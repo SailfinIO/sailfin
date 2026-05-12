@@ -29,7 +29,7 @@ import { get_enum_name_at } from "./lowering_native_helpers";
 // Pure — any tracing is the caller's responsibility.
 fn build_enum_infos_inline(enums: NativeEnum[]) -> EnumTypeInfo[] {
     let mut recovered: EnumTypeInfo[] = [];
-    let mut idx: number = 0;
+    let mut idx: int = 0;
     loop {
         if idx >= enums.length { break; }
         let name = get_enum_name_at(enums, idx);
@@ -43,18 +43,18 @@ fn build_enum_infos_inline(enums: NativeEnum[]) -> EnumTypeInfo[] {
         }
         // Unit-enum defaults (fixup_enum_layouts was skipped).
         let tag_type = "i32";
-        let tag_size: number = 4;
-        let tag_align: number = 4;
-        let size: number = 4;
-        let align: number = 4;
+        let tag_size: int = 4;
+        let tag_align: int = 4;
+        let size: int = 4;
+        let align: int = 4;
         let llvm = "%" + sanitize_symbol(name);
-        let mut max_ps: number = size - tag_size;
+        let mut max_ps: int = size - tag_size;
         if max_ps < 0 { max_ps = 0; }
 
         let mut variants_out: EnumVariantInfo[] = [];
         let e = enums[idx];
         let src = e.variants;
-        let mut vi: number = 0;
+        let mut vi: int = 0;
         if src != null {
             loop {
                 if vi >= src.length { break; }
@@ -101,7 +101,7 @@ fn build_type_context_with_recovery(combined_structs: NativeStruct[], combined_e
     // Collect type-context diagnostics into a local array; returned
     // to the orchestrator via `TypeContextBuildResult` instead of
     // the legacy `.phase_types_diagnostics` file channel.
-    let mut _tc_di: number = 0;
+    let mut _tc_di: int = 0;
     let _tc_diags = type_build.diagnostics;
     let mut _tc_diags_lines: string[] = [];
     if _tc_diags != null {

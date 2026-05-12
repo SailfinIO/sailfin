@@ -26,7 +26,7 @@
 // -------------------------------------------------------------------
 fn _starts_with(value: string, prefix: string) -> boolean {
     if prefix.length > value.length { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= prefix.length { break; }
         if value[index] != prefix[index] { return false; }
@@ -39,7 +39,7 @@ fn _is_identifier_char(ch: string) -> boolean {
     if ch.length != 1 { return false; }
     if ch == "_" { return true; }
     let alphanum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= alphanum.length { break; }
         if alphanum[i] == ch { return true; }
@@ -58,7 +58,7 @@ fn _detect_unsupported_statement_keyword(text: string) -> string {
 
 fn _strings_equal(a: string, b: string) -> boolean {
     if a.length != b.length { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= a.length { break; }
         if a[i] != b[i] { return false; }
@@ -68,7 +68,8 @@ fn _strings_equal(a: string, b: string) -> boolean {
 }
 
 fn _diagnostic_message(keyword: string) -> string {
-    let mut message: string = "`" + keyword + "` is reserved but not implemented;";
+    let mut message: string = "`" + keyword
+        + "` is reserved but not implemented;";
     if _strings_equal(keyword, "while") {
         message = message + " Sailfin's only loop construct is `loop`."
             + " Rewrite `while cond { body }` as"
@@ -81,11 +82,11 @@ fn _contains(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if needle.length > haystack.length { return false; }
     let limit = haystack.length - needle.length;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i > limit { break; }
         let mut matched: boolean = true;
-        let mut j: number = 0;
+        let mut j: int = 0;
         loop {
             if j >= needle.length { break; }
             if haystack[i + j] != needle[j] {

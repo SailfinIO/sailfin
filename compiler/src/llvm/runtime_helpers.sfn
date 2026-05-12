@@ -673,7 +673,7 @@ fn append_runtime_helper(values: RuntimeHelperDescriptor[], value: RuntimeHelper
 fn find_runtime_helper(target: string) -> RuntimeHelperDescriptor? {
     let descriptors = runtime_helper_descriptors();
     let trimmed = trim_text(target);
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= descriptors.length { break; }
         if descriptors[index].target == trimmed {

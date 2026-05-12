@@ -42,7 +42,7 @@ test "numeric: bare integer addition reaches the emitter" {
 }
 
 // ── `: number` alias preserved ────────────────────────────────
-test "numeric: ': number = 42' typechecks (alias-as-float)" {
+test "numeric: ': number = 42' typechecks (alias-as-float)" {  // alias-coverage
     // Existing `: number` annotations across the compiler source
     // stay valid through this slice; E.2/E.3 migrate them to
     // `: int` / `: float`.

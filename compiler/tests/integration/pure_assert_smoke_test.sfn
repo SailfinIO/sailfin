@@ -14,15 +14,15 @@
 struct AssertFailure {
     present: boolean;
     file: string;
-    line: number;
-    col: number;
+    line: int;
+    col: int;
     message: string;
 }
 
-fn _number_to_string(value: number) -> string {
+fn _number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
     let mut is_negative: boolean = false;
-    let mut remaining: number = value;
+    let mut remaining: int = value;
     if value < 0 {
         is_negative = true;
         remaining = 0 - value;
@@ -31,8 +31,8 @@ fn _number_to_string(value: number) -> string {
     let digits = "0123456789";
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;
-        let mut quotient: number = 0;
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -51,7 +51,7 @@ fn _bool_to_string(value: boolean) -> string {
     return "false";
 }
 
-fn _abs(x: number) -> number {
+fn _abs(x: number) -> number {  // alias-coverage: float-shaped tolerance helper
     if x < 0 { return 0 - x; }
     return x;
 }
@@ -76,7 +76,7 @@ fn _pure_fail(message: string) -> AssertFailure {
     };
 }
 
-fn pure_assert_eq_int(actual: number, expected: number, label: string) -> AssertFailure ![pure] {
+fn pure_assert_eq_int(actual: int, expected: int, label: string) -> AssertFailure ![pure] {
     if actual == expected { return _pure_ok(); }
     let message = "ASSERTION FAILED: " + label + "; expected: "
         + _number_to_string(expected)
@@ -95,7 +95,7 @@ fn pure_assert_eq_string(actual: string, expected: string, label: string) -> Ass
     return _pure_fail(message);
 }
 
-fn pure_assert_eq_float(actual: number, expected: number, tolerance: number, label: string) -> AssertFailure ![pure] {
+fn pure_assert_eq_float(actual: number, expected: number, tolerance: number, label: string) -> AssertFailure ![pure] {  // alias-coverage
     let diff = _abs(actual - expected);
     if diff <= tolerance { return _pure_ok(); }
     let message = "ASSERTION FAILED: " + label + "; expected: "

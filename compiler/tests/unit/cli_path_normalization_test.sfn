@@ -8,7 +8,6 @@
 // — to gate this regression. Each invocation costs ~2 min on Linux
 // CI. This unit test gates the same logic in milliseconds, so the
 // e2e test now runs the canonical scenario exactly once.
-
 import { _collect_test_files_cmd, _strip_trailing_slashes_cmd } from "../../src/cli_commands_utils";
 
 test "path-norm: bare directory unchanged" {
@@ -67,16 +66,16 @@ test "path-norm: no internal slashes touched" {
 test "collect-test-files: trailing slash on root produces clean paths" ![io] {
     let with_slash = _collect_test_files_cmd("compiler/tests/unit/", 25);
     assert with_slash.length > 0;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= with_slash.length { break; }
         let p = with_slash[i];
-        let mut j: number = 0;
+        let mut j: int = 0;
         loop {
             if j + 1 >= p.length { break; }
             // No "//" should appear anywhere in any returned path.
             // Pre-fix, paths looked like `compiler/tests/unit//foo_test.sfn`.
-            assert !(p[j] == "/" && p[j + 1] == "/");
+            assert ! (p[j] == "/" && p[j + 1] == "/");
             j += 1;
         }
         i += 1;
@@ -87,7 +86,7 @@ test "collect-test-files: trailing-slash and bare root produce identical lists" 
     let bare = _collect_test_files_cmd("compiler/tests/unit", 25);
     let with_slash = _collect_test_files_cmd("compiler/tests/unit/", 25);
     assert bare.length == with_slash.length;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= bare.length { break; }
         assert bare[i] == with_slash[i];

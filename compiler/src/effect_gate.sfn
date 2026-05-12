@@ -154,7 +154,7 @@ fn read_effect_enforcement_env(unique_key: string) -> string ![io] {
 // source path through every `compile_to_*` signature is a bigger
 // refactor than Phase B should take. Phase E (cross-module
 // propagation) revisits the path-plumbing question.
-fn validate_and_render_effects(program: Program, source: string, file_path: string, imports: ImportSymbolTable) -> number ![io] {
+fn validate_and_render_effects(program: Program, source: string, file_path: string, imports: ImportSymbolTable) -> int ![io] {
     let no_caps: string[] = [];
     return validate_and_render_effects_with_capabilities(program, source, file_path, imports, no_caps);
 }
@@ -170,7 +170,7 @@ fn validate_and_render_effects(program: Program, source: string, file_path: stri
 // also runs, emitting `E0403` for any function declaring an effect
 // outside the manifest-allowed set. Both violation streams flow
 // through the same `SAILFIN_EFFECT_ENFORCE` severity contract.
-fn validate_and_render_effects_with_capabilities(program: Program, source: string, file_path: string, imports: ImportSymbolTable, capabilities_required: string[]) -> number ![io] {
+fn validate_and_render_effects_with_capabilities(program: Program, source: string, file_path: string, imports: ImportSymbolTable, capabilities_required: string[]) -> int ![io] {
     let raw = read_effect_enforcement_env(file_path);
     let severity = resolve_effect_enforcement(raw);
     if severity == "off" {
@@ -183,14 +183,14 @@ fn validate_and_render_effects_with_capabilities(program: Program, source: strin
         return 0;
     }
     let source_lines = split_source_lines(source);
-    let mut errors: number = 0;
+    let mut errors: int = 0;
 
     // Phase B/C/D/E: in-module + cross-module effect propagation.
     // Empty-table callers (legacy `compile_to_sailfin`,
     // `compile_to_llvm`) get the same in-module-only behavior they
     // had pre-Phase-E.
     let violations = validate_effects_with_imports(program, imports);
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= violations.length { break; }
         let mut v: EffectViolation = violations[i];
@@ -206,7 +206,7 @@ fn validate_and_render_effects_with_capabilities(program: Program, source: strin
     // Phase F: capsule capability cross-check. Skipped when no
     // manifest provided a surface (empty `capabilities_required`).
     let capability_violations = validate_capsule_capabilities(program, capabilities_required);
-    let mut k: number = 0;
+    let mut k: int = 0;
     loop {
         if k >= capability_violations.length { break; }
         let mut cv: CapabilityViolation = capability_violations[k];

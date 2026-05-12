@@ -63,7 +63,7 @@ fn format_expression(expression: Expression) -> string {
     }
     if expression.variant == "Call" {
         let mut rendered: string[] = [];
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= expression.arguments.length { break; }
             rendered.push(format_expression(expression.arguments[index]));
@@ -79,7 +79,7 @@ fn format_expression(expression: Expression) -> string {
     }
     if expression.variant == "Array" {
         let mut rendered: string[] = [];
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= expression.elements.length { break; }
             rendered.push(format_expression(expression.elements[index]));
@@ -90,7 +90,7 @@ fn format_expression(expression: Expression) -> string {
     }
     if expression.variant == "Object" {
         let mut rendered: string[] = [];
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
             let field = expression.fields[index];
@@ -104,7 +104,7 @@ fn format_expression(expression: Expression) -> string {
     if expression.variant == "Struct" {
         let type_name = join_with_separator(expression.type_name, ".");
         let mut rendered: string[] = [];
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
             let field = expression.fields[index];
@@ -152,7 +152,7 @@ fn format_lambda_expression(expression: Expression) -> string {
 
 fn format_lambda_parameters(parameters: Parameter[]) -> string {
     let mut rendered: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= parameters.length { break; }
         let param = parameters[index];
@@ -168,7 +168,7 @@ fn format_lambda_parameters(parameters: Parameter[]) -> string {
 fn format_lambda_body(body: Block) -> string {
     let mut lines: string[] = [];
     if body.statements.length == 0 { lines.push("// empty body"); } else {
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= body.statements.length { break; }
             lines.push(format_lambda_statement(body.statements[index]));
@@ -203,13 +203,13 @@ fn format_lambda_statement(statement: Statement) -> string {
     return "// TODO: unsupported lambda statement: " + statement.variant;
 }
 
-fn indent_lines(lines: string[], depth: number) -> string[] {
+fn indent_lines(lines: string[], depth: int) -> string[] {
     let mut result: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
         let mut prefix: string = "";
-        let mut count: number = 0;
+        let mut count: int = 0;
         loop {
             if count >= depth { break; }
             prefix = prefix + "    ";

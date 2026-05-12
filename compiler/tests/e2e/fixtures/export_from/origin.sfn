@@ -15,7 +15,7 @@ fn export_from_strip_xyz(value: string) -> string {
     let head = value[0] + value[1] + value[2];
     if head == "xyz" {
         let mut rest: string = "";
-        let mut index: number = 3;
+        let mut index: int = 3;
         loop {
             if index >= value.length { break; }
             rest = rest + value[index];

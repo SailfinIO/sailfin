@@ -27,9 +27,9 @@ import {
     trim_text
 } from "./core_text";
 
-fn find_matching_closing_brace(text: string, open_index: number) -> number {
-    let mut depth: number = 0;
-    let mut index: number = open_index;
+fn find_matching_closing_brace(text: string, open_index: int) -> int {
+    let mut depth: int = 0;
+    let mut index: int = open_index;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape: boolean = false;
@@ -71,15 +71,15 @@ fn find_matching_closing_brace(text: string, open_index: number) -> number {
     return -1;
 }
 
-fn find_top_level_colon(text: string) -> number {
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut angle_depth: number = 0;
+fn find_top_level_colon(text: string) -> int {
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut angle_depth: int = 0;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape: boolean = false;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = substring(text, index, index + 1);
@@ -185,11 +185,11 @@ fn parse_struct_literal(text: string) -> StructLiteralParse {
         };
     }
 
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut angle_depth: number = 0;
-    let mut index: number = 0;
-    let mut open_index: number = -1;
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut angle_depth: int = 0;
+    let mut index: int = 0;
+    let mut open_index: int = -1;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape: boolean = false;
@@ -274,7 +274,7 @@ fn parse_struct_literal(text: string) -> StructLiteralParse {
             let body = substring(trimmed, open_index + 1, close_index);
             let entries = split_array_elements(body);
             let mut seen: string[] = [];
-            let mut entry_index: number = 0;
+            let mut entry_index: int = 0;
             loop {
                 if entry_index >= entries.length { break; }
                 let entry = trim_text(entries[entry_index]);
@@ -360,11 +360,11 @@ fn parse_struct_pattern(text: string) -> StructLiteralParse {
         };
     }
 
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut angle_depth: number = 0;
-    let mut index: number = 0;
-    let mut open_index: number = -1;
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut angle_depth: int = 0;
+    let mut index: int = 0;
+    let mut open_index: int = -1;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape: boolean = false;
@@ -437,7 +437,7 @@ fn parse_struct_pattern(text: string) -> StructLiteralParse {
             let body = substring(trimmed, open_index + 1, close_index);
             let entries = split_array_elements(body);
             let mut seen: string[] = [];
-            let mut entry_index: number = 0;
+            let mut entry_index: int = 0;
             loop {
                 if entry_index >= entries.length { break; }
                 let entry = trim_text(entries[entry_index]);
@@ -530,11 +530,11 @@ fn parse_enum_literal(text: string) -> EnumLiteralParse {
         };
     }
 
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut angle_depth: number = 0;
-    let mut index: number = dot_index + 1;
-    let mut open_index: number = -1;
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut angle_depth: int = 0;
+    let mut index: int = dot_index + 1;
+    let mut open_index: int = -1;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape: boolean = false;
@@ -601,14 +601,14 @@ fn parse_enum_literal(text: string) -> EnumLiteralParse {
 
         // Reject member-access chains like Enum.Variant().field so they can be
         // handled by parse_member_access instead of being mis-parsed here.
-        let mut paren_depth: number = 0;
-        let mut bracket_depth: number = 0;
-        let mut angle_depth: number = 0;
+        let mut paren_depth: int = 0;
+        let mut bracket_depth: int = 0;
+        let mut angle_depth: int = 0;
         let mut in_single: boolean = false;
         let mut in_double: boolean = false;
         let mut escape: boolean = false;
         let mut dot_seen: boolean = false;
-        let mut scan_index: number = 0;
+        let mut scan_index: int = 0;
         loop {
             if scan_index >= variant_name_part.length { break; }
             let ch = variant_name_part[scan_index];
@@ -723,7 +723,7 @@ fn parse_enum_literal(text: string) -> EnumLiteralParse {
             let body = substring(trimmed, open_index + 1, close_index);
             let entries = split_array_elements(body);
             let mut seen: string[] = [];
-            let mut entry_index: number = 0;
+            let mut entry_index: int = 0;
             loop {
                 if entry_index >= entries.length { break; }
                 let entry = trim_text(entries[entry_index]);
@@ -801,11 +801,11 @@ fn parse_enum_literal(text: string) -> EnumLiteralParse {
     };
 }
 
-fn find_top_level_range_separator(value: string) -> number {
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut index: number = 0;
+fn find_top_level_range_separator(value: string) -> int {
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= value.length { break; }
         let ch = substring(value, index, index + 1);
@@ -857,11 +857,11 @@ fn find_top_level_range_separator(value: string) -> number {
     return -1;
 }
 
-fn find_top_level_range_separator_from(value: string, start_index: number) -> number {
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut index: number = 0;
+fn find_top_level_range_separator_from(value: string, start_index: int) -> int {
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= value.length { break; }
         let _cp_rng_next = index + 1;
@@ -893,15 +893,15 @@ fn find_top_level_range_separator_from(value: string, start_index: number) -> nu
     return -1;
 }
 
-fn find_member_access_separator(value: string) -> number {
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut brace_depth: number = 0;
+fn find_member_access_separator(value: string) -> int {
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape: boolean = false;
-    let mut index: number = 0;
-    let mut last_index: number = -1;
+    let mut index: int = 0;
+    let mut last_index: int = -1;
     loop {
         if index >= value.length { break; }
         let ch = char_at(value, index);
@@ -1028,9 +1028,9 @@ fn parse_index_expression(expression: string) -> IndexExpressionParse {
     }
 
     // Look for the last '[' that is not inside nested brackets
-    let mut bracket_depth: number = 0;
-    let mut index_position: number = -1;
-    let mut i: number = trimmed.length - 1;
+    let mut bracket_depth: int = 0;
+    let mut index_position: int = -1;
+    let mut i: int = trimmed.length - 1;
 
     // Start from the end to find the outermost closing bracket
     if substring(trimmed, trimmed.length - 1, trimmed.length) != "]" {

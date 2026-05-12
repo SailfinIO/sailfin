@@ -1,21 +1,17 @@
 // Regression tests for toml_get_dependencies() and capsule dependency
 // resolution helpers used by compile-time dependency resolution.
-
 import { toml_get_dependencies } from "../../src/toml_parser";
 
 // -- Local helpers for string assertions --
-
-fn _str_eq(a: string, b: string) -> boolean {
-    return strings_equal(a, b);
-}
+fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
 
 fn _contains(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if haystack.length < needle.length { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i + needle.length > haystack.length { break; }
-        let mut j: number = 0;
+        let mut j: int = 0;
         let mut matches: boolean = true;
         loop {
             if j >= needle.length { break; }
@@ -33,7 +29,7 @@ fn _contains(haystack: string, needle: string) -> boolean {
 
 fn _starts_with(value: string, prefix: string) -> boolean {
     if prefix.length > value.length { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= prefix.length { break; }
         if value[i] != prefix[i] { return false; }
@@ -46,18 +42,18 @@ fn _starts_with(value: string, prefix: string) -> boolean {
 // Duplicated here to test the format contract independently.
 fn _test_lookup_dep(deps: string, name: string) -> string {
     if deps.length == 0 { return ""; }
-    let mut start: number = 0;
+    let mut start: int = 0;
     let len = deps.length;
     loop {
         if start >= len { break; }
-        let mut end: number = start;
+        let mut end: int = start;
         loop {
             if end >= len { break; }
             if deps[end] == "\n" { break; }
             end += 1;
         }
-        let mut eq_pos: number = -1;
-        let mut ei: number = start;
+        let mut eq_pos: int = -1;
+        let mut ei: int = start;
         loop {
             if ei >= end { break; }
             if deps[ei] == "=" {
@@ -78,7 +74,6 @@ fn _test_lookup_dep(deps: string, name: string) -> string {
 }
 
 // -- Tests --
-
 test "toml_get_dependencies: empty toml returns empty string" {
     let toml = "[capsule]\nname = \"test\"\nversion = \"0.1.0\"\n";
     let deps = toml_get_dependencies(toml);

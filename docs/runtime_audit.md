@@ -443,16 +443,7 @@ compiler features that do not exist in the current toolchain.
 
 ### Hard prerequisites (runtime cannot be written without these)
 
-1. **Integer types (`int` / `float`)** — roadmap §0. **Slice A shipped
-   2026-05-02.** Annotated locals/parameters/returns of `int` and `float`
-   now lower to `i64` / `double` respectively; integer arithmetic dispatch
-   and comparison dispatch are wired. The extern accept-list admits both.
-   Slices B–E (bitwise ops, additional widths, `as` casts, bare-literal
-   defaulting + `number` retirement) remain — see
-   `docs/runtime_architecture.md` §3.7 for the slice taxonomy and the
-   limitations table (L1–L6). The pre-Slice-A "everything is a double"
-   ABI rationale below still applies to bare literals (L1) until Slice E
-   migrates the compiler source off `number`.
+1. **Integer types (`int` / `float`)** — roadmap §0. **Slices A–D + E.1 + E.1.5 + E.2 + E.3a shipped (latest: E.3a 2026-05-12, #555).** Annotated locals/parameters/returns of `int` and `float` lower to `i64` / `double`; bitwise ops lower to `and`/`or`/`xor`/`shl`/`ashr i64`; `as` casts lower through the full sitofp/fptosi/sext/zext/trunc matrix; bare integer literals default to `int`; all `: number` type annotations in `compiler/src/`, `runtime/prelude.sfn`, and `compiler/tests/` are migrated to `: int` / `: float` or marked `// alias-coverage`. Zero bare `: number` type annotations remain in the compiler source tree. The L2/L3 silent-widening rejection prerequisite is now satisfied — Slice E.3b (`dominant_type` tightening, issue #296) can land. See `docs/runtime_architecture.md` §3.7 for the full slice taxonomy and limitations table (L1–L6).
 2. **`Result<T, E>` and the `?` operator** — roadmap §0. The runtime must be
    able to return structured errors (file open failures, HTTP errors, OOM,
    unicode decode errors) without abusing `try`/`catch` or union-sentinels.

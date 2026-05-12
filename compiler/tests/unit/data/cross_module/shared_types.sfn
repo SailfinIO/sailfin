@@ -1,43 +1,49 @@
 // compiler/tests/data/cross_module/shared_types.sfn
 // Defines structs and enums that will be imported by consumer modules
-
 struct Point {
-  x: number;
-  y: number;
+    x: int;
+    y: int;
 
-  fn distance_from_origin(self: Point) -> number {
-    let x_squared = self.x * self.x;
-    let y_squared = self.y * self.y;
-    return x_squared + y_squared;  // simplified - no sqrt for now
-  }
+    fn distance_from_origin(self: Point) -> int {
+        let x_squared = self.x * self.x;
+        let y_squared = self.y * self.y;
+        return x_squared + y_squared;  // simplified - no sqrt for now
+    }
 }
 
 struct Rectangle {
-  top_left: Point;
-  width: number;
-  height: number;
+    top_left: Point;
+    width: int;
+    height: int;
 }
 
 enum Color {
-  Red,
-  Green,
-  Blue,
-  Custom { r: int; g: int; b: int; }
+    Red,
+    Green,
+    Blue,
+    Custom {
+        r: int;
+        g: int;
+        b: int;
+    }
 }
 
 enum Shape {
-  Circle { center: Point; radius: number; }
-  Box { bounds: Rectangle; }
-  Empty;
+    Circle {
+        center: Point;
+        radius: int;
+    }
+    Box {
+        bounds: Rectangle;
+    }
+    Empty;
 }
 
-fn make_red() -> Color {
-  return Color.Red;
-}
+fn make_red() -> Color { return Color.Red; }
 
-fn make_circle(x: number, y: number, r: number) -> Shape {
-  return Shape.Circle {
-    center: Point { x: x, y: y },
-    radius: r
-  };
+fn make_circle(x: int, y: int, r: int) -> Shape {
+    return Shape.Circle {
+        center: Point { x: x, y: y },
+        radius: r
+    };
 }

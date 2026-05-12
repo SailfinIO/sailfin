@@ -33,7 +33,7 @@ import { substring } from "./string_utils";
 // Bumped only on a breaking change to any of the three event shapes.
 // Consumers (the planned MCP `sailfin_test_runner` tool, CI scrapers,
 // the `assert_compiles` integration) hard-fail on unknown values.
-let TEST_RUNNER_JSON_SCHEMA_VERSION: number = 1;
+let TEST_RUNNER_JSON_SCHEMA_VERSION: int = 1;
 
 // One test entry collected from a parsed source file. Populated by
 // `collect_test_entries` before the test binary runs so the runner
@@ -69,7 +69,7 @@ fn _trj_make_test_entry(name: string, file: string, line: int, effects: string[]
 // the lexer, so a minimal escaper is sufficient.
 fn _trj_escape_string(s: string) -> string {
     let mut out: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= s.length { break; }
         let ch = substring(s, i, i + 1);
@@ -95,28 +95,28 @@ fn _trj_string_field(name: string, value: string) -> string {
     return _trj_field(name, _trj_quote(value));
 }
 
-fn _trj_number_field(name: string, value: number) -> string {
+fn _trj_number_field(name: string, value: int) -> string {
     return _trj_field(name, _trj_number_to_string(value));
 }
 
 // Local copy of `number_to_string` to keep this module pure (no `main`
 // dependency). Same algorithm as `diagnostics_json.sfn`'s
 // `_dj_number_to_string`.
-fn _trj_number_to_string(value: number) -> string {
+fn _trj_number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
-    let mut working: number = value;
+    let mut working: int = value;
     let mut negative: boolean = false;
     if working < 0 {
         negative = true;
         working = 0 - working;
     }
     let digits = "0123456789";
-    let mut remaining: number = working;
+    let mut remaining: int = working;
     let mut output: string = "";
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;
-        let mut quotient: number = 0;
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -133,7 +133,7 @@ fn _trj_number_to_string(value: number) -> string {
 fn _trj_join(parts: string[], sep: string) -> string {
     if parts.length == 0 { return ""; }
     let mut out = parts[0];
-    let mut i: number = 1;
+    let mut i: int = 1;
     loop {
         if i >= parts.length { break; }
         out = out + sep + parts[i];
@@ -145,7 +145,7 @@ fn _trj_join(parts: string[], sep: string) -> string {
 fn _trj_render_string_array(values: string[]) -> string {
     if values.length == 0 { return "[]"; }
     let mut parts: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= values.length { break; }
         parts.push(_trj_quote(values[i]));
@@ -178,7 +178,7 @@ fn render_assert_failure_json(failure: AssertFailure) -> string {
 // before any `test` event. `total` is the count of test declarations
 // across every file the runner will execute; consumers use it to
 // drive a progress bar without buffering the whole stream.
-fn render_start_event(total: number) -> string {
+fn render_start_event(total: int) -> string {
     let mut parts: string[] = [];
     parts.push(_trj_string_field("event", "start"));
     parts.push(_trj_number_field("total", total));
@@ -195,7 +195,7 @@ fn render_start_event(total: number) -> string {
 // share a file's binary process, the per-test slice is approximated
 // by even-distribution of the file's run time over its tests. See
 // the spec for the full schema.
-fn render_test_event(name: string, file: string, line: number, status: string, duration_ms: number, effects: string[], failure: AssertFailure) -> string {
+fn render_test_event(name: string, file: string, line: int, status: string, duration_ms: int, effects: string[], failure: AssertFailure) -> string {
     let mut parts: string[] = [];
     parts.push(_trj_string_field("event", "test"));
     parts.push(_trj_string_field("name", name));
@@ -213,7 +213,7 @@ fn render_test_event(name: string, file: string, line: number, status: string, d
 // Final line of a `sfn test --json` run. Emitted exactly once, after
 // the last `test` event. `duration_ms` is the wall-clock time of the
 // whole runner invocation.
-fn render_summary_event(passed: number, failed: number, skipped: number, duration_ms: number) -> string {
+fn render_summary_event(passed: int, failed: int, skipped: int, duration_ms: int) -> string {
     let mut parts: string[] = [];
     parts.push(_trj_string_field("event", "summary"));
     parts.push(_trj_number_field("passed", passed));
@@ -235,7 +235,7 @@ fn render_summary_event(passed: number, failed: number, skipped: number, duratio
 // that case).
 fn collect_test_entries(program: Program, file_path: string) -> TestEntry[] {
     let mut out: TestEntry[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= program.statements.length { break; }
         let stmt = program.statements[i];
@@ -259,12 +259,12 @@ fn collect_test_entries(program: Program, file_path: string) -> TestEntry[] {
 // failure record is absent or when no test precedes the recorded
 // line — the runner falls back to treating the first not-yet-passed
 // test as the failing one in those cases.
-fn locate_failing_test(entries: TestEntry[], failure: AssertFailure) -> number {
+fn locate_failing_test(entries: TestEntry[], failure: AssertFailure) -> int {
     if !failure.present { return -1; }
     if failure.line <= 0 { return -1; }
-    let mut best_index: number = -1;
-    let mut best_line: number = -1;
-    let mut i: number = 0;
+    let mut best_index: int = -1;
+    let mut best_line: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= entries.length { break; }
         let entry_line = entries[i].line;

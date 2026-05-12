@@ -67,8 +67,8 @@ EOF
 
 cat > "$SCRATCH/src/shape.sfn" <<'EOF'
 interface Shape {
-    fn area(self) -> number;
-    fn perimeter(self) -> number;
+    fn area(self) -> int;
+    fn perimeter(self) -> int;
 }
 
 export { Shape };
@@ -81,11 +81,11 @@ cat > "$SCRATCH/src/triangle.sfn" <<'EOF'
 import { Shape } from "./shape";
 
 struct Triangle implements Shape {
-    a: number;
-    b: number;
-    c: number;
+    a: int;
+    b: int;
+    c: int;
 
-    fn area(self) -> number { return 0; }
+    fn area(self) -> int { return 0; }
 }
 
 fn main() {
@@ -154,12 +154,12 @@ test_negative_control() {
 import { Shape } from "./shape";
 
 struct Triangle implements Shape {
-    a: number;
-    b: number;
-    c: number;
+    a: int;
+    b: int;
+    c: int;
 
-    fn area(self) -> number { return 0; }
-    fn perimeter(self) -> number { return 0; }
+    fn area(self) -> int { return 0; }
+    fn perimeter(self) -> int { return 0; }
 }
 
 fn main() {

@@ -1,9 +1,5 @@
-fn _sign(n: number) -> string {
-    if n > 0 {
-        return "positive";
-    } else if n < 0 {
-        return "negative";
-    } else {
+fn _sign(n: int) -> string {
+    if n > 0 { return "positive"; } else if n < 0 { return "negative"; } else {
         return "zero";
     }
 }
@@ -11,36 +7,24 @@ fn _sign(n: number) -> string {
 // NOTE: match on number literals causes a compiler segfault during LLVM
 // lowering (globals phase). Using if/else-if chain as a workaround.
 // See: https://github.com/SailfinIO/sailfin/issues/50
-fn _classify_day(day: number) -> string {
-    if day == 1 {
-        return "Monday";
-    } else if day == 2 {
-        return "Tuesday";
-    } else if day == 3 {
+fn _classify_day(day: int) -> string {
+    if day == 1 { return "Monday"; } else if day == 2 { return "Tuesday"; } else if day == 3 {
         return "Wednesday";
-    } else if day == 4 {
-        return "Thursday";
-    } else if day == 5 {
+    } else if day == 4 { return "Thursday"; } else if day == 5 {
         return "Friday";
-    } else if day == 6 {
-        return "Saturday";
-    } else if day == 7 {
+    } else if day == 6 { return "Saturday"; } else if day == 7 {
         return "Sunday";
     }
     return "unknown";
 }
 
-fn _max(a: number, b: number) -> number {
-    if a >= b {
-        return a;
-    }
+fn _max(a: int, b: int) -> int {
+    if a >= b { return a; }
     return b;
 }
 
-fn _min(a: number, b: number) -> number {
-    if a <= b {
-        return a;
-    }
+fn _min(a: int, b: int) -> int {
+    if a <= b { return a; }
     return b;
 }
 
@@ -85,21 +69,17 @@ test "control_flow: min returns smaller value" {
 }
 
 test "control_flow: nested if evaluates inner condition" {
-    let a: number = 10;
-    let b: number = 5;
+    let a: int = 10;
+    let b: int = 5;
     let mut result: string = "none";
     if a > 0 {
-        if b > 0 {
-            result = "both positive";
-        }
+        if b > 0 { result = "both positive"; }
     }
     assert result == "both positive";
 }
 
 test "control_flow: boolean short-circuit with &&" {
-    let mut side_effect: number = 0;
-    if false && (side_effect == 0) {
-        side_effect = 1;
-    }
+    let mut side_effect: int = 0;
+    if false && (side_effect == 0) { side_effect = 1; }
     assert side_effect == 0;
 }

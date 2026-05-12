@@ -112,7 +112,7 @@ fn looks_like_user_type(annotation: string) -> boolean {
             if is_ascii_uppercase(second) { return true; }
         }
     }
-    let mut index: number = 1;
+    let mut index: int = 1;
     loop {
         if index >= trimmed.length { break; }
         let _tm_next = index + 1;
@@ -472,7 +472,7 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
     // GEP still indexes into the layout correctly because the type body is
     // still `%T = type { field0, field1, ... }`.
     if looks_like_user_type(normalized) {
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= context.structs.length { break; }
             let info = context.structs[i];
@@ -514,9 +514,9 @@ fn map_union_type(context: TypeContext, annotation: string) -> string {
     if trimmed.length == 0 { return ""; }
     // Split on top-level `|` separators (skip nested generics)
     let mut parts: string[] = [];
-    let mut start: number = 0;
-    let mut index: number = 0;
-    let mut depth: number = 0;
+    let mut start: int = 0;
+    let mut index: int = 0;
+    let mut depth: int = 0;
     let mut found_pipe: boolean = false;
     loop {
         if index >= trimmed.length { break; }
@@ -550,7 +550,7 @@ fn map_union_type(context: TypeContext, annotation: string) -> string {
     if parts.length < 2 { return ""; }
     // Map each variant type and build the tagged struct
     let mut result: string = "{ i32";
-    let mut pi: number = 0;
+    let mut pi: int = 0;
     loop {
         if pi >= parts.length { break; }
         let mapped = map_type_annotation(parts[pi]);
@@ -713,7 +713,7 @@ fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
 // Returns "int", "float", or "other" for an LLVM primitive type. Used by
 // `coerce_operand_to_type` (and future `#296` reapply in Slice E.3) to refuse
 // silent int↔float bitcasts at call boundaries during the partial migration
-// from `: number` to `: int`/`: float`. Pointer and aggregate types return
+// from `: int` to `: int`/`: float`. Pointer and aggregate types return
 // "other" — this slice deliberately scopes the diagnostic to scalar
 // primitives so the partial-migration ABI hazard is caught loudly without
 // disturbing today's pointer/struct lowering.

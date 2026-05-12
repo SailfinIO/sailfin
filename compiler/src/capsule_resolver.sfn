@@ -273,8 +273,8 @@ struct TestCapsuleResolution {
 
 // ---- Path helpers ----
 fn _cr_dirname(path: string) -> string {
-    let mut last_slash: number = -1;
-    let mut i: number = 0;
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= path.length { break; }
         if path[i] == "/" { last_slash = i; }
@@ -291,8 +291,8 @@ fn _cr_path_join(base: string, name: string) -> string {
     return base + "/" + name;
 }
 
-fn _cr_find_char(text: string, ch: string, start: number) -> number {
-    let mut i: number = start;
+fn _cr_find_char(text: string, ch: string, start: int) -> int {
+    let mut i: int = start;
     loop {
         if i >= text.length { break; }
         if substring(text, i, i + 1) == ch { return i; }
@@ -330,8 +330,8 @@ fn _cr_shell_read(cmd: string) -> string ![io] {
     // could make `_cr_scratch_root` and `_test_scratch_root` disagree
     // on the path and route artifacts to different directories.
     if captured.length == 0 { return ""; }
-    let mut start: number = 0;
-    let mut end: number = captured.length;
+    let mut start: int = 0;
+    let mut end: int = captured.length;
     loop {
         if start >= end { break; }
         let c = substring(captured, start, start + 1);
@@ -386,7 +386,7 @@ fn _cr_import_context_root(work_dir: string) -> string {
 // `cli_commands_utils` to keep the resolver's dep diamond shallow.
 fn _cr_shell_quote(value: string) -> string {
     let mut out: string = "'";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= value.length { break; }
         let ch = substring(value, i, i + 1);
@@ -411,7 +411,7 @@ fn _cr_shell_quote(value: string) -> string {
 // available as a regression-bisect escape hatch (mirrors the
 // `BUILD_JOBS=1` knob the prior `scripts/build.sh` historically
 // exposed; the script was retired in Stage E PR7 / #383).
-fn _cr_resolve_jobs() -> number ![io] {
+fn _cr_resolve_jobs() -> int ![io] {
     let env_jobs = _cr_shell_read("printf '%s' \"$SAILFIN_BUILD_JOBS\"");
     if env_jobs.length > 0 {
         let parsed = _cr_parse_positive_int(env_jobs);
@@ -436,15 +436,15 @@ fn _cr_resolve_jobs() -> number ![io] {
 // Parse a non-negative integer from a string. Returns 0 on any
 // non-digit or empty input. Local to the resolver so we don't
 // pull in a richer parser for a single-use helper.
-fn _cr_parse_positive_int(value: string) -> number {
+fn _cr_parse_positive_int(value: string) -> int {
     if value.length == 0 { return 0; }
-    let mut n: number = 0;
-    let mut i: number = 0;
+    let mut n: int = 0;
+    let mut i: int = 0;
     let mut any_digit: boolean = false;
     loop {
         if i >= value.length { break; }
         let ch = substring(value, i, i + 1);
-        let mut digit: number = -1;
+        let mut digit: int = -1;
         if ch == "0" { digit = 0; }
         if ch == "1" { digit = 1; }
         if ch == "2" { digit = 2; }
@@ -532,7 +532,7 @@ struct ParallelEmitTask {
 // the script was retired in Stage E PR7 / #383). With
 // `jobs == 1`, the helper sequentialises to keep the
 // regression-bisect path simple.
-fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: string, jobs: number) -> boolean ![io] {
+fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: string, jobs: int) -> boolean ![io] {
     if tasks.length == 0 { return true; }
     let mut effective_jobs = jobs;
     if effective_jobs <= 0 { effective_jobs = 1; }
@@ -541,7 +541,7 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
     // SAILFIN_BUILD_JOBS=1 invocations) on the simple
     // process.run-per-task path. No xargs overhead, no temp file.
     if effective_jobs == 1 {
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= tasks.length { break; }
             let t = tasks[i];
@@ -567,7 +567,7 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
         return false;
     }
     let mut content: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= tasks.length { break; }
         let t = tasks[i];
@@ -655,7 +655,7 @@ fn _cr_is_safe_version(value: string) -> boolean {
     if _cr_find_char(value, "/", 0) >= 0 { return false; }
     if _cr_find_char(value, "\\", 0) >= 0 { return false; }
     // Guard against ".." anywhere
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i + 1 >= value.length { break; }
         if substring(value, i, i + 2) == ".." { return false; }
@@ -669,7 +669,7 @@ fn _cr_is_safe_version(value: string) -> boolean {
 // filesystem-safe identifier (e.g. in .ll filenames).
 fn mangle_slug(slug: string) -> string {
     let mut out: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= slug.length { break; }
         let ch = substring(slug, i, i + 1);
@@ -761,7 +761,7 @@ fn _cr_routing_slug(cur: CapsuleSource, consumer_root_prefix: string) -> string 
 fn discover_project_root(start_dir: string) -> string ![io] {
     let mut dir: string = start_dir;
     if dir.length == 0 { dir = "."; }
-    let mut depth: number = 0;
+    let mut depth: int = 0;
     loop {
         if depth >= 16 { break; }
         let manifest = _cr_path_join(dir, "capsule.toml");
@@ -787,19 +787,19 @@ struct _CrDepEntry {
 fn _cr_parse_deps(deps: string) -> _CrDepEntry[] {
     let mut out: _CrDepEntry[] = [];
     if deps.length == 0 { return out; }
-    let mut start: number = 0;
+    let mut start: int = 0;
     let len = deps.length;
     loop {
         if start >= len { break; }
-        let mut end: number = start;
+        let mut end: int = start;
         loop {
             if end >= len { break; }
             if substring(deps, end, end + 1) == "\n" { break; }
             end += 1;
         }
         if end > start {
-            let mut eq_pos: number = -1;
-            let mut ei: number = start;
+            let mut eq_pos: int = -1;
+            let mut ei: int = start;
             loop {
                 if ei >= end { break; }
                 if substring(deps, ei, ei + 1) == "=" {
@@ -867,8 +867,8 @@ fn _cr_collect_capsule_sources(src_dir: string, spec: string) -> CapsuleSource[]
     // src/util/ = `spec/util`).
     let mut dir_queue: string[] = [src_dir];
     let mut slug_queue: string[] = [spec];
-    let mut head: number = 0;
-    let max_depth: number = 32;
+    let mut head: int = 0;
+    let max_depth: int = 32;
     loop {
         if head >= dir_queue.length { break; }
         if head >= max_depth { break; }
@@ -877,7 +877,7 @@ fn _cr_collect_capsule_sources(src_dir: string, spec: string) -> CapsuleSource[]
         head += 1;
         if !fs.exists(dir) { continue; }
         let entries = fs.listDirectory(dir);
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= entries.length { break; }
             let entry = entries[i];
@@ -984,7 +984,7 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
     let mut runtime_cap_names: string[] = [];
     if workspace_root.length > 0 {
         let runtime_caps = enumerate_runtime_capsule_artifacts(workspace_root, empty_specs);
-        let mut rci: number = 0;
+        let mut rci: int = 0;
         loop {
             if rci >= runtime_caps.length { break; }
             runtime_cap_names.push(runtime_caps[rci].capsule_name);
@@ -992,7 +992,7 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
         }
     }
 
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= entries.length { break; }
         let entry = entries[i];
@@ -1003,7 +1003,7 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
         let src_dir = _cr_locate_capsule_src(project_root, entry.spec, entry.version);
         if src_dir.length > 0 {
             let found = _cr_collect_capsule_sources(src_dir, entry.spec);
-            let mut fi: number = 0;
+            let mut fi: int = 0;
             loop {
                 if fi >= found.length { break; }
                 sources.push(found[fi]);
@@ -1106,11 +1106,11 @@ fn _cr_extract_layout_manifest(asm_path: string, manifest_path: string) ![io] {
     if !fs.exists(asm_path) { return; }
     let asm_text = fs.readFile(asm_path);
     let mut manifest: string = "";
-    let mut line_start: number = 0;
+    let mut line_start: int = 0;
     let len = asm_text.length;
     loop {
         if line_start >= len { break; }
-        let mut line_end: number = line_start;
+        let mut line_end: int = line_start;
         loop {
             if line_end >= len { break; }
             if substring(asm_text, line_end, line_end + 1) == "\n" { break; }
@@ -1155,7 +1155,7 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
     // dominate. Single-source builds never benefit from
     // parallelism.
     if sailfin_exe.length == 0 || sources.length == 1 {
-        let mut si: number = 0;
+        let mut si: int = 0;
         loop {
             if si >= sources.length { break; }
             let ok = _cr_stage_one(sources[si], sailfin_exe, work_dir);
@@ -1169,7 +1169,7 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
     if jobs <= 1 {
         // SAILFIN_BUILD_JOBS=1 (or unresolved nproc): keep the
         // legacy serial path. No xargs overhead, no temp file.
-        let mut si: number = 0;
+        let mut si: int = 0;
         loop {
             if si >= sources.length { break; }
             let ok = _cr_stage_one(sources[si], sailfin_exe, work_dir);
@@ -1187,8 +1187,8 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
     // extracts each `.layout-manifest` (also fast — just file
     // read + grep, no subprocess).
     let mut needs_emit: ParallelEmitTask[] = [];
-    let mut emit_indices: number[] = [];
-    let mut si: number = 0;
+    let mut emit_indices: int[] = [];
+    let mut si: int = 0;
     loop {
         if si >= sources.length { break; }
         let src = sources[si];
@@ -1223,7 +1223,7 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
         // each freshly-emitted `.sfn-asm`. Cheap (read + line
         // scan) so parallelizing this step would be pure
         // overhead.
-        let mut ei: number = 0;
+        let mut ei: int = 0;
         loop {
             if ei >= emit_indices.length { break; }
             let src_idx = emit_indices[ei];
@@ -1261,7 +1261,7 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
 // at the typical N (~5-30 deps per source) the constant cost is
 // dominated by the per-source filesystem read elsewhere.
 fn _cr_string_in_array(arr: string[], needle: string) -> boolean {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= arr.length { break; }
         if strings_equal(arr[i], needle) { return true; }
@@ -1275,9 +1275,9 @@ fn _cr_string_in_array(arr: string[], needle: string) -> boolean {
 //   "sfn/http/client" →  "sfn/http"
 //   "noslash"         →  ""              (not a scoped spec)
 fn _cr_scope_name_prefix(spec: string) -> string {
-    let mut slash_count: number = 0;
-    let mut second_slash: number = -1;
-    let mut i: number = 0;
+    let mut slash_count: int = 0;
+    let mut second_slash: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= spec.length { break; }
         if substring(spec, i, i + 1) == "/" {
@@ -1308,7 +1308,7 @@ fn _cr_direct_import_slugs_for(src: CapsuleSource, sources: CapsuleSource[]) -> 
     // Relative imports: resolve each spec to a path, find the
     // matching CapsuleSource, push its slug.
     let rel_specs = collect_relative_import_specs(source_text);
-    let mut r: number = 0;
+    let mut r: int = 0;
     loop {
         if r >= rel_specs.length { break; }
         let mut dep_path = resolve_relative_import(cur_dir, rel_specs[r]);
@@ -1321,7 +1321,7 @@ fn _cr_direct_import_slugs_for(src: CapsuleSource, sources: CapsuleSource[]) -> 
                 if fs.exists(mod_fallback) { dep_path = mod_fallback; }
             }
         }
-        let mut k: number = 0;
+        let mut k: int = 0;
         loop {
             if k >= sources.length { break; }
             if strings_equal(sources[k].source_path, dep_path) {
@@ -1341,12 +1341,12 @@ fn _cr_direct_import_slugs_for(src: CapsuleSource, sources: CapsuleSource[]) -> 
     // the right behaviour, since relative imports don't go through
     // the scoped-import path.
     let scoped_specs = collect_scoped_import_specs(source_text);
-    let mut s: number = 0;
+    let mut s: int = 0;
     loop {
         if s >= scoped_specs.length { break; }
         let scope_name = _cr_scope_name_prefix(scoped_specs[s]);
         if scope_name.length > 0 {
-            let mut k2: number = 0;
+            let mut k2: int = 0;
             loop {
                 if k2 >= sources.length { break; }
                 if strings_equal(sources[k2].spec, scope_name) {
@@ -1368,12 +1368,12 @@ fn _cr_direct_import_slugs_for(src: CapsuleSource, sources: CapsuleSource[]) -> 
 fn _cr_collect_per_source_dep_manifests(sources: CapsuleSource[], work_dir: string) -> string[][] ![io] {
     let context_root = _cr_import_context_root(work_dir);
     let mut out: string[][] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= sources.length { break; }
         let dep_slugs = _cr_direct_import_slugs_for(sources[i], sources);
         let mut paths: string[] = [];
-        let mut j: number = 0;
+        let mut j: int = 0;
         loop {
             if j >= dep_slugs.length { break; }
             paths.push(context_root + "/" + dep_slugs[j] + ".layout-manifest");
@@ -1517,8 +1517,8 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
         // emitted file as a cheap mid-file IR check; the empty-
         // file probe survives as a fast pre-`llvm-as` filter so
         // we don't pay parser cost on an obviously-broken output.
-        let max_attempts: number = 3;
-        let mut attempt: number = 0;
+        let max_attempts: int = 3;
+        let mut attempt: int = 0;
         loop {
             if ok { break; }
             if attempt >= max_attempts { break; }
@@ -1714,7 +1714,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, s
     // the events. Empty `sailfin_exe` keeps the single-process
     // legacy path that hasn't grown subprocess plumbing yet.
     let mut go_parallel: boolean = false;
-    let mut jobs: number = 1;
+    let mut jobs: int = 1;
     if sailfin_exe.length > 0 {
         if sources.length > 1 {
             jobs = _cr_resolve_jobs();
@@ -1729,11 +1729,11 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, s
         let mut ll_paths_ordered: string[] = [];
         let mut events_ordered: ModuleCacheEvent[] = [];
         let mut needs_emit: ParallelEmitTask[] = [];
-        let mut emit_indices: number[] = [];
+        let mut emit_indices: int[] = [];
         let mut emit_keys: CacheKey[] = [];
         let mut emit_lookup_attempted: boolean[] = [];
         let mut emit_copy_failed: boolean[] = [];
-        let mut pi: number = 0;
+        let mut pi: int = 0;
         loop {
             if pi >= sources.length { break; }
             let src = sources[pi];
@@ -1819,7 +1819,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, s
         // because cache_store_artifact writes through the
         // content-addressed store and there's no benefit to
         // parallelizing the cp-and-rename.
-        let mut ei: number = 0;
+        let mut ei: int = 0;
         loop {
             if ei >= emit_indices.length { break; }
             let src_idx = emit_indices[ei];
@@ -1877,7 +1877,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, s
     // exactly as the pre-PR3 code did, with the same retry +
     // validator cascade per task. Slower for cold builds but
     // simpler to reason about during regression bisects.
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= sources.length { break; }
         let evt = _cr_compile_one(sources[i], per_source_dep_manifests[i], cache_root_path, config, compiler_version, flags_canonical, sailfin_exe, work_dir);
@@ -1929,11 +1929,11 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, s
 fn parse_workspace_member_paths(members_text: string) -> string[] {
     let mut out: string[] = [];
     if members_text.length == 0 { return out; }
-    let mut start: number = 0;
+    let mut start: int = 0;
     let len = members_text.length;
     loop {
         if start >= len { break; }
-        let mut end: number = start;
+        let mut end: int = start;
         loop {
             if end >= len { break; }
             if substring(members_text, end, end + 1) == "\n" { break; }
@@ -1945,7 +1945,7 @@ fn parse_workspace_member_paths(members_text: string) -> string[] {
             // workspace.toml today must list members literally. Skip glob
             // entries so an accidental wildcard never silently expands here.
             let mut has_glob: boolean = false;
-            let mut gi: number = 0;
+            let mut gi: int = 0;
             loop {
                 if gi >= entry.length { break; }
                 if substring(entry, gi, gi + 1) == "*" {
@@ -1969,7 +1969,7 @@ fn parse_workspace_member_paths(members_text: string) -> string[] {
 fn discover_workspace_root(start_dir: string) -> string ![io] {
     let mut dir: string = start_dir;
     if dir.length == 0 { dir = "."; }
-    let mut depth: number = 0;
+    let mut depth: int = 0;
     loop {
         if depth >= 16 { break; }
         let manifest = _cr_path_join(dir, "workspace.toml");
@@ -2002,10 +2002,10 @@ fn _cr_is_safe_member_path(path: string) -> boolean {
     // workspace.toml).
     if _cr_find_char(path, "\\", 0) >= 0 { return false; }
     // Reject any `..` segment. Walk segments separated by `/`.
-    let mut start: number = 0;
+    let mut start: int = 0;
     loop {
         if start >= path.length { break; }
-        let mut end: number = start;
+        let mut end: int = start;
         loop {
             if end >= path.length { break; }
             if substring(path, end, end + 1) == "/" { break; }
@@ -2031,7 +2031,7 @@ fn load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
     let text = fs.readFile(manifest);
     let members_text = toml_get_workspace_members(text);
     let paths = parse_workspace_member_paths(members_text);
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= paths.length { break; }
         let path = paths[i];
@@ -2062,7 +2062,7 @@ fn load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
 // itself, plus the prelude, may declare names that are not import-targets;
 // the caller decides whether the lookup result is meaningful.
 fn workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> string {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= members.length { break; }
         if strings_equal(members[i].name, spec) {
@@ -2078,7 +2078,7 @@ fn workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> string
 // state machine so the resolver owns the only import-spec scanner. Skip-aware
 // of string literals, line comments, and block comments — must stay in sync
 // with the legacy implementation until that is deleted.
-fn _cr_byte_at(text: string, index: number) -> string {
+fn _cr_byte_at(text: string, index: int) -> string {
     if text.length == 0 { return ""; }
     if index < 0 { return ""; }
     if index >= text.length { return ""; }
@@ -2088,7 +2088,7 @@ fn _cr_byte_at(text: string, index: number) -> string {
 fn _cr_is_ident_char(ch: string) -> boolean {
     let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
     if ch.length == 0 { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= allowed.length { break; }
         if substring(allowed, i, i + 1) == ch { return true; }
@@ -2097,7 +2097,7 @@ fn _cr_is_ident_char(ch: string) -> boolean {
     return false;
 }
 
-fn _cr_word_matches(source: string, index: number, word: string) -> boolean {
+fn _cr_word_matches(source: string, index: int, word: string) -> boolean {
     if word.length == 0 { return false; }
     if index < 0 { return false; }
     let end_pos = index + word.length;
@@ -2126,9 +2126,9 @@ fn collect_relative_import_specs(source: string) -> string[] {
     let mut out: string[] = [];
     let source_len = source.length;
     if source_len == 0 { return out; }
-    let mut steps: number = 0;
+    let mut steps: int = 0;
     let max_steps = source_len * 6 + 1000;
-    let mut i: number = 0;
+    let mut i: int = 0;
     let mut in_string: boolean = false;
     let mut escaping: boolean = false;
     let mut in_line_comment: boolean = false;
@@ -2199,13 +2199,13 @@ fn collect_relative_import_specs(source: string) -> string[] {
         if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
         if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
         if _is_dep_keyword {
-            let mut j: number = i;
+            let mut j: int = i;
             let mut s_in_string: boolean = false;
             let mut s_escaping: boolean = false;
             let mut s_in_line_comment: boolean = false;
             let mut s_in_block_comment: boolean = false;
             let mut spec: string = "";
-            let mut stmt_end: number = -1;
+            let mut stmt_end: int = -1;
             loop {
                 if j >= source_len { break; }
                 steps += 1;
@@ -2383,11 +2383,11 @@ fn resolve_relative_import(base_dir: string, spec: string) -> string {
 // Find the first occurrence of `needle` in `haystack`, or -1. Local
 // to the resolver so we don't pull in `string_utils.sfn`'s richer
 // `index_of` (which would broaden the diamond) for a single use.
-fn _cr_find_substring(haystack: string, needle: string) -> number {
+fn _cr_find_substring(haystack: string, needle: string) -> int {
     if needle.length == 0 { return 0; }
     if haystack.length < needle.length { return -1; }
     let limit = haystack.length - needle.length;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i > limit { break; }
         if substring(haystack, i, i + needle.length) == needle { return i; }
@@ -2407,7 +2407,7 @@ fn _cr_canonicalise_path(value: string) -> string {
     }
     // Collapse interior `/./` segments. Bounded by max iterations so a
     // pathological input can't loop forever.
-    let mut max_iters: number = 64;
+    let mut max_iters: int = 64;
     loop {
         if max_iters <= 0 { break; }
         let pos = _cr_find_substring(out, "/./");
@@ -2457,14 +2457,14 @@ fn enumerate_relative_sources(entry_path: string) -> CapsuleSource[] ![io] {
     let entry_dir = _cr_dirname(entry_path);
     let mut visited: string[] = [entry_path];
     let mut queue: string[] = [entry_path];
-    let mut head: number = 0;
+    let mut head: int = 0;
     // Belt-and-suspenders cap on top of the visited-set dedupe, in case
     // the visited check is ever broken by a slug bug. If we hit it we
     // surface a diagnostic rather than silently dropping reachable
     // modules — a silent drop would later show up as missing
     // import-context artifacts during lowering with no clear cause.
-    let max_iterations: number = 4096;
-    let mut iterations: number = 0;
+    let max_iterations: int = 4096;
+    let mut iterations: int = 0;
     loop {
         if head >= queue.length { break; }
         if iterations >= max_iterations {
@@ -2481,7 +2481,7 @@ fn enumerate_relative_sources(entry_path: string) -> CapsuleSource[] ![io] {
         let source = fs.readFile(current_path);
         let specs = collect_relative_import_specs(source);
         let cur_dir = _cr_dirname(current_path);
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= specs.length { break; }
             let spec = specs[i];
@@ -2496,7 +2496,7 @@ fn enumerate_relative_sources(entry_path: string) -> CapsuleSource[] ![io] {
             }
             if fs.exists(dep_path) {
                 let mut already_seen: boolean = false;
-                let mut vi: number = 0;
+                let mut vi: int = 0;
                 loop {
                     if vi >= visited.length { break; }
                     if strings_equal(visited[vi], dep_path) {
@@ -2566,7 +2566,7 @@ fn enumerate_binary_capsule_sources(project_root: string, entry_path: string) ->
     // else here, since slugs come from the file path) keeps the
     // pattern uniform across the file.
     let mut dir_queue: string[] = [src_dir];
-    let mut head: number = 0;
+    let mut head: int = 0;
     // Belt-and-suspenders cap on the BFS — guards against a
     // pathological symlink loop or a runaway listDirectory binding.
     // Sized for `compiler/src/` (137 files, 7 directories at the
@@ -2577,8 +2577,8 @@ fn enumerate_binary_capsule_sources(project_root: string, entry_path: string) ->
     // `head >= max_depth` with `max_depth = 32`, which capped on
     // QUEUE INDEX (not tree depth) and would silently truncate any
     // project with more than 32 directories under `src/`.
-    let max_iterations: number = 4096;
-    let mut iterations: number = 0;
+    let max_iterations: int = 4096;
+    let mut iterations: int = 0;
     loop {
         if head >= dir_queue.length { break; }
         if iterations >= max_iterations {
@@ -2595,7 +2595,7 @@ fn enumerate_binary_capsule_sources(project_root: string, entry_path: string) ->
         head += 1;
         if !fs.exists(dir) { continue; }
         let entries = fs.listDirectory(dir);
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= entries.length { break; }
             let entry = entries[i];
@@ -2636,9 +2636,9 @@ fn collect_scoped_import_specs(source: string) -> string[] {
     let mut out: string[] = [];
     let source_len = source.length;
     if source_len == 0 { return out; }
-    let mut steps: number = 0;
+    let mut steps: int = 0;
     let max_steps = source_len * 6 + 1000;
-    let mut i: number = 0;
+    let mut i: int = 0;
     let mut in_string: boolean = false;
     let mut escaping: boolean = false;
     let mut in_line_comment: boolean = false;
@@ -2709,13 +2709,13 @@ fn collect_scoped_import_specs(source: string) -> string[] {
         if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
         if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
         if _is_dep_keyword {
-            let mut j: number = i;
+            let mut j: int = i;
             let mut s_in_string: boolean = false;
             let mut s_escaping: boolean = false;
             let mut s_in_line_comment: boolean = false;
             let mut s_in_block_comment: boolean = false;
             let mut spec: string = "";
-            let mut stmt_end: number = -1;
+            let mut stmt_end: int = -1;
             loop {
                 if j >= source_len { break; }
                 steps += 1;
@@ -2844,7 +2844,7 @@ fn collect_scoped_import_specs(source: string) -> string[] {
                         }
                     }
                     let mut has_slash: boolean = false;
-                    let mut si: number = 0;
+                    let mut si: int = 0;
                     loop {
                         if si >= spec.length { break; }
                         if substring(spec, si, si + 1) == "/" {
@@ -2889,9 +2889,9 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
     if target.length == 0 { return false; }
     let source_len = source.length;
     if source_len == 0 { return false; }
-    let mut steps: number = 0;
+    let mut steps: int = 0;
     let max_steps = source_len * 6 + 1000;
-    let mut i: number = 0;
+    let mut i: int = 0;
     let mut in_string: boolean = false;
     let mut escaping: boolean = false;
     let mut in_line_comment: boolean = false;
@@ -2967,13 +2967,13 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
             // duplicated here to avoid running the broader scanner
             // (allocates a string array) when a single literal-match
             // probe is all we need.
-            let mut j: number = i;
+            let mut j: int = i;
             let mut s_in_string: boolean = false;
             let mut s_escaping: boolean = false;
             let mut s_in_line_comment: boolean = false;
             let mut s_in_block_comment: boolean = false;
             let mut spec: string = "";
-            let mut stmt_end: number = -1;
+            let mut stmt_end: int = -1;
             loop {
                 if j >= source_len { break; }
                 steps += 1;
@@ -3115,7 +3115,7 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
 // only, not by slug — see `cache_key_for`).
 fn _cr_any_entry_imports_host(entry_paths: string[], capsule_name: string) -> boolean ![io] {
     if capsule_name.length == 0 { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= entry_paths.length { break; }
         let entry = entry_paths[i];
@@ -3142,7 +3142,7 @@ fn _cr_member_src_for_spec(members: WorkspaceMember[], spec: string) -> string {
 }
 
 fn _cr_string_array_contains(items: string[], needle: string) -> boolean {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= items.length { break; }
         if strings_equal(items[i], needle) { return true; }
@@ -3169,16 +3169,16 @@ fn enumerate_workspace_implicit_sources(entry_path: string, members: WorkspaceMe
     if entry_path.length == 0 { return out; }
     if members.length == 0 { return out; }
     let mut covered: string[] = [];
-    let mut ei: number = 0;
+    let mut ei: int = 0;
     loop {
         if ei >= excluded_specs.length { break; }
         covered.push(excluded_specs[ei]);
         ei += 1;
     }
     let mut paths_to_scan: string[] = [entry_path];
-    let mut head: number = 0;
-    let max_iterations: number = 1024;
-    let mut iterations: number = 0;
+    let mut head: int = 0;
+    let max_iterations: int = 1024;
+    let mut iterations: int = 0;
     loop {
         if head >= paths_to_scan.length { break; }
         if iterations >= max_iterations { break; }
@@ -3188,7 +3188,7 @@ fn enumerate_workspace_implicit_sources(entry_path: string, members: WorkspaceMe
         if !fs.exists(path) { continue; }
         let source = fs.readFile(path);
         let specs = collect_scoped_import_specs(source);
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= specs.length { break; }
             let spec = specs[i];
@@ -3204,7 +3204,7 @@ fn enumerate_workspace_implicit_sources(entry_path: string, members: WorkspaceMe
             if src_dir.length == 0 { continue; }
             covered.push(canonical);
             let found = _cr_collect_capsule_sources(src_dir, canonical);
-            let mut j: number = 0;
+            let mut j: int = 0;
             loop {
                 if j >= found.length { break; }
                 out.push(found[j]);
@@ -3224,19 +3224,19 @@ fn enumerate_workspace_implicit_sources(entry_path: string, members: WorkspaceMe
 fn _cr_dep_specs_from_text(deps_text: string) -> string[] {
     let mut out: string[] = [];
     if deps_text.length == 0 { return out; }
-    let mut start: number = 0;
+    let mut start: int = 0;
     let len = deps_text.length;
     loop {
         if start >= len { break; }
-        let mut end: number = start;
+        let mut end: int = start;
         loop {
             if end >= len { break; }
             if substring(deps_text, end, end + 1) == "\n" { break; }
             end += 1;
         }
         if end > start {
-            let mut eq_pos: number = -1;
-            let mut ei: number = start;
+            let mut eq_pos: int = -1;
+            let mut ei: int = start;
             loop {
                 if ei >= end { break; }
                 if substring(deps_text, ei, ei + 1) == "=" {
@@ -3336,12 +3336,12 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
 
     // (1) Relative imports — walked from every entry; the dedupe loop
     // below collapses overlapping sets.
-    let mut ei: number = 0;
+    let mut ei: int = 0;
     loop {
         if ei >= entry_paths.length { break; }
         let entry = entry_paths[ei];
         let relative = enumerate_relative_sources(entry);
-        let mut ri: number = 0;
+        let mut ri: int = 0;
         loop {
             if ri >= relative.length { break; }
             sources.push(relative[ri]);
@@ -3372,11 +3372,11 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
     // used and the resolved kind is binary.
     if consumer.walk_project_src {
         if project_root.length > 0 {
-            let mut bei: number = 0;
+            let mut bei: int = 0;
             loop {
                 if bei >= entry_paths.length { break; }
                 let bin_sources = enumerate_binary_capsule_sources(project_root, entry_paths[bei]);
-                let mut bsi: number = 0;
+                let mut bsi: int = 0;
                 loop {
                     if bsi >= bin_sources.length { break; }
                     sources.push(bin_sources[bsi]);
@@ -3403,7 +3403,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
             capabilities_required = toml_get_capabilities_required(manifest_text);
         }
         let dep_sources = enumerate_capsule_sources(project_root);
-        let mut di: number = 0;
+        let mut di: int = 0;
         loop {
             if di >= dep_sources.length { break; }
             sources.push(dep_sources[di]);
@@ -3433,7 +3433,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
                 if host_name.length > 0 {
                     if _cr_any_entry_imports_host(entry_paths, host_name) {
                         let host_sources = _cr_enumerate_host_capsule_sources(project_root);
-                        let mut hi: number = 0;
+                        let mut hi: int = 0;
                         loop {
                             if hi >= host_sources.length { break; }
                             let candidate = host_sources[hi];
@@ -3444,7 +3444,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
                             // doesn't catch that case because the
                             // slugs differ.
                             let mut already_seen: boolean = false;
-                            let mut sj: number = 0;
+                            let mut sj: int = 0;
                             loop {
                                 if sj >= sources.length { break; }
                                 if strings_equal(sources[sj].source_path, candidate.source_path) {
@@ -3468,11 +3468,11 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
         // Workspace-implicit enumeration is per-entry: each entry may
         // reference a different scoped import, and the union is the
         // set the project actually needs.
-        let mut wi_entry: number = 0;
+        let mut wi_entry: int = 0;
         loop {
             if wi_entry >= entry_paths.length { break; }
             let implicit = enumerate_workspace_implicit_sources(entry_paths[wi_entry], members, covered_specs);
-            let mut wi: number = 0;
+            let mut wi: int = 0;
             loop {
                 if wi >= implicit.length { break; }
                 sources.push(implicit[wi]);
@@ -3500,12 +3500,12 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
     let mut deduped: CapsuleSource[] = [];
     let mut seen_slugs: string[] = [];
     let mut seen_paths: string[] = [];
-    let mut si: number = 0;
+    let mut si: int = 0;
     loop {
         if si >= sources.length { break; }
         let candidate = sources[si];
         let mut duplicate: boolean = false;
-        let mut sj: number = 0;
+        let mut sj: int = 0;
         loop {
             if sj >= seen_slugs.length { break; }
             if strings_equal(seen_slugs[sj], candidate.slug) {
@@ -3547,7 +3547,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
     // `compile_capsule_modules`, `_clang_link_multi`) only ever
     // see the resolved value.
     let mut dep_specs: string[] = [];
-    let mut ds: number = 0;
+    let mut ds: int = 0;
     loop {
         if ds >= deduped.length { break; }
         if deduped[ds].spec.length > 0 {
@@ -3571,7 +3571,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
     // computation sees the relativized form.
     let consumer_root_prefix = _cr_consumer_root_prefix(project_root, consumer);
     let mut resolved: CapsuleSource[] = [];
-    let mut ri: number = 0;
+    let mut ri: int = 0;
     loop {
         if ri >= deduped.length { break; }
         let cur = deduped[ri];
@@ -3769,7 +3769,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
 
     let check_context_root = _cr_import_context_root(work_dir);
     let mut asm_paths: string[] = [];
-    let mut ai: number = 0;
+    let mut ai: int = 0;
     loop {
         if ai >= resolved.sources.length { break; }
         asm_paths.push(check_context_root + "/" + resolved.sources[ai].slug
@@ -3855,7 +3855,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
 
     let test_context_root = _cr_import_context_root(work_dir);
     let mut asm_paths: string[] = [];
-    let mut ai: number = 0;
+    let mut ai: int = 0;
     loop {
         if ai >= resolved.sources.length { break; }
         asm_paths.push(test_context_root + "/" + resolved.sources[ai].slug

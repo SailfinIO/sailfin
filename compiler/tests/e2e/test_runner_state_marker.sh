@@ -148,7 +148,7 @@ EOF
 test_in_process_flag_default_false() {
     mkdir -p "$SCRATCH/proj3/sub"
     cat > "$SCRATCH/proj3/sub/helper.sfn" <<'EOF'
-fn add_one(x: number) -> number {
+fn add_one(x: int) -> int {
     return x + 1;
 }
 EOF

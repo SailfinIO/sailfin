@@ -7,7 +7,7 @@ import { contains_text, starts_with, trim_text } from "../../utils";
 import { char_code_at_text, is_trim_char } from "./core_text";
 
 fn lines_end_with_terminator(lines: string[]) -> boolean {
-    let mut index: number = lines.length - 1;
+    let mut index: int = lines.length - 1;
     loop {
         if lines.length == 0 { return false; }
         if index < 0 { break; }
@@ -34,8 +34,8 @@ fn strip_enclosing_parentheses(expression: string) -> string {
         _if90 = true;
     }
     if _if90 { return trimmed; }
-    let mut depth: number = 0;
-    let mut index: number = 0;
+    let mut depth: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= trimmed.length { break; }
         let ch = char_at(trimmed, index);
@@ -55,16 +55,16 @@ fn strip_enclosing_parentheses(expression: string) -> string {
 }
 
 fn find_top_level_operator(expression: string, operators: string) -> OperatorMatch {
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut angle_depth: number = 0;
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut angle_depth: int = 0;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape_next: boolean = false;
-    let mut candidate_index: number = -1;
+    let mut candidate_index: int = -1;
     let mut candidate_symbol: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= expression.length { break; }
         let ch = char_at(expression, index);
@@ -188,10 +188,10 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
 }
 
 fn find_comparison_operator(expression: string) -> OperatorMatch {
-    let mut depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut index: number = 0;
+    let mut depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut index: int = 0;
     let mut in_string: boolean = false;
     let mut escape_next: boolean = false;
     loop {
@@ -329,10 +329,10 @@ fn find_comparison_operator(expression: string) -> OperatorMatch {
 }
 
 fn find_logical_operator(expression: string) -> OperatorMatch {
-    let mut depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut index: number = 0;
+    let mut depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut index: int = 0;
     let mut in_string: boolean = false;
     let mut escape_next: boolean = false;
 
@@ -525,12 +525,12 @@ fn find_bitwise_and_operator(expression: string) -> OperatorMatch {
 // reuses the helper for symmetry — the doubled-form skip is a
 // no-op there.
 fn _find_single_char_op_skipping_double(expression: string, target: string) -> OperatorMatch {
-    let mut paren_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut bracket_depth: number = 0;
+    let mut paren_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut bracket_depth: int = 0;
     let mut in_string: boolean = false;
     let mut escape_next: boolean = false;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= expression.length { break; }
         let ch = substring(expression, index, index + 1);
@@ -619,12 +619,12 @@ fn _find_single_char_op_skipping_double(expression: string, target: string) -> O
 // matcher (above) was extended to skip these doubled forms so
 // they reach this finder.
 fn find_shift_operator(expression: string) -> OperatorMatch {
-    let mut paren_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut bracket_depth: number = 0;
+    let mut paren_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut bracket_depth: int = 0;
     let mut in_string: boolean = false;
     let mut escape_next: boolean = false;
-    let mut index: number = 0;
+    let mut index: int = 0;
     let _so_limit = expression.length - 1;
     loop {
         if index >= _so_limit { break; }
@@ -707,7 +707,7 @@ fn find_shift_operator(expression: string) -> OperatorMatch {
 
 fn contains_char(set: string, ch: string) -> boolean {
     if ch.length == 0 { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= set.length { break; }
         let set_ch = substring(set, index, index + 1);
@@ -717,7 +717,7 @@ fn contains_char(set: string, ch: string) -> boolean {
     return false;
 }
 
-fn is_binary_minus(expression: string, index: number) -> boolean {
+fn is_binary_minus(expression: string, index: int) -> boolean {
     let previous = find_previous_non_space_char(expression, index);
     let next = find_next_non_space_char(expression, index);
     if previous == null { return false; }
@@ -743,7 +743,7 @@ fn is_binary_minus(expression: string, index: number) -> boolean {
     return true;
 }
 
-fn is_binary_star(expression: string, index: number) -> boolean {
+fn is_binary_star(expression: string, index: int) -> boolean {
     let previous = find_previous_non_space_char(expression, index);
     let next = find_next_non_space_char(expression, index);
     if previous == null { return false; }
@@ -769,8 +769,8 @@ fn is_binary_star(expression: string, index: number) -> boolean {
     return true;
 }
 
-fn find_previous_non_space_char(value: string, index: number) -> string? {
-    let mut position: number = index;
+fn find_previous_non_space_char(value: string, index: int) -> string? {
+    let mut position: int = index;
     loop {
         if position <= 0 { break; }
         position -= 1;
@@ -780,8 +780,8 @@ fn find_previous_non_space_char(value: string, index: number) -> string? {
     return null;
 }
 
-fn find_next_non_space_char(value: string, index: number) -> string? {
-    let mut position: number = index + 1;
+fn find_next_non_space_char(value: string, index: int) -> string? {
+    let mut position: int = index + 1;
     loop {
         if position >= value.length { break; }
         let ch = char_at(value, position);

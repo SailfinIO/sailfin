@@ -40,14 +40,14 @@ import {
     typecheck_has_errors
 } from "./typecheck";
 
-fn _ms_since(start_ms: number) -> number {
+fn _ms_since(start_ms: int) -> int {
     let end_ms = monotonic_millis();
     let delta = end_ms - start_ms;
     if delta < 0 { return 0; }
     return delta;
 }
 
-fn _timing_line(module_name: string, phase: string, elapsed_ms: number) -> string {
+fn _timing_line(module_name: string, phase: string, elapsed_ms: int) -> string {
     // Format is stable and grep/awk-friendly.
     // Emitted to stderr via print.err by the caller.
     return "[timing] module=" + module_name + " phase=" + phase + " ms="
@@ -84,7 +84,7 @@ fn module_name_from_path(source_path: string) -> string {
 
     // Normalize path separators so we can reason about prefixes.
     let mut normalized: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= source_path.length { break; }
         let ch = source_path[index];
@@ -99,9 +99,9 @@ fn module_name_from_path(source_path: string) -> string {
     // - .../runtime/prelude.sfn         -> runtime/prelude
     let compiler_prefix = "compiler/src/";
     let runtime_prefix = "runtime/";
-    let mut start: number = 0;
+    let mut start: int = 0;
 
-    let mut last_compiler: number = -1;
+    let mut last_compiler: int = -1;
     let compiler_search_limit = normalized.length - compiler_prefix.length;
     index = 0;
     loop {
@@ -112,7 +112,7 @@ fn module_name_from_path(source_path: string) -> string {
         index += 1;
     }
     if last_compiler >= 0 { start = last_compiler + compiler_prefix.length; } else {
-        let mut last_runtime: number = -1;
+        let mut last_runtime: int = -1;
         let runtime_search_limit = normalized.length - runtime_prefix.length;
         index = 0;
         loop {
@@ -130,15 +130,15 @@ fn module_name_from_path(source_path: string) -> string {
 
     // Find the end of the module name by stripping the extension from the last
     // path segment.
-    let mut last_slash: number = -1;
+    let mut last_slash: int = -1;
     index = start;
     loop {
         if index >= normalized.length { break; }
         if normalized[index] == "/" { last_slash = index; }
         index += 1;
     }
-    let mut end: number = normalized.length;
-    let mut dot_index: number = -1;
+    let mut end: int = normalized.length;
+    let mut dot_index: int = -1;
     index = normalized.length;
     let dot_limit = last_slash + 1;
     loop {
@@ -291,7 +291,7 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
     let t1 = monotonic_millis();
     let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK")
         || _legacy_flag_file("build/sailfin/.skip_typecheck");
-    let mut t_typecheck: number = 0;
+    let mut t_typecheck: int = 0;
     if !skip_typecheck {
         t_typecheck = _ms_since(t1);
         if typecheck_has_errors(program) {
@@ -383,7 +383,7 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
     let program: Program = parse_program(source);
     let diagnostics = typecheck_diagnostics_with_imports(program, imported_interfaces);
     let mut has_errors: boolean = false;
-    let mut di: number = 0;
+    let mut di: int = 0;
     loop {
         if di >= diagnostics.length { break; }
         if strings_equal(diagnostics[di].severity, "error") {
@@ -535,7 +535,7 @@ fn compile_to_llvm_file_with_module(source: string, module_name: string, out_pat
 // `error[E0001]: ... --> file:line:col` like `sfn check`.
 fn _emit_typecheck_diagnostics(entries: Diagnostic[], source: string, file_path: string) ![io] {
     let lines = split_source_lines(source);
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= entries.length { break; }
         // Stamp file_path in place so the renderer's `--> file:line:col`
@@ -549,21 +549,21 @@ fn _emit_typecheck_diagnostics(entries: Diagnostic[], source: string, file_path:
     }
 }
 
-fn number_to_string(value: number) -> string {
+fn number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
-    let mut working: number = value;
+    let mut working: int = value;
     let mut negative: boolean = false;
     if working < 0 {
         negative = true;
         working = 0 - working;
     }
     let digits = "0123456789";
-    let mut remaining: number = working;
+    let mut remaining: int = working;
     let mut output: string = "";
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;
-        let mut quotient: number = 0;
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -577,9 +577,9 @@ fn number_to_string(value: number) -> string {
     return output;
 }
 
-fn repeat_character(ch: string, count: number) -> string {
+fn repeat_character(ch: string, count: int) -> string {
     if count <= 0 { return ""; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut result: string = "";
     loop {
         if index >= count { break; }

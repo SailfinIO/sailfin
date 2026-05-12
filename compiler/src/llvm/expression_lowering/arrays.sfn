@@ -17,7 +17,7 @@ import {
     empty_runtime_call_overrides
 } from "./native/runtime_call";
 
-fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: number) -> ExpressionResult {
+fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: int) -> ExpressionResult {
     let mut current_lines = lines;
     let mut current_temp = temp_index;
     let mut diagnostics: string[] = [];
@@ -149,7 +149,7 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
     };
     let buffer_operands: LLVMOperand[] = [buffer_size_operand];
     let buffer_result = emit_runtime_call("alloc_struct", buffer_operands, buffer_overrides, current_temp, current_lines);
-    let mut _buffer_di: number = 0;
+    let mut _buffer_di: int = 0;
     loop {
         if _buffer_di >= buffer_result.diagnostics.length { break; }
         diagnostics.push(buffer_result.diagnostics[_buffer_di]);
@@ -188,7 +188,7 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
     let lhs_copy_len = LLVMOperand { llvm_type: "i64", value: lhs_bytes };
     let lhs_copy_operands: LLVMOperand[] = [lhs_copy_dest, lhs_copy_src, lhs_copy_len];
     let lhs_copy_result = emit_runtime_call("copy_bytes", lhs_copy_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-    let mut _lhs_copy_di: number = 0;
+    let mut _lhs_copy_di: int = 0;
     loop {
         if _lhs_copy_di >= lhs_copy_result.diagnostics.length { break; }
         diagnostics.push(lhs_copy_result.diagnostics[_lhs_copy_di]);
@@ -230,7 +230,7 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
     let rhs_copy_len = LLVMOperand { llvm_type: "i64", value: rhs_bytes };
     let rhs_copy_operands: LLVMOperand[] = [rhs_copy_dest, rhs_copy_src, rhs_copy_len];
     let rhs_copy_result = emit_runtime_call("copy_bytes", rhs_copy_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-    let mut _rhs_copy_di: number = 0;
+    let mut _rhs_copy_di: int = 0;
     loop {
         if _rhs_copy_di >= rhs_copy_result.diagnostics.length { break; }
         diagnostics.push(rhs_copy_result.diagnostics[_rhs_copy_di]);
@@ -265,7 +265,7 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
     };
     let struct_concat_operands: LLVMOperand[] = [struct_concat_size_operand];
     let struct_concat_result = emit_runtime_call("alloc_struct", struct_concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-    let mut _struct_concat_di: number = 0;
+    let mut _struct_concat_di: int = 0;
     loop {
         if _struct_concat_di >= struct_concat_result.diagnostics.length {
             break;
@@ -335,7 +335,7 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
     };
 }
 
-fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_type: string, lines: string[], temp_index: number) -> ExpressionResult {
+fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_type: string, lines: string[], temp_index: int) -> ExpressionResult {
     let mut current_lines = lines;
     let mut current_temp = temp_index;
     let mut diagnostics: string[] = [];
@@ -533,9 +533,9 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
 // Find the top-level comma in an LLVM type string, respecting nested braces.
 // This is needed for parsing array struct types like { { %T*, i64 }*, i64 }
 // where the element type itself contains commas.
-fn find_top_level_comma_in_llvm_type(text: string) -> number {
-    let mut brace_depth: number = 0;
-    let mut index: number = 0;
+fn find_top_level_comma_in_llvm_type(text: string) -> int {
+    let mut brace_depth: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = substring(text, index, index + 1);

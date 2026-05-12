@@ -69,7 +69,7 @@ fn parameter_from_native(native: NativeParameter) -> Parameter {
 
 fn parameters_from_native(natives: NativeParameter[]) -> Parameter[] {
     let mut out: Parameter[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= natives.length { break; }
         out.push(parameter_from_native(natives[i]));
@@ -84,7 +84,7 @@ fn type_parameter_from_name(name: string) -> TypeParameter {
 
 fn type_parameters_from_names(names: string[]) -> TypeParameter[] {
     let mut out: TypeParameter[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= names.length { break; }
         out.push(type_parameter_from_name(names[i]));
@@ -95,7 +95,7 @@ fn type_parameters_from_names(names: string[]) -> TypeParameter[] {
 
 fn _copy_string_array(items: string[]) -> string[] {
     let mut out: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= items.length { break; }
         out.push(items[i]);
@@ -119,7 +119,7 @@ fn function_signature_from_native_interface_signature(native: NativeInterfaceSig
 
 fn function_signatures_from_native(signatures: NativeInterfaceSignature[]) -> FunctionSignature[] {
     let mut out: FunctionSignature[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= signatures.length { break; }
         out.push(function_signature_from_native_interface_signature(signatures[i]));
@@ -144,7 +144,7 @@ fn interface_statement_from_native(native: NativeInterface) -> Statement {
 
 fn interfaces_from_native(natives: NativeInterface[]) -> Statement[] {
     let mut out: Statement[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= natives.length { break; }
         out.push(interface_statement_from_native(natives[i]));

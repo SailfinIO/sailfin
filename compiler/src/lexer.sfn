@@ -26,7 +26,7 @@ fn lex(source: string) -> Token[] ![io] {
     };
 
     let tokens: Token[] = [];
-    let mut guard: number = 0;
+    let mut guard: int = 0;
     let max_guard = length * 8 + 1000;
 
     loop {
@@ -357,7 +357,7 @@ fn is_double_quote(ch: string) -> boolean { return ch == "\""; }
 
 fn is_backslash(ch: string) -> boolean { return ch == "\\"; }
 
-fn slice(text: string, start: number, end: number) -> string {
+fn slice(text: string, start: int, end: int) -> string {
     let text_len = text.length;
     let mut safe_start = start;
     let mut safe_end = end;
@@ -368,7 +368,7 @@ fn slice(text: string, start: number, end: number) -> string {
     return substring_unchecked(text, safe_start, safe_end);
 }
 
-fn byte_at(text: string, index: number) -> string {
+fn byte_at(text: string, index: int) -> string {
     let text_len = text.length;
     if text_len == 0 { return ""; }
     if index < 0 { return ""; }

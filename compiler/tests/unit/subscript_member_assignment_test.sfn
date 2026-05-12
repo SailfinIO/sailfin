@@ -23,8 +23,8 @@
 // `arr[i].field = value`, then observed via `arr[i].field` reads.
 struct Entry {
     key: string;
-    value: number;
-    tag: number;
+    value: int;
+    tag: int;
 }
 
 fn _make_entries() -> Entry[] {
@@ -103,7 +103,7 @@ test "subscript_member_assign: multiple fields in same and neighbour slots" {
 // shape that drove the bug: iterate, test, mutate the matching slot.
 test "subscript_member_assign: loop mutation through subscript" {
     let mut entries = _make_entries();
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= entries.length { break; }
         entries[i].tag = entries[i].tag + i + 1;

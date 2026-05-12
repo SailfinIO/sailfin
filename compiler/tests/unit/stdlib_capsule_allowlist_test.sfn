@@ -11,9 +11,7 @@
 // because the test runner can't resolve `char_code` through the
 // `cli_commands_utils.sfn → string_utils.sfn → runtime/prelude` import
 // chain. Keep this in sync with cli_commands_utils.sfn.
-
 // -- Inlined copy of _is_stdlib_capsule_cmd --
-
 fn _is_stdlib_capsule(name: string) -> boolean {
     if name == "cli" { return true; }
     if name == "crypto" { return true; }
@@ -38,7 +36,7 @@ fn _is_stdlib_capsule(name: string) -> boolean {
 }
 
 fn _has_slash(name: string) -> boolean {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= name.length { break; }
         if name[i] == "/" { return true; }
@@ -54,7 +52,6 @@ fn _resolve_capsule_name(name: string) -> string {
 }
 
 // -- Known-good: every capsule currently under capsules/sfn/ --
-
 test "stdlib allowlist: every shipped sfn/* capsule is recognized" {
     assert _is_stdlib_capsule("cli");
     assert _is_stdlib_capsule("crypto");
@@ -78,24 +75,22 @@ test "stdlib allowlist: every shipped sfn/* capsule is recognized" {
 }
 
 // -- Known-bad: effect names and removed entries must not be in the list --
-
 test "stdlib allowlist: effect names and unknown names are rejected" {
     // `io`, `clock`, `model`, `gpu`, `rand` are effect names, not capsules.
-    assert !_is_stdlib_capsule("io");
-    assert !_is_stdlib_capsule("clock");
-    assert !_is_stdlib_capsule("model");
-    assert !_is_stdlib_capsule("gpu");
-    assert !_is_stdlib_capsule("rand");
+    assert ! _is_stdlib_capsule("io");
+    assert ! _is_stdlib_capsule("clock");
+    assert ! _is_stdlib_capsule("model");
+    assert ! _is_stdlib_capsule("gpu");
+    assert ! _is_stdlib_capsule("rand");
     // `collections` was removed from the allowlist — no in-tree capsule.
-    assert !_is_stdlib_capsule("collections");
+    assert ! _is_stdlib_capsule("collections");
     // Arbitrary unknowns.
-    assert !_is_stdlib_capsule("");
-    assert !_is_stdlib_capsule("nonexistent");
-    assert !_is_stdlib_capsule("Cli");
+    assert ! _is_stdlib_capsule("");
+    assert ! _is_stdlib_capsule("nonexistent");
+    assert ! _is_stdlib_capsule("Cli");
 }
 
 // -- Name normalization --
-
 test "resolve capsule name: bare stdlib name gets sfn/ scope" {
     assert _resolve_capsule_name("cli") == "sfn/cli";
     assert _resolve_capsule_name("fmt") == "sfn/fmt";

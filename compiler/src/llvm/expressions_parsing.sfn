@@ -19,14 +19,14 @@ import { ends_with, starts_with, trim_text } from "./utils";
 // =============================================================================
 fn parse_member_access(expression: string) -> MemberAccessParse {
     let trimmed = trim_text(expression);
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut brace_depth: number = 0;
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
     let mut in_double: boolean = false;
     let mut in_single: boolean = false;
     let mut escape_next: boolean = false;
-    let mut last_dot: number = -1;
-    let mut index: number = 0;
+    let mut last_dot: int = -1;
+    let mut index: int = 0;
     loop {
         if index >= trimmed.length { break; }
         let ch = char_at(trimmed, index);
@@ -135,14 +135,14 @@ fn parse_index_expression(expression: string) -> IndexExpressionParse {
     if substring(trimmed, trimmed.length - 1, trimmed.length) != "]" {
         return IndexExpressionParse { success: false, base: "", index: "" };
     }
-    let mut bracket_depth: number = 0;
-    let mut paren_depth: number = 0;
-    let mut brace_depth: number = 0;
+    let mut bracket_depth: int = 0;
+    let mut paren_depth: int = 0;
+    let mut brace_depth: int = 0;
     let mut in_double: boolean = false;
     let mut in_single: boolean = false;
     let mut escape_next: boolean = false;
-    let mut open_bracket: number = -1;
-    let mut index: number = trimmed.length - 1;
+    let mut open_bracket: int = -1;
+    let mut index: int = trimmed.length - 1;
     loop {
         if index < 0 { break; }
         let ch = char_at(trimmed, index);
@@ -245,14 +245,14 @@ fn parse_index_expression(expression: string) -> IndexExpressionParse {
 // =============================================================================
 fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
     let trimmed = trim_text(expression);
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut brace_depth: number = 0;
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
     let mut in_double: boolean = false;
     let mut in_single: boolean = false;
     let mut escape_next: boolean = false;
-    let mut equals_index: number = -1;
-    let mut index: number = 0;
+    let mut equals_index: int = -1;
+    let mut index: int = 0;
     loop {
         if index >= trimmed.length { break; }
         let ch = char_at(trimmed, index);
@@ -467,10 +467,10 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
     }
 
     // Find '?' and ':' at the same nesting level (depth 0)
-    let mut depth: number = 0;
-    let mut question_index: number = -1;
-    let mut colon_index: number = -1;
-    let mut index: number = 0;
+    let mut depth: int = 0;
+    let mut question_index: int = -1;
+    let mut colon_index: int = -1;
+    let mut index: int = 0;
     let mut in_double: boolean = false;
     let mut in_single: boolean = false;
     let mut escape_next: boolean = false;
@@ -637,15 +637,15 @@ fn parse_cast_expression(text: string) -> CastParseResult {
     }
 
     // Scan for a top-level ` as ` outside of brackets/strings.
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut angle_depth: number = 0;
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut angle_depth: int = 0;
     let mut in_double: boolean = false;
     let mut in_single: boolean = false;
     let mut escape_next: boolean = false;
-    let mut match_index: number = -1;
-    let mut index: number = 0;
+    let mut match_index: int = -1;
+    let mut index: int = 0;
 
     loop {
         if index >= trimmed.length { break; }

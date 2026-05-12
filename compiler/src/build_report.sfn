@@ -113,7 +113,7 @@ fn empty_build_report() -> BuildReport {
 // strings, slugs) are ASCII-clean.
 fn _br_json_escape(s: string) -> string {
     let mut out: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= s.length { break; }
         let ch = substring(s, i, i + 1);
@@ -139,7 +139,7 @@ fn _br_json_string_field(name: string, value: string) -> string {
     return _br_json_field(name, _br_json_quote(value));
 }
 
-fn _br_json_number_field(name: string, value: number) -> string {
+fn _br_json_number_field(name: string, value: int) -> string {
     return _br_json_field(name, _br_number_to_string(value));
 }
 
@@ -159,21 +159,21 @@ fn _br_json_bool_field(name: string, value: boolean) -> string {
 // runs forever or emits a stream of zeros. The repeated-subtraction
 // path keeps everything integer-valued. See
 // `compiler/src/main.sfn::number_to_string` for the same shape.
-fn _br_number_to_string(value: number) -> string {
+fn _br_number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
-    let mut working: number = value;
+    let mut working: int = value;
     let mut negative: boolean = false;
     if working < 0 {
         negative = true;
         working = 0 - working;
     }
     let digits = "0123456789";
-    let mut remaining: number = working;
+    let mut remaining: int = working;
     let mut output: string = "";
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;
-        let mut quotient: number = 0;
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -192,7 +192,7 @@ fn _br_number_to_string(value: number) -> string {
 // -------------------------------------------------------------------
 fn _br_json_string_array(values: string[]) -> string {
     let mut out: string = "[";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= values.length { break; }
         if i > 0 { out = out + ","; }

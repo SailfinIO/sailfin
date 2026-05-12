@@ -53,9 +53,9 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
     // available without the memory cost of parsing function bodies.
     let mut queue_paths: string[] = [];
     let mut queue_parent_slugs: string[] = [];
-    let mut queue_depths: number[] = [];
+    let mut queue_depths: int[] = [];
 
-    let mut init_index: number = 0;
+    let mut init_index: int = 0;
     loop {
         if init_index >= imports.length { break; }
         queue_paths.push(imports[init_index].module);
@@ -64,9 +64,9 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
         init_index += 1;
     }
 
-    let max_transitive_depth: number = 3;
+    let max_transitive_depth: int = 3;
 
-    let mut queue_index: number = 0;
+    let mut queue_index: int = 0;
     loop {
         if queue_index >= queue_paths.length { break; }
         if trace {
@@ -176,7 +176,7 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
         // The `seen` dedup guards against cycles.
         if native_text_for_discovery.length > 0 {
             let transitive_imports = parse_native_imports_for_import(native_text_for_discovery);
-            let mut ti: number = 0;
+            let mut ti: int = 0;
             let next_depth = depth + 1;
             loop {
                 if ti >= transitive_imports.length { break; }
@@ -235,8 +235,8 @@ fn resolve_import_module_slug(module: string) -> string {
 }
 
 fn dirname_for_module_slug(slug: string) -> string {
-    let mut last_slash: number = -1;
-    let mut index: number = 0;
+    let mut last_slash: int = -1;
+    let mut index: int = 0;
     loop {
         if index >= slug.length { break; }
         let _sl_end = index + 1;
@@ -275,7 +275,7 @@ fn resolve_import_module_slug_for_module(module: string, current_module_slug: st
         if index_of(current_slug, "/") < 0 {
             if index_of(current_slug, "__") >= 0 {
                 let mut rebuilt: string = "";
-                let mut idx: number = 0;
+                let mut idx: int = 0;
                 loop {
                     if idx >= current_slug.length { break; }
                     let _imp_next = idx + 1;
@@ -316,7 +316,7 @@ fn resolve_import_module_slug_for_module(module: string, current_module_slug: st
     // - "../native_ir" -> "native_ir"
     let mut parts: string[] = [];
     let mut segment: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= normalized.length { break; }
         let ch = substring(normalized, index, index + 1);
@@ -343,7 +343,7 @@ fn resolve_import_module_slug_for_module(module: string, current_module_slug: st
         if part == ".." {
             if resolved.length > 0 {
                 let mut shortened: string[] = [];
-                let mut drop_index: number = 0;
+                let mut drop_index: int = 0;
                 let limit = resolved.length - 1;
                 loop {
                     if drop_index >= limit { break; }
@@ -410,7 +410,7 @@ fn _resolve_native_text_path_for_slug(slug: string) -> string ![io] {
 
 fn normalize_import_module_path(value: string) -> string {
     let mut result: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= value.length { break; }
         let ch = substring(value, index, index + 1);
@@ -463,24 +463,24 @@ fn resolve_cached_capsule_source(module: string, deps: string, home_dir: string)
     let mut version: string = "";
     let mut lookup_keys: string[] = [module];
     if starts_with(module, "sfn/") { lookup_keys.push(name); }
-    let mut key_idx: number = 0;
+    let mut key_idx: int = 0;
     loop {
         if key_idx >= lookup_keys.length { break; }
         if version.length > 0 { break; }
         let dep_name = lookup_keys[key_idx];
-        let mut start: number = 0;
+        let mut start: int = 0;
         let dep_len = deps.length;
         loop {
             if start >= dep_len { break; }
-            let mut end: number = start;
+            let mut end: int = start;
             loop {
                 if end >= dep_len { break; }
                 let ch = substring(deps, end, end + 1);
                 if ch == "\n" { break; }
                 end += 1;
             }
-            let mut eq_pos: number = -1;
-            let mut ei: number = start;
+            let mut eq_pos: int = -1;
+            let mut ei: int = start;
             loop {
                 if ei >= end { break; }
                 let ch = substring(deps, ei, ei + 1);
@@ -537,7 +537,7 @@ fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], m
     let mut diagnostics: string[] = [];
 
     let mut updated_structs: NativeStruct[] = structs;
-    let mut struct_index: number = 0;
+    let mut struct_index: int = 0;
     loop {
         if struct_index >= manifest.structs.length { break; }
         let layout_struct = manifest.structs[struct_index];
@@ -560,7 +560,7 @@ fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], m
     }
 
     let mut updated_enums: NativeEnum[] = enums;
-    let mut enum_index: number = 0;
+    let mut enum_index: int = 0;
     loop {
         if enum_index >= manifest.enums.length { break; }
         let layout_enum = manifest.enums[enum_index];
@@ -590,8 +590,8 @@ fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], m
 // =============================================================================
 // Helper Functions
 // =============================================================================
-fn find_struct_index(structs: NativeStruct[], name: string) -> number {
-    let mut index: number = 0;
+fn find_struct_index(structs: NativeStruct[], name: string) -> int {
+    let mut index: int = 0;
     loop {
         if index >= structs.length { break; }
         if structs[index].name == name { return index; }
@@ -600,8 +600,8 @@ fn find_struct_index(structs: NativeStruct[], name: string) -> number {
     return -1;
 }
 
-fn find_enum_index(enums: NativeEnum[], name: string) -> number {
-    let mut index: number = 0;
+fn find_enum_index(enums: NativeEnum[], name: string) -> int {
+    let mut index: int = 0;
     loop {
         if index >= enums.length { break; }
         if enums[index].name == name { return index; }
@@ -610,9 +610,9 @@ fn find_enum_index(enums: NativeEnum[], name: string) -> number {
     return -1;
 }
 
-fn replace_native_struct(structs: NativeStruct[], index: number, replacement: NativeStruct) -> NativeStruct[] {
+fn replace_native_struct(structs: NativeStruct[], index: int, replacement: NativeStruct) -> NativeStruct[] {
     let mut result: NativeStruct[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= structs.length { break; }
         if i == index { result.push(replacement); } else {
@@ -623,9 +623,9 @@ fn replace_native_struct(structs: NativeStruct[], index: number, replacement: Na
     return result;
 }
 
-fn replace_native_enum(enums: NativeEnum[], index: number, replacement: NativeEnum) -> NativeEnum[] {
+fn replace_native_enum(enums: NativeEnum[], index: int, replacement: NativeEnum) -> NativeEnum[] {
     let mut result: NativeEnum[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= enums.length { break; }
         if i == index { result.push(replacement); } else {

@@ -1,43 +1,25 @@
-fn _add(x: number, y: number) -> number {
-    return x + y;
-}
+fn _add(x: int, y: int) -> int { return x + y; }
 
-fn _multiply(x: number, y: number) -> number {
-    return x * y;
-}
+fn _multiply(x: int, y: int) -> int { return x * y; }
 
-fn _subtract(a: number, b: number) -> number {
-    return a - b;
-}
+fn _subtract(a: int, b: int) -> int { return a - b; }
 
-fn _identity(x: number) -> number {
-    return x;
-}
+fn _identity(x: int) -> int { return x; }
 
-fn _is_even(n: number) -> boolean {
-    return n % 2 == 0;
-}
+fn _is_even(n: int) -> boolean { return n % 2 == 0; }
 
-fn _factorial(n: number) -> number {
-    if n <= 1 {
-        return 1;
-    }
+fn _factorial(n: int) -> int {
+    if n <= 1 { return 1; }
     return n * _factorial(n - 1);
 }
 
-fn _fibonacci(n: number) -> number {
-    if n <= 0 {
-        return 0;
-    }
-    if n == 1 {
-        return 1;
-    }
+fn _fibonacci(n: int) -> int {
+    if n <= 0 { return 0; }
+    if n == 1 { return 1; }
     return _fibonacci(n - 1) + _fibonacci(n - 2);
 }
 
-fn _greet(name: string) -> string {
-    return "Hello, " + name + "!";
-}
+fn _greet(name: string) -> string { return "Hello, " + name + "!"; }
 
 test "functions: add returns correct sum" {
     assert _add(2, 3) == 5;

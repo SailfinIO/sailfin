@@ -2,4 +2,4 @@
 // function. The companion test in `tests/x_test.sfn` calls this
 // via `import { my_fn } from "my-app";` to exercise the runner's
 // bare-name resolver wiring.
-fn my_fn(x: number) -> number { return x + 1; }
+fn my_fn(x: int) -> int { return x + 1; }

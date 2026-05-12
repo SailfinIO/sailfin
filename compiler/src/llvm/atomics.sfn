@@ -67,7 +67,7 @@ fn is_atomic_builtin(name: string) -> boolean {
 // `store atomic` instruction. Returns an `ExpressionResult` whose
 // `operand` is the loaded i64 (for `atomic_load`) or null (for
 // `atomic_store`'s void return).
-fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
     let trimmed = trim_text(name);
     if trimmed == "atomic_load" {
         return _lower_atomic_load(arguments, bindings, locals, temp_index, lines, functions, context);
@@ -113,7 +113,7 @@ fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBi
 
 // `atomic_load(ptr: *int) -> int` →
 //     %tN = load atomic i64, i64* <ptr>, seq_cst, align 8
-fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -191,7 +191,7 @@ fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals:
 
 // `atomic_store(ptr: *int, value: int) -> void` →
 //     store atomic i64 <value>, i64* <ptr>, seq_cst, align 8
-fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -301,7 +301,7 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
 // E0806 (the same code M0-Atomics.1 reserved for atomic-arity /
 // type errors), extended with an "expected zero arguments"
 // message as the sub-issue contract specifies.
-fn _lower_atomic_fence(arguments: string[], temp_index: number, lines: string[]) -> ExpressionResult ![io] {
+fn _lower_atomic_fence(arguments: string[], temp_index: int, lines: string[]) -> ExpressionResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines = lines;
 
@@ -347,7 +347,7 @@ fn _lower_atomic_fence(arguments: string[], temp_index: number, lines: string[])
 // mnemonic (`add` vs `sub`) differs. `name` is threaded through to
 // the diagnostics so the user sees the Sailfin-level builtin name
 // (e.g. `atomic_sub`) rather than the LLVM op.
-fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;
@@ -473,7 +473,7 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
 // Both memory orderings on `cmpxchg` are pinned to `seq_cst`
 // (success and failure). v0 also ships strong cmpxchg only — no
 // `cmpxchg weak` — matching the rest of the M0 atomics surface.
-fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines = lines;
     let mut current_temp = temp_index;

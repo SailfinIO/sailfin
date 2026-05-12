@@ -22,15 +22,15 @@
 // value). Subsequent field accesses then flow through the normal boxed
 // member-access lowering.
 struct Point {
-    x: number;
-    y: number;
+    x: int;
+    y: int;
 }
 
 async fn make_origin() -> Point {
     return Point { x: 0, y: 0 };
 }
 
-async fn make_point(x: number, y: number) -> Point {
+async fn make_point(x: int, y: int) -> Point {
     return Point { x: x, y: y };
 }
 

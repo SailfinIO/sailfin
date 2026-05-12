@@ -60,7 +60,7 @@ struct EnumLayoutFixupResult {
 }
 
 fn is_unit_enum(enum_def: NativeEnum) -> boolean {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= enum_def.variants.length { break; }
         let variant = enum_def.variants[index];
@@ -71,10 +71,10 @@ fn is_unit_enum(enum_def: NativeEnum) -> boolean {
 }
 
 fn synthesize_unit_enum_layout(enum_def: NativeEnum) -> NativeEnumLayout {
-    let tag_size: number = 4;
-    let tag_align: number = 4;
+    let tag_size: int = 4;
+    let tag_align: int = 4;
     let mut layouts: NativeEnumVariantLayout[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= enum_def.variants.length { break; }
         let variant = enum_def.variants[index];
@@ -95,12 +95,12 @@ fn synthesize_unit_enum_layout(enum_def: NativeEnum) -> NativeEnumLayout {
 
 fn enum_layout_matches_variants(enum_def: NativeEnum, layout: NativeEnumLayout) -> boolean {
     if layout.variants.length != enum_def.variants.length { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= enum_def.variants.length { break; }
         let expected = enum_def.variants[index].name;
         let mut found: boolean = false;
-        let mut layout_index: number = 0;
+        let mut layout_index: int = 0;
         loop {
             if layout_index >= layout.variants.length { break; }
             if layout.variants[layout_index].name == expected {
@@ -126,7 +126,7 @@ fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
     }
     let mut diagnostics: string[] = [];
     let mut updated: NativeEnum[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= enums.length { break; }
         let enum_def = enums[index];
@@ -206,7 +206,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
     }
     let mut diagnostics: string[] = [];
     let mut struct_entries: StructTypeInfo[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= structs.length { break; }
         let definition = structs[index];
@@ -220,7 +220,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
         let sanitized = sanitize_symbol(definition.name);
         let llvm_name = "%" + sanitized;
         let mut fields: StructFieldInfo[] = [];
-        let mut field_index: number = 0;
+        let mut field_index: int = 0;
         loop {
             if field_index >= layout.fields.length { break; }
             let layout_field = layout.fields[field_index];
@@ -249,7 +249,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             });
             field_index += 1;
         }
-        let mut align_value: number = layout.align;
+        let mut align_value: int = layout.align;
         if align_value <= 0 { align_value = 1; }
         struct_entries = append_struct_type_info(struct_entries, StructTypeInfo {
             name: definition.name, llvm_name: llvm_name, fields: fields, size: layout.size, align: align_value
@@ -258,7 +258,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
     }
 
     let mut enum_entries: EnumTypeInfo[] = [];
-    let mut enum_index: number = 0;
+    let mut enum_index: int = 0;
     loop {
         if enum_index >= enums.length { break; }
         let enum_def = enums[enum_index];
@@ -272,12 +272,12 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
         let sanitized_enum = sanitize_symbol(enum_def.name);
         let llvm_enum_name = "%" + sanitized_enum;
         let mut variants: EnumVariantInfo[] = [];
-        let mut variant_index: number = 0;
+        let mut variant_index: int = 0;
         loop {
             if variant_index >= enum_layout.variants.length { break; }
             let variant_layout = enum_layout.variants[variant_index];
             let mut variant_fields: StructFieldInfo[] = [];
-            let mut variant_field_index: number = 0;
+            let mut variant_field_index: int = 0;
             loop {
                 if variant_field_index >= variant_layout.fields.length {
                     break;
@@ -317,10 +317,10 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             });
             variant_index += 1;
         }
-        let mut enum_align_value: number = enum_layout.align;
+        let mut enum_align_value: int = enum_layout.align;
         if enum_align_value <= 0 { enum_align_value = 1; }
-        let mut max_payload_size: number = 0;
-        let mut payload_scan: number = 0;
+        let mut max_payload_size: int = 0;
+        let mut payload_scan: int = 0;
         loop {
             if payload_scan >= variants.length { break; }
             let variant = variants[payload_scan];
@@ -337,7 +337,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
 
     // Build interface type information
     let mut interface_entries: InterfaceTypeInfo[] = [];
-    let mut interface_index: number = 0;
+    let mut interface_index: int = 0;
     loop {
         if interface_index >= interfaces.length { break; }
         let interface_def = interfaces[interface_index];
@@ -351,19 +351,19 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
 
     // Build vtable information for each struct-interface pair
     let mut vtable_entries: VTableInfo[] = [];
-    let mut struct_vtable_index: number = 0;
+    let mut struct_vtable_index: int = 0;
     loop {
         if struct_vtable_index >= structs.length { break; }
         let struct_def = structs[struct_vtable_index];
         let mut implements = struct_def.implements;
         if implements == null { implements = []; }
-        let mut implements_index: number = 0;
+        let mut implements_index: int = 0;
         loop {
             if implements_index >= implements.length { break; }
             let interface_name = implements[implements_index];
             // Find the interface definition
             let mut interface_def_opt: NativeInterface? = null;
-            let mut search_idx: number = 0;
+            let mut search_idx: int = 0;
             loop {
                 if search_idx >= interfaces.length { break; }
                 if interfaces[search_idx].name == interface_name {
@@ -393,13 +393,13 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
 
             // Build vtable entries for each method
             let mut vtable_method_entries: VTableEntry[] = [];
-            let mut sig_index: number = 0;
+            let mut sig_index: int = 0;
             loop {
                 if sig_index >= interface_def.signatures.length { break; }
                 let signature = interface_def.signatures[sig_index];
                 // Build function pointer type: return_type (param_types...)*
                 let mut param_types: string[] = ["i8*"];  // First param is always self as i8*
-                let mut param_idx: number = 1;  // Skip self since we already added it
+                let mut param_idx: int = 1;  // Skip self since we already added it
                 loop {
                     if param_idx >= signature.parameters.length { break; }
                     let param = signature.parameters[param_idx];
@@ -425,7 +425,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
 
         // Structural conformance: if the struct doesn't explicitly declare `implements`,
         // but does provide compatible methods, synthesize a vtable anyway.
-        let mut interface_scan: number = 0;
+        let mut interface_scan: int = 0;
         loop {
             if interface_scan >= interfaces.length { break; }
             let interface_def = interfaces[interface_scan];
@@ -441,14 +441,14 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
                         + ".const";
 
                     let mut vtable_method_entries: VTableEntry[] = [];
-                    let mut sig_index: number = 0;
+                    let mut sig_index: int = 0;
                     loop {
                         if sig_index >= interface_def.signatures.length {
                             break;
                         }
                         let signature = interface_def.signatures[sig_index];
                         let mut param_types: string[] = ["i8*"];
-                        let mut param_idx: number = 1;
+                        let mut param_idx: int = 1;
                         loop {
                             if param_idx >= signature.parameters.length {
                                 break;

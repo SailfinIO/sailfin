@@ -32,12 +32,12 @@
 // with multiple methods to exercise the boxed-pointer-to-value coercion
 // path for every insertion position.
 struct Pixel {
-    x: number;
-    y: number;
+    x: int;
+    y: int;
 
-    fn manhattan(self) -> number { return self.x + self.y; }
+    fn manhattan(self) -> int { return self.x + self.y; }
 
-    fn scaled(self, factor: number) -> Pixel {
+    fn scaled(self, factor: int) -> Pixel {
         return Pixel { x: self.x * factor, y: self.y * factor };
     }
 }
@@ -53,7 +53,7 @@ struct Region {
         };
     }
 
-    fn origin_sum(self) -> number { return self.origin.manhattan(); }
+    fn origin_sum(self) -> int { return self.origin.manhattan(); }
 }
 
 test "array_literal_boxed_struct: method on user struct reads self correctly" {

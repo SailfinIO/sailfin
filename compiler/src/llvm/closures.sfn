@@ -135,7 +135,7 @@ struct ClosureEnvPrologueResult {
 // `%sfn_closure_env_<id>` — the LLVM type name for one lambda's
 // env struct. Stable across runs of the same source so A3 can
 // reference the same name from the call-site dispatch path.
-fn closure_env_type_name(lambda_id: number) -> string {
+fn closure_env_type_name(lambda_id: int) -> string {
     return "%sfn_closure_env_" + number_to_string(lambda_id);
 }
 
@@ -160,7 +160,7 @@ fn closure_field_llvm_type(capture: Capture) -> string {
 // sentinel layout (`is_empty == true`, `type_decl == ""`) so the
 // caller can short-circuit env emission entirely for non-capturing
 // lambdas.
-fn synthesize_closure_env_struct(captures: Capture[], lambda_id: number) -> ClosureEnvLayout {
+fn synthesize_closure_env_struct(captures: Capture[], lambda_id: int) -> ClosureEnvLayout {
     let type_name = closure_env_type_name(lambda_id);
     if captures.length == 0 {
         let empty_fields: ClosureEnvField[] = [];
@@ -175,7 +175,7 @@ fn synthesize_closure_env_struct(captures: Capture[], lambda_id: number) -> Clos
 
     let mut fields: ClosureEnvField[] = [];
     let mut field_types: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= captures.length { break; }
         let capture = captures[index];
@@ -203,7 +203,7 @@ fn synthesize_closure_env_struct(captures: Capture[], lambda_id: number) -> Clos
 // alloc walk surfaces this as a `zeroinitializer`-equivalent
 // store via `_field_zero_value`.
 fn _find_operand(operands: ClosureCaptureOperand[], name: string) -> string {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= operands.length { break; }
         if operands[index].name == name {
@@ -236,9 +236,9 @@ fn _field_zero_value(llvm_type: string) -> string {
 // SSA scope. The walk advances this monotonically per emitted
 // instruction, mirroring `emission_async.sfn`'s context-struct
 // build-out.
-fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOperand[], temp_index: number) -> ClosureEnvAllocResult {
+fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOperand[], temp_index: int) -> ClosureEnvAllocResult {
     let mut lines: string[] = [];
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
 
     if layout.is_empty {
         return ClosureEnvAllocResult {
@@ -282,7 +282,7 @@ fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOper
     lines.push("  " + env_typed + " = bitcast i8* " + env_raw + " to "
         + typed_ptr);
 
-    let mut field_index: number = 0;
+    let mut field_index: int = 0;
     loop {
         if field_index >= layout.fields.length { break; }
         let field = layout.fields[field_index];
@@ -325,10 +325,10 @@ fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOper
 // `env_param_name` is the LLVM SSA name of the env parameter
 // (e.g., `"%env_raw"`). Empty-capture layouts return no lines
 // and no bindings.
-fn emit_closure_env_load_prologue(layout: ClosureEnvLayout, env_param_name: string, temp_index: number) -> ClosureEnvPrologueResult {
+fn emit_closure_env_load_prologue(layout: ClosureEnvLayout, env_param_name: string, temp_index: int) -> ClosureEnvPrologueResult {
     let mut lines: string[] = [];
     let mut bindings: ClosureEnvLoadedBinding[] = [];
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
 
     if layout.is_empty {
         return ClosureEnvPrologueResult {
@@ -346,7 +346,7 @@ fn emit_closure_env_load_prologue(layout: ClosureEnvLayout, env_param_name: stri
     lines.push("  " + env_typed + " = bitcast i8* " + env_param_name + " to "
         + typed_ptr);
 
-    let mut field_index: number = 0;
+    let mut field_index: int = 0;
     loop {
         if field_index >= layout.fields.length { break; }
         let field = layout.fields[field_index];

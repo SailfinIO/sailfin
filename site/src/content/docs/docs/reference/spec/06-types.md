@@ -23,9 +23,10 @@ sidebar:
 
 > Bare unsuffixed integer literals default to `int` (i64); decimal or
 > exponent literals default to `float` (f64). The `number` keyword is a
-> deprecated alias for `float` and will be removed once the compiler
-> source completes its migration to the explicit `int` / `float`
-> spellings — tracked on the [roadmap](/roadmap).
+> deprecated alias for `float`. The compiler source migration to explicit
+> `int` / `float` spellings is complete (Slice E.3a, 2026-05-12) —
+> `number` remains as an alias for backward compatibility but will be
+> removed before 1.0.
 
 **Composite types**: structs, enums, arrays (`T[]`)
 

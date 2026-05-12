@@ -1,5 +1,5 @@
-import { helper_answer } from "./fixtures/inlining_helper";
 import { shared_add, shared_greet } from "./fixtures/cross_module_shared";
+import { helper_answer } from "./fixtures/inlining_helper";
 
 test "cross_module: import function from another module" {
     assert helper_answer() == 42;

@@ -150,12 +150,12 @@ fn parse_decorators(parser: Parser) -> DecoratorParseResult {
             let paren_result = collect_parenthesized(current);
             if paren_result.success {
                 let mut segment_tokens: Token[] = [];
-                let mut angle: number = 0;
-                let mut paren: number = 0;
-                let mut brace: number = 0;
-                let mut bracket: number = 0;
+                let mut angle: int = 0;
+                let mut paren: int = 0;
+                let mut brace: int = 0;
+                let mut bracket: int = 0;
 
-                let mut index: number = 0;
+                let mut index: int = 0;
                 loop {
                     if index >= paren_result.tokens.length { break; }
                     let tok = paren_result.tokens[index];
@@ -316,7 +316,7 @@ fn parse_type_parameter_clause(parser: Parser) -> TypeParameterParseResult {
 
     current = parser_advance_raw(current);
     let mut collected: Token[] = [];
-    let mut depth: number = 1;
+    let mut depth: int = 1;
 
     loop {
         let tok = parser_peek_raw(current);
@@ -337,7 +337,7 @@ fn parse_type_parameter_clause(parser: Parser) -> TypeParameterParseResult {
 
     let slices = split_token_slices_by_comma(collected);
     let mut parameters: TypeParameter[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= slices.length { break; }
         let slice_tokens = trim_token_edges(slices[index]);
@@ -398,7 +398,7 @@ fn parse_implements_clause(parser: Parser) -> ImplementsParseResult {
 
     let mut implements_types: TypeAnnotation[] = [];
     let entries = split_tokens_by_comma(capture.tokens);
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= entries.length { break; }
         let text = trim_text(entries[index]);
@@ -609,7 +609,7 @@ fn parse_specifier_list(initial_parser: Parser) -> SpecifierListParseResult {
     parser = skip_trivia(parser);
     parser = consume_symbol(parser, "{");
 
-    let mut spec_count: number = 0;
+    let mut spec_count: int = 0;
     let mut spec_names: string[] = [];
     let mut spec_aliases: string[] = [];
     parser = skip_trivia(parser);
@@ -655,7 +655,7 @@ fn parse_specifier_list(initial_parser: Parser) -> SpecifierListParseResult {
     // Build NamedSpecifier array from parallel string arrays
     // (avoids struct .push() which the first-pass binary can't lower)
     let mut specifiers: NamedSpecifier[] = [];
-    let mut _si: number = 0;
+    let mut _si: int = 0;
     loop {
         if _si >= spec_count { break; }
         let mut _a: string? = null;
@@ -679,7 +679,7 @@ fn parse_specifier_list(initial_parser: Parser) -> SpecifierListParseResult {
 
 fn build_import_specifiers(values: NamedSpecifier[]) -> ImportSpecifier[] {
     let mut result: ImportSpecifier[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= values.length { break; }
         let entry = values[index];
@@ -693,7 +693,7 @@ fn build_import_specifiers(values: NamedSpecifier[]) -> ImportSpecifier[] {
 
 fn build_export_specifiers(values: NamedSpecifier[]) -> ExportSpecifier[] {
     let mut result: ExportSpecifier[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= values.length { break; }
         let entry = values[index];
@@ -739,7 +739,7 @@ fn parse_variable(initial_parser: Parser) -> StatementParseResult {
         statement_tokens = append_token(statement_tokens, separator_token);
         parser = separator_result.parser;
         let capture = collect_until(skip_trivia(parser), ["=", ";"]);
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= capture.tokens.length { break; }
             statement_tokens = append_token(statement_tokens, capture.tokens[index]);
@@ -760,7 +760,7 @@ fn parse_variable(initial_parser: Parser) -> StatementParseResult {
         statement_tokens = append_token(statement_tokens, assign);
         parser = parser_advance_raw(parser);
         let capture = collect_until(skip_trivia(parser), [";"]);
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= capture.tokens.length { break; }
             statement_tokens = append_token(statement_tokens, capture.tokens[index]);
@@ -1682,9 +1682,9 @@ fn parse_unknown(initial_parser: Parser) -> StatementParseResult {
     parser = skip_trivia(parser);
     let mut tokens: Token[] = [];
     let mut current = parser;
-    let mut depth: number = 0;
-    let iteration_limit: number = 16384;
-    let mut iteration_count: number = 0;
+    let mut depth: int = 0;
+    let iteration_limit: int = 16384;
+    let mut iteration_count: int = 0;
     let mut truncated: boolean = false;
 
     loop {

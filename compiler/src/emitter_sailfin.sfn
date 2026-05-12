@@ -67,7 +67,7 @@ fn emit_program(program: Program) -> string {
     // Ensure the emitted program can reference the runtime, but avoid duplicating
     // the import when we roundtrip an already-emitted module.
     let mut has_runtime_import: boolean = false;
-    let mut scan: number = 0;
+    let mut scan: int = 0;
     loop {
         if scan >= program.statements.length { break; }
         let statement = program.statements[scan];
@@ -87,7 +87,7 @@ fn emit_program(program: Program) -> string {
         builder = builder_emit_line(builder, "import() from \"sailfin/runtime\";");
     }
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
 
@@ -198,7 +198,7 @@ fn emit_test(builder: TextBuilder, statement: Statement) -> TextBuilder {
 
 fn format_import_specifiers(specifiers: ImportSpecifier[]) -> string {
     let mut parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= specifiers.length { break; }
         let entry = format_specifier_entry(specifiers[index].name, specifiers[index].alias);
@@ -210,7 +210,7 @@ fn format_import_specifiers(specifiers: ImportSpecifier[]) -> string {
 
 fn format_export_specifiers(specifiers: ExportSpecifier[]) -> string {
     let mut parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= specifiers.length { break; }
         let entry = format_specifier_entry(specifiers[index].name, specifiers[index].alias);
@@ -241,7 +241,7 @@ fn emit_interface(builder: TextBuilder, statement: Statement) -> TextBuilder {
     header = header + format_type_parameters(statement.type_parameters);
     current = builder_emit_line(current, header);
     current = emit_block_start(current);
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= statement.members.length { break; }
         let signature = statement.members[index];
@@ -258,7 +258,7 @@ fn emit_enum(builder: TextBuilder, statement: Statement) -> TextBuilder {
     let mut header: string = "enum " + statement.name;
     header = header + format_type_parameters(statement.type_parameters);
     current = emit_block_header(current, header);
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= statement.variants.length { break; }
         let variant = statement.variants[index];
@@ -278,7 +278,7 @@ fn emit_struct(builder: TextBuilder, statement: Statement) -> TextBuilder {
     }
     current = emit_block_header(current, header);
 
-    let mut field_index: number = 0;
+    let mut field_index: int = 0;
     loop {
         if field_index >= statement.fields.length { break; }
         current = builder_emit_line(current, format_field(statement.fields[field_index])
@@ -286,7 +286,7 @@ fn emit_struct(builder: TextBuilder, statement: Statement) -> TextBuilder {
         field_index += 1;
     }
 
-    let mut method_index: number = 0;
+    let mut method_index: int = 0;
     loop {
         if method_index >= statement.methods.length { break; }
         let method = statement.methods[method_index];
@@ -326,7 +326,7 @@ fn emit_block_body(builder: TextBuilder, block: Block) -> TextBuilder {
     }
 
     let mut current = builder;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= block.statements.length { break; }
         current = emit_block_statement(current, block.statements[index]);
@@ -392,7 +392,7 @@ fn emit_block_statement(builder: TextBuilder, statement: Statement) -> TextBuild
 fn emit_with(builder: TextBuilder, statement: Statement) -> TextBuilder {
     let mut current = emit_decorators(builder, statement.decorators);
     let mut line: string = "with ";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= statement.clauses.length { break; }
         if index > 0 { line = line + ", "; }
@@ -440,7 +440,7 @@ fn emit_match(builder: TextBuilder, statement: Statement) -> TextBuilder {
     let mut current = emit_decorators(builder, statement.decorators);
     let header = "match " + format_expression(statement.expression);
     current = emit_block_header(current, header);
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= statement.cases.length { break; }
         current = emit_match_case(current, statement.cases[index]);
@@ -493,7 +493,7 @@ fn emit_decorators_then_line(builder: TextBuilder, decorators: Decorator[], line
 
 fn emit_decorators(builder: TextBuilder, decorators: Decorator[]) -> TextBuilder {
     let mut current = builder;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= decorators.length { break; }
         current = builder_emit_line(current, format_decorator(decorators[index]));
@@ -506,7 +506,7 @@ fn format_decorator(decorator: Decorator) -> string {
     let mut line: string = "@" + decorator.name;
     if decorator.arguments.length == 0 { return line; }
     let mut parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= decorator.arguments.length { break; }
         parts.push(format_decorator_argument(decorator.arguments[index]));
@@ -564,7 +564,7 @@ fn format_field(field: FieldDeclaration) -> string {
 fn format_enum_variant(variant: EnumVariant) -> string {
     if variant.fields.length == 0 { return variant.name; }
     let mut parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= variant.fields.length { break; }
         parts.push(format_field(variant.fields[index]));
@@ -576,7 +576,7 @@ fn format_enum_variant(variant: EnumVariant) -> string {
 fn format_parameters(parameters: Parameter[]) -> string {
     if parameters.length == 0 { return ""; }
     let mut parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= parameters.length { break; }
         parts.push(format_parameter(parameters[index]));
@@ -602,7 +602,7 @@ fn format_parameter(parameter: Parameter) -> string {
 fn format_type_parameters(parameters: TypeParameter[]) -> string {
     if parameters.length == 0 { return ""; }
     let mut names: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= parameters.length { break; }
         let parameter = parameters[index];
@@ -624,7 +624,7 @@ fn format_effects(effects: string[]) -> string {
 fn join_type_annotations(values: TypeAnnotation[]) -> string {
     if values.length == 0 { return ""; }
     let mut parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= values.length { break; }
         parts.push(values[index].text);

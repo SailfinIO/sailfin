@@ -8,7 +8,7 @@
 import { LocalBinding, ParameterBinding, OwnershipInfo } from "../types";
 
 fn bindings_find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= bindings.length { break; }
         let binding = bindings[index];
@@ -20,7 +20,7 @@ fn bindings_find_parameter_binding(bindings: ParameterBinding[], name: string) -
 
 fn bindings_mark_parameter_consumed(bindings: ParameterBinding[], name: string) -> ParameterBinding[] {
     let mut result: ParameterBinding[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= bindings.length { break; }
         let binding = bindings[index];
@@ -42,7 +42,7 @@ fn bindings_mark_parameter_consumed(bindings: ParameterBinding[], name: string) 
 
 fn bindings_mark_local_consumed(locals: LocalBinding[], name: string) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= locals.length { break; }
         let entry = locals[index];
@@ -68,7 +68,7 @@ fn bindings_mark_local_consumed(locals: LocalBinding[], name: string) -> LocalBi
 
 fn bindings_reset_local_consumption(locals: LocalBinding[], name: string) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= locals.length { break; }
         let entry = locals[index];
@@ -94,7 +94,7 @@ fn bindings_reset_local_consumption(locals: LocalBinding[], name: string) -> Loc
 
 fn bindings_update_local_ownership(locals: LocalBinding[], name: string, ownership: OwnershipInfo?) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= locals.length { break; }
         let entry = locals[index];

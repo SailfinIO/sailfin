@@ -45,9 +45,9 @@ import { find_local_binding, find_parameter_binding, replace_llvm_operand } from
 // The seed compiler (v0.1.1) has a bug where `arr[idx]` inside complex loops
 // compiles as substring() on the wrong local variable.  Extracting the access
 // into a tiny function produces correct array-element-load LLVM IR.
-fn get_string_at(arr: string[], idx: number) -> string { return arr[idx]; }
+fn get_string_at(arr: string[], idx: int) -> string { return arr[idx]; }
 
-fn lower_call_expression(target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+fn lower_call_expression(target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
     let mut diagnostics: string[] = [];
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
     let empty_constants = empty_string_constant_set();
@@ -104,7 +104,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                     }
                 }
                 if _if54 {
-                    let mut arg_index: number = 0;
+                    let mut arg_index: int = 0;
                     loop {
                         if arg_index >= arguments.length { break; }
                         let field_info = variant_info.fields[arg_index];
@@ -133,7 +133,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     let resolution = resolve_call_method_target(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context, diagnostics, collected_string_constants);
     trimmed_target = resolution.trimmed_target;
     let mut current_lines = resolution.current_lines;
-    let mut current_temp: number = resolution.current_temp;
+    let mut current_temp: int = resolution.current_temp;
     diagnostics = resolution.diagnostics;
     collected_string_constants = resolution.string_constants;
     let method_operand = resolution.method_operand;
@@ -191,7 +191,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
 
     // Phase 3: Lower arguments
     let mut operands: LLVMOperand[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= arguments.length { break; }
         let argument_text = trim_text(get_string_at(arguments, index));
@@ -225,7 +225,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         let operand_value = method_operand;
         let mut combined_operands: LLVMOperand[] = [];
         combined_operands.push(operand_value);
-        let mut operand_index: number = 0;
+        let mut operand_index: int = 0;
         loop {
             if operand_index >= operands.length { break; }
             combined_operands.push(operands[operand_index]);
@@ -275,7 +275,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     // Default argument filling
     if function_entry != null {
         if operands.length < expected_params.length {
-            let mut param_index: number = operands.length;
+            let mut param_index: int = operands.length;
             loop {
                 if param_index >= expected_params.length { break; }
                 if param_index >= function_entry.parameters.length { break; }

@@ -19,7 +19,7 @@ import {
     string_array_contains
 } from "./utils";
 
-fn clamp_collection_length(value: number, max: number) -> number {
+fn clamp_collection_length(value: int, max: int) -> int {
     if value != value { return 0; }
     if value < 0 { return 0; }
     if value > max { return max; }
@@ -31,7 +31,7 @@ fn clamp_collection_length(value: number, max: number) -> number {
 // =============================================================================
 fn render_interface_type_definitions(context: TypeContext) -> string[] {
     let mut lines: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     let interface_count = clamp_collection_length(context.interfaces.length, 10000);
     loop {
         if index >= interface_count { break; }
@@ -49,12 +49,12 @@ fn render_interface_type_definitions(context: TypeContext) -> string[] {
 // =============================================================================
 fn render_vtable_type_definitions(context: TypeContext) -> string[] {
     let mut lines: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= context.vtables.length { break; }
         let vtable = context.vtables[index];
         let mut entry_types: string[] = [];
-        let mut entry_index: number = 0;
+        let mut entry_index: int = 0;
         loop {
             if entry_index >= vtable.entries.length { break; }
             entry_types.push(vtable.entries[entry_index].function_pointer_type);
@@ -72,12 +72,12 @@ fn render_vtable_type_definitions(context: TypeContext) -> string[] {
 
 fn render_vtable_constants(context: TypeContext) -> string[] {
     let mut lines: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= context.vtables.length { break; }
         let vtable = context.vtables[index];
         let mut entry_values: string[] = [];
-        let mut entry_index: number = 0;
+        let mut entry_index: int = 0;
         loop {
             if entry_index >= vtable.entries.length { break; }
             let entry = vtable.entries[entry_index];
@@ -114,8 +114,8 @@ fn _escape_llvm_string(text: string) -> string {
     // Chunked: O(K) memory where K = number of escape chars, instead of
     // O(N^2) per-character `out = out + ch` accumulation.
     let mut chunks: string[] = [];
-    let mut chunk_start: number = 0;
-    let mut i: number = 0;
+    let mut chunk_start: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= text.length { break; }
         let ch = substring(text, i, i + 1);
@@ -136,7 +136,7 @@ fn _escape_llvm_string(text: string) -> string {
     if chunks.length == 0 { return ""; }
     if chunks.length == 1 { return chunks[0]; }
     let mut out: string = chunks[0];
-    let mut j: number = 1;
+    let mut j: int = 1;
     loop {
         if j >= chunks.length { break; }
         out = out + chunks[j];
@@ -153,7 +153,7 @@ fn _test_label_from_name(raw_name: string) -> string {
         }
     }
     let mut cleaned: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= name.length { break; }
         let ch = substring(name, i, i + 1);
@@ -170,7 +170,7 @@ fn render_test_harness_main(tests: NativeFunction[]) -> string[] {
     let test_count = tests.length;
 
     // String constants for test names and summary
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= test_count { break; }
         let label = _test_label_from_name(tests[index].name);
@@ -259,7 +259,7 @@ fn render_interface_signature(signature: NativeInterfaceSignature) -> string {
 fn render_interface_parameters(parameters: NativeParameter[]) -> string {
     if parameters.length == 0 { return ""; }
     let mut rendered: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= parameters.length { break; }
         let parameter = parameters[index];
@@ -285,13 +285,13 @@ fn extract_struct_type_from_llvm(llvm_type: string) -> string {
     // Returns empty string if no struct type found
     if llvm_type.length == 0 { return ""; }
     let mut result: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= llvm_type.length { break; }
         let ch = substring(llvm_type, index, index + 1);
         if ch == "%" {
             // Found a struct type reference, extract the name
-            let mut end_index: number = index + 1;
+            let mut end_index: int = index + 1;
             loop {
                 if end_index >= llvm_type.length { break; }
                 let end_ch = substring(llvm_type, end_index, end_index + 1);
@@ -318,7 +318,7 @@ fn extract_struct_type_from_llvm(llvm_type: string) -> string {
 
 fn collect_parameter_types(context: TypeContext, parameters: NativeParameter[], function_name: string) -> string[] {
     let mut types: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= parameters.length { break; }
         let parameter = parameters[index];
@@ -344,7 +344,7 @@ fn collect_parameter_types(context: TypeContext, parameters: NativeParameter[], 
 }
 
 fn find_function_by_name(functions: NativeFunction[], name: string) -> NativeFunction? {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= functions.length { break; }
         if functions[index].name == name { return functions[index]; }
@@ -364,7 +364,7 @@ fn find_function_by_name_or_import(functions: NativeFunction[], target: string) 
     if exact != null { return exact; }
     let suffix_prefix = target + "__";
     let mut match_result: NativeFunction? = null;
-    let mut idx: number = 0;
+    let mut idx: int = 0;
     loop {
         if idx >= functions.length { break; }
         let candidate = functions[idx];
@@ -382,7 +382,7 @@ fn find_function_by_name_or_import(functions: NativeFunction[], target: string) 
 // =============================================================================
 fn is_entry_point(entry_points: string[], function_name: string) -> boolean {
     if entry_points == null { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= entry_points.length { break; }
         if entry_points[index] == function_name { return true; }
@@ -395,7 +395,7 @@ fn collect_exported_symbol_names(imports: NativeImport[]) -> string[] {
     if imports == null { return []; }
     if imports.length > 10000 { return []; }
     let mut names: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= imports.length { break; }
         let entry = imports[index];
@@ -409,7 +409,7 @@ fn collect_exported_symbol_names(imports: NativeImport[]) -> string[] {
                 index += 1;
                 continue;
             }
-            let mut spec_index: number = 0;
+            let mut spec_index: int = 0;
             loop {
                 if spec_index >= specifiers.length { break; }
                 let spec = specifiers[spec_index];
@@ -432,7 +432,7 @@ fn collect_exported_symbol_names(imports: NativeImport[]) -> string[] {
 }
 
 fn is_exported_symbol(exported_symbols: string[], function_name: string) -> boolean {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= exported_symbols.length { break; }
         if exported_symbols[index] == function_name { return true; }

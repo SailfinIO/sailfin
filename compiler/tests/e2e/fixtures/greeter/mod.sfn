@@ -1,9 +1,5 @@
-fn greeter_hello() -> string {
-    return "hello from mod";
-}
+fn greeter_hello() -> string { return "hello from mod"; }
 
-fn greeter_add(a: number, b: number) -> number {
-    return a + b;
-}
+fn greeter_add(a: int, b: int) -> int { return a + b; }
 
 export { greeter_hello, greeter_add };

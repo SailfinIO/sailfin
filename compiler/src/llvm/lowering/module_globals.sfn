@@ -46,7 +46,7 @@ fn _strip_string_quotes(s: string) -> string {
     }
     if _is_quoted {
         let mut result: string = "";
-        let mut i: number = 1;
+        let mut i: int = 1;
         loop {
             if i >= s.length - 1 { break; }
             result = result + s[i];
@@ -210,19 +210,19 @@ fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeCont
     let mut preamble_lines: string[] = [];
     let mut locals: LocalBinding[] = [];
     let mut needs_init: boolean = false;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= bindings.length { break; }
         let binding = bindings[index];
         index += 1;
         let result = _process_one_binding(binding, context, scope_id);
-        let mut li: number = 0;
+        let mut li: int = 0;
         loop {
             if li >= result.preamble_lines.length { break; }
             preamble_lines.push(result.preamble_lines[li]);
             li += 1;
         }
-        let mut lj: number = 0;
+        let mut lj: int = 0;
         loop {
             if lj >= result.locals.length { break; }
             locals.push(result.locals[lj]);

@@ -185,7 +185,7 @@ fn validate_effects(program: Program) -> EffectViolation[] {
 fn validate_effects_with_imports(program: Program, imports: ImportSymbolTable) -> EffectViolation[] {
     let local_imports = localize_import_symbols_for_program(program, imports);
     let mut violations: EffectViolation[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
         violations = append_violations(violations, analyze_statement(program.statements[index], local_imports));
@@ -214,7 +214,7 @@ fn validate_effects_with_imports(program: Program, imports: ImportSymbolTable) -
 fn validate_capsule_capabilities(program: Program, capabilities_required: string[]) -> CapabilityViolation[] {
     let mut violations: CapabilityViolation[] = [];
     if capabilities_required.length == 0 { return violations; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
         violations = _append_capability_violations(violations, _analyze_statement_capabilities(program.statements[index], capabilities_required));
@@ -247,7 +247,7 @@ fn _analyze_statement_capabilities(statement: Statement, capabilities: string[])
     }
     if statement.variant == "StructDeclaration" {
         let mut issues: CapabilityViolation[] = [];
-        let mut method_index: number = 0;
+        let mut method_index: int = 0;
         loop {
             if method_index >= statement.methods.length { break; }
             let method = statement.methods[method_index];
@@ -270,7 +270,7 @@ fn _analyze_routine_capabilities(signature: FunctionSignature, name: string, cap
     // surface) and flag the contradiction with the existing E0403
     // diagnostic.
     let mut has_concrete_effect: boolean = false;
-    let mut probe: number = 0;
+    let mut probe: int = 0;
     loop {
         if probe >= signature.effects.length { break; }
         if !is_universally_allowed_effect(signature.effects[probe]) {
@@ -280,7 +280,7 @@ fn _analyze_routine_capabilities(signature: FunctionSignature, name: string, cap
         probe += 1;
     }
     let mut excess: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= signature.effects.length { break; }
         let effect = signature.effects[i];
@@ -310,7 +310,7 @@ fn _analyze_routine_capabilities(signature: FunctionSignature, name: string, cap
 
 fn _append_capability_violations(violations: CapabilityViolation[], new_violations: CapabilityViolation[]) -> CapabilityViolation[] {
     let mut result = violations;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= new_violations.length { break; }
         result.push(new_violations[i]);
@@ -338,7 +338,7 @@ fn analyze_statement(statement: Statement, imports: ImportSymbolTable) -> Effect
     }
     if statement.variant == "StructDeclaration" {
         let mut issues: EffectViolation[] = [];
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= statement.methods.length { break; }
             let method = statement.methods[index];
@@ -372,14 +372,14 @@ fn is_program_entry_point(signature: FunctionSignature) -> boolean {
 fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decorator[], name: string, imports: ImportSymbolTable) -> EffectViolation[] {
     let names = decorator_names(decorators);
     let mut declared: string[] = [];
-    let mut declared_index: number = 0;
+    let mut declared_index: int = 0;
     loop {
         if declared_index >= signature.effects.length { break; }
         declared = append_unique_effect(declared, signature.effects[declared_index]);
         declared_index += 1;
     }
     let mut requires_io_from_decorators: boolean = false;
-    let mut decorator_index: number = 0;
+    let mut decorator_index: int = 0;
     loop {
         if decorator_index >= names.length { break; }
         let decorator_name = names[decorator_index];
@@ -399,7 +399,7 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
     let required = required_effects(body, imports);
     let mut missing: string[] = [];
     let mut missing_requirements: EffectRequirement[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= required.length { break; }
         let requirement = required[index];
@@ -462,7 +462,7 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
 // synthesized expressions). The caller passes signature_token as the
 // fallback so the violation always carries a source location.
 fn _first_requirement_trigger(missing_requirements: EffectRequirement[], fallback: Token?) -> Token? {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= missing_requirements.length { break; }
         let req = missing_requirements[i];
@@ -478,7 +478,7 @@ fn required_effects(body: Block, imports: ImportSymbolTable) -> EffectRequiremen
 
 fn collect_effects_from_block(block: Block, imports: ImportSymbolTable) -> EffectRequirement[] {
     let mut required: EffectRequirement[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= block.statements.length { break; }
         required = merge_requirements(required, collect_effects_from_statement(block.statements[index], imports));
@@ -500,7 +500,7 @@ fn collect_effects_from_optional_statement(statement: Statement?, imports: Impor
 fn collect_effects_from_statement(statement: Statement, imports: ImportSymbolTable) -> EffectRequirement[] {
     if statement.variant == "WithStatement" {
         let mut required = collect_effects_from_block(statement.body, imports);
-        let mut clause_index: number = 0;
+        let mut clause_index: int = 0;
         loop {
             if clause_index >= statement.clauses.length { break; }
             let clause = statement.clauses[clause_index];
@@ -520,7 +520,7 @@ fn collect_effects_from_statement(statement: Statement, imports: ImportSymbolTab
     }
     if statement.variant == "MatchStatement" {
         let mut required = collect_effects_from_expression(statement.expression, imports);
-        let mut case_index: number = 0;
+        let mut case_index: int = 0;
         loop {
             if case_index >= statement.cases.length { break; }
             required = merge_requirements(required, collect_effects_from_match_case(statement.cases[case_index], imports));
@@ -553,7 +553,7 @@ fn collect_effects_from_statement(statement: Statement, imports: ImportSymbolTab
     }
     if statement.variant == "StructDeclaration" {
         let mut required: EffectRequirement[] = [];
-        let mut method_index: number = 0;
+        let mut method_index: int = 0;
         loop {
             if method_index >= statement.methods.length { break; }
             required = merge_requirements(required, collect_effects_from_block(statement.methods[method_index].body, imports));
@@ -595,7 +595,7 @@ fn _propagate_imported_callee_effects(name: string, imports: ImportSymbolTable, 
     if entry.effects.length == 0 { return base; }
     let mut required = base;
     let prefix = "imported `" + name + "` declares ![";
-    let mut e: number = 0;
+    let mut e: int = 0;
     loop {
         if e >= entry.effects.length { break; }
         let effect = entry.effects[e];
@@ -651,7 +651,7 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         // and emits the right requirement (`fs` → io, `http` → net,
         // etc.). Don't re-analyze the callee here; doing so would
         // double-count every Member-callee effect.
-        let mut argument_index: number = 0;
+        let mut argument_index: int = 0;
         loop {
             if argument_index >= expression.arguments.length { break; }
             required = merge_requirements(required, collect_effects_from_expression(expression.arguments[argument_index], imports));
@@ -706,7 +706,7 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
     }
     if expression.variant == "Array" {
         let mut required: EffectRequirement[] = [];
-        let mut element_index: number = 0;
+        let mut element_index: int = 0;
         loop {
             if element_index >= expression.elements.length { break; }
             required = merge_requirements(required, collect_effects_from_expression(expression.elements[element_index], imports));
@@ -716,7 +716,7 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
     }
     if expression.variant == "Object" {
         let mut required: EffectRequirement[] = [];
-        let mut field_index: number = 0;
+        let mut field_index: int = 0;
         loop {
             if field_index >= expression.fields.length { break; }
             required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value, imports));
@@ -726,7 +726,7 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
     }
     if expression.variant == "Struct" {
         let mut required: EffectRequirement[] = [];
-        let mut field_index: number = 0;
+        let mut field_index: int = 0;
         loop {
             if field_index >= expression.fields.length { break; }
             required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value, imports));
@@ -811,7 +811,7 @@ fn contains_code(text: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if text.length < needle.length { return false; }
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut in_line_comment: boolean = false;
     let mut in_block_comment: boolean = false;
     let mut in_string_quote: string = "";
@@ -896,7 +896,7 @@ fn contains_code(text: string, needle: string) -> boolean {
 
 fn append_violations(violations: EffectViolation[], new_violations: EffectViolation[]) -> EffectViolation[] {
     let mut result = violations;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= new_violations.length { break; }
         result.push(new_violations[index]);
@@ -917,7 +917,7 @@ fn append_unique_effect(effects: string[], effect: string) -> string[] {
 }
 
 fn contains_effect(effects: string[], effect: string) -> boolean {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= effects.length { break; }
         if effects[index] == effect { return true; }
@@ -933,7 +933,7 @@ fn append_requirement(collection: EffectRequirement[], item: EffectRequirement) 
 
 fn merge_requirements(base: EffectRequirement[], additions: EffectRequirement[]) -> EffectRequirement[] {
     let mut result = base;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= additions.length { break; }
         result.push(additions[index]);
@@ -943,7 +943,7 @@ fn merge_requirements(base: EffectRequirement[], additions: EffectRequirement[])
 }
 
 fn contains_requirement_for_effect(requirements: EffectRequirement[], effect: string) -> boolean {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= requirements.length { break; }
         if requirements[index].effect == effect { return true; }

@@ -27,17 +27,17 @@ fn _emit(source: string) -> string {
 
 // ── Comma-separated fields parse as fields, not silently as nothing ──
 test "struct field: comma separator captures all fields" {
-    let asm = _emit("struct Pair { name: string, age: number }");
+    let asm = _emit("struct Pair { name: string, age: int }");
     // Both fields must appear in the layout; pre-fix the seed produced
     // `size=0` and emitted only a `noop` body.
     assert index_of(asm, ".layout field name type=string") >= 0;
-    assert index_of(asm, ".layout field age type=number") >= 0;
+    assert index_of(asm, ".layout field age type=int") >= 0;
     assert index_of(asm, ".field name: string") >= 0;
-    assert index_of(asm, ".field age: number") >= 0;
+    assert index_of(asm, ".field age: int") >= 0;
 }
 
 test "struct field: comma separator yields non-zero size" {
-    let asm = _emit("struct Pair { name: string, age: number }");
+    let asm = _emit("struct Pair { name: string, age: int }");
     // Two pointer/double-sized fields → size 16. The pre-fix output
     // was `size=0 align=1`, which is the diagnostic for "field-list
     // collapsed to empty".
@@ -46,16 +46,16 @@ test "struct field: comma separator yields non-zero size" {
 
 // ── Semicolon-separated fields stay working (status quo) ─────────────
 test "struct field: semicolon separator still works" {
-    let asm = _emit("struct Pair { name: string; age: number; }");
+    let asm = _emit("struct Pair { name: string; age: int; }");
     assert index_of(asm, ".layout field name type=string") >= 0;
-    assert index_of(asm, ".layout field age type=number") >= 0;
+    assert index_of(asm, ".layout field age type=int") >= 0;
 }
 
 // ── Mixed and trailing terminator are accepted ───────────────────────
 test "struct field: mixed separators accepted" {
-    let asm = _emit("struct Trio { a: string, b: number; c: boolean }");
+    let asm = _emit("struct Trio { a: string, b: int; c: boolean }");
     assert index_of(asm, ".layout field a type=string") >= 0;
-    assert index_of(asm, ".layout field b type=number") >= 0;
+    assert index_of(asm, ".layout field b type=int") >= 0;
     assert index_of(asm, ".layout field c type=boolean") >= 0;
 }
 
@@ -63,15 +63,15 @@ test "struct field: last field without terminator accepted" {
     // `}` immediately following the type is treated as the implicit
     // end of the field list — matches Rust's optional-trailing-comma
     // ergonomic and the existing `parse_enum_variant_field` precedent.
-    let asm = _emit("struct Pair { name: string; age: number }");
+    let asm = _emit("struct Pair { name: string; age: int }");
     assert index_of(asm, ".layout field name type=string") >= 0;
-    assert index_of(asm, ".layout field age type=number") >= 0;
+    assert index_of(asm, ".layout field age type=int") >= 0;
 }
 
 test "struct field: trailing comma accepted" {
-    let asm = _emit("struct Pair { name: string, age: number, }");
+    let asm = _emit("struct Pair { name: string, age: int, }");
     assert index_of(asm, ".layout field name type=string") >= 0;
-    assert index_of(asm, ".layout field age type=number") >= 0;
+    assert index_of(asm, ".layout field age type=int") >= 0;
 }
 
 // ── String-typed field round-trips through the layout ────────────────
@@ -90,8 +90,8 @@ test "struct field: two-string-field struct preserves both fields" {
 
 // ── `mut` qualifier is preserved across both separator forms ─────────
 test "struct field: mut qualifier with comma separator" {
-    let asm = _emit("struct Counter { mut value: number, label: string }");
-    assert index_of(asm, ".field mut value: number") >= 0;
+    let asm = _emit("struct Counter { mut value: int, label: string }");
+    assert index_of(asm, ".field mut value: int") >= 0;
     assert index_of(asm, ".field label: string") >= 0;
 }
 

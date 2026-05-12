@@ -1,10 +1,6 @@
-async fn computeTask1() -> number {
-    return 21;
-}
+async fn computeTask1() -> int { return 21; }
 
-async fn computeTask2() -> number {
-    return 21;
-}
+async fn computeTask2() -> int { return 21; }
 
 test "async: await futures" {
     let future1 = computeTask1();

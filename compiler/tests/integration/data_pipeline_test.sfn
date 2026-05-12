@@ -2,14 +2,13 @@
 // arrays, loops, and conditional logic together. This exercises the full
 // compilation pipeline and catches issues with struct returns through
 // multiple function call layers.
-
 struct Record {
-    id: number;
-    value: number;
+    id: int;
+    value: int;
     tag: string;
 }
 
-fn _make_record(id: number, value: number, tag: string) -> Record {
+fn _make_record(id: int, value: int, tag: string) -> Record {
     return Record { id: id, value: value, tag: tag };
 }
 
@@ -25,12 +24,10 @@ fn _transform_value(r: Record) -> Record {
 
 fn _filter_valid(records: Record[]) -> Record[] {
     let mut result: Record[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= records.length { break; }
-        if _is_valid(records[i]) {
-            result.push(records[i]);
-        }
+        if _is_valid(records[i]) { result.push(records[i]); }
         i += 1;
     }
     return result;
@@ -38,7 +35,7 @@ fn _filter_valid(records: Record[]) -> Record[] {
 
 fn _transform_all(records: Record[]) -> Record[] {
     let mut result: Record[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= records.length { break; }
         result.push(_transform_value(records[i]));
@@ -47,9 +44,9 @@ fn _transform_all(records: Record[]) -> Record[] {
     return result;
 }
 
-fn _sum_values(records: Record[]) -> number {
-    let mut total: number = 0;
-    let mut i: number = 0;
+fn _sum_values(records: Record[]) -> int {
+    let mut total: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= records.length { break; }
         total += records[i].value;
@@ -58,27 +55,23 @@ fn _sum_values(records: Record[]) -> number {
     return total;
 }
 
-fn _max_value(records: Record[]) -> number {
+fn _max_value(records: Record[]) -> int {
     if records.length == 0 { return 0; }
-    let mut best: number = records[0].value;
-    let mut i: number = 1;
+    let mut best: int = records[0].value;
+    let mut i: int = 1;
     loop {
         if i >= records.length { break; }
-        if records[i].value > best {
-            best = records[i].value;
-        }
+        if records[i].value > best { best = records[i].value; }
         i += 1;
     }
     return best;
 }
 
-fn _find_by_tag(records: Record[], tag: string) -> number {
-    let mut i: number = 0;
+fn _find_by_tag(records: Record[], tag: string) -> int {
+    let mut i: int = 0;
     loop {
         if i >= records.length { break; }
-        if records[i].tag == tag {
-            return records[i].value;
-        }
+        if records[i].tag == tag { return records[i].value; }
         i += 1;
     }
     return -1;
@@ -163,14 +156,13 @@ test "pipeline: full pipeline filter-transform-aggregate" {
 // ---------------------------------------------------------------------------
 // Building array through accumulation pattern
 // ---------------------------------------------------------------------------
-
-fn _generate_fibonacci(count: number) -> number[] {
-    let mut result: number[] = [];
+fn _generate_fibonacci(count: int) -> int[] {
+    let mut result: int[] = [];
     if count <= 0 { return result; }
     result.push(0);
     if count == 1 { return result; }
     result.push(1);
-    let mut i: number = 2;
+    let mut i: int = 2;
     loop {
         if i >= count { break; }
         let next = result[i - 1] + result[i - 2];

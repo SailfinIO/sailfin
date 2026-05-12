@@ -42,11 +42,11 @@ run_test() {
 # e2e tests already exercise — using the same code here means both
 # surfaces (build-path + check-path) are sharing the renderer.
 cat > "$SCRATCH/dup.sfn" <<'EOF'
-fn process(x: number) -> number {
+fn process(x: int) -> int {
     return x;
 }
 
-fn process(x: number) -> number {
+fn process(x: int) -> int {
     return x + 1;
 }
 
@@ -132,7 +132,7 @@ run_test "build-path diagnostic carries [kind: typecheck] suffix" test_kind_suff
 
 # ---- Test 6: negative control — clean fixture produces no error[ header ----
 cat > "$SCRATCH/clean.sfn" <<'EOF'
-fn add(a: number, b: number) -> number {
+fn add(a: int, b: int) -> int {
     return a + b;
 }
 

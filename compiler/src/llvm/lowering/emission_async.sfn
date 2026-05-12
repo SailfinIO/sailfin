@@ -141,7 +141,7 @@ fn emit_async_function(function: NativeFunction, functions: NativeFunction[], ef
         let trampoline_symbol = wrapper_symbol + "__async_trampoline";
 
         let mut param_llvm_types: string[] = [];
-        let mut param_index: number = 0;
+        let mut param_index: int = 0;
         loop {
             if param_index >= preparation.bindings.length { break; }
             param_llvm_types.push(preparation.bindings[param_index].llvm_type);
@@ -156,14 +156,14 @@ fn emit_async_function(function: NativeFunction, functions: NativeFunction[], ef
             + "(i8* %ctx_raw) {");
         wrapper_lines.push("block.entry:");
 
-        let mut tramp_temp: number = 0;
+        let mut tramp_temp: int = 0;
         let tramp_ctx = format_temp_name(tramp_temp);
         tramp_temp += 1;
         wrapper_lines.push("  " + tramp_ctx + " = bitcast i8* %ctx_raw to "
             + ctx_ptr_type);
 
         let mut arg_texts: string[] = [];
-        let mut load_index: number = 0;
+        let mut load_index: int = 0;
         loop {
             if load_index >= preparation.bindings.length { break; }
             let binding = preparation.bindings[load_index];
@@ -215,7 +215,7 @@ fn emit_async_function(function: NativeFunction, functions: NativeFunction[], ef
             + signature
             + ") {");
         wrapper_lines.push("block.entry:");
-        let mut wrap_temp: number = 0;
+        let mut wrap_temp: int = 0;
         let size_ptr = format_temp_name(wrap_temp);
         wrap_temp += 1;
         wrapper_lines.push("  " + size_ptr + " = getelementptr inbounds "
@@ -240,7 +240,7 @@ fn emit_async_function(function: NativeFunction, functions: NativeFunction[], ef
             + " to "
             + ctx_ptr_type);
 
-        let mut store_index: number = 0;
+        let mut store_index: int = 0;
         loop {
             if store_index >= preparation.bindings.length { break; }
             let binding = preparation.bindings[store_index];

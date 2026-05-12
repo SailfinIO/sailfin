@@ -10,16 +10,16 @@ import { is_identifier_part_char } from "./utils";
 // Operator Finding
 // =============================================================================
 fn find_top_level_operator(expression: string, operators: string) -> OperatorMatch {
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut angle_depth: number = 0;
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut angle_depth: int = 0;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape_next: boolean = false;
-    let mut candidate_index: number = -1;
+    let mut candidate_index: int = -1;
     let mut candidate_symbol: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= expression.length { break; }
         let ch = char_at(expression, index);
@@ -140,7 +140,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
     };
 }
 
-fn is_binary_minus(expression: string, index: number) -> boolean {
+fn is_binary_minus(expression: string, index: int) -> boolean {
     if index == 0 { return false; }
     let prev_char = char_at(expression, index - 1);
     let mut _if178: boolean = false;
@@ -155,7 +155,7 @@ fn is_binary_minus(expression: string, index: number) -> boolean {
     return false;
 }
 
-fn is_binary_star(expression: string, index: number) -> boolean {
+fn is_binary_star(expression: string, index: int) -> boolean {
     if index == 0 { return false; }
     let prev_char = char_at(expression, index - 1);
     let mut _if180: boolean = false;
@@ -173,11 +173,11 @@ fn is_binary_star(expression: string, index: number) -> boolean {
 // =============================================================================
 // Range and Separator Finding
 // =============================================================================
-fn find_top_level_range_separator(value: string) -> number {
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut index: number = 0;
+fn find_top_level_range_separator(value: string) -> int {
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= value.length { break; }
         let ch = substring(value, index, index + 1);
@@ -229,15 +229,15 @@ fn find_top_level_range_separator(value: string) -> number {
     return -1;
 }
 
-fn find_top_level_union_separator(text: string) -> number {
-    let mut paren_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut angle_depth: number = 0;
+fn find_top_level_union_separator(text: string) -> int {
+    let mut paren_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut angle_depth: int = 0;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape: boolean = false;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = substring(text, index, index + 1);
