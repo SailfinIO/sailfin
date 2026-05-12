@@ -40,10 +40,10 @@ import {
 } from "./core_operands";
 import { lines_end_with_terminator, strip_enclosing_parentheses } from "./core_operators";
 
-fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
+fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: int, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
     let coerced = coerce_operand_to_type(operand, "i1", temp_index, lines, true, null);
     let mut current_diagnostics: string[] = diagnostics;
-    let mut _ci0: number = 0;
+    let mut _ci0: int = 0;
     loop {
         if _ci0 >= coerced.diagnostics.length { break; }
         current_diagnostics.push(coerced.diagnostics[_ci0]);
@@ -80,7 +80,7 @@ fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: number, line
 
 fn lower_logical_not_result(result: ExpressionResult, base_diagnostics: string[]) -> ExpressionResult {
     let mut combined: string[] = base_diagnostics;
-    let mut _ci0: number = 0;
+    let mut _ci0: int = 0;
     loop {
         if _ci0 >= result.diagnostics.length { break; }
         combined.push(result.diagnostics[_ci0]);
@@ -98,7 +98,7 @@ fn lower_logical_not_result(result: ExpressionResult, base_diagnostics: string[]
     return lower_logical_not_with_operand(result.operand, result.temp_index, result.lines, combined, result.string_constants);
 }
 
-fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
+fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
     let mut string_constants: StringConstant[] = empty_string_constant_set();
 
@@ -108,7 +108,7 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
     let else_label = "ternary_else_" + label_id;
     let merge_label = "ternary_merge_" + label_id;
 
-    let label_temp_offset: number = temp_index + 1;
+    let label_temp_offset: int = temp_index + 1;
 
     let cond_result = lower_expression(parse.condition, bindings, locals, label_temp_offset, lines, functions, context, "");
     diagnostics = extend_string_array(diagnostics, cond_result.diagnostics);
@@ -228,7 +228,7 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
     };
 }
 
-fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
+fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let left_text = trim_text(substring(expression, 0, match.index));
     // Slice B (2026-05-02): use `match.symbol.length` instead of
     // a hardcoded `+ 1` so two-char operators (`<<`, `>>`) slice
@@ -284,7 +284,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
     // silent widening (L2 in `docs/runtime_architecture.md`
     // §3.7) — the rejection rides on Slice E.3 (#296) after
     // every `: number` site in the compiler source has migrated
-    // to `: int`/`: float`. Slice D's `as` casts let authors
+    // to explicit `: int`/`: float`. Slice D's `as` casts let authors
     // spell the conversion explicitly today.
     let mut _right_expected: string = "";
     if left_result.operand != null {
@@ -699,7 +699,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
     };
 }
 
-fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
+fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let mut _if100: boolean = false;
     if expression == null { _if100 = true; }
@@ -796,7 +796,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     }
 
     let mut alignment_lines: string[] = right_result.lines;
-    let mut alignment_temp: number = right_result.temp_index;
+    let mut alignment_temp: int = right_result.temp_index;
     let mut left_operand = left_result.operand;
     let mut right_operand = right_result.operand;
     let mut is_equality: boolean = false;
@@ -1025,7 +1025,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     };
 }
 
-fn lower_logical_and(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
+fn lower_logical_and(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + 2, expression.length));
     let mut diagnostics: string[] = [];
@@ -1052,7 +1052,7 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
     let right_end_label = "logical_and_right_end_" + label_id;
     let merge_label = "logical_and_merge_" + label_id;
 
-    let label_temp_offset: number = temp_index + 1;
+    let label_temp_offset: int = temp_index + 1;
 
     let left_result = lower_expression(left_text, bindings, locals, label_temp_offset, lines, functions, context, "");
     diagnostics = extend_string_array(diagnostics, left_result.diagnostics);
@@ -1156,7 +1156,7 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
     };
 }
 
-fn lower_logical_or(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
+fn lower_logical_or(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + 2, expression.length));
     let mut diagnostics: string[] = [];
@@ -1183,7 +1183,7 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
     let right_end_label = "logical_or_right_end_" + label_id;
     let merge_label = "logical_or_merge_" + label_id;
 
-    let label_temp_offset: number = temp_index + 1;
+    let label_temp_offset: int = temp_index + 1;
 
     let left_result = lower_expression(left_text, bindings, locals, label_temp_offset, lines, functions, context, "");
     diagnostics = extend_string_array(diagnostics, left_result.diagnostics);

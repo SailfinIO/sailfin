@@ -56,14 +56,14 @@ import { recover_temp_from_lines } from "./temp_recovery";
 
 // Handles deref (*ptr = value), member access (obj.field = value), and
 // array index (arr[i] = value) assignments. Returns ExpressionStatementResult.
-fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, assign_operator: string, current_bindings: ParameterBinding[], current_locals: LocalBinding[], temp_index: number, lines: string[], next_region_id: number, scope_id: string, scope_depth: number, functions: NativeFunction[], context: TypeContext, current_label: string) -> ExpressionStatementResult ![io] {
+fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, assign_operator: string, current_bindings: ParameterBinding[], current_locals: LocalBinding[], temp_index: int, lines: string[], next_region_id: int, scope_id: string, scope_depth: int, functions: NativeFunction[], context: TypeContext, current_label: string) -> ExpressionStatementResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
     let mut string_constants: StringConstant[] = empty_string_constant_set();
     let mut lifetime_regions: LifetimeRegionMetadata[] = [];
     let mut lifetime_releases: LifetimeReleaseEvent[] = [];
-    let mut current_next_region: number = next_region_id;
+    let mut current_next_region: int = next_region_id;
     let mut mutations: LocalMutation[] = [];
 
     let trimmed_target = trim_text(assign_target);
@@ -76,7 +76,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                 + assign_value;
         }
         let lowered_value = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-        let mut _ci0: number = 0;
+        let mut _ci0: int = 0;
         loop {
             if _ci0 >= lowered_value.diagnostics.length { break; }
             diagnostics.push(lowered_value.diagnostics[_ci0]);
@@ -120,7 +120,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             };
         }
         let lowered_ptr = lower_expression(pointer_text, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-        let mut _ci1: number = 0;
+        let mut _ci1: int = 0;
         loop {
             if _ci1 >= lowered_ptr.diagnostics.length { break; }
             diagnostics.push(lowered_ptr.diagnostics[_ci1]);
@@ -170,7 +170,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         // coercion behaviour. The reapply of #296 in Slice E.3 (#490)
         // generalises the rejection here too.
         let coerced = coerce_operand_to_type(lowered_value.operand, element_type, current_temp, current_lines, true, null);
-        let mut _ci2: number = 0;
+        let mut _ci2: int = 0;
         loop {
             if _ci2 >= coerced.diagnostics.length { break; }
             diagnostics.push(coerced.diagnostics[_ci2]);
@@ -224,7 +224,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                 + assign_value;
         }
         let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-        let mut _ci3: number = 0;
+        let mut _ci3: int = 0;
         loop {
             if _ci3 >= lowered.diagnostics.length { break; }
             diagnostics.push(lowered.diagnostics[_ci3]);
@@ -240,7 +240,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                 + "`");
         } else {
             let base_result = lower_expression(member_parse.base, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-            let mut _ci4: number = 0;
+            let mut _ci4: int = 0;
             loop {
                 if _ci4 >= base_result.diagnostics.length { break; }
                 diagnostics.push(base_result.diagnostics[_ci4]);
@@ -293,7 +293,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                     let subscript_parse = parse_index_expression(base_name);
                     if subscript_parse.success {
                         let array_result = lower_expression(subscript_parse.base, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-                        let mut _sci0: number = 0;
+                        let mut _sci0: int = 0;
                         loop {
                             if _sci0 >= array_result.diagnostics.length {
                                 break;
@@ -309,7 +309,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                             let element_type = array_pointer_element_type(array_operand.llvm_type);
                             if element_type.length > 0 {
                                 let index_result = lower_expression(subscript_parse.index, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-                                let mut _sci1: number = 0;
+                                let mut _sci1: int = 0;
                                 loop {
                                     if _sci1 >= index_result.diagnostics.length {
                                         break;
@@ -323,11 +323,11 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                 if index_result.operand != null {
                                     // Slice E.1.5 (#528): array index coercion
                                     // legitimately widens double → i64 today
-                                    // (`arr[index]` with `index: number` is
-                                    // common). Exempt from the ABI primitive
-                                    // kind diagnostic.
+                                    // (`arr[index]` with an index expression
+                                    // still typed as `number` is common).
+                                    // Exempt from the ABI primitive kind diagnostic.
                                     let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines, true, null);
-                                    let mut _sci2: number = 0;
+                                    let mut _sci2: int = 0;
                                     loop {
                                         if _sci2 >= coerced_index.diagnostics.length {
                                             break;
@@ -390,7 +390,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                         };
                                         let bc_assign_operands: LLVMOperand[] = [bc_assign_index_op, bc_assign_length_op];
                                         let bc_assign_result = emit_runtime_call("runtime.bounds_check", bc_assign_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-                                        let mut _bc_assign_di: number = 0;
+                                        let mut _bc_assign_di: int = 0;
                                         loop {
                                             if _bc_assign_di >= bc_assign_result.diagnostics.length {
                                                 break;
@@ -458,7 +458,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                         // `: number` to `: int` while its writers still
                         // produce doubles surfaces here loudly.
                         let coerced = coerce_operand_to_type(lowered.operand, field_info.llvm_type, current_temp, current_lines, false, null);
-                        let mut _ci5: number = 0;
+                        let mut _ci5: int = 0;
                         loop {
                             if _ci5 >= coerced.diagnostics.length { break; }
                             diagnostics.push(coerced.diagnostics[_ci5]);
@@ -472,7 +472,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                         // the type-shape detail emitted by `coerce_operand_to_type`.
                         if coerced.operand == null {
                             let mut _abi_match: boolean = false;
-                            let mut _abi_idx: number = 0;
+                            let mut _abi_idx: int = 0;
                             loop {
                                 if _abi_idx >= coerced.diagnostics.length {
                                     break;
@@ -546,7 +546,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                 + assign_value;
         }
         let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-        let mut _ci6: number = 0;
+        let mut _ci6: int = 0;
         loop {
             if _ci6 >= lowered.diagnostics.length { break; }
             diagnostics.push(lowered.diagnostics[_ci6]);
@@ -562,7 +562,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                 + "`");
         } else {
             let base_result = lower_expression(index_parse.base, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-            let mut _ci7: number = 0;
+            let mut _ci7: int = 0;
             loop {
                 if _ci7 >= base_result.diagnostics.length { break; }
                 diagnostics.push(base_result.diagnostics[_ci7]);
@@ -577,7 +577,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                     + "` produced no value");
             } else {
                 let index_result = lower_expression(index_parse.index, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-                let mut _ci8: number = 0;
+                let mut _ci8: int = 0;
                 loop {
                     if _ci8 >= index_result.diagnostics.length { break; }
                     diagnostics.push(index_result.diagnostics[_ci8]);
@@ -603,7 +603,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                         // Slice E.3 (#490) tightens this once the migration
                         // completes.
                         let coerced = coerce_operand_to_type(lowered.operand, element_type, current_temp, current_lines, true, null);
-                        let mut _ci9: number = 0;
+                        let mut _ci9: int = 0;
                         loop {
                             if _ci9 >= coerced.diagnostics.length { break; }
                             diagnostics.push(coerced.diagnostics[_ci9]);
@@ -617,7 +617,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                             // (see comment at the subscripted-lvalue site
                             // above).
                             let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines, true, null);
-                            let mut _ci10: number = 0;
+                            let mut _ci10: int = 0;
                             loop {
                                 if _ci10 >= coerced_index.diagnostics.length {
                                     break;

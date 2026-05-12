@@ -56,7 +56,7 @@ fn _extract_leading_call_target(expression: string) -> string {
     if trimmed.length == 0 { return ""; }
     let first = substring(trimmed, 0, 1);
     if !is_identifier_start_char(first) { return ""; }
-    let mut index: number = 1;
+    let mut index: int = 1;
     loop {
         if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
@@ -68,25 +68,25 @@ fn _extract_leading_call_target(expression: string) -> string {
     return substring(trimmed, 0, index);
 }
 
-fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: number, next_local_id: number, next_region_id: number, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: number, current_label: string) -> LetLoweringResult ![io] {
+fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> LetLoweringResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
     let mut current_locals: LocalBinding[] = locals;
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
     let mut current_bindings: ParameterBinding[] = bindings;
     let mut ownership: OwnershipInfo? = null;
     let mut consumption: OwnershipConsumption? = null;
     let mut initializer_span: NativeSourceSpan? = instruction.value_span;
     let mut lifetime_regions: LifetimeRegionMetadata[] = [];
     let mut lifetime_releases: LifetimeReleaseEvent[] = [];
-    let mut current_next_region: number = next_region_id;
+    let mut current_next_region: int = next_region_id;
     let mut mutations: LocalMutation[] = [];
     let debug_lowering = trace_lowering();
     if initializer_span == null { initializer_span = instruction.span; }
 
     let suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, current_bindings, function.name, initializer_span);
-    let mut _ci16: number = 0;
+    let mut _ci16: int = 0;
     loop {
         if _ci16 >= suspension_diagnostics.length { break; }
         diagnostics.push(suspension_diagnostics[_ci16]);
@@ -126,7 +126,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
 
     let mut operand: LLVMOperand? = null;
     let ownership_analysis = analyze_value_ownership(instruction.value, initializer_span, current_locals, current_bindings);
-    let mut _ci17: number = 0;
+    let mut _ci17: int = 0;
     loop {
         if _ci17 >= ownership_analysis.diagnostics.length { break; }
         diagnostics.push(ownership_analysis.diagnostics[_ci17]);
@@ -136,7 +136,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     consumption = ownership_analysis.consumption;
     if ownership != null {
         let conflict_diagnostics = detect_borrow_conflicts(ownership, current_locals, instruction.name, function.name);
-        let mut _ci18: number = 0;
+        let mut _ci18: int = 0;
         loop {
             if _ci18 >= conflict_diagnostics.length { break; }
             diagnostics.push(conflict_diagnostics[_ci18]);
@@ -197,7 +197,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         if debug_lowering {
             print.err("let-lowering: accessing lowered.diagnostics");
         }
-        let mut _ci19: number = 0;
+        let mut _ci19: int = 0;
         loop {
             if _ci19 >= lowered.diagnostics.length { break; }
             diagnostics.push(lowered.diagnostics[_ci19]);
@@ -395,7 +395,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         } else {
             // Types differ — coerce and use the returned struct.
             let coerced = coerce_operand_to_type(operand, llvm_type, current_temp, current_lines, true, null);
-            let mut _ci20: number = 0;
+            let mut _ci20: int = 0;
             loop {
                 if _ci20 >= coerced.diagnostics.length { break; }
                 diagnostics.push(coerced.diagnostics[_ci20]);
@@ -502,22 +502,22 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
 
 // Scan emitted lines starting at `start_offset` for @.runtime.field.X
 // references and infer the string constants that need to be declared.
-fn _infer_field_constants_from_lines(lines: string[], start_offset: number) -> StringConstant[] {
+fn _infer_field_constants_from_lines(lines: string[], start_offset: int) -> StringConstant[] {
     let mut result: StringConstant[] = [];
     // Build in two parts to avoid a single "@.runtime.field." literal that
     // triggers a bogus global constant in the selfhost IR.
     let marker = "@.runtime" + ".field.";
     let marker_len = marker.length;
-    let mut i: number = start_offset;
+    let mut i: int = start_offset;
     loop {
         if i >= lines.length { break; }
         let line = lines[i];
         // Quick scan for the marker
-        let mut pos: number = 0;
+        let mut pos: int = 0;
         loop {
             if pos + marker_len > line.length { break; }
             let mut matches: boolean = true;
-            let mut ci: number = 0;
+            let mut ci: int = 0;
             loop {
                 if ci >= marker_len { break; }
                 if substring(line, pos + ci, pos + ci + 1) != substring(marker, ci, ci
@@ -531,7 +531,7 @@ fn _infer_field_constants_from_lines(lines: string[], start_offset: number) -> S
                 // Extract field name: runs until comma or space
                 let name_start = pos;
                 let field_start = pos + marker_len;
-                let mut field_end: number = field_start;
+                let mut field_end: int = field_start;
                 loop {
                     if field_end >= line.length { break; }
                     let ch = substring(line, field_end, field_end + 1);
@@ -543,7 +543,7 @@ fn _infer_field_constants_from_lines(lines: string[], start_offset: number) -> S
                 let field_name = substring(line, field_start, field_end);
                 // Deduplicate
                 let mut already: boolean = false;
-                let mut ri: number = 0;
+                let mut ri: int = 0;
                 loop {
                     if ri >= result.length { break; }
                     if result[ri].name == full_name {

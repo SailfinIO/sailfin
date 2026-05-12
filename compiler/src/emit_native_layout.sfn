@@ -39,46 +39,46 @@ struct LayoutEmitResult {
 struct StructFieldLayoutDescriptor {
     name: string;
     type_annotation: string;
-    offset: number;
-    size: number;
-    align: number;
+    offset: int;
+    size: int;
+    align: int;
 }
 
 struct RecordLayoutResult {
-    size: number;
-    align: number;
+    size: int;
+    align: int;
     fields: StructFieldLayoutDescriptor[];
     diagnostics: string[];
 }
 
 struct EnumVariantLayoutDescriptor {
     name: string;
-    tag: number;
-    offset: number;
-    size: number;
-    align: number;
+    tag: int;
+    offset: int;
+    size: int;
+    align: int;
     fields: StructFieldLayoutDescriptor[];
 }
 
 struct EnumAggregateLayout {
-    size: number;
-    align: number;
-    tag_size: number;
-    tag_align: number;
+    size: int;
+    align: int;
+    tag_size: int;
+    tag_align: int;
     variants: EnumVariantLayoutDescriptor[];
     diagnostics: string[];
 }
 
 struct TypeLayoutInfo {
-    size: number;
-    align: number;
+    size: int;
+    align: int;
     diagnostics: string[];
 }
 
 struct CanonicalTypeLayout {
     name: string;
-    size: number;
-    align: number;
+    size: int;
+    align: int;
 }
 
 struct NativeArtifact {
@@ -91,7 +91,7 @@ struct NativeArtifact {
 fn build_layout_context(program: Program) -> LayoutContext {
     let mut structs: LayoutStructDefinition[] = [];
     let mut enums: LayoutEnumDefinition[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
         let statement = program.statements[index];
@@ -103,7 +103,7 @@ fn build_layout_context(program: Program) -> LayoutContext {
         }
         if statement.variant == "EnumDeclaration" {
             let mut variants: LayoutEnumVariantDefinition[] = [];
-            let mut variant_index: number = 0;
+            let mut variant_index: int = 0;
             loop {
                 if variant_index >= statement.variants.length { break; }
                 let variant = statement.variants[variant_index];
@@ -131,7 +131,7 @@ fn compute_struct_layout_lines(context: LayoutContext, struct_name: string, fiel
         + number_to_string(layout.size)
         + " align="
         + number_to_string(layout.align));
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= layout.fields.length { break; }
         let field = layout.fields[index];
@@ -151,7 +151,7 @@ fn compute_struct_layout_lines(context: LayoutContext, struct_name: string, fiel
 
 fn compute_enum_layout_lines(context: LayoutContext, statement: Statement) -> LayoutEmitResult {
     let mut layout_variants: LayoutEnumVariantDefinition[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= statement.variants.length { break; }
         let variant = statement.variants[index];
@@ -171,7 +171,7 @@ fn compute_enum_layout_lines(context: LayoutContext, statement: Statement) -> La
         + " tag_align="
         + number_to_string(layout.tag_align);
     lines.push(header);
-    let mut variant_index: number = 0;
+    let mut variant_index: int = 0;
     loop {
         if variant_index >= layout.variants.length { break; }
         let descriptor = layout.variants[variant_index];
@@ -181,7 +181,7 @@ fn compute_enum_layout_lines(context: LayoutContext, statement: Statement) -> La
         line = line + " size=" + number_to_string(descriptor.size);
         line = line + " align=" + number_to_string(descriptor.align);
         lines.push(line);
-        let mut payload_index: number = 0;
+        let mut payload_index: int = 0;
         loop {
             if payload_index >= descriptor.fields.length { break; }
             let payload = descriptor.fields[payload_index];
@@ -204,30 +204,30 @@ fn compute_enum_layout_lines(context: LayoutContext, statement: Statement) -> La
 }
 
 fn infer_enum_aggregate_layout(context: LayoutContext, enum_name: string, variants: LayoutEnumVariantDefinition[], visiting: string[]) -> EnumAggregateLayout {
-    let tag_size: number = 4;
-    let tag_align: number = 4;
-    let mut union_align: number = tag_align;
-    let mut union_size: number = tag_size;
+    let tag_size: int = 4;
+    let tag_align: int = 4;
+    let mut union_align: int = tag_align;
+    let mut union_size: int = tag_size;
     let mut diagnostics: string[] = [];
     let mut descriptors: EnumVariantLayoutDescriptor[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= variants.length { break; }
         let variant = variants[index];
         let container_name = enum_name + "." + variant.name;
         let record = calculate_record_layout(context, variant.fields, "variant", container_name, visiting);
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= record.diagnostics.length { break; }
             diagnostics.push(record.diagnostics[_ci]);
             _ci += 1;
         }
-        let mut variant_align: number = record.align;
+        let mut variant_align: int = record.align;
         if variant_align <= 0 { variant_align = 1; }
         let payload_offset = align_to(tag_size, variant_align);
         if variant_align > union_align { union_align = variant_align; }
         let mut absolute_fields: StructFieldLayoutDescriptor[] = [];
-        let mut field_index: number = 0;
+        let mut field_index: int = 0;
         loop {
             if field_index >= record.fields.length { break; }
             let field = record.fields[field_index];
@@ -252,9 +252,9 @@ fn infer_enum_aggregate_layout(context: LayoutContext, enum_name: string, varian
         union_align = tag_align;
         union_size = tag_size;
     }
-    let mut final_align: number = union_align;
+    let mut final_align: int = union_align;
     if final_align <= 0 { final_align = 1; }
-    let mut aligned_size: number = union_size;
+    let mut aligned_size: int = union_size;
     if final_align > 1 { aligned_size = align_to(union_size, final_align); }
     return EnumAggregateLayout {
         size: aligned_size,
@@ -269,20 +269,20 @@ fn infer_enum_aggregate_layout(context: LayoutContext, enum_name: string, varian
 fn calculate_record_layout(context: LayoutContext, inputs: LayoutFieldInput[], container_kind: string, container_name: string, visiting: string[]) -> RecordLayoutResult {
     let mut diagnostics: string[] = [];
     let mut fields: StructFieldLayoutDescriptor[] = [];
-    let mut offset: number = 0;
-    let mut max_align: number = 1;
-    let mut index: number = 0;
+    let mut offset: int = 0;
+    let mut max_align: int = 1;
+    let mut index: int = 0;
     loop {
         if index >= inputs.length { break; }
         let input = inputs[index];
         let layout = analyze_type_layout(context, visiting, input.type_annotation, container_kind, container_name, input.name);
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= layout.diagnostics.length { break; }
             diagnostics.push(layout.diagnostics[_ci]);
             _ci += 1;
         }
-        let mut field_align: number = layout.align;
+        let mut field_align: int = layout.align;
         if field_align <= 0 { field_align = 1; }
         offset = align_to(offset, field_align);
         let descriptor = StructFieldLayoutDescriptor {
@@ -297,10 +297,10 @@ fn calculate_record_layout(context: LayoutContext, inputs: LayoutFieldInput[], c
         if field_align > max_align { max_align = field_align; }
         index += 1;
     }
-    let mut final_align: number = max_align;
+    let mut final_align: int = max_align;
     if inputs.length == 0 { final_align = 1; }
     if final_align <= 0 { final_align = 1; }
-    let mut total_size: number = offset;
+    let mut total_size: int = offset;
     if final_align > 1 { total_size = align_to(offset, final_align); }
     return RecordLayoutResult {
         size: total_size,
@@ -421,7 +421,7 @@ fn analyze_type_layout(context: LayoutContext, visiting: string[], type_annotati
     if struct_definition != null {
         let nested_visiting = append_string(visiting, trimmed);
         let record = calculate_record_layout(context, struct_definition.fields, "struct", trimmed, nested_visiting);
-        let mut _ci0: number = 0;
+        let mut _ci0: int = 0;
         loop {
             if _ci0 >= record.diagnostics.length { break; }
             diagnostics.push(record.diagnostics[_ci0]);
@@ -437,7 +437,7 @@ fn analyze_type_layout(context: LayoutContext, visiting: string[], type_annotati
     if enum_definition != null {
         let nested_visiting = append_string(visiting, trimmed);
         let aggregate = infer_enum_aggregate_layout(context, trimmed, enum_definition.variants, nested_visiting);
-        let mut _ci1: number = 0;
+        let mut _ci1: int = 0;
         loop {
             if _ci1 >= aggregate.diagnostics.length { break; }
             diagnostics.push(aggregate.diagnostics[_ci1]);
@@ -461,7 +461,7 @@ fn analyze_type_layout(context: LayoutContext, visiting: string[], type_annotati
 // ── Field conversion helpers ─────────────────────────────────────────
 fn convert_struct_fields(fields: FieldDeclaration[]) -> LayoutFieldInput[] {
     let mut inputs: LayoutFieldInput[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= fields.length { break; }
         let field = fields[index];
@@ -516,7 +516,7 @@ fn append_canonical_type_layout(values: CanonicalTypeLayout[], value: CanonicalT
 
 // ── Lookup helpers ───────────────────────────────────────────────────
 fn find_layout_struct_definition(context: LayoutContext, name: string) -> LayoutStructDefinition? {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= context.structs.length { break; }
         let definition = context.structs[index];
@@ -527,7 +527,7 @@ fn find_layout_struct_definition(context: LayoutContext, name: string) -> Layout
 }
 
 fn find_layout_enum_definition(context: LayoutContext, name: string) -> LayoutEnumDefinition? {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= context.enums.length { break; }
         let definition = context.enums[index];
@@ -634,7 +634,7 @@ fn canonical_type_layouts() -> CanonicalTypeLayout[] {
 
 fn lookup_canonical_type_layout(name: string) -> CanonicalTypeLayout? {
     let layouts = canonical_type_layouts();
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= layouts.length { break; }
         let layout = layouts[index];
@@ -645,9 +645,9 @@ fn lookup_canonical_type_layout(name: string) -> CanonicalTypeLayout? {
 }
 
 // ── Alignment arithmetic ─────────────────────────────────────────────
-fn align_to(value: number, alignment: number) -> number {
+fn align_to(value: int, alignment: int) -> int {
     if alignment <= 1 { return value; }
-    let mut remainder: number = value;
+    let mut remainder: int = value;
     loop {
         if remainder < alignment { break; }
         remainder -= alignment;
@@ -664,13 +664,13 @@ fn generate_layout_manifest(program: Program, context: LayoutContext) -> NativeA
     builder = builder_emit_blank(builder);
 
     // Emit struct layouts
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
         let statement = program.statements[index];
         if statement.variant == "StructDeclaration" {
             let result = compute_struct_layout_lines(context, statement.name, statement.fields);
-            let mut line_index: number = 0;
+            let mut line_index: int = 0;
             loop {
                 if line_index >= result.lines.length { break; }
                 builder = builder_emit_line(builder, result.lines[line_index]);
@@ -688,7 +688,7 @@ fn generate_layout_manifest(program: Program, context: LayoutContext) -> NativeA
         let statement = program.statements[index];
         if statement.variant == "EnumDeclaration" {
             let result = compute_enum_layout_lines(context, statement);
-            let mut line_index: number = 0;
+            let mut line_index: int = 0;
             loop {
                 if line_index >= result.lines.length { break; }
                 builder = builder_emit_line(builder, result.lines[line_index]);
@@ -709,7 +709,7 @@ fn generate_layout_manifest(program: Program, context: LayoutContext) -> NativeA
 fn emit_layout_lines(state: NativeState, lines: string[]) -> NativeState {
     if lines.length == 0 { return state; }
     let mut current = state;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
         current = state_emit_line(current, lines[index]);

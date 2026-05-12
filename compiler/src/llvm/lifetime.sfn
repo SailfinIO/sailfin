@@ -96,13 +96,13 @@ fn parse_borrow_expression(text: string) -> BorrowParseResult {
             if substring(remainder, 0, 1) == "(" {
                 let argument_parse = extract_borrow_argument(remainder);
                 let mut messages: string[] = [];
-                let mut _ci0: number = 0;
+                let mut _ci0: int = 0;
                 loop {
                     if _ci0 >= diagnostics.length { break; }
                     messages.push(diagnostics[_ci0]);
                     _ci0 += 1;
                 }
-                let mut _ci1: number = 0;
+                let mut _ci1: int = 0;
                 loop {
                     if _ci1 >= argument_parse.diagnostics.length { break; }
                     messages.push(argument_parse.diagnostics[_ci1]);
@@ -229,9 +229,9 @@ fn parse_borrow_expression(text: string) -> BorrowParseResult {
 
 fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
     let mut diagnostics: string[] = [];
-    let mut depth: number = 0;
-    let mut index: number = 0;
-    let mut closing_index: number = -1;
+    let mut depth: int = 0;
+    let mut index: int = 0;
+    let mut closing_index: int = -1;
     loop {
         if index >= text.length { break; }
         let ch = substring(text, index, index + 1);
@@ -298,7 +298,7 @@ fn extract_simple_borrow_target(text: string) -> BorrowArgumentParse {
             diagnostics: diagnostics
         };
     }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
@@ -335,7 +335,7 @@ fn extract_simple_borrow_target(text: string) -> BorrowArgumentParse {
 fn is_valid_borrow_target(text: string) -> boolean {
     let trimmed = trim_text(text);
     if trimmed.length == 0 { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
@@ -356,7 +356,7 @@ fn is_valid_borrow_target(text: string) -> boolean {
 // =============================================================================
 // Borrow Expression Lowering
 // =============================================================================
-fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[]) -> ExpressionResult {
+fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
     let empty_constants = empty_string_constant_set();
     if !parse.success {
@@ -561,7 +561,7 @@ fn analyze_value_ownership(initializer: string?, span: NativeSourceSpan?, locals
 
 fn update_local_ownership(locals: LocalBinding[], name: string, ownership: OwnershipInfo?) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= locals.length { break; }
         let entry = locals[index];
@@ -593,7 +593,7 @@ fn detect_borrow_conflicts(ownership: OwnershipInfo?, locals: LocalBinding[], bi
     if ownership == null { return diagnostics; }
     if ownership.variant != "Borrow" { return diagnostics; }
     let base = trim_text(ownership.base);
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= locals.length { break; }
         let existing = locals[index];
@@ -649,7 +649,7 @@ fn resolve_borrow_base(target: string, locals: LocalBinding[]) -> string {
     return resolve_borrow_base_inner(trim_text(target), locals, 0);
 }
 
-fn resolve_borrow_base_inner(target: string, locals: LocalBinding[], depth: number) -> string {
+fn resolve_borrow_base_inner(target: string, locals: LocalBinding[], depth: int) -> string {
     let trimmed = trim_text(target);
     if trimmed.length == 0 { return trimmed; }
     if depth >= 8 { return trimmed; }
@@ -710,9 +710,9 @@ fn append_lifetime_release_event(events: LifetimeReleaseEvent[], event: Lifetime
     return out;
 }
 
-fn mark_lifetime_region_released(regions: LifetimeRegionMetadata[], region_id: number, scope_id: string, scope_depth: number) -> LifetimeRegionMetadata[] {
+fn mark_lifetime_region_released(regions: LifetimeRegionMetadata[], region_id: int, scope_id: string, scope_depth: int) -> LifetimeRegionMetadata[] {
     let mut result: LifetimeRegionMetadata[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= regions.length { break; }
         let entry = regions[index];
@@ -741,7 +741,7 @@ fn mark_lifetime_region_released(regions: LifetimeRegionMetadata[], region_id: n
 fn apply_lifetime_release_events(regions: LifetimeRegionMetadata[], releases: LifetimeReleaseEvent[]) -> LifetimeRegionMetadata[] {
     if releases.length == 0 { return regions; }
     let mut current_regions: LifetimeRegionMetadata[] = regions;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= releases.length { break; }
         let release = releases[index];
@@ -751,7 +751,7 @@ fn apply_lifetime_release_events(regions: LifetimeRegionMetadata[], releases: Li
     return current_regions;
 }
 
-fn make_lifetime_region_metadata(id: number, binding: string, ownership: OwnershipInfo, scope_id: string, scope_depth: number, base_scope_id: string, base_scope_depth: number) -> LifetimeRegionMetadata {
+fn make_lifetime_region_metadata(id: int, binding: string, ownership: OwnershipInfo, scope_id: string, scope_depth: int, base_scope_id: string, base_scope_depth: int) -> LifetimeRegionMetadata {
     return LifetimeRegionMetadata {
         id: id,
         binding: binding,
@@ -803,7 +803,7 @@ fn validate_borrow_lifetimes(function: NativeFunction, regions: LifetimeRegionMe
             + ")");
         return diagnostics;
     }
-    let mut index: number = 0;
+    let mut index: int = 0;
     let root_scope = format_root_scope_id(function.name);
     loop {
         if index >= regions.length { break; }
@@ -849,7 +849,7 @@ fn validate_borrow_lifetimes(function: NativeFunction, regions: LifetimeRegionMe
 // =============================================================================
 fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
     let mut diagnostics: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= locals.length { break; }
         let local = locals[index];
@@ -875,7 +875,7 @@ fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], binding
         }
         index += 1;
     }
-    let mut parameter_index: number = 0;
+    let mut parameter_index: int = 0;
     loop {
         if parameter_index >= bindings.length { break; }
         let binding = bindings[parameter_index];

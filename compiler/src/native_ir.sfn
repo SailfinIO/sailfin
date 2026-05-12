@@ -103,14 +103,14 @@ struct NativeStructField {
 struct NativeStructLayoutField {
     name: string;
     type_annotation: string;
-    offset: number;
-    size: number;
-    align: number;
+    offset: int;
+    size: int;
+    align: int;
 }
 
 struct NativeStructLayout {
-    size: number;
-    align: number;
+    size: int;
+    align: int;
     fields: NativeStructLayoutField[];
 }
 
@@ -150,19 +150,19 @@ struct NativeEnumVariant {
 
 struct NativeEnumVariantLayout {
     name: string;
-    tag: number;
-    offset: number;
-    size: number;
-    align: number;
+    tag: int;
+    offset: int;
+    size: int;
+    align: int;
     fields: NativeStructLayoutField[];
 }
 
 struct NativeEnumLayout {
-    size: number;
-    align: number;
+    size: int;
+    align: int;
     tag_type: string;
-    tag_size: number;
-    tag_align: number;
+    tag_size: int;
+    tag_align: int;
     variants: NativeEnumVariantLayout[];
 }
 
@@ -249,8 +249,8 @@ struct HeaderNameParse {
 struct StructLayoutHeaderParse {
     success: boolean;
     name: string;
-    size: number;
-    align: number;
+    size: int;
+    align: int;
     diagnostics: string[];
 }
 
@@ -273,11 +273,11 @@ struct ParseNativeResult {
 struct EnumLayoutHeaderParse {
     success: boolean;
     name: string;
-    size: number;
-    align: number;
+    size: int;
+    align: int;
     tag_type: string;
-    tag_size: number;
-    tag_align: number;
+    tag_size: int;
+    tag_align: int;
     diagnostics: string[];
 }
 

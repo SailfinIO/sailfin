@@ -1586,8 +1586,16 @@ i64 length helper).
        i64↔f64 widens during the partial migration; #489d
        audits and removes all uses. Verified by
        `compiler/tests/integration/numeric_abi_mismatch_test.sfn`.
-    3. **E.2 (next):** Audit-and-migrate every `: number`
-       annotation in `compiler/src/*.sfn` and
+    3. **E.2 (in progress; #530, 2026-05-12):** The closed
+       instruction-lowering numeric cluster now spells its
+       integer-shaped declarations as `: int` instead of
+       `: number`: LLVM lowering result counters/offsets,
+       lifetime depths/region IDs, native-IR and layout metadata,
+       and the transitive statement/core-lowering consumers named
+       by #530. The audit intentionally leaves the prelude/tests,
+       future-seam files, and existing boundary casts for follow-up
+       E.2 sweeps. Remaining E.2 work continues to migrate every
+       other `: number` annotation in `compiler/src/*.sfn` and
        `runtime/prelude.sfn` to `: int` or `: float` based on
        actual usage. The migration is purely mechanical because
        E.1's alias-as-float keeps every `: number` site lowering
