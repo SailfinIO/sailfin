@@ -63,8 +63,7 @@ fn parameter_from_native(native: NativeParameter) -> Parameter {
         type_annotation: annotation,
         default_value: null,
         mutable: native.mutable,
-        span: null,
-        attributes: native.attributes
+        span: null
     };
 }
 

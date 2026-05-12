@@ -1862,9 +1862,10 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
 //     assignments to locals, array-element stores, array-index → i64
 //     coercions, and the various `i1`/`i8*`/`{i8*, i64}` shape coerces.
 //     These keep today's silent widening so the existing tree continues to
-//     self-host. The `@[abi_widen]`-annotated parameter opt-out (Slice E.2,
-//     #489a–d) flips the call-arg site to permissive mode for the small set
-//     of legitimate i64 ↔ f64 widens during the partial migration.
+//     self-host. Slice E.2 (#489a–d, #530) cleared the call-arg site of all
+//     legitimate int↔float widens, so the strict mode there is now
+//     unconditional; widens that still need to happen run through explicit
+//     `as int` / `as float` casts in source (#532).
 //
 // Slice E.3 (#490) re-applies #296 symmetrically — once every `: number`
 // site in the compiler source has migrated to `: int`/`: float`, the
