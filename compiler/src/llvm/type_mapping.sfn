@@ -228,7 +228,9 @@ fn layout_annotation_represents_user_value(annotation: string) -> boolean {
     if layout_annotation_requires_pointer(annotation) { return false; }
     let base = layout_annotation_base_type(annotation);
     if base.length == 0 { return false; }
-    if base == "number" { return false; }
+    if base == "number" {
+        return false;
+    }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
     if base == "float" { return false; }
     let mut _if309: boolean = false;
     if base == "boolean" { _if309 = true; }
@@ -320,7 +322,9 @@ fn map_type_annotation(annotation: string) -> string {
             return inner_type + "*";
         }
     }
-    if normalized == "number" { return "double"; }
+    if normalized == "number" {
+        return "double";
+    }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
     if normalized == "float" { return "double"; }
     if normalized == "f64" { return "double"; }
     if normalized == "f32" { return "float"; }
@@ -619,7 +623,9 @@ fn map_array_pointer_type(context: TypeContext, annotation: string) -> string {
 
 fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
-    if trimmed == "number" { return "double"; }
+    if trimmed == "number" {
+        return "double";
+    }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
     if trimmed == "float" { return "double"; }
     if trimmed == "f64" { return "double"; }
     if trimmed == "f32" { return "float"; }
@@ -665,7 +671,9 @@ fn future_pointer_type_for_return_type(return_type: string) -> string {
     if trimmed == "void" { _if324 = true; }
     if _if324 { return "%SailfinFutureVoid*"; }
     let normalized = unwrap_move_wrapper(trimmed);
-    if normalized == "number" { return "%SailfinFutureNumber*"; }
+    if normalized == "number" {
+        return "%SailfinFutureNumber*";
+    }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
     let mut _if325: boolean = false;
     if normalized == "boolean" { _if325 = true; }
     if normalized == "bool" { _if325 = true; }
@@ -682,7 +690,9 @@ fn spawn_symbol_for_return_type(return_type: string) -> string {
     if trimmed == "void" { _if326 = true; }
     if _if326 { return "sailfin_runtime_spawn_void"; }
     let normalized = unwrap_move_wrapper(trimmed);
-    if normalized == "number" { return "sailfin_runtime_spawn_number"; }
+    if normalized == "number" {
+        return "sailfin_runtime_spawn_number";
+    }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
     let mut _if327: boolean = false;
     if normalized == "boolean" { _if327 = true; }
     if normalized == "bool" { _if327 = true; }
@@ -698,7 +708,9 @@ fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
     if trimmed == "void" { _if328 = true; }
     if _if328 { return "sailfin_runtime_spawn_void_ctx"; }
     let normalized = unwrap_move_wrapper(trimmed);
-    if normalized == "number" { return "sailfin_runtime_spawn_number_ctx"; }
+    if normalized == "number" {
+        return "sailfin_runtime_spawn_number_ctx";
+    }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
     let mut _if329: boolean = false;
     if normalized == "boolean" { _if329 = true; }
     if normalized == "bool" { _if329 = true; }

@@ -468,7 +468,9 @@ fn parse_type_descriptor(text: string) -> TypeDescriptor {
 
 fn check_type_primitive(value: any, name: string) -> boolean {
     if name == "string" { return runtime_is_string_fn(value); }
-    if name == "number" { return runtime_is_number_fn(value); }
+    if name == "number" {
+        return runtime_is_number_fn(value);
+    }  // alias-coverage: runtime type-guard predicate keyword
     if name == "boolean" { return runtime_is_boolean_fn(value); }
     if name == "void" { return runtime_is_void_fn(value); }
     return false;
