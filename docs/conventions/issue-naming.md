@@ -411,22 +411,30 @@ of their parent epic via the GitHub parent/child link.
 ## Slice E `// alias-coverage` convention
 
 During the Slice E numeric-types migration (track `M0`, epic #424) every
-preserved `: number` or `-> number` type annotation in `compiler/src/` and
+preserved reference to the `number` type in `compiler/src/` and
 `runtime/prelude.sfn` carries a trailing `// alias-coverage: <reason>`
-comment.  This makes the audit grep machine-checkable:
+comment.  This applies to two categories of sites:
+
+1. **Type-annotation sites** — `: number` or `-> number` in source declarations.
+   These are tracked by the audit grep:
 
 ```bash
 grep -rnE "(: number|-> number)" compiler/src/ runtime/prelude.sfn \
-  | grep -v "// alias-coverage"
+  | grep -v "// alias-coverage" \
+  | grep -v ":[[:space:]]*//"   # exclude comment-only lines (false positives)
 # Must return ONLY sites that bulk-migration PRs still need to migrate.
 ```
 
+2. **String-branch seams** — `== "number"` comparisons that dispatch on the
+   Sailfin type name and will need to split when `int`/`float` arrive.  These
+   are not caught by the audit grep above but are tagged for the same reason.
+
 **Contract:**
 
-- A `(: number|-> number)` site is **preserved** (opt-out from bulk migration)
-  only when the `number` type annotation is intentional and semantic:
-  Future mapping seams, runtime type-guard predicates, or literal-text
-  predicates.  Every such site carries the marker.
+- A site is **preserved** (opt-out from bulk migration) only when the `number`
+  reference is intentional and semantic: Future mapping seams, runtime
+  type-guard predicates, or numeric-type values that are not integer counters.
+  Every such site carries the marker.
 - A `(: number|-> number)` site is **in scope** (will be migrated in a bulk
   PR) when `number` is used as an integer counter, index, or size.  These
   sites must **not** carry the marker.
@@ -440,7 +448,7 @@ grep -rnE "(: number|-> number)" compiler/src/ runtime/prelude.sfn \
 |-----------|-----------|
 | `== "number"` branches that will split for `int`/`float` | `Future mapping seam (Slice E.2 follow-up)` |
 | Runtime `is_number` / `check_type_primitive` guard | `runtime type-guard predicate keyword` |
-| Text/literal processing that works with the `number` type value | `literal-text predicate (AST/IR keyword match)` |
+| Numeric-type value that is not an integer counter (e.g. float-valued) | `number-type value (not an integer counter)` |
 
 ---
 
