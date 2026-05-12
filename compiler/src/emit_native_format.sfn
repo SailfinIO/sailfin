@@ -231,15 +231,6 @@ fn format_parameters(parameters: Parameter[]) -> string {
         if index >= parameters.length { break; }
         let parameter = parameters[index];
         let mut entry: string = "";
-        // Slice E.1.5 (#528): mirror `.param` emission for the inline
-        // signature line so the header is human-readable and round-trips
-        // through future parsers that do consume the header.
-        let mut _attr_index: number = 0;
-        loop {
-            if _attr_index >= parameter.attributes.length { break; }
-            entry = entry + "@[" + parameter.attributes[_attr_index] + "] ";
-            _attr_index += 1;
-        }
         if parameter.mutable { entry = entry + "mut " + parameter.name; } else {
             entry = entry + parameter.name;
         }

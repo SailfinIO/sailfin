@@ -470,8 +470,7 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
                     type_annotation: p_type,
                     mutable: p.mutable,
                     default_value: p.default_value,
-                    span: p.span,
-                    attributes: p.attributes
+                    span: p.span
                 };
                 fixed_params.push(fixed_p);
                 pi += 1;

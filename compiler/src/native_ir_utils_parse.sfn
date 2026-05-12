@@ -782,20 +782,6 @@ fn parse_function_name(header: string) -> string {
 fn parse_parameter_entry(body: string, span: NativeSourceSpan?) -> NativeParameter? {
     let mut trimmed = trim_text(body);
     if trimmed.length == 0 { return null; }
-    // Slice E.1.5 (#528): consume leading `@[name]` attribute markers. The
-    // emitter writes them inline at the front of the `.param` body so a
-    // single text-line round-trip preserves them. Multiple attributes stack
-    // (`@[abi_widen] @[other_marker] mut x: int`).
-    let mut attributes: string[] = [];
-    loop {
-        if !starts_with(trimmed, "@[") { break; }
-        let close_index = index_of(trimmed, "]");
-        if close_index < 0 { break; }
-        let attr_name = trim_text(substring(trimmed, 2, close_index));
-        if attr_name.length == 0 { break; }
-        attributes.push(attr_name);
-        trimmed = trim_text(substring(trimmed, close_index + 1, trimmed.length));
-    }
     let mut is_mutable: boolean = false;
     if starts_with(trimmed, "mut ") {
         is_mutable = true;
@@ -849,8 +835,7 @@ fn parse_parameter_entry(body: string, span: NativeSourceSpan?) -> NativeParamet
         type_annotation: type_annotation,
         mutable: is_mutable,
         default_value: default_value,
-        span: span,
-        attributes: attributes
+        span: span
     };
 }
 
@@ -859,15 +844,6 @@ fn line_looks_like_parameter_entry(text: string) -> boolean {
     if trimmed.length == 0 { return false; }
     if starts_with(trimmed, ".") { return false; }
     if starts_with(trimmed, ";") { return false; }
-    // Slice E.1.5 (#528): peel off leading `@[name]` attribute markers so the
-    // classifier treats `@[abi_widen] x: int` the same as `x: int`.
-    loop {
-        if !starts_with(trimmed, "@[") { break; }
-        let close_index = index_of(trimmed, "]");
-        if close_index < 0 { break; }
-        trimmed = trim_text(substring(trimmed, close_index + 1, trimmed.length));
-        if trimmed.length == 0 { return false; }
-    }
     let arrow_index = index_of(trimmed, "->");
     let colon_index = index_of(trimmed, ":");
     let mut sep_index: number = -1;

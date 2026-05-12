@@ -65,11 +65,6 @@ struct NativeParameter {
     mutable: boolean;
     default_value: string?;
     span: NativeSourceSpan?;
-    // Slice E.1.5 (#528): mirrors `Parameter.attributes` after the AST →
-    // native_ir lowering. Currently only `abi_widen` is honoured at the
-    // LLVM call-arg coerce site; unknown attributes round-trip without
-    // affecting lowering.
-    attributes: string[];
 }
 
 struct NativeFunction {
