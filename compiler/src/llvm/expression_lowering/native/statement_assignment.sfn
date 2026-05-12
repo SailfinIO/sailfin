@@ -323,9 +323,9 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                 if index_result.operand != null {
                                     // Slice E.1.5 (#528): array index coercion
                                     // legitimately widens double → i64 today
-                                    // (`arr[index]` with `index: int` is
-                                    // common). Exempt from the ABI primitive
-                                    // kind diagnostic.
+                                    // (`arr[index]` with an index expression
+                                    // still typed as `number` is common).
+                                    // Exempt from the ABI primitive kind diagnostic.
                                     let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines, true, null);
                                     let mut _sci2: int = 0;
                                     loop {
@@ -455,7 +455,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                         // explicit ABI boundary in the issue's scope. Refuse
                         // silent int↔float coercion so a future partial
                         // migration that flips one struct field's type from
-                        // `: int` to `: int` while its writers still
+                        // `: number` to `: int` while its writers still
                         // produce doubles surfaces here loudly.
                         let coerced = coerce_operand_to_type(lowered.operand, field_info.llvm_type, current_temp, current_lines, false, null);
                         let mut _ci5: int = 0;

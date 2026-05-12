@@ -264,10 +264,10 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
     }
     // Slice E.1 (#488): bare integer literals default to `int` (i64) at
     // scalar context, but unannotated array literals keep the pre-E.1
-    // `double` element default so the existing `: int[]` corpus
+    // `double` element default so the existing `: number[]` corpus
     // (compiler source, runtime/prelude.sfn, and every test fixture
-    // that types arrays as `: int[]`) lowers without churn.
-    // Once E.2 migrates every `: int` site to `: int`/`: float`,
+    // that types arrays as `: number[]`) lowers without churn.
+    // Once E.2 migrates every `: number` site to `: int`/`: float`,
     // this fallback flips to `i64` (or, more cleanly, the array
     // literal grows a real type-inference pass that reads the
     // typecheck-derived binding type).
