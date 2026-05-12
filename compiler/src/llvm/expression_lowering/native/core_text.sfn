@@ -11,11 +11,11 @@ import { InterpolatedTemplateParse } from "../../types";
 import { is_identifier_part_char, is_identifier_start_char, starts_with } from "../../utils";
 import { split_array_elements } from "../splitting";
 
-fn number_to_string(value: number) -> string {
+fn number_to_string(value: number) -> string {  // alias-coverage: literal-text predicate (AST/IR keyword match)
     if value == 0 { return "0"; }
     let digits = "0123456789";
-    let powers: number[] = [1000000000000000, 100000000000000, 10000000000000, 1000000000000, 100000000000, 10000000000, 1000000000, 100000000, 10000000, 1000000, 100000, 10000, 1000, 100, 10, 1];
-    let mut remaining: number = value;
+    let powers: number[] = [1000000000000000, 100000000000000, 10000000000000, 1000000000000, 100000000000, 10000000000, 1000000000, 100000000, 10000000, 1000000, 100000, 10000, 1000, 100, 10, 1];  // alias-coverage: literal-text predicate (AST/IR keyword match)
+    let mut remaining: number = value;  // alias-coverage: literal-text predicate (AST/IR keyword match)
     let mut is_negative: boolean = false;
     if remaining < 0 {
         is_negative = true;

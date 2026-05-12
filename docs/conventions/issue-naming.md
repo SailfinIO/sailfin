@@ -408,6 +408,42 @@ of their parent epic via the GitHub parent/child link.
 
 ---
 
+## Slice E `// alias-coverage` convention
+
+During the Slice E numeric-types migration (track `M0`, epic #424) every
+preserved `: number` or `-> number` type annotation in `compiler/src/` and
+`runtime/prelude.sfn` carries a trailing `// alias-coverage: <reason>`
+comment.  This makes the audit grep machine-checkable:
+
+```bash
+grep -rnE "(: number|-> number)" compiler/src/ runtime/prelude.sfn \
+  | grep -v "// alias-coverage"
+# Must return ONLY sites that bulk-migration PRs still need to migrate.
+```
+
+**Contract:**
+
+- A `(: number|-> number)` site is **preserved** (opt-out from bulk migration)
+  only when the `number` type annotation is intentional and semantic:
+  Future mapping seams, runtime type-guard predicates, or literal-text
+  predicates.  Every such site carries the marker.
+- A `(: number|-> number)` site is **in scope** (will be migrated in a bulk
+  PR) when `number` is used as an integer counter, index, or size.  These
+  sites must **not** carry the marker.
+- Bulk migration PRs must not introduce new untagged `: number` or
+  `-> number` sites in `compiler/src/` or `runtime/prelude.sfn`.
+  Reviewers should run the audit grep above before approving.
+
+**Suggested tag reasons** (keep short and consistent):
+
+| Situation | Tag value |
+|-----------|-----------|
+| `== "number"` branches that will split for `int`/`float` | `Future mapping seam (Slice E.2 follow-up)` |
+| Runtime `is_number` / `check_type_primitive` guard | `runtime type-guard predicate keyword` |
+| Text/literal processing that works with the `number` type value | `literal-text predicate (AST/IR keyword match)` |
+
+---
+
 ## Track ID directory
 
 Reserved track IDs (extend by editing the roadmap, then this list):
