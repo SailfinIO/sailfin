@@ -9,7 +9,7 @@ Issue: #560. This artifact records the migration decision for every untagged, no
 - Use `alias-coverage` only for intentionally preserved `number` alias seams; those should receive a source `// alias-coverage:` tag in the migration PR.
 - `Other / grep-noise` rows are audited hits that do not introduce a Sailfin numeric type annotation.
 
-No rows require an architect escalation; the only fractional decisions are the generic clamp helper and per-test duration ratio.
+No rows require an architect escalation. The `float` decisions are the generic clamp helper, decimal parsing, and per-test duration ratio; only clamp and per-test duration are ambiguous fractional decisions.
 
 ## Function-parameter and return sites
 
@@ -60,7 +60,7 @@ No rows require an architect escalation; the only fractional decisions are the g
 | `compiler/src/cli_commands.sfn` | 124 | `fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[]) -> number ![io] {` | `int` | Command helpers return process-style integer status codes. |
 | `compiler/src/cli_commands.sfn` | 200 | `fn _clean_lowering_state(dir: string) -> number ![io] {` | `int` | Command helpers return process-style integer status codes. |
 | `compiler/src/cli_commands.sfn` | 424 | `fn _find_test_group(groups: TestGroup[], key: string) -> number {` | `int` | Search helpers return discrete string or collection positions. |
-| `compiler/src/cli_commands.sfn` | 494 | `fn _trj_per_test_duration(file_elapsed_ms: number, test_count: number) -> number {` | `params int; return float` | Elapsed milliseconds and test counts are integers, but division produces an average duration ratio. |
+| `compiler/src/cli_commands.sfn` | 494 | `fn _trj_per_test_duration(file_elapsed_ms: number, test_count: number) -> number {` | `float` | Return is an average duration ratio; parameters are integer millisecond/count inputs. |
 | `compiler/src/cli_commands.sfn` | 510 | `fn _emit_file_test_events(entries: TestEntry[], outcome: TestFileOutcome) -> number ![io] {` | `int` | Command helpers return process-style integer status codes. |
 | `compiler/src/cli_commands.sfn` | 569 | `fn _trj_decode_passed(packed: number) -> number {` | `int` | Parameters and returns describe counts, positions, codes, or millisecond ticks. |
 | `compiler/src/cli_commands.sfn` | 581 | `fn _trj_decode_failed(packed: number) -> number {` | `int` | Parameters and returns describe counts, positions, codes, or millisecond ticks. |
@@ -314,19 +314,19 @@ No rows require an architect escalation; the only fractional decisions are the g
 | File | Line | Current shape | Decision | Rationale |
 | --- | ---: | --- | --- | --- |
 | `compiler/src/llvm/expression_lowering/native/core_member_lowering.sfn` | 136 | `let operand = LLVMOperand { llvm_type: "double", value: number_temp };` | `not annotation` | The hit is a field value named number_temp, not a Sailfin type annotation. |
-| `compiler/src/typecheck.sfn` | 491 | `// here. Existing examples and tests use a mix (`-> number`, `-> void`,` | `not annotation` | The hit appears only inside explanatory comment text. |
-| `compiler/src/llvm/type_mapping.sfn` | 728 | `// from `: number` to `: int`/`: float`. Pointer and aggregate types return` | `not annotation` | The hit appears only inside explanatory comment text. |
-| `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn` | 267 | `// `double` element default so the existing `: number[]` corpus` | `not annotation` | The hit appears only inside explanatory comment text. |
-| `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn` | 269 | `// that types arrays as `: number[]`) lowers without churn.` | `not annotation` | The hit appears only inside explanatory comment text. |
-| `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn` | 270 | `// Once E.2 migrates every `: number` site to `: int`/`: float`,` | `not annotation` | The hit appears only inside explanatory comment text. |
+| `compiler/src/typecheck.sfn` | 491 | <code>// here. Existing examples and tests use a mix (&#96;-&gt; number&#96;, &#96;-&gt; void&#96;, no return type, ...)</code> | `not annotation` | The hit appears only inside explanatory comment text. |
+| `compiler/src/llvm/type_mapping.sfn` | 728 | <code>// from &#96;: number&#96; to &#96;: int&#96;/&#96;: float&#96;. Pointer and aggregate types return</code> | `not annotation` | The hit appears only inside explanatory comment text. |
+| `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn` | 267 | <code>// &#96;double&#96; element default so the existing &#96;: number[]&#96; corpus</code> | `not annotation` | The hit appears only inside explanatory comment text. |
+| `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn` | 269 | <code>// that types arrays as &#96;: number[]&#96;) lowers without churn.</code> | `not annotation` | The hit appears only inside explanatory comment text. |
+| `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn` | 270 | <code>// Once E.2 migrates every &#96;: number&#96; site to &#96;: int&#96;/&#96;: float&#96;,</code> | `not annotation` | The hit appears only inside explanatory comment text. |
 | `compiler/src/llvm/expression_lowering/native/core_strings.sfn` | 52 | `value: number_to_string(array_length)` | `not annotation` | The hit is a function call, not a Sailfin type annotation. |
-| `compiler/src/llvm/expression_lowering/native/statement_assignment.sfn` | 458 | `// `: number` to `: int` while its writers still` | `not annotation` | The hit appears only inside explanatory comment text. |
-| `compiler/src/llvm/expression_lowering/native/core.sfn` | 475 | `// deprecated `: number` alias maps to once `map_primitive_type`` | `not annotation` | The hit appears only inside explanatory comment text. |
-| `compiler/src/llvm/expression_lowering/native/core_operands.sfn` | 1870 | `// Slice E.3 (#490) re-applies #296 symmetrically — once every `: number`` | `not annotation` | The hit appears only inside explanatory comment text. |
-| `compiler/src/llvm/expression_lowering/native/core_operands.sfn` | 1906 | `// migration mismatch — a callee parameter flipped from `: number`` | `not annotation` | The hit appears only inside explanatory comment text. |
-| `compiler/src/llvm/expression_lowering/native/core_operands.sfn` | 2026 | `// `: number` site in the compiler source has been migrated to` | `not annotation` | The hit appears only inside explanatory comment text. |
-| `compiler/src/llvm/expression_lowering/native/core_operands.sfn` | 2107 | `// `: number` site in the compiler source has migrated to `: int`/`: float`.` | `not annotation` | The hit appears only inside explanatory comment text. |
-| `compiler/src/llvm/expression_lowering/native/core_ops_lowering.sfn` | 286 | `// every `: number` site in the compiler source has migrated` | `not annotation` | The hit appears only inside explanatory comment text. |
+| `compiler/src/llvm/expression_lowering/native/statement_assignment.sfn` | 458 | <code>// &#96;: number&#96; to &#96;: int&#96; while its writers still</code> | `not annotation` | The hit appears only inside explanatory comment text. |
+| `compiler/src/llvm/expression_lowering/native/core.sfn` | 475 | <code>// deprecated &#96;: number&#96; alias maps to once &#96;map_primitive_type&#96;</code> | `not annotation` | The hit appears only inside explanatory comment text. |
+| `compiler/src/llvm/expression_lowering/native/core_operands.sfn` | 1870 | <code>// Slice E.3 (#490) re-applies #296 symmetrically — once every &#96;: number&#96;</code> | `not annotation` | The hit appears only inside explanatory comment text. |
+| `compiler/src/llvm/expression_lowering/native/core_operands.sfn` | 1906 | <code>// migration mismatch — a callee parameter flipped from &#96;: number&#96;</code> | `not annotation` | The hit appears only inside explanatory comment text. |
+| `compiler/src/llvm/expression_lowering/native/core_operands.sfn` | 2026 | <code>// &#96;: number&#96; site in the compiler source has been migrated to</code> | `not annotation` | The hit appears only inside explanatory comment text. |
+| `compiler/src/llvm/expression_lowering/native/core_operands.sfn` | 2107 | <code>// &#96;: number&#96; site in the compiler source has migrated to &#96;: int&#96;/&#96;: float&#96;.</code> | `not annotation` | The hit appears only inside explanatory comment text. |
+| `compiler/src/llvm/expression_lowering/native/core_ops_lowering.sfn` | 286 | <code>// every &#96;: number&#96; site in the compiler source has migrated</code> | `not annotation` | The hit appears only inside explanatory comment text. |
 
 ## Tests: alias-coverage list
 
