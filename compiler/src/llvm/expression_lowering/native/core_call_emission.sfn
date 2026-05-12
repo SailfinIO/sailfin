@@ -94,10 +94,13 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
         if _if55 { coerced_operands.push(operand); } else if target_type.length == 0 {
             coerced_operands.push(operand);
         } else {
-            // Slice E.1.5 (#528): function call argument coercion is the
-            // primary ABI boundary. Strict mode refuses silent int↔float
-            // widening at parameters; widens that need to happen run
-            // through explicit `as int` / `as float` casts in source.
+            // Slice E.1.5 (#528) + #550: function call argument coercion is
+            // the primary ABI boundary. Strict mode (`allow_widen=false`)
+            // emits a `[warning] ABI primitive mismatch` for `float → int`
+            // mismatches and falls through to `coerce_numeric_primitive`
+            // (still emitting `round + fptosi`) — the original `[fatal]`
+            // refusal was downgraded in #550. The fatal re-promotes
+            // symmetrically in #490 once E.2 completes.
             let coerced = coerce_operand_to_type(operand, target_type, result_temp, result_lines, false, null);
             result_diagnostics = extend_string_array(result_diagnostics, coerced.diagnostics);
             result_lines = coerced.lines;

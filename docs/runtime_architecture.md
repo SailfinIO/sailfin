@@ -1579,12 +1579,15 @@ i64 length helper).
        E.2 completes. See lines 1399–1411 above for the original
        sequencing constraint that #528 violated.
 
-       The `@[abi_widen]` parameter attribute is parsed by
-       `parse_single_parameter` and plumbed through
-       `NativeParameter.attributes` as a per-parameter opt-out
-       used by Slice E.2 to bridge the small set of legitimate
-       i64↔f64 widens during the partial migration; #489d
-       audits and removes all uses. Verified by
+       The `@[abi_widen]` parameter attribute was added as a
+       per-parameter opt-out during the partial migration but
+       was never used: the asymmetric rule above kept the
+       call-arg site quiet for the only direction E.2 touched,
+       so #532 deleted the attribute end-to-end (parser,
+       `Parameter.attributes`, `NativeParameter.attributes`,
+       `.sfn-asm` round-trip, and the call-arg lookup). The
+       call-arg coerce site now passes `allow_widen=false`
+       unconditionally. Verified by
        `compiler/tests/integration/numeric_abi_mismatch_test.sfn`.
     3. **E.2 (in progress; #530, 2026-05-12):** The closed
        instruction-lowering numeric cluster now spells its
