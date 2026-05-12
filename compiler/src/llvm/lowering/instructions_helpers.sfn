@@ -16,7 +16,7 @@ import { extend_string_array, number_to_string } from "../utils";
 
 fn clone_local_bindings(values: LocalBinding[]) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= values.length { break; }
         result.push(values[index]);
@@ -28,7 +28,7 @@ fn clone_local_bindings(values: LocalBinding[]) -> LocalBinding[] {
 fn extend_lifetime_regions(values: LifetimeRegionMetadata[], extras: LifetimeRegionMetadata[]) -> LifetimeRegionMetadata[] {
     if extras.length == 0 { return values; }
     let mut out = values;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= extras.length { break; }
         out = out.push(extras[index]);
@@ -40,7 +40,7 @@ fn extend_lifetime_regions(values: LifetimeRegionMetadata[], extras: LifetimeReg
 fn extend_mutations(values: LocalMutation[], extras: LocalMutation[]) -> LocalMutation[] {
     if extras.length == 0 { return values; }
     let mut out = values;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= extras.length { break; }
         out = out.push(extras[index]);
@@ -49,11 +49,11 @@ fn extend_mutations(values: LocalMutation[], extras: LocalMutation[]) -> LocalMu
     return out;
 }
 
-fn insert_lines_before_index(lines: string[], index: number, insert_lines: string[]) -> string[] {
+fn insert_lines_before_index(lines: string[], index: int, insert_lines: string[]) -> string[] {
     if insert_lines.length == 0 { return lines; }
 
     let mut result: string[] = [];
-    let mut line_idx: number = 0;
+    let mut line_idx: int = 0;
     let mut inserted: boolean = false;
     loop {
         if line_idx >= lines.length { break; }
@@ -141,10 +141,10 @@ fn _emit_rc_release_triplet(binding: LocalBinding, suffix: string) -> string[] {
     return lines;
 }
 
-fn emit_scope_drops(locals: LocalBinding[], scope_id: string, temp_index: number) -> ScopeDropResult {
+fn emit_scope_drops(locals: LocalBinding[], scope_id: string, temp_index: int) -> ScopeDropResult {
     let mut lines: string[] = [];
-    let mut current_temp: number = temp_index;
-    let mut index: number = 0;
+    let mut current_temp: int = temp_index;
+    let mut index: int = 0;
     loop {
         if index >= locals.length { break; }
         let binding = locals[index];
@@ -188,12 +188,12 @@ fn emit_scope_drops(locals: LocalBinding[], scope_id: string, temp_index: number
 // shared with `emit_scope_drops` (`is_rc_drop_eligible`) decides
 // owner-drop status; this helper does not duplicate the rc / consumed /
 // borrow filters.
-fn emit_guarded_scope_drops(locals: LocalBinding[], try_scope_id: string, temp_index: number, block_counter: number) -> GuardedDropResult {
+fn emit_guarded_scope_drops(locals: LocalBinding[], try_scope_id: string, temp_index: int, block_counter: int) -> GuardedDropResult {
     let mut lines: string[] = [];
-    let mut current_temp: number = temp_index;
-    let mut current_counter: number = block_counter;
+    let mut current_temp: int = temp_index;
+    let mut current_counter: int = block_counter;
     let mut final_label: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= locals.length { break; }
         let binding = locals[index];
@@ -247,8 +247,8 @@ fn emit_guarded_scope_drops(locals: LocalBinding[], try_scope_id: string, temp_i
 fn scope_id_inside_try_body(scope_id: string) -> boolean {
     let len = scope_id.length;
     if len < 4 { return false; }
-    let mut segment_start: number = 0;
-    let mut i: number = 0;
+    let mut segment_start: int = 0;
+    let mut i: int = 0;
     loop {
         if i + 1 >= len { break; }
         let ch = grapheme_at(scope_id, i);
@@ -278,12 +278,12 @@ fn scope_id_inside_try_body(scope_id: string) -> boolean {
 // stripping non-`[A-Za-z0-9_]`, but make_child_scope_id is only ever
 // passed compiler-generated block labels in the LLVM lowering passes —
 // see the `parent_scope_id` separator caveat).
-fn _segment_is_try_label(text: string, from: number, to: number) -> boolean {
+fn _segment_is_try_label(text: string, from: int, to: int) -> boolean {
     if to - from < 4 { return false; }
     if grapheme_at(text, from) != "t" { return false; }
     if grapheme_at(text, from + 1) != "r" { return false; }
     if grapheme_at(text, from + 2) != "y" { return false; }
-    let mut i: number = from + 3;
+    let mut i: int = from + 3;
     loop {
         if i >= to { break; }
         let ch = grapheme_at(text, i);
@@ -316,8 +316,8 @@ fn _segment_is_try_label(text: string, from: number, to: number) -> boolean {
 fn parent_scope_id(scope_id: string) -> string {
     let len = scope_id.length;
     if len < 2 { return ""; }
-    let mut last_dunder: number = -1;
-    let mut i: number = 0;
+    let mut last_dunder: int = -1;
+    let mut i: int = 0;
     loop {
         if i + 1 >= len { break; }
         let ch = grapheme_at(scope_id, i);
@@ -354,11 +354,11 @@ fn parent_scope_id(scope_id: string) -> string {
 // can't induce an unbounded loop. The guard ceiling is well above any
 // realistic scope nesting depth (Sailfin source rarely exceeds ~10
 // nested blocks).
-fn emit_drops_for_scope_chain(locals: LocalBinding[], from_scope: string, to_scope: string, include_target: boolean, temp_index: number) -> ScopeDropResult {
+fn emit_drops_for_scope_chain(locals: LocalBinding[], from_scope: string, to_scope: string, include_target: boolean, temp_index: int) -> ScopeDropResult {
     let mut lines: string[] = [];
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
     let mut current: string = from_scope;
-    let mut guard: number = 0;
+    let mut guard: int = 0;
     loop {
         if guard > 64 { break; }
         guard += 1;
@@ -379,11 +379,11 @@ fn emit_drops_for_scope_chain(locals: LocalBinding[], from_scope: string, to_sco
     return ScopeDropResult { lines: lines, next_temp: current_temp };
 }
 
-fn _parse_int_from_string(text: string) -> number {
+fn _parse_int_from_string(text: string) -> int {
     let len = text.length;
     if len == 0 { return 0; }
-    let mut result: number = 0;
-    let mut i: number = 0;
+    let mut result: int = 0;
+    let mut i: int = 0;
     let first_ch = grapheme_at(text, 0);
     if first_ch == "-" { i = 1; }
     loop {

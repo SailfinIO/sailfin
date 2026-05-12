@@ -77,10 +77,10 @@ fn _format_literal_span(span: NativeSourceSpan) -> string {
     return start + "-" + end;
 }
 
-fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
+fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
     let trimmed_expected = trim_text(expected_type);
@@ -103,7 +103,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         }
         let mut current_operand: LLVMOperand = open.operand;
 
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= elements.length { break; }
             let element_text = trim_text(elements[index]);
@@ -127,7 +127,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                     };
                 }
                 let with_sep = emit_string_concat(current_operand, sep.operand, current_temp, current_lines);
-                let mut _ci0: number = 0;
+                let mut _ci0: int = 0;
                 loop {
                     if _ci0 >= with_sep.diagnostics.length { break; }
                     diagnostics.push(with_sep.diagnostics[_ci0]);
@@ -148,7 +148,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             }
 
             let lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions, context, "");
-            let mut _ci1: number = 0;
+            let mut _ci1: int = 0;
             loop {
                 if _ci1 >= lowered.diagnostics.length { break; }
                 diagnostics.push(lowered.diagnostics[_ci1]);
@@ -169,7 +169,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             }
 
             let as_string = coerce_operand_to_string(lowered.operand, current_temp, current_lines);
-            let mut _ci2: number = 0;
+            let mut _ci2: int = 0;
             loop {
                 if _ci2 >= as_string.diagnostics.length { break; }
                 diagnostics.push(as_string.diagnostics[_ci2]);
@@ -190,7 +190,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             }
 
             let appended = emit_string_concat(current_operand, as_string.operand, current_temp, current_lines);
-            let mut _ci3: number = 0;
+            let mut _ci3: int = 0;
             loop {
                 if _ci3 >= appended.diagnostics.length { break; }
                 diagnostics.push(appended.diagnostics[_ci3]);
@@ -225,7 +225,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             };
         }
         let finished = emit_string_concat(current_operand, close.operand, current_temp, current_lines);
-        let mut _ci4: number = 0;
+        let mut _ci4: int = 0;
         loop {
             if _ci4 >= finished.diagnostics.length { break; }
             diagnostics.push(finished.diagnostics[_ci4]);
@@ -264,16 +264,16 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
     }
     // Slice E.1 (#488): bare integer literals default to `int` (i64) at
     // scalar context, but unannotated array literals keep the pre-E.1
-    // `double` element default so the existing `: number[]` corpus
+    // `double` element default so the existing `: int[]` corpus
     // (compiler source, runtime/prelude.sfn, and every test fixture
-    // that types arrays as `: number[]`) lowers without churn.
-    // Once E.2 migrates every `: number` site to `: int`/`: float`,
+    // that types arrays as `: int[]`) lowers without churn.
+    // Once E.2 migrates every `: int` site to `: int`/`: float`,
     // this fallback flips to `i64` (or, more cleanly, the array
     // literal grows a real type-inference pass that reads the
     // typecheck-derived binding type).
     let mut element_expected_type: string = inferred_element_type;
     if element_expected_type.length == 0 { element_expected_type = "double"; }
-    let mut index: number = metadata.start_index;
+    let mut index: int = metadata.start_index;
     loop {
         if index >= elements.length { break; }
         let element_text = trim_text(elements[index]);
@@ -543,7 +543,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
     };
     let raw_array_operands: LLVMOperand[] = [raw_array_size_operand];
     let raw_array_result = emit_runtime_call("alloc_struct", raw_array_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-    let mut _raw_array_di: number = 0;
+    let mut _raw_array_di: int = 0;
     loop {
         if _raw_array_di >= raw_array_result.diagnostics.length { break; }
         diagnostics.push(raw_array_result.diagnostics[_raw_array_di]);
@@ -609,7 +609,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
     };
     let struct_alloc_operands: LLVMOperand[] = [struct_size_operand];
     let struct_alloc_result = emit_runtime_call("alloc_struct", struct_alloc_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-    let mut _struct_alloc_di: number = 0;
+    let mut _struct_alloc_di: int = 0;
     loop {
         if _struct_alloc_di >= struct_alloc_result.diagnostics.length { break; }
         diagnostics.push(struct_alloc_result.diagnostics[_struct_alloc_di]);
@@ -689,10 +689,10 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
 // `line:col` instead of firing bare. Pre-#540 callers (every `lower_expression`
 // fan-out) thread `null` until they pick up an enclosing span — see the
 // issue's `Out:` section for the deferred plumbing.
-fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
+fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
     let mut current_lines: string[] = lines;
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
     let mut info = resolve_struct_info_for_literal(context, parse.type_name);
@@ -720,7 +720,7 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
         };
         // 0.5.8+ boxed-struct ABI: heap-allocate the aggregate and return %T*.
         let boxed = box_aggregate_operand(aggregate, info.llvm_name + "*", current_temp, current_lines, context);
-        let mut _bdi: number = 0;
+        let mut _bdi: int = 0;
         loop {
             if _bdi >= boxed.diagnostics.length { break; }
             diagnostics.push(boxed.diagnostics[_bdi]);
@@ -737,12 +737,12 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
 
     let mut used_names: string[] = [];
     let mut previous_value: string = "";
-    let mut field_index: number = 0;
+    let mut field_index: int = 0;
     loop {
         if field_index >= info.fields.length { break; }
         let expected = info.fields[field_index];
-        let mut literal_index: number = -1;
-        let mut literal_lookup_index: number = 0;
+        let mut literal_index: int = -1;
+        let mut literal_lookup_index: int = 0;
         loop {
             if literal_lookup_index >= parse.fields.length { break; }
             if parse.fields[literal_lookup_index].name == expected.name {
@@ -763,7 +763,7 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 field_value_text = literal_field.name;
             }
             let lowered = lower_expression(field_value_text, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type);
-            let mut _ci5: number = 0;
+            let mut _ci5: int = 0;
             loop {
                 if _ci5 >= lowered.diagnostics.length { break; }
                 diagnostics.push(lowered.diagnostics[_ci5]);
@@ -781,7 +781,7 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 // span so the bare ABI primitive mismatch diagnostic from
                 // `coerce_operand_to_type` carries a `line:col`.
                 let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines, false, span);
-                let mut _ci6: number = 0;
+                let mut _ci6: int = 0;
                 loop {
                     if _ci6 >= coerced.diagnostics.length { break; }
                     diagnostics.push(coerced.diagnostics[_ci6]);
@@ -791,7 +791,7 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 current_temp = coerced.temp_index;
                 if coerced.operand == null {
                     let mut _abi_match: boolean = false;
-                    let mut _abi_idx: number = 0;
+                    let mut _abi_idx: int = 0;
                     loop {
                         if _abi_idx >= coerced.diagnostics.length { break; }
                         if find_substring_from(coerced.diagnostics[_abi_idx], "ABI primitive mismatch", 0) >= 0 {
@@ -864,7 +864,7 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
         field_index += 1;
     }
 
-    let mut extra_index: number = 0;
+    let mut extra_index: int = 0;
     loop {
         if extra_index >= parse.fields.length { break; }
         let literal_field = parse.fields[extra_index];
@@ -884,7 +884,7 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
         };
         // 0.5.8+ boxed-struct ABI: heap-allocate the aggregate and return %T*.
         let boxed = box_aggregate_operand(aggregate, info.llvm_name + "*", current_temp, current_lines, context);
-        let mut _bdi: number = 0;
+        let mut _bdi: int = 0;
         loop {
             if _bdi >= boxed.diagnostics.length { break; }
             diagnostics.push(boxed.diagnostics[_bdi]);
@@ -912,7 +912,7 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
         value: previous_value
     };
     let boxed = box_aggregate_operand(aggregate, info.llvm_name + "*", current_temp, current_lines, context);
-    let mut _bdi: number = 0;
+    let mut _bdi: int = 0;
     loop {
         if _bdi >= boxed.diagnostics.length { break; }
         diagnostics.push(boxed.diagnostics[_bdi]);
@@ -927,10 +927,10 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
     };
 }
 
-fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, temp_index: number, lines: string[], context: TypeContext) -> HeapBoxResult {
+fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, temp_index: int, lines: string[], context: TypeContext) -> HeapBoxResult {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
 
     // 0.5.8+ boxed-struct ABI: compute the true LLVM layout size via the
     // `getelementptr` sizeof trick instead of the `lookup_allocation_info`
@@ -972,7 +972,7 @@ fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, te
     };
     let box_operands: LLVMOperand[] = [box_size_operand];
     let box_result = emit_runtime_call("alloc_struct", box_operands, box_overrides, current_temp - 1, current_lines);
-    let mut _box_di: number = 0;
+    let mut _box_di: int = 0;
     loop {
         if _box_di >= box_result.diagnostics.length { break; }
         diagnostics.push(box_result.diagnostics[_box_di]);
@@ -1023,10 +1023,10 @@ fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, te
 
 // Slice E.2 follow-up (#540): `span` mirrors the threading in
 // `lower_struct_literal`. Pre-#540 callers pass `null`.
-fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
+fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
     let mut current_lines: string[] = lines;
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
     let enum_info = resolve_enum_info_for_literal(context, parse.enum_name);
@@ -1108,12 +1108,12 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
     if variant_info.fields.length > 0 {
         let alloca_ptr = enum_alloca;
         let mut used_names: string[] = [];
-        let mut field_index: number = 0;
+        let mut field_index: int = 0;
         loop {
             if field_index >= variant_info.fields.length { break; }
             let expected = variant_info.fields[field_index];
-            let mut literal_index: number = -1;
-            let mut literal_lookup_index: number = 0;
+            let mut literal_index: int = -1;
+            let mut literal_lookup_index: int = 0;
             loop {
                 if literal_lookup_index >= parse.fields.length { break; }
                 if parse.fields[literal_lookup_index].name == expected.name {
@@ -1126,7 +1126,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
             if literal_index >= 0 {
                 let literal_field = parse.fields[literal_index];
                 let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type);
-                let mut _ci7: number = 0;
+                let mut _ci7: int = 0;
                 loop {
                     if _ci7 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci7]);
@@ -1157,7 +1157,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                                 }
                                 if !should_unwrap_string_field {
                                     let boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context);
-                                    let mut _ci8: number = 0;
+                                    let mut _ci8: int = 0;
                                     loop {
                                         if _ci8 >= boxed.diagnostics.length {
                                             break;
@@ -1182,7 +1182,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                     // Slice E.2 follow-up (#540): thread the enum-literal
                     // site span; same shape as the struct-literal branch.
                     let coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines, false, span);
-                    let mut _ci9: number = 0;
+                    let mut _ci9: int = 0;
                     loop {
                         if _ci9 >= coerced.diagnostics.length { break; }
                         diagnostics.push(coerced.diagnostics[_ci9]);
@@ -1192,7 +1192,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                     current_temp = coerced.temp_index;
                     if coerced.operand == null {
                         let mut _abi_match: boolean = false;
-                        let mut _abi_idx: number = 0;
+                        let mut _abi_idx: int = 0;
                         loop {
                             if _abi_idx >= coerced.diagnostics.length { break; }
                             if find_substring_from(coerced.diagnostics[_abi_idx], "ABI primitive mismatch", 0) >= 0 {
@@ -1231,7 +1231,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                         if alloca_ptr != null {
                             let payload_ptr_temp = format_temp_name(current_temp);
                             current_temp += 1;
-                            let mut payload_field_index: number = 1;
+                            let mut payload_field_index: int = 1;
                             if enum_info.max_payload_size > 0 {
                                 if enum_info.align > enum_info.tag_size {
                                     payload_field_index = 2;
@@ -1298,7 +1298,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
             field_index += 1;
         }
 
-        let mut extra_index: number = 0;
+        let mut extra_index: int = 0;
         loop {
             if extra_index >= parse.fields.length { break; }
             let literal_field = parse.fields[extra_index];
@@ -1337,7 +1337,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
         value: enum_value
     };
     let boxed = box_aggregate_operand(aggregate, enum_info.llvm_name + "*", current_temp, current_lines, context);
-    let mut _edi: number = 0;
+    let mut _edi: int = 0;
     loop {
         if _edi >= boxed.diagnostics.length { break; }
         diagnostics.push(boxed.diagnostics[_edi]);
@@ -1352,7 +1352,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
     };
 }
 
-fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
+fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let mut diagnostics = parse.diagnostics;
     let empty_constants = empty_string_constant_set();
     if !parse.success {
@@ -1378,7 +1378,7 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     }
 
     let lowered = lower_expression(parse.value, bindings, locals, temp_index, lines, functions, context, "");
-    let mut _ci10: number = 0;
+    let mut _ci10: int = 0;
     loop {
         if _ci10 >= lowered.diagnostics.length { break; }
         diagnostics.push(lowered.diagnostics[_ci10]);
@@ -1611,7 +1611,7 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     };
 }
 
-fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? {
+fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? {
     let content = unescape_string_literal(literal);
     if find_substring_from(content, "{{", 0) < 0 { return null; }
     if find_substring_from(content, "}}", 0) < 0 { return null; }
@@ -1622,7 +1622,7 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
     if parsed.parts.length != parsed.expressions.length + 1 { return null; }
 
     let mut current_lines: string[] = lines;
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
     let mut diagnostics: string[] = [];
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
@@ -1642,13 +1642,13 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
     }
     let mut current_operand: LLVMOperand = first.operand;
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= parsed.expressions.length { break; }
 
         let expr_text = parsed.expressions[index];
         let lowered_expr = lower_expression(expr_text, bindings, locals, current_temp, current_lines, functions, context, "i8*");
-        let mut _ci11: number = 0;
+        let mut _ci11: int = 0;
         loop {
             if _ci11 >= lowered_expr.diagnostics.length { break; }
             diagnostics.push(lowered_expr.diagnostics[_ci11]);
@@ -1672,7 +1672,7 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
         }
 
         let coerced = coerce_operand_to_string(lowered_expr.operand, current_temp, current_lines);
-        let mut _ci12: number = 0;
+        let mut _ci12: int = 0;
         loop {
             if _ci12 >= coerced.diagnostics.length { break; }
             diagnostics.push(coerced.diagnostics[_ci12]);
@@ -1695,7 +1695,7 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
         }
 
         let concat1 = emit_string_concat(current_operand, coerced.operand, current_temp, current_lines);
-        let mut _ci13: number = 0;
+        let mut _ci13: int = 0;
         loop {
             if _ci13 >= concat1.diagnostics.length { break; }
             diagnostics.push(concat1.diagnostics[_ci13]);
@@ -1730,7 +1730,7 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
         }
 
         let concat2 = emit_string_concat(current_operand, part_value.operand, current_temp, current_lines);
-        let mut _ci14: number = 0;
+        let mut _ci14: int = 0;
         loop {
             if _ci14 >= concat2.diagnostics.length { break; }
             diagnostics.push(concat2.diagnostics[_ci14]);
