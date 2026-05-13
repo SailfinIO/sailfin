@@ -80,13 +80,13 @@ struct TypeDescriptor {
     items: TypeDescriptor[];
 }
 
-fn sleep(milliseconds: number) ![clock] { runtime_sleep_fn(milliseconds); }
+fn sleep(milliseconds: int) ![clock] { runtime_sleep_fn(milliseconds); }
 
-fn monotonic_millis() -> number ![clock] {
+fn monotonic_millis() -> int ![clock] {
     return runtime_monotonic_millis_fn();
 }
 
-fn channel < T > (capacity: number = 0) -> any ![io] {
+fn channel < T > (capacity: int = 0) -> any ![io] {
     return runtime_channel_fn(capacity);
 }
 
@@ -114,7 +114,7 @@ fn array_reduce(items: any[], initial: any, reducer: any) -> any {
     return runtime_array_reduce_fn(items, initial, reducer);
 }
 
-fn char_at(value: string, index: number) -> string {
+fn char_at(value: string, index: int) -> string {
     if value.length == 0 { return ""; }
     if index < 0 { return ""; }
     if index >= value.length { return ""; }
@@ -321,7 +321,7 @@ fn string_ends_with(value: string, suffix: string) -> boolean {
     return true;
 }
 
-fn descriptor_find_top_level(value: string, needle: string) -> number {
+fn descriptor_find_top_level(value: string, needle: string) -> int {
     let trimmed = descriptor_trim(value);
     if needle.length != 1 { return -1; }
     let target = grapheme_at(needle, 0);
@@ -540,13 +540,13 @@ fn serve(handler: any, config: any? = null) -> void ![io, net] {
     runtime_serve_fn(handler, config);
 }
 
-fn clamp(value: number, minimum: number, maximum: number) -> number {
+fn clamp(value: int, minimum: int, maximum: int) -> int {
     if value < minimum { return minimum; }
     if value > maximum { return maximum; }
     return value;
 }
 
-fn substring(text: string, start: number, end: number) -> string {
+fn substring(text: string, start: int, end: int) -> string {
     let length = text.length;
     if length == 0 { return ""; }
     let mut normalized_start = clamp(start, 0, length);
@@ -576,7 +576,7 @@ fn strings_equal(left: string, right: string) -> boolean {
     return true;
 }
 
-fn find_char(text: string, character: string, start: number = 0) -> number {
+fn find_char(text: string, character: string, start: int = 0) -> int {
     let length = text.length;
     if length == 0 { return -1; }
 
@@ -607,7 +607,7 @@ fn match_exhaustive_failed(value: any) -> void {
     runtime_raise_value_error_fn(message);
 }
 
-fn char_code(character: string) -> number {
+fn char_code(character: string) -> int {
     if character.length == 0 { return -1; }
 
     // Performance note: this function sits on hot paths in the compiler.
@@ -617,11 +617,11 @@ fn char_code(character: string) -> number {
     return runtime_char_code_fn(grapheme_at(character, 0));
 }
 
-fn grapheme_count(text: string) -> number {
+fn grapheme_count(text: string) -> int {
     return runtime_grapheme_count_fn(text);
 }
 
-fn grapheme_at(text: string, index: number) -> string {
+fn grapheme_at(text: string, index: int) -> string {
     return runtime_grapheme_at_fn(text, index);
 }
 
