@@ -453,7 +453,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "strings_equal", symbol: "strings_equal", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_str_eq"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "char_code", symbol: "char_code", return_type: "double", parameter_types: ["i8*"], effects: [], native_signature: null
+        target: "char_code", symbol: "char_code", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "number_to_string", symbol: "number_to_string", return_type: "i8*", parameter_types: ["double"], effects: [], native_signature: null
@@ -648,7 +648,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // "monotonic_millis" → sailfin_runtime_monotonic_millis) so it
     // is not duplicated here.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "find_char", symbol: "find_char", return_type: "double", parameter_types: ["i8*", "i8*", "double"], effects: [], native_signature: null
+        target: "find_char", symbol: "find_char", return_type: "i64", parameter_types: ["i8*", "i8*", "i64"], effects: [], native_signature: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "string_starts_with", symbol: "string_starts_with", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null
