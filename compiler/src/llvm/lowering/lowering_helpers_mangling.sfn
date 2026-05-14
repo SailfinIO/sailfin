@@ -431,6 +431,14 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
     loop {
         if index >= structs.length { break; }
         let definition = structs[index];
+        if definition.name == null {
+            index += 1;
+            continue;
+        }
+        if definition.name.length == 0 {
+            index += 1;
+            continue;
+        }
         let mut methods = definition.methods;
         if methods == null {
             index += 1;
@@ -444,6 +452,14 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
         loop {
             if method_index >= methods.length { break; }
             let method = methods[method_index];
+            if method.name == null {
+                method_index += 1;
+                continue;
+            }
+            if method.name.length == 0 {
+                method_index += 1;
+                continue;
+            }
             let qualified_name = definition.name + method.name;
             // Rebuild parameters so that the `self` parameter always carries
             // the struct name as its type_annotation.  The ABI corruption in
