@@ -52,7 +52,7 @@ import { lower_expression } from "./core";
 import { lower_inline_gep_field_access } from "./core_member_helpers";
 import { sanitize_symbol } from "./core_text";
 
-fn make_expression_result(lines: string[], temp_index: number, operand: LLVMOperand?, diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
+fn make_expression_result(lines: string[], temp_index: int, operand: LLVMOperand?, diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,
@@ -62,7 +62,7 @@ fn make_expression_result(lines: string[], temp_index: number, operand: LLVMOper
     };
 }
 
-fn emit_string_constant_pointer(constant: StringConstant, temp_index: number, lines: string[]) -> StringPointerResult {
+fn emit_string_constant_pointer(constant: StringConstant, temp_index: int, lines: string[]) -> StringPointerResult {
     let mut current_lines: string[] = lines;
     let array_length = constant.byte_count + 1;
     let array_type = "[" + number_to_string(array_length) + " x i8]";
@@ -81,9 +81,9 @@ fn emit_string_constant_pointer(constant: StringConstant, temp_index: number, li
     };
 }
 
-fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
+fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_index: int, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
     let mut current_lines: string[] = lines;
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
     let mut dynamic_string_constants: StringConstant[] = string_constants;
 
     let sanitized_field = sanitize_symbol(field);
@@ -141,7 +141,7 @@ fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_in
     return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants);
 }
 
-fn lower_runtime_global_reference(temp_index: number, lines: string[]) -> ExpressionResult {
+fn lower_runtime_global_reference(temp_index: int, lines: string[]) -> ExpressionResult {
     let runtime_temp = format_temp_name(temp_index);
     let mut current_lines = lines;
     current_lines.push("  " + runtime_temp + " = load i8*, i8** @runtime");
@@ -156,9 +156,9 @@ fn lower_runtime_global_reference(temp_index: number, lines: string[]) -> Expres
     };
 }
 
-fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, base_operand: LLVMOperand, pointer_available: boolean, temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[], expected_type: string) -> ExpressionResult {
+fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, base_operand: LLVMOperand, pointer_available: boolean, temp_index: int, lines: string[], diagnostics: string[], string_constants: StringConstant[], expected_type: string) -> ExpressionResult {
     let mut current_lines: string[] = lines;
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
     let mut enum_string_constants: StringConstant[] = string_constants;
     let mut messages: string[] = diagnostics;
 
@@ -224,7 +224,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         current_temp = default_pointer_result.temp_index;
         let mut current_pointer: string = default_pointer_result.pointer;
 
-        let mut variant_index: number = 0;
+        let mut variant_index: int = 0;
         loop {
             if variant_index >= enum_info.variants.length { break; }
             let variant_info = enum_info.variants[variant_index];
@@ -282,7 +282,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
 
     let mut matched_variants: EnumVariantInfo[] = [];
     let mut matched_fields: StructFieldInfo[] = [];
-    let mut variant_check_index: number = 0;
+    let mut variant_check_index: int = 0;
     loop {
         if variant_check_index >= enum_info.variants.length { break; }
         let candidate_variant = enum_info.variants[variant_check_index];
@@ -345,7 +345,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         // reject fields whose base type differs OR whose pointer depth differs
         // by more than 1 — those the coercion cannot repair.
         let mut expected_base: string = expected_type;
-        let mut expected_depth: number = 0;
+        let mut expected_depth: int = 0;
         loop {
             if !ends_with_pointer_suffix(expected_base) { break; }
             expected_base = strip_pointer_suffix(expected_base);
@@ -353,12 +353,12 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         }
         let mut filtered_variants: EnumVariantInfo[] = [];
         let mut filtered_fields: StructFieldInfo[] = [];
-        let mut selection_index: number = 0;
+        let mut selection_index: int = 0;
         loop {
             if selection_index >= matched_fields.length { break; }
             let candidate_field = matched_fields[selection_index];
             let mut candidate_base: string = candidate_field.llvm_type;
-            let mut candidate_depth: number = 0;
+            let mut candidate_depth: int = 0;
             loop {
                 if !ends_with_pointer_suffix(candidate_base) { break; }
                 candidate_base = strip_pointer_suffix(candidate_base);
@@ -369,7 +369,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             if candidate_base == expected_base {
                 // Only accept if pointer-depth difference is within the
                 // coercion branch's supported range (|diff| <= 1).
-                let mut diff: number = candidate_depth - expected_depth;
+                let mut diff: int = candidate_depth - expected_depth;
                 if diff < 0 { diff = 0 - diff; }
                 if diff <= 1 { accept = true; }
             }
@@ -404,23 +404,23 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
 
     let first_type = selected_fields[0].llvm_type;
     let mut base_type: string = first_type;
-    let mut first_pointer_depth: number = 0;
+    let mut first_pointer_depth: int = 0;
     loop {
         if !ends_with_pointer_suffix(base_type) { break; }
         base_type = strip_pointer_suffix(base_type);
         first_pointer_depth += 1;
     }
 
-    let mut min_pointer_depth: number = first_pointer_depth;
-    let mut max_pointer_depth: number = first_pointer_depth;
+    let mut min_pointer_depth: int = first_pointer_depth;
+    let mut max_pointer_depth: int = first_pointer_depth;
     let mut consistent_base: boolean = true;
     let mut pointer_depth_mismatch: boolean = false;
-    let mut type_index: number = 1;
+    let mut type_index: int = 1;
     loop {
         if type_index >= selected_fields.length { break; }
         let candidate_type = selected_fields[type_index].llvm_type;
         let mut candidate_base: string = candidate_type;
-        let mut candidate_depth: number = 0;
+        let mut candidate_depth: int = 0;
         loop {
             if !ends_with_pointer_suffix(candidate_base) { break; }
             candidate_base = strip_pointer_suffix(candidate_base);
@@ -498,14 +498,14 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
 
     let default_literal = default_return_literal(field_type);
     let mut current_value_text: string = default_literal;
-    let mut match_index: number = 0;
+    let mut match_index: int = 0;
     loop {
         if match_index >= selected_variants.length { break; }
         let variant_info = selected_variants[match_index];
         let field_info = selected_fields[match_index];
 
         let payload_ptr_temp = format_temp_name(current_temp);
-        let mut payload_field_index: number = 1;
+        let mut payload_field_index: int = 1;
         if enum_info.max_payload_size > 0 {
             if enum_info.align > enum_info.tag_size { payload_field_index = 2; }
         }

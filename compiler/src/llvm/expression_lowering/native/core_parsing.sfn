@@ -109,7 +109,7 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
         if substring(remainder, 0, 1) == "(" {
             let argument_parse = extract_borrow_argument(remainder);
             let mut messages: string[] = diagnostics;
-            let mut _ci0: number = 0;
+            let mut _ci0: int = 0;
             loop {
                 if _ci0 >= argument_parse.diagnostics.length { break; }
                 messages.push(argument_parse.diagnostics[_ci0]);
@@ -192,9 +192,9 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
 
 fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
     let mut diagnostics: string[] = [];
-    let mut depth: number = 0;
-    let mut index: number = 0;
-    let mut closing_index: number = -1;
+    let mut depth: int = 0;
+    let mut index: int = 0;
+    let mut closing_index: int = -1;
     loop {
         if index >= text.length { break; }
         let ch = substring(text, index, index + 1);
@@ -261,7 +261,7 @@ fn extract_simple_borrow_target(text: string) -> BorrowArgumentParse {
             diagnostics: diagnostics
         };
     }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
@@ -298,7 +298,7 @@ fn extract_simple_borrow_target(text: string) -> BorrowArgumentParse {
 fn is_valid_borrow_target(text: string) -> boolean {
     let trimmed = trim_text(text);
     if trimmed.length == 0 { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
@@ -331,10 +331,10 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
     }
 
     // Find '?' and ':' at the same nesting level (depth 0)
-    let mut depth: number = 0;
-    let mut question_index: number = -1;
-    let mut colon_index: number = -1;
-    let mut index: number = 0;
+    let mut depth: int = 0;
+    let mut question_index: int = -1;
+    let mut colon_index: int = -1;
+    let mut index: int = 0;
 
     loop {
         if index >= trimmed.length { break; }
@@ -530,15 +530,15 @@ fn parse_cast_expression(text: string) -> CastParseResult {
     }
 
     // Scan for a top-level ` as ` outside of brackets/strings.
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut angle_depth: number = 0;
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut angle_depth: int = 0;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape_next: boolean = false;
-    let mut index: number = 0;
-    let mut match_index: number = -1;
+    let mut index: int = 0;
+    let mut match_index: int = -1;
     loop {
         if index >= trimmed.length { break; }
         let ch = char_at(trimmed, index);

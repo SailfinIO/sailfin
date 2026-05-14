@@ -462,7 +462,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_injected_count = 0;
                     } else {
                         let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                        let mut _ci3: number = 0;
+                        let mut _ci3: int = 0;
                         loop {
                             if _ci3 >= lowered_self.diagnostics.length {
                                 break;
@@ -499,7 +499,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                     }
                 } else {
                     let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                    let mut _ci4: number = 0;
+                    let mut _ci4: int = 0;
                     loop {
                         if _ci4 >= lowered_self.diagnostics.length { break; }
                         r_diagnostics.push(lowered_self.diagnostics[_ci4]);
@@ -534,7 +534,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                 }
             } else if interface_info != null {
                 let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                let mut _ci5: number = 0;
+                let mut _ci5: int = 0;
                 loop {
                     if _ci5 >= lowered_self.diagnostics.length { break; }
                     r_diagnostics.push(lowered_self.diagnostics[_ci5]);
@@ -574,7 +574,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                 // all known structs for one that has a function with a fused
                 // name (StructNamefield) in the function list / file context.
                 let mut _struct_fallback_info: StructTypeInfo? = null;
-                let mut _sfi: number = 0;
+                let mut _sfi: int = 0;
                 loop {
                     if _sfi >= context.structs.length { break; }
                     let _sf_candidate = context.structs[_sfi];
@@ -589,7 +589,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                 if _struct_fallback_info != null {
                     // Found a struct method — lower the base and dispatch
                     let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                    let mut _ci6b: number = 0;
+                    let mut _ci6b: int = 0;
                     loop {
                         if _ci6b >= lowered_self.diagnostics.length { break; }
                         r_diagnostics.push(lowered_self.diagnostics[_ci6b]);
@@ -628,7 +628,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                     } else {
                         let field_helper = find_runtime_helper(method_parse.field);
                         let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                        let mut _ci6: number = 0;
+                        let mut _ci6: int = 0;
                         loop {
                             if _ci6 >= lowered_self.diagnostics.length {
                                 break;
@@ -760,8 +760,8 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
         let sep_pos = find_last_index_of_char(after_prefix, "_");
         if sep_pos > 1 {
             // Look for "__" separator (double underscore)
-            let mut _td_split: number = -1;
-            let mut _td_i: number = 0;
+            let mut _td_split: int = -1;
+            let mut _td_i: int = 0;
             loop {
                 if _td_i >= after_prefix.length { break; }
                 if substring(after_prefix, _td_i, _td_i + 2) == "__" {
@@ -774,7 +774,7 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                 let method_name = substring(after_prefix, _td_split + 2, after_prefix.length);
                 let interface_info2 = find_interface_info_by_name(context, interface_name);
                 if interface_info2 != null {
-                    let mut sig_idx: number = 0;
+                    let mut sig_idx: int = 0;
                     loop {
                         if sig_idx >= interface_info2.signatures.length {
                             break;
