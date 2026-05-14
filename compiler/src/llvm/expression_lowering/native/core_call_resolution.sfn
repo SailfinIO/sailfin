@@ -63,7 +63,7 @@ import {
 // function named `atomic_load` from shadowing the builtin (which
 // would otherwise be a hazard once the runtime starts depending on
 // these names).
-fn try_dispatch_atomic_builtin(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+fn try_dispatch_atomic_builtin(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
     if !is_atomic_builtin(trimmed_target) { return null; }
     return lower_atomic_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
 }
@@ -71,15 +71,15 @@ fn try_dispatch_atomic_builtin(trimmed_target: string, arguments: string[], bind
 // Resolve fused concat/push targets (e.g. `valuesconcat(xs)` → `concat`).
 // Also handles parse_member_access dispatch and struct-method fallback.
 // Returns a CallTargetResolution with the resolved target, method operand, etc.
-fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], current_temp: number, current_lines: string[], functions: NativeFunction[], context: TypeContext, diagnostics: string[], collected_string_constants: StringConstant[]) -> CallTargetResolution ![io] {
+fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], current_temp: int, current_lines: string[], functions: NativeFunction[], context: TypeContext, diagnostics: string[], collected_string_constants: StringConstant[]) -> CallTargetResolution ![io] {
     let mut result_target = trimmed_target;
     let mut result_lines = current_lines;
-    let mut result_temp: number = current_temp;
+    let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
     let mut result_string_constants = collected_string_constants;
     let mut method_operand: LLVMOperand? = null;
     let mut helper_descriptor: RuntimeHelperDescriptor? = null;
-    let mut injected_argument_count: number = 0;
+    let mut injected_argument_count: int = 0;
     let mut is_array_concat: boolean = false;
     let mut array_concat_element_type: string = "";
     let mut is_array_push: boolean = false;
@@ -105,7 +105,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
 
                     if local != null {
                         let load_result = load_local_operand(local, result_temp, result_lines);
-                        let mut _ci0: number = 0;
+                        let mut _ci0: int = 0;
                         loop {
                             if _ci0 >= load_result.diagnostics.length { break; }
                             result_diagnostics.push(load_result.diagnostics[_ci0]);
@@ -151,7 +151,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
 
     // Defuse fused push targets (e.g. `loaded_argspush(x)` → `push`)
     // FLAT structure — NO nested ifs — to survive seed degenerate-if bug.
-    let mut _push_score: number = 0;
+    let mut _push_score: int = 0;
     if ends_with(canonical_fused, "push") { _push_score += 1; }
     if canonical_fused.length > 4 { _push_score += 1; }
     let mut _push_receiver_name: string = "";
@@ -173,7 +173,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
     let mut _push_receiver_operand: LLVMOperand? = null;
     if _push_local != null {
         let push_load_result = load_local_operand(_push_local, result_temp, result_lines);
-        let mut _pci0: number = 0;
+        let mut _pci0: int = 0;
         loop {
             if _pci0 >= push_load_result.diagnostics.length { break; }
             result_diagnostics.push(push_load_result.diagnostics[_pci0]);
@@ -237,7 +237,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                 if _pre_am_local != null {
                                     _pre_am_type = _pre_am_local.llvm_type;
                                     let _pre_am_load = load_local_operand(_pre_am_local, result_temp, result_lines);
-                                    let mut _pci_am: number = 0;
+                                    let mut _pci_am: int = 0;
                                     loop {
                                         if _pci_am >= _pre_am_load.diagnostics.length {
                                             break;
@@ -323,7 +323,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                 }
                                 if _pre_struct.length > 0 {
                                     let _pre_lowered = lower_expression(_pre_base, bindings, locals, result_temp, result_lines, functions, context, "");
-                                    let mut _ci1: number = 0;
+                                    let mut _ci1: int = 0;
                                     loop {
                                         if _ci1 >= _pre_lowered.diagnostics.length {
                                             break;
@@ -355,15 +355,15 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
 
 // Resolves method calls via parse_member_access (struct methods, interface dispatch,
 // runtime helpers, array concat/push).
-fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], result_temp: number, result_lines: string[], functions: NativeFunction[], context: TypeContext, result_diagnostics: string[], result_string_constants: StringConstant[], method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, injected_argument_count: number, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string) -> CallTargetResolution ![io] {
+fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], result_temp: int, result_lines: string[], functions: NativeFunction[], context: TypeContext, result_diagnostics: string[], result_string_constants: StringConstant[], method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, injected_argument_count: int, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string) -> CallTargetResolution ![io] {
     let mut r_target = result_target;
     let mut r_lines = result_lines;
-    let mut r_temp: number = result_temp;
+    let mut r_temp: int = result_temp;
     let mut r_diagnostics = result_diagnostics;
     let mut r_string_constants = result_string_constants;
     let mut r_method_operand = method_operand;
     let mut r_helper_descriptor = helper_descriptor;
-    let mut r_injected_count: number = injected_argument_count;
+    let mut r_injected_count: int = injected_argument_count;
     let mut r_is_array_concat = is_array_concat;
     let mut r_array_concat_element_type = array_concat_element_type;
     let mut r_is_array_push = is_array_push;
@@ -377,7 +377,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
             if method_parse.field == "push" { _if58 = true; }
             if _if58 {
                 let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                let mut _ci2: number = 0;
+                let mut _ci2: int = 0;
                 loop {
                     if _ci2 >= lowered_self.diagnostics.length { break; }
                     r_diagnostics.push(lowered_self.diagnostics[_ci2]);

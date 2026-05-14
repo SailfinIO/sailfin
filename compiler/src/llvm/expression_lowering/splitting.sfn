@@ -13,10 +13,10 @@ fn split_array_elements(text: string) -> string[] {
     if trimmed.length == 0 { return []; }
     let mut entries: string[] = [];
     let mut current: string = "";
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut index: number = 0;
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut index: int = 0;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape: boolean = false;
