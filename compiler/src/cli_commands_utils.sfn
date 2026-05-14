@@ -69,7 +69,7 @@ fn _dirname_cmd(path: string) -> string {
 // signature on the legacy `: number / -> number` shape so the dispatcher
 // has a discriminating signature to disambiguate. Flips in the bulk PR
 // that migrates the prelude-mirror helpers in lockstep.
-fn find_char(text: string, ch: string, start: number) -> number { // alias-coverage: prelude shadow
+fn find_char(text: string, ch: string, start: number) -> number {  // alias-coverage: prelude shadow
     let mut i: number = start;
     loop {
         if i >= text.length { break; }
