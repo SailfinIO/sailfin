@@ -34,7 +34,7 @@ fn parse_decimal_number(text: string) -> NumberParseResult {
         return NumberParseResult { success: false, value: 0 };
     }
     let mut value: int = 0;
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut negative: boolean = false;
     if trimmed[0] == "-" {
         negative = true;
@@ -82,9 +82,9 @@ fn parse_struct_layout_header(text: string) -> StructLayoutHeaderParse {
     let mut size_found: boolean = false;
     let mut align_found: boolean = false;
     let mut name_value: string = "";
-    let mut size_value: number = 0;
-    let mut align_value: number = 0;
-    let mut index: number = 0;
+    let mut size_value: int = 0;
+    let mut align_value: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= tokens.length { break; }
         let token = tokens[index];
@@ -183,10 +183,10 @@ fn parse_struct_layout_field(text: string, struct_name: string) -> StructLayoutF
     let mut offset_found: boolean = false;
     let mut size_found: boolean = false;
     let mut align_found: boolean = false;
-    let mut offset_value: number = 0;
-    let mut size_value: number = 0;
-    let mut align_value: number = 0;
-    let mut index: number = 1;
+    let mut offset_value: int = 0;
+    let mut size_value: int = 0;
+    let mut align_value: int = 0;
+    let mut index: int = 1;
     loop {
         if index >= tokens.length { break; }
         let token = tokens[index];
@@ -308,11 +308,11 @@ fn parse_enum_layout_header(text: string) -> EnumLayoutHeaderParse {
     let mut tag_type: string = "";
     let mut tag_size_found: boolean = false;
     let mut tag_align_found: boolean = false;
-    let mut size_value: number = 0;
-    let mut align_value: number = 0;
-    let mut tag_size_value: number = 0;
-    let mut tag_align_value: number = 0;
-    let mut index: number = 0;
+    let mut size_value: int = 0;
+    let mut align_value: int = 0;
+    let mut tag_size_value: int = 0;
+    let mut tag_align_value: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= tokens.length { break; }
         let token = tokens[index];
@@ -452,11 +452,11 @@ fn parse_enum_variant_layout(text: string, enum_name: string) -> EnumLayoutVaria
     let mut offset_found: boolean = false;
     let mut size_found: boolean = false;
     let mut align_found: boolean = false;
-    let mut tag_value: number = 0;
-    let mut offset_value: number = 0;
-    let mut size_value: number = 0;
-    let mut align_value: number = 0;
-    let mut index: number = 1;
+    let mut tag_value: int = 0;
+    let mut offset_value: int = 0;
+    let mut size_value: int = 0;
+    let mut align_value: int = 0;
+    let mut index: int = 1;
     loop {
         if index >= tokens.length { break; }
         let token = tokens[index];
@@ -619,10 +619,10 @@ fn parse_enum_payload_layout(text: string, enum_name: string) -> EnumLayoutPaylo
     let mut offset_found: boolean = false;
     let mut size_found: boolean = false;
     let mut align_found: boolean = false;
-    let mut offset_value: number = 0;
-    let mut size_value: number = 0;
-    let mut align_value: number = 0;
-    let mut index: number = 1;
+    let mut offset_value: int = 0;
+    let mut size_value: int = 0;
+    let mut align_value: int = 0;
+    let mut index: int = 1;
     loop {
         if index >= tokens.length { break; }
         let token = tokens[index];
