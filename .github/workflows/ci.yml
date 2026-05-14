@@ -15,6 +15,12 @@ env:
   # scrubs env — can't silently regress CI onto the malloc path.
   # See docs/build-performance.md → "Arena Allocator Default-On".
   SAILFIN_USE_ARENA: "1"
+  # macOS arm64 CI runners are ~2x slower than local Linux dev hardware.
+  # The atomic tests import the full expression-lowering stack and take
+  # ~110s locally; on macOS CI they can reach 220s, exceeding the default
+  # 180s per-test budget and causing spurious failures. 300s gives ample
+  # headroom on both platforms without masking genuine hangs.
+  SAILFIN_TEST_TIMEOUT: "300"
 
 permissions:
   contents: read
