@@ -16,7 +16,7 @@
 // for these builtins runs at all, plus a few near-miss negatives
 // so a regression in `is_atomic_builtin` surfaces here without
 // paying the lowering import cost.
-import { is_atomic_builtin } from "../../src/llvm/atomics";
+import { is_atomic_builtin } from "../../src/llvm/atomics_check";
 
 // ── Predicate recognises the implemented names ──
 test "atomics: is_atomic_builtin recognises atomic_add" {
