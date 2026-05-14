@@ -53,7 +53,7 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
     // available without the memory cost of parsing function bodies.
     let mut queue_paths: string[] = [];
     let mut queue_parent_slugs: string[] = [];
-    let mut queue_depths: number[] = [];
+    let mut queue_depths: int[] = [];
 
     let mut init_index: int = 0;
     loop {
@@ -64,7 +64,7 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
         init_index += 1;
     }
 
-    let max_transitive_depth: number = 3;
+    let max_transitive_depth: int = 3;
 
     let mut queue_index: int = 0;
     loop {
@@ -235,7 +235,7 @@ fn resolve_import_module_slug(module: string) -> string {
 }
 
 fn dirname_for_module_slug(slug: string) -> string {
-    let mut last_slash: number = -1;
+    let mut last_slash: int = -1;
     let mut index: int = 0;
     loop {
         if index >= slug.length { break; }
@@ -472,15 +472,15 @@ fn resolve_cached_capsule_source(module: string, deps: string, home_dir: string)
         let dep_len = deps.length;
         loop {
             if start >= dep_len { break; }
-            let mut end: number = start;
+            let mut end: int = start;
             loop {
                 if end >= dep_len { break; }
                 let ch = substring(deps, end, end + 1);
                 if ch == "\n" { break; }
                 end += 1;
             }
-            let mut eq_pos: number = -1;
-            let mut ei: number = start;
+            let mut eq_pos: int = -1;
+            let mut ei: int = start;
             loop {
                 if ei >= end { break; }
                 let ch = substring(deps, ei, ei + 1);
@@ -610,7 +610,7 @@ fn find_enum_index(enums: NativeEnum[], name: string) -> number {
     return -1;
 }
 
-fn replace_native_struct(structs: NativeStruct[], index: number, replacement: NativeStruct) -> NativeStruct[] {
+fn replace_native_struct(structs: NativeStruct[], index: int, replacement: NativeStruct) -> NativeStruct[] {
     let mut result: NativeStruct[] = [];
     let mut i: int = 0;
     loop {
@@ -623,7 +623,7 @@ fn replace_native_struct(structs: NativeStruct[], index: number, replacement: Na
     return result;
 }
 
-fn replace_native_enum(enums: NativeEnum[], index: number, replacement: NativeEnum) -> NativeEnum[] {
+fn replace_native_enum(enums: NativeEnum[], index: int, replacement: NativeEnum) -> NativeEnum[] {
     let mut result: NativeEnum[] = [];
     let mut i: int = 0;
     loop {

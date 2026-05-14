@@ -71,8 +71,8 @@ fn is_unit_enum(enum_def: NativeEnum) -> boolean {
 }
 
 fn synthesize_unit_enum_layout(enum_def: NativeEnum) -> NativeEnumLayout {
-    let tag_size: number = 4;
-    let tag_align: number = 4;
+    let tag_size: int = 4;
+    let tag_align: int = 4;
     let mut layouts: NativeEnumVariantLayout[] = [];
     let mut index: int = 0;
     loop {
@@ -249,7 +249,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             });
             field_index += 1;
         }
-        let mut align_value: number = layout.align;
+        let mut align_value: int = layout.align;
         if align_value <= 0 { align_value = 1; }
         struct_entries = append_struct_type_info(struct_entries, StructTypeInfo {
             name: definition.name, llvm_name: llvm_name, fields: fields, size: layout.size, align: align_value
@@ -317,7 +317,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             });
             variant_index += 1;
         }
-        let mut enum_align_value: number = enum_layout.align;
+        let mut enum_align_value: int = enum_layout.align;
         if enum_align_value <= 0 { enum_align_value = 1; }
         let mut max_payload_size: int = 0;
         let mut payload_scan: int = 0;

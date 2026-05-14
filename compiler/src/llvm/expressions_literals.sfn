@@ -60,7 +60,7 @@ fn is_digit_char(ch: string) -> boolean {
     return _ret167;
 }
 
-fn char_code_at_text(text: string, index: number) -> number {
+fn char_code_at_text(text: string, index: int) -> int {
     return char_code(char_at(text, index));
 }
 

@@ -71,7 +71,7 @@ fn fnv1a_64_hash(input: string) -> AbiHashLimbs {
         h2: 40164,
         h3: 52210
     };
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= input.length { break; }
         let byte = char_code(substring(input, i, i + 1));
@@ -163,7 +163,7 @@ fn _xor_byte(a: number, b: number) -> number {
     let mut bit_value: number = 1;
     let mut a_rem: number = a;
     let mut b_rem: number = b;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= 8 { break; }
         let a_split = _split_low_bit(a_rem);

@@ -14,7 +14,7 @@ import { find_parameter_binding } from "./core_bindings";
 import { strip_enclosing_parentheses } from "./core_operators";
 import { find_local_binding } from "./core_scopes";
 
-fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[]) -> ExpressionResult {
+fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
     let empty_constants = empty_string_constant_set();
     if !parse.success {

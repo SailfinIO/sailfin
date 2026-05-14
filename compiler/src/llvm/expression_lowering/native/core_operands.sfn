@@ -47,7 +47,7 @@ fn format_coerce_span_location(span: NativeSourceSpan) -> string {
     return start + "-" + end;
 }
 
-fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: number, lines: string[]) -> ComparisonEmission {
+fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: int, lines: string[]) -> ComparisonEmission {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut symbol_is_equality: boolean = false;
@@ -185,7 +185,7 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
     };
 }
 
-fn emit_boolean_and(left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: number, lines: string[]) -> ComparisonEmission {
+fn emit_boolean_and(left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: int, lines: string[]) -> ComparisonEmission {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     if left_operand.llvm_type != "i1" {
@@ -274,7 +274,7 @@ fn is_string_pointer_type(llvm_type: string) -> boolean {
     return false;
 }
 
-fn load_local_operand(local: LocalBinding, temp_index: number, lines: string[]) -> LoadLocalResult {
+fn load_local_operand(local: LocalBinding, temp_index: int, lines: string[]) -> LoadLocalResult {
     let mut diagnostics: string[] = [];
     let load_name = format_temp_name(temp_index);
     let mut current_lines: string[] = lines;
@@ -339,7 +339,7 @@ fn collapse_type_spaces(value: string) -> string {
 
 // Numeric primitive coercion: handles conversions between double/i64/i32/i8/i1.
 // Returns null if neither type is a numeric primitive — caller should try other coercion paths.
-fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: string, temp_index: number, lines: string[]) -> CoercionResult? {
+fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
     let mut current_lines: string[] = lines;
     let mut diagnostics: string[] = [];
 
@@ -779,7 +779,7 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
 
 // Pointer/struct coercion: handles bitcasts, boxing, unboxing, pointer derefs.
 // Returns null if no pointer coercion applies.
-fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: string, temp_index: number, lines: string[]) -> CoercionResult? {
+fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
     let mut current_lines: string[] = lines;
     let mut diagnostics: string[] = [];
 
@@ -1127,7 +1127,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
 }
 
 // General coercion fallbacks: boxing, union construction, pointer variance, null handling.
-fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: string, temp_index: number, lines: string[]) -> CoercionResult? {
+fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
     let mut current_lines: string[] = lines;
     let mut diagnostics: string[] = [];
 
@@ -1225,7 +1225,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
             let mut has_value: boolean = false;
             let mut value_text: string = "";
             let mut local_lines: string[] = current_lines;
-            let mut local_temp: number = temp_index;
+            let mut local_temp: int = temp_index;
             if operand_type == variant_type {
                 has_value = true;
                 value_text = operand.value;
@@ -1673,7 +1673,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                 }
                 current_lines = mp_result_g.lines;
                 let mut pointer_value: string = typed_ptr_temp;
-                let mut next_index: number = temp_index + 4;
+                let mut next_index: int = temp_index + 4;
                 let typed_pointer_type = operand.llvm_type + "*";
                 if typed_pointer_type != target {
                     let cast_temp = format_temp_name(next_index);
@@ -1712,7 +1712,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                     + operand.llvm_type
                     + "* "
                     + alloca_temp);
-                let mut next_index: number = temp_index + 1;
+                let mut next_index: int = temp_index + 1;
                 let mut pointer_value: string = alloca_temp;
                 let operand_pointer_type = operand.llvm_type + "*";
                 if operand_pointer_type != target {
@@ -1806,7 +1806,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
         if ends_with_pointer_suffix(operand.llvm_type) {
             let mut pointer_type: string = operand.llvm_type;
             let mut pointer_value: string = operand.value;
-            let mut pointer_temp_index: number = temp_index;
+            let mut pointer_temp_index: int = temp_index;
             let base_type = strip_pointer_suffix(pointer_type);
             if base_type != target {
                 let desired_pointer_type = target + "*";
@@ -1872,7 +1872,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
 // rejection re-promotes to `[fatal]` and extends to the permissive
 // sites above. The `numeric_type_kind` helper stays in place as the
 // chokepoint for that re-enablement.
-fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: number, lines: string[], allow_widen: boolean, span: NativeSourceSpan?) -> CoercionResult ![io] {
+fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: int, lines: string[], allow_widen: boolean, span: NativeSourceSpan?) -> CoercionResult ![io] {
     let debug_coerce = trace_lowering();
     if debug_coerce {
         print.err("emit-llvm: coerce_operand entry operand_type=" + operand.llvm_type
@@ -2068,10 +2068,10 @@ fn dominant_type(first: string, second: string) -> string {
     return first;
 }
 
-fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: number, lines: string[]) -> BinaryAlignmentResult {
+fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, lines: string[]) -> BinaryAlignmentResult {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
     let mut left_operand = left;
     let mut right_operand = right;
     if left_operand.value == "null" {
