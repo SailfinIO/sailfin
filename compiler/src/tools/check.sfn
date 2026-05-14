@@ -113,7 +113,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
     // and render it in one pass. Factories mint diagnostics with an
     // empty file_path; this is the single point that knows which
     // module is currently being analyzed.
-    let mut ti: number = 0;
+    let mut ti: int = 0;
     loop {
         if ti >= type_diags.length { break; }
         type_diags[ti].file_path = file_path;
@@ -148,7 +148,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
     if effect_severity == "off" {
         effect_severity = resolve_effect_enforcement("");
     }
-    let mut ei: number = 0;
+    let mut ei: int = 0;
     loop {
         if ei >= effect_violations.length { break; }
         let mut violation = effect_violations[ei];
@@ -167,7 +167,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
     // the in-module / cross-module effect findings. Same severity
     // contract — `sfn check` ignores `=off` so these diagnostics
     // still surface even when the build path is bypassed.
-    let mut ci: number = 0;
+    let mut ci: int = 0;
     loop {
         if ci >= capability_violations.length { break; }
         let mut cv = capability_violations[ci];
@@ -213,7 +213,7 @@ fn render_summary(summary: CheckSummary) -> string {
 fn summarize(results: CheckResult[]) -> CheckSummary {
     let mut total_err: int = 0;
     let mut total_warn: int = 0;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= results.length { break; }
         total_err += results[i].error_count;

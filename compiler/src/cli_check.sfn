@@ -72,7 +72,7 @@ fn _emit_check_header(path: string, quiet: boolean) ![io] {
 
 fn _emit_check_diagnostics(result: CheckResult, quiet: boolean) ![io] {
     if quiet { return; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= result.rendered.length { break; }
         print.err(result.rendered[i]);
@@ -100,7 +100,7 @@ fn _emit_check_diagnostics(result: CheckResult, quiet: boolean) ![io] {
 fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean) ![io] {
     if quiet { return; }
     let empty_lines: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= load_result.missing_paths.length { break; }
         let diag = Diagnostic {
@@ -114,7 +114,7 @@ fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean)
         print.err(render_diagnostic(diag, empty_lines, "load"));
         i += 1;
     }
-    let mut p: number = 0;
+    let mut p: int = 0;
     loop {
         if p >= load_result.parse_failure_paths.length { break; }
         let diag = Diagnostic {
@@ -143,8 +143,8 @@ fn _check_group_key(file_path: string) -> string ![io] {
 }
 
 // Find the group whose key matches `key`; return its index or -1.
-fn _find_group(groups: CheckGroup[], key: string) -> number {
-    let mut i: number = 0;
+fn _find_group(groups: CheckGroup[], key: string) -> int {
+    let mut i: int = 0;
     loop {
         if i >= groups.length { break; }
         if strings_equal(groups[i].key, key) { return i; }
@@ -153,12 +153,12 @@ fn _find_group(groups: CheckGroup[], key: string) -> number {
     return -1;
 }
 
-fn handle_check_command(args: string[]) -> number ![io] {
+fn handle_check_command(args: string[]) -> int ![io] {
     let mut quiet: boolean = false;
     let mut json: boolean = false;
     let mut paths: string[] = [];
 
-    let mut argi: number = 1;
+    let mut argi: int = 1;
     loop {
         if argi >= args.length { break; }
         let arg = args[argi];
@@ -188,7 +188,7 @@ fn handle_check_command(args: string[]) -> number ![io] {
     if paths.length == 0 { paths.push("."); }
 
     let mut files: string[] = [];
-    let mut pi: number = 0;
+    let mut pi: int = 0;
     loop {
         if pi >= paths.length { break; }
         let p = paths[pi];
@@ -197,7 +197,7 @@ fn handle_check_command(args: string[]) -> number ![io] {
             return 2;
         }
         let collected = _collect_sfn_files_cmd(p, 20);
-        let mut ci: number = 0;
+        let mut ci: int = 0;
         loop {
             if ci >= collected.length { break; }
             files.push(collected[ci]);
@@ -218,8 +218,8 @@ fn handle_check_command(args: string[]) -> number ![io] {
     // groups (e.g. `sfn check capsuleA/foo.sfn capsuleB/bar.sfn`),
     // each project resolves independently.
     let mut groups: CheckGroup[] = [];
-    let mut file_group_index: number[] = [];
-    let mut gpi: number = 0;
+    let mut file_group_index: int[] = [];
+    let mut gpi: int = 0;
     loop {
         if gpi >= files.length { break; }
         let path = files[gpi];
@@ -245,7 +245,7 @@ fn handle_check_command(args: string[]) -> number ![io] {
     let mut aggregate_missing: string[] = [];
     let mut aggregate_parse_failures: string[] = [];
     let mut aggregate_skipped: string[] = [];
-    let mut gi: number = 0;
+    let mut gi: int = 0;
     loop {
         if gi >= groups.length { break; }
         // `sfn check` does not write `.ll` (it stops after staging),
@@ -275,19 +275,19 @@ fn handle_check_command(args: string[]) -> number ![io] {
         // produces an `E0403` diagnostic.
         groups[gi].capabilities_required = resolution.capabilities_required;
 
-        let mut mi: number = 0;
+        let mut mi: int = 0;
         loop {
             if mi >= load.missing_paths.length { break; }
             aggregate_missing.push(load.missing_paths[mi]);
             mi += 1;
         }
-        let mut pfi: number = 0;
+        let mut pfi: int = 0;
         loop {
             if pfi >= load.parse_failure_paths.length { break; }
             aggregate_parse_failures.push(load.parse_failure_paths[pfi]);
             pfi += 1;
         }
-        let mut ski: number = 0;
+        let mut ski: int = 0;
         loop {
             if ski >= load.skipped_paths.length { break; }
             aggregate_skipped.push(load.skipped_paths[ski]);
@@ -330,7 +330,7 @@ fn handle_check_command(args: string[]) -> number ![io] {
     // and returns 0 / accepts any value without effect.
     let scratch_mark = sailfin_intrinsic_runtime_arena_mark();
 
-    let mut fi: number = 0;
+    let mut fi: int = 0;
     loop {
         if fi >= files.length { break; }
         let path = files[fi];
@@ -377,7 +377,7 @@ fn handle_check_command(args: string[]) -> number ![io] {
 
     if json {
         let summary = summarize(results);
-        let mut exit_code: number = 0;
+        let mut exit_code: int = 0;
         if total_errors > 0 { exit_code = 1; }
         let envelope = _build_json_envelope(results, aggregate_load_result, summary, exit_code);
         print(envelope);
@@ -404,14 +404,14 @@ fn handle_check_command(args: string[]) -> number ![io] {
 // carries its `producer` so consumers can filter on the producing
 // pass without inspecting `code` ranges. See
 // `docs/reference/check-json-schema.md` for the locked schema.
-fn _build_json_envelope(results: CheckResult[], load: ImportedInterfaceLoadResult, summary: CheckSummary, exit_code: number) -> string ![io] {
+fn _build_json_envelope(results: CheckResult[], load: ImportedInterfaceLoadResult, summary: CheckSummary, exit_code: int) -> string ![io] {
     let mut events: CheckJsonEvent[] = [];
 
-    let mut ri: number = 0;
+    let mut ri: int = 0;
     loop {
         if ri >= results.length { break; }
         let result = results[ri];
-        let mut di: number = 0;
+        let mut di: int = 0;
         loop {
             if di >= result.diagnostics.length { break; }
             let producer = result.producers[di];
@@ -427,7 +427,7 @@ fn _build_json_envelope(results: CheckResult[], load: ImportedInterfaceLoadResul
     // not by the analysis passes. They share the Diagnostic shape so
     // they ride the same event array — the `kind: "load_warning"`
     // discriminator lets consumers filter for them specifically.
-    let mut mi: number = 0;
+    let mut mi: int = 0;
     loop {
         if mi >= load.missing_paths.length { break; }
         let warn = Diagnostic {
@@ -443,7 +443,7 @@ fn _build_json_envelope(results: CheckResult[], load: ImportedInterfaceLoadResul
         });
         mi += 1;
     }
-    let mut pi: number = 0;
+    let mut pi: int = 0;
     loop {
         if pi >= load.parse_failure_paths.length { break; }
         let warn = Diagnostic {

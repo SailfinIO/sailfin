@@ -42,7 +42,7 @@ import { Diagnostic, FixSuggestion, TextEdit } from "./typecheck_types";
 fn join_effects(effects: string[]) -> string {
     if effects.length == 0 { return ""; }
     let mut out = effects[0];
-    let mut i: number = 1;
+    let mut i: int = 1;
     loop {
         if i >= effects.length { break; }
         out = out + ", " + effects[i];
@@ -63,7 +63,7 @@ fn code_for_missing_effect(missing_effects: string[], requirements: EffectRequir
     // effects are typically I/O regardless of any cross-module
     // propagation), matching the historical Phase A precedence.
     let mut has_imported: boolean = false;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= requirements.length { break; }
         let desc = requirements[i].description;
@@ -80,7 +80,7 @@ fn code_for_missing_effect(missing_effects: string[], requirements: EffectRequir
 fn _description_starts_with_imported(desc: string) -> boolean {
     let prefix = "imported `";
     if desc.length < prefix.length { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= prefix.length { break; }
         if desc[i] != prefix[i] { return false; }
@@ -98,7 +98,7 @@ fn effect_violation_to_diagnostic(violation: EffectViolation) -> Diagnostic {
 
     if violation.requirements.length > 0 {
         message = message + "\nrequired by:";
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= violation.requirements.length { break; }
             let req = violation.requirements[i];
@@ -225,7 +225,7 @@ fn _excess_plural_suffix(excess: string[]) -> string {
 fn _quoted_effects_csv(effects: string[]) -> string {
     if effects.length == 0 { return ""; }
     let mut out = "\"" + effects[0] + "\"";
-    let mut i: number = 1;
+    let mut i: int = 1;
     loop {
         if i >= effects.length { break; }
         out = out + ", \"" + effects[i] + "\"";
@@ -240,7 +240,7 @@ fn _quoted_effects_csv(effects: string[]) -> string {
 fn _dr_split_lines(source: string) -> string[] {
     let mut lines: string[] = [];
     let mut current: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= source.length { break; }
         let _ch_next = index + 1;
@@ -279,7 +279,7 @@ fn split_source_lines(source: string) -> string[] {
 fn _dr_join_lines(lines: string[]) -> string {
     if lines.length == 0 { return ""; }
     let mut result: string = lines[0];
-    let mut index: number = 1;
+    let mut index: int = 1;
     loop {
         if index >= lines.length { break; }
         result = result + "\n" + lines[index];
@@ -288,21 +288,21 @@ fn _dr_join_lines(lines: string[]) -> string {
     return result;
 }
 
-fn _dr_number_to_string(value: number) -> string {
+fn _dr_number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
-    let mut working: number = value;
+    let mut working: int = value;
     let mut negative: boolean = false;
     if working < 0 {
         negative = true;
         working = 0 - working;
     }
     let digits = "0123456789";
-    let mut remaining: number = working;
+    let mut remaining: int = working;
     let mut output: string = "";
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;
-        let mut quotient: number = 0;
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -316,9 +316,9 @@ fn _dr_number_to_string(value: number) -> string {
     return output;
 }
 
-fn _dr_repeat(ch: string, count: number) -> string {
+fn _dr_repeat(ch: string, count: int) -> string {
     if count <= 0 { return ""; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut result: string = "";
     loop {
         if index >= count { break; }
@@ -332,16 +332,16 @@ fn _dr_render_message_lines(message: string) -> string[] {
     return _dr_split_lines(message);
 }
 
-fn _dr_pad_number_string(value: string, width: number) -> string {
+fn _dr_pad_number_string(value: string, width: int) -> string {
     if value.length >= width { return value; }
     let pad_count = width - value.length;
     return _dr_repeat(" ", pad_count) + value;
 }
 
-fn _dr_build_pointer_prefix(column: number, line_text: string) -> string {
+fn _dr_build_pointer_prefix(column: int, line_text: string) -> string {
     if column <= 1 { return ""; }
     let mut prefix: string = "";
-    let mut index: number = 1;
+    let mut index: int = 1;
     loop {
         if index >= column { break; }
         if index <= line_text.length {
@@ -355,14 +355,14 @@ fn _dr_build_pointer_prefix(column: number, line_text: string) -> string {
     return prefix;
 }
 
-fn _dr_build_caret(lexeme: string, line_text: string, column: number) -> string {
-    let mut highlight: number = lexeme.length;
+fn _dr_build_caret(lexeme: string, line_text: string, column: int) -> string {
+    let mut highlight: int = lexeme.length;
     if highlight <= 0 { highlight = 1; }
-    let mut remaining: number = line_text.length - (column - 1);
+    let mut remaining: int = line_text.length - (column - 1);
     if remaining <= 0 { remaining = 1; }
     if highlight > remaining { highlight = remaining; }
     let mut out: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= highlight { break; }
         out = out + "^";
@@ -378,14 +378,14 @@ fn render_diagnostic(d: Diagnostic, source_lines: string[], kind: string) -> str
     if msg_lines.length > 0 { header = header + msg_lines[0]; }
     parts.push(header);
 
-    let mut padding_width: number = 1;
+    let mut padding_width: int = 1;
     if source_lines.length > 0 {
         padding_width = _dr_number_to_string(source_lines.length).length;
     }
 
     let mut has_location: boolean = false;
-    let mut line_number: number = 0;
-    let mut column_number: number = 1;
+    let mut line_number: int = 0;
+    let mut column_number: int = 1;
     let mut lexeme: string = "";
     if d.primary != null {
         let token: Token? = d.primary;
@@ -414,7 +414,7 @@ fn render_diagnostic(d: Diagnostic, source_lines: string[], kind: string) -> str
         parts.push("  --> " + d.file_path);
     }
 
-    let mut i: number = 1;
+    let mut i: int = 1;
     loop {
         if i >= msg_lines.length { break; }
         parts.push("  = " + msg_lines[i]);

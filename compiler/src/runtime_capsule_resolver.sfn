@@ -125,8 +125,8 @@ fn _rcr_normalize_path(path: string) -> string {
     let mut absolute: boolean = false;
     if substring(path, 0, 1) == "/" { absolute = true; }
     let mut segments: string[] = [];
-    let mut start: number = 0;
-    let mut i: number = 0;
+    let mut start: int = 0;
+    let mut i: int = 0;
     loop {
         if i > path.length { break; }
         if i == path.length || substring(path, i, i + 1) == "/" {
@@ -140,7 +140,7 @@ fn _rcr_normalize_path(path: string) -> string {
                         if last != ".." {
                             // Pop the last segment.
                             let mut popped: string[] = [];
-                            let mut pi: number = 0;
+                            let mut pi: int = 0;
                             loop {
                                 if pi >= segments.length - 1 { break; }
                                 popped.push(segments[pi]);
@@ -162,7 +162,7 @@ fn _rcr_normalize_path(path: string) -> string {
     }
     let mut out: string = "";
     if absolute { out = "/"; }
-    let mut j: number = 0;
+    let mut j: int = 0;
     loop {
         if j >= segments.length { break; }
         if j > 0 { out = out + "/"; }
@@ -191,7 +191,7 @@ fn _rcr_resolve_path(manifest_dir: string, relative: string) -> string {
 // Apply `_rcr_resolve_path` to every entry in `relatives`.
 fn _rcr_resolve_paths(manifest_dir: string, relatives: string[]) -> string[] {
     let mut out: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= relatives.length { break; }
         out.push(_rcr_resolve_path(manifest_dir, relatives[i]));
@@ -204,8 +204,8 @@ fn _rcr_resolve_paths(manifest_dir: string, relatives: string[]) -> string[] {
 fn _rcr_split_newlines(text: string) -> string[] {
     let mut out: string[] = [];
     if text.length == 0 { return out; }
-    let mut start: number = 0;
-    let mut i: number = 0;
+    let mut start: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= text.length { break; }
         if substring(text, i, i + 1) == "\n" {
@@ -230,16 +230,16 @@ fn _rcr_split_newlines(text: string) -> string[] {
 fn _rcr_is_safe_member_path(path: string) -> boolean {
     if path.length == 0 { return false; }
     if substring(path, 0, 1) == "/" { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= path.length { break; }
         if substring(path, i, i + 1) == "\\" { return false; }
         i += 1;
     }
-    let mut start: number = 0;
+    let mut start: int = 0;
     loop {
         if start >= path.length { break; }
-        let mut end: number = start;
+        let mut end: int = start;
         loop {
             if end >= path.length { break; }
             if substring(path, end, end + 1) == "/" { break; }
@@ -308,7 +308,7 @@ fn enumerate_runtime_capsule_artifacts(workspace_root: string, dep_specs: string
     let workspace_text = fs.readFile(workspace_manifest);
     let members_text = toml_get_workspace_members(workspace_text);
     let members = _rcr_split_newlines(members_text);
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= members.length { break; }
         let member_path = members[i];

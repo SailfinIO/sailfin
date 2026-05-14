@@ -164,8 +164,8 @@ fn parse_scope_name(capsule_name: string) -> ScopeName {
     if capsule_name.length == 0 {
         return ScopeName { scope: "", name: "" };
     }
-    let mut i: number = 0;
-    let mut slash_at: number = -1;
+    let mut i: int = 0;
+    let mut slash_at: int = -1;
     loop {
         if i >= capsule_name.length { break; }
         if substring(capsule_name, i, i + 1) == "/" {
@@ -204,7 +204,7 @@ fn _ca_is_safe_segment(s: string) -> boolean {
     if s.length == 0 { return false; }
     if s == "." { return false; }
     if s == ".." { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= s.length { break; }
         let ch = substring(s, i, i + 1);
@@ -227,8 +227,8 @@ fn is_safe_scope_name(scope: string, name: string) -> boolean {
     // slash case, but defending here keeps the validator usable
     // by other callers.)
     if substring(name, 0, 1) == "/" { return false; }
-    let mut start: number = 0;
-    let mut i: number = 0;
+    let mut start: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= name.length { break; }
         if substring(name, i, i + 1) == "/" {
@@ -279,8 +279,8 @@ fn capsule_artifact_bin_path(scope: string, name: string, bin: string) -> string
 // emitter must check the result before using it as a filename.
 fn capsule_default_bin_name(name: string) -> string {
     if name.length == 0 { return ""; }
-    let mut last_slash: number = -1;
-    let mut i: number = 0;
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= name.length { break; }
         if substring(name, i, i + 1) == "/" { last_slash = i; }
@@ -355,7 +355,7 @@ fn _ca_is_safe_relpath_segment(s: string) -> boolean {
     if s.length == 0 { return false; }
     if s == "." { return false; }
     if s == ".." { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= s.length { break; }
         let ch = substring(s, i, i + 1);
@@ -375,8 +375,8 @@ fn _ca_is_safe_relpath_segment(s: string) -> boolean {
 fn _ca_is_safe_relpath(s: string) -> boolean {
     if s.length == 0 { return false; }
     if substring(s, 0, 1) == "/" { return false; }
-    let mut start: number = 0;
-    let mut i: number = 0;
+    let mut start: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= s.length { break; }
         let ch = substring(s, i, i + 1);
@@ -413,7 +413,7 @@ fn ir_path_for_slug(layout: CapsuleArtifactLayout, slug: string) -> string {
     // Rule 1: dep-prefix match. Iterate in the order layout was
     // built; specs are deduped at construction so each (scope,
     // name) pair is checked at most once.
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= layout.dep_scopes.length { break; }
         let dep_scope = layout.dep_scopes[i];
@@ -457,7 +457,7 @@ fn ir_path_for_slug(layout: CapsuleArtifactLayout, slug: string) -> string {
 fn capsule_artifact_layout_from_specs(specs: string[], consumer_scope: string, consumer_name: string) -> CapsuleArtifactLayout {
     let mut dep_scopes: string[] = [];
     let mut dep_names: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= specs.length { break; }
         let spec = specs[i];
@@ -467,7 +467,7 @@ fn capsule_artifact_layout_from_specs(specs: string[], consumer_scope: string, c
         if p.scope.length == 0 { continue; }
         if !is_safe_scope_name(p.scope, p.name) { continue; }
         let mut already: boolean = false;
-        let mut j: number = 0;
+        let mut j: int = 0;
         loop {
             if j >= dep_scopes.length { break; }
             if dep_scopes[j] == p.scope {
@@ -496,7 +496,7 @@ fn capsule_artifact_layout_from_specs(specs: string[], consumer_scope: string, c
 // -------------------------------------------------------------------
 fn _ca_json_escape(s: string) -> string {
     let mut out: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= s.length { break; }
         let ch = substring(s, i, i + 1);
@@ -522,28 +522,28 @@ fn _ca_json_string_field(name: string, value: string) -> string {
     return _ca_json_field(name, _ca_json_quote(value));
 }
 
-fn _ca_json_number_field(name: string, value: number) -> string {
+fn _ca_json_number_field(name: string, value: int) -> string {
     return _ca_json_field(name, _ca_number_to_string(value));
 }
 
 // Same repeated-subtraction algorithm as `build_report.sfn` and
 // `compiler/src/main.sfn::number_to_string` — Sailfin's `number`
 // is a float, so `working / 10` doesn't truncate.
-fn _ca_number_to_string(value: number) -> string {
+fn _ca_number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
-    let mut working: number = value;
+    let mut working: int = value;
     let mut negative: boolean = false;
     if working < 0 {
         negative = true;
         working = 0 - working;
     }
     let digits = "0123456789";
-    let mut remaining: number = working;
+    let mut remaining: int = working;
     let mut output: string = "";
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;
-        let mut quotient: number = 0;
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -559,7 +559,7 @@ fn _ca_number_to_string(value: number) -> string {
 
 fn _ca_json_string_array(values: string[]) -> string {
     let mut out: string = "[";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= values.length { break; }
         if i > 0 { out = out + ","; }
@@ -589,7 +589,7 @@ fn _ca_json_module_entry(m: CapsuleArtifactModule) -> string {
 
 fn _ca_json_modules_array(modules: CapsuleArtifactModule[]) -> string {
     let mut out: string = "[";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= modules.length { break; }
         if i > 0 { out = out + ","; }

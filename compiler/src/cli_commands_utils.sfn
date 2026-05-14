@@ -60,7 +60,16 @@ fn _dirname_cmd(path: string) -> string {
     return substring(path, 0, last_slash);
 }
 
-fn find_char(text: string, ch: string, start: number) -> number {
+// alias-coverage: name-collision seam — `runtime/prelude.sfn` exports a
+// `find_char` of its own at `(string, string, int = 0) -> int`. If this
+// local helper's signature exactly matches the prelude's `: int / -> int`,
+// the seed's cross-module call-site resolver picks the wrong definition
+// and emits malformed LLVM IR (callers see "publish failed (HTTP …)"
+// silently turn into a passthrough; see #562 PR description). Keep the
+// signature on the legacy `: number / -> number` shape so the dispatcher
+// has a discriminating signature to disambiguate. Flips in the bulk PR
+// that migrates the prelude-mirror helpers in lockstep.
+fn find_char(text: string, ch: string, start: number) -> number {  // alias-coverage: prelude shadow
     let mut i: number = start;
     loop {
         if i >= text.length { break; }
