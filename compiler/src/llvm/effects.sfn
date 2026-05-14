@@ -166,7 +166,7 @@ fn collect_expression_borrow_effects(expression: string) -> string[] {
                     continue;
                 }
             }
-            let mut cursor: number = _amp_next;
+            let mut cursor: int = _amp_next;
             let mut mutable_flag: boolean = false;
             let _cursor_plus3 = cursor + 3;
             if _cursor_plus3 <= trimmed.length {
@@ -365,7 +365,7 @@ fn extract_call_targets(expression: string, function_names: string[]) -> string[
                     if dot_index == -1 { break; }
                     candidate = substring(candidate, dot_index + 1, candidate.length);
                 }
-                let mut cursor: number = index;
+                let mut cursor: int = index;
                 loop {
                     if cursor >= expression_len { break; }
                     let next = substring(expression, cursor, cursor + 1);
@@ -421,7 +421,7 @@ fn extract_all_call_targets(expression: string) -> string[] {
             }
             let candidate = substring(expression, start_index, index);
             if candidate.length > 0 {
-                let mut cursor: number = index;
+                let mut cursor: int = index;
                 loop {
                     if cursor >= expression_len { break; }
                     let next = substring(expression, cursor, cursor + 1);
@@ -465,7 +465,7 @@ fn collect_function_runtime_helper_targets(function: NativeFunction) -> string[]
     let mut decorators = function.decorators;
     if decorators == null { decorators = []; }
     if decorators.length > 100000 { return used; }
-    let mut decorator_index: number = 0;
+    let mut decorator_index: int = 0;
     loop {
         if decorator_index >= decorators.length { break; }
         let decorator_name = decorators[decorator_index];
@@ -659,7 +659,7 @@ fn contains_dot_property(expression: string, name: string) -> boolean {
         }
         let _sfx_end = index + suffix_length;
         if _sfx_end <= expression.length {
-            let mut match_index: number = 0;
+            let mut match_index: int = 0;
             let mut matches: boolean = true;
             loop {
                 if match_index >= suffix_length { break; }
@@ -703,21 +703,21 @@ fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph:
     }
 
     let trace = test_runner_trace();
-    let mut iteration: number = 0;
+    let mut iteration: int = 0;
     let max_iterations = call_graph.length * 8 + 16;
 
     // Pre-compute call graph indices once so the fixed-point propagation loop
     // avoids repeated O(n) string lookups.
-    let mut call_targets: number[] = [];
-    let mut call_callee_indices: number[][] = [];
-    let mut call_index: number = 0;
+    let mut call_targets: int[] = [];
+    let mut call_callee_indices: int[][] = [];
+    let mut call_index: int = 0;
     loop {
         if call_index >= call_graph.length { break; }
         let call_entry = call_graph[call_index];
         call_targets.push(find_function_effect_entry_index(aggregated, call_entry.name));
 
-        let mut callees: number[] = [];
-        let mut callee_index: number = 0;
+        let mut callees: int[] = [];
+        let mut callee_index: int = 0;
         loop {
             if callee_index >= call_entry.callees.length { break; }
             callees.push(find_function_effect_entry_index(aggregated, call_entry.callees[callee_index]));
@@ -749,13 +749,13 @@ fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph:
                 let mut merged: string[] = copy_string_array(target_entry.effects);
 
                 let callees = call_callee_indices[call_index];
-                let mut callee_index: number = 0;
+                let mut callee_index: int = 0;
                 loop {
                     if callee_index >= callees.length { break; }
                     let callee_pos = callees[callee_index];
                     if callee_pos >= 0 {
                         let callee_entry = aggregated[callee_pos];
-                        let mut effect_index: number = 0;
+                        let mut effect_index: int = 0;
                         loop {
                             if effect_index >= callee_entry.effects.length {
                                 break;
@@ -782,7 +782,7 @@ fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph:
     return aggregated;
 }
 
-fn find_function_effect_entry_index(entries: FunctionEffectEntry[], name: string) -> number {
+fn find_function_effect_entry_index(entries: FunctionEffectEntry[], name: string) -> int {
     let mut index: int = 0;
     loop {
         if index >= entries.length { break; }
@@ -798,7 +798,7 @@ fn find_function_effect_entry(entries: FunctionEffectEntry[], name: string) -> F
     return null;
 }
 
-fn replace_function_effect_entry(entries: FunctionEffectEntry[], position: number, entry: FunctionEffectEntry) -> FunctionEffectEntry[] {
+fn replace_function_effect_entry(entries: FunctionEffectEntry[], position: int, entry: FunctionEffectEntry) -> FunctionEffectEntry[] {
     let mut result: FunctionEffectEntry[] = [];
     let mut index: int = 0;
     loop {
