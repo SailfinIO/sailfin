@@ -48,7 +48,7 @@ fn starts_with_local(value: string, prefix: string) -> boolean {
     return true;
 }
 
-fn index_of_char_local(value: string, needle: string) -> number {
+fn index_of_char_local(value: string, needle: string) -> int {
     if needle.length == 0 { return 0; }
     let mut index: int = 0;
     loop {
@@ -166,7 +166,7 @@ fn _parse_lowered_fn_string_constants(raw: string) -> StringConstant[] {
 // appear outside of double-quoted string literals.  For example:
 //   `collect_until(p, ["!", "{"])` → 0  (the `{` is inside quotes)
 //   `Statement.TestDeclaration {`  → 1
-fn net_unquoted_brace_depth(text: string) -> number {
+fn net_unquoted_brace_depth(text: string) -> int {
     let mut depth: int = 0;
     let mut in_quote: boolean = false;
     let mut escape: boolean = false;

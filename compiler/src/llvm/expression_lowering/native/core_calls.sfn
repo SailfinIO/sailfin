@@ -4,7 +4,7 @@
 import { char_at } from "../../../string_utils";
 import { append_string, trim_text } from "../../utils";
 
-fn find_call_site(expression: string) -> number {
+fn find_call_site(expression: string) -> int {
     // Find the opening paren of the outermost (last) call in a chained
     // expression like `Builder.create("hello").finish()`.  We scan
     // left-to-right, tracking balanced parens/braces/brackets/strings,

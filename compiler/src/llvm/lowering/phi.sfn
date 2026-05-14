@@ -152,7 +152,7 @@ fn insert_lines_before_index(lines: string[], index: int, insert_lines: string[]
     return result;
 }
 
-fn find_last_terminator_index(lines: string[]) -> number {
+fn find_last_terminator_index(lines: string[]) -> int {
     let mut index: int = lines.length;
     loop {
         if index <= 0 { break; }

@@ -315,7 +315,7 @@ fn is_float_llvm_type(value: string) -> boolean {
     return false;
 }
 
-fn integer_llvm_width(value: string) -> number {
+fn integer_llvm_width(value: string) -> int {
     if value == "i1" { return 1; }
     if value == "i8" { return 8; }
     if value == "i16" { return 16; }

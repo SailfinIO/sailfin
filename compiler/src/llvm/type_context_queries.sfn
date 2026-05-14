@@ -139,7 +139,7 @@ fn find_struct_info_by_llvm_type(context: TypeContext, llvm_type: string) -> Str
     return null;
 }
 
-fn find_struct_field_index(struct_info: StructTypeInfo, field_name: string) -> number {
+fn find_struct_field_index(struct_info: StructTypeInfo, field_name: string) -> int {
     let mut index: int = 0;
     loop {
         if index >= struct_info.fields.length { break; }

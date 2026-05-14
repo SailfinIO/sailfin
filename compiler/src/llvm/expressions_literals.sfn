@@ -191,7 +191,7 @@ fn is_character_literal(text: string) -> boolean {
     return inner.length == 1;
 }
 
-fn get_character_literal_value(text: string) -> number {
+fn get_character_literal_value(text: string) -> int {
     let inner = substring(text, 1, text.length - 1);
     if inner.length == 0 { return 0; }
     // Handle escape sequences

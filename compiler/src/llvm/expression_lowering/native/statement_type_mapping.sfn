@@ -220,7 +220,7 @@ fn map_array_pointer_type(context: TypeContext, annotation: string) -> string {
 // ---------------------------------------------------------------------------
 // Union types
 // ---------------------------------------------------------------------------
-fn find_top_level_union_separator(text: string) -> number {
+fn find_top_level_union_separator(text: string) -> int {
     let mut paren_depth: int = 0;
     let mut brace_depth: int = 0;
     let mut bracket_depth: int = 0;

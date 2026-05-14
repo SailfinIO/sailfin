@@ -533,7 +533,7 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
 // Find the top-level comma in an LLVM type string, respecting nested braces.
 // This is needed for parsing array struct types like { { %T*, i64 }*, i64 }
 // where the element type itself contains commas.
-fn find_top_level_comma_in_llvm_type(text: string) -> number {
+fn find_top_level_comma_in_llvm_type(text: string) -> int {
     let mut brace_depth: int = 0;
     let mut index: int = 0;
     loop {

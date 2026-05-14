@@ -279,7 +279,7 @@ fn collect_defined_function_symbols(lines: string[]) -> string[] {
     return symbols;
 }
 
-fn find_substitution_index(olds: string[], news: string[], symbol: string) -> number {
+fn find_substitution_index(olds: string[], news: string[], symbol: string) -> int {
     let mut index: int = 0;
     loop {
         let mut _if267: boolean = false;

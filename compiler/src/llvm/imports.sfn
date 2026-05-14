@@ -590,7 +590,7 @@ fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], m
 // =============================================================================
 // Helper Functions
 // =============================================================================
-fn find_struct_index(structs: NativeStruct[], name: string) -> number {
+fn find_struct_index(structs: NativeStruct[], name: string) -> int {
     let mut index: int = 0;
     loop {
         if index >= structs.length { break; }
@@ -600,7 +600,7 @@ fn find_struct_index(structs: NativeStruct[], name: string) -> number {
     return -1;
 }
 
-fn find_enum_index(enums: NativeEnum[], name: string) -> number {
+fn find_enum_index(enums: NativeEnum[], name: string) -> int {
     let mut index: int = 0;
     loop {
         if index >= enums.length { break; }
