@@ -442,3 +442,23 @@ The tests-bulk issue should add `// alias-coverage:` tags or migrate these files
 | `compiler/tests/unit/variables_test.sfn` | `alias-coverage candidate` | Test source currently exercises legacy number annotations during migration. |
 | `compiler/tests/unit/version_resolution_test.sfn` | `alias-coverage candidate` | Test source currently exercises legacy number annotations during migration. |
 | `compiler/tests/unit/workspace_resolver_test.sfn` | `alias-coverage candidate` | Test source currently exercises legacy number annotations during migration. |
+
+## Appendix: LLVM runtime helper registry coupling
+
+Issue: #571 (E.3a-prep-3b). The `RuntimeHelperDescriptor` rows in `compiler/src/llvm/runtime_helpers.sfn` whose `target == symbol` define the LLVM calling convention every caller emits for that helper — the registry IS the ABI for those entries, because the symbol the linker resolves is the prelude wrapper itself. Whenever the prelude flips `: number` → `: int` for one of these rows, the registry row must flip in lockstep or callers emit `declare double @<name>` against a `define i64 @<name>` and the linker silently accepts the mismatch (runtime gets garbage).
+
+This appendix enumerates the seven prelude-mirror rows (those where `target == symbol`) and their migration disposition for Slice E.3a.
+
+| Line | Row | `target == symbol` | Current `parameter_types` / `return_type` | `native_signature` | Disposition for E.3a |
+| --- | --- | --- | --- | --- | --- |
+| 399 | `substring` | `substring` | `["i8*", "double", "double"] -> "i8*"` | `sfn_str_slice` | **Keep `double`.** The C trampoline `sfn_str_slice` in `runtime/native/src/sailfin_runtime.c:2127` is declared `char *sfn_str_slice(const char *text, double start, double end)`. Because `native_signature` routes callers to `@sfn_str_slice` (not the prelude wrapper), the registry's `parameter_types` describe the C ABI, not the prelude. Flipping these to `i64` would create a *new* declare/define mismatch with the C runtime. `substring(text, int, int)` callers fall through the #550 `coerce_numeric_primitive` path (`round + fptosi`) at each callsite. A future runtime-side change can flip the C signature to `i64` and the registry together; that's tracked separately as a runtime-audit follow-up. |
+| 402 | `substring_unchecked` | `substring_unchecked` | `["i8*", "double", "double"] -> "i8*"` | `sfn_str_slice` | **Keep `double`.** Same rationale as `substring` — both rows resolve to the same C trampoline. |
+| 453 | `strings_equal` | `strings_equal` | `["i8*", "i8*"] -> "i1"` | `sfn_str_eq` | **No flip needed.** Already on pointer/boolean types. The boolean return is `i1` regardless of the numeric reform. |
+| 456 | `char_code` | `char_code` | `["i8*"] -> "double"` | `null` | **Flipped to `i64` (this issue).** No `native_signature` — callers resolve directly to the prelude-defined `@char_code`. The #561 prelude flip changes the wrapper to `-> int`, so the registry's return must flip together to keep declare/define coherent. |
+| 459 | `number_to_string` | `number_to_string` | `["double"] -> "i8*"` | `null` | **Keep `double`.** `number_to_string` is the float-printing helper. `number` (float) remains a real type after E.3a — `number` becomes an alias for `float`, not `int`. The parameter type stays `double` indefinitely. |
+| 651 | `find_char` | `find_char` | `["i8*", "i8*", "double"] -> "double"` | `null` | **Flipped to `i64` (this issue).** Both the start-index parameter and the index return flip together. Same reasoning as `char_code` — no `native_signature`, callers resolve directly to the prelude wrapper. |
+| 654 | `string_starts_with` | `string_starts_with` | `["i8*", "i8*"] -> "i1"` | `null` | **No flip needed.** Already on pointer/boolean types. |
+
+**Sequencing.** This issue (E.3a-prep-3b) lands between #560 (semantic audit) and #561 (prelude flip). After this issue closes, #561 re-picks against `claude/task-561-8E1ga` and the prelude flip lines up declare/define for `char_code` and `find_char` in one cycle.
+
+**Coupling rule for downstream bulk PRs.** Every bulk PR in the E.3a series (#562 / #563 / #564 / #565 / #566) that touches a prelude function appearing in this appendix MUST check whether the corresponding registry row needs a parallel flip. The deeper fix — derive registry signatures from the prelude AST so this coupling can't drift — is filed as a post-1.0 hardening item (see #571 body).
