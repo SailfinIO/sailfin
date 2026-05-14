@@ -78,8 +78,8 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
     let mut functions: NativeFunction[] = [];
     let mut current: NativeFunction? = null;
     let mut current_struct_name: string = "";
-    let mut index: number = 0;
-    let mut fn_count: number = 0;
+    let mut index: int = 0;
+    let mut fn_count: int = 0;
     loop {
         if index >= lines.length { break; }
         let line = trim_text_local(lines[index]);
@@ -152,8 +152,8 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         let param_text_raw = trim_text_local(substring(line, 7, line.length));
         let param_colon_idx = index_of(param_text_raw, ": ");
         let param_legacy_arrow_idx = index_of(param_text_raw, " -> ");
-        let mut param_arrow_idx: number = -1;
-        let mut param_sep_len: number = 2;
+        let mut param_arrow_idx: int = -1;
+        let mut param_sep_len: int = 2;
         if param_colon_idx >= 0 {
             param_arrow_idx = param_colon_idx;
             param_sep_len = 2;
@@ -383,7 +383,7 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         // the seed degenerate-if bug drops all nested/else-if branches.
         // We use a score (need 3 of 3) instead of nested AND conditions.
         let _ml_net_depth = net_unquoted_brace_depth(line);
-        let mut _gather_score: number = 0;
+        let mut _gather_score: int = 0;
         if is_eval { _gather_score += 1; }
         if _ml_net_depth > 0 { _gather_score += 1; }
         // Only gather when there is a positive unquoted brace depth
@@ -393,8 +393,8 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         if is_eval {
             _eval_gathered = trim_text_local(substring(line, 5, line.length));
         }
-        let mut _eval_brace_depth: number = 1;
-        let mut _gi: number = index + 1;
+        let mut _eval_brace_depth: int = 1;
+        let mut _gi: int = index + 1;
         loop {
             if _gather_score < 3 { break; }
             if _gi >= lines.length { break; }
@@ -453,7 +453,7 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         // (e.g. `eval line = line + " => {"`).  Misidentifying eval lines as inline
         // cases corrupts the instruction list and causes a 2-cycle oscillation in
         // the self-hosting fixed-point check.
-        let mut _inline_score: number = 0;
+        let mut _inline_score: int = 0;
         if is_inline_case { _inline_score += 1; }
         if !is_eval { _inline_score += 1; }
         if !is_match_kw { _inline_score += 1; }
@@ -485,7 +485,7 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
 fn recover_native_imports_light(native_text: string) -> NativeImport[] {
     let lines = split_lines_local(native_text);
     let mut imports: NativeImport[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
         let line = trim_text_local(lines[index]);
@@ -518,10 +518,10 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
     let mut struct_methods: NativeFunction[] = [];
     let mut struct_layout: NativeStructLayout? = null;
     let mut layout_fields: NativeStructLayoutField[] = [];
-    let mut layout_size: number = 0;
-    let mut layout_align: number = 0;
+    let mut layout_size: int = 0;
+    let mut layout_align: int = 0;
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
         let line = trim_text_local(lines[index]);
@@ -545,8 +545,8 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
         let field_text = trim_text_local(substring(line, 7, line.length));
         let field_colon_idx = index_of(field_text, ": ");
         let field_legacy_arrow_idx = index_of(field_text, " -> ");
-        let mut field_arrow_idx: number = -1;
-        let mut field_sep_len: number = 2;
+        let mut field_arrow_idx: int = -1;
+        let mut field_sep_len: int = 2;
         if field_colon_idx >= 0 {
             field_arrow_idx = field_colon_idx;
             field_sep_len = 2;
@@ -721,7 +721,7 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
                 }
 
                 let mut has_body_instructions = false;
-                let mut body_index: number = 0;
+                let mut body_index: int = 0;
                 loop {
                     if body_index >= initial_function_count { break; }
                     let function = safe_functions[body_index];
@@ -737,7 +737,7 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
                 }
                 if !has_body_instructions { use_expected = true; }
 
-                let mut index: number = 0;
+                let mut index: int = 0;
                 loop {
                     let mut _if245: boolean = false;
                     if index >= initial_function_count { _if245 = true; }
@@ -768,7 +768,7 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
                     let light_functions = recover_native_functions_light(expected_source_text);
                     let light_count = sanitize_collection_length(light_functions.length, 200000);
                     let mut light_has_body = false;
-                    let mut light_index: number = 0;
+                    let mut light_index: int = 0;
                     loop {
                         if light_index >= light_count { break; }
                         let function = light_functions[light_index];
@@ -846,23 +846,23 @@ fn recover_native_enums_light(native_text: string) -> NativeEnum[] {
     let mut enum_name: string = "";
     let mut variants: NativeEnumVariant[] = [];
     let mut variant_layouts: NativeEnumVariantLayout[] = [];
-    let mut layout_size: number = 0;
-    let mut layout_align: number = 0;
+    let mut layout_size: int = 0;
+    let mut layout_align: int = 0;
     let mut layout_tag_type: string = "i32";
-    let mut layout_tag_size: number = 4;
-    let mut layout_tag_align: number = 4;
+    let mut layout_tag_size: int = 4;
+    let mut layout_tag_align: int = 4;
     let mut has_layout: boolean = false;
 
     // Deferred variant layout — accumulate payload fields before flushing.
     let mut pending_vl_name: string = "";
-    let mut pending_vl_tag: number = 0;
-    let mut pending_vl_offset: number = 0;
-    let mut pending_vl_size: number = 0;
-    let mut pending_vl_align: number = 0;
+    let mut pending_vl_tag: int = 0;
+    let mut pending_vl_offset: int = 0;
+    let mut pending_vl_size: int = 0;
+    let mut pending_vl_align: int = 0;
     let mut pending_vl_fields: NativeStructLayoutField[] = [];
     let mut has_pending_vl: boolean = false;
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
         let line = trim_text_local(lines[index]);

@@ -56,7 +56,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
     let mut pending_value_span: NativeSourceSpan? = null;
     let mut pending_decorators: string[] = [];
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
         let raw_line = lines[index];
@@ -112,7 +112,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
                 pending_decorators = [];
             }
             let struct_result = parse_struct_definition(lines, index, include_instructions);
-            let mut _ci: number = 0;
+            let mut _ci: int = 0;
             loop {
                 if _ci >= struct_result.diagnostics.length { break; }
                 diagnostics.push(struct_result.diagnostics[_ci]);
@@ -130,7 +130,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
                 pending_decorators = [];
             }
             let interface_result = parse_interface_definition(lines, index);
-            let mut _ci: number = 0;
+            let mut _ci: int = 0;
             loop {
                 if _ci >= interface_result.diagnostics.length { break; }
                 diagnostics.push(interface_result.diagnostics[_ci]);
@@ -148,7 +148,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
                 pending_decorators = [];
             }
             let enum_result = parse_enum_definition(lines, index);
-            let mut _ci: number = 0;
+            let mut _ci: int = 0;
             loop {
                 if _ci >= enum_result.diagnostics.length { break; }
                 diagnostics.push(enum_result.diagnostics[_ci]);
@@ -220,7 +220,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
             if trimmed[0] == "'" { _if358 = true; }
             if _if358 {
                 let quote = trimmed[0];
-                let mut scan: number = 1;
+                let mut scan: int = 1;
                 let mut escaping: boolean = false;
                 loop {
                     if scan >= trimmed.length { break; }
@@ -300,7 +300,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
         if starts_with(line, ".param ") {
             if current != null {
                 let mut combined: string = strip_prefix(line, ".param ");
-                let mut lookahead: number = index + 1;
+                let mut lookahead: int = index + 1;
                 loop {
                     if lookahead >= lines.length { break; }
                     let continuation_raw = lines[lookahead];
@@ -322,7 +322,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
                     diagnostics.push("unable to parse parameter line: " + line);
                     pending_span = null;
                 } else {
-                    let mut entry_index: number = 0;
+                    let mut entry_index: int = 0;
                     let mut span_consumed: boolean = false;
                     loop {
                         if entry_index >= entries.length { break; }
@@ -406,7 +406,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
             }
             continue;
         }
-        let mut instruction_index: number = 0;
+        let mut instruction_index: int = 0;
         loop {
             if instruction_index >= instructions.length { break; }
             current = append_instruction(current, instructions[instruction_index]);

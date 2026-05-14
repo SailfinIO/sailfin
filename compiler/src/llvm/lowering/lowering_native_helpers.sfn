@@ -87,7 +87,7 @@ fn make_native_import(module_path: string) -> NativeImport {
     };
 }
 
-fn make_native_struct_layout(sz: number, al: number, flds: NativeStructLayoutField[]) -> NativeStructLayout {
+fn make_native_struct_layout(sz: int, al: int, flds: NativeStructLayoutField[]) -> NativeStructLayout {
     return NativeStructLayout { size: sz, align: al, fields: flds };
 }
 
@@ -109,7 +109,7 @@ fn make_native_struct_field(fname: string, ftype: string) -> NativeStructField {
     };
 }
 
-fn make_native_struct_layout_field(lf_name: string, lf_type: string, lf_offset: number, lf_size: number, lf_align: number) -> NativeStructLayoutField {
+fn make_native_struct_layout_field(lf_name: string, lf_type: string, lf_offset: int, lf_size: int, lf_align: int) -> NativeStructLayoutField {
     return NativeStructLayoutField {
         name: lf_name,
         type_annotation: lf_type,
@@ -128,7 +128,7 @@ fn make_native_enum_variant(vname: string) -> NativeEnumVariant {
     return NativeEnumVariant { name: vname, fields: [] };
 }
 
-fn make_native_enum_layout(esize: number, ealign: number, etag_type: string, etag_size: number, etag_align: number, evariants: NativeEnumVariantLayout[]) -> NativeEnumLayout {
+fn make_native_enum_layout(esize: int, ealign: int, etag_type: string, etag_size: int, etag_align: int, evariants: NativeEnumVariantLayout[]) -> NativeEnumLayout {
     return NativeEnumLayout {
         size: esize,
         align: ealign,
@@ -139,7 +139,7 @@ fn make_native_enum_layout(esize: number, ealign: number, etag_type: string, eta
     };
 }
 
-fn make_native_enum_variant_layout(vlname: string, vltag: number, vloffset: number, vlsize: number, vlalign: number) -> NativeEnumVariantLayout {
+fn make_native_enum_variant_layout(vlname: string, vltag: int, vloffset: int, vlsize: int, vlalign: int) -> NativeEnumVariantLayout {
     return NativeEnumVariantLayout {
         name: vlname,
         tag: vltag,
@@ -150,7 +150,7 @@ fn make_native_enum_variant_layout(vlname: string, vltag: number, vloffset: numb
     };
 }
 
-fn make_native_enum_variant_layout_with_fields(vlname: string, vltag: number, vloffset: number, vlsize: number, vlalign: number, vlfields: NativeStructLayoutField[]) -> NativeEnumVariantLayout {
+fn make_native_enum_variant_layout_with_fields(vlname: string, vltag: int, vloffset: int, vlsize: int, vlalign: int, vlfields: NativeStructLayoutField[]) -> NativeEnumVariantLayout {
     return NativeEnumVariantLayout {
         name: vlname,
         tag: vltag,
@@ -229,7 +229,7 @@ fn append_instruction_to_function(func: NativeFunction, instr: NativeInstruction
 // ── NativeInstruction constructors ───────────────────────────────────
 // NativeInstruction construction helpers (seed v0.1.1 drops enum variant constructors)
 // Tags: Return=0, Expression=1, If=3, Else=4, EndIf=5, Loop=8, EndLoop=9, Break=10, Continue=11, Unknown=21
-fn make_instruction_text(tag_val: number, text: string) -> NativeInstruction {
+fn make_instruction_text(tag_val: int, text: string) -> NativeInstruction {
     // Seed drops this; fixup pass replaces body
     if tag_val == 0 {
         return NativeInstruction.Return { expression: text, span: null };
@@ -249,7 +249,7 @@ fn make_instruction_text(tag_val: number, text: string) -> NativeInstruction {
     return NativeInstruction.Unknown { text: text };
 }
 
-fn make_instruction_simple(tag_val: number) -> NativeInstruction {
+fn make_instruction_simple(tag_val: int) -> NativeInstruction {
     // Seed drops this; fixup pass replaces body
     if tag_val == 4 { return NativeInstruction.Else(); }
     if tag_val == 5 { return NativeInstruction.EndIf(); }
@@ -267,7 +267,7 @@ fn make_instruction_for(target: string, iterable: string) -> NativeInstruction {
 }
 
 // ── NativeEnum field accessors ───────────────────────────────────────
-fn get_enum_name_at(enums: NativeEnum[], idx: number) -> string {
+fn get_enum_name_at(enums: NativeEnum[], idx: int) -> string {
     let e = enums[idx];
     return e.name;
 }
@@ -276,7 +276,7 @@ fn get_enum_name_at(enums: NativeEnum[], idx: number) -> string {
 // The seed v0.1.1 compiles enum field access as sailfin_runtime_get_field
 // which is a runtime stub returning empty data.  These helpers use
 // explicit array indexing; the fixup pass replaces their bodies.
-fn get_instruction_tag(instructions: NativeInstruction[], idx: number) -> number {
+fn get_instruction_tag(instructions: NativeInstruction[], idx: int) -> int {
     // Enum tag accessor. The seed v0.1.1 can't compile this correctly;
     // _fix_struct_construction_helpers replaces the body for the first-pass
     // binary. Once a new seed is cut from a working binary, this source
@@ -288,108 +288,108 @@ fn get_instruction_tag(instructions: NativeInstruction[], idx: number) -> number
     return sailfin_enum_tag_from_instruction_array(instructions, idx);
 }
 
-fn get_instruction_text(instructions: NativeInstruction[], idx: number) -> string {
+fn get_instruction_text(instructions: NativeInstruction[], idx: int) -> string {
     // Seed drops this; fixup pass replaces with payload[0] read
     let instr = instructions[idx];
     return instr.expression;
 }
 
-fn get_instruction_condition(instructions: NativeInstruction[], idx: number) -> string {
+fn get_instruction_condition(instructions: NativeInstruction[], idx: int) -> string {
     // Seed drops this; fixup pass replaces with payload[0] read
     let instr = instructions[idx];
     return instr.condition;
 }
 
-fn get_instruction_let_name(instructions: NativeInstruction[], idx: number) -> string {
+fn get_instruction_let_name(instructions: NativeInstruction[], idx: int) -> string {
     let instr = instructions[idx];
     return instr.name;
 }
 
-fn get_instruction_let_mutable(instructions: NativeInstruction[], idx: number) -> boolean {
+fn get_instruction_let_mutable(instructions: NativeInstruction[], idx: int) -> boolean {
     let instr = instructions[idx];
     return instr.mutable;
 }
 
-fn get_instruction_let_type(instructions: NativeInstruction[], idx: number) -> string {
+fn get_instruction_let_type(instructions: NativeInstruction[], idx: int) -> string {
     let instr = instructions[idx];
     return instr.type_annotation;
 }
 
-fn get_instruction_let_value(instructions: NativeInstruction[], idx: number) -> string? {
+fn get_instruction_let_value(instructions: NativeInstruction[], idx: int) -> string? {
     let instr = instructions[idx];
     return instr.value;
 }
 
-fn get_instruction_for_target(instructions: NativeInstruction[], idx: number) -> string {
+fn get_instruction_for_target(instructions: NativeInstruction[], idx: int) -> string {
     // Seed drops this; fixup pass replaces with payload[0] read
     let instr = instructions[idx];
     return instr.target;
 }
 
-fn get_instruction_for_iterable(instructions: NativeInstruction[], idx: number) -> string {
+fn get_instruction_for_iterable(instructions: NativeInstruction[], idx: int) -> string {
     // Seed drops this; fixup pass replaces with payload[1] read
     let instr = instructions[idx];
     return instr.iterable;
 }
 
 // ── NativeFunction field accessors ───────────────────────────────────
-fn get_function_name_at(functions: NativeFunction[], idx: number) -> string {
+fn get_function_name_at(functions: NativeFunction[], idx: int) -> string {
     let f = functions[idx];
     return f.name;
 }
 
-fn get_function_return_type_at(functions: NativeFunction[], idx: number) -> string {
+fn get_function_return_type_at(functions: NativeFunction[], idx: int) -> string {
     let f = functions[idx];
     return f.return_type;
 }
 
-fn get_function_is_async_at(functions: NativeFunction[], idx: number) -> boolean {
+fn get_function_is_async_at(functions: NativeFunction[], idx: int) -> boolean {
     let f = functions[idx];
     return f.is_async;
 }
 
-fn get_function_is_extern_at(functions: NativeFunction[], idx: number) -> boolean {
+fn get_function_is_extern_at(functions: NativeFunction[], idx: int) -> boolean {
     let f = functions[idx];
     return f.is_extern;
 }
 
-fn get_function_parameters_at(functions: NativeFunction[], idx: number) -> NativeParameter[] {
+fn get_function_parameters_at(functions: NativeFunction[], idx: int) -> NativeParameter[] {
     let f = functions[idx];
     return f.parameters;
 }
 
-fn get_function_instructions_at(functions: NativeFunction[], idx: number) -> NativeInstruction[] {
+fn get_function_instructions_at(functions: NativeFunction[], idx: int) -> NativeInstruction[] {
     let f = functions[idx];
     return f.instructions;
 }
 
-fn get_function_effects_at(functions: NativeFunction[], idx: number) -> string[] {
+fn get_function_effects_at(functions: NativeFunction[], idx: int) -> string[] {
     let f = functions[idx];
     return f.effects;
 }
 
-fn get_function_decorators_at(functions: NativeFunction[], idx: number) -> string[] {
+fn get_function_decorators_at(functions: NativeFunction[], idx: int) -> string[] {
     let f = functions[idx];
     return f.decorators;
 }
 
 // ── NativeStruct field accessors ─────────────────────────────────────
-fn get_struct_name_at(structs: NativeStruct[], idx: number) -> string {
+fn get_struct_name_at(structs: NativeStruct[], idx: int) -> string {
     let s = structs[idx];
     return s.name;
 }
 
-fn get_struct_fields_at(structs: NativeStruct[], idx: number) -> NativeStructField[] {
+fn get_struct_fields_at(structs: NativeStruct[], idx: int) -> NativeStructField[] {
     let s = structs[idx];
     return s.fields;
 }
 
-fn get_struct_field_name_at(fields: NativeStructField[], idx: number) -> string {
+fn get_struct_field_name_at(fields: NativeStructField[], idx: int) -> string {
     let f = fields[idx];
     return f.name;
 }
 
-fn get_struct_field_type_at(fields: NativeStructField[], idx: number) -> string {
+fn get_struct_field_type_at(fields: NativeStructField[], idx: int) -> string {
     let f = fields[idx];
     return f.type_annotation;
 }
@@ -397,7 +397,7 @@ fn get_struct_field_type_at(fields: NativeStructField[], idx: number) -> string 
 // ── Import append helper ─────────────────────────────────────────────
 fn append_native_import(arr: NativeImport[], item: NativeImport) -> NativeImport[] {
     let mut result: NativeImport[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= arr.length { break; }
         result = result.push(arr[i]);

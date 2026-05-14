@@ -42,7 +42,7 @@ fn update_instruction_depth_state(state: InstructionDepthState, text: string) ->
     let mut in_string = state.in_string;
     let mut escaping = state.escaping;
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = text[index];
@@ -153,7 +153,7 @@ fn is_native_directive_line(line: string) -> boolean {
     return starts_with(trimmed, ".");
 }
 
-fn gather_instruction(lines: string[], start_index: number) -> InstructionGatherResult {
+fn gather_instruction(lines: string[], start_index: int) -> InstructionGatherResult {
     if start_index >= lines.length {
         return InstructionGatherResult { text: "", lines_consumed: 0 };
     }
