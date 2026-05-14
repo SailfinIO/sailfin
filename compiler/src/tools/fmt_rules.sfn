@@ -76,7 +76,7 @@ fn get_spacing_rule(left_role: string, right_role: string) -> string {
 // ═══════════════════════════════════════════════════════════════════
 // Returns the number of blank lines required for a context transition.
 // context values: "top_level", "after_imports", "in_block"
-fn get_blank_line_rule(context: string) -> int {
+fn get_blank_line_rule(context: string) -> number {
     if strings_equal(context, "top_level") { return 1; }
     if strings_equal(context, "after_imports") { return 1; }
     return 0;
@@ -114,7 +114,7 @@ fn closes_statement(lexeme: string) -> boolean {
 
 // Wrapping decision for collections (imports, struct literals).
 // Returns true if the collection should be wrapped to one-per-line.
-fn wraps_at_threshold(items: int, line_length: int) -> boolean {
+fn wraps_at_threshold(items: number, line_length: number) -> boolean {
     if items > 3 { return true; }
     if line_length > 80 { return true; }
     return false;
