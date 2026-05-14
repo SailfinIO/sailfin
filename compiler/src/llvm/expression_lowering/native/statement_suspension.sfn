@@ -21,7 +21,7 @@ import { unwrap_move_wrapper } from "./statement_type_mapping";
 // ---------------------------------------------------------------------------
 fn contains_keyword_outside_strings(value: string, keyword: string) -> boolean {
     if value.length == 0 { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape: boolean = false;
@@ -114,7 +114,7 @@ fn normalise_borrow_base(raw_base: string) -> string {
 // ---------------------------------------------------------------------------
 fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
     let mut diagnostics: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= locals.length { break; }
         let local = locals[index];
@@ -140,7 +140,7 @@ fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], binding
         }
         index += 1;
     }
-    let mut parameter_index: number = 0;
+    let mut parameter_index: int = 0;
     loop {
         if parameter_index >= bindings.length { break; }
         let binding = bindings[parameter_index];

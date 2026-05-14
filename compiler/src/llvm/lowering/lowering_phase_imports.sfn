@@ -71,7 +71,7 @@ fn gather_imported_module_symbols(safe_imported_native_texts: string[], safe_imp
     let mut imported_struct_methods: NativeFunction[] = [];
 
     let manifest_count = safe_imported_manifests.length;
-    let mut text_index: number = 0;
+    let mut text_index: int = 0;
     loop {
         if text_index >= safe_imported_native_texts.length { break; }
         let native_text = safe_imported_native_texts[text_index];
@@ -108,7 +108,7 @@ fn gather_imported_module_symbols(safe_imported_native_texts: string[], safe_imp
     }
 
     if safe_imported_native_texts.length < manifest_count {
-        let mut manifest_index: number = safe_imported_native_texts.length;
+        let mut manifest_index: int = safe_imported_native_texts.length;
         loop {
             if manifest_index >= manifest_count { break; }
             let leftover_manifest = safe_imported_manifests[manifest_index];

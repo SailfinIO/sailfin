@@ -46,7 +46,7 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     let base_operand = base_result.operand;
 
     let index_result = lower_expression(parse.index, bindings, locals, current_temp, current_lines, functions, context, "");
-    let mut _ci0: number = 0;
+    let mut _ci0: int = 0;
     loop {
         if _ci0 >= index_result.diagnostics.length { break; }
         diagnostics.push(index_result.diagnostics[_ci0]);
@@ -70,7 +70,7 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     let index_operand = index_result.operand;
 
     let index_coercion = coerce_operand_to_type(index_operand, "i64", current_temp, current_lines, true, null);
-    let mut _ci1: number = 0;
+    let mut _ci1: int = 0;
     loop {
         if _ci1 >= index_coercion.diagnostics.length { break; }
         diagnostics.push(index_coercion.diagnostics[_ci1]);
@@ -124,11 +124,11 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
                     let struct_inner = trim_text(substring(inner_type, 1, inner_type.length - 1));
 
                     let mut comma_pos: number = -1;
-                    let mut brace_depth: number = 0;
-                    let mut bracket_depth: number = 0;
-                    let mut paren_depth: number = 0;
-                    let mut angle_depth: number = 0;
-                    let mut i: number = 0;
+                    let mut brace_depth: int = 0;
+                    let mut bracket_depth: int = 0;
+                    let mut paren_depth: int = 0;
+                    let mut angle_depth: int = 0;
+                    let mut i: int = 0;
                     loop {
                         if i >= struct_inner.length { break; }
                         let ch = substring(struct_inner, i, i + 1);
@@ -182,7 +182,7 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
 
     if is_string {
         let index_as_double = coerce_operand_to_type(index_operand, "double", current_temp, current_lines, true, null);
-        let mut _ci2: number = 0;
+        let mut _ci2: int = 0;
         loop {
             if _ci2 >= index_as_double.diagnostics.length { break; }
             diagnostics.push(index_as_double.diagnostics[_ci2]);
@@ -207,7 +207,7 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         // the prior hand-spelled emission.
         let grapheme_operands: LLVMOperand[] = [effective_base_operand, index_as_double.operand];
         let grapheme_result = emit_runtime_call("grapheme_at", grapheme_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-        let mut _grapheme_di: number = 0;
+        let mut _grapheme_di: int = 0;
         loop {
             if _grapheme_di >= grapheme_result.diagnostics.length { break; }
             diagnostics.push(grapheme_result.diagnostics[_grapheme_di]);
@@ -278,7 +278,7 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         };
         let bc_operands: LLVMOperand[] = [bc_index_operand, bc_length_operand];
         let bc_result = emit_runtime_call("runtime.bounds_check", bc_operands, empty_runtime_call_overrides(), current_temp, current_lines);
-        let mut _bc_di: number = 0;
+        let mut _bc_di: int = 0;
         loop {
             if _bc_di >= bc_result.diagnostics.length { break; }
             diagnostics.push(bc_result.diagnostics[_bc_di]);

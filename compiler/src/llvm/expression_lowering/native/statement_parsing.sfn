@@ -11,9 +11,9 @@ import { index_of, trim_text } from "../../utils";
 
 fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
     let trimmed = trim_text(expression);
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut index: number = 0;
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
@@ -184,7 +184,7 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
         };
     }
     let mut name: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= remainder.length { break; }
         let ch = substring(remainder, index, index + 1);

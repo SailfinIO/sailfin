@@ -744,7 +744,7 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
             };
             let i8c_operands: LLVMOperand[] = [i8c_size_operand];
             let i8c_result = emit_runtime_call("alloc_struct", i8c_operands, i8c_overrides, temp_index, current_lines);
-            let mut _i8c_di: number = 0;
+            let mut _i8c_di: int = 0;
             loop {
                 if _i8c_di >= i8c_result.diagnostics.length { break; }
                 diagnostics.push(i8c_result.diagnostics[_i8c_di]);
@@ -949,7 +949,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                     let alloc_operands_a: LLVMOperand[] = [alloc_size_op_a];
                     let alloc_result_a = emit_runtime_call("alloc_struct", alloc_operands_a, alloc_overrides_a, temp_index
                         + 2, current_lines);
-                    let mut _alloc_di_a: number = 0;
+                    let mut _alloc_di_a: int = 0;
                     loop {
                         if _alloc_di_a >= alloc_result_a.diagnostics.length {
                             break;
@@ -975,7 +975,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                     let mp_operands_a: LLVMOperand[] = [mp_op_a];
                     let mp_result_a = emit_runtime_call("mark_persistent", mp_operands_a, empty_runtime_call_overrides(), temp_index
                         + 4, current_lines);
-                    let mut _mp_di_a: number = 0;
+                    let mut _mp_di_a: int = 0;
                     loop {
                         if _mp_di_a >= mp_result_a.diagnostics.length { break; }
                         diagnostics.push(mp_result_a.diagnostics[_mp_di_a]);
@@ -1061,7 +1061,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
         let alloc_operands_b: LLVMOperand[] = [alloc_size_op_b];
         let alloc_result_b = emit_runtime_call("alloc_struct", alloc_operands_b, alloc_overrides_b, temp_index
             + 2, current_lines);
-        let mut _alloc_di_b: number = 0;
+        let mut _alloc_di_b: int = 0;
         loop {
             if _alloc_di_b >= alloc_result_b.diagnostics.length { break; }
             diagnostics.push(alloc_result_b.diagnostics[_alloc_di_b]);
@@ -1082,7 +1082,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
         let mp_operands_b: LLVMOperand[] = [mp_op_b];
         let mp_result_b = emit_runtime_call("mark_persistent", mp_operands_b, empty_runtime_call_overrides(), temp_index
             + 4, current_lines);
-        let mut _mp_di_b: number = 0;
+        let mut _mp_di_b: int = 0;
         loop {
             if _mp_di_b >= mp_result_b.diagnostics.length { break; }
             diagnostics.push(mp_result_b.diagnostics[_mp_di_b]);
@@ -1169,7 +1169,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                     let alloc_operands_c: LLVMOperand[] = [alloc_size_op_c];
                     let alloc_result_c = emit_runtime_call("alloc_struct", alloc_operands_c, alloc_overrides_c, temp_index
                         + 2, current_lines);
-                    let mut _alloc_di_c: number = 0;
+                    let mut _alloc_di_c: int = 0;
                     loop {
                         if _alloc_di_c >= alloc_result_c.diagnostics.length {
                             break;
@@ -1195,7 +1195,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                     let mp_operands_c: LLVMOperand[] = [mp_op_c];
                     let mp_result_c = emit_runtime_call("mark_persistent", mp_operands_c, empty_runtime_call_overrides(), temp_index
                         + 4, current_lines);
-                    let mut _mp_di_c: number = 0;
+                    let mut _mp_di_c: int = 0;
                     loop {
                         if _mp_di_c >= mp_result_c.diagnostics.length { break; }
                         diagnostics.push(mp_result_c.diagnostics[_mp_di_c]);
@@ -1218,7 +1218,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
     }
     if is_union_llvm_type(target) {
         let variants = parse_union_payload_types(target);
-        let mut variant_index: number = 0;
+        let mut variant_index: int = 0;
         loop {
             if variant_index >= variants.length { break; }
             let variant_type = variants[variant_index];
@@ -1269,7 +1269,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                         let alloc_operands_d: LLVMOperand[] = [alloc_size_op_d];
                         let alloc_result_d = emit_runtime_call("alloc_struct", alloc_operands_d, alloc_overrides_d, local_temp
                             + 2, local_lines);
-                        let mut _alloc_di_d: number = 0;
+                        let mut _alloc_di_d: int = 0;
                         loop {
                             if _alloc_di_d >= alloc_result_d.diagnostics.length {
                                 break;
@@ -1297,7 +1297,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                         let mp_operands_d: LLVMOperand[] = [mp_op_d];
                         let mp_result_d = emit_runtime_call("mark_persistent", mp_operands_d, empty_runtime_call_overrides(), local_temp
                             + 4, local_lines);
-                        let mut _mp_di_d: number = 0;
+                        let mut _mp_di_d: int = 0;
                         loop {
                             if _mp_di_d >= mp_result_d.diagnostics.length {
                                 break;
@@ -1353,7 +1353,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                             let alloc_operands_e: LLVMOperand[] = [alloc_size_op_e];
                             let alloc_result_e = emit_runtime_call("alloc_struct", alloc_operands_e, alloc_overrides_e, local_temp
                                 + 2, local_lines);
-                            let mut _alloc_di_e: number = 0;
+                            let mut _alloc_di_e: int = 0;
                             loop {
                                 if _alloc_di_e >= alloc_result_e.diagnostics.length {
                                     break;
@@ -1381,7 +1381,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                             let mp_operands_e: LLVMOperand[] = [mp_op_e];
                             let mp_result_e = emit_runtime_call("mark_persistent", mp_operands_e, empty_runtime_call_overrides(), local_temp
                                 + 4, local_lines);
-                            let mut _mp_di_e: number = 0;
+                            let mut _mp_di_e: int = 0;
                             loop {
                                 if _mp_di_e >= mp_result_e.diagnostics.length {
                                     break;
@@ -1544,7 +1544,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                 let alloc_operands_f: LLVMOperand[] = [alloc_size_op_f];
                 let alloc_result_f = emit_runtime_call("alloc_struct", alloc_operands_f, alloc_overrides_f, temp_index
                     + 2, current_lines);
-                let mut _alloc_di_f: number = 0;
+                let mut _alloc_di_f: int = 0;
                 loop {
                     if _alloc_di_f >= alloc_result_f.diagnostics.length {
                         break;
@@ -1571,7 +1571,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                 let mp_operands_f: LLVMOperand[] = [mp_op_f];
                 let mp_result_f = emit_runtime_call("mark_persistent", mp_operands_f, empty_runtime_call_overrides(), temp_index
                     + 4, current_lines);
-                let mut _mp_di_f: number = 0;
+                let mut _mp_di_f: int = 0;
                 loop {
                     if _mp_di_f >= mp_result_f.diagnostics.length { break; }
                     diagnostics.push(mp_result_f.diagnostics[_mp_di_f]);
@@ -1638,7 +1638,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                 let alloc_operands_g: LLVMOperand[] = [alloc_size_op_g];
                 let alloc_result_g = emit_runtime_call("alloc_struct", alloc_operands_g, alloc_overrides_g, temp_index
                     + 2, current_lines);
-                let mut _alloc_di_g: number = 0;
+                let mut _alloc_di_g: int = 0;
                 loop {
                     if _alloc_di_g >= alloc_result_g.diagnostics.length {
                         break;
@@ -1665,7 +1665,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                 let mp_operands_g: LLVMOperand[] = [mp_op_g];
                 let mp_result_g = emit_runtime_call("mark_persistent", mp_operands_g, empty_runtime_call_overrides(), temp_index
                     + 4, current_lines);
-                let mut _mp_di_g: number = 0;
+                let mut _mp_di_g: int = 0;
                 loop {
                     if _mp_di_g >= mp_result_g.diagnostics.length { break; }
                     diagnostics.push(mp_result_g.diagnostics[_mp_di_g]);
@@ -1958,7 +1958,7 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
     let numeric = coerce_numeric_primitive(operand, operand_type, target, temp_index, current_lines);
     if numeric != null {
         // Merge so any kind-check warning pushed above survives (#550).
-        let mut _nd_i: number = 0;
+        let mut _nd_i: int = 0;
         loop {
             if _nd_i >= numeric.diagnostics.length { break; }
             diagnostics.push(numeric.diagnostics[_nd_i]);
@@ -1973,7 +1973,7 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
     }
     let pointer = coerce_pointer_or_struct(operand, operand_type, target, temp_index, current_lines);
     if pointer != null {
-        let mut _pd_i: number = 0;
+        let mut _pd_i: int = 0;
         loop {
             if _pd_i >= pointer.diagnostics.length { break; }
             diagnostics.push(pointer.diagnostics[_pd_i]);
@@ -1988,7 +1988,7 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
     }
     let general = coerce_general_fallback(operand, operand_type, target, temp_index, current_lines);
     if general != null {
-        let mut _gd_i: number = 0;
+        let mut _gd_i: int = 0;
         loop {
             if _gd_i >= general.diagnostics.length { break; }
             diagnostics.push(general.diagnostics[_gd_i]);
@@ -2106,7 +2106,7 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: number,
     // Slice E.3 (#490) reapplies #296 and removes this opt-out once every
     // `: number` site in the compiler source has migrated to `: int`/`: float`.
     let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines, true, null);
-    let mut _ci0: number = 0;
+    let mut _ci0: int = 0;
     loop {
         if _ci0 >= left_coercion.diagnostics.length { break; }
         diagnostics.push(left_coercion.diagnostics[_ci0]);
@@ -2132,7 +2132,7 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: number,
     current_temp = left_coercion.temp_index;
 
     let right_coercion = coerce_operand_to_type(right_operand, target_type, current_temp, current_lines, true, null);
-    let mut _ci1: number = 0;
+    let mut _ci1: int = 0;
     loop {
         if _ci1 >= right_coercion.diagnostics.length { break; }
         diagnostics.push(right_coercion.diagnostics[_ci1]);

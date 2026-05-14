@@ -122,14 +122,14 @@ fn _resolve_call_parameter_types(overrides: RuntimeCallOverrides, descriptor: Ru
 
 // Single descriptor-driven entry point for runtime helper calls.
 // See file header for the resolution precedence and render shape.
-fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: RuntimeCallOverrides, temp_index: number, lines: string[]) -> ExpressionResult ![io] {
+fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: RuntimeCallOverrides, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
     let descriptor = find_runtime_helper(target);
     let call_symbol = _resolve_call_symbol(overrides, descriptor, target);
     let return_type = _resolve_call_return_type(overrides, descriptor);
     let parameter_types = _resolve_call_parameter_types(overrides, descriptor);
 
     let mut result_lines: string[] = lines;
-    let mut result_temp: number = temp_index;
+    let mut result_temp: int = temp_index;
     let mut result_diagnostics: string[] = [];
     let empty_constants: StringConstant[] = [];
 
@@ -158,7 +158,7 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
     // sans the trait-dispatch carve-out (runtime helpers do not
     // carry self-typed first args).
     let mut coerced_operands: LLVMOperand[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= operands.length { break; }
         let operand = operands[index];
@@ -207,7 +207,7 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
     }
 
     let mut rendered_args: string[] = [];
-    let mut render_index: number = 0;
+    let mut render_index: int = 0;
     loop {
         if render_index >= coerced_operands.length { break; }
         rendered_args.push(format_typed_operand(coerced_operands[render_index]));

@@ -23,7 +23,7 @@ fn lower_inline_gep_field_access(base_name: string, field_name: string, base_ope
     let mut _igep_struct: string = "";
 
     // Check bindings for type annotation
-    let mut _igep_bi: number = 0;
+    let mut _igep_bi: int = 0;
     loop {
         if _igep_bi >= bindings.length { break; }
         if bindings[_igep_bi].name == _igep_base {

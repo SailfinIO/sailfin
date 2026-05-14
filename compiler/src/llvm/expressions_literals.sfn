@@ -14,7 +14,7 @@ import { trim_text } from "./utils";
 // =============================================================================
 fn matches_case_insensitive(text: string, target: string) -> boolean {
     if text.length != target.length { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = char_code(char_at(text, index));
@@ -67,7 +67,7 @@ fn char_code_at_text(text: string, index: number) -> number {
 fn is_integer_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
     if trimmed.length == 0 { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     if substring(trimmed, 0, 1) == "-" {
         if trimmed.length == 1 { return false; }
         index = 1;
@@ -98,7 +98,7 @@ fn is_integer_literal(text: string) -> boolean {
 }
 
 fn is_number_literal(text: string) -> boolean {
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut has_digit: boolean = false;
     let mut has_decimal: boolean = false;
     let trimmed = trim_text(text);
@@ -154,7 +154,7 @@ fn is_string_literal(text: string) -> boolean {
     // Avoid treating concatenation expressions like `"a" + "b"` as a single
     // string literal. Require all interior quotes to be escaped.
     let mut escape: boolean = false;
-    let mut index: number = 1;
+    let mut index: int = 1;
     loop {
         if index >= trimmed.length - 1 { break; }
         let ch = char_at(trimmed, index);
