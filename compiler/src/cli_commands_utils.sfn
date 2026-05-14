@@ -48,8 +48,8 @@ fn _ends_with_cmd(value: string, suffix: string) -> boolean {
 }
 
 fn _dirname_cmd(path: string) -> string {
-    let mut last_slash: number = -1;
-    let mut i: number = 0;
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= path.length { break; }
         if substring(path, i, i + 1) == "/" { last_slash = i; }
@@ -60,8 +60,8 @@ fn _dirname_cmd(path: string) -> string {
     return substring(path, 0, last_slash);
 }
 
-fn find_char(text: string, ch: string, start: number) -> number {
-    let mut i: number = start;
+fn find_char(text: string, ch: string, start: int) -> int {
+    let mut i: int = start;
     loop {
         if i >= text.length { break; }
         if substring(text, i, i + 1) == ch { return i; }
@@ -71,8 +71,8 @@ fn find_char(text: string, ch: string, start: number) -> number {
 }
 
 fn _toml_trim_cmd(text: string) -> string {
-    let mut s: number = 0;
-    let mut e: number = text.length;
+    let mut s: int = 0;
+    let mut e: int = text.length;
     loop {
         if s >= e { break; }
         let c = substring(text, s, s + 1);
@@ -174,7 +174,7 @@ fn _ensure_dir_recursive_cmd(path: string) -> void ![io] {
 
 fn _sanitize_filename_cmd(value: string) -> string {
     let mut result: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= value.length { break; }
         let ch = substring(value, i, i + 1);
@@ -196,7 +196,7 @@ fn _looks_like_test_file_cmd(name: string) -> boolean {
     return _ends_with_cmd(name, "_test.sfn");
 }
 
-fn _collect_test_files_cmd(root: string, max_depth: number) -> string[] ![io] {
+fn _collect_test_files_cmd(root: string, max_depth: int) -> string[] ![io] {
     let mut results: string[] = [];
     if _ends_with_cmd(root, ".sfn") { return [root]; }
     // Mirror `_collect_sfn_files_cmd`'s normalization: a trailing
@@ -211,17 +211,17 @@ fn _collect_test_files_cmd(root: string, max_depth: number) -> string[] ![io] {
     // place the backstop is dead code.
     let root_norm: string = _strip_trailing_slashes_cmd(root);
     let mut queue: string[] = [root_norm];
-    let mut depth: number = 0;
+    let mut depth: int = 0;
     loop {
         if depth >= max_depth { break; }
         if queue.length == 0 { break; }
         let mut next_queue: string[] = [];
-        let mut qi: number = 0;
+        let mut qi: int = 0;
         loop {
             if qi >= queue.length { break; }
             let dir = queue[qi];
             let entries = fs.listDirectory(dir);
-            let mut ei: number = 0;
+            let mut ei: int = 0;
             loop {
                 if ei >= entries.length { break; }
                 let entry = entries[ei];
@@ -265,17 +265,17 @@ fn _strip_trailing_slashes_cmd(path: string) -> string {
     return result;
 }
 
-fn _collect_sfn_files_cmd(root: string, max_depth: number) -> string[] ![io] {
+fn _collect_sfn_files_cmd(root: string, max_depth: int) -> string[] ![io] {
     let mut results: string[] = [];
     if _ends_with_cmd(root, ".sfn") { return [root]; }
     let root_norm: string = _strip_trailing_slashes_cmd(root);
     let mut queue: string[] = [root_norm];
-    let mut depth: number = 0;
+    let mut depth: int = 0;
     loop {
         if depth >= max_depth { break; }
         if queue.length == 0 { break; }
         let mut next_queue: string[] = [];
-        let mut qi: number = 0;
+        let mut qi: int = 0;
         loop {
             if qi >= queue.length { break; }
             let dir = queue[qi];
@@ -284,7 +284,7 @@ fn _collect_sfn_files_cmd(root: string, max_depth: number) -> string[] ![io] {
                 continue;
             }
             let entries = fs.listDirectory(dir);
-            let mut ei: number = 0;
+            let mut ei: int = 0;
             loop {
                 if ei >= entries.length { break; }
                 let entry = entries[ei];
@@ -319,7 +319,7 @@ fn _curl_post_json_cmd(url: string, body_path: string, auth_header: string) -> s
     return response;
 }
 
-fn _curl_download_cmd(url: string, output_path: string) -> number ![io] {
+fn _curl_download_cmd(url: string, output_path: string) -> int ![io] {
     return process.run(["curl", "-sfSL", "-o", output_path, url]);
 }
 
@@ -332,7 +332,7 @@ fn _curl_download_cmd(url: string, output_path: string) -> number ![io] {
 // command-injection surface.
 fn _shell_single_quote_arg(value: string) -> string {
     let mut out: string = "'";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= value.length { break; }
         let ch = substring(value, i, i + 1);
@@ -360,7 +360,7 @@ fn _sha256_of_file_cmd(file_path: string) -> string ![io] {
 }
 
 fn _extract_sfnpkg_cmd(content: string, dest_dir: string) -> void ![io] {
-    let mut pos: number = 0;
+    let mut pos: int = 0;
     let header = "SFNPKG/1\n";
     if content.length < header.length { return; }
     pos = header.length;
@@ -378,7 +378,7 @@ fn _extract_sfnpkg_cmd(content: string, dest_dir: string) -> void ![io] {
         if nl_idx < 0 { break; }
         let rel_path = substring(after_marker, 0, nl_idx);
         let body_start = pos + marker.length + nl_idx + 1;
-        let mut body_end: number = content.length;
+        let mut body_end: int = content.length;
         let next_marker_search = substring(content, body_start, content.length);
         let next_idx = find_char(next_marker_search, "-", 0);
         if next_idx >= 0 {
@@ -443,7 +443,7 @@ fn _display_capsule_name_cmd(name: string) -> string {
 
 fn _has_prefix_cmd(value: string, prefix: string) -> boolean {
     if prefix.length > value.length { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= prefix.length { break; }
         if value[i] != prefix[i] { return false; }
@@ -460,7 +460,7 @@ fn _path_join_cmd(base: string, name: string) -> string {
 
 fn _string_contains_cmd(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= haystack.length { break; }
         if haystack[i] == needle { return true; }
@@ -474,14 +474,14 @@ fn _is_ident_char_cmd(ch: string) -> boolean {
     return _string_contains_cmd(allowed, ch);
 }
 
-fn _byte_at_cmd(text: string, index: number) -> string {
+fn _byte_at_cmd(text: string, index: int) -> string {
     if text.length == 0 { return ""; }
     if index < 0 { return ""; }
     if index >= text.length { return ""; }
     return substring(text, index, index + 1);
 }
 
-fn _word_matches_cmd(source: string, index: number, word: string) -> boolean {
+fn _word_matches_cmd(source: string, index: int, word: string) -> boolean {
     if word.length == 0 { return false; }
     if index < 0 { return false; }
     let end_pos = index + word.length;
@@ -497,7 +497,7 @@ fn _word_matches_cmd(source: string, index: number, word: string) -> boolean {
 }
 
 fn _string_list_contains_cmd(items: string[], value: string) -> boolean {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= items.length { break; }
         if items[i] == value { return true; }

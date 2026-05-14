@@ -36,7 +36,7 @@ fn _strict_capsule_version(toml_text: string) -> string {
     // Quick check: the text must contain a 'version' key line.
     // This avoids returning the parser's "0.1.0" default.
     let mut has_version_key: boolean = false;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= toml_text.length { break; }
         if toml_text[i] == "v" {
@@ -56,7 +56,7 @@ fn _strict_capsule_version(toml_text: string) -> string {
     // Reject the parser's default "0.1.0" if that's not what the file says.
     if strings_equal(ver, "0.1.0") {
         // Double-check: does the file actually say version = "0.1.0"?
-        let mut j: number = 0;
+        let mut j: int = 0;
         let mut found_literal: boolean = false;
         loop {
             if j >= toml_text.length { break; }
@@ -82,7 +82,7 @@ fn _read_stamp(path: string) -> string ![io] {
         let content = fs.readFile(path);
         if content.length > 0 {
             // Return the first line (strip trailing newline if present).
-            let mut end: number = 0;
+            let mut end: int = 0;
             loop {
                 if end >= content.length { break; }
                 if content[end] == "\n" { break; }
@@ -99,7 +99,7 @@ fn _read_stamp(path: string) -> string ![io] {
 // Uses the strict extractor so a file without an explicit version key
 // doesn't shadow the fallback with the parser's "0.1.0" default.
 fn _read_capsule_version(paths: string[]) -> string ![io] {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= paths.length { break; }
         if fs.exists(paths[i]) {

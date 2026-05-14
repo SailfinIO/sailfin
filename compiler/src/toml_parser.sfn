@@ -24,8 +24,8 @@ struct TomlDependency {
 }
 
 fn _toml_trim(text: string) -> string {
-    let mut start: number = 0;
-    let mut end: number = text.length;
+    let mut start: int = 0;
+    let mut end: int = text.length;
     loop {
         if start >= end { break; }
         let ch = text[start];
@@ -65,9 +65,9 @@ fn _toml_strip_quotes(text: string) -> string {
 
 fn _toml_split_lines(text: string) -> string[] {
     let mut lines: string[] = [];
-    let mut start: number = 0;
+    let mut start: int = 0;
     let len = text.length;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= len { break; }
         if text[i] == "\n" {
@@ -90,8 +90,8 @@ fn _toml_parse_string_array(value: string) -> string[] {
     if _if437 { return items; }
     let inner = _toml_trim(substring(trimmed, 1, trimmed.length - 1));
     if inner.length == 0 { return items; }
-    let mut start: number = 0;
-    let mut i: number = 0;
+    let mut start: int = 0;
+    let mut i: int = 0;
     let len = inner.length;
     loop {
         if i >= len { break; }
@@ -136,7 +136,7 @@ fn _is_stdlib(name: string) -> boolean {
 fn resolve_capsule_name(name: string) -> string {
     // "http" → "sfn/http", "sfn/http" → "sfn/http", "acme/router" → "acme/router"
     // Check if it already has a scope (contains "/")
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= name.length { break; }
         if name[i] == "/" { return name; }
@@ -174,7 +174,7 @@ fn _parse_toml_internal(text: string) -> SailToml {
     };
     let lines = _toml_split_lines(text);
     let mut section: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= lines.length { break; }
         let raw_line = lines[i];
@@ -302,7 +302,7 @@ fn _toml_split_lines_into_array(joined: string) -> string[] {
     if joined.length == 0 { return []; }
     let lines = _toml_split_lines(joined);
     let mut out: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= lines.length { break; }
         let trimmed = _toml_trim(lines[i]);
@@ -358,7 +358,7 @@ fn toml_get_prelude_entry(text: string) -> string {
 fn toml_get_workspace_members(text: string) -> string {
     let t = _parse_toml_internal(text);
     let mut out: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= t.workspace_members.length { break; }
         if i > 0 { out = out + "\n"; }
@@ -372,7 +372,7 @@ fn toml_get_workspace_members(text: string) -> string {
 fn toml_get_exports(text: string) -> string {
     let t = _parse_toml_internal(text);
     let mut out: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= t.exports.length { break; }
         if i > 0 { out = out + "\n"; }
@@ -390,8 +390,8 @@ fn toml_get_target_triples(text: string) -> string {
     let lines = _toml_split_lines(text);
     let prefix = "targets.";
     let mut out: string = "";
-    let mut found: number = 0;
-    let mut i: number = 0;
+    let mut found: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= lines.length { break; }
         let line = _toml_trim(lines[i]);
@@ -403,7 +403,7 @@ fn toml_get_target_triples(text: string) -> string {
         let section = _toml_trim(substring(line, 1, close));
         if section.length <= prefix.length { continue; }
         let mut matches: boolean = true;
-        let mut pi: number = 0;
+        let mut pi: int = 0;
         loop {
             if pi >= prefix.length { break; }
             if section[pi] != prefix[pi] {
@@ -429,7 +429,7 @@ fn toml_get_target_triples(text: string) -> string {
 fn toml_get_string_array(text: string, section: string, key: string) -> string {
     let lines = _toml_split_lines(text);
     let mut current_section: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= lines.length { break; }
         let line = _toml_trim(lines[i]);
@@ -452,7 +452,7 @@ fn toml_get_string_array(text: string, section: string, key: string) -> string {
         let value = _toml_trim(substring(line, eq_pos + 1, line.length));
         let arr = _toml_parse_string_array(value);
         let mut out: string = "";
-        let mut ai: number = 0;
+        let mut ai: int = 0;
         loop {
             if ai >= arr.length { break; }
             if ai > 0 { out = out + "\n"; }
@@ -489,7 +489,7 @@ fn toml_get_capabilities_required(text: string) -> string[] {
 fn toml_get_string(text: string, section: string, key: string) -> string {
     let lines = _toml_split_lines(text);
     let mut current_section: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= lines.length { break; }
         let line = _toml_trim(lines[i]);
@@ -521,7 +521,7 @@ fn toml_get_string(text: string, section: string, key: string) -> string {
 fn toml_get_dependencies(text: string) -> string {
     let t = _parse_toml_internal(text);
     let mut out: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= t.dependencies.length { break; }
         if i > 0 { out = out + "\n"; }
@@ -552,7 +552,7 @@ fn toml_generate(name: string, version: string, description: string, entry: stri
 fn toml_add_dependency(toml_text: string, capsule: string, version: string) -> string {
     let t = _parse_toml_internal(toml_text);
     let mut found: boolean = false;
-    let mut di: number = 0;
+    let mut di: int = 0;
     loop {
         if di >= t.dependencies.length { break; }
         if strings_equal(t.dependencies[di].capsule, capsule) {
@@ -573,7 +573,7 @@ fn toml_add_dependency(toml_text: string, capsule: string, version: string) -> s
 fn toml_add_dev_dependency(toml_text: string, capsule: string, version: string) -> string {
     let t = _parse_toml_internal(toml_text);
     let mut found: boolean = false;
-    let mut di: number = 0;
+    let mut di: int = 0;
     loop {
         if di >= t.dev_dependencies.length { break; }
         if strings_equal(t.dev_dependencies[di].capsule, capsule) {
@@ -599,7 +599,7 @@ fn _write_toml(toml: SailToml) -> string {
         out = out + "description = \"" + toml.description + "\"\n";
     }
     out = out + "\n[dependencies]\n";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= toml.dependencies.length { break; }
         let dep = toml.dependencies[i];
@@ -608,7 +608,7 @@ fn _write_toml(toml: SailToml) -> string {
     }
     if toml.dev_dependencies.length > 0 {
         out = out + "\n[dev-dependencies]\n";
-        let mut j: number = 0;
+        let mut j: int = 0;
         loop {
             if j >= toml.dev_dependencies.length { break; }
             let dep = toml.dev_dependencies[j];
@@ -618,7 +618,7 @@ fn _write_toml(toml: SailToml) -> string {
     }
     out = out + "\n[capabilities]\n";
     out = out + "required = [";
-    let mut k: number = 0;
+    let mut k: int = 0;
     loop {
         if k >= toml.capabilities.length { break; }
         if k > 0 { out = out + ", "; }
@@ -635,7 +635,7 @@ fn _write_toml(toml: SailToml) -> string {
     if toml.workspace_members.length > 0 {
         out = out + "\n[workspace]\n";
         out = out + "members = [";
-        let mut wi: number = 0;
+        let mut wi: int = 0;
         loop {
             if wi >= toml.workspace_members.length { break; }
             if wi > 0 { out = out + ", "; }
@@ -647,7 +647,7 @@ fn _write_toml(toml: SailToml) -> string {
     if toml.exports.length > 0 {
         out = out + "\n[exports]\n";
         out = out + "modules = [";
-        let mut ei: number = 0;
+        let mut ei: int = 0;
         loop {
             if ei >= toml.exports.length { break; }
             if ei > 0 { out = out + ", "; }

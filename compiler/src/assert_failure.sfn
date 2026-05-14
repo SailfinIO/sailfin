@@ -44,10 +44,10 @@ fn _empty_assert_failure() -> AssertFailure {
 // assert-fail record. Defensive: any non-digit char (including a
 // stray '\r' from a CRLF round-trip on Windows) falls back to 0
 // rather than aborting the runner.
-fn _af_parse_decimal(text: string) -> number {
+fn _af_parse_decimal(text: string) -> float {
     if text.length == 0 { return 0; }
-    let mut value: number = 0;
-    let mut index: number = 0;
+    let mut value: int = 0;
+    let mut index: int = 0;
     let mut negative: boolean = false;
     if text[0] == "-" {
         negative = true;

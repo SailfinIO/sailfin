@@ -121,9 +121,9 @@ fn _is_safe_capsule_version_cmd(value: string) -> boolean {
 // symbol tests need, and the backstop became dead code. See
 // `docs/proposals/build-architecture.md` Stage B for the full
 // trail.
-fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[]) -> number ![io] {
+fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[]) -> int ![io] {
     let mut args: string[] = ["clang", "-O0", "-o", out_path, ll_path];
-    let mut di: number = 0;
+    let mut di: int = 0;
     loop {
         if di >= dep_ll_paths.length { break; }
         args.push(dep_ll_paths[di]);
@@ -135,7 +135,7 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         if fs.exists(src_dir) {
             if fs.exists(include_dir) { args.push("-I" + include_dir); }
             let entries = fs.listDirectory(src_dir);
-            let mut i: number = 0;
+            let mut i: int = 0;
             loop {
                 if i >= entries.length { break; }
                 if _ends_with_cmd(entries[i], ".c") {
@@ -151,7 +151,7 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         let prelude_paths: string[] = ["build/selfhost/native/obj/runtime/prelude.o", "build/native/obj/runtime/prelude.o", "build/native/obj/prelude.o", runtime_root
             + "/native/obj/runtime/prelude.o", runtime_root
             + "/native/obj/prelude.o",];
-        let mut pi: number = 0;
+        let mut pi: int = 0;
         loop {
             if pi >= prelude_paths.length { break; }
             if fs.exists(prelude_paths[pi]) {
@@ -197,9 +197,9 @@ fn _test_scratch_root() -> string ![io] {
 // Remove stale LLVM lowering scratchpad files from build/sailfin/ so that
 // inter-phase data from a previous compilation doesn't corrupt the next one.
 // Only deletes known scratch prefixes; leaves control/debug flags untouched.
-fn _clean_lowering_state(dir: string) -> number ![io] {
+fn _clean_lowering_state(dir: string) -> int ![io] {
     let entries = fs.listDirectory(dir);
-    let mut ci: number = 0;
+    let mut ci: int = 0;
     loop {
         if ci >= entries.length { break; }
         let entry = entries[ci];
@@ -421,8 +421,8 @@ fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io
     };
 }
 
-fn _find_test_group(groups: TestGroup[], key: string) -> number {
-    let mut i: number = 0;
+fn _find_test_group(groups: TestGroup[], key: string) -> int {
+    let mut i: int = 0;
     loop {
         if i >= groups.length { break; }
         if strings_equal(groups[i].key, key) { return i; }
@@ -491,11 +491,11 @@ fn _outcome_setup_failure(failure: AssertFailure) -> TestFileOutcome {
 // is not directly observable; spec §11 documents the
 // even-distribution approximation used here. Returns 0 when the
 // file produced no test entries.
-fn _trj_per_test_duration(file_elapsed_ms: number, test_count: number) -> number {
+fn _trj_per_test_duration(file_elapsed_ms: int, test_count: int) -> float {
     if test_count <= 0 { return 0; }
     if file_elapsed_ms <= 0 { return 0; }
-    let mut quotient: number = 0;
-    let mut remaining: number = file_elapsed_ms;
+    let mut quotient: int = 0;
+    let mut remaining: int = file_elapsed_ms;
     loop {
         if remaining < test_count { break; }
         remaining -= test_count;
@@ -507,13 +507,13 @@ fn _trj_per_test_duration(file_elapsed_ms: number, test_count: number) -> number
 // Emit one jsonl `test` event per entry in `entries`, attributing
 // outcomes per `outcome.kind`. Stdout-only — caller must not have
 // mixed any human banner output into the same stream.
-fn _emit_file_test_events(entries: TestEntry[], outcome: TestFileOutcome) -> number ![io] {
+fn _emit_file_test_events(entries: TestEntry[], outcome: TestFileOutcome) -> int ![io] {
     let total_in_file = entries.length;
     let per_test_ms = _trj_per_test_duration(outcome.elapsed_ms, total_in_file);
-    let mut passed: number = 0;
-    let mut failed: number = 0;
-    let mut skipped: number = 0;
-    let mut idx: number = 0;
+    let mut passed: int = 0;
+    let mut failed: int = 0;
+    let mut skipped: int = 0;
+    let mut idx: int = 0;
     loop {
         if idx >= entries.length { break; }
         let entry = entries[idx];
@@ -566,10 +566,10 @@ fn _emit_file_test_events(entries: TestEntry[], outcome: TestFileOutcome) -> num
     return passed * 1000000 + failed * 1000 + skipped;
 }
 
-fn _trj_decode_passed(packed: number) -> number {
-    let mut p: number = packed;
+fn _trj_decode_passed(packed: int) -> int {
+    let mut p: int = packed;
     if p < 0 { p = 0 - p; }
-    let mut count: number = 0;
+    let mut count: int = 0;
     loop {
         if p < 1000000 { break; }
         p -= 1000000;
@@ -578,15 +578,15 @@ fn _trj_decode_passed(packed: number) -> number {
     return count;
 }
 
-fn _trj_decode_failed(packed: number) -> number {
-    let mut p: number = packed;
+fn _trj_decode_failed(packed: int) -> int {
+    let mut p: int = packed;
     if p < 0 { p = 0 - p; }
     // Strip the millions slot.
     loop {
         if p < 1000000 { break; }
         p -= 1000000;
     }
-    let mut count: number = 0;
+    let mut count: int = 0;
     loop {
         if p < 1000 { break; }
         p -= 1000;
@@ -595,8 +595,8 @@ fn _trj_decode_failed(packed: number) -> number {
     return count;
 }
 
-fn _trj_decode_skipped(packed: number) -> number {
-    let mut p: number = packed;
+fn _trj_decode_skipped(packed: int) -> int {
+    let mut p: int = packed;
     if p < 0 { p = 0 - p; }
     loop {
         if p < 1000000 { break; }
@@ -609,14 +609,14 @@ fn _trj_decode_skipped(packed: number) -> number {
     return p;
 }
 
-fn handle_test_command(args: string[], runtime_root: string) -> number ![io, clock] {
+fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock] {
     // Flag parser: `--json` is the only recognised flag for now.
     // Positional args carry the optional `path` argument; preserves
     // pre-existing behaviour where `sfn test [path]` accepts at most
     // one positional. The flag may appear before or after the path.
     let mut json_output: boolean = false;
     let mut positional: string[] = [];
-    let mut ai: number = 1;
+    let mut ai: int = 1;
     loop {
         if ai >= args.length { break; }
         let arg = args[ai];
@@ -676,8 +676,8 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io, clo
     // tests from two different capsules in one invocation), each
     // project resolves independently.
     let mut groups: TestGroup[] = [];
-    let mut file_group_index: number[] = [];
-    let mut gpi: number = 0;
+    let mut file_group_index: int[] = [];
+    let mut gpi: int = 0;
     loop {
         if gpi >= test_files.length { break; }
         let path = test_files[gpi];
@@ -706,7 +706,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io, clo
     // collision, stage-write failure, capsule-compile failure) all
     // collapse to `staging_failed = true` and exit 2 to distinguish
     // setup from test failure (exit 1).
-    let mut gi: number = 0;
+    let mut gi: int = 0;
     loop {
         if gi >= groups.length { break; }
         if trace_runner {
@@ -809,9 +809,9 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io, clo
     // behaviour exactly — a measurable saving for the ~75-file
     // self-host suite where every read+parse cycle adds up.
     let mut per_file_entries: TestEntry[][] = [];
-    let mut total_tests: number = 0;
+    let mut total_tests: int = 0;
     if json_output {
-        let mut pi: number = 0;
+        let mut pi: int = 0;
         loop {
             if pi >= test_files.length { break; }
             let pre_path = test_files[pi];
@@ -827,12 +827,12 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io, clo
 
     let runner_start_ms = monotonic_millis();
 
-    let mut total_passed: number = 0;
-    let mut total_failed: number = 0;
-    let mut total_skipped: number = 0;
-    let mut overall_rc: number = 0;
+    let mut total_passed: int = 0;
+    let mut total_failed: int = 0;
+    let mut total_skipped: int = 0;
+    let mut overall_rc: int = 0;
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= test_files.length { break; }
         let path = test_files[index];
@@ -1004,7 +1004,7 @@ fn _is_valid_registry_url_cmd(url: string) -> boolean {
         if strings_equal(substring(url, 0, 8), "https://") { has_http = true; }
     }
     if !has_http { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= url.length { break; }
         let ch = url[i];
@@ -1061,7 +1061,7 @@ fn _resolve_registry_url_cmd() -> string ![io] {
     return _default_registry_url_cmd();
 }
 
-fn _write_config_registry_cmd(url: string) -> number ![io] {
+fn _write_config_registry_cmd(url: string) -> int ![io] {
     let home = _get_home_cmd();
     if home.length == 0 {
         print("could not determine home directory");
@@ -1089,7 +1089,7 @@ fn _write_config_registry_cmd(url: string) -> number ![io] {
     return 0;
 }
 
-fn handle_config_command(args: string[]) -> number ![io] {
+fn handle_config_command(args: string[]) -> int ![io] {
     if args.length < 2 {
         print("usage: sfn config <get|set|unset|list> [key] [value]");
         return 2;
@@ -1161,7 +1161,7 @@ fn handle_config_command(args: string[]) -> number ![io] {
     return 2;
 }
 
-fn handle_publish_command(args: string[]) -> number ![io] {
+fn handle_publish_command(args: string[]) -> int ![io] {
     if args.length > 2 {
         print("usage: sfn publish [path]");
         return 2;
@@ -1219,7 +1219,7 @@ fn handle_publish_command(args: string[]) -> number ![io] {
     payload = payload + "--- path: capsule.toml\n" + toml_text + "\n";
 
     let src_files = _collect_sfn_files_cmd(src_dir, 10);
-    let mut fi: number = 0;
+    let mut fi: int = 0;
     loop {
         if fi >= src_files.length { break; }
         let file_path = src_files[fi];
@@ -1347,14 +1347,14 @@ fn handle_publish_command(args: string[]) -> number ![io] {
 // <path>`) first. Auto-rebuilding from inside a Sailfin-native
 // command shelling out to `make` is a bootstrapping smell (the
 // compiler would be rebuilding itself before packaging itself).
-fn handle_package_command(args: string[]) -> number ![io] {
+fn handle_package_command(args: string[]) -> int ![io] {
     // Parse args.
     let mut target_arg: string = "";
     let mut out_dir: string = "dist";
     let mut compiler_bin: string = "build/native/sailfin";
     let mut capsule_path: string = "";
     let mut installer_mode: boolean = false;
-    let mut argi: number = 1;
+    let mut argi: int = 1;
     loop {
         if argi >= args.length { break; }
         let a = args[argi];
@@ -1452,7 +1452,7 @@ fn _package_detect_target() -> string ![io] {
 
 // Package the compiler. Reads `compiler/capsule.toml` for version,
 // stages `<bin>/sailfin` + `<bin>/sfn`, tars + sha256s + manifest.
-fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> number ![io] {
+fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> int ![io] {
     if !fs.exists(compiler_bin) {
         print("sfn package: compiler binary not found: " + compiler_bin);
         print("hint: run `make compile` first");
@@ -1573,7 +1573,7 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> n
 // hasn't run a self-host pass yet, and downstream consumers can
 // regenerate both. `tools/package.sh` had the same conditional
 // inclusion.
-fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> number ![io] {
+fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> int ![io] {
     if !fs.exists(compiler_bin) {
         print("sfn package: compiler binary not found: " + compiler_bin);
         print("hint: run `make compile` first");
@@ -1734,7 +1734,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
 // artifact path and kind. Stages binary/object + sidecar +
 // capsule.toml into the tarball — minimal contents until a
 // post-1.0 `--include-ir` flag adds the per-module IR.
-fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) -> number ![io] {
+fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) -> int ![io] {
     // Normalise trailing slash on the path.
     let mut path = capsule_path;
     if path.length > 0 {
@@ -1904,7 +1904,7 @@ fn _package_size_of_file(path: string) -> int ![io] {
     let raw = _shell_read_cmd("wc -c < " + _shell_single_quote_arg(path));
     if raw.length == 0 { return 0; }
     let mut value: int = 0;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= raw.length { break; }
         let ch = substring(raw, i, i + 1);
@@ -1929,13 +1929,13 @@ fn _package_size_of_file(path: string) -> int ![io] {
 // caller should already have validated via `is_safe_scope_name`.
 fn _package_sanitise_name(name: string) -> string {
     let mut out: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= name.length { break; }
         let ch = substring(name, i, i + 1);
-        if ch == "/" { out = out + "-"; } else if ch == "\\" {
-            out = out + "-";
-        } else { out = out + ch; }
+        if ch == "/" { out = out + "-"; } else if ch == "\\" { out = out + "-"; } else {
+            out = out + ch;
+        }
         i += 1;
     }
     return out;
@@ -1945,8 +1945,8 @@ fn _package_sanitise_name(name: string) -> string {
 // has no segments or ends with `/`.
 fn _package_basename(path: string) -> string {
     if path.length == 0 { return ""; }
-    let mut last_slash: number = -1;
-    let mut i: number = 0;
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= path.length { break; }
         if substring(path, i, i + 1) == "/" { last_slash = i; }
@@ -1978,7 +1978,7 @@ fn _package_extract_top_level(json: string, field: string) -> string {
     if start < 0 { return ""; }
     let value_start = start + needle.length;
     // Find the closing quote, honouring backslash escapes.
-    let mut end: number = value_start;
+    let mut end: int = value_start;
     loop {
         if end >= json.length { return ""; }
         let ch = substring(json, end, end + 1);
@@ -1993,11 +1993,11 @@ fn _package_extract_top_level(json: string, field: string) -> string {
     return substring(json, value_start, end);
 }
 
-fn _package_find_substring(haystack: string, needle: string, start: number) -> number {
+fn _package_find_substring(haystack: string, needle: string, start: int) -> int {
     if needle.length == 0 { return start; }
     if haystack.length < needle.length { return -1; }
     let limit = haystack.length - needle.length;
-    let mut i: number = start;
+    let mut i: int = start;
     loop {
         if i > limit { break; }
         if substring(haystack, i, i + needle.length) == needle { return i; }
@@ -2006,12 +2006,12 @@ fn _package_find_substring(haystack: string, needle: string, start: number) -> n
     return -1;
 }
 
-fn handle_add_command(args: string[]) -> number ![io] {
+fn handle_add_command(args: string[]) -> int ![io] {
     let mut is_dev: boolean = false;
     let mut is_update: boolean = false;
     let mut capsule_arg: string = "";
     // Parse flags: sfn add [--dev] [--update] <capsule>
-    let mut argi: number = 1;
+    let mut argi: int = 1;
     loop {
         if argi >= args.length { break; }
         if strings_equal(args[argi], "--dev") { is_dev = true; } else if strings_equal(args[argi], "--update") {
@@ -2165,7 +2165,7 @@ fn handle_add_command(args: string[]) -> number ![io] {
     return 0;
 }
 
-fn handle_init_command(args: string[]) -> number ![io] {
+fn handle_init_command(args: string[]) -> int ![io] {
     if args.length != 1 {
         print("usage: sfn init");
         return 2;
@@ -2177,8 +2177,8 @@ fn handle_init_command(args: string[]) -> number ![io] {
     let cwd = _get_env_cmd("PWD");
     let mut pkg_name: string = "my-capsule";
     if cwd.length > 0 {
-        let mut last_slash: number = -1;
-        let mut si: number = 0;
+        let mut last_slash: int = -1;
+        let mut si: int = 0;
         loop {
             if si >= cwd.length { break; }
             if substring(cwd, si, si + 1) == "/" { last_slash = si; }
@@ -2200,7 +2200,7 @@ fn handle_init_command(args: string[]) -> number ![io] {
     return 0;
 }
 
-fn handle_login_command(args: string[]) -> number ![io] {
+fn handle_login_command(args: string[]) -> int ![io] {
     if args.length > 2 {
         print("usage: sfn login [token]");
         return 2;
@@ -2257,7 +2257,7 @@ fn handle_login_command(args: string[]) -> number ![io] {
     return 0;
 }
 
-fn handle_guillermo_command() -> number ![io] {
+fn handle_guillermo_command() -> int ![io] {
     print("                                                                               ++++++++++++         ");
     print("                                                                       ++++++++++++++##*++++++++    ");
     print("                                                                   ++++++++++++#%%%%%%%%%++++++++++ ");
@@ -2321,7 +2321,7 @@ fn handle_guillermo_command() -> number ![io] {
 // ═══════════════════════════════════════════════════════════════════
 // sfn fmt — canonical formatter
 // ═══════════════════════════════════════════════════════════════════
-fn handle_fmt_command(args: string[]) -> number ![io] {
+fn handle_fmt_command(args: string[]) -> int ![io] {
     let mut check_mode = false;
     let mut write_mode = false;
     let mut paths: string[] = [];

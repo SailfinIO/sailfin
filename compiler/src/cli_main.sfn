@@ -121,8 +121,8 @@ fn _path_join(base: string, name: string) -> string {
 }
 
 fn _dirname(path: string) -> string {
-    let mut last_slash: number = -1;
-    let mut index: number = 0;
+    let mut last_slash: int = -1;
+    let mut index: int = 0;
     loop {
         if index >= path.length { break; }
         if path[index] == "/" { last_slash = index; }
@@ -215,7 +215,7 @@ fn _emit_capsule_artifact_sidecar(spec_capsule_name: string, spec_version: strin
     let path_count = capsule_result.ll_paths.length;
     let mut limit = event_count;
     if path_count < limit { limit = path_count; }
-    let mut mi: number = 0;
+    let mut mi: int = 0;
     loop {
         if mi >= limit { break; }
         let evt = capsule_result.module_events[mi];
@@ -294,8 +294,8 @@ fn _runtime_prelude_path(root: string) -> string ![io] {
 // naming scheme so cached `.o`s coexist between the legacy and
 // artifact-driven paths during the Stage D transition.
 fn _path_basename(path: string) -> string {
-    let mut last_slash: number = -1;
-    let mut i: number = 0;
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= path.length { break; }
         if path[i] == "/" { last_slash = i; }
@@ -309,8 +309,8 @@ fn _path_basename(path: string) -> string {
 // `"foo"`; `"foo.tar.gz"` → `"foo.tar"` (last extension only).
 // Returns the input unchanged when there's no `.`.
 fn _path_strip_ext(name: string) -> string {
-    let mut last_dot: number = -1;
-    let mut i: number = 0;
+    let mut last_dot: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= name.length { break; }
         if name[i] == "." { last_dot = i; }
@@ -352,7 +352,7 @@ fn _failed_runtime_link_inputs() -> RuntimeLinkInputs {
 fn _runtime_obj_prefix(capsule_name: string) -> string {
     if capsule_name.length == 0 { return ""; }
     let mut out: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= capsule_name.length { break; }
         let ch = substring(capsule_name, i, i + 1);
@@ -377,14 +377,14 @@ fn _runtime_obj_prefix(capsule_name: string) -> string {
 fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string) -> RuntimeLinkInputs ![io] {
     let mut objects: string[] = [];
     let mut link_libs: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= runtime_capsules.length { break; }
         let cap = runtime_capsules[i];
         // `-I<dir>` for every include root the capsule declares.
         // Threaded into every c-source compile in this capsule.
         let mut include_flags: string[] = [];
-        let mut idi: number = 0;
+        let mut idi: int = 0;
         loop {
             if idi >= cap.include_dirs.length { break; }
             include_flags.push("-I" + cap.include_dirs[idi]);
@@ -400,7 +400,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
         // full basename (extension included so `foo.c` and
         // `foo.ll` from the same capsule don't collide on the
         // same `.o` output).
-        let mut ci: number = 0;
+        let mut ci: int = 0;
         loop {
             if ci >= cap.c_sources.length { break; }
             let src = cap.c_sources[ci];
@@ -409,7 +409,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                 + ".o");
             if !fs.exists(obj) {
                 let mut args: string[] = ["clang", opt_flag, "-Wno-override-module"];
-                let mut fi: number = 0;
+                let mut fi: int = 0;
                 loop {
                     if fi >= include_flags.length { break; }
                     args.push(include_flags[fi]);
@@ -431,7 +431,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
         // ll-sources: assemble each via clang, also cached with
         // the capsule prefix + full basename. `foo.ll` ≠
         // `foo.c` because the basename includes the extension.
-        let mut li: number = 0;
+        let mut li: int = 0;
         loop {
             if li >= cap.ll_sources.length { break; }
             let src = cap.ll_sources[li];
@@ -451,7 +451,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
         }
         // link-libs flow through verbatim (resolver doesn't
         // path-resolve these — they're linker flags like `-lm`).
-        let mut bi: number = 0;
+        let mut bi: int = 0;
         loop {
             if bi >= cap.link_libs.length { break; }
             link_libs.push(cap.link_libs[bi]);
@@ -530,7 +530,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
     }
     // Quick path: nothing to do if no capsule declares sfn_sources.
     let mut has_any: boolean = false;
-    let mut probe: number = 0;
+    let mut probe: int = 0;
     loop {
         if probe >= runtime_capsules.length { break; }
         if runtime_capsules[probe].sfn_sources.length > 0 {
@@ -554,12 +554,12 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
             + "\"), then readlink -f /proc/self/exe");
         return _failed_runtime_link_inputs();
     }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= runtime_capsules.length { break; }
         let cap = runtime_capsules[i];
         let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
-        let mut si: number = 0;
+        let mut si: int = 0;
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
@@ -659,14 +659,14 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     return [runtime_obj, arena_obj, globals_obj, prelude_obj];
 }
 
-fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> number ![io] {
+fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> int ![io] {
     // Thin wrapper: most callers have one .ll; capsule-aware callers use
     // _clang_link_multi_with_opt directly.
     let single: string[] = [ll_path];
     return _clang_link_multi_with_opt(single, out_path, runtime_root, runtime_capsules, opt_flag, cache_dir, binary_dir);
 }
 
-fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> number ![io] {
+fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> int ![io] {
     if ll_paths.length == 0 {
         print("_clang_link_multi_with_opt: no input .ll files");
         return 1;
@@ -705,7 +705,7 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         // at which point this branch becomes load-bearing.
         let sfn_inputs = _compile_runtime_sfn_sources(runtime_capsules, cache_dir, opt_flag, binary_dir);
         if !sfn_inputs.success { return 1; }
-        let mut soi: number = 0;
+        let mut soi: int = 0;
         loop {
             if soi >= sfn_inputs.object_paths.length { break; }
             runtime_objs.push(sfn_inputs.object_paths[soi]);
@@ -769,13 +769,13 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     }
 
     let mut args: string[] = ["clang", opt_flag, "-Wno-override-module"];
-    let mut roi: number = 0;
+    let mut roi: int = 0;
     loop {
         if roi >= runtime_objs.length { break; }
         args.push(runtime_objs[roi]);
         roi += 1;
     }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= ll_paths.length { break; }
         args.push(ll_paths[i]);
@@ -783,7 +783,7 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     }
     args.push("-o");
     args.push(out_path);
-    let mut lli: number = 0;
+    let mut lli: int = 0;
     loop {
         if lli >= runtime_link_libs.length { break; }
         args.push(runtime_link_libs[lli]);
@@ -792,13 +792,13 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     return process.run(args);
 }
 
-fn _clang_link(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> number ![io] {
+fn _clang_link(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> int ![io] {
     // Default link used by `build` and `run` for single-module programs.
     let resolved_cache_dir = _resolve_sailfin_cache_dir(cache_dir);
     return _clang_link_with_opt(ll_path, out_path, runtime_root, runtime_capsules, "-O2", resolved_cache_dir, binary_dir);
 }
 
-fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> number ![io] {
+fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> int ![io] {
     // Default link used by `build` and `run` for multi-module programs
     // (main source + capsule dependency modules). `cache_dir` is the
     // sailfin-side scratch root (`build/sailfin` for legacy in-tree
@@ -899,11 +899,15 @@ fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
     return spec;
 }
 
-fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
+// alias-coverage: C ABI boundary — runtime/native/src/native_driver.c calls
+// `sailfin_cli_main__cli_main` declared as returning `double`. Until the
+// C runtime moves to Sailfin (post-1.0) the return type must stay `number`
+// so the LLVM declare/define lines up with the C-side caller.
+fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {  // alias-coverage: C-ABI boundary
     let trace_argv = _env_flag("SAILFIN_TRACE_ARGV") || _legacy_flag_file("build/sailfin/.trace_argv");
     if trace_argv {
         print.err("cli: argv.len=" + number_to_string(argv.length));
-        let mut trace_index: number = 0;
+        let mut trace_index: int = 0;
         loop {
             if trace_index >= argv.length { break; }
             print.err("cli: argv[" + number_to_string(trace_index) + "]=" + argv[trace_index]);
@@ -917,7 +921,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
 
     let mut runtime_root: string = "";
     let mut binary_dir: string = "";
-    let mut start_index: number = 0;
+    let mut start_index: int = 0;
     // Parse internal flags injected by the C driver (order: --runtime-root, --binary-dir).
     if start_index < argv.length {
         if argv[start_index] == "--runtime-root" {
@@ -945,7 +949,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
     }
 
     let mut args: string[] = [];
-    let mut arg_index: number = start_index;
+    let mut arg_index: int = start_index;
     loop {
         if arg_index >= argv.length { break; }
         args.push(argv[arg_index]);
@@ -957,7 +961,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
     }
     if trace_argv {
         print.err("cli: args.len=" + number_to_string(args.length));
-        let mut arg_index_trace: number = 0;
+        let mut arg_index_trace: int = 0;
         loop {
             if arg_index_trace >= args.length { break; }
             print.err("cli: args[" + number_to_string(arg_index_trace) + "]="
@@ -1106,9 +1110,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
                 if timing {
                     print(compile_to_llvm_with_module_timed(source, module_name));
                 } else {
-                    if !print_llvm_with_module(source, module_name) {
-                        return 1;
-                    }
+                    if !print_llvm_with_module(source, module_name) { return 1; }
                 }
             }
             return 0;
@@ -1155,7 +1157,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         let mut work_dir: string = "";
 
         // Parse args: support -o OUTPUT and -p PATH in any combination.
-        let mut bi: number = 1;
+        let mut bi: int = 1;
         loop {
             if bi >= args.length { break; }
             let a = args[bi];
@@ -1449,7 +1451,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
 
         let exe_path = out_path;
         let mut all_lls: string[] = [ll_path];
-        let mut cli: number = 0;
+        let mut cli: int = 0;
         loop {
             if cli >= capsule_lls.length { break; }
             all_lls.push(capsule_lls[cli]);
@@ -1481,7 +1483,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         let mut clean_flag: boolean = false;
         let mut cache_trace_flag: boolean = false;
 
-        let mut ri: number = 1;
+        let mut ri: int = 1;
         loop {
             if ri >= args.length { break; }
             let a = args[ri];
@@ -1560,7 +1562,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         }
 
         let mut all_lls: string[] = [ll_path];
-        let mut rli: number = 0;
+        let mut rli: int = 0;
         loop {
             if rli >= capsule_lls.length { break; }
             all_lls.push(capsule_lls[rli]);
@@ -1618,6 +1620,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
 }
 
 // Exported entrypoint for the native argv shim.
-fn native_cli_main(argv: string[]) -> number ![io] {
+// alias-coverage: mirrors `sailfin_cli_main` at the C ABI boundary.
+fn native_cli_main(argv: string[]) -> number ![io] {  // alias-coverage: C-ABI boundary
     return sailfin_cli_main(argv);
 }

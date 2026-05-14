@@ -278,7 +278,7 @@ fn is_valid_digest(digest: string) -> boolean {
 
 fn _is_valid_digest(digest: string) -> boolean {
     if digest.length != 64 { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= digest.length { break; }
         let code = char_code(char_at(digest, i));
@@ -428,7 +428,7 @@ fn _sha256_of_string(input: string, unique_suffix: string) -> string ![io] {
 // for sorting hex digests (`[0-9a-f]+`) and JSON-string flag
 // values where this is a faithful byte-wise compare.
 fn _string_lt(a: string, b: string) -> boolean {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= a.length || i >= b.length { break; }
         let ca = char_code(char_at(a, i));
@@ -444,17 +444,17 @@ fn _string_lt(a: string, b: string) -> boolean {
 // <100, and the compiler itself has 132 modules total).
 fn _sort_strings(input: string[]) -> string[] {
     let mut out: string[] = [];
-    let mut copy_i: number = 0;
+    let mut copy_i: int = 0;
     loop {
         if copy_i >= input.length { break; }
         out.push(input[copy_i]);
         copy_i += 1;
     }
-    let mut k: number = 1;
+    let mut k: int = 1;
     loop {
         if k >= out.length { break; }
         let cur = out[k];
-        let mut j: number = k - 1;
+        let mut j: int = k - 1;
         loop {
             if j < 0 { break; }
             if !_string_lt(cur, out[j]) { break; }
@@ -487,7 +487,7 @@ fn _sort_strings(input: string[]) -> string[] {
 // the character via `char_code` rather than a source literal.
 fn _escape_json_string(input: string) -> string {
     let mut out: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= input.length { break; }
         let ch = char_at(input, i);
@@ -508,7 +508,7 @@ fn _escape_json_string(input: string) -> string {
 fn canonicalize_flags(flags: string[]) -> string {
     let sorted = _sort_strings(flags);
     let mut out: string = "[";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= sorted.length { break; }
         if i > 0 { out = out + ","; }
@@ -541,7 +541,7 @@ fn cache_key_for(source_path: string, dep_layout_manifest_paths: string[], compi
     let s_hash = _sha256_of_file_cmd(source_path);
 
     let mut dep_hashes: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= dep_layout_manifest_paths.length { break; }
         dep_hashes.push(_sha256_of_file_cmd(dep_layout_manifest_paths[i]));
@@ -549,7 +549,7 @@ fn cache_key_for(source_path: string, dep_layout_manifest_paths: string[], compi
     }
     let sorted_dep_hashes = _sort_strings(dep_hashes);
     let mut deps_concat: string = "";
-    let mut j: number = 0;
+    let mut j: int = 0;
     loop {
         if j >= sorted_dep_hashes.length { break; }
         if j > 0 { deps_concat = deps_concat + "|"; }

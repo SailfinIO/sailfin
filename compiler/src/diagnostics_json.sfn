@@ -59,7 +59,7 @@ struct CheckJsonSummary {
 // `effect_violation_to_diagnostic` and the typecheck factories.
 fn _json_escape_string(s: string) -> string {
     let mut out: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= s.length { break; }
         let ch = substring(s, i, i + 1);
@@ -85,28 +85,28 @@ fn _json_string_field(name: string, value: string) -> string {
     return _json_field(name, _json_quote(value));
 }
 
-fn _json_number_field(name: string, value: number) -> string {
+fn _json_number_field(name: string, value: int) -> string {
     return _json_field(name, _dj_number_to_string(value));
 }
 
 // Local copy of `number_to_string` (see preamble). Same algorithm as
 // `main.sfn`'s; kept here so the module stays self-contained for
 // unit tests and avoids the seed-compiler import-cycle limitation.
-fn _dj_number_to_string(value: number) -> string {
+fn _dj_number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
-    let mut working: number = value;
+    let mut working: int = value;
     let mut negative: boolean = false;
     if working < 0 {
         negative = true;
         working = 0 - working;
     }
     let digits = "0123456789";
-    let mut remaining: number = working;
+    let mut remaining: int = working;
     let mut output: string = "";
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;
-        let mut quotient: number = 0;
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -176,7 +176,7 @@ fn _json_render_suggestion(s: FixSuggestion?) -> string {
 fn _json_render_edits(edits: TextEdit[]) -> string {
     if edits.length == 0 { return "[]"; }
     let mut parts: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= edits.length { break; }
         parts.push(_json_render_edit(edits[i]));
@@ -202,7 +202,7 @@ fn _json_render_event(event: CheckJsonEvent) -> string {
 fn _json_render_events(events: CheckJsonEvent[]) -> string {
     if events.length == 0 { return "[]"; }
     let mut parts: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= events.length { break; }
         parts.push(_json_render_event(events[i]));
@@ -227,7 +227,7 @@ fn _json_render_summary(s: CheckJsonSummary) -> string {
 // (`schema_version` first so consumers can hard-fail on unknown
 // versions before reading anything else). One trailing newline so
 // stdout-piped consumers see a clean line boundary.
-fn render_check_json_envelope(events: CheckJsonEvent[], summary: CheckJsonSummary, exit_code: number) -> string {
+fn render_check_json_envelope(events: CheckJsonEvent[], summary: CheckJsonSummary, exit_code: int) -> string {
     let mut parts: string[] = [];
     parts.push(_json_string_field("schema_version", "sailfin-check/1"));
     parts.push(_json_string_field("command", "sfn check"));
@@ -264,7 +264,7 @@ fn classify_producer(code: string) -> string {
 fn _join(parts: string[], sep: string) -> string {
     if parts.length == 0 { return ""; }
     let mut out = parts[0];
-    let mut i: number = 1;
+    let mut i: int = 1;
     loop {
         if i >= parts.length { break; }
         out = out + sep + parts[i];
@@ -275,7 +275,7 @@ fn _join(parts: string[], sep: string) -> string {
 
 fn _starts_with(s: string, prefix: string) -> boolean {
     if s.length < prefix.length { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= prefix.length { break; }
         let _next = i + 1;
