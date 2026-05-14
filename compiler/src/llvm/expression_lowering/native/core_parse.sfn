@@ -71,7 +71,7 @@ fn find_matching_closing_brace(text: string, open_index: int) -> int {
     return -1;
 }
 
-fn find_top_level_colon(text: string) -> number {
+fn find_top_level_colon(text: string) -> int {
     let mut paren_depth: int = 0;
     let mut bracket_depth: int = 0;
     let mut brace_depth: int = 0;

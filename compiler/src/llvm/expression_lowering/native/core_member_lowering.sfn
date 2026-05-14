@@ -606,7 +606,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     return make_expression_result(current_lines, current_temp, operand, messages, enum_string_constants);
 }
 
-fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
+fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
     let mut diagnostics: string[] = base_result.diagnostics;
     let mut collected_string_constants: StringConstant[] = base_result.string_constants;
@@ -621,7 +621,7 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
     }
 
     let mut current_lines: string[] = base_result.lines;
-    let mut current_temp: number = base_result.temp_index;
+    let mut current_temp: int = base_result.temp_index;
     let base_operand = base_result.operand;
 
     if parse.field == "length" {

@@ -43,7 +43,7 @@ import { find_substring_from, sanitize_symbol } from "./core_text";
 // Returns the plain `llvm lowering: ` prefix otherwise so non-ABI coercion
 // failures keep their existing tier.
 fn _abi_mismatch_diagnostic_prefix(diagnostics: string[]) -> string {
-    let mut idx: number = 0;
+    let mut idx: int = 0;
     loop {
         if idx >= diagnostics.length { break; }
         let diag = diagnostics[idx];
@@ -57,9 +57,9 @@ fn _abi_mismatch_diagnostic_prefix(diagnostics: string[]) -> string {
 
 // Coerce operands to expected types and emit the final call instruction.
 // Handles array concat/push, trait dispatch, and normal function calls.
-fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, function_entry: NativeFunction?, current_temp: number, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> ExpressionResult ![io] {
+fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, function_entry: NativeFunction?, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> ExpressionResult ![io] {
     let mut result_lines = current_lines;
-    let mut result_temp: number = current_temp;
+    let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
     let _trace_ccl = trace_lowering();
 
@@ -72,7 +72,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
             + llvm_return);
     }
     let mut coerced_operands: LLVMOperand[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= operands.length { break; }
         let operand = operands[index];
@@ -154,7 +154,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
             if !ends_with_pointer_suffix(array_concat_element_type) {
                 if final_operands.length >= 2 {
                     let concat_result = lower_struct_array_concat(final_operands[0], final_operands[1], array_concat_element_type, result_lines, result_temp);
-                    let mut _ci7: number = 0;
+                    let mut _ci7: int = 0;
                     loop {
                         if _ci7 >= concat_result.diagnostics.length { break; }
                         result_diagnostics.push(concat_result.diagnostics[_ci7]);
@@ -213,7 +213,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                 // comment above). Slice E.1.5 (#528) leaves this site exempt
                 // from the ABI primitive kind check.
                 let push_value_coerced = coerce_operand_to_type(final_operands[1], array_push_element_type, result_temp, result_lines, true, null);
-                let mut _ci_apc: number = 0;
+                let mut _ci_apc: int = 0;
                 loop {
                     if _ci_apc >= push_value_coerced.diagnostics.length {
                         break;
@@ -245,7 +245,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                 }
                 let push_value_operand = push_value_coerced.operand;
                 let push_result = lower_array_push_in_place(final_operands[0], push_value_operand, array_push_element_type, result_lines, result_temp);
-                let mut _ci8: number = 0;
+                let mut _ci8: int = 0;
                 loop {
                     if _ci8 >= push_result.diagnostics.length { break; }
                     result_diagnostics.push(push_result.diagnostics[_ci8]);
@@ -367,8 +367,8 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
     if substring(trimmed_target, 0, 16) == "trait_dispatch__" {
         let after_prefix = substring(trimmed_target, 16, trimmed_target.length);
         // Find the last "__" separator to split interface name from method name
-        let mut _td_split: number = -1;
-        let mut _td_i: number = 0;
+        let mut _td_split: int = -1;
+        let mut _td_i: int = 0;
         loop {
             if _td_i >= after_prefix.length { break; }
             if substring(after_prefix, _td_i, _td_i + 2) == "__" {
@@ -401,8 +401,8 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
 
                 let interface_info3 = find_interface_info_by_name(context, interface_name);
                 if interface_info3 != null {
-                    let mut method_index: number = -1;
-                    let mut sig_idx: number = 0;
+                    let mut method_index: int = -1;
+                    let mut sig_idx: int = 0;
                     loop {
                         if sig_idx >= interface_info3.signatures.length {
                             break;
@@ -416,7 +416,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
 
                     if method_index >= 0 {
                         let mut fp_param_types: string[] = ["i8*"];
-                        let mut arg_idx: number = 1;
+                        let mut arg_idx: int = 1;
                         loop {
                             if arg_idx >= final_operands.length { break; }
                             fp_param_types.push(final_operands[arg_idx].llvm_type);

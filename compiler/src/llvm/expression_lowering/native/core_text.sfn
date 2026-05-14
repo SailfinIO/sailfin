@@ -48,7 +48,7 @@ fn number_to_string(value: number) -> string {  // alias-coverage: number-type v
     return output;
 }
 
-fn lower_char_code(code: number) -> number {
+fn lower_char_code(code: int) -> int {
     let upper_a = char_code("A");
     let upper_z = char_code("Z");
     if code >= upper_a {
@@ -62,7 +62,7 @@ fn lower_char_code(code: number) -> number {
 
 fn matches_case_insensitive(value: string, expected: string) -> boolean {
     if value.length != expected.length { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= value.length { break; }
         let value_ch = substring(value, index, index + 1);
@@ -76,8 +76,8 @@ fn matches_case_insensitive(value: string, expected: string) -> boolean {
 }
 
 fn trim_text(value: string) -> string {
-    let mut start: number = 0;
-    let mut end: number = value.length;
+    let mut start: int = 0;
+    let mut end: int = value.length;
     loop {
         if start >= end { break; }
         let ch = char_at(value, start);
@@ -147,7 +147,7 @@ fn append_string(values: string[], value: string) -> string[] {
 }
 
 fn string_array_contains(values: string[], target: string) -> boolean {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= values.length { break; }
         if values[index] == target { return true; }
@@ -168,7 +168,7 @@ fn join_with_separator(values: string[], separator: string) -> string {
         if parts.length <= 1 { break; }
 
         let mut next: string[] = [];
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= parts.length { break; }
             let _ct_next = index + 1;
@@ -187,9 +187,9 @@ fn join_with_separator(values: string[], separator: string) -> string {
     return parts[0];
 }
 
-fn find_substring_from(value: string, target: string, start: number) -> number {
+fn find_substring_from(value: string, target: string, start: int) -> int {
     if target.length == 0 { return start; }
-    let mut index: number = start;
+    let mut index: int = start;
     if index < 0 { index = 0; }
     // Use substring + == instead of char_code_at_text comparisons.
     let _search_limit = value.length - target.length;
@@ -220,7 +220,7 @@ fn parse_union_payload_types(union_llvm_type: string) -> string[] {
     // Expect first entry to be i32 tag.
     if fields.length < 2 { return []; }
     let mut result: string[] = [];
-    let mut index: number = 1;
+    let mut index: int = 1;
     loop {
         if index >= fields.length { break; }
         result.push(trim_text(fields[index]));
@@ -234,7 +234,7 @@ fn extract_simple_identifier(text: string) -> string {
     if trimmed.length == 0 { return ""; }
     let first = substring(trimmed, 0, 1);
     if !is_identifier_start_char(first) { return ""; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
@@ -268,14 +268,14 @@ fn is_digit_char(ch: string) -> boolean {
     return _ret125;
 }
 
-fn char_code_at_text(text: string, index: number) -> number {
+fn char_code_at_text(text: string, index: int) -> int {
     return char_code(char_at(text, index));
 }
 
 fn is_integer_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
     if trimmed.length == 0 { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     if substring(trimmed, 0, 1) == "-" {
         if trimmed.length == 1 { return false; }
         index = 1;
@@ -306,7 +306,7 @@ fn is_integer_literal(text: string) -> boolean {
 }
 
 fn is_number_literal(text: string) -> boolean {
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut has_digit: boolean = false;
     let mut has_decimal: boolean = false;
     let trimmed = trim_text(text);
