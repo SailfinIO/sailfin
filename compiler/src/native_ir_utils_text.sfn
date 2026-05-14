@@ -54,8 +54,8 @@ fn is_trim_char(ch: string) -> boolean {
 }
 
 fn trim_text(value: string) -> string {
-    let mut start: number = 0;
-    let mut end: number = value.length;
+    let mut start: int = 0;
+    let mut end: int = value.length;
     loop {
         if start >= end { break; }
         let ch = value[start];
@@ -118,8 +118,8 @@ fn strip_quotes(value: string) -> string {
 fn split_lines(value: string) -> string[] {
     let value_len = value.length;
     let mut lines: string[] = [];
-    let mut start: number = 0;
-    let mut index: number = 0;
+    let mut start: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= value_len { break; }
         let ch = value[index];
@@ -135,8 +135,8 @@ fn split_lines(value: string) -> string[] {
 
 fn strip_generics(name: string) -> string {
     let mut result: string = "";
-    let mut depth: number = 0;
-    let mut index: number = 0;
+    let mut depth: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= name.length { break; }
         let ch = name[index];
@@ -156,12 +156,12 @@ fn strip_generics(name: string) -> string {
     return trim_text(result);
 }
 
-fn last_index_of(value: string, target: string) -> number {
+fn last_index_of(value: string, target: string) -> int {
     if target.length == 0 { return value.length; }
-    let mut index: number = value.length - target.length;
+    let mut index: int = value.length - target.length;
     loop {
         if index < 0 { break; }
-        let mut match_index: number = 0;
+        let mut match_index: int = 0;
         let mut matches: boolean = true;
         loop {
             if match_index >= target.length { break; }
@@ -181,8 +181,8 @@ fn last_index_of(value: string, target: string) -> number {
 fn split_text(value: string, delimiter: string) -> string[] {
     if delimiter.length == 0 { return [value]; }
     let mut parts: string[] = [];
-    let mut start: number = 0;
-    let mut index: number = 0;
+    let mut start: int = 0;
+    let mut index: int = 0;
 
     loop {
         if index >= value.length { break; }
@@ -205,7 +205,7 @@ fn split_comma_separated(value: string) -> string[] {
     let value_len = value.length;
     let mut results: string[] = [];
     let mut current: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= value_len { break; }
         let ch = value[index];
@@ -227,14 +227,14 @@ fn split_comma_separated(value: string) -> string[] {
     return filtered;
 }
 
-fn text_char_at(value: string, index: number) -> string {
+fn text_char_at(value: string, index: int) -> string {
     if index < 0 { return ""; }
     if index >= value.length { return ""; }
     return value[index];
 }
 
 fn trim_trailing_delimiters(text: string) -> string {
-    let mut end: number = text.length;
+    let mut end: int = text.length;
     loop {
         if end <= 0 { break; }
         let ch = text_char_at(text, end - 1);
@@ -260,12 +260,12 @@ fn maybe_trim_trailing(value: string?) -> string? {
 fn split_top_level_commas(text: string) -> string[] {
     let mut entries: string[] = [];
     let mut current: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut quote: string = "";
-    let mut angle_depth: number = 0;
-    let mut paren_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut brace_depth: number = 0;
+    let mut angle_depth: int = 0;
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = text[index];
@@ -365,9 +365,9 @@ fn split_top_level_commas(text: string) -> string[] {
     return entries;
 }
 
-fn find_matching_angle(text: string, start_index: number) -> number {
-    let mut depth: number = 0;
-    let mut index: number = start_index;
+fn find_matching_angle(text: string, start_index: int) -> int {
+    let mut depth: int = 0;
+    let mut index: int = start_index;
     loop {
         if index >= text.length { break; }
         let ch = text[index];
@@ -382,9 +382,9 @@ fn find_matching_angle(text: string, start_index: number) -> number {
     return -1;
 }
 
-fn find_matching_paren(text: string, start_index: number) -> number {
-    let mut depth: number = 0;
-    let mut index: number = start_index;
+fn find_matching_paren(text: string, start_index: int) -> int {
+    let mut depth: int = 0;
+    let mut index: int = start_index;
     loop {
         if index >= text.length { break; }
         let ch = text[index];
@@ -420,8 +420,8 @@ fn find_matching_paren(text: string, start_index: number) -> number {
 fn split_whitespace(value: string) -> string[] {
     let mut parts: string[] = [];
     if value.length == 0 { return parts; }
-    let mut start: number = -1;
-    let mut index: number = 0;
+    let mut start: int = -1;
+    let mut index: int = 0;
     loop {
         if index >= value.length { break; }
         let ch = text_char_at(value, index);

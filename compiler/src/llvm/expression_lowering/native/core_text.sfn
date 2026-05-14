@@ -22,12 +22,12 @@ fn number_to_string(value: number) -> string {  // alias-coverage: number-type v
         remaining = 0 - remaining;
     }
     let mut output: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut started: boolean = false;
     loop {
         if index >= powers.length { break; }
         let power = powers[index];
-        let mut count: number = 0;
+        let mut count: int = 0;
         loop {
             if remaining < power { break; }
             remaining -= power;
@@ -362,7 +362,7 @@ fn is_string_literal(text: string) -> boolean {
     // Guard against misclassifying expressions like `"a" + "b"` as a single
     // string literal. Only accept if every interior `"` is escaped.
     let mut escape: boolean = false;
-    let mut index: number = 1;
+    let mut index: int = 1;
     loop {
         if index >= trimmed.length - 1 { break; }
         let ch = char_at(trimmed, index);
@@ -400,7 +400,7 @@ fn is_character_literal(text: string) -> boolean {
     return inner.length == 1;
 }
 
-fn get_character_literal_value(text: string) -> number {
+fn get_character_literal_value(text: string) -> int {
     let inner = substring(text, 1, text.length - 1);
     if inner.length == 0 { return 0; }
     // Handle escape sequences
@@ -441,11 +441,11 @@ fn make_string_constant_name_for_module(module_name: string, content: string) ->
     return "@.str." + tag + substring(base, 5, base.length);
 }
 
-fn compute_string_constant_hash(content: string) -> number {
+fn compute_string_constant_hash(content: string) -> int {
     // Use a djb2-style rolling hash so identical literals share the same identifier.
-    let mut hash: number = 5381;
-    let modulus: number = 2147483647;
-    let mut index: number = 0;
+    let mut hash: int = 5381;
+    let modulus: int = 2147483647;
+    let mut index: int = 0;
     loop {
         if index >= content.length { break; }
         let code = char_code(char_at(content, index));
@@ -467,7 +467,7 @@ fn compute_string_constant_hash(content: string) -> number {
 fn parse_interpolated_template(content: string) -> InterpolatedTemplateParse {
     let mut parts: string[] = [];
     let mut expressions: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index > content.length { break; }
         let start = find_substring_from(content, "{{", index);
@@ -515,8 +515,8 @@ fn escape_string_for_sailfin_literal(content: string) -> string {
     // intermediates per invocation; emit_native.sfn calls this on every
     // string literal it emits to the .sfn-asm output).
     let mut chunks: string[] = [];
-    let mut chunk_start: number = 0;
-    let mut index: number = 0;
+    let mut chunk_start: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= content.length { break; }
         let ch = substring(content, index, index + 1);
@@ -541,7 +541,7 @@ fn escape_string_for_sailfin_literal(content: string) -> string {
     if chunks.length == 0 { return ""; }
     if chunks.length == 1 { return chunks[0]; }
     let mut result: string = chunks[0];
-    let mut i: number = 1;
+    let mut i: int = 1;
     loop {
         if i >= chunks.length { break; }
         result = result + chunks[i];
@@ -557,7 +557,7 @@ fn unescape_string_literal(literal: string) -> string {
     let inner = substring(literal, start_index, end_index);
 
     let mut result: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= inner.length { break; }
         let ch = char_at(inner, index);
@@ -624,7 +624,7 @@ fn is_symbol_char(ch: string) -> boolean {
 fn sanitize_symbol(name: string) -> string {
     if name.length == 0 { return "_"; }
     let mut result: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= name.length { break; }
         let ch = substring(name, index, index + 1);
