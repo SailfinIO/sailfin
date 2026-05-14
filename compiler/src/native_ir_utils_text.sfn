@@ -74,14 +74,14 @@ fn trim_text(value: string) -> string {
     return substring(value, start, end);
 }
 
-fn index_of(value: string, target: string) -> number {
+fn index_of(value: string, target: string) -> int {
     if target.length == 0 { return 0; }
     if target.length > value.length { return -1; }
     let limit = value.length - target.length;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index > limit { break; }
-        let mut match_index: number = 0;
+        let mut match_index: int = 0;
         let mut matches: boolean = true;
         loop {
             if match_index >= target.length { break; }

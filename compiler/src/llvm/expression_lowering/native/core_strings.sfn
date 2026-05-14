@@ -9,7 +9,7 @@ import { coerce_operand_to_type, harmonise_operands } from "./core_operands";
 import { unescape_string_literal } from "./core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
-fn lower_string_literal(literal: string, temp_index: number, lines: string[]) -> ExpressionResult {
+fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> ExpressionResult {
     // M1.A — String literal lowering to {i8*, i64} aggregate.
     //
     // The literal materializes in three layers:
@@ -53,7 +53,7 @@ fn lower_string_literal(literal: string, temp_index: number, lines: string[]) ->
     };
     let alloc_operands: LLVMOperand[] = [alloc_size_operand];
     let alloc_result = emit_runtime_call("alloc_struct", alloc_operands, empty_runtime_call_overrides(), temp_index, current_lines);
-    let mut _alloc_di: number = 0;
+    let mut _alloc_di: int = 0;
     loop {
         if _alloc_di >= alloc_result.diagnostics.length { break; }
         diagnostics.push(alloc_result.diagnostics[_alloc_di]);
@@ -97,7 +97,7 @@ fn lower_string_literal(literal: string, temp_index: number, lines: string[]) ->
     };
 }
 
-fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: number, lines: string[]) -> ExpressionResult {
+fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
     let harmonised = harmonise_operands(left, right, temp_index, lines);
     let mut _if121: boolean = false;
     if harmonised.left == null { _if121 = true; }
@@ -122,14 +122,14 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: number,
     // legacy-shape consumers don't need updating in this PR.
     let left_aligned = coerce_operand_to_type(harmonised.left, "{i8*, i64}", harmonised.temp_index, harmonised.lines, true, null);
     let mut diagnostics: string[] = harmonised.diagnostics;
-    let mut _ci0: number = 0;
+    let mut _ci0: int = 0;
     loop {
         if _ci0 >= left_aligned.diagnostics.length { break; }
         diagnostics.push(left_aligned.diagnostics[_ci0]);
         _ci0 += 1;
     }
     let right_aligned = coerce_operand_to_type(harmonised.right, "{i8*, i64}", left_aligned.temp_index, left_aligned.lines, true, null);
-    let mut _ci1: number = 0;
+    let mut _ci1: int = 0;
     loop {
         if _ci1 >= right_aligned.diagnostics.length { break; }
         diagnostics.push(right_aligned.diagnostics[_ci1]);
@@ -164,7 +164,7 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: number,
     };
 }
 
-fn coerce_operand_to_string(operand: LLVMOperand, temp_index: number, lines: string[]) -> ExpressionResult {
+fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
     let empty_constants = empty_string_constant_set();
     if operand.llvm_type == "i8*" {
         return ExpressionResult {

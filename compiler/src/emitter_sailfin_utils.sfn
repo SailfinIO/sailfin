@@ -32,7 +32,7 @@ struct TextBuilder {
 
 fn quote_string(value: string) -> string {
     let mut result: string = "\"";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= value.length { break; }
         result = result + escape_string_char(char_at(value, index));
@@ -66,7 +66,7 @@ fn trim_block_body(text: string) -> string {
 
 fn collapse_whitespace(value: string) -> string {
     let mut result: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut last_space: boolean = false;
     loop {
         if index >= value.length { break; }
@@ -94,7 +94,7 @@ fn collapse_whitespace(value: string) -> string {
 fn tokens_to_source(tokens: Token[]) -> string {
     if tokens.length == 0 { return ""; }
     let mut parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= tokens.length { break; }
         parts.push(tokens[index].lexeme);
@@ -109,7 +109,7 @@ fn builder_new() -> TextBuilder {
 
 fn builder_emit_line(builder: TextBuilder, line: string) -> TextBuilder {
     let mut prefix: string = "";
-    let mut count: number = 0;
+    let mut count: int = 0;
     loop {
         if count >= builder.indent { break; }
         prefix = prefix + "    ";
@@ -147,7 +147,7 @@ fn builder_to_string(builder: TextBuilder) -> string {
 }
 
 fn trim_right(value: string) -> string {
-    let mut end: number = value.length;
+    let mut end: int = value.length;
     loop {
         if end <= 0 { break; }
         let ch = char_at(value, end - 1);
@@ -167,7 +167,7 @@ fn trim_right(value: string) -> string {
 fn join_with_separator(values: string[], separator: string) -> string {
     if values.length == 0 { return ""; }
     let mut result: string = values[0];
-    let mut index: number = 1;
+    let mut index: int = 1;
     loop {
         if index >= values.length { break; }
         result = result + separator + values[index];
@@ -177,8 +177,8 @@ fn join_with_separator(values: string[], separator: string) -> string {
 }
 
 fn trim_text(value: string) -> string {
-    let mut start: number = 0;
-    let mut end: number = value.length;
+    let mut start: int = 0;
+    let mut end: int = value.length;
     loop {
         if start >= end { break; }
         let ch = char_at(value, start);

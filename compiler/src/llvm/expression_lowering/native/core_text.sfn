@@ -112,13 +112,13 @@ fn is_trim_char(ch: string) -> boolean {
     return _ret124;
 }
 
-fn index_of(value: string, target: string) -> number {
+fn index_of(value: string, target: string) -> int {
     if target.length == 0 { return 0; }
     // Use substring + == instead of char_code_at_text comparisons.
     // char_code_at_text is miscompiled by older seeds, but substring
     // (backed by the C runtime grapheme_at) and == both work correctly.
     let _search_limit = value.length - target.length;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index > _search_limit { break; }
         let candidate = substring(value, index, index + target.length);
@@ -128,10 +128,10 @@ fn index_of(value: string, target: string) -> number {
     return -1;
 }
 
-fn find_last_index_of_char(value: string, target: string) -> number {
+fn find_last_index_of_char(value: string, target: string) -> int {
     if target.length != 1 { return -1; }
     // Use substring + == instead of char_code_at_text.
-    let mut index: number = value.length;
+    let mut index: int = value.length;
     loop {
         if index <= 0 { break; }
         index -= 1;
