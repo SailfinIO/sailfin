@@ -152,7 +152,7 @@ test "test_runner_json: collect_test_entries finds every test in source order" {
 }
 
 test "test_runner_json: collect_test_entries returns empty when no tests" {
-    let source = "fn nothing_to_see() -> number { return 0; }\n";
+    let source = "fn nothing_to_see() -> int { return 0; }\n";
     let program: Program = parse_program(source);
     let entries = collect_test_entries(program, "no_tests.sfn");
     assert entries.length == 0;

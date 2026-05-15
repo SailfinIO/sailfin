@@ -24,7 +24,7 @@ import { parse_program } from "../../src/parser/mod";
 // Helpers
 // -------------------------------------------------------------------
 fn _find_function_body(program: Program, name: string) -> Block {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
         let stmt = program.statements[index];
@@ -36,9 +36,9 @@ fn _find_function_body(program: Program, name: string) -> Block {
     return Block { tokens: [], text: "", statements: [] };
 }
 
-fn _count_variable_declarations(block: Block) -> number {
-    let mut count: number = 0;
-    let mut index: number = 0;
+fn _count_variable_declarations(block: Block) -> int {
+    let mut count: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= block.statements.length { break; }
         if block.statements[index].variant == "VariableDeclaration" {
@@ -49,9 +49,9 @@ fn _count_variable_declarations(block: Block) -> number {
     return count;
 }
 
-fn _nth_variable_declaration(block: Block, n: number) -> Statement {
-    let mut found: number = 0;
-    let mut index: number = 0;
+fn _nth_variable_declaration(block: Block, n: int) -> Statement {
+    let mut found: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= block.statements.length { break; }
         let stmt = block.statements[index];
@@ -108,10 +108,10 @@ test "parser block let: multiple block-scoped lets parse to structured statement
 }
 
 test "parser block let: typed let with explicit annotation parses" {
-    // `let x: number = 1` previously round-tripped through raw text
+    // `let x: number = 1` previously round-tripped through raw text  // alias-coverage: parser fixture exercises legacy : number syntax
     // inside a block. The structured path must preserve the type
     // annotation for the typechecker to consume.
-    let source = "fn main() { let x: number = 1; }";
+    let source = "fn main() { let x: number = 1; }";  // alias-coverage: parser fixture exercises legacy : number syntax
     let program = parse_program(source);
     let body = _find_function_body(program, "main");
     assert _count_variable_declarations(body) == 1;
@@ -126,7 +126,7 @@ test "parser block let: top-level let path is unchanged" {
     // VariableDeclaration.
     let source = "let module_const = 42;";
     let program = parse_program(source);
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut found = false;
     loop {
         if index >= program.statements.length { break; }

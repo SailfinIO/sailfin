@@ -2,13 +2,11 @@
 // Targets: match lowering correctness, enum dispatch, block bodies.
 // The self-hosted compiler uses match statements for AST node dispatch
 // and instruction type routing. These patterns must work correctly.
-
 // ---------------------------------------------------------------------------
 // Match with computation in block bodies
 // ---------------------------------------------------------------------------
-
-fn _compute_via_match(op: number, a: number, b: number) -> number {
-    let mut result: number = 0;
+fn _compute_via_match(op: number, a: number, b: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut result: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     match op {
         1: {
             result = a + b;
@@ -21,15 +19,11 @@ fn _compute_via_match(op: number, a: number, b: number) -> number {
         },
         4: {
             // Division (integer-like)
-            if b != 0 {
-                result = a / b;
-            } else {
-                result = 0;
-            }
+            if b != 0 { result = a / b; } else { result = 0; }
         },
         _: {
             result = -1;
-        },
+        }
     }
     return result;
 }
@@ -61,24 +55,23 @@ test "match_adv: block body default" {
 // ---------------------------------------------------------------------------
 // Match on enum with many variants
 // ---------------------------------------------------------------------------
-
 enum HttpStatus {
     Ok,
     Created,
     BadRequest,
     Unauthorized,
     NotFound,
-    ServerError,
+    ServerError
 }
 
-fn _status_code(s: HttpStatus) -> number {
+fn _status_code(s: HttpStatus) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     match s {
         HttpStatus.Ok: return 200,
         HttpStatus.Created: return 201,
         HttpStatus.BadRequest: return 400,
         HttpStatus.Unauthorized: return 401,
         HttpStatus.NotFound: return 404,
-        HttpStatus.ServerError: return 500,
+        HttpStatus.ServerError: return 500
     }
 }
 
@@ -86,7 +79,7 @@ fn _is_success(s: HttpStatus) -> boolean {
     match s {
         HttpStatus.Ok: return true,
         HttpStatus.Created: return true,
-        _: return false,
+        _: return false
     }
 }
 
@@ -109,50 +102,50 @@ test "match_adv: enum with wildcard" {
 // ---------------------------------------------------------------------------
 // Match result used in further computation
 // ---------------------------------------------------------------------------
-
 // Note: Sailfin only has float division (no integer types yet),
 // so scores must be exact multiples of 10 for match arms to hit.
-fn _grade_letter(score: number) -> string {
+fn _grade_letter(score: number) -> string {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     let bracket = score / 10;
     let mut letter: string = "F";
     match bracket {
-        10: { letter = "A+"; },
-        9: { letter = "A"; },
-        8: { letter = "B"; },
-        7: { letter = "C"; },
-        6: { letter = "D"; },
-        _: { letter = "F"; },
+        10: {
+            letter = "A+";
+        },
+        9: {
+            letter = "A";
+        },
+        8: {
+            letter = "B";
+        },
+        7: {
+            letter = "C";
+        },
+        6: {
+            letter = "D";
+        },
+        _: {
+            letter = "F";
+        }
     }
     return letter;
 }
 
-test "match_adv: grade A plus" {
-    assert _grade_letter(100) == "A+";
-}
+test "match_adv: grade A plus" { assert _grade_letter(100) == "A+"; }
 
-test "match_adv: grade A" {
-    assert _grade_letter(90) == "A";
-}
+test "match_adv: grade A" { assert _grade_letter(90) == "A"; }
 
-test "match_adv: grade B" {
-    assert _grade_letter(80) == "B";
-}
+test "match_adv: grade B" { assert _grade_letter(80) == "B"; }
 
-test "match_adv: grade C" {
-    assert _grade_letter(70) == "C";
-}
+test "match_adv: grade C" { assert _grade_letter(70) == "C"; }
 
-test "match_adv: grade F" {
-    assert _grade_letter(50) == "F";
-}
+test "match_adv: grade F" { assert _grade_letter(50) == "F"; }
 
 // ---------------------------------------------------------------------------
 // Match in a loop (repeated dispatch)
 // ---------------------------------------------------------------------------
-
-fn _process_commands(commands: number[]) -> number {
-    let mut accumulator: number = 0;
-    let mut i: number = 0;
+fn _process_commands(commands: number[]) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut accumulator: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     loop {
         if i >= commands.length { break; }
         let cmd = commands[i];
@@ -162,18 +155,14 @@ fn _process_commands(commands: number[]) -> number {
                 if i + 1 < commands.length {
                     accumulator += commands[i + 1];
                     i += 2;
-                } else {
-                    i += 1;
-                }
+                } else { i += 1; }
             },
             2: {
                 // MUL: multiply accumulator by next value
                 if i + 1 < commands.length {
                     accumulator = accumulator * commands[i + 1];
                     i += 2;
-                } else {
-                    i += 1;
-                }
+                } else { i += 1; }
             },
             3: {
                 // RESET: set to zero
@@ -182,7 +171,7 @@ fn _process_commands(commands: number[]) -> number {
             },
             _: {
                 i += 1;
-            },
+            }
         }
     }
     return accumulator;
@@ -201,19 +190,18 @@ test "match_adv: command processing with reset" {
 }
 
 test "match_adv: command processing empty" {
-    let mut cmds: number[] = [];
+    let mut cmds: number[] = [];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     assert _process_commands(cmds) == 0;
 }
 
 // ---------------------------------------------------------------------------
 // Match with enum and string results
 // ---------------------------------------------------------------------------
-
 enum LogLevel {
     Debug,
     Info,
     Warn,
-    Error,
+    Error
 }
 
 fn _log_prefix(level: LogLevel) -> string {
@@ -221,7 +209,7 @@ fn _log_prefix(level: LogLevel) -> string {
         LogLevel.Debug: return "[DEBUG]",
         LogLevel.Info: return "[INFO]",
         LogLevel.Warn: return "[WARN]",
-        LogLevel.Error: return "[ERROR]",
+        LogLevel.Error: return "[ERROR]"
     }
 }
 
@@ -248,23 +236,18 @@ test "match_adv: log prefix all levels" {
 // ---------------------------------------------------------------------------
 // Nested match (match result drives another match)
 // ---------------------------------------------------------------------------
-
-fn _priority_level(level: LogLevel) -> number {
+fn _priority_level(level: LogLevel) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     match level {
         LogLevel.Debug: return 0,
         LogLevel.Info: return 1,
         LogLevel.Warn: return 2,
-        LogLevel.Error: return 3,
+        LogLevel.Error: return 3
     }
 }
 
 fn _should_alert(level: LogLevel) -> boolean {
     let priority = _priority_level(level);
-    match priority {
-        3: return true,
-        2: return true,
-        _: return false,
-    }
+    match priority { 3: return true, 2: return true, _: return false }
 }
 
 test "match_adv: nested match dispatch" {

@@ -41,8 +41,8 @@ fn _is_ws(ch: string) -> boolean {
 }
 
 fn _trim(value: string) -> string {
-    let mut start: number = 0;
-    let mut end: number = value.length;
+    let mut start: int = 0;
+    let mut end: int = value.length;
     loop {
         if start >= end { break; }
         if !_is_ws(value[start]) { break; }
@@ -54,7 +54,7 @@ fn _trim(value: string) -> string {
         end -= 1;
     }
     let mut out: string = "";
-    let mut i: number = start;
+    let mut i: int = start;
     loop {
         if i >= end { break; }
         out = out + value[i];
@@ -65,7 +65,7 @@ fn _trim(value: string) -> string {
 
 fn _starts_with(value: string, prefix: string) -> boolean {
     if prefix.length > value.length { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= prefix.length { break; }
         if value[i] != prefix[i] { return false; }
@@ -77,7 +77,7 @@ fn _starts_with(value: string, prefix: string) -> boolean {
 fn _strip_prefix(value: string, prefix: string) -> string {
     if !_starts_with(value, prefix) { return value; }
     let mut out: string = "";
-    let mut i: number = prefix.length;
+    let mut i: int = prefix.length;
     loop {
         if i >= value.length { break; }
         out = out + value[i];
@@ -88,13 +88,13 @@ fn _strip_prefix(value: string, prefix: string) -> string {
 
 fn _split_lines(value: string) -> string[] {
     let mut lines: string[] = [];
-    let mut start: number = 0;
-    let mut index: number = 0;
+    let mut start: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= value.length { break; }
         if value[index] == "\n" {
             let mut line: string = "";
-            let mut j: number = start;
+            let mut j: int = start;
             loop {
                 if j >= index { break; }
                 line = line + value[j];
@@ -106,7 +106,7 @@ fn _split_lines(value: string) -> string[] {
         index += 1;
     }
     let mut tail: string = "";
-    let mut k: number = start;
+    let mut k: int = start;
     loop {
         if k >= value.length { break; }
         tail = tail + value[k];
@@ -125,7 +125,7 @@ fn _parse_entry(kind: string, entry: string) -> FastImport? {
 
     // Extract quoted module identifier.
     if trimmed[0] != "\"" { return null; }
-    let mut idx: number = 1;
+    let mut idx: int = 1;
     let mut module: string = "";
     loop {
         if idx >= trimmed.length { return null; }
@@ -157,8 +157,8 @@ fn _parse_entry(kind: string, entry: string) -> FastImport? {
             idx += 1;
         }
         // Split content on commas.
-        let mut start: number = 0;
-        let mut i: number = 0;
+        let mut start: int = 0;
+        let mut i: int = 0;
         loop {
             if i > content.length { break; }
             let at_end = i == content.length;
@@ -168,7 +168,7 @@ fn _parse_entry(kind: string, entry: string) -> FastImport? {
             }
             if at_end || at_comma {
                 let mut raw: string = "";
-                let mut j: number = start;
+                let mut j: int = start;
                 loop {
                     if j >= i { break; }
                     raw = raw + content[j];
@@ -179,7 +179,7 @@ fn _parse_entry(kind: string, entry: string) -> FastImport? {
                     // Parse "name" or "name as alias".
                     let mut name: string = "";
                     let mut alias: string? = null;
-                    let mut p: number = 0;
+                    let mut p: int = 0;
                     loop {
                         if p >= spec_text.length { break; }
                         if _is_ws(spec_text[p]) { break; }
@@ -215,7 +215,7 @@ fn _parse_entry(kind: string, entry: string) -> FastImport? {
 fn fast_scan(text: string) -> FastImport[] {
     let lines = _split_lines(text);
     let mut imports: FastImport[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
         let line = _trim(lines[index]);
@@ -320,19 +320,19 @@ test "fast-scan: struct/enum/fn bodies do not produce spurious imports" {
     // `.endstruct` / `.endfn` / instructions.
     let text = "; test\n" + ".module test_mod\n" + ".import \"./helpers\"\n"
         + ".interface Meter\n"
-        + "    .sig total(self: Meter) -> number\n"
+        + "    .sig total(self: Meter) -> int\n"
         + ".endinterface\n"
         + ".struct Person implements Meter\n"
         + "    .layout struct name=Person size=8 align=8\n"
-        + "    .field years: number\n"
-        + "    .method total(self: Person) -> number\n"
+        + "    .field years: int\n"
+        + "    .method total(self: Person) -> int\n"
         + "    .meta return number\n"
         + "    .meta effects none\n"
         + "        .span 8 14 8 28\n"
         + "        ret self.years\n"
         + "    .endmethod\n"
         + ".endstruct\n"
-        + ".fn identity(value: number) -> number\n"
+        + ".fn identity(value: int) -> int\n"
         + ".meta return number\n"
         + "    ret value\n"
         + ".endfn\n"
@@ -354,13 +354,13 @@ test "fast-scan: representative compiler-module fixture" {
         + ".import \"./foo\" { bar }\n"
         + ".import \"./baz\"\n"
         + ".interface Meter\n"
-        + "    .sig total(self: Meter) -> number\n"
+        + "    .sig total(self: Meter) -> int\n"
         + ".endinterface\n"
         + ".struct Point\n"
-        + "    .field x: number\n"
-        + "    .field y: number\n"
+        + "    .field x: int\n"
+        + "    .field y: int\n"
         + ".endstruct\n"
-        + ".fn add(a: number, b: number) -> number\n"
+        + ".fn add(a: int, b: int) -> int\n"
         + ".meta return number\n"
         + "    ret a + b\n"
         + ".endfn\n"

@@ -2,7 +2,7 @@ struct DivisionError {
     message: string;
 }
 
-fn _safe_divide(a: number, b: number) -> number | DivisionError {
+fn _safe_divide(a: int, b: int) -> int | DivisionError {
     if b == 0 {
         return DivisionError { message: "division by zero" };
     }
@@ -13,7 +13,7 @@ struct ParseError {
     message: string;
 }
 
-fn _parse_non_negative(n: number) -> number | ParseError {
+fn _parse_non_negative(n: int) -> int | ParseError {
     if n < 0 {
         return ParseError { message: "expected non-negative number" };
     }
@@ -25,7 +25,6 @@ fn _parse_non_negative(n: number) -> number | ParseError {
 // return types compile and can be called, but cannot yet inspect the result
 // via match destructuring.
 // See: https://github.com/SailfinIO/sailfin/issues/50
-
 test "error_handling: union return function compiles and runs (success path)" {
     let result = _safe_divide(10, 2);
     // Once match on union types is supported, assert the numeric result here

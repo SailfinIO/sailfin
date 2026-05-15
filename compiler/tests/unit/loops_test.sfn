@@ -1,59 +1,45 @@
-fn _sum_to(n: number) -> number {
-    let mut total: number = 0;
-    let mut i: number = 1;
+fn _sum_to(n: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut total: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut i: number = 1;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     loop {
-        if i > n {
-            break;
-        }
+        if i > n { break; }
         total += i;
         i += 1;
     }
     return total;
 }
 
-fn _count_evens_up_to(n: number) -> number {
-    let mut count: number = 0;
-    let mut i: number = 0;
+fn _count_evens_up_to(n: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut count: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     loop {
-        if i > n {
-            break;
-        }
-        if i % 2 == 0 {
-            count += 1;
-        }
+        if i > n { break; }
+        if i % 2 == 0 { count += 1; }
         i += 1;
     }
     return count;
 }
 
-fn _first_multiple_of_seven(limit: number) -> number {
-    let mut i: number = 1;
+fn _first_multiple_of_seven(limit: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut i: number = 1;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     loop {
-        if i > limit {
-            return -1;
-        }
-        if i % 7 == 0 {
-            return i;
-        }
+        if i > limit { return -1; }
+        if i % 7 == 0 { return i; }
         i += 1;
     }
     return -1;
 }
 
-fn _sum_array(arr: number[]) -> number {
-    let mut total: number = 0;
-    for n in arr {
-        total += n;
-    }
+fn _sum_array(arr: number[]) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut total: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    for n in arr { total += n; }
     return total;
 }
 
-fn _count_positive(arr: number[]) -> number {
-    let mut count: number = 0;
+fn _count_positive(arr: number[]) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut count: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     for n in arr {
-        if n > 0 {
-            count += 1;
-        }
+        if n > 0 { count += 1; }
     }
     return count;
 }
@@ -82,7 +68,7 @@ test "loops: for-in sums array elements" {
 }
 
 test "loops: for-in with empty array" {
-    let mut empty: number[] = [];
+    let mut empty: number[] = [];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     assert _sum_array(empty) == 0;
 }
 
@@ -92,33 +78,25 @@ test "loops: for-in counts positive elements" {
 }
 
 test "loops: continue skips iteration body" {
-    let mut evens: number = 0;
-    let mut i: number = 0;
+    let mut evens: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     loop {
-        if i >= 10 {
-            break;
-        }
+        if i >= 10 { break; }
         i += 1;
-        if i % 2 != 0 {
-            continue;
-        }
+        if i % 2 != 0 { continue; }
         evens += 1;
     }
     assert evens == 5;
 }
 
 test "loops: nested loops accumulate correctly" {
-    let mut total: number = 0;
-    let mut i: number = 0;
+    let mut total: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     loop {
-        if i >= 3 {
-            break;
-        }
-        let mut j: number = 0;
+        if i >= 3 { break; }
+        let mut j: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
         loop {
-            if j >= 3 {
-                break;
-            }
+            if j >= 3 { break; }
             total += 1;
             j += 1;
         }

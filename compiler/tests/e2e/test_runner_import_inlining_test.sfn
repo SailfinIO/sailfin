@@ -1,5 +1,3 @@
 import { helper_answer } from "./fixtures/inlining_helper";
 
-test "test_runner: relative import inlining" {
-    assert helper_answer() == 42;
-}
+test "test_runner: relative import inlining" { assert helper_answer() == 42; }

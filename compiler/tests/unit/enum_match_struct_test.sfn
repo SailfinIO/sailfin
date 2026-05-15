@@ -1,39 +1,35 @@
 // Seed viability tests: enum match + struct field access + loop filtering.
 // Targets: match on enum, enum equality in loops, struct with enum fields.
-
 enum Priority {
     Low,
     Medium,
     High,
-    Critical,
+    Critical
 }
 
 enum TaskStatus {
     Todo,
     InProgress,
     Done,
-    Blocked,
+    Blocked
 }
 
 struct Task {
     name: string;
     priority: Priority;
     status: TaskStatus;
-    effort: number;
+    effort: int;
 }
 
 // ---------------------------------------------------------------------------
 // Enum equality in loops and conditions
 // ---------------------------------------------------------------------------
-
-fn _count_by_status(tasks: Task[], status: TaskStatus) -> number {
-    let mut count: number = 0;
-    let mut i: number = 0;
+fn _count_by_status(tasks: Task[], status: TaskStatus) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= tasks.length { break; }
-        if tasks[i].status == status {
-            count += 1;
-        }
+        if tasks[i].status == status { count += 1; }
         i += 1;
     }
     return count;
@@ -41,11 +37,21 @@ fn _count_by_status(tasks: Task[], status: TaskStatus) -> number {
 
 test "enum_match: count tasks by status" {
     let mut tasks: Task[] = [];
-    tasks.push(Task { name: "A", priority: Priority.High, status: TaskStatus.Todo, effort: 1 });
-    tasks.push(Task { name: "B", priority: Priority.Low, status: TaskStatus.Done, effort: 2 });
-    tasks.push(Task { name: "C", priority: Priority.Medium, status: TaskStatus.Todo, effort: 3 });
-    tasks.push(Task { name: "D", priority: Priority.High, status: TaskStatus.InProgress, effort: 1 });
-    tasks.push(Task { name: "E", priority: Priority.Low, status: TaskStatus.Todo, effort: 4 });
+    tasks.push(Task {
+        name: "A", priority: Priority.High, status: TaskStatus.Todo, effort: 1
+    });
+    tasks.push(Task {
+        name: "B", priority: Priority.Low, status: TaskStatus.Done, effort: 2
+    });
+    tasks.push(Task {
+        name: "C", priority: Priority.Medium, status: TaskStatus.Todo, effort: 3
+    });
+    tasks.push(Task {
+        name: "D", priority: Priority.High, status: TaskStatus.InProgress, effort: 1
+    });
+    tasks.push(Task {
+        name: "E", priority: Priority.Low, status: TaskStatus.Todo, effort: 4
+    });
 
     assert _count_by_status(tasks, TaskStatus.Todo) == 3;
     assert _count_by_status(tasks, TaskStatus.Done) == 1;
@@ -58,7 +64,6 @@ test "enum_match: count tasks by status" {
 // _format_task calls _priority_label, so _priority_label (which uses match)
 // must appear below _format_task for the seedcheck's recovery parser.
 // ---------------------------------------------------------------------------
-
 fn _format_task(t: Task) -> string {
     let plabel = _priority_label(t.priority);
     return "[" + plabel + "] " + t.name;
@@ -69,7 +74,7 @@ test "enum_match: format with struct" {
         name: "Deploy",
         priority: Priority.Critical,
         status: TaskStatus.Todo,
-        effort: 5,
+        effort: 5
     };
     assert _format_task(t) == "[P0] Deploy";
 }
@@ -79,7 +84,7 @@ fn _priority_label(p: Priority) -> string {
         Priority.Low: return "P3",
         Priority.Medium: return "P2",
         Priority.High: return "P1",
-        Priority.Critical: return "P0",
+        Priority.Critical: return "P0"
     }
 }
 

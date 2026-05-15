@@ -20,21 +20,21 @@
 // by-pointer and by-value) and asserts that the select chain picks the
 // right value for every variant tag.
 struct Cell {
-    value: number;
+    value: int;
 }
 
 enum Node {
     // `payload: Cell?` — LLVM maps to `%Cell*` (depth 1).
-    Optional { payload: Cell?, tag: number },
+    Optional { payload: Cell?, tag: int },
     // `payload: Cell`  — LLVM maps to `%Cell`  (depth 0) under the inline
     // user-struct field layout used for enum payloads.
-    Direct { payload: Cell, tag: number },
+    Direct { payload: Cell, tag: int },
     // Sentinel variant without `payload` — must not interfere with the
     // match-arm tag lookup.
-    Missing { tag: number }
+    Missing { tag: int }
 }
 
-fn _extract_value(node: Node) -> number {
+fn _extract_value(node: Node) -> int {
     // Accesses `node.payload` in a context where the receiver expects a
     // boxed `Cell?` pointer. The filter used to keep only the `Optional`
     // variant here, returning `null` on `Direct` and crashing inside
@@ -44,12 +44,12 @@ fn _extract_value(node: Node) -> number {
     return _cell_value(cell);
 }
 
-fn _cell_value(cell: Cell?) -> number {
+fn _cell_value(cell: Cell?) -> int {
     if cell == null { return -1; }
     return cell.value;
 }
 
-fn _tag_of(node: Node) -> number {
+fn _tag_of(node: Node) -> int {
     // `.tag` is present on every variant with the same `number` type, so
     // the filter should accept all three with no depth mismatch.
     return node.tag;

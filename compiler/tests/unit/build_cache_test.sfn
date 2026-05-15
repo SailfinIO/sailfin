@@ -1,33 +1,3 @@
-// ──────────────────────────────────────────────────────────────────────
-// MIGRATION-WINDOW DISABLED (Slice E.3a, 2026-05-14)
-// ──────────────────────────────────────────────────────────────────────
-//
-// This file is intentionally renamed from `build_cache_test.sfn` to
-// `build_cache_test.sfn.alias-coverage` so the test runner (which
-// discovers `*_test.sfn`) skips it during the E.3a numeric migration.
-//
-// Why: `build_cache.sfn`'s `_escape_json_string` and `_sort_strings`
-// helpers (and every test that exercises `canonicalize_flags` or
-// `cache_key_for` through them) call into the
-// `compiler/src/string_utils.sfn` shadow chain — `char_at`,
-// `char_code_at_text`, etc. — which still carries `: number`
-// annotations during the migration window. The prelude (#561) and the
-// LLVM runtime helper registry (#571) flipped to `: int` / `i64`, but
-// the shadow chain stays on `: number` until the compiler-source bulk
-// PR that owns `compiler/src/` migrations (#562 or whichever flips
-// `string_utils.sfn` + `llvm/utils.sfn` in lockstep) lands. Until then,
-// the call-site coercion through the warning regime (#550) is the only
-// thing keeping the chain consistent, and assertions on exact JSON
-// output (`"[\"--release\"]"`, etc.) trip whenever the coerced path
-// produces a wrong character. The bug surfaces in this test file but
-// is structural to the shadow-mirror layer.
-//
-// Re-enable: when the bulk PR that flips `compiler/src/string_utils.sfn`
-// + `compiler/src/llvm/utils.sfn` to `: int` merges, rename this file
-// back to `build_cache_test.sfn` and re-run `make test`. See the
-// follow-up issue referenced from #571's PR for tracking.
-// ──────────────────────────────────────────────────────────────────────
-//
 // Unit tests for `compiler/src/build_cache.sfn`.
 //
 // The cache module is the foundation for incremental builds in

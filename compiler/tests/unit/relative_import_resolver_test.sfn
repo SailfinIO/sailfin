@@ -10,7 +10,7 @@
 // inlined helpers remain the established unit-test pattern.
 // -- Inline copies of the scanner + resolver helpers (must match
 //    `compiler/src/capsule_resolver.sfn`).
-fn _byte_at(text: string, index: number) -> string {
+fn _byte_at(text: string, index: int) -> string {
     if text.length == 0 { return ""; }
     if index < 0 { return ""; }
     if index >= text.length { return ""; }
@@ -20,7 +20,7 @@ fn _byte_at(text: string, index: number) -> string {
 fn _is_ident_char(ch: string) -> boolean {
     let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
     if ch.length == 0 { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= allowed.length { break; }
         if substring(allowed, i, i + 1) == ch { return true; }
@@ -29,7 +29,7 @@ fn _is_ident_char(ch: string) -> boolean {
     return false;
 }
 
-fn _word_matches(source: string, index: number, word: string) -> boolean {
+fn _word_matches(source: string, index: int, word: string) -> boolean {
     if word.length == 0 { return false; }
     if index < 0 { return false; }
     let end_pos = index + word.length;
@@ -48,9 +48,9 @@ fn _collect_relative_import_specs(source: string) -> string[] {
     let mut out: string[] = [];
     let source_len = source.length;
     if source_len == 0 { return out; }
-    let mut steps: number = 0;
+    let mut steps: int = 0;
     let max_steps = source_len * 6 + 1000;
-    let mut i: number = 0;
+    let mut i: int = 0;
     let mut in_string: boolean = false;
     let mut escaping: boolean = false;
     let mut in_line_comment: boolean = false;
@@ -118,13 +118,13 @@ fn _collect_relative_import_specs(source: string) -> string[] {
             continue;
         }
         if _word_matches(source, i, "import") {
-            let mut j: number = i;
+            let mut j: int = i;
             let mut s_in_string: boolean = false;
             let mut s_escaping: boolean = false;
             let mut s_in_line_comment: boolean = false;
             let mut s_in_block_comment: boolean = false;
             let mut spec: string = "";
-            let mut stmt_end: number = -1;
+            let mut stmt_end: int = -1;
             loop {
                 if j >= source_len { break; }
                 steps += 1;
@@ -258,8 +258,8 @@ fn _collect_relative_import_specs(source: string) -> string[] {
 }
 
 fn _dirname(path: string) -> string {
-    let mut last_slash: number = -1;
-    let mut i: number = 0;
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= path.length { break; }
         if path[i] == "/" { last_slash = i; }

@@ -1,4 +1,4 @@
-fn helper_answer() -> number {
+fn helper_answer() -> number {  // alias-coverage: cross-module fixture preserves number-aliased API
     return 42;
 }
 

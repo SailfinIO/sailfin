@@ -1,55 +1,33 @@
 test "llvm: injects round declare when used" {
-    let lines = [
-        "source_filename = \"m1.ll\"",
-        "",
-        "define double @foo(double %x) {",
-        "entry:",
-        "  %y = call double @round(double %x)",
-        "  ret double %y",
-        "}",
-    ];
+    let lines = ["source_filename = \"m1.ll\"", "", "define double @foo(double %x) {", "entry:", "  %y = call double @round(double %x)", "  ret double %y", "}",];
 
     let out = ensure_intrinsic_declarations(lines);
 
     let decl = "declare double @round(double)";
     let mut saw_decl: boolean = false;
     for line in out {
-        if line == decl {
-            saw_decl = true;
-        }
+        if line == decl { saw_decl = true; }
     }
-    if !saw_decl {
-        runtime_raise_value_error_fn("missing round decl");
-    }
+    if !saw_decl { runtime_raise_value_error_fn("missing round decl"); }
 }
 
-fn _index_of(haystack: string, needle: string) -> number {
-    if needle.length == 0 {
-        return 0;
-    }
-    if haystack.length < needle.length {
-        return -1;
-    }
-    let mut i: number = 0;
+fn _index_of(haystack: string, needle: string) -> int {
+    if needle.length == 0 { return 0; }
+    if haystack.length < needle.length { return -1; }
+    let mut i: int = 0;
     loop {
-        if i + needle.length > haystack.length {
-            break;
-        }
-        let mut j: number = 0;
+        if i + needle.length > haystack.length { break; }
+        let mut j: int = 0;
         let mut matches: boolean = true;
         loop {
-            if j >= needle.length {
-                break;
-            }
+            if j >= needle.length { break; }
             if haystack[i + j] != needle[j] {
                 matches = false;
                 break;
             }
             j += 1;
         }
-        if matches {
-            return i;
-        }
+        if matches { return i; }
         i += 1;
     }
     return -1;
@@ -60,35 +38,23 @@ fn _contains(haystack: string, needle: string) -> boolean {
 }
 
 fn _trim(value: string) -> string {
-    if value.length == 0 {
-        return value;
-    }
-    let mut start: number = 0;
+    if value.length == 0 { return value; }
+    let mut start: int = 0;
     loop {
-        if start >= value.length {
-            break;
-        }
+        if start >= value.length { break; }
         let ch = value[start];
-        if ch != " " && ch != "\t" && ch != "\n" && ch != "\r" {
-            break;
-        }
+        if ch != " " && ch != "\t" && ch != "\n" && ch != "\r" { break; }
         start += 1;
     }
-    let mut end: number = value.length;
+    let mut end: int = value.length;
     loop {
-        if end <= start {
-            break;
-        }
+        if end <= start { break; }
         let ch = value[end - 1];
-        if ch != " " && ch != "\t" && ch != "\n" && ch != "\r" {
-            break;
-        }
+        if ch != " " && ch != "\t" && ch != "\n" && ch != "\r" { break; }
         end -= 1;
     }
-    if start == 0 && end == value.length {
-        return value;
-    }
-    return value[start:end];
+    if start == 0 && end == value.length { return value; }
+    return value[start: end];
 }
 
 fn ensure_intrinsic_declarations(lines: string[]) -> string[] {
@@ -97,17 +63,11 @@ fn ensure_intrinsic_declarations(lines: string[]) -> string[] {
     let decl = "declare double @round(double)";
 
     for line in lines {
-        if _contains(line, "call double @round(") {
-            uses_round = true;
-        }
-        if _trim(line) == decl {
-            has_round_decl = true;
-        }
+        if _contains(line, "call double @round(") { uses_round = true; }
+        if _trim(line) == decl { has_round_decl = true; }
     }
 
-    if !uses_round || has_round_decl {
-        return lines;
-    }
+    if !uses_round || has_round_decl { return lines; }
 
     let mut out = lines;
     out.push("");

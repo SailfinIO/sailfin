@@ -1,11 +1,10 @@
 // Seed viability tests: enum-driven state machine.
 // Targets: enum dispatch in conditional chains, enum as loop accumulator.
-
 enum State {
     Idle,
     Running,
     Paused,
-    Stopped,
+    Stopped
 }
 
 fn _transition(current: State, event: string) -> State {
@@ -28,7 +27,7 @@ fn _transition(current: State, event: string) -> State {
 
 fn _run_state_machine(events: string[]) -> State {
     let mut state: State = State.Idle;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= events.length { break; }
         state = _transition(state, events[i]);

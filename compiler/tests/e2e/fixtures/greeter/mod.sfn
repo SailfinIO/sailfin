@@ -1,8 +1,6 @@
-fn greeter_hello() -> string {
-    return "hello from mod";
-}
+fn greeter_hello() -> string { return "hello from mod"; }
 
-fn greeter_add(a: number, b: number) -> number {
+fn greeter_add(a: number, b: number) -> number {  // alias-coverage: cross-module fixture preserves number-aliased API
     return a + b;
 }
 

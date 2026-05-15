@@ -153,7 +153,7 @@ test "effect violation: fn main() without ![io] still flags print.info" {
     let v = violations[0];
     assert v.routine_name == "main";
     let mut found_io: boolean = false;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= v.missing_effects.length { break; }
         if v.missing_effects[i] == "io" { found_io = true; }

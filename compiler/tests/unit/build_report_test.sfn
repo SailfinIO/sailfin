@@ -171,10 +171,10 @@ test "build_report_to_json: negative exit_code serializes with sign" {
 fn _contains(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if haystack.length < needle.length { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i + needle.length > haystack.length { break; }
-        let mut j: number = 0;
+        let mut j: int = 0;
         let mut matches: boolean = true;
         loop {
             if j >= needle.length { break; }

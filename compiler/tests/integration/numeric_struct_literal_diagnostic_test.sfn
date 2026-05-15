@@ -31,7 +31,7 @@ fn _span(line: int, col: int) -> NativeSourceSpan {
 fn _contains(text: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if needle.length > text.length { return false; }
-    let mut i: number = 0;
+    let mut i: number = 0;  // alias-coverage: numeric migration coverage
     let limit = text.length - needle.length;
     loop {
         if i > limit { break; }
@@ -53,7 +53,7 @@ test "coerce_operand_to_type: bare diagnostic when span is null" ![io] {
     assert result.operand != null;
     assert result.diagnostics.length >= 1;
     let mut saw_bare: boolean = false;
-    let mut idx: number = 0;
+    let mut idx: number = 0;  // alias-coverage: numeric migration coverage
     loop {
         if idx >= result.diagnostics.length { break; }
         let diag = result.diagnostics[idx];
@@ -75,7 +75,7 @@ test "coerce_operand_to_type: span-aware diagnostic carries line:col" ![io] {
     // still attaches to the diagnostic for #540's location plumbing.
     assert result.operand != null;
     let mut saw_location: boolean = false;
-    let mut idx: number = 0;
+    let mut idx: number = 0;  // alias-coverage: numeric migration coverage
     loop {
         if idx >= result.diagnostics.length { break; }
         let diag = result.diagnostics[idx];

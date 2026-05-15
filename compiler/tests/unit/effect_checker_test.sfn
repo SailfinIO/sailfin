@@ -438,7 +438,7 @@ test "effect violation: http.<x> Member call carets at http" {
     assert trig.lexeme == "http";
     // E0400 message text references the namespace, not the member.
     let mut found_net: boolean = false;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= v.missing_effects.length { break; }
         if v.missing_effects[i] == "net" { found_net = true; }
@@ -470,7 +470,7 @@ test "effect violation: bare sleep() Call carets at the callee for clock effect"
     assert violations.length == 1;
     let v = violations[0];
     let mut found_clock: boolean = false;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= v.missing_effects.length { break; }
         if v.missing_effects[i] == "clock" { found_clock = true; }

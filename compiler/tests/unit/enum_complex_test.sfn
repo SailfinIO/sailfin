@@ -1,18 +1,16 @@
 // Seed viability tests: complex enum patterns (part 1).
 // Targets: enum dispatch, enum arrays, enum as struct field.
-
 // ---------------------------------------------------------------------------
 // Enum used as array element
 // ---------------------------------------------------------------------------
-
 enum Priority {
     Low,
     Medium,
     High,
-    Critical,
+    Critical
 }
 
-fn _priority_value(p: Priority) -> number {
+fn _priority_value(p: Priority) -> int {
     if p == Priority.Low { return 1; }
     if p == Priority.Medium { return 2; }
     if p == Priority.High { return 3; }
@@ -23,8 +21,8 @@ fn _priority_value(p: Priority) -> number {
 fn _max_priority(priorities: Priority[]) -> Priority {
     if priorities.length == 0 { return Priority.Low; }
     let mut best: Priority = priorities[0];
-    let mut best_val: number = _priority_value(best);
-    let mut i: number = 1;
+    let mut best_val: int = _priority_value(best);
+    let mut i: int = 1;
     loop {
         if i >= priorities.length { break; }
         let val = _priority_value(priorities[i]);
@@ -61,19 +59,18 @@ test "enum_complex: max priority single" {
 // ---------------------------------------------------------------------------
 // Enum as struct field with multiple enums
 // ---------------------------------------------------------------------------
-
 enum TaskStatus {
     Todo,
     InProgress,
     Done,
-    Blocked,
+    Blocked
 }
 
 struct Task {
     name: string;
     priority: Priority;
     status: TaskStatus;
-    effort: number;
+    effort: int;
 }
 
 fn _is_actionable(t: Task) -> boolean {
@@ -82,14 +79,10 @@ fn _is_actionable(t: Task) -> boolean {
     return true;
 }
 
-fn _task_score(t: Task) -> number {
+fn _task_score(t: Task) -> int {
     let pval = _priority_value(t.priority);
-    if t.status == TaskStatus.InProgress {
-        return pval * 10 + t.effort;
-    }
-    if t.status == TaskStatus.Todo {
-        return pval * 5;
-    }
+    if t.status == TaskStatus.InProgress { return pval * 10 + t.effort; }
+    if t.status == TaskStatus.Todo { return pval * 5; }
     return 0;
 }
 
@@ -98,7 +91,7 @@ test "enum_complex: struct with two enum fields" {
         name: "Fix bug",
         priority: Priority.High,
         status: TaskStatus.InProgress,
-        effort: 3,
+        effort: 3
     };
     assert t.name == "Fix bug";
     assert t.priority == Priority.High;
@@ -111,7 +104,7 @@ test "enum_complex: blocked task not actionable" {
         name: "Blocked",
         priority: Priority.Critical,
         status: TaskStatus.Blocked,
-        effort: 5,
+        effort: 5
     };
     assert _is_actionable(t) == false;
 }
@@ -121,7 +114,7 @@ test "enum_complex: task scoring" {
         name: "A",
         priority: Priority.High,
         status: TaskStatus.InProgress,
-        effort: 2,
+        effort: 2
     };
     // 3 * 10 + 2 = 32
     assert _task_score(t1) == 32;
@@ -130,7 +123,7 @@ test "enum_complex: task scoring" {
         name: "B",
         priority: Priority.Low,
         status: TaskStatus.Todo,
-        effort: 0,
+        effort: 0
     };
     // 1 * 5 = 5
     assert _task_score(t2) == 5;

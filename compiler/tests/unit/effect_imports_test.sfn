@@ -224,7 +224,7 @@ test "validate_effects_with_imports: imported callee surfaces E0402-shaped viola
     // out by hand because the prefix is the cross-module contract.
     let prefix = "imported `";
     assert req.description.length >= prefix.length;
-    let mut i: number = 0;
+    let mut i: int = 0;
     let mut prefix_match: boolean = true;
     loop {
         if i >= prefix.length { break; }

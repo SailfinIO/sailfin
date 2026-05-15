@@ -10,7 +10,7 @@
 // all of `compiler/src/llvm/` and could not be flipped atomically, so
 // the diagnostic provides visibility without aborting emission. Slice
 // E.3 (#490) re-promotes the diagnostic to `[fatal]` symmetrically once
-// every `: number` site has migrated.
+// every `: number` site has migrated.  // alias-coverage: numeric migration coverage
 import { coerce_operand_to_type, harmonise_operands } from "../../src/llvm/expression_lowering/native/core_operands";
 import { numeric_type_kind } from "../../src/llvm/type_mapping";
 import { LLVMOperand } from "../../src/llvm/types";
@@ -65,7 +65,7 @@ test "coerce_operand_to_type: warns + silently widens double → i64 in boundary
     // not trip and emission continues.
     let mut found_warning = false;
     let mut found_fatal = false;
-    let mut i: number = 0;
+    let mut i: number = 0;  // alias-coverage: numeric migration coverage
     loop {
         if i >= result.diagnostics.length { break; }
         let diag = result.diagnostics[i];
@@ -73,7 +73,7 @@ test "coerce_operand_to_type: warns + silently widens double → i64 in boundary
         let mut _has_fatal = false;
         let mut _has_double = false;
         let mut _has_i64 = false;
-        let mut j: number = 0;
+        let mut j: number = 0;  // alias-coverage: numeric migration coverage
         loop {
             if j + 9 > diag.length { break; }
             if substring(diag, j, j + 9) == "[warning]" { _has_warning = true; }
