@@ -37,8 +37,7 @@ import {
     _shell_single_quote_arg,
     _string_contains_cmd,
     _toml_trim_cmd,
-    _write_text_cmd,
-    find_char
+    _write_text_cmd
 } from "./cli_commands_utils";
 import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "./dist_manifest";
 import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
@@ -51,7 +50,7 @@ import {
 } from "./main";
 import { LayoutManifest } from "./native_ir";
 import { parse_program } from "./parser/mod";
-import { substring } from "./string_utils";
+import { find_char_local, substring } from "./string_utils";
 import {
     TestEntry,
     collect_test_entries,
@@ -78,8 +77,8 @@ fn _is_safe_capsule_segment_cmd(value: string) -> boolean {
     if value.length == 0 { return false; }
     if strings_equal(value, ".") { return false; }
     if strings_equal(value, "..") { return false; }
-    if find_char(value, "/", 0) >= 0 { return false; }
-    if find_char(value, "\\", 0) >= 0 { return false; }
+    if find_char_local(value, "/", 0) >= 0 { return false; }
+    if find_char_local(value, "\\", 0) >= 0 { return false; }
     return true;
 }
 
@@ -88,8 +87,8 @@ fn _is_safe_capsule_version_cmd(value: string) -> boolean {
     if value.length == 0 { return false; }
     if strings_equal(value, ".") { return false; }
     if strings_equal(value, "..") { return false; }
-    if find_char(value, "/", 0) >= 0 { return false; }
-    if find_char(value, "\\", 0) >= 0 { return false; }
+    if find_char_local(value, "/", 0) >= 0 { return false; }
+    if find_char_local(value, "\\", 0) >= 0 { return false; }
     if _string_contains_cmd(value, "..") { return false; }
     return true;
 }
@@ -1293,7 +1292,7 @@ fn handle_publish_command(args: string[]) -> int ![io] {
     if fs.exists(header_tmp) {
         let headers = fs.readFile(header_tmp);
         process.run(["rm", "-f", header_tmp]);
-        let sp = find_char(headers, " ", 0);
+        let sp = find_char_local(headers, " ", 0);
         if sp >= 0 {
             if headers.length >= sp + 4 {
                 status = substring(headers, sp + 1, sp + 4);
@@ -2047,7 +2046,7 @@ fn handle_add_command(args: string[]) -> int ![io] {
     // shell pipeline below when fetching the index, and into the cache path
     // and download URL after. Rejecting path-traversal and directory-separator
     // characters early covers both the shell-injection and traversal risks.
-    let slash_pos = find_char(registry_name, "/", 0);
+    let slash_pos = find_char_local(registry_name, "/", 0);
     if slash_pos < 0 {
         print("invalid capsule id — expected scope/name format: "
             + registry_name);
