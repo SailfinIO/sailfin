@@ -121,7 +121,7 @@ test "layout: align_to large values" {
 }
 
 // ── Primitive type layout tests ──────────────────────────────────────
-test "layout: int is 8 bytes" {
+test "layout: number is 8 bytes" {  // alias-coverage: _primitive_layout still keys on the legacy "number" tag
     let l = _primitive_layout("number");
     assert l.size == 8;
     assert l.align == 8;
@@ -214,7 +214,7 @@ test "layout: bool then number has padding" {
     assert result.align == 8;
 }
 
-test "layout: int then bool has tail padding" {
+test "layout: number then bool has tail padding" {  // alias-coverage: _primitive_layout still keys on the legacy "number" tag
     let inputs = [_FieldInput { name: "count", type_name: "number" }, _FieldInput {
         name: "flag", type_name: "boolean"
     },];
