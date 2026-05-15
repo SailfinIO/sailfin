@@ -74,7 +74,6 @@ fn _is_keyword(lexeme: string) -> boolean {
     if strings_equal(lexeme, "import") { return true; }
     if strings_equal(lexeme, "export") { return true; }
     if strings_equal(lexeme, "from") { return true; }
-    if strings_equal(lexeme, "const") { return true; }
     if strings_equal(lexeme, "type") { return true; }
     if strings_equal(lexeme, "test") { return true; }
     if strings_equal(lexeme, "impl") { return true; }
@@ -126,7 +125,6 @@ fn _is_top_level_decl(lexeme: string) -> boolean {
     if strings_equal(lexeme, "enum") { return true; }
     if strings_equal(lexeme, "interface") { return true; }
     if strings_equal(lexeme, "test") { return true; }
-    if strings_equal(lexeme, "const") { return true; }
     if strings_equal(lexeme, "type") { return true; }
     if strings_equal(lexeme, "impl") { return true; }
     if strings_equal(lexeme, "model") { return true; }

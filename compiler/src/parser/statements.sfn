@@ -20,6 +20,7 @@ import {
     substring
 } from "../string_utils";
 import { Token } from "../token";
+import { parse_variable } from "./declarations";
 import { expression_from_tokens } from "./expressions";
 import {
     append_token,
@@ -214,6 +215,21 @@ fn parse_block_statement(parser: Parser) -> BlockStatementParseResult {
         return BlockStatementParseResult {
             parser: body_result.parser,
             statement: Statement.BlockStatement { body: body_result.block },
+            success: true
+        };
+    }
+    if identifier_matches(token, "let") {
+        if decorators.length > 0 {
+            return BlockStatementParseResult {
+                parser: original,
+                statement: null,
+                success: false
+            };
+        }
+        let var_result = parse_variable(after_decorators);
+        return BlockStatementParseResult {
+            parser: var_result.parser,
+            statement: var_result.statement,
             success: true
         };
     }

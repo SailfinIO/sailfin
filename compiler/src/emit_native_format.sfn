@@ -26,6 +26,19 @@ import {
 } from "./emit_native_state";
 
 // ── Expression formatting ────────────────────────────────────────────
+// Render an operand that's about to appear inside a Binary expression.
+// If the operand is itself a Binary, parenthesize the rendering so the
+// re-parse honours the original grouping. The format is text-only and
+// re-tokenized downstream (`expression_from_tokens`, `parse_let_instruction`),
+// so dropping the parens silently changes precedence and corrupts arithmetic
+// like `(a - 0) / b`.
+fn _format_binary_operand(operand: Expression) -> string {
+    if operand.variant == "Binary" {
+        return "(" + format_expression(operand) + ")";
+    }
+    return format_expression(operand);
+}
+
 fn format_expression(expression: Expression) -> string {
     if expression.variant == "Identifier" {
         let name = expression.name;
@@ -38,11 +51,22 @@ fn format_expression(expression: Expression) -> string {
         return quote_string(expression.value);
     }
     if expression.variant == "Unary" {
-        return expression.operator + format_expression(expression.operand);
+        // Same precedence concern as Binary: `!a && b` parses as
+        // `(!a) && b`, but the original `!(a && b)` had the negation
+        // outside. Wrap a Binary operand so the unary scope survives
+        // round-tripping. Surfaced by the `assert !(... && ...)` pattern
+        // in `compiler/tests/unit/cli_path_normalization_test.sfn:79`.
+        return expression.operator + _format_binary_operand(expression.operand);
     }
     if expression.variant == "Binary" {
-        let left = format_expression(expression.left);
-        let right = format_expression(expression.right);
+        // Wrap nested Binary operands in parens so the round-trip preserves
+        // grouping. Without this, `(a - 0) / b` formats as `a - 0 / b` and
+        // re-parses with `/` binding tighter than `-`, silently changing
+        // semantics. Surfaced by issue #521 once block-scoped `let`
+        // initializers started flowing through `format_expression` instead
+        // of the raw-text passthrough.
+        let left = _format_binary_operand(expression.left);
+        let right = _format_binary_operand(expression.right);
         return left + " " + expression.operator + " " + right;
     }
     if expression.variant == "Member" {

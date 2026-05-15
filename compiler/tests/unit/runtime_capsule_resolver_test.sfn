@@ -78,7 +78,7 @@ fn _setup_scratch_workspace(scratch: string) ![io] {
     fs.writeFile(scratch + "/capsules/sfn/library-cap/capsule.toml", library_manifest);
 }
 
-test "enumerate: returns runtime capsule from workspace" {
+test "enumerate: returns runtime capsule from workspace" ![io] {
     let scratch = "build/sailfin/.runtime-resolver-test-1";
     _setup_scratch_workspace(scratch);
     let empty: string[] = [];
@@ -88,7 +88,7 @@ test "enumerate: returns runtime capsule from workspace" {
     process.run(["rm", "-rf", scratch]);
 }
 
-test "enumerate: skips kind != runtime members" {
+test "enumerate: skips kind != runtime members" ![io] {
     let scratch = "build/sailfin/.runtime-resolver-test-2";
     _setup_scratch_workspace(scratch);
     let empty: string[] = [];
@@ -104,7 +104,7 @@ test "enumerate: skips kind != runtime members" {
     process.run(["rm", "-rf", scratch]);
 }
 
-test "enumerate: c_sources resolved to workspace-rooted paths" {
+test "enumerate: c_sources resolved to workspace-rooted paths" ![io] {
     let scratch = "build/sailfin/.runtime-resolver-test-3";
     _setup_scratch_workspace(scratch);
     let empty: string[] = [];
@@ -122,7 +122,7 @@ test "enumerate: c_sources resolved to workspace-rooted paths" {
     process.run(["rm", "-rf", scratch]);
 }
 
-test "enumerate: sfn_sources resolved relative to manifest dir" {
+test "enumerate: sfn_sources resolved relative to manifest dir" ![io] {
     let scratch = "build/sailfin/.runtime-resolver-test-sfn-sources";
     _setup_scratch_workspace(scratch);
     let empty: string[] = [];
@@ -143,7 +143,7 @@ test "enumerate: sfn_sources resolved relative to manifest dir" {
     process.run(["rm", "-rf", scratch]);
 }
 
-test "enumerate: ll_sources resolved with same join rule as c_sources" {
+test "enumerate: ll_sources resolved with same join rule as c_sources" ![io] {
     let scratch = "build/sailfin/.runtime-resolver-test-4";
     _setup_scratch_workspace(scratch);
     let empty: string[] = [];
@@ -155,7 +155,7 @@ test "enumerate: ll_sources resolved with same join rule as c_sources" {
     process.run(["rm", "-rf", scratch]);
 }
 
-test "enumerate: include_dirs resolved to manifest-relative dirs" {
+test "enumerate: include_dirs resolved to manifest-relative dirs" ![io] {
     let scratch = "build/sailfin/.runtime-resolver-test-5";
     _setup_scratch_workspace(scratch);
     let empty: string[] = [];
@@ -166,7 +166,7 @@ test "enumerate: include_dirs resolved to manifest-relative dirs" {
     process.run(["rm", "-rf", scratch]);
 }
 
-test "enumerate: link_libs flow through verbatim (not path-resolved)" {
+test "enumerate: link_libs flow through verbatim (not path-resolved)" ![io] {
     let scratch = "build/sailfin/.runtime-resolver-test-6";
     _setup_scratch_workspace(scratch);
     let empty: string[] = [];
@@ -180,7 +180,7 @@ test "enumerate: link_libs flow through verbatim (not path-resolved)" {
     process.run(["rm", "-rf", scratch]);
 }
 
-test "enumerate: prelude_entry resolved relative to manifest dir" {
+test "enumerate: prelude_entry resolved relative to manifest dir" ![io] {
     let scratch = "build/sailfin/.runtime-resolver-test-7";
     _setup_scratch_workspace(scratch);
     let empty: string[] = [];
@@ -196,7 +196,7 @@ test "enumerate: prelude_entry resolved relative to manifest dir" {
     process.run(["rm", "-rf", scratch]);
 }
 
-test "enumerate: dep_specs filter narrows the result set" {
+test "enumerate: dep_specs filter narrows the result set" ![io] {
     let scratch = "build/sailfin/.runtime-resolver-test-8";
     _setup_scratch_workspace(scratch);
     // Only ask for sfn/runtime-native — the library capsule was
@@ -210,7 +210,7 @@ test "enumerate: dep_specs filter narrows the result set" {
     process.run(["rm", "-rf", scratch]);
 }
 
-test "enumerate: dep_specs with unknown name returns empty" {
+test "enumerate: dep_specs with unknown name returns empty" ![io] {
     let scratch = "build/sailfin/.runtime-resolver-test-9";
     _setup_scratch_workspace(scratch);
     let specs = ["sfn/does-not-exist"];
@@ -219,14 +219,14 @@ test "enumerate: dep_specs with unknown name returns empty" {
     process.run(["rm", "-rf", scratch]);
 }
 
-test "enumerate: missing workspace.toml returns empty" {
+test "enumerate: missing workspace.toml returns empty" ![io] {
     // No setup — pass a non-existent workspace root.
     let empty: string[] = [];
     let result = enumerate_runtime_capsule_artifacts("/tmp/sfn-no-such-workspace-xyz", empty);
     assert result.length == 0;
 }
 
-test "enumerate: empty workspace_root returns empty" {
+test "enumerate: empty workspace_root returns empty" ![io] {
     let empty: string[] = [];
     let result = enumerate_runtime_capsule_artifacts("", empty);
     assert result.length == 0;

@@ -1,0 +1,156 @@
+// Regression coverage for `parse_block_statement` routing block-scoped
+// `let` / `let mut` declarations through `parse_variable`.
+//
+// History: surfaced by PR #512 / issue #458 (closures-with-capture A1).
+// `parse_block_statement` in `compiler/src/parser/statements.sfn`
+// branched on `for`, `loop`, `break`, `continue`, `if`, `match`, `with`,
+// `unsafe`, `return`, `throw`, `try`, `assert` — but never `let`. Block-
+// scoped variable bindings fell through to `parse_expression_statement`
+// and ended up as opaque `ExpressionStatement(Raw)` text, hiding locals
+// from every pass that walks the AST (capture analysis, drop emission,
+// future scope tracking). The fix adds a `let` branch that delegates to
+// the existing `parse_variable` helper used by top-level declarations,
+// so block-scoped locals now surface as `Statement.VariableDeclaration`
+// with the same field shape (`name`, `mutable`, `initializer`).
+//
+// Note: `const` is intentionally NOT covered here. Per the keywords
+// reference (`site/src/content/docs/docs/reference/keywords.md`) and
+// `spec/03-declarations.md`, Sailfin only has `let` and `let mut`; the
+// scope-adjustment thread on issue #521 documents that decision.
+import { Block, Program, Statement } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+// -------------------------------------------------------------------
+// Helpers
+// -------------------------------------------------------------------
+fn _find_function_body(program: Program, name: string) -> Block {
+    let mut index: number = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "FunctionDeclaration" {
+            if stmt.signature.name == name { return stmt.body; }
+        }
+        index += 1;
+    }
+    return Block { tokens: [], text: "", statements: [] };
+}
+
+fn _count_variable_declarations(block: Block) -> number {
+    let mut count: number = 0;
+    let mut index: number = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        if block.statements[index].variant == "VariableDeclaration" {
+            count += 1;
+        }
+        index += 1;
+    }
+    return count;
+}
+
+fn _nth_variable_declaration(block: Block, n: number) -> Statement {
+    let mut found: number = 0;
+    let mut index: number = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        let stmt = block.statements[index];
+        if stmt.variant == "VariableDeclaration" {
+            if found == n { return stmt; }
+            found += 1;
+        }
+        index += 1;
+    }
+    return block.statements[0];
+}
+
+// -------------------------------------------------------------------
+// Tests
+// -------------------------------------------------------------------
+test "parser block let: simple `let` inside fn body produces VariableDeclaration" {
+    let source = "fn main() { let x = 1; }";
+    let program = parse_program(source);
+    let body = _find_function_body(program, "main");
+    assert _count_variable_declarations(body) == 1;
+    let decl = _nth_variable_declaration(body, 0);
+    assert decl.name == "x";
+    assert decl.mutable == false;
+}
+
+test "parser block let: `let mut` inside fn body preserves mutable flag" {
+    // Pre-fix this fell through to parse_expression_statement and lost
+    // the mutable flag — only top-level `let` carried it because only
+    // top-level routed through `parse_variable`.
+    let source = "fn main() { let mut count = 0; }";
+    let program = parse_program(source);
+    let body = _find_function_body(program, "main");
+    assert _count_variable_declarations(body) == 1;
+    let decl = _nth_variable_declaration(body, 0);
+    assert decl.name == "count";
+    assert decl.mutable == true;
+}
+
+test "parser block let: multiple block-scoped lets parse to structured statements" {
+    // The acceptance-criteria example from issue #521. Pre-fix the
+    // lambda buried inside `let f = fn(){...}` was invisible to any
+    // capture-analysis walk over `main`'s body — the outer `let`
+    // collapsed to a `Raw` expression statement.
+    let source = "fn main() { let x = 1; let f = fn() { return x; }; }";
+    let program = parse_program(source);
+    let body = _find_function_body(program, "main");
+    assert _count_variable_declarations(body) == 2;
+
+    let first = _nth_variable_declaration(body, 0);
+    assert first.name == "x";
+
+    let second = _nth_variable_declaration(body, 1);
+    assert second.name == "f";
+}
+
+test "parser block let: typed let with explicit annotation parses" {
+    // `let x: number = 1` previously round-tripped through raw text
+    // inside a block. The structured path must preserve the type
+    // annotation for the typechecker to consume.
+    let source = "fn main() { let x: number = 1; }";
+    let program = parse_program(source);
+    let body = _find_function_body(program, "main");
+    assert _count_variable_declarations(body) == 1;
+    let decl = _nth_variable_declaration(body, 0);
+    assert decl.name == "x";
+    assert decl.type_annotation != null;
+}
+
+test "parser block let: top-level let path is unchanged" {
+    // Anchor existing behaviour — the new branch must not regress the
+    // top-level `let` path that was already shipping a structured
+    // VariableDeclaration.
+    let source = "let module_const = 42;";
+    let program = parse_program(source);
+    let mut index: number = 0;
+    let mut found = false;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "VariableDeclaration" {
+            if stmt.name == "module_const" { found = true; }
+        }
+        index += 1;
+    }
+    assert found;
+}
+
+test "parser block let: nested block lets parse independently" {
+    // Block-scoped lets inside an `if` body must also flow through the
+    // structured path — `parse_block_statement` recurses into nested
+    // blocks via `parse_block`, so the fix automatically extends.
+    let source = "fn main() { if true { let inner = 7; } }";
+    let program = parse_program(source);
+    let body = _find_function_body(program, "main");
+    // Outer body has the if-statement only — no top-level
+    // VariableDeclaration in main's immediate scope.
+    assert _count_variable_declarations(body) == 0;
+    // The inner block is reachable but enumerating it requires
+    // pattern-matching the `IfStatement` variant, which is more AST
+    // shape than this regression needs. The outer-count assertion
+    // confirms the fix doesn't accidentally hoist nested lets.
+}
