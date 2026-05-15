@@ -78,7 +78,7 @@ fn split_lines_local(value: string) -> string[] {
 }
 
 // ── Number / key-value parsing ───────────────────────────────────────
-fn parse_number_local(text: string) -> number {
+fn parse_number_local(text: string) -> int {
     let trimmed = trim_text_local(text);
     if trimmed.length == 0 { return 0; }
     let mut result: int = 0;

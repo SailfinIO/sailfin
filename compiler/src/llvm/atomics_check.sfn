@@ -3,11 +3,11 @@
 // Lightweight predicate over the six reserved atomic-builtin names
 // (`atomic_load`, `atomic_store`, `atomic_add`, `atomic_sub`,
 // `atomic_cas`, `atomic_fence`). Split out of `atomics.sfn` so the
-// unit-test surface and the pre-resolution dispatch hook in
-// `core_call_resolution.sfn` can import it without pulling in the
-// full expression-lowering stack that `atomics.sfn` transitively
-// requires for `lower_atomic_builtin` (which mutually recurses with
-// `lower_expression`).
+// unit-test surface can import it without pulling in the full
+// expression-lowering stack that `atomics.sfn` transitively requires
+// for `lower_atomic_builtin` (which mutually recurses with
+// `lower_expression`). `core_call_resolution.sfn` still imports from
+// `atomics.sfn` directly because it also needs `lower_atomic_builtin`.
 //
 // Before the split, the atomic unit tests took ~90s locally on Linux
 // and ~330s on macOS arm64 CI — exceeding the per-test timeout
