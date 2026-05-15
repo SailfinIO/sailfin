@@ -56,7 +56,7 @@ fn map_struct_type_annotation(context: TypeContext, annotation: string) -> strin
 fn map_enum_type_annotation(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 { return ""; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= context.enums.length { break; }
         let enum_info = context.enums[index];
@@ -220,15 +220,15 @@ fn map_array_pointer_type(context: TypeContext, annotation: string) -> string {
 // ---------------------------------------------------------------------------
 // Union types
 // ---------------------------------------------------------------------------
-fn find_top_level_union_separator(text: string) -> number {
-    let mut paren_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut angle_depth: number = 0;
+fn find_top_level_union_separator(text: string) -> int {
+    let mut paren_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut angle_depth: int = 0;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape: boolean = false;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = substring(text, index, index + 1);
@@ -346,7 +346,7 @@ fn map_union_type(context: TypeContext, annotation: string) -> string {
     let parts = split_union_annotations(normalized);
     if parts.length < 2 { return ""; }
     let mut llvm_parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= parts.length { break; }
         let part = trim_text(parts[index]);
@@ -414,7 +414,7 @@ fn _map_type_core(context: TypeContext, normalized: string) -> string {
             if first_ch <= "Z" { looks_user = true; }
         }
         if looks_user {
-            let mut i: number = 0;
+            let mut i: int = 0;
             loop {
                 if i >= context.structs.length { break; }
                 let info = context.structs[i];

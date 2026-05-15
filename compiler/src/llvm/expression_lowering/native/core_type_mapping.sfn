@@ -29,7 +29,7 @@ fn map_struct_type_annotation_ctx(context: TypeContext, annotation: string) -> s
 fn map_enum_type_annotation(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 { return ""; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= context.enums.length { break; }
         let enum_info = context.enums[index];
@@ -182,15 +182,15 @@ fn unwrap_move_wrapper(annotation: string) -> string {
     return trimmed;
 }
 
-fn find_top_level_union_separator(text: string) -> number {
-    let mut paren_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut angle_depth: number = 0;
+fn find_top_level_union_separator(text: string) -> int {
+    let mut paren_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut angle_depth: int = 0;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape: boolean = false;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = substring(text, index, index + 1);
@@ -308,7 +308,7 @@ fn map_union_type(context: TypeContext, annotation: string) -> string {
     let parts = split_union_annotations(normalized);
     if parts.length < 2 { return ""; }
     let mut llvm_parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= parts.length { break; }
         let part = trim_text(parts[index]);
@@ -377,7 +377,7 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
                 // Check if this is a struct or enum (not interface).
                 let struct_info = find_struct_info_by_name(context, normalized);
                 if struct_info != null { return primitive_type + "*"; }
-                let mut _enum_idx: number = 0;
+                let mut _enum_idx: int = 0;
                 loop {
                     if _enum_idx >= context.enums.length { break; }
                     if context.enums[_enum_idx].name == normalized {
@@ -469,7 +469,7 @@ fn map_parameter_type(context: TypeContext, parameter_type: string) -> string {
             if !ends_with_pointer_suffix(primitive_type) {
                 let struct_info = find_struct_info_by_name(context, normalized);
                 if struct_info != null { return primitive_type + "*"; }
-                let mut _enum_idx: number = 0;
+                let mut _enum_idx: int = 0;
                 loop {
                     if _enum_idx >= context.enums.length { break; }
                     if context.enums[_enum_idx].name == normalized {

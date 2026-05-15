@@ -278,7 +278,7 @@ fn print_llvm_ir_from_text(native_text: string, module_name: string) -> boolean 
         return false;
     }
     let lines = lowered_lines.lines;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
         print(lines[index]);
@@ -383,7 +383,7 @@ fn lower_to_llvm_with_context(native_module: NativeModule, imported_manifests: L
 fn lower_to_llvm_lines_with_context(native_module: NativeModule, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult ![io] {
     let mut diagnostics: string[] = [];
     if imported_diagnostics.length > 0 {
-        let mut _ci0: number = 0;
+        let mut _ci0: int = 0;
         loop {
             if _ci0 >= imported_diagnostics.length { break; }
             diagnostics.push(imported_diagnostics[_ci0]);

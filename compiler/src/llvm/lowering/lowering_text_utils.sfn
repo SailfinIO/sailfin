@@ -20,7 +20,7 @@ fn is_trim_char_local(ch: string) -> boolean {
 
 fn trim_text_local(value: string) -> string {
     if value.length == 0 { return ""; }
-    let mut start: number = 0;
+    let mut start: int = 0;
     let mut end = value.length;
     loop {
         if start >= end { break; }
@@ -39,7 +39,7 @@ fn trim_text_local(value: string) -> string {
 fn starts_with_local(value: string, prefix: string) -> boolean {
     if prefix.length == 0 { return true; }
     if value.length < prefix.length { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= prefix.length { break; }
         if value[index] != prefix[index] { return false; }
@@ -48,9 +48,9 @@ fn starts_with_local(value: string, prefix: string) -> boolean {
     return true;
 }
 
-fn index_of_char_local(value: string, needle: string) -> number {
+fn index_of_char_local(value: string, needle: string) -> int {
     if needle.length == 0 { return 0; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= value.length { break; }
         if value[index] == needle { return index; }
@@ -62,8 +62,8 @@ fn index_of_char_local(value: string, needle: string) -> number {
 fn split_lines_local(value: string) -> string[] {
     let value_len = value.length;
     let mut lines: string[] = [];
-    let mut start: number = 0;
-    let mut index: number = 0;
+    let mut start: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= value_len { break; }
         let ch = value[index];
@@ -78,11 +78,11 @@ fn split_lines_local(value: string) -> string[] {
 }
 
 // ── Number / key-value parsing ───────────────────────────────────────
-fn parse_number_local(text: string) -> number {
+fn parse_number_local(text: string) -> int {
     let trimmed = trim_text_local(text);
     if trimmed.length == 0 { return 0; }
-    let mut result: number = 0;
-    let mut i: number = 0;
+    let mut result: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= trimmed.length { break; }
         let ch = trimmed[i];
@@ -100,7 +100,7 @@ fn parse_number_local(text: string) -> number {
 
 // Extract a numeric value from "key=value" pattern in text.
 // key_prefix is e.g. "size=", prefix_len is its length (e.g. 5).
-fn extract_kv_number(text: string, key_prefix: string, prefix_len: number) -> number {
+fn extract_kv_number(text: string, key_prefix: string, prefix_len: int) -> int {
     let key_idx = index_of(text, key_prefix);
     if key_idx < 0 { return 0; }
     let val_start = key_idx + prefix_len;
@@ -113,7 +113,7 @@ fn extract_kv_number(text: string, key_prefix: string, prefix_len: number) -> nu
 }
 
 // Extract a string value from "key=value" pattern in text.
-fn extract_kv_string(text: string, key_prefix: string, prefix_len: number) -> string {
+fn extract_kv_string(text: string, key_prefix: string, prefix_len: int) -> string {
     let key_idx = index_of(text, key_prefix);
     if key_idx < 0 { return ""; }
     let val_start = key_idx + prefix_len;
@@ -130,7 +130,7 @@ fn _parse_lowered_fn_string_constants(raw: string) -> StringConstant[] {
     let mut result: StringConstant[] = [];
     if raw.length == 0 { return result; }
     let file_lines = split_lines_local(raw);
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= file_lines.length { break; }
         let line = file_lines[i];
@@ -166,11 +166,11 @@ fn _parse_lowered_fn_string_constants(raw: string) -> StringConstant[] {
 // appear outside of double-quoted string literals.  For example:
 //   `collect_until(p, ["!", "{"])` → 0  (the `{` is inside quotes)
 //   `Statement.TestDeclaration {`  → 1
-fn net_unquoted_brace_depth(text: string) -> number {
-    let mut depth: number = 0;
+fn net_unquoted_brace_depth(text: string) -> int {
+    let mut depth: int = 0;
     let mut in_quote: boolean = false;
     let mut escape: boolean = false;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= text.length { break; }
         let ch = text[i];

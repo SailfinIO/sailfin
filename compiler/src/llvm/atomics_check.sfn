@@ -1,0 +1,70 @@
+// compiler/src/llvm/atomics_check.sfn
+//
+// Lightweight predicate over the six reserved atomic-builtin names
+// (`atomic_load`, `atomic_store`, `atomic_add`, `atomic_sub`,
+// `atomic_cas`, `atomic_fence`). Split out of `atomics.sfn` so the
+// unit-test surface can import it without pulling in the full
+// expression-lowering stack that `atomics.sfn` transitively requires
+// for `lower_atomic_builtin` (which mutually recurses with
+// `lower_expression`). `core_call_resolution.sfn` still imports from
+// `atomics.sfn` directly because it also needs `lower_atomic_builtin`.
+//
+// Before the split, the atomic unit tests took ~90s locally on Linux
+// and ~330s on macOS arm64 CI — exceeding the per-test timeout
+// budget. After the split they import only `runtime/prelude` and
+// compile in single-digit seconds. The full lowering remains in
+// `atomics.sfn` and is unaffected.
+//
+// Trim semantics: whitespace (space, newline, CR, tab) is stripped
+// from both ends before matching, matching the original behaviour
+// of `trim_text` from `llvm/utils.sfn`. The four whitespace classes
+// are inlined here so this file has no compiler-internal imports.
+import { char_code, substring } from "runtime/prelude";
+
+fn _is_atomic_whitespace(code: int) -> boolean {
+    if code == char_code(" ") { return true; }
+    if code == char_code("\n") { return true; }
+    if code == char_code("\r") { return true; }
+    if code == char_code("\t") { return true; }
+    return false;
+}
+
+fn _trim_atomic_name(value: string) -> string {
+    let mut start: int = 0;
+    let mut end: int = value.length;
+    loop {
+        if start >= end { break; }
+        let code = char_code(substring(value, start, start + 1));
+        if _is_atomic_whitespace(code) {
+            start += 1;
+            continue;
+        }
+        break;
+    }
+    loop {
+        if end <= start { break; }
+        let code = char_code(substring(value, end - 1, end));
+        if _is_atomic_whitespace(code) {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    if start == 0 {
+        if end == value.length { return value; }
+    }
+    return substring(value, start, end);
+}
+
+fn is_atomic_builtin(name: string) -> boolean {
+    let trimmed = _trim_atomic_name(name);
+    if trimmed == "atomic_load" { return true; }
+    if trimmed == "atomic_store" { return true; }
+    if trimmed == "atomic_add" { return true; }
+    if trimmed == "atomic_sub" { return true; }
+    if trimmed == "atomic_cas" { return true; }
+    if trimmed == "atomic_fence" { return true; }
+    return false;
+}
+
+export { is_atomic_builtin };

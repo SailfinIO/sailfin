@@ -171,7 +171,7 @@ fn detect_borrow_conflicts_impl(ownership: OwnershipInfo?, locals: LocalBinding[
     if ownership == null { return diagnostics; }
     if ownership.variant != "Borrow" { return diagnostics; }
     let base = trim_text(ownership.base);
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= locals.length { break; }
         let existing = locals[index];
@@ -227,7 +227,7 @@ fn resolve_borrow_base_impl(target: string, locals: LocalBinding[]) -> string {
     return resolve_borrow_base_inner(trim_text(target), locals, 0);
 }
 
-fn resolve_borrow_base_inner(target: string, locals: LocalBinding[], depth: number) -> string {
+fn resolve_borrow_base_inner(target: string, locals: LocalBinding[], depth: int) -> string {
     let trimmed = trim_text(target);
     if trimmed.length == 0 { return trimmed; }
     if depth >= 8 { return trimmed; }

@@ -73,7 +73,7 @@ fn extend_native_structs(values: NativeStruct[], extras: NativeStruct[]) -> Nati
     let mut out = values;
     if out == null { out = []; }
     if extras == null { return out; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= extras.length { break; }
         out = out.push(extras[index]);
@@ -86,7 +86,7 @@ fn extend_native_enums(values: NativeEnum[], extras: NativeEnum[]) -> NativeEnum
     let mut out = values;
     if out == null { out = []; }
     if extras == null { return out; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= extras.length { break; }
         out = out.push(extras[index]);
@@ -99,7 +99,7 @@ fn extend_native_interfaces(values: NativeInterface[], extras: NativeInterface[]
     let mut out = values;
     if out == null { out = []; }
     if extras == null { return out; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= extras.length { break; }
         out = out.push(extras[index]);
@@ -112,7 +112,7 @@ fn extend_native_functions(values: NativeFunction[], extras: NativeFunction[]) -
     let mut out = values;
     if out == null { out = []; }
     if extras == null { return out; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= extras.length { break; }
         out = out.push(extras[index]);
@@ -164,7 +164,7 @@ fn is_llvm_symbol_char(ch: string) -> boolean {
 fn sanitize_module_suffix(module_name: string) -> string {
     if module_name.length == 0 { return "module"; }
     let mut out: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= module_name.length { break; }
         let ch = module_name[index];
@@ -217,7 +217,7 @@ fn extract_module_name_from_native_text(native_text: string) -> string {
 
 fn collect_available_import_module_names(imported_native_texts: string[]) -> string[] {
     let mut names: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= imported_native_texts.length { break; }
         let text = imported_native_texts[index];
@@ -252,12 +252,12 @@ fn resolve_import_provider_module_name(import_path: string, current_module_slug:
 
 fn collect_defined_function_symbols(lines: string[]) -> string[] {
     let mut symbols: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
         let trimmed = trim_text(lines[index]);
         if starts_with(trimmed, "define ") {
-            let mut at_index: number = index_of(trimmed, "@");
+            let mut at_index: int = index_of(trimmed, "@");
             if at_index >= 0 {
                 let mut start = at_index + 1;
                 let mut end = start;
@@ -279,8 +279,8 @@ fn collect_defined_function_symbols(lines: string[]) -> string[] {
     return symbols;
 }
 
-fn find_substitution_index(olds: string[], news: string[], symbol: string) -> number {
-    let mut index: number = 0;
+fn find_substitution_index(olds: string[], news: string[], symbol: string) -> int {
+    let mut index: int = 0;
     loop {
         let mut _if267: boolean = false;
         if index >= olds.length { _if267 = true; }
@@ -296,7 +296,7 @@ fn replace_symbol_refs_in_line(line: string, olds: string[], news: string[]) -> 
     if olds.length == 0 { return line; }
     if line.length == 0 { return line; }
     let mut out: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut in_string: boolean = false;
     loop {
         if index >= line.length { break; }
@@ -351,7 +351,7 @@ fn replace_symbol_refs_in_line(line: string, olds: string[], news: string[]) -> 
 fn apply_symbol_substitutions(lines: string[], olds: string[], news: string[]) -> string[] {
     if olds.length == 0 { return lines; }
     let mut out = lines;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= out.length { break; }
         out[index] = replace_symbol_refs_in_line(out[index], olds, news);
@@ -360,7 +360,7 @@ fn apply_symbol_substitutions(lines: string[], olds: string[], news: string[]) -
     return out;
 }
 
-fn _extract_signature_from_header(trimmed: string, prefix_len: number, symbol: string) -> DeclareSignature? {
+fn _extract_signature_from_header(trimmed: string, prefix_len: int, symbol: string) -> DeclareSignature? {
     let at_index = index_of(trimmed, "@");
     if at_index < 0 { return null; }
     let start = at_index + 1;
@@ -400,10 +400,10 @@ fn _extract_signature_from_header(trimmed: string, prefix_len: number, symbol: s
 
     // Split parameters on top-level commas only (struct types include commas).
     let mut parts: string[] = [];
-    let mut start_index: number = 0;
-    let mut scan: number = 0;
-    let mut curly_depth: number = 0;
-    let mut angle_depth: number = 0;
+    let mut start_index: int = 0;
+    let mut scan: int = 0;
+    let mut curly_depth: int = 0;
+    let mut angle_depth: int = 0;
     loop {
         if scan >= params_text.length { break; }
         let ch = params_text[scan];
@@ -429,14 +429,14 @@ fn _extract_signature_from_header(trimmed: string, prefix_len: number, symbol: s
     // Only strip the trailing `%name` when it appears at the top level (curly
     // depth 0) so that struct types like "{ %Decorator*, i64 }*" are preserved.
     let mut stripped_parts: string[] = [];
-    let mut pi: number = 0;
+    let mut pi: int = 0;
     loop {
         if pi >= parts.length { break; }
         let p = parts[pi];
         // Scan backwards to find the last '%' at curly depth 0.
         let mut scan_pos = p.length - 1;
-        let mut pct_at_top: number = -1;
-        let mut depth: number = 0;
+        let mut pct_at_top: int = -1;
+        let mut depth: int = 0;
         loop {
             if scan_pos < 0 { break; }
             let ch = substring(p, scan_pos, scan_pos + 1);
@@ -499,7 +499,7 @@ fn _extract_type_from_arg(raw: string) -> string {
 fn find_declare_signature(lines: string[], symbol: string) -> DeclareSignature? {
     if symbol.length == 0 { return null; }
     // First pass: check declare lines.
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
         let trimmed = trim_text(lines[index]);
@@ -549,10 +549,10 @@ fn find_declare_signature(lines: string[], symbol: string) -> DeclareSignature? 
                         // the last `%` or `@` (start of the SSA/value name)
                         // rather than the first space.
                         let mut call_parts: string[] = [];
-                        let mut ps: number = 0;
-                        let mut sc: number = 0;
-                        let mut cd: number = 0;
-                        let mut pd: number = 0;
+                        let mut ps: int = 0;
+                        let mut sc: int = 0;
+                        let mut cd: int = 0;
+                        let mut pd: int = 0;
                         loop {
                             if sc >= params_text.length { break; }
                             let pch = params_text[sc];
@@ -595,7 +595,7 @@ fn find_declare_signature(lines: string[], symbol: string) -> DeclareSignature? 
 fn render_function_shim(export_symbol: string, target_symbol: string, signature: DeclareSignature) -> string[] {
     let mut param_decls: string[] = [];
     let mut call_args: string[] = [];
-    let mut idx: number = 0;
+    let mut idx: int = 0;
     loop {
         if idx >= signature.param_types.length { break; }
         let ty = trim_text(signature.param_types[idx]);
@@ -631,7 +631,7 @@ fn render_function_shim(export_symbol: string, target_symbol: string, signature:
 fn insert_before_llvm_footer(lines: string[], inserted: string[]) -> string[] {
     if inserted.length == 0 { return lines; }
     let mut footer_index = lines.length;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
         let trimmed = trim_text(lines[index]);
@@ -645,11 +645,11 @@ fn insert_before_llvm_footer(lines: string[], inserted: string[]) -> string[] {
         index += 1;
     }
     let mut out: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= lines.length { break; }
         if i == footer_index {
-            let mut j: number = 0;
+            let mut j: int = 0;
             loop {
                 if j >= inserted.length { break; }
                 out.push(inserted[j]);
@@ -660,7 +660,7 @@ fn insert_before_llvm_footer(lines: string[], inserted: string[]) -> string[] {
         i += 1;
     }
     if footer_index == lines.length {
-        let mut j: number = 0;
+        let mut j: int = 0;
         loop {
             if j >= inserted.length { break; }
             out.push(inserted[j]);

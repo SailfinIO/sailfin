@@ -239,7 +239,7 @@ fn sanitize_functions(functions: NativeFunction[], native_text_override_path: st
             }
             let mut recovered_functions = parse_native_functions_from_text(recovery_text);
             let mut recovered_has_body = false;
-            let mut recovered_index: number = 0;
+            let mut recovered_index: int = 0;
             loop {
                 if recovered_index >= recovered_functions.length { break; }
                 let recovered_function = recovered_functions[recovered_index];
@@ -313,7 +313,7 @@ fn recover_structs_if_corrupt(safe_structs: NativeStruct[], native_text_override
     let mut structs_look_corrupt: boolean = safe_structs.length == 0;
     if !structs_look_corrupt {
         if safe_structs.length > 0 {
-            let mut check_i: number = 0;
+            let mut check_i: int = 0;
             loop {
                 if check_i >= safe_structs.length { break; }
                 let check_struct = safe_structs[check_i];

@@ -404,7 +404,7 @@ fn resolve_borrow_base(target: string, locals: LocalBinding[]) -> string {
     return resolve_borrow_base_impl(target, locals);
 }
 
-fn lower_expression(expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
+fn lower_expression(expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
     let trimmed = trim_text(expression);
     let mut diagnostics: string[] = [];
     let empty_constants = empty_string_constant_set();
@@ -560,7 +560,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 };
             }
             let lowered = lower_expression(remainder, bindings, locals, temp_index, lines, functions, context, expected_type);
-            let mut _ci0: number = 0;
+            let mut _ci0: int = 0;
             loop {
                 if _ci0 >= lowered.diagnostics.length { break; }
                 diagnostics.push(lowered.diagnostics[_ci0]);
@@ -706,7 +706,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                             let free_operands: LLVMOperand[] = [free_operand];
                             let free_result = emit_runtime_call("runtime.free", free_operands, empty_runtime_call_overrides(), lowered.temp_index
                                 + 3, awaited_lines2);
-                            let mut _free_di: number = 0;
+                            let mut _free_di: int = 0;
                             loop {
                                 if _free_di >= free_result.diagnostics.length {
                                     break;
@@ -880,7 +880,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 };
             }
             let lowered_ptr = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
-            let mut _ci1: number = 0;
+            let mut _ci1: int = 0;
             loop {
                 if _ci1 >= lowered_ptr.diagnostics.length { break; }
                 diagnostics.push(lowered_ptr.diagnostics[_ci1]);
@@ -952,7 +952,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                             // Only rewrite string array concats; the generic runtime helper only supports i8* elements.
                             if element_type == "i8*" {
                                 let mut rewritten_args: string[] = [member_target.base];
-                                let mut arg_index: number = 0;
+                                let mut arg_index: int = 0;
                                 loop {
                                     if arg_index >= argument_entries.length {
                                         break;
@@ -968,7 +968,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                                 let element_type = array_pointer_element_type(param.llvm_type);
                                 if element_type == "i8*" {
                                     let mut rewritten_args: string[] = [member_target.base];
-                                    let mut arg_index: number = 0;
+                                    let mut arg_index: int = 0;
                                     loop {
                                         if arg_index >= argument_entries.length {
                                             break;
@@ -1010,7 +1010,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 // out of scope per the issue's `Out:` section. Pass `null`;
                 // the ABI mismatch diagnostic falls back to its bare form.
                 let lowered_enum = lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context, expected_type, null);
-                let mut _ci2: number = 0;
+                let mut _ci2: int = 0;
                 loop {
                     if _ci2 >= lowered_enum.diagnostics.length { break; }
                     diagnostics.push(lowered_enum.diagnostics[_ci2]);
@@ -1030,7 +1030,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     let struct_parse = parse_struct_literal(stripped);
     if struct_parse.recognized {
         if !struct_parse.success {
-            let mut _ci3: number = 0;
+            let mut _ci3: int = 0;
             loop {
                 if _ci3 >= struct_parse.diagnostics.length { break; }
                 diagnostics.push(struct_parse.diagnostics[_ci3]);
@@ -1045,7 +1045,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             };
         }
         let lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context, expected_type, null);
-        let mut _ci4: number = 0;
+        let mut _ci4: int = 0;
         loop {
             if _ci4 >= lowered_struct.diagnostics.length { break; }
             diagnostics.push(lowered_struct.diagnostics[_ci4]);
@@ -1100,7 +1100,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     let local = find_local_binding(locals, stripped);
     if local != null {
         let load_result = load_local_operand(local, temp_index, lines);
-        let mut _ci5: number = 0;
+        let mut _ci5: int = 0;
         loop {
             if _ci5 >= load_result.diagnostics.length { break; }
             diagnostics.push(load_result.diagnostics[_ci5]);

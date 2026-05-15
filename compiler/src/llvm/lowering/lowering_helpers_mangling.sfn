@@ -78,7 +78,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
     }
     let mut local_olds: string[] = [];
     let mut local_news: string[] = [];
-    let mut def_index: number = 0;
+    let mut def_index: int = 0;
     loop {
         if def_index >= defined.length { break; }
         let sym = defined[def_index];
@@ -137,11 +137,11 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
 
     if native_text.length > 0 {
         // Scan native text line-by-line for .import / .export directives.
-        let mut scan_pos: number = 0;
+        let mut scan_pos: int = 0;
         loop {
             if scan_pos >= native_text.length { break; }
             // Find end of current line.
-            let mut line_end: number = scan_pos;
+            let mut line_end: int = scan_pos;
             loop {
                 if line_end >= native_text.length { break; }
                 if native_text[line_end] == "\n" { break; }
@@ -240,7 +240,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
     //    but has no existing declare or define in the module.
     let mut shim_lines: string[] = [];
     let mut injected_declares: string[] = [];
-    let mut shim_index: number = 0;
+    let mut shim_index: int = 0;
     loop {
         let mut _if274: boolean = false;
         if shim_index >= shim_exports.length { _if274 = true; }
@@ -265,7 +265,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
             }
         }
         let _shim_result = render_function_shim(export_sym, target_sym, signature);
-        let mut _ci0: number = 0;
+        let mut _ci0: int = 0;
         loop {
             if _ci0 >= _shim_result.length { break; }
             shim_lines.push(_shim_result[_ci0]);
@@ -284,7 +284,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
 
 fn _has_declare_or_define(lines: string[], symbol: string) -> boolean {
     let at_sym = "@" + symbol + "(";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
         let trimmed = trim_text(lines[index]);
@@ -301,7 +301,7 @@ fn _has_declare_or_define(lines: string[], symbol: string) -> boolean {
 
 fn _render_declare_line(symbol: string, signature: DeclareSignature) -> string {
     let mut param_types: string[] = [];
-    let mut idx: number = 0;
+    let mut idx: int = 0;
     loop {
         if idx >= signature.param_types.length { break; }
         param_types.push(signature.param_types[idx]);
@@ -324,7 +324,7 @@ fn build_trait_metadata(interfaces: NativeInterface[], structs: NativeStruct[]) 
         return TraitMetadata { interfaces: [], implementations: [] };
     }
     let mut interface_descriptors: TraitDescriptor[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= interfaces.length { break; }
         let interface = interfaces[index];
@@ -374,7 +374,7 @@ fn concat_native_functions(first: NativeFunction[], second: NativeFunction[]) ->
     let mut safe_second = second;
     if safe_second == null { safe_second = []; }
     if safe_second.length > 200000 { return result; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= safe_first.length { break; }
         result = append_native_function(result, safe_first[index]);
@@ -415,7 +415,7 @@ fn extend_native_functions_inplace(dst: NativeFunction[], src: NativeFunction[])
     let mut safe_src = src;
     if safe_src == null { safe_src = []; }
     if safe_src.length > 200000 { return out; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= safe_src.length { break; }
         out = append_native_function(out, safe_src[index]);
@@ -427,10 +427,18 @@ fn extend_native_functions_inplace(dst: NativeFunction[], src: NativeFunction[])
 fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
     if structs.length > 100000 { return []; }
     let mut result: NativeFunction[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= structs.length { break; }
         let definition = structs[index];
+        if definition.name == null {
+            index += 1;
+            continue;
+        }
+        if definition.name.length == 0 {
+            index += 1;
+            continue;
+        }
         let mut methods = definition.methods;
         if methods == null {
             index += 1;
@@ -440,10 +448,18 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
             index += 1;
             continue;
         }
-        let mut method_index: number = 0;
+        let mut method_index: int = 0;
         loop {
             if method_index >= methods.length { break; }
             let method = methods[method_index];
+            if method.name == null {
+                method_index += 1;
+                continue;
+            }
+            if method.name.length == 0 {
+                method_index += 1;
+                continue;
+            }
             let qualified_name = definition.name + method.name;
             // Rebuild parameters so that the `self` parameter always carries
             // the struct name as its type_annotation.  The ABI corruption in
@@ -452,7 +468,7 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
             let mut fixed_params: NativeParameter[] = [];
             let mut raw_params = method.parameters;
             if raw_params == null { raw_params = []; }
-            let mut pi: number = 0;
+            let mut pi: int = 0;
             loop {
                 if pi >= raw_params.length { break; }
                 let p = raw_params[pi];
@@ -509,7 +525,7 @@ fn _join_llvm_lines_linear(lines: string[]) -> string {
     loop {
         if current.length <= 1 { break; }
         let mut next: string[] = [];
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= current.length { break; }
             if i + 1 < current.length {

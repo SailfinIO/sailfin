@@ -61,7 +61,7 @@ import {
     _sha256_of_file_cmd,
     _write_text_cmd
 } from "./cli_commands_utils";
-import { substring } from "./string_utils";
+import { char_code_at_text, substring } from "./string_utils";
 
 // ----------------------------------------------------------------
 // Schema version
@@ -281,7 +281,7 @@ fn _is_valid_digest(digest: string) -> boolean {
     let mut i: int = 0;
     loop {
         if i >= digest.length { break; }
-        let code = char_code(char_at(digest, i));
+        let code = char_code_at_text(digest, i);
         let is_digit = code >= 48 && code <= 57;  // 0-9
         let is_lower_hex = code >= 97 && code <= 102;  // a-f
         if !is_digit && !is_lower_hex { return false; }
@@ -431,8 +431,8 @@ fn _string_lt(a: string, b: string) -> boolean {
     let mut i: int = 0;
     loop {
         if i >= a.length || i >= b.length { break; }
-        let ca = char_code(char_at(a, i));
-        let cb = char_code(char_at(b, i));
+        let ca = char_code_at_text(a, i);
+        let cb = char_code_at_text(b, i);
         if ca < cb { return true; }
         if ca > cb { return false; }
         i += 1;
@@ -491,7 +491,7 @@ fn _escape_json_string(input: string) -> string {
     loop {
         if i >= input.length { break; }
         let ch = char_at(input, i);
-        let code = char_code(ch);
+        let code = char_code_at_text(input, i);
         if ch == "\\" { out = out + "\\\\"; } else if ch == "\"" {
             out = out + "\\\"";
         } else if code == 9 { out = out + "\\t"; } else if code == 10 {

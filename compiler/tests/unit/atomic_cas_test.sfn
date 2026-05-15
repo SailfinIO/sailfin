@@ -12,7 +12,7 @@
 // `compiler/tests/e2e/test_atomic_cas_compile.sh`. The type-error
 // rejections on the second and third arguments are pinned in that
 // same e2e file via `[fatal] [E0806]` stderr probes.
-import { is_atomic_builtin } from "../../src/llvm/atomics";
+import { is_atomic_builtin } from "../../src/llvm/atomics_check";
 
 // ── Predicate recognises atomic_cas ──
 test "atomics: is_atomic_builtin recognises atomic_cas" {

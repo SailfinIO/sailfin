@@ -22,7 +22,7 @@ import {
 
 // Helper: Find preloaded value for a local by name
 fn find_preloaded_value(locals: LocalBinding[], preloaded_values: string[], name: string) -> string? {
-    let mut local_index: number = 0;
+    let mut local_index: int = 0;
     loop {
         if local_index >= locals.length { break; }
         let check_local = locals[local_index];
@@ -39,12 +39,12 @@ fn find_preloaded_value(locals: LocalBinding[], preloaded_values: string[], name
 // Helper: Collect unique mutation names from a list of mutations
 fn collect_mutation_names(mutations: LocalMutation[]) -> string[] {
     let mut names: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= mutations.length { break; }
         let mutation = mutations[index];
         let mut already_added: boolean = false;
-        let mut check_index: number = 0;
+        let mut check_index: int = 0;
         loop {
             if check_index >= names.length { break; }
             if names[check_index] == mutation.name {
@@ -61,7 +61,7 @@ fn collect_mutation_names(mutations: LocalMutation[]) -> string[] {
 
 // Helper: Find mutation for a specific local name in a list
 fn find_mutation_for_name(mutations: LocalMutation[], name: string) -> LocalMutation? {
-    let mut index: number = mutations.length;
+    let mut index: int = mutations.length;
     loop {
         if index <= 0 { break; }
         index -= 1;
@@ -73,7 +73,7 @@ fn find_mutation_for_name(mutations: LocalMutation[], name: string) -> LocalMuta
 fn find_mutation_for_name_at_label(mutations: LocalMutation[], name: string, label: string) -> LocalMutation? {
     if label.length == 0 { return find_mutation_for_name(mutations, name); }
 
-    let mut index: number = mutations.length;
+    let mut index: int = mutations.length;
     loop {
         if index <= 0 { break; }
         index -= 1;
@@ -92,7 +92,7 @@ fn join_strings(strings: string[], separator: string) -> string {
 }
 
 // Helper: Create phi and store lines for a single local (returns both lines separately)
-fn build_phi_and_store(local: LocalBinding, llvm_type: string, phi_inputs: string[], temp_index: number) -> PhiStoreEntry {
+fn build_phi_and_store(local: LocalBinding, llvm_type: string, phi_inputs: string[], temp_index: int) -> PhiStoreEntry {
     let phi_temp = format_temp_name(temp_index);
     let phi_input_str = join_strings(phi_inputs, ", ");
     let phi_line = "  " + phi_temp + " = phi " + llvm_type + " " + phi_input_str;
@@ -104,7 +104,7 @@ fn build_phi_and_store(local: LocalBinding, llvm_type: string, phi_inputs: strin
 
 // Helper: determine the label of the current basic block by scanning the existing lines
 fn find_last_label(lines: string[], fallback: string) -> string {
-    let mut index: number = lines.length;
+    let mut index: int = lines.length;
     loop {
         if index <= 0 { break; }
         index -= 1;
@@ -129,11 +129,11 @@ fn is_terminator_line(line: string) -> boolean {
     return false;
 }
 
-fn insert_lines_before_index(lines: string[], index: number, insert_lines: string[]) -> string[] {
+fn insert_lines_before_index(lines: string[], index: int, insert_lines: string[]) -> string[] {
     if insert_lines.length == 0 { return lines; }
 
     let mut result: string[] = [];
-    let mut line_idx: number = 0;
+    let mut line_idx: int = 0;
     let mut inserted: boolean = false;
     loop {
         if line_idx >= lines.length { break; }
@@ -152,8 +152,8 @@ fn insert_lines_before_index(lines: string[], index: number, insert_lines: strin
     return result;
 }
 
-fn find_last_terminator_index(lines: string[]) -> number {
-    let mut index: number = lines.length;
+fn find_last_terminator_index(lines: string[]) -> int {
+    let mut index: int = lines.length;
     loop {
         if index <= 0 { break; }
         index -= 1;
@@ -162,10 +162,10 @@ fn find_last_terminator_index(lines: string[]) -> number {
     return -1;
 }
 
-fn retarget_recent_mutations(mutations: LocalMutation[], start_index: number, target_label: string) -> LocalMutation[] {
+fn retarget_recent_mutations(mutations: LocalMutation[], start_index: int, target_label: string) -> LocalMutation[] {
     if target_label.length == 0 { return mutations; }
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut result: LocalMutation[] = [];
 
     loop {
@@ -191,12 +191,12 @@ fn retarget_recent_mutations(mutations: LocalMutation[], start_index: number, ta
     return result;
 }
 
-fn materialize_mutation_values_at_exit(mutations: LocalMutation[], locals: LocalBinding[], lines: string[], temp_index: number) -> MutationMaterializationResult {
-    let mut current_temp: number = temp_index;
+fn materialize_mutation_values_at_exit(mutations: LocalMutation[], locals: LocalBinding[], lines: string[], temp_index: int) -> MutationMaterializationResult {
+    let mut current_temp: int = temp_index;
     let mut updated_mutations: LocalMutation[] = [];
     let mut load_lines: string[] = [];
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= mutations.length { break; }
 
@@ -232,7 +232,7 @@ fn materialize_mutation_values_at_exit(mutations: LocalMutation[], locals: Local
         if insert_index >= 0 {
             updated_lines = insert_lines_before_index(updated_lines, insert_index, load_lines);
         } else {
-            let mut append_idx: number = 0;
+            let mut append_idx: int = 0;
             loop {
                 if append_idx >= load_lines.length { break; }
                 updated_lines.push(load_lines[append_idx]);
@@ -248,12 +248,12 @@ fn materialize_mutation_values_at_exit(mutations: LocalMutation[], locals: Local
     };
 }
 
-fn materialize_mutation_values_at_label(mutations: LocalMutation[], locals: LocalBinding[], lines: string[], temp_index: number, target_label: string) -> MutationMaterializationResult {
+fn materialize_mutation_values_at_label(mutations: LocalMutation[], locals: LocalBinding[], lines: string[], temp_index: int, target_label: string) -> MutationMaterializationResult {
     let mut updated_lines: string[] = lines;
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
     let mut updated_mutations: LocalMutation[] = [];
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= mutations.length { break; }
 
@@ -299,13 +299,13 @@ fn materialize_mutation_values_at_label(mutations: LocalMutation[], locals: Loca
     };
 }
 
-fn emit_phi_merges_for_straight_if(mutations: LocalMutation[], locals: LocalBinding[], preloaded_values: string[], base_label: string, then_label: string, then_exit_label: string, lines: string[], temp_index: number) -> PhiMergeResult {
+fn emit_phi_merges_for_straight_if(mutations: LocalMutation[], locals: LocalBinding[], preloaded_values: string[], base_label: string, then_label: string, then_exit_label: string, lines: string[], temp_index: int) -> PhiMergeResult {
     let allow_preloaded_fallback: boolean = false;
     let mut phi_lines: string[] = [];
     let mut store_lines: string[] = [];
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
     let mutated_names = collect_mutation_names(mutations);
-    let mut index: number = 0;
+    let mut index: int = 0;
 
     loop {
         if index >= mutated_names.length { break; }
@@ -353,11 +353,11 @@ fn emit_phi_merges_for_straight_if(mutations: LocalMutation[], locals: LocalBind
     return PhiMergeResult { lines: combined_lines, temp_index: current_temp };
 }
 
-fn emit_phi_merges_for_if_else(then_mutations: LocalMutation[], else_mutations: LocalMutation[], locals: LocalBinding[], preloaded_values: string[], then_label: string, else_label: string, then_exit_label: string, else_exit_label: string, then_terminated: boolean, else_terminated: boolean, lines: string[], temp_index: number) -> PhiMergeResult {
+fn emit_phi_merges_for_if_else(then_mutations: LocalMutation[], else_mutations: LocalMutation[], locals: LocalBinding[], preloaded_values: string[], then_label: string, else_label: string, then_exit_label: string, else_exit_label: string, then_terminated: boolean, else_terminated: boolean, lines: string[], temp_index: int) -> PhiMergeResult {
     let allow_preloaded_fallback: boolean = false;
     let mut phi_lines: string[] = [];
     let mut store_lines: string[] = [];
-    let mut current_temp: number = temp_index;
+    let mut current_temp: int = temp_index;
 
     // Build a union of mutated local names from both branches
     let then_names = collect_mutation_names(then_mutations);
@@ -365,12 +365,12 @@ fn emit_phi_merges_for_if_else(then_mutations: LocalMutation[], else_mutations: 
     let mut mutated_names: string[] = then_names;
 
     // Add unique names from else branch
-    let mut else_idx: number = 0;
+    let mut else_idx: int = 0;
     loop {
         if else_idx >= else_names.length { break; }
         let else_name = else_names[else_idx];
         let mut already_added: boolean = false;
-        let mut check_idx: number = 0;
+        let mut check_idx: int = 0;
         loop {
             if check_idx >= mutated_names.length { break; }
             if mutated_names[check_idx] == else_name {
@@ -384,7 +384,7 @@ fn emit_phi_merges_for_if_else(then_mutations: LocalMutation[], else_mutations: 
     }
 
     // For each mutated name, emit a phi node
-    let mut name_idx: number = 0;
+    let mut name_idx: int = 0;
     loop {
         if name_idx >= mutated_names.length { break; }
         let name = mutated_names[name_idx];
@@ -482,7 +482,7 @@ fn emit_phi_merges_for_if_else(then_mutations: LocalMutation[], else_mutations: 
     return PhiMergeResult { lines: combined_lines, temp_index: current_temp };
 }
 
-fn emit_phi_merges_for_match(arm_mutations_list: MatchArmMutations[], locals: LocalBinding[], preloaded_values: string[], lines: string[], temp_index: number) -> PhiMergeResult {
+fn emit_phi_merges_for_match(arm_mutations_list: MatchArmMutations[], locals: LocalBinding[], preloaded_values: string[], lines: string[], temp_index: int) -> PhiMergeResult {
     // Phi emission disabled — alloca-store approach is used instead.
     // Each match arm already stores directly to allocas, so phi nodes are
     // redundant. Disabling avoids broken phi output from corrupted

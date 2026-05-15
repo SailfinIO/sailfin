@@ -9,7 +9,7 @@ import { map_parameter_type, map_struct_type_annotation_ctx } from "./core_type_
 
 fn collect_parameter_types(context: TypeContext, parameters: NativeParameter[], function_name: string) -> string[] {
     let mut types: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= parameters.length { break; }
         let parameter = parameters[index];

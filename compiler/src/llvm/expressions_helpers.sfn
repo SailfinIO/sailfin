@@ -42,8 +42,8 @@ fn strip_enclosing_parentheses(expression: string) -> string {
         _if172 = true;
     }
     if _if172 { return trimmed; }
-    let mut depth: number = 0;
-    let mut index: number = 0;
+    let mut depth: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= trimmed.length { break; }
         let ch = char_at(trimmed, index);
@@ -76,7 +76,7 @@ fn contains_text(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if haystack.length < needle.length { return false; }
     let _search_limit = haystack.length - needle.length;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index > _search_limit { break; }
         let candidate = substring(haystack, index, index + needle.length);
@@ -165,11 +165,11 @@ fn default_return_literal(llvm_type: string) -> string {
 // =============================================================================
 // LLVM Temp and Operand Formatting
 // =============================================================================
-fn format_temp_name(index: number) -> string {
+fn format_temp_name(index: int) -> string {
     return "%t" + number_to_string(index);
 }
 
-fn format_local_pointer_name(index: number) -> string {
+fn format_local_pointer_name(index: int) -> string {
     return "%l" + number_to_string(index);
 }
 

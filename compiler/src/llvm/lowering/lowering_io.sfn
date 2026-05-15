@@ -18,7 +18,7 @@ fn extend_string_lines(values: string[], extras: string[]) -> string[] {
     if out == null { out = []; }
     let mut safe_extras = extras;
     if safe_extras == null { safe_extras = []; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= safe_extras.length { break; }
         out.push(safe_extras[index]);
@@ -32,7 +32,7 @@ fn append_string_lines(values: string[], extras: string[]) -> string[] {
     if out == null { out = []; }
     let mut safe_extras = extras;
     if safe_extras == null { safe_extras = []; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= safe_extras.length { break; }
         out.push(safe_extras[index]);
@@ -62,7 +62,7 @@ fn extend_lifetime_regions_checked(values: LifetimeRegionMetadata[], extras: Lif
     if extras.length == 0 { return values; }
     if extras.length > 1000000 { return values; }
     let mut out = values;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= extras.length { break; }
         out = out.push(extras[index]);
@@ -71,9 +71,9 @@ fn extend_lifetime_regions_checked(values: LifetimeRegionMetadata[], extras: Lif
     return out;
 }
 
-fn insert_string_at(values: string[], insert_index: number, value: string) -> string[] {
+fn insert_string_at(values: string[], insert_index: int, value: string) -> string[] {
     let mut out: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= values.length { break; }
         if index == insert_index { out.push(value); }
@@ -111,10 +111,10 @@ fn _write_llvm_lines_chunked_unused(path: string, lines: string[]) -> boolean ![
 
     let chunk_limit = 100000000;
     let mut buffer: string = "";
-    let mut buffered: number = 0;
+    let mut buffered: int = 0;
     let mut wrote: boolean = false;
 
-    let mut index2: number = 0;
+    let mut index2: int = 0;
     loop {
         if index2 >= lines.length { break; }
         let line2 = lines[index2] + "\n";
@@ -156,7 +156,7 @@ fn ensure_intrinsic_declarations(lines: string[]) -> string[] {
     let mut uses_round: boolean = false;
     let mut has_round_decl: boolean = false;
     let mut has_round_define: boolean = false;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lines.length { break; }
         let line = lines[index];

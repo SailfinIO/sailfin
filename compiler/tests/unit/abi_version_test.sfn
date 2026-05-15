@@ -17,7 +17,7 @@
 // (`sfn emit llvm examples/basics/hello-world.sfn | grep '@sfn_abi'`)
 // covers them; an e2e regression test pinning the exact text and
 // linkage is tracked as a follow-up.
-import { RuntimeHelperDescriptor, find_runtime_helper } from "../../src/llvm/mod";
+import { RuntimeHelperDescriptor, find_runtime_helper } from "../../src/llvm/runtime_helpers";
 
 // =============================================================================
 // RuntimeHelperDescriptor.native_signature — accepts both null and string

@@ -44,7 +44,7 @@ import {
 // not between test runs within a single `make test` invocation).
 fn lower_all_functions(local_functions: NativeFunction[], context_functions: NativeFunction[], aggregated_effects: FunctionEffectEntry[], type_context: TypeContext, module_name: string, safe_entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_global_locals: LocalBinding[], module_init_symbol: string, module_globals_needs_init_call: boolean, module_string_constants: StringConstant[], trace: boolean, debug_lowering: boolean) -> FunctionLoweringResult ![io] {
     let mut lines: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut has_add_function: boolean = false;
     let mut all_string_constants: StringConstant[] = module_string_constants;
     let mut function_effects: FunctionEffectEntry[] = [];
@@ -85,8 +85,8 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
             is_extern: fn_is_extern
         };
         if trace {
-            let mut return_count: number = 0;
-            let mut instr_index: number = 0;
+            let mut return_count: int = 0;
+            let mut instr_index: int = 0;
             loop {
                 if instr_index >= safe_instructions.length { break; }
                 if safe_instructions[instr_index].variant == "Return" {
@@ -134,8 +134,8 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
             if _lfn_lines.length > 0 {
                 print.err("test llvm: function first line " + _lfn_lines[0]);
                 print.err("test llvm: function last line " + _lfn_lines[_lfn_lines.length - 1]);
-                let mut ret_lines: number = 0;
-                let mut scan_index: number = 0;
+                let mut ret_lines: int = 0;
+                let mut scan_index: int = 0;
                 loop {
                     if scan_index >= _lfn_lines.length { break; }
                     let line = _lfn_lines[scan_index];
