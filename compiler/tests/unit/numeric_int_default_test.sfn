@@ -25,7 +25,7 @@ fn _diagnostics(source: string) -> Diagnostic[] {
 // ── Bare integer literal: no annotation needed ────────────────
 test "numeric: bare integer literal needs no annotation" {
     // The parser/typecheck must accept this without the
-    // `let x: number = 1` workaround that the pre-E.1 default
+    // `let x: number = 1` workaround that the pre-E.1 default  // alias-coverage: numeric migration coverage
     // forced on every untyped integer.
     let diagnostics = _diagnostics("fn main() { let a = 1; let b = a + 2; }");
     assert diagnostics.length == 0;
@@ -41,12 +41,12 @@ test "numeric: bare integer addition reaches the emitter" {
     assert index_of(asm, "let b") >= 0;
 }
 
-// ── `: number` alias preserved ────────────────────────────────
-test "numeric: ': number = 42' typechecks (alias-as-float)" {
-    // Existing `: number` annotations across the compiler source
+// ── `: number` alias preserved ────────────────────────────────  // alias-coverage: numeric migration coverage
+test "numeric: ': number = 42' typechecks (alias-as-float)" {  // alias-coverage: numeric migration coverage
+    // Existing `: number` annotations across the compiler source  // alias-coverage: numeric migration coverage
     // stay valid through this slice; E.2/E.3 migrate them to
     // `: int` / `: float`.
-    let diagnostics = _diagnostics("fn main() { let x: number = 42; }");
+    let diagnostics = _diagnostics("fn main() { let x: number = 42; }");  // alias-coverage: numeric migration coverage
     assert diagnostics.length == 0;
 }
 

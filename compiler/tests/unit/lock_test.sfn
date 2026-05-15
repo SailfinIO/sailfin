@@ -1,25 +1,21 @@
 // Regression tests for capsule lockfile parsing, lookup, and generation.
-
 import {
     lock_get_versions,
     lock_get_version,
     lock_get_hash,
-    lock_add_entry,
+    lock_add_entry
 } from "../../src/lock";
 
 // -- Local helpers for string assertions --
-
-fn _str_eq(a: string, b: string) -> boolean {
-    return strings_equal(a, b);
-}
+fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
 
 fn _contains(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if haystack.length < needle.length { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i + needle.length > haystack.length { break; }
-        let mut j: number = 0;
+        let mut j: int = 0;
         let mut matches: boolean = true;
         loop {
             if j >= needle.length { break; }
@@ -38,18 +34,18 @@ fn _contains(haystack: string, needle: string) -> boolean {
 // Duplicated dep lookup for testing the lock_get_versions format contract.
 fn _test_lookup_dep(deps: string, name: string) -> string {
     if deps.length == 0 { return ""; }
-    let mut start: number = 0;
+    let mut start: int = 0;
     let len = deps.length;
     loop {
         if start >= len { break; }
-        let mut end: number = start;
+        let mut end: int = start;
         loop {
             if end >= len { break; }
             if deps[end] == "\n" { break; }
             end += 1;
         }
-        let mut eq_pos: number = -1;
-        let mut ei: number = start;
+        let mut eq_pos: int = -1;
+        let mut ei: int = start;
         loop {
             if ei >= end { break; }
             if deps[ei] == "=" {
@@ -70,10 +66,7 @@ fn _test_lookup_dep(deps: string, name: string) -> string {
 }
 
 // -- Sample lockfiles --
-
-fn _empty_lock() -> string {
-    return "# capsule.lock\n\n[packages]\n";
-}
+fn _empty_lock() -> string { return "# capsule.lock\n\n[packages]\n"; }
 
 fn _single_lock() -> string {
     return "# capsule.lock\n\n[packages]\n\"http\" = \"0.1.0 sha256:abc123\"\n";
@@ -84,7 +77,6 @@ fn _multi_lock() -> string {
 }
 
 // -- Tests: lock_get_versions --
-
 test "lock_get_versions: empty lockfile returns empty string" {
     let versions = lock_get_versions(_empty_lock());
     assert _str_eq(versions, "");
@@ -112,7 +104,6 @@ test "lock_get_versions: round-trip lookup matches toml format" {
 }
 
 // -- Tests: lock_get_version --
-
 test "lock_get_version: found" {
     assert _str_eq(lock_get_version(_single_lock(), "http"), "0.1.0");
 }
@@ -133,7 +124,6 @@ test "lock_get_version: empty lockfile" {
 }
 
 // -- Tests: lock_get_hash --
-
 test "lock_get_hash: found" {
     assert _str_eq(lock_get_hash(_single_lock(), "http"), "sha256:abc123");
 }
@@ -154,7 +144,6 @@ test "lock_get_hash: empty lockfile" {
 }
 
 // -- Tests: lock_add_entry --
-
 test "lock_add_entry: add to empty lockfile" {
     let result = lock_add_entry("", "http", "0.1.0", "sha256:abc123");
     assert _contains(result, "[packages]");
@@ -183,7 +172,6 @@ test "lock_add_entry: update preserves other entries" {
 }
 
 // -- Tests: lockfile format --
-
 test "lock format: header comment present" {
     let result = lock_add_entry("", "http", "0.1.0", "sha256:abc");
     assert _contains(result, "# capsule.lock");
@@ -201,7 +189,6 @@ test "lock format: packages section present" {
 }
 
 // -- Tests: parsing edge cases --
-
 test "lock parse: ignores comments" {
     let lock = "# comment\n# another\n\n[packages]\n\"http\" = \"0.1.0 sha256:abc\"\n";
     assert _str_eq(lock_get_version(lock, "http"), "0.1.0");

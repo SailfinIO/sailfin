@@ -1,16 +1,12 @@
 // Regression tests for compile-time capsule dependency resolution.
 // Tests the dependency lookup helper, capsule name resolution, and
 // import span collection for non-stdlib scoped imports.
-
 // -- String helpers --
-
-fn _str_eq(a: string, b: string) -> boolean {
-    return strings_equal(a, b);
-}
+fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
 
 fn _has_prefix(value: string, prefix: string) -> boolean {
     if prefix.length > value.length { return false; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= prefix.length { break; }
         if value[i] != prefix[i] { return false; }
@@ -20,7 +16,7 @@ fn _has_prefix(value: string, prefix: string) -> boolean {
 }
 
 fn _has_slash(name: string) -> boolean {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= name.length { break; }
         if name[i] == "/" { return true; }
@@ -30,22 +26,21 @@ fn _has_slash(name: string) -> boolean {
 }
 
 // -- Duplicated resolution helpers for standalone testing --
-
 fn _lookup_dep_version(deps: string, name: string) -> string {
     if deps.length == 0 { return ""; }
     if name.length == 0 { return ""; }
-    let mut start: number = 0;
+    let mut start: int = 0;
     let len = deps.length;
     loop {
         if start >= len { break; }
-        let mut end: number = start;
+        let mut end: int = start;
         loop {
             if end >= len { break; }
             if deps[end] == "\n" { break; }
             end += 1;
         }
-        let mut eq_pos: number = -1;
-        let mut ei: number = start;
+        let mut eq_pos: int = -1;
+        let mut ei: int = start;
         loop {
             if ei >= end { break; }
             if deps[ei] == "=" {
@@ -67,11 +62,14 @@ fn _lookup_dep_version(deps: string, name: string) -> string {
 
 fn _display_capsule_name(name: string) -> string {
     if _has_slash(name) {
-        let mut slash: number = -1;
-        let mut i: number = 0;
+        let mut slash: int = -1;
+        let mut i: int = 0;
         loop {
             if i >= name.length { break; }
-            if name[i] == "/" { slash = i; break; }
+            if name[i] == "/" {
+                slash = i;
+                break;
+            }
             i += 1;
         }
         if slash >= 0 {
@@ -88,9 +86,9 @@ fn _resolve_cached_path(spec: string, deps: string, home: string) -> string {
     if deps.length == 0 { return ""; }
     if home.length == 0 { return ""; }
     // Require exactly one slash (scope/name)
-    let mut slash_pos: number = -1;
-    let mut slash_count: number = 0;
-    let mut i: number = 0;
+    let mut slash_pos: int = -1;
+    let mut slash_count: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= spec.length { break; }
         if spec[i] == "/" {
@@ -118,11 +116,11 @@ fn _resolve_cached_path(spec: string, deps: string, home: string) -> string {
     if _str_eq(version, ".") { return ""; }
     if _str_eq(version, "..") { return ""; }
     if _has_slash(version) { return ""; }
-    return home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version + "/src/mod.sfn";
+    return home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version
+        + "/src/mod.sfn";
 }
 
 // -- Tests --
-
 test "dep lookup: single entry found" {
     let deps = "cli=0.2.0";
     assert _str_eq(_lookup_dep_version(deps, "cli"), "0.2.0");

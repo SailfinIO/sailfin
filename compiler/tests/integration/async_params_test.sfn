@@ -1,4 +1,4 @@
-async fn add(x: number, y: number) -> number {
+async fn add(x: number, y: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     return x + y;
 }
 

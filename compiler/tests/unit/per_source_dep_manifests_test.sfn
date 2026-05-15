@@ -14,7 +14,7 @@
 // -- Inline copies of the pure helpers from
 //    `compiler/src/capsule_resolver.sfn` (must stay in sync).
 fn _cr_string_in_array(arr: string[], needle: string) -> boolean {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= arr.length { break; }
         if strings_equal(arr[i], needle) { return true; }
@@ -24,9 +24,9 @@ fn _cr_string_in_array(arr: string[], needle: string) -> boolean {
 }
 
 fn _cr_scope_name_prefix(spec: string) -> string {
-    let mut slash_count: number = 0;
-    let mut second_slash: number = -1;
-    let mut i: number = 0;
+    let mut slash_count: int = 0;
+    let mut second_slash: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= spec.length { break; }
         if substring(spec, i, i + 1) == "/" {

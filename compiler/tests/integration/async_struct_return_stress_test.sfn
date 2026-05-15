@@ -1,21 +1,17 @@
 struct Person {
-    id: number;
+    id: int;
 
-    fn id_plus(self, x: number) -> number {
-        return self.id + x;
-    }
+    fn id_plus(self, x: int) -> int { return self.id + x; }
 }
 
-async fn make_person(id: number) -> Person {
+async fn make_person(id: int) -> Person {
     return Person { id: id };
 }
 
 test "async: struct return stress" {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
-        if i >= 200 {
-            break;
-        }
+        if i >= 200 { break; }
 
         // Await a FuturePtr in a typed context so the lowering unboxes + frees.
         let person: Person = await make_person(i);

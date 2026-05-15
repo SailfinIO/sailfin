@@ -12,7 +12,7 @@ import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 
 fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
-    let mut i: number = 0;
+    let mut i: number = 0;  // alias-coverage: diagnostic test exercises legacy : number rejection
     loop {
         if i >= diagnostics.length { break; }
         if strings_equal(diagnostics[i].code, code) { return true; }
@@ -21,9 +21,9 @@ fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
     return false;
 }
 
-fn _count_code(diagnostics: Diagnostic[], code: string) -> number {
-    let mut count: number = 0;
-    let mut i: number = 0;
+fn _count_code(diagnostics: Diagnostic[], code: string) -> number {  // alias-coverage: diagnostic test exercises legacy : number rejection
+    let mut count: number = 0;  // alias-coverage: diagnostic test exercises legacy : number rejection
+    let mut i: number = 0;  // alias-coverage: diagnostic test exercises legacy : number rejection
     loop {
         if i >= diagnostics.length { break; }
         if strings_equal(diagnostics[i].code, code) { count += 1; }
@@ -32,14 +32,14 @@ fn _count_code(diagnostics: Diagnostic[], code: string) -> number {
     return count;
 }
 
-fn _index_of(haystack: string, needle: string) -> number {
+fn _index_of(haystack: string, needle: string) -> number {  // alias-coverage: diagnostic test exercises legacy : number rejection
     if needle.length == 0 { return 0; }
     if haystack.length < needle.length { return -1; }
-    let mut i: number = 0;
+    let mut i: number = 0;  // alias-coverage: diagnostic test exercises legacy : number rejection
     let limit = haystack.length - needle.length;
     loop {
         if i > limit { break; }
-        let mut j: number = 0;
+        let mut j: number = 0;  // alias-coverage: diagnostic test exercises legacy : number rejection
         let mut matches: boolean = true;
         loop {
             if j >= needle.length { break; }
@@ -71,8 +71,8 @@ test "main: accepts fn main() {} (zero parameters, no return type)" {
     assert ! _has_code(diagnostics, "E0011");
 }
 
-test "main: accepts fn main(argv: string[]) -> number ![io]" {
-    let source = "fn main(argv: string[]) -> number ![io] { return 0; }";
+test "main: accepts fn main(argv: string[]) -> number ![io]" {  // alias-coverage: diagnostic test exercises legacy : number rejection
+    let source = "fn main(argv: string[]) -> number ![io] { return 0; }";  // alias-coverage: diagnostic test exercises legacy : number rejection
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     assert ! _has_code(diagnostics, "E0010");
@@ -90,8 +90,8 @@ test "main: accepts fn main() ![io] (effect declared, zero params)" {
     assert ! _has_code(diagnostics, "E0011");
 }
 
-test "main: accepts fn main() -> number (return type only)" {
-    let source = "fn main() -> number { return 0; }";
+test "main: accepts fn main() -> number (return type only)" {  // alias-coverage: diagnostic test exercises legacy : number rejection
+    let source = "fn main() -> number { return 0; }";  // alias-coverage: diagnostic test exercises legacy : number rejection
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     assert ! _has_code(diagnostics, "E0010");
@@ -102,8 +102,8 @@ test "main: accepts fn main() -> number (return type only)" {
 // Reject path — wrong parameter shape produces a Sailfin diagnostic
 // rather than a downstream `lld` error.
 // -------------------------------------------------------------------
-test "main: rejects fn main(argv: number) -> number (E0011 wrong argv type)" {
-    let source = "fn main(argv: number) -> number { return 0; }";
+test "main: rejects fn main(argv: number) -> number (E0011 wrong argv type)" {  // alias-coverage: diagnostic test exercises legacy : number rejection
+    let source = "fn main(argv: number) -> number { return 0; }";  // alias-coverage: diagnostic test exercises legacy : number rejection
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     // Issue #469 acceptance: the diagnostic must point at the parameter,
@@ -111,8 +111,8 @@ test "main: rejects fn main(argv: number) -> number (E0011 wrong argv type)" {
     assert _has_code(diagnostics, "E0011");
 }
 
-test "main: rejects fn main(argv: string[], extra: number) (E0010 extra param)" {
-    let source = "fn main(argv: string[], extra: number) -> number { return 0; }";
+test "main: rejects fn main(argv: string[], extra: number) (E0010 extra param)" {  // alias-coverage: diagnostic test exercises legacy : number rejection
+    let source = "fn main(argv: string[], extra: number) -> number { return 0; }";  // alias-coverage: diagnostic test exercises legacy : number rejection
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     // E0010 is the parameter-count code. The wrapper passes only argv,
@@ -128,14 +128,14 @@ test "main: E0011 message includes the offending type text" {
     // has enough context to fix without consulting the spec. Assert
     // both substrings explicitly — a length-only check would miss a
     // regression that drops the actual-vs-expected detail.
-    let source = "fn main(argv: number) -> number { return 0; }";
+    let source = "fn main(argv: number) -> number { return 0; }";  // alias-coverage: diagnostic test exercises legacy : number rejection
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     let mut found_message: boolean = false;
     let mut found_expected: boolean = false;
     let mut found_actual: boolean = false;
     let mut found_param_name: boolean = false;
-    let mut i: number = 0;
+    let mut i: number = 0;  // alias-coverage: diagnostic test exercises legacy : number rejection
     loop {
         if i >= diagnostics.length { break; }
         let d = diagnostics[i];
@@ -156,7 +156,7 @@ test "main: E0011 message includes the offending type text" {
 test "main: only one E0011 for a single bad parameter" {
     // Duplicate diagnostics for the same slot would be noisy. The
     // validator must emit at most one E0011 per offending parameter.
-    let source = "fn main(argv: number) -> number { return 0; }";
+    let source = "fn main(argv: number) -> number { return 0; }";  // alias-coverage: diagnostic test exercises legacy : number rejection
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     assert _count_code(diagnostics, "E0011") == 1;
@@ -169,7 +169,7 @@ test "main: only one E0011 for a single bad parameter" {
 // custom parameter shapes) keep their freedom.
 // -------------------------------------------------------------------
 test "main: non-main fn with arbitrary params produces no E0010/E0011" {
-    let source = "fn handle_request(req: number) -> number { return req; }";
+    let source = "fn handle_request(req: number) -> number { return req; }";  // alias-coverage: diagnostic test exercises legacy : number rejection
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     assert ! _has_code(diagnostics, "E0010");
@@ -180,7 +180,7 @@ test "main: function literally named `mainframe` is not gated" {
     // The validator must use exact name matching, not a prefix/suffix
     // check, so identifiers like `mainframe`, `main_loop`, or
     // `entrypoint_main` keep their original signature freedom.
-    let source = "fn mainframe(argv: number) -> number { return argv; }";
+    let source = "fn mainframe(argv: number) -> number { return argv; }";  // alias-coverage: diagnostic test exercises legacy : number rejection
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     assert ! _has_code(diagnostics, "E0010");

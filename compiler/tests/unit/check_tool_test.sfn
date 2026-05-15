@@ -14,14 +14,14 @@
 // -------------------------------------------------------------------
 // Local helpers
 // -------------------------------------------------------------------
-fn _index_of(haystack: string, needle: string) -> number {
+fn _index_of(haystack: string, needle: string) -> int {
     if needle.length == 0 { return 0; }
     if haystack.length < needle.length { return -1; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     let limit = haystack.length - needle.length;
     loop {
         if i > limit { break; }
-        let mut j: number = 0;
+        let mut j: int = 0;
         let mut matches: boolean = true;
         loop {
             if j >= needle.length { break; }
@@ -44,7 +44,7 @@ fn _contains(haystack: string, needle: string) -> boolean {
 fn _local_join_effects(effects: string[]) -> string {
     if effects.length == 0 { return ""; }
     let mut out = effects[0];
-    let mut i: number = 1;
+    let mut i: int = 1;
     loop {
         if i >= effects.length { break; }
         out = out + ", " + effects[i];
@@ -81,9 +81,9 @@ fn _local_code_for_first_description(first_desc: string) -> string {
     return "E0400";
 }
 
-fn _local_num_to_string(value: number) -> string {
+fn _local_num_to_string(value: int) -> string {
     if value == 0 { return "0"; }
-    let mut working: number = value;
+    let mut working: int = value;
     let mut negative: boolean = false;
     if working < 0 {
         negative = true;
@@ -92,8 +92,8 @@ fn _local_num_to_string(value: number) -> string {
     let mut output: string = "";
     loop {
         if working == 0 { break; }
-        let mut quotient: number = 0;
-        let mut remaining: number = working;
+        let mut quotient: int = 0;
+        let mut remaining: int = working;
         loop {
             if remaining < 10 { break; }
             remaining = remaining - 10;
@@ -116,7 +116,7 @@ fn _local_num_to_string(value: number) -> string {
     return output;
 }
 
-fn _local_render_summary(files_checked: number, total_errors: number) -> string {
+fn _local_render_summary(files_checked: int, total_errors: int) -> string {
     let files_str = _local_num_to_string(files_checked);
     if total_errors == 0 { return "checked " + files_str + " files: ok"; }
     let errors_str = _local_num_to_string(total_errors);

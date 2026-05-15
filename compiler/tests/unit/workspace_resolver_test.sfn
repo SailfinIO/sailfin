@@ -26,11 +26,11 @@ struct WorkspaceMember {
 fn _parse_workspace_member_paths(members_text: string) -> string[] {
     let mut out: string[] = [];
     if members_text.length == 0 { return out; }
-    let mut start: number = 0;
+    let mut start: int = 0;
     let len = members_text.length;
     loop {
         if start >= len { break; }
-        let mut end: number = start;
+        let mut end: int = start;
         loop {
             if end >= len { break; }
             if substring(members_text, end, end + 1) == "\n" { break; }
@@ -39,7 +39,7 @@ fn _parse_workspace_member_paths(members_text: string) -> string[] {
         if end > start {
             let entry = substring(members_text, start, end);
             let mut has_glob: boolean = false;
-            let mut gi: number = 0;
+            let mut gi: int = 0;
             loop {
                 if gi >= entry.length { break; }
                 if substring(entry, gi, gi + 1) == "*" {
@@ -57,7 +57,7 @@ fn _parse_workspace_member_paths(members_text: string) -> string[] {
 
 // -- Inline copy of workspace_member_for_spec (from capsule_resolver.sfn) --
 fn _workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> string {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= members.length { break; }
         if strings_equal(members[i].name, spec) {
@@ -69,8 +69,8 @@ fn _workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> strin
 }
 
 // -- Inline copy of _cr_is_safe_member_path (from capsule_resolver.sfn) --
-fn _find_char(text: string, ch: string, start: number) -> number {
-    let mut i: number = start;
+fn _find_char(text: string, ch: string, start: int) -> int {
+    let mut i: int = start;
     loop {
         if i >= text.length { break; }
         if substring(text, i, i + 1) == ch { return i; }
@@ -83,10 +83,10 @@ fn _is_safe_member_path(path: string) -> boolean {
     if path.length == 0 { return false; }
     if substring(path, 0, 1) == "/" { return false; }
     if _find_char(path, "\\", 0) >= 0 { return false; }
-    let mut start: number = 0;
+    let mut start: int = 0;
     loop {
         if start >= path.length { break; }
-        let mut end: number = start;
+        let mut end: int = start;
         loop {
             if end >= path.length { break; }
             if substring(path, end, end + 1) == "/" { break; }

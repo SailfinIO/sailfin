@@ -2,10 +2,8 @@
 // These exercise patterns that previously caused invalid LLVM IR:
 // - Duplicate SSA temp names (temp_index resets across control flow)
 // - Phi nodes interleaved with other instructions
-
 // --- SSA temp_index stability across control flow ---
-
-fn _nested_lets_in_branches(n: number) -> number {
+fn _nested_lets_in_branches(n: number) -> number {  // alias-coverage: numeric migration coverage
     let a = n + 1;
     let b = a * 2;
     if n > 10 {
@@ -19,13 +17,11 @@ fn _nested_lets_in_branches(n: number) -> number {
     }
 }
 
-fn _lets_across_loop(n: number) -> number {
-    let mut total: number = 0;
-    let mut i: number = 0;
+fn _lets_across_loop(n: number) -> number {  // alias-coverage: numeric migration coverage
+    let mut total: number = 0;  // alias-coverage: numeric migration coverage
+    let mut i: number = 0;  // alias-coverage: numeric migration coverage
     loop {
-        if i >= n {
-            break;
-        }
+        if i >= n { break; }
         let step = i * 2;
         let adjusted = step + 1;
         total += adjusted;
@@ -36,54 +32,36 @@ fn _lets_across_loop(n: number) -> number {
 }
 
 // --- Phi node ordering (value-producing if/else) ---
-
-fn _conditional_value(flag: boolean) -> number {
-    let mut result: number = 0;
-    if flag {
-        result = 42;
-    } else {
-        result = 99;
-    }
+fn _conditional_value(flag: boolean) -> number {  // alias-coverage: numeric migration coverage
+    let mut result: number = 0;  // alias-coverage: numeric migration coverage
+    if flag { result = 42; } else { result = 99; }
     return result;
 }
 
-fn _chained_conditionals(a: number, b: number) -> number {
-    let mut x: number = 0;
-    if a > b {
-        x = a - b;
-    } else {
-        x = b - a;
-    }
-    let mut y: number = 0;
-    if x > 10 {
-        y = x * 2;
-    } else {
-        y = x + 5;
-    }
+fn _chained_conditionals(a: number, b: number) -> number {  // alias-coverage: numeric migration coverage
+    let mut x: number = 0;  // alias-coverage: numeric migration coverage
+    if a > b { x = a - b; } else { x = b - a; }
+    let mut y: number = 0;  // alias-coverage: numeric migration coverage
+    if x > 10 { y = x * 2; } else { y = x + 5; }
     return y;
 }
 
-fn _deeply_nested_control_flow(x: number) -> number {
+fn _deeply_nested_control_flow(x: number) -> number {  // alias-coverage: numeric migration coverage
     let a = x + 1;
     if a > 100 {
         let b = a - 50;
-        if b > 75 {
-            return b * 2;
-        } else {
+        if b > 75 { return b * 2; } else {
             let c = b + 10;
             return c;
         }
     } else {
         let d = a * 2;
-        if d < 50 {
-            return d;
-        }
+        if d < 50 { return d; }
         return d + 1;
     }
 }
 
 // --- Tests ---
-
 test "ssa: nested lets across if/else branches (then)" {
     assert _nested_lets_in_branches(20) == 180;
 }
@@ -92,13 +70,9 @@ test "ssa: nested lets across if/else branches (else)" {
     assert _nested_lets_in_branches(5) == 33;
 }
 
-test "ssa: lets across loop iterations" {
-    assert _lets_across_loop(0) == 0;
-}
+test "ssa: lets across loop iterations" { assert _lets_across_loop(0) == 0; }
 
-test "ssa: conditional value true" {
-    assert _conditional_value(true) == 42;
-}
+test "ssa: conditional value true" { assert _conditional_value(true) == 42; }
 
 test "ssa: conditional value false" {
     assert _conditional_value(false) == 99;

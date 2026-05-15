@@ -2,38 +2,29 @@
 // Targets: stack frame correctness, function call ABI, pointer handling.
 // Self-hosting requires correct recursive lowering for the parser,
 // type checker, and emitter which all recurse into nested AST nodes.
-
 // ---------------------------------------------------------------------------
 // Deep recursion (100+ levels)
 // ---------------------------------------------------------------------------
-
-fn _sum_recursive(n: number) -> number {
+fn _sum_recursive(n: int) -> int {
     if n <= 0 { return 0; }
     return n + _sum_recursive(n - 1);
 }
 
-test "deep_recursion: sum to 100" {
-    assert _sum_recursive(100) == 5050;
-}
+test "deep_recursion: sum to 100" { assert _sum_recursive(100) == 5050; }
 
-test "deep_recursion: sum to 200" {
-    assert _sum_recursive(200) == 20100;
-}
+test "deep_recursion: sum to 200" { assert _sum_recursive(200) == 20100; }
 
-test "deep_recursion: sum to 0" {
-    assert _sum_recursive(0) == 0;
-}
+test "deep_recursion: sum to 0" { assert _sum_recursive(0) == 0; }
 
 // ---------------------------------------------------------------------------
 // Mutual recursion (two functions calling each other)
 // ---------------------------------------------------------------------------
-
-fn _is_even_rec(n: number) -> boolean {
+fn _is_even_rec(n: int) -> boolean {
     if n == 0 { return true; }
     return _is_odd_rec(n - 1);
 }
 
-fn _is_odd_rec(n: number) -> boolean {
+fn _is_odd_rec(n: int) -> boolean {
     if n == 0 { return false; }
     return _is_even_rec(n - 1);
 }
@@ -60,14 +51,13 @@ test "deep_recursion: mutual recursion cross-check" {
 // ---------------------------------------------------------------------------
 // Recursion with struct parameter and return
 // ---------------------------------------------------------------------------
-
 struct TreeResult {
-    sum: number;
-    depth: number;
-    count: number;
+    sum: int;
+    depth: int;
+    count: int;
 }
 
-fn _tree_accumulate(depth: number, value: number) -> TreeResult {
+fn _tree_accumulate(depth: int, value: int) -> TreeResult {
     if depth <= 0 {
         return TreeResult { sum: value, depth: 0, count: 1 };
     }
@@ -76,7 +66,7 @@ fn _tree_accumulate(depth: number, value: number) -> TreeResult {
     return TreeResult {
         sum: left.sum + right.sum + value,
         depth: depth,
-        count: left.count + right.count + 1,
+        count: left.count + right.count + 1
     };
 }
 
@@ -105,38 +95,21 @@ test "deep_recursion: recursive struct return depth 3" {
 // ---------------------------------------------------------------------------
 // Long call chain (A calls B calls C calls D ...)
 // ---------------------------------------------------------------------------
+fn _chain_a(n: int) -> int { return _chain_b(n + 1); }
 
-fn _chain_a(n: number) -> number {
-    return _chain_b(n + 1);
-}
+fn _chain_b(n: int) -> int { return _chain_c(n + 1); }
 
-fn _chain_b(n: number) -> number {
-    return _chain_c(n + 1);
-}
+fn _chain_c(n: int) -> int { return _chain_d(n + 1); }
 
-fn _chain_c(n: number) -> number {
-    return _chain_d(n + 1);
-}
+fn _chain_d(n: int) -> int { return _chain_e(n + 1); }
 
-fn _chain_d(n: number) -> number {
-    return _chain_e(n + 1);
-}
+fn _chain_e(n: int) -> int { return _chain_f(n + 1); }
 
-fn _chain_e(n: number) -> number {
-    return _chain_f(n + 1);
-}
+fn _chain_f(n: int) -> int { return _chain_g(n + 1); }
 
-fn _chain_f(n: number) -> number {
-    return _chain_g(n + 1);
-}
+fn _chain_g(n: int) -> int { return _chain_h(n + 1); }
 
-fn _chain_g(n: number) -> number {
-    return _chain_h(n + 1);
-}
-
-fn _chain_h(n: number) -> number {
-    return n + 1;
-}
+fn _chain_h(n: int) -> int { return n + 1; }
 
 test "deep_recursion: 8-deep call chain" {
     // 0 -> +1 -> +1 -> +1 -> +1 -> +1 -> +1 -> +1 -> +1 = 8
@@ -150,8 +123,7 @@ test "deep_recursion: call chain preserves large values" {
 // ---------------------------------------------------------------------------
 // Recursion with string accumulation
 // ---------------------------------------------------------------------------
-
-fn _repeat_string(s: string, n: number) -> string {
+fn _repeat_string(s: string, n: int) -> string {
     if n <= 0 { return ""; }
     if n == 1 { return s; }
     return s + _repeat_string(s, n - 1);
@@ -176,8 +148,7 @@ test "deep_recursion: string repeat 5" {
 // ---------------------------------------------------------------------------
 // Recursive array building (power set size calculation)
 // ---------------------------------------------------------------------------
-
-fn _power_of_two(n: number) -> number {
+fn _power_of_two(n: int) -> int {
     if n == 0 { return 1; }
     return 2 * _power_of_two(n - 1);
 }
@@ -192,8 +163,7 @@ test "deep_recursion: power of two" {
 // ---------------------------------------------------------------------------
 // Ackermann-like function (tests deep recursion with branching)
 // ---------------------------------------------------------------------------
-
-fn _ackermann_bounded(m: number, n: number) -> number {
+fn _ackermann_bounded(m: int, n: int) -> int {
     if m == 0 { return n + 1; }
     if n == 0 { return _ackermann_bounded(m - 1, 1); }
     return _ackermann_bounded(m - 1, _ackermann_bounded(m, n - 1));

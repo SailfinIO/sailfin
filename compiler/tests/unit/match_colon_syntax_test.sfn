@@ -24,8 +24,8 @@
 // bracket balanced) and adds `:` as a top-level terminator alongside `=>`
 // and `->`. Nested `:` inside a struct or map literal pattern is still
 // treated as part of the pattern, not as a case separator.
-fn _compute(op: number, a: number, b: number) -> number {
-    let mut result: number = 0;
+fn _compute(op: int, a: int, b: int) -> int {
+    let mut result: int = 0;
     match op {
         1: {
             result = a + b;
@@ -67,8 +67,8 @@ test "match_colon: enum patterns with inline return" {
 }
 
 test "match_colon: match inside a loop updates counters" {
-    let mut i: number = 0;
-    let mut sum: number = 0;
+    let mut i: int = 0;
+    let mut sum: int = 0;
     loop {
         if i >= 5 { break; }
         match i {

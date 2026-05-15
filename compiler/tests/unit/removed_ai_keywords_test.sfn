@@ -18,7 +18,7 @@
 // -------------------------------------------------------------------
 fn _starts_with(value: string, prefix: string) -> boolean {
     if prefix.length > value.length { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= prefix.length { break; }
         if value[index] != prefix[index] { return false; }
@@ -81,7 +81,7 @@ test "removed keywords: diagnostic message mentions the keyword and sfn/ai" {
     assert _starts_with(msg, "`model` block syntax was removed");
     // The diagnostic must point users at the planned library capsule.
     let mut found: boolean = false;
-    let mut i: number = 0;
+    let mut i: int = 0;
     let needle = "sfn/ai";
     let limit = msg.length - needle.length;
     loop {

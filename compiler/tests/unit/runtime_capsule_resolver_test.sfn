@@ -95,7 +95,7 @@ test "enumerate: skips kind != runtime members" ![io] {
     let result = enumerate_runtime_capsule_artifacts(scratch, empty);
     // The library-cap member exists in workspace.toml but has
     // kind="library"; it MUST be filtered out.
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= result.length { break; }
         assert result[i].capsule_name != "sfn/library-cap";

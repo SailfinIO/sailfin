@@ -28,14 +28,14 @@
 // retain their pointer-form inference.
 struct Field {
     name: string;
-    offset: number;
-    size: number;
-    align: number;
+    offset: int;
+    size: int;
+    align: int;
 }
 
 struct Record {
-    size: number;
-    align: number;
+    size: int;
+    align: int;
     fields: Field[];
 }
 
@@ -46,14 +46,14 @@ struct FieldInput {
 
 fn _layout_for(inputs: FieldInput[]) -> Record {
     let mut fields: Field[] = [];
-    let mut offset: number = 0;
-    let mut max_align: number = 1;
-    let mut i: number = 0;
+    let mut offset: int = 0;
+    let mut max_align: int = 1;
+    let mut i: int = 0;
     loop {
         if i >= inputs.length { break; }
         let input = inputs[i];
-        let mut size: number = 8;
-        let mut align: number = 8;
+        let mut size: int = 8;
+        let mut align: int = 8;
         if input.type_name == "i32" {
             size = 4;
             align = 4;
@@ -113,7 +113,7 @@ test "array_literal_aggregate_seed: direct read from inline literal" {
 }
 
 // -- primitive arrays still work (fix must not regress them) --
-test "array_literal_aggregate_seed: number array literal unchanged" {
+test "array_literal_aggregate_seed: number array literal unchanged" {  // alias-coverage: test exercises the legacy number-aliased float array path
     let xs = [1.0, 2.5, 4.0];
     assert xs.length == 3;
     assert xs[0] == 1.0;

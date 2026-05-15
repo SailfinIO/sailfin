@@ -1,11 +1,11 @@
 interface Meter {
-    fn total(self: Meter) -> number;
+    fn total(self: Meter) -> number;  // alias-coverage: cross-module fixture preserves number-aliased API
 }
 
 struct Person implements Meter {
-    years: number;
+    years: number;  // alias-coverage: cross-module fixture preserves number-aliased API
 
-    fn total(self: Person) -> number {
+    fn total(self: Person) -> number {  // alias-coverage: cross-module fixture preserves number-aliased API
         return self.years;
     }
 }
@@ -14,15 +14,13 @@ fn make_people() -> Person[] {
     return [Person { years: 36 }, Person { years: 42 }];
 }
 
-fn total_years(values: Person[]) -> number {
-    let mut total: number = 0;
-    for person in values {
-        total = total + person.years;
-    }
+fn total_years(values: Person[]) -> number {  // alias-coverage: cross-module fixture preserves number-aliased API
+    let mut total: number = 0;  // alias-coverage: cross-module fixture preserves number-aliased API
+    for person in values { total = total + person.years; }
     return total;
 }
 
-fn main() -> number {
+fn main() -> number {  // alias-coverage: cross-module fixture preserves number-aliased API
     let people = make_people();
     return total_years(people);
 }

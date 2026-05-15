@@ -1,6 +1,4 @@
-async fn flip(x: boolean) -> boolean {
-    return !x;
-}
+async fn flip(x: boolean) -> boolean { return !x; }
 
 test "async: bool" {
     let fut = flip(true);

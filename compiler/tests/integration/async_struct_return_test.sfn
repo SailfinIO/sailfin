@@ -1,9 +1,7 @@
 struct Person {
     name: string;
 
-    fn greet(self) -> string {
-        return "Hello, {{self.name}}!";
-    }
+    fn greet(self) -> string { return "Hello, {{self.name}}!"; }
 }
 
 async fn make_person(name: string) -> Person {

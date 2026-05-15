@@ -2,22 +2,20 @@
 // Targets: cross-module ABI mismatches, pointer encoding, struct layout correctness.
 // These patterns stress the LLVM lowering for byval/sret calling conventions
 // that the v0.1.1 seed mishandled (~15 cross-module ABI fixups).
-
 // ---------------------------------------------------------------------------
 // Struct with many fields (>4 fields triggers byval ABI on most platforms)
 // ---------------------------------------------------------------------------
-
 struct Config {
-    width: number;
-    height: number;
-    depth: number;
-    scale: number;
-    offset_x: number;
-    offset_y: number;
-    rotation: number;
-    opacity: number;
+    width: int;
+    height: int;
+    depth: int;
+    scale: int;
+    offset_x: int;
+    offset_y: int;
+    rotation: int;
+    opacity: int;
 
-    fn total_pixels(self) -> number {
+    fn total_pixels(self) -> int {
         return self.width * self.height * self.depth;
     }
 
@@ -30,7 +28,7 @@ struct Config {
             offset_x: self.offset_x * self.scale,
             offset_y: self.offset_y * self.scale,
             rotation: self.rotation,
-            opacity: self.opacity,
+            opacity: self.opacity
         };
     }
 }
@@ -44,7 +42,7 @@ fn _make_default_config() -> Config {
         offset_x: 10,
         offset_y: 20,
         rotation: 90,
-        opacity: 255,
+        opacity: 255
     };
 }
 
@@ -79,30 +77,33 @@ test "struct_large: method returning 8-field struct" {
 // ---------------------------------------------------------------------------
 // Struct returned from function and passed to another function
 // ---------------------------------------------------------------------------
-
 struct Vec3 {
-    x: number;
-    y: number;
-    z: number;
+    x: int;
+    y: int;
+    z: int;
 
-    fn length_squared(self) -> number {
+    fn length_squared(self) -> int {
         return self.x * self.x + self.y * self.y + self.z * self.z;
     }
 
     fn add(self, other: Vec3) -> Vec3 {
-        return Vec3 { x: self.x + other.x, y: self.y + other.y, z: self.z + other.z };
+        return Vec3 {
+            x: self.x + other.x,
+            y: self.y + other.y,
+            z: self.z + other.z
+        };
     }
 
-    fn scale(self, s: number) -> Vec3 {
+    fn scale(self, s: int) -> Vec3 {
         return Vec3 { x: self.x * s, y: self.y * s, z: self.z * s };
     }
 }
 
-fn _make_vec(a: number, b: number, c: number) -> Vec3 {
+fn _make_vec(a: int, b: int, c: int) -> Vec3 {
     return Vec3 { x: a, y: b, z: c };
 }
 
-fn _dot_product(a: Vec3, b: Vec3) -> number {
+fn _dot_product(a: Vec3, b: Vec3) -> int {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
@@ -110,7 +111,7 @@ fn _cross_product(a: Vec3, b: Vec3) -> Vec3 {
     return Vec3 {
         x: a.y * b.z - a.z * b.y,
         y: a.z * b.x - a.x * b.z,
-        z: a.x * b.y - a.y * b.x,
+        z: a.x * b.y - a.y * b.x
     };
 }
 
@@ -140,24 +141,17 @@ test "struct_large: method chaining with struct returns" {
 // ---------------------------------------------------------------------------
 // Struct containing struct (nested composition)
 // ---------------------------------------------------------------------------
-
 struct AABB {
     min: Vec3;
     max: Vec3;
 
-    fn width(self) -> number {
-        return self.max.x - self.min.x;
-    }
+    fn width(self) -> int { return self.max.x - self.min.x; }
 
-    fn height(self) -> number {
-        return self.max.y - self.min.y;
-    }
+    fn height(self) -> int { return self.max.y - self.min.y; }
 
-    fn depth(self) -> number {
-        return self.max.z - self.min.z;
-    }
+    fn depth(self) -> int { return self.max.z - self.min.z; }
 
-    fn volume(self) -> number {
+    fn volume(self) -> int {
         return self.width() * self.height() * self.depth();
     }
 
@@ -165,15 +159,15 @@ struct AABB {
         return Vec3 {
             x: (self.min.x + self.max.x) / 2,
             y: (self.min.y + self.max.y) / 2,
-            z: (self.min.z + self.max.z) / 2,
+            z: (self.min.z + self.max.z) / 2
         };
     }
 }
 
-fn _make_aabb(x1: number, y1: number, z1: number, x2: number, y2: number, z2: number) -> AABB {
+fn _make_aabb(x1: int, y1: int, z1: int, x2: int, y2: int, z2: int) -> AABB {
     return AABB {
         min: Vec3 { x: x1, y: y1, z: z1 },
-        max: Vec3 { x: x2, y: y2, z: z2 },
+        max: Vec3 { x: x2, y: y2, z: z2 }
     };
 }
 
@@ -200,10 +194,9 @@ test "struct_large: nested struct returns struct" {
 // ---------------------------------------------------------------------------
 // Array of structs with aggregation
 // ---------------------------------------------------------------------------
-
 fn _sum_vectors(vecs: Vec3[]) -> Vec3 {
     let mut total = Vec3 { x: 0, y: 0, z: 0 };
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= vecs.length { break; }
         total = total.add(vecs[i]);
@@ -226,8 +219,7 @@ test "struct_large: array of structs aggregation" {
 // ---------------------------------------------------------------------------
 // Struct as both parameter and return value (round-trip)
 // ---------------------------------------------------------------------------
-
-fn _transform_config(cfg: Config, new_scale: number) -> Config {
+fn _transform_config(cfg: Config, new_scale: int) -> Config {
     return Config {
         width: cfg.width,
         height: cfg.height,
@@ -236,7 +228,7 @@ fn _transform_config(cfg: Config, new_scale: number) -> Config {
         offset_x: cfg.offset_x + 1,
         offset_y: cfg.offset_y + 1,
         rotation: cfg.rotation,
-        opacity: cfg.opacity,
+        opacity: cfg.opacity
     };
 }
 

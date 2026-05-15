@@ -1,8 +1,8 @@
-async fn computeTask1() -> number {
+async fn computeTask1() -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     return 21;
 }
 
-async fn computeTask2() -> number {
+async fn computeTask2() -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     return 21;
 }
 

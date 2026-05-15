@@ -24,7 +24,7 @@ test "token: Token struct literal" {
         kind: TokenKind.Identifier(),
         lexeme: "hello",
         line: 1,
-        column: 5,
+        column: 5
     };
     assert tok.kind.variant == "Identifier";
     assert tok.lexeme == "hello";

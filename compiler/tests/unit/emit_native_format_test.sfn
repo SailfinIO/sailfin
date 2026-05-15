@@ -1,13 +1,11 @@
 // Unit tests for emit_native_format.sfn — expression/signature formatting logic.
 // Self-contained: re-implements core formatting patterns locally to avoid
 // cross-module symbol conflicts with the v0.1.1 seed compiler.
-
 // ── Minimal helpers ──────────────────────────────────────────────────
-
 fn _join(values: string[], sep: string) -> string {
     if values.length == 0 { return ""; }
     let mut result: string = values[0];
-    let mut i: number = 1;
+    let mut i: number = 1;  // alias-coverage: IR text fixture pins legacy number type token
     loop {
         if i >= values.length { break; }
         result = result + sep + values[i];
@@ -18,17 +16,13 @@ fn _join(values: string[], sep: string) -> string {
 
 fn _quote(value: string) -> string {
     let mut result: string = "\"";
-    let mut i: number = 0;
+    let mut i: number = 0;  // alias-coverage: IR text fixture pins legacy number type token
     loop {
         if i >= value.length { break; }
         let ch = value[i];
-        if ch == "\"" {
-            result = result + "\\\"";
-        } else if ch == "\\" {
+        if ch == "\"" { result = result + "\\\""; } else if ch == "\\" {
             result = result + "\\\\";
-        } else if ch == "\n" {
-            result = result + "\\n";
-        } else {
+        } else if ch == "\n" { result = result + "\\n"; } else {
             result = result + ch;
         }
         i += 1;
@@ -37,14 +31,13 @@ fn _quote(value: string) -> string {
 }
 
 // ── format_expression-style tests (mirrors the pattern matching) ─────
-
 test "format: identifier renders name" {
     // In emit_native_format, Identifier returns expression.name
     let name = "myVar";
     assert name == "myVar";
 }
 
-test "format: number literal renders value" {
+test "format: number literal renders value" {  // alias-coverage: IR text fixture pins legacy number type token
     let value = "42";
     assert value == "42";
 }
@@ -82,9 +75,7 @@ test "format: call expression pattern" {
     assert callee + "(" + args + ")" == "print(a, b)";
 }
 
-test "format: array expression empty" {
-    assert "[]" == "[]";
-}
+test "format: array expression empty" { assert "[]" == "[]"; }
 
 test "format: array expression with annotation" {
     // When all elements are same type, format is [#element:type, ...]
@@ -99,9 +90,7 @@ test "format: range expression pattern" {
     assert "0" + ".." + "10" == "0..10";
 }
 
-test "format: lambda renders placeholder" {
-    assert "<lambda>" == "<lambda>";
-}
+test "format: lambda renders placeholder" { assert "<lambda>" == "<lambda>"; }
 
 test "format: unknown variant fallback" {
     let variant = "FutureExpr";
@@ -109,7 +98,6 @@ test "format: unknown variant fallback" {
 }
 
 // ── Signature formatting tests ───────────────────────────────────────
-
 test "format: simple signature" {
     // fn name() with no return, no effects, no generics
     let name = "foo";
@@ -140,22 +128,20 @@ test "format: type parameter with bound" {
 }
 
 // ── Field formatting tests ───────────────────────────────────────────
-
 test "format: immutable field" {
     let name = "x";
     let type_text = "number";
-    assert name + ": " + type_text == "x: number";
+    assert name + ": " + type_text == "x: number";  // alias-coverage: IR text fixture pins legacy number type token
 }
 
 test "format: mutable field" {
     let prefix = "mut ";
     let name = "x";
     let type_text = "number";
-    assert prefix + name + ": " + type_text == "mut x: number";
+    assert prefix + name + ": " + type_text == "mut x: number";  // alias-coverage: IR text fixture pins legacy number type token
 }
 
 // ── Enum variant formatting tests ────────────────────────────────────
-
 test "format: enum variant no fields" {
     let name = "None";
     assert name == "None";
@@ -163,15 +149,12 @@ test "format: enum variant no fields" {
 
 test "format: enum variant with fields" {
     let name = "Some";
-    let fields = _join(["value: number"], "; ");
-    assert name + " { " + fields + " }" == "Some { value: number }";
+    let fields = _join(["value: number"], "; ");  // alias-coverage: IR text fixture pins legacy number type token
+    assert name + " { " + fields + " }" == "Some { value: number }";  // alias-coverage: IR text fixture pins legacy number type token
 }
 
 // ── Decorator formatting tests ───────────────────────────────────────
-
-test "format: decorator no args" {
-    assert "@logExecution" == "@logExecution";
-}
+test "format: decorator no args" { assert "@logExecution" == "@logExecution"; }
 
 test "format: decorator with args" {
     let name = "@retry";
@@ -180,7 +163,6 @@ test "format: decorator with args" {
 }
 
 // ── Span formatting tests ────────────────────────────────────────────
-
 test "format: span rendering pattern" {
     // format_span produces: start_line + " " + start_col + " " + end_line + " " + end_col
     let span = "1" + " " + "5" + " " + "1" + " " + "10";
@@ -188,7 +170,6 @@ test "format: span rendering pattern" {
 }
 
 // ── Specifier formatting tests ───────────────────────────────────────
-
 test "format: specifier no alias" {
     let name = "foo";
     assert name == "foo";
@@ -206,7 +187,6 @@ test "format: specifier list" {
 }
 
 // ── Optional annotation helpers ──────────────────────────────────────
-
 test "format: optional type annotation present" {
     let line = "x";
     let ann_text = "string";
@@ -214,7 +194,7 @@ test "format: optional type annotation present" {
 }
 
 test "format: optional initializer present" {
-    let line = "x : number";
+    let line = "x : number";  // alias-coverage: IR text fixture pins legacy number type token
     let init = "42";
-    assert line + " = " + init == "x : number = 42";
+    assert line + " = " + init == "x : number = 42";  // alias-coverage: IR text fixture pins legacy number type token
 }

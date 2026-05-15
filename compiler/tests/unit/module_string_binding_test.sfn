@@ -1,8 +1,6 @@
 let module_banner = "sailfin-module-init";
 
-fn read_module_banner() -> string {
-    return module_banner;
-}
+fn read_module_banner() -> string { return module_banner; }
 
 test "module: untyped string binding initializes" {
     let value = read_module_banner();

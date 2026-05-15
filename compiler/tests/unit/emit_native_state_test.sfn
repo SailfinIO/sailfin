@@ -6,14 +6,12 @@
 // trim_right, number_to_string, strip_optional_suffix) require the runtime
 // prelude which isn't available in standalone test files. Those are exercised
 // indirectly through the emit_native integration test and the full test suite.
-
 // ── Local copies of functions under test ─────────────────────────────
-
 fn _ends_with(value: string, suffix: string) -> boolean {
     if suffix.length == 0 { return true; }
     if value.length < suffix.length { return false; }
     let start = value.length - suffix.length;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= suffix.length { break; }
         let _cmp_pos = start + index;
@@ -25,21 +23,15 @@ fn _ends_with(value: string, suffix: string) -> boolean {
 
 fn _quote_string(value: string) -> string {
     let mut result: string = "\"";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= value.length { break; }
         let ch = value[index];
-        if ch == "\"" {
-            result = result + "\\\"";
-        } else if ch == "\\" {
+        if ch == "\"" { result = result + "\\\""; } else if ch == "\\" {
             result = result + "\\\\";
-        } else if ch == "\n" {
-            result = result + "\\n";
-        } else if ch == "\t" {
+        } else if ch == "\n" { result = result + "\\n"; } else if ch == "\t" {
             result = result + "\\t";
-        } else {
-            result = result + ch;
-        }
+        } else { result = result + ch; }
         index += 1;
     }
     result = result + "\"";
@@ -49,7 +41,7 @@ fn _quote_string(value: string) -> string {
 fn _join(values: string[], separator: string) -> string {
     if values.length == 0 { return ""; }
     let mut result: string = values[0];
-    let mut index: number = 1;
+    let mut index: int = 1;
     loop {
         if index >= values.length { break; }
         result = result + separator + values[index];
@@ -59,7 +51,7 @@ fn _join(values: string[], separator: string) -> string {
 }
 
 fn _contains(values: string[], target: string) -> boolean {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= values.length { break; }
         if values[index] == target { return true; }
@@ -74,13 +66,9 @@ fn _append_unique(values: string[], value: string) -> string[] {
     return values;
 }
 
-fn _is_array_type(t: string) -> boolean {
-    return _ends_with(t, "[]");
-}
+fn _is_array_type(t: string) -> boolean { return _ends_with(t, "[]"); }
 
-fn _is_optional(t: string) -> boolean {
-    return _ends_with(t, "?");
-}
+fn _is_optional(t: string) -> boolean { return _ends_with(t, "?"); }
 
 fn _escape_char(ch: string) -> string {
     if ch == "\"" { return "\\\""; }
@@ -92,7 +80,6 @@ fn _escape_char(ch: string) -> string {
 }
 
 // ── ends_with tests ──────────────────────────────────────────────────
-
 test "state: ends_with match" {
     assert _ends_with("hello.sfn", ".sfn") == true;
 }
@@ -119,7 +106,6 @@ test "state: ends_with single char" {
 }
 
 // ── quote_string / escape_char tests ─────────────────────────────────
-
 test "state: quote_string simple" {
     assert _quote_string("hello") == "\"hello\"";
 }
@@ -128,44 +114,29 @@ test "state: quote_string with newline" {
     assert _quote_string("a\nb") == "\"a\\nb\"";
 }
 
-test "state: quote_string empty" {
-    assert _quote_string("") == "\"\"";
-}
+test "state: quote_string empty" { assert _quote_string("") == "\"\""; }
 
-test "state: escape_char newline" {
-    assert _escape_char("\n") == "\\n";
-}
+test "state: escape_char newline" { assert _escape_char("\n") == "\\n"; }
 
-test "state: escape_char tab" {
-    assert _escape_char("\t") == "\\t";
-}
+test "state: escape_char tab" { assert _escape_char("\t") == "\\t"; }
 
 test "state: escape_char carriage return" {
     assert _escape_char("\r") == "\\r";
 }
 
-test "state: escape_char plain" {
-    assert _escape_char("a") == "a";
-}
+test "state: escape_char plain" { assert _escape_char("a") == "a"; }
 
-test "state: escape_char quote" {
-    assert _escape_char("\"") == "\\\"";
-}
+test "state: escape_char quote" { assert _escape_char("\"") == "\\\""; }
 
-test "state: escape_char backslash" {
-    assert _escape_char("\\") == "\\\\";
-}
+test "state: escape_char backslash" { assert _escape_char("\\") == "\\\\"; }
 
 // ── join tests ───────────────────────────────────────────────────────
-
 test "state: join multiple" {
     let parts = ["a", "b", "c"];
     assert _join(parts, ", ") == "a, b, c";
 }
 
-test "state: join single" {
-    assert _join(["only"], "-") == "only";
-}
+test "state: join single" { assert _join(["only"], "-") == "only"; }
 
 test "state: join empty" {
     let empty: string[] = [];
@@ -177,7 +148,6 @@ test "state: join with space separator" {
 }
 
 // ── contains / append_unique tests ───────────────────────────────────
-
 test "state: contains found" {
     assert _contains(["a", "b", "c"], "b") == true;
 }
@@ -202,7 +172,6 @@ test "state: append_unique adds new" {
 }
 
 // ── Type annotation helpers ──────────────────────────────────────────
-
 test "state: is_array_type positive" {
     assert _is_array_type("string[]") == true;
     assert _is_array_type("number[]") == true;

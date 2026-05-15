@@ -2,11 +2,9 @@
 // These tests exercise code patterns that appear frequently in the compiler
 // source itself. If the seed can compile and run these, it has a good chance
 // of compiling the actual compiler.
-
 // ---------------------------------------------------------------------------
 // String-indexed dispatch (pattern used in instruction lowering)
 // ---------------------------------------------------------------------------
-
 fn _starts_with(s: string, prefix: string) -> boolean {
     if prefix.length > s.length { return false; }
     let sub = substring(s, 0, prefix.length);
@@ -68,24 +66,21 @@ test "selfhost: ends_with" {
 // ---------------------------------------------------------------------------
 // Line-by-line text processing (pattern used in recovery parser)
 // ---------------------------------------------------------------------------
-
-fn _count_lines(text: string) -> number {
+fn _count_lines(text: string) -> int {
     if text.length == 0 { return 0; }
-    let mut count: number = 1;
-    let mut i: number = 0;
+    let mut count: int = 1;
+    let mut i: int = 0;
     loop {
         if i >= text.length { break; }
         let ch = substring(text, i, i + 1);
-        if ch == "\n" {
-            count += 1;
-        }
+        if ch == "\n" { count += 1; }
         i += 1;
     }
     return count;
 }
 
-fn _find_char(text: string, target: string) -> number {
-    let mut i: number = 0;
+fn _find_char(text: string, target: string) -> int {
+    let mut i: int = 0;
     loop {
         if i >= text.length { break; }
         let ch = substring(text, i, i + 1);
@@ -108,17 +103,11 @@ fn _extract_after(text: string, delimiter: string) -> string {
     return substring(text, pos + 1, text.length);
 }
 
-test "selfhost: count lines single" {
-    assert _count_lines("hello") == 1;
-}
+test "selfhost: count lines single" { assert _count_lines("hello") == 1; }
 
-test "selfhost: count lines multi" {
-    assert _count_lines("a\nb\nc") == 3;
-}
+test "selfhost: count lines multi" { assert _count_lines("a\nb\nc") == 3; }
 
-test "selfhost: count lines empty" {
-    assert _count_lines("") == 0;
-}
+test "selfhost: count lines empty" { assert _count_lines("") == 0; }
 
 test "selfhost: find char present" {
     assert _find_char("hello=world", "=") == 5;
@@ -143,45 +132,46 @@ test "selfhost: extract before no delimiter" {
 // ---------------------------------------------------------------------------
 // Symbol table pattern (name → index mapping via arrays)
 // ---------------------------------------------------------------------------
-
 struct SymbolTable {
     names: string[];
-    values: number[];
-    count: number;
+    values: int[];
+    count: int;
 }
 
 fn _make_table() -> SymbolTable {
     let mut names: string[] = [];
-    let mut values: number[] = [];
+    let mut values: int[] = [];
     return SymbolTable { names: names, values: values, count: 0 };
 }
 
-fn _table_set(table: SymbolTable, name: string, value: number) -> SymbolTable {
+fn _table_set(table: SymbolTable, name: string, value: int) -> SymbolTable {
     // Check if name exists
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= table.count { break; }
         if table.names[i] == name {
             // Update existing — create new arrays with updated value
-            let mut new_values: number[] = [];
-            let mut j: number = 0;
+            let mut new_values: int[] = [];
+            let mut j: int = 0;
             loop {
                 if j >= table.count { break; }
-                if j == i {
-                    new_values.push(value);
-                } else {
+                if j == i { new_values.push(value); } else {
                     new_values.push(table.values[j]);
                 }
                 j += 1;
             }
-            return SymbolTable { names: table.names, values: new_values, count: table.count };
+            return SymbolTable {
+                names: table.names,
+                values: new_values,
+                count: table.count
+            };
         }
         i += 1;
     }
     // Add new entry
     let mut new_names: string[] = [];
-    let mut new_values: number[] = [];
-    let mut k: number = 0;
+    let mut new_values: int[] = [];
+    let mut k: int = 0;
     loop {
         if k >= table.count { break; }
         new_names.push(table.names[k]);
@@ -190,23 +180,25 @@ fn _table_set(table: SymbolTable, name: string, value: number) -> SymbolTable {
     }
     new_names.push(name);
     new_values.push(value);
-    return SymbolTable { names: new_names, values: new_values, count: table.count + 1 };
+    return SymbolTable {
+        names: new_names,
+        values: new_values,
+        count: table.count + 1
+    };
 }
 
-fn _table_get(table: SymbolTable, name: string) -> number {
-    let mut i: number = 0;
+fn _table_get(table: SymbolTable, name: string) -> int {
+    let mut i: int = 0;
     loop {
         if i >= table.count { break; }
-        if table.names[i] == name {
-            return table.values[i];
-        }
+        if table.names[i] == name { return table.values[i]; }
         i += 1;
     }
     return -1;
 }
 
 fn _table_has(table: SymbolTable, name: string) -> boolean {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= table.count { break; }
         if table.names[i] == name { return true; }
@@ -254,7 +246,6 @@ test "selfhost: symbol table multiple entries" {
 // ---------------------------------------------------------------------------
 // LLVM IR string generation (pattern used in rendering.sfn)
 // ---------------------------------------------------------------------------
-
 fn _emit_alloca(name: string, type_str: string) -> string {
     return "  %" + name + " = alloca " + type_str;
 }
@@ -291,15 +282,12 @@ test "selfhost: emit function header" {
 // ---------------------------------------------------------------------------
 // Complex conditional string building (pattern in type mapping)
 // ---------------------------------------------------------------------------
-
 fn _map_type(sfn_type: string) -> string {
     if sfn_type == "number" { return "double"; }
     if sfn_type == "string" { return "i8*"; }
     if sfn_type == "boolean" { return "i1"; }
     if sfn_type == "void" { return "void"; }
-    if _ends_with(sfn_type, "[]") {
-        return "%struct.Array*";
-    }
+    if _ends_with(sfn_type, "[]") { return "%struct.Array*"; }
     // Default: pointer to struct
     return "%struct." + sfn_type + "*";
 }
@@ -308,9 +296,7 @@ test "selfhost: type mapping number" {
     assert _map_type("number") == "double";
 }
 
-test "selfhost: type mapping string" {
-    assert _map_type("string") == "i8*";
-}
+test "selfhost: type mapping string" { assert _map_type("string") == "i8*"; }
 
 test "selfhost: type mapping boolean" {
     assert _map_type("boolean") == "i1";
@@ -327,10 +313,9 @@ test "selfhost: type mapping struct" {
 // ---------------------------------------------------------------------------
 // Indentation tracking (pattern used in emission)
 // ---------------------------------------------------------------------------
-
-fn _indent(level: number) -> string {
+fn _indent(level: int) -> string {
     let mut result: string = "";
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= level { break; }
         result = result + "  ";
@@ -339,10 +324,10 @@ fn _indent(level: number) -> string {
     return result;
 }
 
-fn _emit_block(lines: string[], indent_level: number) -> string {
+fn _emit_block(lines: string[], indent_level: int) -> string {
     let mut result: string = "";
     let prefix = _indent(indent_level);
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= lines.length { break; }
         result = result + prefix + lines[i] + "\n";

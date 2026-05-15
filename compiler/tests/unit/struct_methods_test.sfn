@@ -2,9 +2,8 @@
 // return value handling — directly targets seed stabilization categories:
 //   - Cross-module type/ABI mismatches (~15 fixups)
 //   - Missing/duplicate definitions (~12 fixups)
-
 struct Counter {
-    value: number;
+    value: int;
     name: string;
 
     fn increment(self) -> Counter {
@@ -15,7 +14,7 @@ struct Counter {
         return Counter { value: self.value - 1, name: self.name };
     }
 
-    fn add(self, n: number) -> Counter {
+    fn add(self, n: int) -> Counter {
         return Counter { value: self.value + n, name: self.name };
     }
 
@@ -23,13 +22,9 @@ struct Counter {
         return Counter { value: 0, name: self.name };
     }
 
-    fn is_zero(self) -> boolean {
-        return self.value == 0;
-    }
+    fn is_zero(self) -> boolean { return self.value == 0; }
 
-    fn label(self) -> string {
-        return self.name;
-    }
+    fn label(self) -> string { return self.name; }
 }
 
 test "struct_methods: basic increment" {
@@ -76,20 +71,15 @@ test "struct_methods: original unchanged by method" {
 // ---------------------------------------------------------------------------
 // Struct with computed fields
 // ---------------------------------------------------------------------------
-
 struct Range {
-    start: number;
-    end: number;
+    start: int;
+    end: int;
 
-    fn length(self) -> number {
-        return self.end - self.start;
-    }
+    fn length(self) -> int { return self.end - self.start; }
 
-    fn contains(self, value: number) -> boolean {
+    fn contains(self, value: int) -> boolean {
         if value >= self.start {
-            if value < self.end {
-                return true;
-            }
+            if value < self.end { return true; }
         }
         return false;
     }
@@ -100,12 +90,18 @@ struct Range {
         return true;
     }
 
-    fn shift(self, offset: number) -> Range {
-        return Range { start: self.start + offset, end: self.end + offset };
+    fn shift(self, offset: int) -> Range {
+        return Range {
+            start: self.start + offset,
+            end: self.end + offset
+        };
     }
 
-    fn expand(self, amount: number) -> Range {
-        return Range { start: self.start - amount, end: self.end + amount };
+    fn expand(self, amount: int) -> Range {
+        return Range {
+            start: self.start - amount,
+            end: self.end + amount
+        };
     }
 }
 
@@ -147,10 +143,9 @@ test "struct_methods: range expand" {
 // ---------------------------------------------------------------------------
 // Struct passed to free functions
 // ---------------------------------------------------------------------------
-
-fn _range_sum(r: Range) -> number {
-    let mut total: number = 0;
-    let mut i: number = r.start;
+fn _range_sum(r: Range) -> int {
+    let mut total: int = 0;
+    let mut i: int = r.start;
     loop {
         if i >= r.end { break; }
         total += i;
@@ -160,9 +155,9 @@ fn _range_sum(r: Range) -> number {
 }
 
 fn _merge_ranges(a: Range, b: Range) -> Range {
-    let mut lo: number = a.start;
+    let mut lo: int = a.start;
     if b.start < lo { lo = b.start; }
-    let mut hi: number = a.end;
+    let mut hi: int = a.end;
     if b.end > hi { hi = b.end; }
     return Range { start: lo, end: hi };
 }
@@ -183,7 +178,6 @@ test "struct_methods: free function returning struct from two inputs" {
 // ---------------------------------------------------------------------------
 // Array of structs
 // ---------------------------------------------------------------------------
-
 test "struct_methods: array of structs" {
     let mut ranges: Range[] = [];
     ranges.push(Range { start: 0, end: 5 });

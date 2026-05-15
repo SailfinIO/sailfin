@@ -148,7 +148,7 @@ test "effect_gate: decorator-implied violations also flow through severity" {
 // stderr; building the AST + capturing stderr would make the test
 // fragile against rendering changes that the renderer-side suite
 // (`check_tool_test.sfn`) already covers.
-fn _simulate_gate_abort_count(severity: string, violation_count: number) -> number {
+fn _simulate_gate_abort_count(severity: string, violation_count: int) -> int {
     if severity == "error" { return violation_count; }
     return 0;
 }

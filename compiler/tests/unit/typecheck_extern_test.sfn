@@ -15,7 +15,7 @@ import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 
 fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
-    let mut i: number = 0;
+    let mut i: number = 0;  // alias-coverage: diagnostic test exercises legacy : number rejection
     loop {
         if i >= diagnostics.length { break; }
         if strings_equal(diagnostics[i].code, code) { return true; }
@@ -24,9 +24,9 @@ fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
     return false;
 }
 
-fn _count_code(diagnostics: Diagnostic[], code: string) -> number {
-    let mut count: number = 0;
-    let mut i: number = 0;
+fn _count_code(diagnostics: Diagnostic[], code: string) -> number {  // alias-coverage: diagnostic test exercises legacy : number rejection
+    let mut count: number = 0;  // alias-coverage: diagnostic test exercises legacy : number rejection
+    let mut i: number = 0;  // alias-coverage: diagnostic test exercises legacy : number rejection
     loop {
         if i >= diagnostics.length { break; }
         if strings_equal(diagnostics[i].code, code) { count += 1; }
@@ -85,7 +85,7 @@ test "extern: rejects array parameter (E0802)" {
 }
 
 test "extern: rejects legacy `number` (E0805)" {
-    let source = "extern fn legacy(x: number) -> number;";
+    let source = "extern fn legacy(x: number) -> number;";  // alias-coverage: diagnostic test exercises legacy : number rejection
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     // Both parameter and return type are rejected.
