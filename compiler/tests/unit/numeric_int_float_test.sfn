@@ -28,14 +28,19 @@ fn _diagnostics(source: string) -> Diagnostic[] {
 }
 
 // ── Native-IR carries int/float types through ─────────────────
+// Block-scoped `let` now routes through `parse_variable` (#521), so the
+// emitter produces the canonical `.let x : int = 42` line from
+// `emit_native.sfn::emit_variable` instead of the raw source text the
+// pre-fix `ExpressionStatement(Raw)` path leaked. Assertions pin the
+// structured shape (the type-annotation text is the load-bearing bit).
 test "numeric: let x: int = 42 carries int through native IR" {
     let asm = _emit("fn main() { let x: int = 42; }");
-    assert index_of(asm, "let x: int") >= 0;
+    assert index_of(asm, ".let x : int") >= 0;
 }
 
 test "numeric: let x: float = 3.14 carries float through native IR" {
     let asm = _emit("fn main() { let x: float = 3.14; }");
-    assert index_of(asm, "let x: float") >= 0;
+    assert index_of(asm, ".let x : float") >= 0;
 }
 
 test "numeric: function signature with int and float types" {

@@ -34,11 +34,49 @@ fn strip_enclosing_parentheses(expression: string) -> string {
         _if90 = true;
     }
     if _if90 { return trimmed; }
+    // String-literal-aware paren walk. The naive version counted `(`/`)`
+    // inside `"..."` runs, so an expression like `("(" + s) + ")"` (emitted
+    // by `format_expression` after #521 added parens around nested Binary
+    // operands) appeared to balance one character early and the outer
+    // parens were never stripped, causing the lowering to misparse the
+    // whole thing as a value of `0`.
     let mut depth: int = 0;
+    let mut in_double: boolean = false;
+    let mut in_single: boolean = false;
+    let mut escape_next: boolean = false;
     let mut index: int = 0;
     loop {
         if index >= trimmed.length { break; }
         let ch = char_at(trimmed, index);
+        if escape_next {
+            escape_next = false;
+            index += 1;
+            continue;
+        }
+        if in_double {
+            if ch == "\\" { escape_next = true; } else if ch == "\"" {
+                in_double = false;
+            }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if ch == "\\" { escape_next = true; } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
         if ch == "(" { depth += 1; } else if ch == ")" {
             depth -= 1;
             if depth == 0 {
