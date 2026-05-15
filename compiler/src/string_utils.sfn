@@ -155,6 +155,7 @@ export {
     grapheme_at,
     char_code,
     char_at,
+    char_code_at_text,
     sanitize_symbol,
     strings_equal,
     index_of,
