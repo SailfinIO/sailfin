@@ -161,7 +161,7 @@ fn parse_import_specifiers(text: string) -> NativeImportSpecifier[] {
     if trimmed.length == 0 { return []; }
     let entries = split_comma_separated(trimmed);
     let mut specifiers: NativeImportSpecifier[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= entries.length { break; }
         let parsed = parse_single_specifier(entries[index]);
@@ -195,7 +195,7 @@ fn parse_decorator_name(line: string) -> string? {
     let tail = trim_text(strip_prefix(trimmed, ".decorator"));
     if tail.length == 0 { return null; }
     if tail[0] != "@" { return null; }
-    let mut index: number = 1;
+    let mut index: int = 1;
     loop {
         if index >= tail.length { break; }
         let ch = tail[index];
@@ -208,12 +208,12 @@ fn parse_decorator_name(line: string) -> string? {
     return name;
 }
 
-fn parse_interface_definition(lines: string[], start_index: number) -> InterfaceParseResult {
+fn parse_interface_definition(lines: string[], start_index: int) -> InterfaceParseResult {
     let mut diagnostics: string[] = [];
     let header = trim_text(lines[start_index]);
     let name_text = trim_text(strip_prefix(header, ".interface "));
     let header_parse = parse_interface_header(name_text);
-    let mut _ci: number = 0;
+    let mut _ci: int = 0;
     loop {
         if _ci >= header_parse.diagnostics.length { break; }
         diagnostics.push(header_parse.diagnostics[_ci]);
@@ -262,7 +262,7 @@ fn parse_interface_definition(lines: string[], start_index: number) -> Interface
         }
         if starts_with(raw_line, ".sig ") {
             let signature_parse = parse_interface_signature(strip_prefix(raw_line, ".sig "), interface_name);
-            let mut _ci: number = 0;
+            let mut _ci: int = 0;
             loop {
                 if _ci >= signature_parse.diagnostics.length { break; }
                 diagnostics.push(signature_parse.diagnostics[_ci]);
@@ -385,7 +385,7 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
 
     let head = trim_text(substring(remainder, 0, paren_index));
     let name_parse = parse_header_name_and_remainder(head);
-    let mut _ci: number = 0;
+    let mut _ci: int = 0;
     loop {
         if _ci >= name_parse.diagnostics.length { break; }
         diagnostics.push(name_parse.diagnostics[_ci]);
@@ -410,7 +410,7 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
     let parameter_text = trim_text(parameters_section);
     if parameter_text.length > 0 {
         let entries = split_parameter_entries(parameter_text);
-        let mut entry_index: number = 0;
+        let mut entry_index: int = 0;
         loop {
             if entry_index >= entries.length { break; }
             let parsed = parse_parameter_entry(entries[entry_index], null);
@@ -566,7 +566,7 @@ fn parse_enum_variant_line(text: string) -> NativeEnumVariant? {
     let fields_segment = substring(trimmed, brace_index + 1, close_index);
     let entries = split_enum_field_entries(fields_segment);
     let mut fields: NativeEnumVariantField[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= entries.length { break; }
         let entry = trim_trailing_delimiters(trim_text(entries[index]));
@@ -585,8 +585,8 @@ fn parse_enum_variant_line(text: string) -> NativeEnumVariant? {
 fn split_enum_field_entries(text: string) -> string[] {
     let mut entries: string[] = [];
     let mut current: string = "";
-    let mut depth: number = 0;
-    let mut index: number = 0;
+    let mut depth: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = text[index];
@@ -627,8 +627,8 @@ fn parse_enum_variant_field(text: string) -> NativeEnumVariantField? {
     }
     let colon_idx = index_of(trimmed, ": ");
     let legacy_arrow_idx = index_of(trimmed, " -> ");
-    let mut arrow_index: number = -1;
-    let mut sep_len: number = 2;
+    let mut arrow_index: int = -1;
+    let mut sep_len: int = 2;
     if colon_idx >= 0 {
         arrow_index = colon_idx;
         sep_len = 2;
@@ -665,8 +665,8 @@ fn parse_struct_field_line(text: string) -> NativeStructField? {
     }
     let colon_idx = index_of(trimmed, ": ");
     let legacy_arrow_idx = index_of(trimmed, " -> ");
-    let mut arrow_index: number = -1;
-    let mut sep_len: number = 2;
+    let mut arrow_index: int = -1;
+    let mut sep_len: int = 2;
     if colon_idx >= 0 {
         arrow_index = colon_idx;
         sep_len = 2;
@@ -714,7 +714,7 @@ fn parse_let_instruction(line: string, span: NativeSourceSpan?, value_span: Nati
 
 fn parse_binding_components(text: string) -> BindingComponents {
     let mut name: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = text[index];
@@ -788,7 +788,7 @@ fn parse_parameter_entry(body: string, span: NativeSourceSpan?) -> NativeParamet
         trimmed = trim_text(strip_prefix(trimmed, "mut "));
     }
     let mut name: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= trimmed.length { break; }
         let ch = trimmed[index];
@@ -846,7 +846,7 @@ fn line_looks_like_parameter_entry(text: string) -> boolean {
     if starts_with(trimmed, ";") { return false; }
     let arrow_index = index_of(trimmed, "->");
     let colon_index = index_of(trimmed, ":");
-    let mut sep_index: number = -1;
+    let mut sep_index: int = -1;
     if colon_index >= 0 { sep_index = colon_index; }
     if arrow_index >= 0 {
         if sep_index < 0 { sep_index = arrow_index; } else if arrow_index < sep_index {
@@ -882,8 +882,8 @@ fn line_looks_like_parameter_entry(text: string) -> boolean {
 fn split_parameter_entries(body: string) -> string[] {
     let mut entries: string[] = [];
     let mut current: string = "";
-    let mut index: number = 0;
-    let mut depth: number = 0;
+    let mut index: int = 0;
+    let mut depth: int = 0;
     let mut quote: string = "";
 
     loop {
