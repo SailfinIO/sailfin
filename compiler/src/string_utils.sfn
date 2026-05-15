@@ -70,6 +70,24 @@ fn char_code_at_text(text: string, index: int) -> int {
     return char_code(char_at(text, index));
 }
 
+// Pure-Sailfin reimplementation of prelude find_char. Callers that import
+// this avoid the stale-seed ABI mismatch that occurs when the seed binary's
+// compiled-in registry predates a prelude type flip (number→int). Uses only
+// char_code_at_text, whose registry signature has been stable across seeds.
+fn find_char_local(text: string, ch: string, start: int) -> int {
+    if ch.length == 0 { return -1; }
+    let needle = char_code_at_text(ch, 0);
+    let len = text.length;
+    let mut i: int = start;
+    if i < 0 { i = 0; }
+    loop {
+        if i >= len { break; }
+        if char_code_at_text(text, i) == needle { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
 fn index_of(value: string, target: string) -> int {
     if target.length == 0 { return 0; }
     let _search_limit = value.length - target.length;
@@ -151,6 +169,7 @@ export {
     clamp,
     substring,
     find_char,
+    find_char_local,
     grapheme_count,
     grapheme_at,
     char_code,
