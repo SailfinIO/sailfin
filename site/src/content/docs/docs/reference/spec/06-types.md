@@ -23,9 +23,11 @@ sidebar:
 
 > Bare unsuffixed integer literals default to `int` (i64); decimal or
 > exponent literals default to `float` (f64). The `number` keyword is a
-> deprecated alias for `float` and will be removed once the compiler
-> source completes its migration to the explicit `int` / `float`
-> spellings — tracked on the [roadmap](/roadmap).
+> deprecated alias for `float` retained for source compatibility. The
+> compiler source and runtime prelude completed their migration to the
+> explicit `int` / `float` spellings in Slice E.3a (May 2026); the alias
+> itself is scheduled for removal in Slice E.4 after the strict-refusal
+> reapply (E.3b) ships — tracked on the [roadmap](/roadmap).
 
 **Composite types**: structs, enums, arrays (`T[]`)
 

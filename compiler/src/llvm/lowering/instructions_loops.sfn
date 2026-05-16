@@ -599,9 +599,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
         if name_idx >= mutated_names.length { break; }
         let name = mutated_names[name_idx];
         let mut exit_value: string = "";
-        if name_idx < exit_loads.length {
-            exit_value = exit_loads[name_idx];
-        }
+        if name_idx < exit_loads.length { exit_value = exit_loads[name_idx]; }
         if exit_value.length > 0 {
             let original = find_mutation_for_name(collected_mutations, name);
             let mut llvm_type: string = "";

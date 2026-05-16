@@ -279,9 +279,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             let mut variant_fields: StructFieldInfo[] = [];
             let mut variant_field_index: int = 0;
             loop {
-                if variant_field_index >= variant_layout.fields.length {
-                    break;
-                }
+                if variant_field_index >= variant_layout.fields.length { break; }
                 let variant_field = variant_layout.fields[variant_field_index];
                 let mapped_variant_type = map_struct_field_annotation(variant_field.type_annotation);
                 let mut llvm_variant_field_type: string = mapped_variant_type;

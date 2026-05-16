@@ -319,9 +319,7 @@ fn emit_block(builder: TextBuilder, block: Block) -> TextBuilder {
 fn emit_block_body(builder: TextBuilder, block: Block) -> TextBuilder {
     if block.statements.length == 0 {
         let trimmed = trim_block_body(block.text);
-        if trimmed.length > 0 {
-            return builder_emit_line(builder, trimmed);
-        }
+        if trimmed.length > 0 { return builder_emit_line(builder, trimmed); }
         return builder_emit_line(builder, "// empty body");
     }
 

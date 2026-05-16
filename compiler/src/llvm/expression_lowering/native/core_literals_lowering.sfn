@@ -435,9 +435,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                     // array's view.
                     let mut should_unwrap_string: boolean = false;
                     if trimmed_operand_type == "{i8*, i64}" {
-                        if element_type == "i8*" {
-                            should_unwrap_string = true;
-                        }
+                        if element_type == "i8*" { should_unwrap_string = true; }
                     }
                     if !should_unwrap_string {
                         let boxed = box_aggregate_operand(operand, element_type, current_temp, current_lines, context);
@@ -828,9 +826,7 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                     }
                     diagnostics.push(_lit_diag);
                 }
-                if coerced.operand != null {
-                    value_operand = coerced.operand;
-                }
+                if coerced.operand != null { value_operand = coerced.operand; }
             }
             if !string_array_contains(used_names, expected.name) {
                 used_names.push(expected.name);

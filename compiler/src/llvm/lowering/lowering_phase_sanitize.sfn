@@ -198,9 +198,7 @@ fn sanitize_functions(functions: NativeFunction[], native_text_override_path: st
         print.err("emit-llvm: dbg-H2 after parse.functions access");
     }
     if debug_lowering {
-        if safe == null {
-            print.err("emit-llvm: parse.functions is null");
-        }
+        if safe == null { print.err("emit-llvm: parse.functions is null"); }
     }
     if safe == null { safe = []; }
     if debug_lowering {

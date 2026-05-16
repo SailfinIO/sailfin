@@ -266,9 +266,7 @@ fn compile_native_text_to_llvm_file(native_text: string, module_name: string, ou
     // calls whose return type cannot be resolved (issue #306) — a
     // partial IR file with the side-effecting call silently dropped
     // would be worse than no output at all.
-    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
-        return false;
-    }
+    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) { return false; }
     let lowered_count = lowered_lines.lines.length;
     if lowered_count > 0 {
         let defined = collect_defined_function_symbols(lowered_lines.lines);
@@ -454,9 +452,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         print.err("emit-llvm: phase=struct_methods_start");
     }
     let module_struct_methods = flatten_struct_methods(module_structs);
-    if debug_lowering {
-        print.err("emit-llvm: phase=struct_methods_done");
-    }
+    if debug_lowering { print.err("emit-llvm: phase=struct_methods_done"); }
     // Site 1 — safe in-place extend: safe_functions is not read after this
     // line; local_functions aliases safe_functions and is read downstream.
     let local_functions = extend_native_functions_inplace(safe_functions, module_struct_methods);

@@ -287,10 +287,7 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
             + true_lit.operand.value
             + ", i8* "
             + false_lit.operand.value);
-        let out_operand = LLVMOperand {
-            llvm_type: "i8*",
-            value: select_temp
-        };
+        let out_operand = LLVMOperand { llvm_type: "i8*", value: select_temp };
         return ExpressionResult {
             lines: out_lines,
             temp_index: false_lit.temp_index + 1,

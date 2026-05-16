@@ -1110,9 +1110,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {  // alias-coverage:
                 if timing {
                     print(compile_to_llvm_with_module_timed(source, module_name));
                 } else {
-                    if !print_llvm_with_module(source, module_name) {
-                        return 1;
-                    }
+                    if !print_llvm_with_module(source, module_name) { return 1; }
                 }
             }
             return 0;

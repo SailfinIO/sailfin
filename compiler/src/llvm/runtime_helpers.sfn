@@ -676,9 +676,7 @@ fn find_runtime_helper(target: string) -> RuntimeHelperDescriptor? {
     let mut index: int = 0;
     loop {
         if index >= descriptors.length { break; }
-        if descriptors[index].target == trimmed {
-            return descriptors[index];
-        }
+        if descriptors[index].target == trimmed { return descriptors[index]; }
         index += 1;
     }
     return null;

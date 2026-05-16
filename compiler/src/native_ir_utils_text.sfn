@@ -346,9 +346,7 @@ fn split_top_level_commas(text: string) -> string[] {
                     if bracket_depth == 0 {
                         if brace_depth == 0 {
                             let segment = trim_text(current);
-                            if segment.length > 0 {
-                                entries.push(segment);
-                            }
+                            if segment.length > 0 { entries.push(segment); }
                             current = "";
                             index += 1;
                             continue;

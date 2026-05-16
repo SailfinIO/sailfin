@@ -613,10 +613,7 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
             current_lines.push("  " + convert_temp + " = fptosi double "
                 + round_temp
                 + " to i8");
-            let coerced = LLVMOperand {
-                llvm_type: "i8",
-                value: convert_temp
-            };
+            let coerced = LLVMOperand { llvm_type: "i8", value: convert_temp };
             return CoercionResult {
                 lines: current_lines,
                 temp_index: temp_index + 2,
@@ -762,10 +759,7 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
                 + malloc_temp
                 + ", i64 1");
             current_lines.push("  store i8 0, i8* " + null_ptr);
-            let coerced = LLVMOperand {
-                llvm_type: "i8*",
-                value: malloc_temp
-            };
+            let coerced = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
             return CoercionResult {
                 lines: current_lines,
                 temp_index: temp_index + 3,
@@ -829,10 +823,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 + ", i64 "
                 + len_temp
                 + ", 1");
-            let coerced = LLVMOperand {
-                llvm_type: "{i8*, i64}",
-                value: agg1
-            };
+            let coerced = LLVMOperand { llvm_type: "{i8*, i64}", value: agg1 };
             return CoercionResult {
                 lines: current_lines,
                 temp_index: temp_index + 3,
@@ -1232,9 +1223,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
             } else {
                 let mut _elif78: boolean = false;
                 if !ends_with_pointer_suffix(operand_type) {
-                    if ends_with_pointer_suffix(variant_type) {
-                        _elif78 = true;
-                    }
+                    if ends_with_pointer_suffix(variant_type) { _elif78 = true; }
                 }
                 if _elif78 {
                     let expected_value_type = strip_pointer_suffix(variant_type);

@@ -1932,9 +1932,9 @@ fn _package_sanitise_name(name: string) -> string {
     loop {
         if i >= name.length { break; }
         let ch = substring(name, i, i + 1);
-        if ch == "/" { out = out + "-"; } else if ch == "\\" {
-            out = out + "-";
-        } else { out = out + ch; }
+        if ch == "/" { out = out + "-"; } else if ch == "\\" { out = out + "-"; } else {
+            out = out + ch;
+        }
         i += 1;
     }
     return out;
