@@ -224,6 +224,18 @@ extern "C"
     // Additional prelude/runtime helpers (currently minimal implementations).
     void sailfin_runtime_copy_bytes(char *dest, char *src, int64_t length);
     char *sailfin_runtime_log_execution(char *value);
+    // Issue #617: these three untyped exports are deprecated stubs
+    // (silent NULL/no-op). The Sailfin-level wrappers in `sfn/sync`,
+    // the prelude `runtime.channel/_spawn/_parallel` bindings, and
+    // the LLVM lowering descriptors that reached them are all gone,
+    // so freshly-built compilers no longer emit calls to these
+    // symbols. They remain DECLARED here only because the currently
+    // pinned seed's pre-built `prelude.o` still calls them; remove
+    // both the declarations and the definitions below once a new
+    // seed without those references is pinned. Tracked as a
+    // `seed-blocker` cleanup. The typed `spawn_*` / `await_*`
+    // variants further down are real pthread implementations and
+    // are unaffected.
     char *sailfin_runtime_channel(double capacity);
     char *sailfin_runtime_parallel(char *thunk);
     void sailfin_runtime_spawn(char *thunk, char *name);

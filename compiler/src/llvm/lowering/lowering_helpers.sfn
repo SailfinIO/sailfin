@@ -724,7 +724,6 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "runtime_array_map_fn");
     helpers = append_unique_effect(helpers, "runtime_array_filter_fn");
     helpers = append_unique_effect(helpers, "runtime_array_reduce_fn");
-    helpers = append_unique_effect(helpers, "runtime_channel_fn");
     helpers = append_unique_effect(helpers, "runtime_char_code_fn");
     helpers = append_unique_effect(helpers, "runtime_grapheme_at_fn");
     helpers = append_unique_effect(helpers, "runtime_grapheme_count_fn");
@@ -737,7 +736,6 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "runtime_is_void_fn");
     helpers = append_unique_effect(helpers, "runtime_log_execution_fn");
     helpers = append_unique_effect(helpers, "runtime_monotonic_millis_fn");
-    helpers = append_unique_effect(helpers, "runtime_parallel_fn");
     helpers = append_unique_effect(helpers, "runtime_resolve_runtime_type_fn");
     helpers = append_unique_effect(helpers, "runtime_serve_fn");
     helpers = append_unique_effect(helpers, "runtime_sleep_fn");
@@ -749,7 +747,6 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     // preamble has to take over. Disappears when PR 2 retires the
     // C trampoline.
     helpers = append_unique_effect(helpers, "sailfin_runtime_sleep");
-    helpers = append_unique_effect(helpers, "runtime_spawn_fn");
     helpers = append_unique_effect(helpers, "runtime_to_debug_string_fn");
     helpers = append_unique_effect(helpers, "runtime_create_capability_grant");
     helpers = append_unique_effect(helpers, "runtime_create_filesystem_bridge");
