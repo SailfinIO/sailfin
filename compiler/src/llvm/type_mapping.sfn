@@ -725,7 +725,8 @@ fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
 // Returns "int", "float", or "other" for an LLVM primitive type. Used by
 // `coerce_operand_to_type` (and future `#296` reapply in Slice E.3) to refuse
 // silent int↔float bitcasts at call boundaries during the partial migration
-// from `: number` to `: int`/`: float`. Pointer and aggregate types return
+// from the historical `number` annotation to `int`/`float`. Pointer and
+// aggregate types return
 // "other" — this slice deliberately scopes the diagnostic to scalar
 // primitives so the partial-migration ABI hazard is caught loudly without
 // disturbing today's pointer/struct lowering.
