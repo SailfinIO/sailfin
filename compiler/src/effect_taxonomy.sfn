@@ -32,7 +32,7 @@ fn canonical_effects() -> string[] {
 
 fn is_canonical_effect(name: string) -> boolean {
     let canonical = canonical_effects();
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= canonical.length { break; }
         if canonical[i] == name { return true; }
