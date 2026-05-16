@@ -453,21 +453,26 @@ compiler features that do not exist in the current toolchain.
    (`i16`/`u16`/`u32`/`u64`/`isize`/`f32`); `expr as Type` lowers via
    the full LLVM matrix (`sitofp`/`fptosi`/`sext`/`zext`/`trunc`/
    `fpext`/`fptrunc`); bare unsuffixed integer literals default to
-   `int` at scalar context. **Slice E.3a (the integer-shaped `:
-   number` migration) is complete:** every `: number` / `-> number`
+   `int` at scalar context. **Slice E.3a (the integer-shaped
+   `: number` migration) is complete:** every `: number` / `-> number`
    site in `compiler/src/*.sfn` and `runtime/prelude.sfn` either
    flipped to its semantic `: int` / `: float` shape or carries a
    trailing `// alias-coverage:` marker documenting the opt-out
    (prelude shadows, C-ABI boundaries, the runtime `is_number`
    type-guard predicate, literal-text predicates in `core_text.sfn`,
    and the `Future`-mapping seam in `type_mapping.sfn`). The
-   site-level audit `grep -rnE "(: number|-> number)"
-   compiler/src/ runtime/prelude.sfn | grep -v "// alias-coverage"`
-   returns zero output. Only the strict-refusal reapply remains
-   (Slice E.3b, #556) before `number` itself can be retired in
-   Slice E.4. See `docs/runtime_architecture.md` §3.7 for the slice
-   taxonomy and the limitations table (L1–L6). L1's array-literal
-   carve-out closes alongside E.3b on the v0.6.0 seed.
+   site-level audit returns zero output:
+
+   ```bash
+   grep -rnE "(: number|-> number)" compiler/src/ runtime/prelude.sfn \
+     | grep -v "// alias-coverage"
+   ```
+
+   Only the strict-refusal reapply remains (Slice E.3b, #556) before
+   `number` itself can be retired in Slice E.4. See
+   `docs/runtime_architecture.md` §3.7 for the slice taxonomy and the
+   limitations table (L1–L6). L1's array-literal carve-out closes
+   alongside E.3b on the v0.6.0 seed.
 2. **`Result<T, E>` and the `?` operator** — roadmap §0. The runtime must be
    able to return structured errors (file open failures, HTTP errors, OOM,
    unicode decode errors) without abusing `try`/`catch` or union-sentinels.
