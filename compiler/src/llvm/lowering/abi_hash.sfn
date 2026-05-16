@@ -16,9 +16,10 @@
 //       hash = (hash XOR b) * 0x100000001b3   (mod 2^64)
 //
 // Implementation runs in pure Sailfin: no `extern fn`, no bitwise
-// builtins. XOR and limb arithmetic are open-coded against `number`
-// (f64). Every intermediate stays well below 2^53 so f64 arithmetic
-// is exact.
+// builtins. XOR and limb arithmetic are open-coded against `int`
+// (i64). Every intermediate stays well below 2^53 so the values
+// also fit in f64 — earlier seeds compiled this code as f64 with
+// exact results.
 import { char_code, substring } from "runtime/prelude";
 
 struct AbiHashLimbs {
@@ -94,8 +95,8 @@ fn fnv1a_64_hash(input: string) -> AbiHashLimbs {
 // state * 0x100000001b3 (mod 2^64), returned as four 16-bit limbs.
 // The prime has only two non-zero 16-bit positions: p0=0x01b3, p2=0x0100.
 fn _mul_prime(state: AbiHashLimbs) -> AbiHashLimbs {
-    let p0: number = 435;
-    let p2: number = 256;
+    let p0: int = 435;
+    let p2: int = 256;
 
     // Column sums for `state * prime mod 2^64`. Each fits well under
     // 2^33: 2 * 65535 * 65535 is about 8.6e9 < 2^34.
@@ -121,12 +122,12 @@ fn _mul_prime(state: AbiHashLimbs) -> AbiHashLimbs {
 
 // Splits `value` (in [0, 2^33)) into (hi = value >> 16, lo = value & 0xFFFF).
 // Implemented as a 17-step binary long division. Each `p`/`q` value is a
-// power of two, so f64 halving is exact.
-fn _u33_split_by_word(value: number) -> _AbiSplitU33 {
-    let mut hi: number = 0;
-    let mut rem: number = value;
-    let mut p: number = 4294967296;
-    let mut q: number = 65536;
+// power of two, so int floor-division by 2 is exact.
+fn _u33_split_by_word(value: int) -> _AbiSplitU33 {
+    let mut hi: int = 0;
+    let mut rem: int = value;
+    let mut p: int = 4294967296;
+    let mut q: int = 65536;
     loop {
         if q < 1 { break; }
         if rem >= p {
@@ -140,11 +141,11 @@ fn _u33_split_by_word(value: number) -> _AbiSplitU33 {
 }
 
 // Splits `value` (in [0, 2^16)) into (hi = value >> 8, lo = value & 0xFF).
-fn _u16_split_by_byte(value: number) -> _AbiSplitU16 {
-    let mut hi: number = 0;
-    let mut rem: number = value;
-    let mut p: number = 32768;
-    let mut q: number = 128;
+fn _u16_split_by_byte(value: int) -> _AbiSplitU16 {
+    let mut hi: int = 0;
+    let mut rem: int = value;
+    let mut p: int = 32768;
+    let mut q: int = 128;
     loop {
         if q < 1 { break; }
         if rem >= p {
@@ -158,11 +159,11 @@ fn _u16_split_by_byte(value: number) -> _AbiSplitU16 {
 }
 
 // 8-bit XOR. Inputs are in [0, 255]; result is in [0, 255].
-fn _xor_byte(a: number, b: number) -> number {
-    let mut result: number = 0;
-    let mut bit_value: number = 1;
-    let mut a_rem: number = a;
-    let mut b_rem: number = b;
+fn _xor_byte(a: int, b: int) -> int {
+    let mut result: int = 0;
+    let mut bit_value: int = 1;
+    let mut a_rem: int = a;
+    let mut b_rem: int = b;
     let mut i: int = 0;
     loop {
         if i >= 8 { break; }
@@ -179,11 +180,11 @@ fn _xor_byte(a: number, b: number) -> number {
 
 // Extracts the low bit of `value` (in [0, 2^16)) and returns
 // (bit, rest = floor(value / 2)).
-fn _split_low_bit(value: number) -> _AbiBitSplit {
-    let mut rest: number = 0;
-    let mut rem: number = value;
-    let mut p: number = 32768;
-    let mut q: number = 16384;
+fn _split_low_bit(value: int) -> _AbiBitSplit {
+    let mut rest: int = 0;
+    let mut rem: int = value;
+    let mut p: int = 32768;
+    let mut q: int = 16384;
     loop {
         if q < 1 { break; }
         if rem >= p {
@@ -265,12 +266,12 @@ struct _AbiDivMod {
 // Computes (carry * 65536 + limb) divmod divisor, where divisor <= 10000
 // and the dividend is < 10000 * 65536 + 65536 ≈ 6.55e8. Implemented as
 // a 17-step binary long division so every intermediate is a power-of-2
-// scaling of the divisor (exact in f64).
-fn _div_mod_small(limb: number, carry: number, divisor: number) -> _AbiDivMod {
+// scaling of the divisor (exact under int floor division).
+fn _div_mod_small(limb: int, carry: int, divisor: int) -> _AbiDivMod {
     let dividend = carry * 65536 + limb;
-    let mut q: number = 0;
-    let mut rem: number = dividend;
-    let mut delta: number = 65536;
+    let mut q: int = 0;
+    let mut rem: int = dividend;
+    let mut delta: int = 65536;
     loop {
         if delta < 1 { break; }
         let p = divisor * delta;
@@ -284,16 +285,16 @@ fn _div_mod_small(limb: number, carry: number, divisor: number) -> _AbiDivMod {
 }
 
 // Small-value decimal formatter (value < 10000 in practice; safe up to
-// the f64 exact-integer limit).
-fn _decimal_string(value: number) -> string {
+// the i64 range).
+fn _decimal_string(value: int) -> string {
     if value == 0 { return "0"; }
     let digits = "0123456789";
     let mut output: string = "";
-    let mut remaining: number = value;
+    let mut remaining: int = value;
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;
-        let mut quotient: number = 0;
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;

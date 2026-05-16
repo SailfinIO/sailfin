@@ -62,7 +62,7 @@ fn empty_trait_metadata() -> TraitMetadata {
     return TraitMetadata { interfaces: [], implementations: [] };
 }
 
-fn sanitize_collection_length(value: number, max: number) -> number {
+fn sanitize_collection_length(value: int, max: int) -> int {
     if value != value { return 0; }
     if value < 0 { return 0; }
     if value > max { return max; }
