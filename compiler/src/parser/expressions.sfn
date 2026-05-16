@@ -145,10 +145,10 @@ fn expression_tokens_consume_type_separator(state: ExpressionTokens, accept_colo
 fn expression_tokens_collect_until(state: ExpressionTokens, terminators: string[]) -> ExpressionCollectResult {
     let mut current = state;
     let mut collected: Token[] = [];
-    let mut angle: number = 0;
-    let mut paren: number = 0;
-    let mut brace: number = 0;
-    let mut bracket: number = 0;
+    let mut angle: int = 0;
+    let mut paren: int = 0;
+    let mut brace: int = 0;
+    let mut bracket: int = 0;
 
     loop {
         if expression_tokens_is_at_end(current) {
@@ -215,7 +215,7 @@ fn collect_expression_block(state: ExpressionTokens) -> ExpressionBlockParseResu
     }
 
     let mut tokens: Token[] = [];
-    let mut depth: number = 0;
+    let mut depth: int = 0;
 
     loop {
         if expression_tokens_is_at_end(current) {
@@ -306,7 +306,7 @@ fn expression_from_single_token(token: Token) -> Expression? {
 // ============================================================================
 // Pratt Parser - Binary Precedence Climbing
 // ============================================================================
-fn parse_expression_bp(state: ExpressionTokens, min_precedence: number) -> ExpressionParseResult {
+fn parse_expression_bp(state: ExpressionTokens, min_precedence: int) -> ExpressionParseResult {
     let prefix_result = parse_prefix_expression(state);
     if !prefix_result.success { return prefix_result; }
 
@@ -1216,7 +1216,7 @@ fn parse_lambda_parameter_list(state: ExpressionTokens) -> LambdaParameterListPa
 //   9   + -
 //  10   * / %
 //  11   unary !   (logical NOT)
-fn binary_precedence(op: string) -> number {
+fn binary_precedence(op: string) -> int {
     if op == ".." { return 0; }
     if op == "||" { return 1; }
     if op == "&&" { return 2; }
@@ -1249,7 +1249,7 @@ fn binary_precedence(op: string) -> number {
     return -1;
 }
 
-fn unary_precedence() -> number { return 11; }
+fn unary_precedence() -> int { return 11; }
 
 // ============================================================================
 // Expression Normalization
@@ -1306,7 +1306,7 @@ fn strip_surrounding_quotes_expr(text: string) -> string {
 fn looks_like_number_expr(text: string) -> boolean {
     if text.length == 0 { return false; }
     let mut has_decimal: boolean = false;
-    let mut index: number = 0;
+    let mut index: int = 0;
     if char_at(text, 0) == "-" {
         if text.length == 1 { return false; }
         index = 1;
@@ -1382,11 +1382,11 @@ fn parse_block_for_lambda(parser: Parser) -> BlockParseResult {
     }
 
     let start_index = current.index;
-    let mut block_end_index: number = start_index;
+    let mut block_end_index: int = start_index;
     current = parser_advance_raw(current);
 
     // Simple block collection - just collect tokens until matching }
-    let mut depth: number = 1;
+    let mut depth: int = 1;
     loop {
         current = skip_trivia(current);
         let tok = parser_peek_raw(current);

@@ -104,7 +104,7 @@ fn strip_surrounding_quotes_local(text: string) -> string {
 fn decode_string_literal_escapes_local(text: string) -> string {
     if text.length == 0 { return ""; }
     let mut decoded: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = char_at(text, index);
@@ -190,7 +190,7 @@ fn is_trivia_token(token: Token) -> boolean {
 
 fn is_whitespace_lexeme(text: string) -> boolean {
     if text.length == 0 { return false; }
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = char_at(text, index);
@@ -212,9 +212,9 @@ fn is_trim_whitespace_local(ch: string) -> boolean {
 // ============================================================================
 // Token Array Operations
 // ============================================================================
-fn token_slice(tokens: Token[], start: number, end: number) -> Token[] {
+fn token_slice(tokens: Token[], start: int, end: int) -> Token[] {
     let mut result: Token[] = [];
-    let mut index: number = start;
+    let mut index: int = start;
     loop {
         if index >= end { break; }
         result = append_token(result, tokens[index]);
@@ -224,8 +224,8 @@ fn token_slice(tokens: Token[], start: number, end: number) -> Token[] {
 }
 
 fn trim_token_edges(tokens: Token[]) -> Token[] {
-    let mut start: number = 0;
-    let mut end: number = tokens.length;
+    let mut start: int = 0;
+    let mut end: int = tokens.length;
 
     loop {
         if start >= end { break; }
@@ -251,9 +251,9 @@ fn trim_token_edges(tokens: Token[]) -> Token[] {
 }
 
 fn trim_block_tokens(tokens: Token[]) -> Token[] {
-    let mut depth: number = 0;
-    let mut index: number = 0;
-    let mut end: number = tokens.length;
+    let mut depth: int = 0;
+    let mut index: int = 0;
+    let mut end: int = tokens.length;
     loop {
         if index >= tokens.length { break; }
         let token = tokens[index];
@@ -273,7 +273,7 @@ fn trim_block_tokens(tokens: Token[]) -> Token[] {
 }
 
 fn filter_trivia(tokens: Token[]) -> Token[] {
-    let mut index: number = 0;
+    let mut index: int = 0;
     let mut filtered: Token[] = [];
 
     loop {
@@ -297,9 +297,9 @@ fn filter_trivia(tokens: Token[]) -> Token[] {
 // ============================================================================
 fn tokens_to_text(tokens: Token[]) -> string {
     let mut text: string = "";
-    let mut index: number = 0;
-    let limit: number = 8192;
-    let max_tokens: number = 512;
+    let mut index: int = 0;
+    let limit: int = 8192;
+    let max_tokens: int = 512;
     let mut truncated: boolean = false;
     loop {
         if index >= tokens.length { break; }
@@ -335,7 +335,7 @@ fn source_span_from_tokens(tokens: Token[]) -> SourceSpan? {
     let mut end_column = last.column;
 
     let lexeme = last.lexeme;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= lexeme.length { break; }
         let ch = char_at(lexeme, index);
@@ -360,9 +360,9 @@ fn source_span_from_tokens(tokens: Token[]) -> SourceSpan? {
 fn collect_until(parser: Parser, terminators: string[]) -> CaptureResult {
     let mut current = parser;
     let mut captured: Token[] = [];
-    let mut paren_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut bracket_depth: number = 0;
+    let mut paren_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut bracket_depth: int = 0;
 
     loop {
         let token = parser_peek_raw(current);
@@ -416,10 +416,10 @@ fn collect_until(parser: Parser, terminators: string[]) -> CaptureResult {
 fn collect_type_annotation_until(parser: Parser, terminators: string[]) -> CaptureResult {
     let mut current = parser;
     let mut captured: Token[] = [];
-    let mut paren_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut bracket_depth: number = 0;
-    let mut angle_depth: number = 0;
+    let mut paren_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut angle_depth: int = 0;
 
     loop {
         let token = parser_peek_raw(current);
@@ -486,7 +486,7 @@ fn collect_parenthesized(parser: Parser) -> ParenthesizedParseResult {
 
     current = parser_advance_raw(current);
     let mut tokens: Token[] = [];
-    let mut depth: number = 1;
+    let mut depth: int = 1;
 
     loop {
         let token = parser_peek_raw(current);
@@ -526,9 +526,9 @@ fn collect_pattern_until_arrow(parser: Parser) -> PatternCaptureResult {
     // Track balancing of (), {}, [] so nested separators inside a pattern
     // (e.g. `SomeStruct { a: b }` or `func(x: 1)`) are not mistaken for the
     // pattern-to-body separator.
-    let mut paren_depth: number = 0;
-    let mut brace_depth: number = 0;
-    let mut bracket_depth: number = 0;
+    let mut paren_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut bracket_depth: int = 0;
 
     loop {
         let token = parser_peek_raw(current);
@@ -603,12 +603,12 @@ fn collect_pattern_until_arrow(parser: Parser) -> PatternCaptureResult {
 fn split_tokens_by_comma(tokens: Token[]) -> string[] {
     let mut parts: string[] = [];
     let mut segment: string = "";
-    let mut angle: number = 0;
-    let mut paren: number = 0;
-    let mut brace: number = 0;
-    let mut bracket: number = 0;
+    let mut angle: int = 0;
+    let mut paren: int = 0;
+    let mut brace: int = 0;
+    let mut bracket: int = 0;
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= tokens.length { break; }
         let token = tokens[index];
@@ -654,12 +654,12 @@ fn split_tokens_by_comma(tokens: Token[]) -> string[] {
 fn split_token_slices_by_comma(tokens: Token[]) -> Token[][] {
     let mut parts: Token[][] = [];
     let mut segment: Token[] = [];
-    let mut angle: number = 0;
-    let mut paren: number = 0;
-    let mut brace: number = 0;
-    let mut bracket: number = 0;
+    let mut angle: int = 0;
+    let mut paren: int = 0;
+    let mut brace: int = 0;
+    let mut bracket: int = 0;
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= tokens.length { break; }
         let token = tokens[index];
@@ -701,13 +701,13 @@ fn split_token_slices_by_comma(tokens: Token[]) -> Token[][] {
 // ============================================================================
 // Top-Level Search Functions
 // ============================================================================
-fn find_top_level_symbol(tokens: Token[], symbol: string) -> number {
-    let mut angle: number = 0;
-    let mut paren: number = 0;
-    let mut brace: number = 0;
-    let mut bracket: number = 0;
+fn find_top_level_symbol(tokens: Token[], symbol: string) -> int {
+    let mut angle: int = 0;
+    let mut paren: int = 0;
+    let mut brace: int = 0;
+    let mut bracket: int = 0;
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= tokens.length { break; }
         let token = tokens[index];
@@ -738,13 +738,13 @@ fn find_top_level_symbol(tokens: Token[], symbol: string) -> number {
     return -1;
 }
 
-fn find_top_level_identifier(tokens: Token[], keyword: string) -> number {
-    let mut angle: number = 0;
-    let mut paren: number = 0;
-    let mut brace: number = 0;
-    let mut bracket: number = 0;
+fn find_top_level_identifier(tokens: Token[], keyword: string) -> int {
+    let mut angle: int = 0;
+    let mut paren: int = 0;
+    let mut brace: int = 0;
+    let mut bracket: int = 0;
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= tokens.length { break; }
         let token = tokens[index];
@@ -777,13 +777,13 @@ fn find_top_level_identifier(tokens: Token[], keyword: string) -> number {
     return -1;
 }
 
-fn find_top_level_colon(tokens: Token[]) -> number {
-    let mut angle: number = 0;
-    let mut paren: number = 0;
-    let mut brace: number = 0;
-    let mut bracket: number = 0;
+fn find_top_level_colon(tokens: Token[]) -> int {
+    let mut angle: int = 0;
+    let mut paren: int = 0;
+    let mut brace: int = 0;
+    let mut bracket: int = 0;
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= tokens.length { break; }
         let token = tokens[index];

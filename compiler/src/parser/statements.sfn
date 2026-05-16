@@ -81,7 +81,7 @@ fn parse_decorators_stub(parser: Parser) -> DecoratorParseResult {
         // Skip arguments if present
         let after = parser_peek_raw(current);
         if symbol_matches(after, "(") {
-            let mut depth: number = 1;
+            let mut depth: int = 1;
             current = parser_advance_raw(current);
             loop {
                 let tok = parser_peek_raw(current);
@@ -123,7 +123,7 @@ fn parse_block(initial_parser: Parser) -> BlockParseResult {
 
     let start_index = parser.index;
     let mut current = parser_advance_raw(parser);
-    let mut block_end_index: number = start_index;
+    let mut block_end_index: int = start_index;
     let mut statements: Statement[] = [];
 
     loop {
@@ -171,9 +171,9 @@ fn parse_block(initial_parser: Parser) -> BlockParseResult {
 }
 
 fn trim_block_tokens_local(tokens: Token[]) -> Token[] {
-    let mut depth: number = 0;
-    let mut index: number = 0;
-    let mut end: number = tokens.length;
+    let mut depth: int = 0;
+    let mut index: int = 0;
+    let mut end: int = tokens.length;
     loop {
         if index >= tokens.length { break; }
         let token = tokens[index];
@@ -806,7 +806,7 @@ fn parse_match_case(parser: Parser) -> MatchCaseParseResult {
         current = parser_advance_raw(current);
 
         let capture = collect_until(current, [";", ",", "}"]);
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= capture.tokens.length { break; }
             block_tokens = append_token(block_tokens, capture.tokens[index]);
@@ -856,7 +856,7 @@ fn parse_match_case(parser: Parser) -> MatchCaseParseResult {
         let expression = expression_from_tokens(trimmed_expression_tokens);
 
         let mut block_tokens: Token[] = [];
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= capture.tokens.length { break; }
             block_tokens = append_token(block_tokens, capture.tokens[index]);
@@ -955,7 +955,7 @@ fn parse_with_statement(parser: Parser, decorators: Decorator[]) -> BlockStateme
     current = clauses_capture.parser;
     let clause_slices = split_token_slices_by_comma(clauses_capture.tokens);
     let mut clauses: WithClause[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= clause_slices.length { break; }
         let slice_tokens = trim_token_edges(clause_slices[index]);
@@ -1023,7 +1023,7 @@ fn parse_return_statement(parser: Parser) -> BlockStatementParseResult {
         expression = expression_from_tokens(capture.tokens);
     }
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= capture.tokens.length { break; }
         statement_tokens = append_token(statement_tokens, capture.tokens[index]);
@@ -1076,7 +1076,7 @@ fn parse_throw_statement(parser: Parser) -> BlockStatementParseResult {
         };
     }
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= capture.tokens.length { break; }
         statement_tokens = append_token(statement_tokens, capture.tokens[index]);
@@ -1218,15 +1218,15 @@ fn parse_try_statement(parser: Parser) -> BlockStatementParseResult {
 // `line` / `column` (small positive number). Sailfin's `/`
 // operator is float division so we extract digits via repeated
 // subtraction — same shape as `compiler/src/main.sfn:number_to_string`.
-fn _assert_int_to_string(value: number) -> string {
+fn _assert_int_to_string(value: int) -> string {
     if value <= 0 { return "0"; }
     let digits = "0123456789";
-    let mut remaining: number = value;
+    let mut remaining: int = value;
     let mut output: string = "";
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;
-        let mut quotient: number = 0;
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -1274,7 +1274,7 @@ fn parse_assert_statement(parser: Parser) -> BlockStatementParseResult {
         };
     }
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= capture.tokens.length { break; }
         statement_tokens = append_token(statement_tokens, capture.tokens[index]);
@@ -1387,7 +1387,7 @@ fn parse_expression_statement(parser: Parser, decorators: Decorator[]) -> BlockS
     }
 
     let mut statement_tokens: Token[] = [];
-    let mut token_index: number = 0;
+    let mut token_index: int = 0;
     loop {
         if token_index >= capture.tokens.length { break; }
         statement_tokens = append_token(statement_tokens, capture.tokens[token_index]);
@@ -1440,9 +1440,9 @@ fn parse_unknown_statement(initial_parser: Parser) -> StatementParseResult {
     parser = skip_trivia(parser);
     let mut tokens: Token[] = [];
     let mut current = parser;
-    let mut depth: number = 0;
-    let iteration_limit: number = 16384;
-    let mut iteration_count: number = 0;
+    let mut depth: int = 0;
+    let iteration_limit: int = 16384;
+    let mut iteration_count: int = 0;
     let mut truncated: boolean = false;
 
     loop {
