@@ -4715,6 +4715,19 @@ char *sailfin_runtime_log_execution(char *value)
     return value;
 }
 
+// Issue #617: the Sailfin-level entry points to these three stubs
+// (the `sfn/sync` `channel` / `parallel` / `spawn` exports, the
+// prelude `runtime.channel/_spawn/_parallel` bindings, and the
+// LLVM lowering descriptors that pointed at them) have all been
+// removed, so freshly-built compilers never emit a call to any
+// of the three. The stub bodies remain ONLY because the currently
+// pinned seed's pre-built `prelude.o` still has unresolved
+// references to these symbols and would refuse to link
+// otherwise — they are seed-blocker cleanup once a new seed
+// without those references is pinned. Callers that want
+// concurrency today must use the typed `spawn_*` / `await_*`
+// variants below (real pthread implementations); structured
+// concurrency proper is tracked under #500 (roadmap M4).
 char *sailfin_runtime_channel(double capacity)
 {
     (void)capacity;

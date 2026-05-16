@@ -207,15 +207,12 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "monotonic_millis", symbol: "sailfin_runtime_monotonic_millis", return_type: "double", parameter_types: [], effects: ["clock"], native_signature: null
     });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_channel_fn", symbol: "sailfin_runtime_channel", return_type: "i8*", parameter_types: ["double"], effects: ["io"], native_signature: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_spawn_fn", symbol: "sailfin_runtime_spawn", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_parallel_fn", symbol: "sailfin_runtime_parallel", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: null
-    });
+    // Untyped `channel` / `spawn` / `parallel` descriptors removed under
+    // issue #617 — their C bridges were silent no-ops and the
+    // `sfn/sync` exports that fronted them are gone. The typed
+    // `spawn_*` / `await_*` flavors (real pthread implementations) keep
+    // their descriptors below. Re-introduce these only when the
+    // structured-concurrency runtime (#500, roadmap M4) actually lands.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_create_capability_grant", symbol: "sailfin_runtime_create_capability_grant", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null
     });

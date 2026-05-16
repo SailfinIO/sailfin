@@ -1,30 +1,30 @@
 // sfn/sync — Concurrency and synchronization primitives for Sailfin.
 //
-// Provides channels for inter-task communication, parallel execution,
-// and task spawning. All operations require the `io` effect.
-
-fn channel(capacity: number = 0) -> any ![io] {
-    // Create a bounded channel for inter-task communication.
-    // Capacity of 0 means unbuffered (synchronous handoff).
-    return runtime.channel(capacity);
-}
-
-fn parallel(tasks: any[]) -> any[] ![io] {
-    // Run multiple tasks concurrently and collect results.
-    // Returns an array of results in the same order as the input tasks.
-    // Each task is a zero-argument function.
-    //
-    // Usage:
-    //   let results = parallel([
-    //       fn() { fetch_user(1) },
-    //       fn() { fetch_user(2) },
-    //   ]);
-    return runtime.parallel(tasks);
-}
-
-fn spawn(task: any, name: string = "") -> void ![io] {
-    // Spawn a task to run concurrently in the background.
-    // The task runs on the runtime's task scheduler.
-    // Use channels to communicate results back.
-    runtime.spawn(task, name);
-}
+// The untyped `channel`, `parallel`, and `spawn` exports were removed
+// (issue #617, a sub-task of #613) because the structured-concurrency
+// runtime they fronted is not yet implemented: their C bridges
+// (`sailfin_runtime_{channel,parallel,spawn}`) silently returned NULL
+// / no-op'd, so callers built and ran but did nothing concurrent. The
+// project's `llms.txt` rule forbids "parsed but unenforced" surface, so
+// the entire untyped wrapper layer is gone — the prelude wrappers,
+// this capsule's exports, and the LLVM lowering descriptors that
+// bridged them to the C runtime. Any caller that names `channel`,
+// `parallel`, or `spawn` now fails the LLVM lowering pass with a
+// `llvm lowering [fatal]: cannot resolve return type for call to ...`
+// diagnostic. The regression test
+// `compiler/tests/e2e/test_sync_rejects_unimplemented_concurrency.sh`
+// pins the visible-failure surface. (`sfn check` itself still accepts
+// these — that's the open undefined-identifier gap tracked under #616.)
+//
+// Migration:
+//   - For task-style concurrency, use the typed `spawn_*` / `await_*`
+//     primitives backed by real pthread implementations in
+//     `runtime/native/src/sailfin_runtime.c` (e.g. `spawn_number`,
+//     `spawn_string`, `spawn_bool`, `spawn_ptr`, `spawn_void`, plus
+//     `_ctx` variants for closures).
+//   - For channels / `parallel(...)`, wait for the structured-
+//     concurrency runtime (tracked under #500, roadmap M4).
+//
+// The capsule intentionally stays in the workspace as an empty shell
+// so the `sfn/sync` name remains reserved for when the real runtime
+// ships and re-introduces these exports with working implementations.
