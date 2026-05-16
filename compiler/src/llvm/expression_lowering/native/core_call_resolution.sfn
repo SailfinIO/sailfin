@@ -464,9 +464,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
                         let mut _ci3: int = 0;
                         loop {
-                            if _ci3 >= lowered_self.diagnostics.length {
-                                break;
-                            }
+                            if _ci3 >= lowered_self.diagnostics.length { break; }
                             r_diagnostics.push(lowered_self.diagnostics[_ci3]);
                             _ci3 += 1;
                         }
@@ -630,9 +628,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
                         let mut _ci6: int = 0;
                         loop {
-                            if _ci6 >= lowered_self.diagnostics.length {
-                                break;
-                            }
+                            if _ci6 >= lowered_self.diagnostics.length { break; }
                             r_diagnostics.push(lowered_self.diagnostics[_ci6]);
                             _ci6 += 1;
                         }

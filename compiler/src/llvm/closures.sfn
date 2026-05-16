@@ -287,9 +287,7 @@ fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOper
         if field_index >= layout.fields.length { break; }
         let field = layout.fields[field_index];
         let mut value = _find_operand(operands, field.name);
-        if value.length == 0 {
-            value = _field_zero_value(field.llvm_type);
-        }
+        if value.length == 0 { value = _field_zero_value(field.llvm_type); }
         let field_ptr = format_temp_name(current_temp);
         current_temp += 1;
         lines.push("  " + field_ptr + " = getelementptr inbounds " + type_name

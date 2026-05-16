@@ -159,16 +159,10 @@ fn gather_instruction(lines: string[], start_index: int) -> InstructionGatherRes
     }
     let first_line = trim_text(lines[start_index]);
     if first_line.length == 0 {
-        return InstructionGatherResult {
-            text: first_line,
-            lines_consumed: 0
-        };
+        return InstructionGatherResult { text: first_line, lines_consumed: 0 };
     }
     if !instruction_supports_multiline(first_line) {
-        return InstructionGatherResult {
-            text: first_line,
-            lines_consumed: 0
-        };
+        return InstructionGatherResult { text: first_line, lines_consumed: 0 };
     }
 
     let mut state = update_instruction_depth_state(initial_instruction_depth_state(), first_line);

@@ -193,10 +193,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
     }
     let end_operand = end_coerced.operand;
 
-    let mut stride_operand = LLVMOperand {
-        llvm_type: "double",
-        value: "1.0"
-    };
+    let mut stride_operand = LLVMOperand { llvm_type: "double", value: "1.0" };
     let stride_text = trim_text(range_parse.stride);
     if stride_text.length > 0 {
         let stride_result = lower_expression(stride_text, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
@@ -595,9 +592,7 @@ fn build_loop_exit_mutations(collected_mutations: LocalMutation[], locals: Local
         if exit_idx >= mutated_names.length { break; }
         let name = mutated_names[exit_idx];
         let mut exit_value: string = "";
-        if exit_idx < exit_loads.length {
-            exit_value = exit_loads[exit_idx];
-        }
+        if exit_idx < exit_loads.length { exit_value = exit_loads[exit_idx]; }
         if exit_value.length > 0 {
             let original = find_mutation_for_name(collected_mutations, name);
             let mut llvm_type: string = "";

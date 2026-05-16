@@ -452,10 +452,7 @@ fn parse_parameter_list(initial_parser: Parser) -> ParameterListParseResult {
         if separator.kind.variant == "EndOfFile" { break; }
     }
 
-    return ParameterListParseResult {
-        parser: parser,
-        parameters: parameters
-    };
+    return ParameterListParseResult { parser: parser, parameters: parameters };
 }
 
 fn parse_single_parameter(initial_parser: Parser) -> ParameterParseResult {
@@ -671,10 +668,7 @@ fn parse_specifier_list(initial_parser: Parser) -> SpecifierListParseResult {
         parser = parser_advance_raw(parser);
     }
 
-    return SpecifierListParseResult {
-        parser: parser,
-        specifiers: specifiers
-    };
+    return SpecifierListParseResult { parser: parser, specifiers: specifiers };
 }
 
 fn build_import_specifiers(values: NamedSpecifier[]) -> ImportSpecifier[] {

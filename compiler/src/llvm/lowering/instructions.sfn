@@ -47,11 +47,7 @@ import { lower_let_instruction } from "./instructions_let";
 import { append_loop_context, last_loop_context, lower_loop_instruction } from "./instructions_loops";
 import { lower_match_instruction } from "./instructions_match";
 import { lower_throw_instruction, lower_try_instruction } from "./instructions_try";
-import {
-    get_instruction_condition,
-    get_instruction_tag,
-    get_instruction_text
-} from "./lowering_native_helpers";
+import { get_instruction_condition, get_instruction_tag, get_instruction_text } from "./lowering_native_helpers";
 import { find_last_label } from "./phi";
 
 fn lower_instruction_range(function: NativeFunction, start_index: int, end: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {

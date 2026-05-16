@@ -435,9 +435,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     // Literal expressions.
     if is_boolean_literal(stripped) {
         let mut value = "0";
-        if matches_case_insensitive(trim_text(stripped), "true") {
-            value = "1";
-        }
+        if matches_case_insensitive(trim_text(stripped), "true") { value = "1"; }
         let operand = LLVMOperand { llvm_type: "i1", value: value };
         return ExpressionResult {
             lines: lines,
@@ -598,10 +596,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                     + "(%SailfinFutureVoid* "
                     + future_operand.value
                     + ")");
-                let out_operand = LLVMOperand {
-                    llvm_type: "void",
-                    value: ""
-                };
+                let out_operand = LLVMOperand { llvm_type: "void", value: "" };
                 return ExpressionResult {
                     lines: awaited_lines,
                     temp_index: lowered.temp_index,

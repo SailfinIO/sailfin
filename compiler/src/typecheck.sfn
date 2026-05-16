@@ -79,9 +79,7 @@ fn _filter_interface_declarations(statements: Statement[]) -> Statement[] {
     loop {
         if i >= statements.length { break; }
         let s = statements[i];
-        if strings_equal(s.variant, "InterfaceDeclaration") {
-            out.push(s);
-        }
+        if strings_equal(s.variant, "InterfaceDeclaration") { out.push(s); }
         i += 1;
     }
     return out;

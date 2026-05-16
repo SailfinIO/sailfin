@@ -315,9 +315,7 @@ fn write_llvm_ir(native_module: NativeModule, out_path: string) -> boolean ![io]
     // side-effecting call could have been silently dropped at the
     // unresolved-callee gate; writing the file would lie about
     // success.
-    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
-        return false;
-    }
+    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) { return false; }
     return write_llvm_lines_chunked(out_path, lines);
 }
 

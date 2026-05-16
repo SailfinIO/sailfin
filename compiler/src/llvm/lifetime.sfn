@@ -956,9 +956,7 @@ fn is_scope_descendant(parent: string, candidate: string) -> boolean {
 // Formatting Helpers
 // =============================================================================
 fn format_use_after_move_message(name: string, span: NativeSourceSpan?) -> string {
-    if span == null {
-        return "llvm lowering: use-after-move of `" + name + "`";
-    }
+    if span == null { return "llvm lowering: use-after-move of `" + name + "`"; }
     return "llvm lowering: use-after-move of `" + name + "` at "
         + format_span_location(span);
 }

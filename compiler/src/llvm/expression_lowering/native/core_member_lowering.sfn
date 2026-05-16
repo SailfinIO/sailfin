@@ -273,10 +273,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             variant_index += 1;
         }
 
-        let operand = LLVMOperand {
-            llvm_type: "i8*",
-            value: current_pointer
-        };
+        let operand = LLVMOperand { llvm_type: "i8*", value: current_pointer };
         return make_expression_result(current_lines, current_temp, operand, messages, enum_string_constants);
     }
 
@@ -680,10 +677,7 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                 + base_operand.value
                 + ", 1");
             current_temp += 1;
-            let operand = LLVMOperand {
-                llvm_type: "i64",
-                value: length_temp
-            };
+            let operand = LLVMOperand { llvm_type: "i64", value: length_temp };
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -709,10 +703,7 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                 + base_operand.value
                 + ")");
             current_temp += 1;
-            let operand = LLVMOperand {
-                llvm_type: "i64",
-                value: length_temp
-            };
+            let operand = LLVMOperand { llvm_type: "i64", value: length_temp };
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,

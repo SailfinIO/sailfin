@@ -523,9 +523,7 @@ fn escape_string_for_sailfin_literal(content: string) -> string {
         let mut esc: string = "";
         if ch == "\\" { esc = "\\\\"; } else if ch == "\"" { esc = "\\\""; } else if ch == "\n" {
             esc = "\\n";
-        } else if ch == "\r" { esc = "\\r"; } else if ch == "\t" {
-            esc = "\\t";
-        }
+        } else if ch == "\r" { esc = "\\r"; } else if ch == "\t" { esc = "\\t"; }
         if esc.length > 0 {
             if index > chunk_start {
                 chunks.push(substring(content, chunk_start, index));
