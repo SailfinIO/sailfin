@@ -178,7 +178,7 @@ struct DecoratorArgument {
 
 fn decorator_names(decorators: Decorator[]) -> string[] {
     let mut names: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= decorators.length { break; }
         names.push(decorators[index].name);
