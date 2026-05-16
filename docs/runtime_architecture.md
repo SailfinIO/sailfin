@@ -1387,7 +1387,8 @@ diagnostics. Coverage:
 
 ### 3.7 Numeric Types (`int` / `float`)
 
-**Status (2026-05-08): Slices A–D + E.1 shipped.** Annotated locals,
+**Status (2026-05-16): Slices A–D + E.1 + E.1.5 + E.2 + E.3a
+shipped; E.3b deferred to v0.6.1.** Annotated locals,
 parameters, and return types of type `int` and `float` lower
 correctly through the LLVM backend (Slice A). Bitwise / shift
 operators on integer-annotated operands lower to `and`/`or`/`xor`/
@@ -1400,15 +1401,28 @@ fix-it suggesting `x != 0` (Slice D). **Slice E.1 (#488):** bare
 unsuffixed integer literals default to `int` (i64); `: number`
 becomes a deprecated alias for `: float` (both lower to `double`)
 in every primitive type-mapping seam. `let x = 42; x + 1` lowers
-to `alloca i64`, `add i64`. The L2/L3 silent-widening rejection
-still rides on Slice E.3, which lands after E.2 migrates every
-`: number` annotation in `compiler/src/*.sfn` and
-`runtime/prelude.sfn` to the explicit `: int`/`: float` form;
-the lowered compiler/runtime code currently mixes i64 and double
-everywhere via the alias, so tightening `dominant_type` before
-the source migration breaks user code (canonical case:
-`for i in 0..arr.length` mixes a `: number` counter with the
-i64 length helper).
+to `alloca i64`, `add i64`. **Slice E.3a — integer-shaped
+`: number` migration completed 2026-05-16 (#567):** every
+`: number` / `-> number` site in `compiler/src/*.sfn` and
+`runtime/prelude.sfn` either flipped to its semantic `: int` /
+`: float` shape (per the decision artifact at
+`docs/proposals/slice-e3a-semantic-audit.md`) or carries a
+trailing `// alias-coverage:` marker documenting the opt-out
+(prelude shadows, C-ABI boundaries, the runtime `is_number`
+predicate, literal-text predicates in `core_text.sfn`, and the
+`Future`-mapping seam in `type_mapping.sfn`). The site-level audit
+returns zero. **The L2/L3 silent-widening rejection (the architect's
+`dominant_type` tightening) is now the only blocker for L2/L3
+closure and rides on Slice E.3b (the strict-refusal reapply
+tracked by #556), which picks up on the v0.6.0 seed and targets
+v0.6.1.** The sequencing constraint stated below for the original
+E.3 — that the rejection must not land while the lowered tree
+mixes i64 (`string.length`) and double (`: number` aliases) — is
+still active, now gating E.3b alone: after E.3a the residual
+mixed-kind boundaries are the documented alias-coverage seams,
+which E.3b's lockstep work clears with the canonical example
+(`for i in 0..arr.length` over a `: number` counter) no longer
+realisable in unmigrated form.
 
 **What ships in Slice A:**
 
@@ -1455,11 +1469,11 @@ i64 length helper).
 | # | Limitation | Consequence | Slice |
 |---|---|---|---|
 | L1 | ✅ **Closed for scalar context by Slice E.1 (2026-05-08, #488).** Bare unsuffixed integer literals at scalar position now default to `int` (i64). `let x = 42` produces `alloca i64`, `store i64 42`. Decimal/exponent literals stay on the `double` path; `: number` and `: float` annotations both map to `double` as deprecated and primary spellings of the floating-point type. Verified by `compiler/tests/e2e/test_numeric_int_default.sh` and `compiler/tests/unit/numeric_int_default_test.sfn`. **Carve-out:** unannotated array literals (`let xs = [1, 2, 3]`) still default to `double[]` so the existing `: number[]` corpus (compiler source, runtime/prelude.sfn, every test fixture that types arrays as `number[]`) keeps lowering without churn until E.2 migrates the source. After E.2 the array-literal default flips to match the scalar one. | E.1 (scalar closed; array carve-out documented) |
-| L2 | Mixed `int` + `float` silently coerces to `double` | `let x: int = 1; let y: float = 2.0; x + y` lowers to `fadd double` after silent fpext on the integer side. Truncates above 2^53. **Slice D ships the `as` cast escape valve so authors can spell the conversion explicitly today**; the silent-widening rejection itself rides on Slice E (without it, the lowered code mixes i64↔double everywhere — every `string.length` returns i64, every `: number` local is double — and the tightened `dominant_type` would break user code like `for i in 0..arr.length`). | E |
-| L3 | Comparison with un-annotated literal coerces to `double` | `let x: int = 42; x > 0` lowers to `fcmp ogt double` because `0` defaults to `double` and `dominant_type` widens both sides. **Slice D mitigation: spell the literal explicitly with `x > (0 as int)`**; the tightening that closes this implicitly rides on Slice E. | E |
+| L2 | Mixed `int` + `float` silently coerces to `double` | `let x: int = 1; let y: float = 2.0; x + y` lowers to `fadd double` after silent fpext on the integer side. Truncates above 2^53. Slice D shipped the `as` cast escape valve so authors can spell the conversion explicitly. E.3a (2026-05-16) eliminated the canonical break case (`for i in 0..arr.length` mixing `: number` counter with i64 length); the strict-refusal reapply rides on E.3b (#556) and targets v0.6.1. | E.3b |
+| L3 | Comparison with un-annotated literal coerces to `double` | `let x: int = 42; x > 0` lowers to `fcmp ogt double` because `0` defaults to `double` and `dominant_type` widens both sides. Slice D mitigation: spell the literal explicitly with `x > (0 as int)`. After E.3a's source migration the strict-refusal reapply (E.3b, #556) closes this on v0.6.1. | E.3b |
 | L4 | ✅ **Closed by Slice B (2026-05-02).** Bitwise operators (`&`, `|`, `^`, `<<`, `>>`) on integer-annotated operands lower to LLVM `and`/`or`/`xor`/`shl`/`ashr i64`. The pure-Sailfin SHA-256/Base64/flag manipulation paths can leave the C runtime in a follow-up M3 PR. Bitwise on `float`/`number` operands is still a footgun — `operation_name_for_symbol` returns empty when `llvm_type == "double"`, but the typecheck does not yet pre-reject it. Closing that gap rides on Slice E's broader int↔float disambiguation. | B (closed) |
 | L5 | Additional widths (`i16`, `u16`, `u32`, `u64`, `isize`, `f32`) in **user-level arithmetic** still funnel through `dominant_type` / `comparison_predicate_for_symbol`, neither of which knows about them — silent widening to `double` (or returning empty predicate strings) is the current behaviour. The **extern boundary** is no longer affected: Slice C (2026-05-02) admitted these widths into `map_primitive_type` and `is_extern_primitive_type`, so `extern fn ioctl(fd: i32, request: u64) -> i32;` lowers to `declare i32 @ioctl(i32, i64)` cleanly. Slice D's `as` casts give authors the escape valve (`x as i64` to align widths before arithmetic), so the remaining work — teaching `dominant_type`/`comparison_predicate_for_symbol` about the wider widths so they don't need explicit casts every time — is now optional polish, not a blocker. | E (polish, riding on `as` casts) |
-| L6 | `number` keyword still exists | Pre-1.0 alias for `double`; the compiler source still uses it everywhere. Migrating compiler source from `number` → `int`/`float` and retiring `number` entirely is the prerequisite for L1. | E |
+| L6 | `number` keyword still exists | Pre-1.0 alias for `double`. **Source migration completed in Slice E.3a (2026-05-16, #567):** every annotation in `compiler/src/*.sfn` and `runtime/prelude.sfn` either flipped to `: int`/`: float` or carries an `// alias-coverage:` opt-out marker. The keyword itself is retained until E.4 retires it after E.3b lands the strict-refusal regime on v0.6.1. | E.3a (source migration); E.4 (keyword removal) |
 
 **Follow-up slices in dependency order:**
 
@@ -1589,36 +1603,63 @@ i64 length helper).
        call-arg coerce site now passes `allow_widen=false`
        unconditionally. Verified by
        `compiler/tests/integration/numeric_abi_mismatch_test.sfn`.
-    3. **E.2 (in progress; #530, 2026-05-12):** The closed
-       instruction-lowering numeric cluster now spells its
+    3. **E.2 (#530, 2026-05-12):** The closed
+       instruction-lowering numeric cluster spelled its
        integer-shaped declarations as `: int` instead of
        `: number`: LLVM lowering result counters/offsets,
        lifetime depths/region IDs, native-IR and layout metadata,
        and the transitive statement/core-lowering consumers named
-       by #530. The audit intentionally leaves the prelude/tests,
-       future-seam files, and existing boundary casts for follow-up
-       E.2 sweeps. Remaining E.2 work continues to migrate every
-       other `: number` annotation in `compiler/src/*.sfn` and
-       `runtime/prelude.sfn` to `: int` or `: float` based on
-       actual usage. The migration is purely mechanical because
-       E.1's alias-as-float keeps every `: number` site lowering
-       as `double`. Each #489a–d PR rides on E.1.5's diagnostic
-       to fail loudly if it leaves the tree inconsistent — the
-       diagnostic must be in the seed, so cut a new alpha and
-       `/pin-seed` it before opening any #489a–d PR.
-    4. **E.3:** Reapply #296 (`dominant_type` rejection of silent
-       int/float coercion). The rejection lands once both sides
-       of every site agree on int-vs-float, which only holds
-       after E.2. Closes L2/L3.
-    5. **E.4:** Cut a release; delete `number` everywhere.
+       by #530. The audit intentionally left the prelude/tests,
+       future-seam files, and existing boundary casts for the
+       follow-up E.3a sweep.
+    4. **E.3a (2026-05-16; #555 split into #559–#567 plus #571,
+       #572, #576, #578, #579, #586, #601–#609 lockstep PRs):**
+       The remaining `: number` annotations in
+       `compiler/src/*.sfn`, `runtime/prelude.sfn`, and
+       `compiler/tests/**/*.sfn` migrated to explicit `: int` or
+       `: float` per the decision artifact at
+       `docs/proposals/slice-e3a-semantic-audit.md`. Site-level
+       opt-outs are tagged with trailing `// alias-coverage:`
+       markers: prelude shadows in
+       `compiler/src/cli_commands_utils.sfn` (`find_char`) and
+       `compiler/src/llvm/utils.sfn` (`number_to_string` /
+       `number_to_string` powers ladder); the C-ABI boundaries
+       `sailfin_cli_main` and `native_cli_main` in
+       `compiler/src/cli_main.sfn` (the C runtime declares them
+       as `double` returns); the runtime `is_number` type-guard
+       predicate at `runtime/prelude.sfn:471`; the literal-text
+       predicates in
+       `compiler/src/llvm/expression_lowering/native/core_text.sfn`;
+       and the `Future` mapping seam in
+       `compiler/src/llvm/type_mapping.sfn` and
+       `compiler/src/llvm/expression_lowering/native/statement_suspension.sfn`.
+       The slice picked up against E.1.5's warning regime (#550) —
+       the original parallel-safe disjoint-subtree assumption broke
+       on the `make_native_*_layout` family and the
+       `string_utils` ↔ `llvm/utils` shadow chain, so the bulk PRs
+       split into lockstep caller/callee micro-PRs (#579 →
+       #601–#606). Migration triggers the v0.6.0 seed bump
+       (alpha.16) and unblocks E.3b on that seed.
+    5. **E.3b (#556):** Reapply #296 (`dominant_type` rejection
+       of silent int/float coercion). Picks up on the v0.6.0
+       (alpha.16) seed and targets v0.6.1. The rejection lands
+       once every site agreed on int-vs-float through E.3a,
+       which is now the case. Closes L2/L3.
+    6. **E.4:** Cut a release; delete `number` everywhere.
 
-**Self-hosting safety (Slice A):** The compiler source uses
-`number` throughout; nothing in `compiler/src/*.sfn` uses `: float`
-or `: int` for control-flow loop counters. Adding `float` →
-`double` to `map_primitive_type` and admitting `int`/`float` in
-the extern accept-list is purely additive — no existing code path
-changes behaviour. Verified via `make compile && make test-unit
-&& make test-integration && make test-e2e` (all green).
+**Self-hosting safety (Slice A through E.3a):** Slice A landed
+additively — adding `float` → `double` to `map_primitive_type` and
+admitting `int`/`float` in the extern accept-list did not change
+any existing code path. Slices E.1 and E.1.5 layered the
+bare-literal default and the warning-regime ABI mismatch
+diagnostic without breaking the still-`: number` corpus. E.2 and
+E.3a then migrated the compiler source and runtime prelude to
+their semantic `: int` / `: float` shapes (or to `// alias-coverage`
+opt-outs at documented seams); every PR self-hosted under
+`make compile` and passed `make test-{unit,integration,e2e}` on
+the seed it picked up against, with the bulk-PR lockstep
+caller/callee splits (#579, #571 / #576) needed precisely to
+preserve self-hosting across cross-subtree boundaries.
 
 ### 3.8 Runtime Helper Registry Migration
 

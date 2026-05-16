@@ -82,9 +82,7 @@ struct TypeDescriptor {
 
 fn sleep(milliseconds: int) ![clock] { runtime_sleep_fn(milliseconds); }
 
-fn monotonic_millis() -> int ![clock] {
-    return runtime_monotonic_millis_fn();
-}
+fn monotonic_millis() -> int ![clock] { return runtime_monotonic_millis_fn(); }
 
 fn channel < T > (capacity: int = 0) -> any ![io] {
     return runtime_channel_fn(capacity);
@@ -504,9 +502,7 @@ fn check_type_descriptor(value: any, descriptor: TypeDescriptor) -> boolean {
         return descriptor.items.length > 0;
     }
     if descriptor.kind == "array" {
-        if descriptor.items.length == 0 {
-            return runtime_is_array_fn(value);
-        }
+        if descriptor.items.length == 0 { return runtime_is_array_fn(value); }
         if !runtime_is_array_fn(value) { return false; }
         let element_descriptor = descriptor.items[0];
         let mut index = 0;
@@ -519,9 +515,7 @@ fn check_type_descriptor(value: any, descriptor: TypeDescriptor) -> boolean {
         }
         return true;
     }
-    if descriptor.kind == "function" {
-        return runtime_is_callable_fn(value);
-    }
+    if descriptor.kind == "function" { return runtime_is_callable_fn(value); }
     if descriptor.kind == "named" {
         if descriptor.name == null { return false; }
         let resolved = runtime_resolve_runtime_type_fn(descriptor.name);
