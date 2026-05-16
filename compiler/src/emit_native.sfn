@@ -97,7 +97,7 @@ fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNa
     state = state_emit_line(state, module_line);
     if program.statements.length > 0 { state = state_emit_blank(state); }
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
         state = emit_statement(state, program.statements[index]);
@@ -141,7 +141,7 @@ fn emit_native_text_with_module_name(program: Program, module_name: string) -> s
     state = state_emit_line(state, module_line);
     if program.statements.length > 0 { state = state_emit_blank(state); }
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
         state = emit_statement(state, program.statements[index]);
@@ -421,7 +421,7 @@ fn emit_interface(state: NativeState, statement: Statement) -> NativeState {
     header = header + format_type_parameters(statement.type_parameters);
     current = state_emit_line(current, header);
     current = state_push_indent(current);
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= statement.members.length { break; }
         let signature = statement.members[index];
@@ -444,7 +444,7 @@ fn emit_enum(state: NativeState, statement: Statement) -> NativeState {
     current = emit_layout_lines(current, enum_layout.lines);
     current = state_push_indent(current);
     current = state_merge_diagnostics(current, enum_layout.diagnostics);
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= statement.variants.length { break; }
         current = state_emit_line(current, ".variant " + format_enum_variant(statement.variants[index]));
@@ -470,14 +470,14 @@ fn emit_struct(state: NativeState, statement: Statement) -> NativeState {
     current = state_push_indent(current);
     current = state_merge_diagnostics(current, struct_layout.diagnostics);
 
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= statement.fields.length { break; }
         current = state_emit_line(current, ".field " + format_field(statement.fields[index]));
         index += 1;
     }
 
-    let mut method_index: number = 0;
+    let mut method_index: int = 0;
     loop {
         if method_index >= statement.methods.length { break; }
         current = emit_method(current, statement.methods[method_index]);
@@ -508,7 +508,7 @@ fn emit_method(state: NativeState, method: MethodDeclaration) -> NativeState {
 fn emit_with(state: NativeState, statement: Statement) -> NativeState {
     let mut current = emit_decorators(state, statement.decorators);
     let mut line: string = ".with ";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= statement.clauses.length { break; }
         if index > 0 { line = line + ", "; }
@@ -546,7 +546,7 @@ fn emit_match(state: NativeState, statement: Statement) -> NativeState {
     let mut current = emit_decorators(state, statement.decorators);
     current = state_emit_line(current, ".match " + format_expression(statement.expression));
     current = state_push_indent(current);
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= statement.cases.length { break; }
         current = emit_match_case(current, statement.cases[index]);
@@ -629,7 +629,7 @@ fn emit_block(state: NativeState, block: Block) -> NativeState {
         return state_emit_line(state, "noop");
     }
     let mut current = state;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= block.statements.length { break; }
         current = emit_statement(current, block.statements[index]);
@@ -640,7 +640,7 @@ fn emit_block(state: NativeState, block: Block) -> NativeState {
 
 fn emit_decorators(state: NativeState, decorators: Decorator[]) -> NativeState {
     let mut current = state;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= decorators.length { break; }
         current = state_emit_line(current, ".decorator " + format_decorator(decorators[index]));
@@ -667,7 +667,7 @@ fn emit_signature_metadata(state: NativeState, signature: FunctionSignature) -> 
 
 fn emit_parameter_metadata(state: NativeState, parameters: Parameter[]) -> NativeState {
     let mut current = state;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= parameters.length { break; }
         let parameter = parameters[index];
@@ -690,7 +690,7 @@ fn emit_parameter_metadata(state: NativeState, parameters: Parameter[]) -> Nativ
 // ── Symbol helpers ───────────────────────────────────────────────────
 fn collect_entry_points(program: Program) -> string[] {
     let mut entries: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
         let statement = program.statements[index];
@@ -730,7 +730,7 @@ fn is_test_symbol_char(ch: string) -> boolean {
 fn sanitize_test_name_for_symbol(name: string) -> string {
     if name.length == 0 { return "unnamed"; }
     let mut out: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= name.length { break; }
         let ch = name[index];
@@ -755,7 +755,7 @@ fn test_function_symbol(test_name: string) -> string {
 
 fn count_exported_symbols(program: Program) -> int {
     let mut count: int = 0;
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
         let stmt = program.statements[index];
@@ -787,13 +787,13 @@ fn count_exported_symbols(program: Program) -> int {
 fn collect_reexport_violations(program: Program) -> string[] {
     let local_defs = collect_local_definition_names(program);
     let mut violations: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
         let statement = program.statements[index];
         if statement.variant == "ExportDeclaration" {
             if statement.source.length == 0 {
-                let mut spec_index: number = 0;
+                let mut spec_index: int = 0;
                 loop {
                     if spec_index >= statement.export_specifiers.length {
                         break;
@@ -818,7 +818,7 @@ fn collect_reexport_violations(program: Program) -> string[] {
 
 fn collect_local_definition_names(program: Program) -> string[] {
     let mut names: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
         let stmt = program.statements[index];
@@ -856,12 +856,12 @@ fn collect_local_definition_names(program: Program) -> string[] {
 // otherwise the original name).  Returns "" if no matching import is
 // found.
 fn find_local_import_source(program: Program, name: string) -> string {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
         let stmt = program.statements[index];
         if stmt.variant == "ImportDeclaration" {
-            let mut spec_index: number = 0;
+            let mut spec_index: int = 0;
             loop {
                 if spec_index >= stmt.import_specifiers.length { break; }
                 let spec = stmt.import_specifiers[spec_index];
@@ -912,7 +912,7 @@ fn format_reexport_violation(symbol: string, origin: string) -> string {
 }
 
 fn report_reexport_violations(violations: string[]) ![io] {
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= violations.length { break; }
         print.err("[emit-native] " + violations[index]);

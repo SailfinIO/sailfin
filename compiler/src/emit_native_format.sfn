@@ -74,7 +74,7 @@ fn format_expression(expression: Expression) -> string {
     }
     if expression.variant == "Call" {
         let mut rendered: string[] = [];
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= expression.arguments.length { break; }
             rendered.push(format_expression(expression.arguments[index]));
@@ -92,7 +92,7 @@ fn format_expression(expression: Expression) -> string {
     }
     if expression.variant == "Object" {
         let mut rendered: string[] = [];
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
             let field = expression.fields[index];
@@ -103,7 +103,7 @@ fn format_expression(expression: Expression) -> string {
     }
     if expression.variant == "Struct" {
         let mut rendered: string[] = [];
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
             let field = expression.fields[index];
@@ -135,7 +135,7 @@ fn format_expression(expression: Expression) -> string {
         // Multi-line expressions cause null array literals in the LLVM
         // lowering due to instruction gathering issues in the compiled binary.
         let mut normalized: string = "";
-        let mut ri: number = 0;
+        let mut ri: int = 0;
         loop {
             if ri >= raw_text.length { break; }
             let rch = raw_text[ri];
@@ -155,7 +155,7 @@ fn format_expression(expression: Expression) -> string {
 fn format_array_expression(elements: Expression[]) -> string {
     let annotation = infer_array_element_type(elements);
     let mut rendered: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= elements.length { break; }
         rendered.push(format_expression(elements[index]));
@@ -173,7 +173,7 @@ fn format_array_expression(elements: Expression[]) -> string {
 fn infer_array_element_type(elements: Expression[]) -> string {
     if elements.length == 0 { return ""; }
     let mut candidate: string = "";
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= elements.length { break; }
         let element_type = infer_expression_type(elements[index]);
@@ -250,7 +250,7 @@ fn format_function_signature(signature: FunctionSignature) -> string {
 fn format_parameters(parameters: Parameter[]) -> string {
     if parameters.length == 0 { return ""; }
     let mut parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= parameters.length { break; }
         let parameter = parameters[index];
@@ -273,7 +273,7 @@ fn format_parameters(parameters: Parameter[]) -> string {
 fn format_type_parameters(parameters: TypeParameter[]) -> string {
     if parameters.length == 0 { return ""; }
     let mut parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= parameters.length { break; }
         let parameter = parameters[index];
@@ -298,7 +298,7 @@ fn format_field(field: FieldDeclaration) -> string {
 fn format_enum_variant(variant: EnumVariant) -> string {
     if variant.fields.length == 0 { return variant.name; }
     let mut parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= variant.fields.length { break; }
         parts.push(format_field(variant.fields[index]));
@@ -312,7 +312,7 @@ fn format_decorator(decorator: Decorator) -> string {
     let mut line: string = "@" + decorator.name;
     if decorator.arguments.length == 0 { return line; }
     let mut parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= decorator.arguments.length { break; }
         let argument = decorator.arguments[index];
@@ -345,7 +345,7 @@ fn format_native_specifier(name: string, alias: string?) -> string {
 
 fn render_native_specifiers(specifiers: ImportSpecifier[]) -> string {
     let mut parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= specifiers.length { break; }
         parts.push(format_native_specifier(specifiers[index].name, specifiers[index].alias));
@@ -356,7 +356,7 @@ fn render_native_specifiers(specifiers: ImportSpecifier[]) -> string {
 
 fn render_export_specifiers(specifiers: ExportSpecifier[]) -> string {
     let mut parts: string[] = [];
-    let mut index: number = 0;
+    let mut index: int = 0;
     loop {
         if index >= specifiers.length { break; }
         parts.push(format_native_specifier(specifiers[index].name, specifiers[index].alias));
