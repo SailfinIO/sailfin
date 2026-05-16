@@ -20,7 +20,6 @@ import {
 } from "./utils";
 
 fn clamp_collection_length(value: int, max: int) -> int {
-    if value != value { return 0; }
     if value < 0 { return 0; }
     if value > max { return max; }
     return value;

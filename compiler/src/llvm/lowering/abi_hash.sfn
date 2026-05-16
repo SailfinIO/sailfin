@@ -284,8 +284,10 @@ fn _div_mod_small(limb: int, carry: int, divisor: int) -> _AbiDivMod {
     return _AbiDivMod { q: q as int, r: rem as int };
 }
 
-// Small-value decimal formatter (value < 10000 in practice; safe up to
-// the i64 range).
+// Small non-negative decimal formatter. Callers in this file pass a
+// `mod 10000` remainder, so `value` is always in [0, 9999]. The inner
+// loop is O(value) repeated subtraction, which is fine at that scale
+// but unsuitable for general use; negative inputs silently return "".
 fn _decimal_string(value: int) -> string {
     if value == 0 { return "0"; }
     let digits = "0123456789";
