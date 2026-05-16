@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/sync"
-version = "0.1.1"
+version = "0.1.2"
 description = "Concurrency and synchronization primitives for Sailfin"
 
 [dependencies]
