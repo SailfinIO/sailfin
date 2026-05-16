@@ -75,7 +75,7 @@ fn typecheck_diagnostics_with_imports(program: Program, imported_interfaces: Sta
 
 fn _filter_interface_declarations(statements: Statement[]) -> Statement[] {
     let mut out: Statement[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= statements.length { break; }
         let s = statements[i];
@@ -87,7 +87,7 @@ fn _filter_interface_declarations(statements: Statement[]) -> Statement[] {
     return out;
 }
 
-fn typecheck_error_count(program: Program) -> number {
+fn typecheck_error_count(program: Program) -> int {
     let diagnostics = typecheck_diagnostics(program);
     return diagnostics.length;
 }
@@ -115,7 +115,7 @@ fn collect_top_level_symbols(program: Program) -> SymbolCollectionResult {
     for statement in program.statements {
         let result = register_top_level_symbol(statement, symbols);
         symbols = result.symbols;
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= result.diagnostics.length { break; }
             diagnostics.push(result.diagnostics[_ci]);
@@ -164,7 +164,7 @@ fn check_program_scopes(program: Program, interfaces: Statement[]) -> Diagnostic
     for statement in program.statements {
         let result = check_statement(statement, bindings, interfaces, 0);
         bindings = result.bindings;
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= result.diagnostics.length { break; }
             diagnostics.push(result.diagnostics[_ci]);
@@ -180,7 +180,7 @@ fn check_program_scopes(program: Program, interfaces: Statement[]) -> Diagnostic
 // it as the parent-bindings length after `clone_bindings`, so a `let x` in a
 // nested block can shadow an enclosing `let x` without tripping E0001. Top-
 // level and recursive same-frame callers pass it through unchanged.
-fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: Statement[], scope_start: number) -> ScopeResult {
+fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: Statement[], scope_start: int) -> ScopeResult {
     if statement.variant == "VariableDeclaration" {
         return register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start);
     }
@@ -188,21 +188,21 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         let registration = register_local_symbol(bindings, statement.signature.name, "function", statement.signature.name_span, scope_start);
         let mut diagnostics = registration.diagnostics;
         let _sig_diags = check_function_signature(statement.signature);
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= _sig_diags.length { break; }
             diagnostics.push(_sig_diags[_ci]);
             _ci += 1;
         }
         let _main_diags = _validate_main_signature(statement.signature);
-        let mut _cim: number = 0;
+        let mut _cim: int = 0;
         loop {
             if _cim >= _main_diags.length { break; }
             diagnostics.push(_main_diags[_cim]);
             _cim += 1;
         }
         let function_diagnostics = check_function_body(statement.signature, statement.body, interfaces);
-        let mut _ci2: number = 0;
+        let mut _ci2: int = 0;
         loop {
             if _ci2 >= function_diagnostics.length { break; }
             diagnostics.push(function_diagnostics[_ci2]);
@@ -217,7 +217,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         let registration = register_local_symbol(bindings, statement.signature.name, "extern function", statement.signature.name_span, scope_start);
         let mut diagnostics = registration.diagnostics;
         let _sig_diags = check_extern_signature(statement.signature);
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= _sig_diags.length { break; }
             diagnostics.push(_sig_diags[_ci]);
@@ -232,39 +232,39 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         let registration = register_local_symbol(bindings, statement.name, "struct", statement.name_span, scope_start);
         let mut diagnostics = registration.diagnostics;
         let _tp_diags = check_type_parameters(statement.type_parameters);
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= _tp_diags.length { break; }
             diagnostics.push(_tp_diags[_ci]);
             _ci += 1;
         }
         let _sf_diags = check_struct_fields(statement.fields);
-        let mut _ci2: number = 0;
+        let mut _ci2: int = 0;
         loop {
             if _ci2 >= _sf_diags.length { break; }
             diagnostics.push(_sf_diags[_ci2]);
             _ci2 += 1;
         }
         let _sm_diags = check_struct_methods(statement.methods);
-        let mut _ci3: number = 0;
+        let mut _ci3: int = 0;
         loop {
             if _ci3 >= _sm_diags.length { break; }
             diagnostics.push(_sm_diags[_ci3]);
             _ci3 += 1;
         }
         let _si_diags = check_struct_implements_interfaces(statement, interfaces);
-        let mut _ci4: number = 0;
+        let mut _ci4: int = 0;
         loop {
             if _ci4 >= _si_diags.length { break; }
             diagnostics.push(_si_diags[_ci4]);
             _ci4 += 1;
         }
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= statement.methods.length { break; }
             let method = statement.methods[index];
             let _mb_diags = check_function_body(method.signature, method.body, interfaces);
-            let mut _ci5: number = 0;
+            let mut _ci5: int = 0;
             loop {
                 if _ci5 >= _mb_diags.length { break; }
                 diagnostics.push(_mb_diags[_ci5]);
@@ -281,14 +281,14 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         let registration = register_local_symbol(bindings, statement.name, "enum", statement.name_span, scope_start);
         let mut diagnostics = registration.diagnostics;
         let _tp_diags = check_type_parameters(statement.type_parameters);
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= _tp_diags.length { break; }
             diagnostics.push(_tp_diags[_ci]);
             _ci += 1;
         }
         let _ev_diags = check_enum_variants(statement.variants);
-        let mut _ci2: number = 0;
+        let mut _ci2: int = 0;
         loop {
             if _ci2 >= _ev_diags.length { break; }
             diagnostics.push(_ev_diags[_ci2]);
@@ -303,14 +303,14 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         let registration = register_local_symbol(bindings, statement.name, "interface", statement.name_span, scope_start);
         let mut diagnostics = registration.diagnostics;
         let _tp_diags = check_type_parameters(statement.type_parameters);
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= _tp_diags.length { break; }
             diagnostics.push(_tp_diags[_ci]);
             _ci += 1;
         }
         let _im_diags = check_interface_members(statement.members);
-        let mut _ci2: number = 0;
+        let mut _ci2: int = 0;
         loop {
             if _ci2 >= _im_diags.length { break; }
             diagnostics.push(_im_diags[_ci2]);
@@ -325,7 +325,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         let registration = register_local_symbol(bindings, statement.name, "test", statement.name_span, scope_start);
         let mut diagnostics = registration.diagnostics;
         let _blk_diags = check_block(statement.body, [], interfaces);
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= _blk_diags.length { break; }
             diagnostics.push(_blk_diags[_ci]);
@@ -350,12 +350,12 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
     }
     if statement.variant == "MatchStatement" {
         let mut diagnostics: Diagnostic[] = [];
-        let mut index: number = 0;
+        let mut index: int = 0;
         loop {
             if index >= statement.cases.length { break; }
             let case = statement.cases[index];
             let _blk_diags = check_block(case.body, bindings, interfaces);
-            let mut _ci: number = 0;
+            let mut _ci: int = 0;
             loop {
                 if _ci >= _blk_diags.length { break; }
                 diagnostics.push(_blk_diags[_ci]);
@@ -371,7 +371,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             let branch = statement.else_branch;
             if branch.body != null {
                 let _blk_diags = check_block(branch.body, bindings, interfaces);
-                let mut _ci: number = 0;
+                let mut _ci: int = 0;
                 loop {
                     if _ci >= _blk_diags.length { break; }
                     diagnostics.push(_blk_diags[_ci]);
@@ -380,7 +380,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             }
             if branch.statement != null {
                 let result = check_statement(branch.statement, bindings, interfaces, scope_start);
-                let mut _ci2: number = 0;
+                let mut _ci2: int = 0;
                 loop {
                     if _ci2 >= result.diagnostics.length { break; }
                     diagnostics.push(result.diagnostics[_ci2]);
@@ -400,7 +400,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         let registration = register_local_symbol(bindings, statement.name, "type", statement.name_span, scope_start);
         let mut diagnostics = registration.diagnostics;
         let _tp_diags = check_type_parameters(statement.type_parameters);
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= _tp_diags.length { break; }
             diagnostics.push(_tp_diags[_ci]);
@@ -435,7 +435,7 @@ fn check_function_body(signature: FunctionSignature, body: Block, interfaces: St
     let parameter_scope = seed_parameter_scope(signature);
     let body_diagnostics = check_block(body, parameter_scope.bindings, interfaces);
     let mut _result = parameter_scope.diagnostics;
-    let mut _ci: number = 0;
+    let mut _ci: int = 0;
     loop {
         if _ci >= body_diagnostics.length { break; }
         _result.push(body_diagnostics[_ci]);
@@ -451,7 +451,7 @@ fn seed_parameter_scope(signature: FunctionSignature) -> ScopeResult {
     for parameter in signature.parameters {
         let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span, 0);
         bindings = registration.bindings;
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= registration.diagnostics.length { break; }
             diagnostics.push(registration.diagnostics[_ci]);
@@ -470,7 +470,7 @@ fn check_block(block: Block, parent_bindings: SymbolEntry[], interfaces: Stateme
     for statement in block.statements {
         let result = check_statement(statement, bindings, interfaces, scope_start);
         bindings = result.bindings;
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= result.diagnostics.length { break; }
             diagnostics.push(result.diagnostics[_ci]);
@@ -494,7 +494,7 @@ fn check_block(block: Block, parent_bindings: SymbolEntry[], interfaces: Stateme
 //   - `fn main(argv: string[])` — argv is forwarded as a Sailfin slice
 //
 // Trailing return type and effect set are intentionally not validated
-// here. Existing examples and tests use a mix (`-> number`, `-> void`,
+// here. Existing examples and tests use a mix (`-> number`, `-> void`,  // alias-coverage: doc string references legacy `-> number` as accepted main-signature return type (see typecheck_main_signature_test.sfn)
 // no return type, `![io]`, `![net]`, `![unsafe, io]`, …) and the
 // effect-checker already gates body operations against the declared
 // set. Restricting the return type or the effect taxonomy here would
@@ -543,7 +543,7 @@ fn _validate_main_signature(signature: FunctionSignature) -> Diagnostic[] {
 // doesn't need a `string_utils` round-trip — `trim_text` is module-
 // private across the compiler today.
 fn _trim_main_type_text(text: string) -> string {
-    let mut start: number = 0;
+    let mut start: int = 0;
     let mut end = text.length;
     loop {
         if start >= end { break; }

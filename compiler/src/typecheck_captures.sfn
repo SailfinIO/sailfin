@@ -100,7 +100,7 @@ struct CaptureWalkResult {
 fn analyze_lambda_captures(program: Program) -> LambdaCaptureRecord[] {
     let mut scope: LocalBinding[] = [];
     let mut records: LambdaCaptureRecord[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= program.statements.length { break; }
         let stmt = program.statements[i];
@@ -128,7 +128,7 @@ fn walk_top_statement(scope: LocalBinding[], stmt: Statement) -> CaptureWalkResu
     }
     if stmt.variant == "StructDeclaration" {
         let mut records: LambdaCaptureRecord[] = [];
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= stmt.methods.length { break; }
             let method = stmt.methods[i];
@@ -151,7 +151,7 @@ fn walk_block(scope: LocalBinding[], block: Block) -> CaptureWalkResult {
     let mut free: string[] = [];
     let mut local: LocalBinding[] = [];
     let mut records: LambdaCaptureRecord[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= block.statements.length { break; }
         let stmt = block.statements[i];
@@ -224,7 +224,7 @@ fn walk_statement(scope: LocalBinding[], stmt: Statement) -> CaptureWalkResult {
     }
     if stmt.variant == "MatchStatement" {
         let mut result = walk_expression(scope, stmt.expression);
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= stmt.cases.length { break; }
             let case = stmt.cases[i];
@@ -239,7 +239,7 @@ fn walk_statement(scope: LocalBinding[], stmt: Statement) -> CaptureWalkResult {
     }
     if stmt.variant == "WithStatement" {
         let mut result = walk_block(scope, stmt.body);
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= stmt.clauses.length { break; }
             result = merge_results(result, walk_expression(scope, stmt.clauses[i].expression));
@@ -314,7 +314,7 @@ fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWal
     }
     if expression.variant == "Call" {
         let mut result = walk_expression(scope, expression.callee);
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= expression.arguments.length { break; }
             result = merge_results(result, walk_expression(scope, expression.arguments[i]));
@@ -324,7 +324,7 @@ fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWal
     }
     if expression.variant == "Array" {
         let mut result = empty_walk_result();
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= expression.elements.length { break; }
             result = merge_results(result, walk_expression(scope, expression.elements[i]));
@@ -334,7 +334,7 @@ fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWal
     }
     if expression.variant == "Object" {
         let mut result = empty_walk_result();
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= expression.fields.length { break; }
             result = merge_results(result, walk_expression(scope, expression.fields[i].value));
@@ -344,7 +344,7 @@ fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWal
     }
     if expression.variant == "Struct" {
         let mut result = empty_walk_result();
-        let mut i: number = 0;
+        let mut i: int = 0;
         loop {
             if i >= expression.fields.length { break; }
             result = merge_results(result, walk_expression(scope, expression.fields[i].value));
@@ -406,7 +406,7 @@ fn body_start_column(body: Block) -> int {
 
 fn extend_with_catch_name(scope: LocalBinding[], catch_name: string?) -> LocalBinding[] {
     let mut out: LocalBinding[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= scope.length { break; }
         out.push(scope[i]);
@@ -433,7 +433,7 @@ fn catch_name_as_list(catch_name: string?) -> string[] {
 // ----- Capture construction & scope helpers -----
 fn build_captures(outer_scope: LocalBinding[], free_names: string[]) -> Capture[] {
     let mut captures: Capture[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= free_names.length { break; }
         let name = free_names[i];
@@ -450,7 +450,7 @@ fn build_captures(outer_scope: LocalBinding[], free_names: string[]) -> Capture[
 
 fn find_binding(scope: LocalBinding[], name: string) -> LocalBinding? {
     let mut found: LocalBinding? = null;
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= scope.length { break; }
         if strings_equal(scope[i].name, name) { found = scope[i]; }
@@ -483,13 +483,13 @@ fn binding_from_let(stmt: Statement) -> LocalBinding {
 
 fn extend_with_parameters(scope: LocalBinding[], parameters: Parameter[]) -> LocalBinding[] {
     let mut out: LocalBinding[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= scope.length { break; }
         out.push(scope[i]);
         i += 1;
     }
-    let mut j: number = 0;
+    let mut j: int = 0;
     loop {
         if j >= parameters.length { break; }
         out.push(binding_from_parameter(parameters[j]));
@@ -500,7 +500,7 @@ fn extend_with_parameters(scope: LocalBinding[], parameters: Parameter[]) -> Loc
 
 fn extend_with_for_target(scope: LocalBinding[], target: Expression) -> LocalBinding[] {
     let mut out: LocalBinding[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= scope.length { break; }
         out.push(scope[i]);
@@ -522,7 +522,7 @@ fn for_target_name(target: Expression) -> string {
 
 fn append_binding(scope: LocalBinding[], binding: LocalBinding) -> LocalBinding[] {
     let mut out: LocalBinding[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= scope.length { break; }
         out.push(scope[i]);
@@ -534,13 +534,13 @@ fn append_binding(scope: LocalBinding[], binding: LocalBinding) -> LocalBinding[
 
 fn concat_bindings(a: LocalBinding[], b: LocalBinding[]) -> LocalBinding[] {
     let mut out: LocalBinding[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= a.length { break; }
         out.push(a[i]);
         i += 1;
     }
-    let mut j: number = 0;
+    let mut j: int = 0;
     loop {
         if j >= b.length { break; }
         out.push(b[j]);
@@ -551,7 +551,7 @@ fn concat_bindings(a: LocalBinding[], b: LocalBinding[]) -> LocalBinding[] {
 
 fn binding_names(bindings: LocalBinding[]) -> string[] {
     let mut out: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= bindings.length { break; }
         out.push(bindings[i].name);
@@ -562,7 +562,7 @@ fn binding_names(bindings: LocalBinding[]) -> string[] {
 
 fn parameter_names(parameters: Parameter[]) -> string[] {
     let mut out: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= parameters.length { break; }
         out.push(parameters[i].name);
@@ -607,13 +607,13 @@ fn merge_results(a: CaptureWalkResult, b: CaptureWalkResult) -> CaptureWalkResul
 
 fn union_names(a: string[], b: string[]) -> string[] {
     let mut out: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= a.length { break; }
         out.push(a[i]);
         i += 1;
     }
-    let mut j: number = 0;
+    let mut j: int = 0;
     loop {
         if j >= b.length { break; }
         if !contains_name(out, b[j]) { out.push(b[j]); }
@@ -624,7 +624,7 @@ fn union_names(a: string[], b: string[]) -> string[] {
 
 fn subtract_names(names: string[], exclude: string[]) -> string[] {
     let mut out: string[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= names.length { break; }
         if !contains_name(exclude, names[i]) { out.push(names[i]); }
@@ -634,7 +634,7 @@ fn subtract_names(names: string[], exclude: string[]) -> string[] {
 }
 
 fn contains_name(names: string[], name: string) -> boolean {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= names.length { break; }
         if strings_equal(names[i], name) { return true; }
@@ -645,13 +645,13 @@ fn contains_name(names: string[], name: string) -> boolean {
 
 fn append_records(a: LambdaCaptureRecord[], b: LambdaCaptureRecord[]) -> LambdaCaptureRecord[] {
     let mut out: LambdaCaptureRecord[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= a.length { break; }
         out.push(a[i]);
         i += 1;
     }
-    let mut j: number = 0;
+    let mut j: int = 0;
     loop {
         if j >= b.length { break; }
         out.push(b[j]);

@@ -84,7 +84,7 @@ fn check_struct_implements_interfaces(statement: Statement, interfaces: Statemen
     if statement.implements_types.length == 0 { return []; }
 
     let mut method_names: string[] = [];
-    let mut _mi: number = 0;
+    let mut _mi: int = 0;
     loop {
         if _mi >= statement.methods.length { break; }
         method_names.push(statement.methods[_mi].signature.name);
@@ -92,7 +92,7 @@ fn check_struct_implements_interfaces(statement: Statement, interfaces: Statemen
     }
 
     let mut diagnostics: Diagnostic[] = [];
-    let mut _ai: number = 0;
+    let mut _ai: int = 0;
     loop {
         if _ai >= statement.implements_types.length { break; }
         let annotation = statement.implements_types[_ai];
@@ -100,13 +100,13 @@ fn check_struct_implements_interfaces(statement: Statement, interfaces: Statemen
         if interface_definition == null { continue; }
         let interface_name = interface_definition.name;
         let _via_diags = validate_interface_annotation(statement.name, interface_definition, annotation);
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= _via_diags.length { break; }
             diagnostics.push(_via_diags[_ci]);
             _ci += 1;
         }
-        let mut _mbi: number = 0;
+        let mut _mbi: int = 0;
         loop {
             if _mbi >= interface_definition.members.length { break; }
             let member = interface_definition.members[_mbi];
@@ -123,7 +123,7 @@ fn check_struct_implements_interfaces(statement: Statement, interfaces: Statemen
 
 fn resolve_interface_annotation(annotation: TypeAnnotation, interfaces: Statement[]) -> Statement? {
     let text = annotation.text;
-    let mut _ii: number = 0;
+    let mut _ii: int = 0;
     loop {
         if _ii >= interfaces.length { break; }
         let iface = interfaces[_ii];
@@ -140,7 +140,7 @@ fn check_struct_fields(fields: FieldDeclaration[]) -> Diagnostic[] {
     let mut seen: string[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
-    let mut _fi: number = 0;
+    let mut _fi: int = 0;
     loop {
         if _fi >= fields.length { break; }
         let field = fields[_fi];
@@ -177,7 +177,7 @@ fn validate_interface_annotation(struct_name: string, interface_definition: Stat
 
 fn format_interface_signature(interface_definition: Statement) -> string {
     let mut names: string[] = [];
-    let mut _pi: number = 0;
+    let mut _pi: int = 0;
     loop {
         if _pi >= interface_definition.type_parameters.length { break; }
         names.push(interface_definition.type_parameters[_pi].name);
@@ -191,7 +191,7 @@ fn format_interface_signature(interface_definition: Statement) -> string {
 fn join_with_separator(items: string[], separator: string) -> string {
     if items.length == 0 { return ""; }
     let mut result = items[0];
-    let mut index: number = 1;
+    let mut index: int = 1;
     loop {
         if index >= items.length { break; }
         result = result + separator + items[index];
@@ -208,9 +208,9 @@ fn parse_type_arguments(annotation_text: string) -> string[] {
 
 fn extract_generic_argument_block(annotation_text: string) -> string? {
     let trimmed = trim_text(annotation_text);
-    let mut index: number = 0;
-    let mut depth: number = 0;
-    let mut start_index: number = -1;
+    let mut index: int = 0;
+    let mut depth: int = 0;
+    let mut start_index: int = -1;
     loop {
         if index >= trimmed.length { break; }
         let ch = trimmed[index];
@@ -232,8 +232,8 @@ fn extract_generic_argument_block(annotation_text: string) -> string? {
 fn split_generic_argument_list(block: string) -> string[] {
     let mut arguments: string[] = [];
     let mut current: string = "";
-    let mut depth: number = 0;
-    let mut index: number = 0;
+    let mut depth: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= block.length { break; }
         let ch = block[index];
@@ -261,8 +261,8 @@ fn split_generic_argument_list(block: string) -> string[] {
 }
 
 fn trim_text(value: string) -> string {
-    let mut start: number = 0;
-    let mut end: number = value.length;
+    let mut start: int = 0;
+    let mut end: int = value.length;
     loop {
         if start >= end { break; }
         if is_whitespace(value[start]) {
@@ -282,9 +282,9 @@ fn trim_text(value: string) -> string {
     return slice_text(value, start, end);
 }
 
-fn slice_text(value: string, start: number, end: number) -> string {
-    let mut normalized_start: number = start;
-    let mut normalized_end: number = end;
+fn slice_text(value: string, start: int, end: int) -> string {
+    let mut normalized_start: int = start;
+    let mut normalized_end: int = end;
 
     if normalized_start < 0 { normalized_start = 0; }
     if normalized_end > value.length { normalized_end = value.length; }
@@ -312,12 +312,12 @@ fn check_struct_methods(methods: MethodDeclaration[]) -> Diagnostic[] {
     let mut seen: string[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
-    let mut _mi: number = 0;
+    let mut _mi: int = 0;
     loop {
         if _mi >= methods.length { break; }
         let method = methods[_mi];
         let _sig_diags = check_function_signature(method.signature);
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= _sig_diags.length { break; }
             diagnostics.push(_sig_diags[_ci]);
@@ -337,7 +337,7 @@ fn check_enum_variants(variants: EnumVariant[]) -> Diagnostic[] {
     let mut seen: string[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
-    let mut _vi: number = 0;
+    let mut _vi: int = 0;
     loop {
         if _vi >= variants.length { break; }
         let variant = variants[_vi];
@@ -355,12 +355,12 @@ fn check_interface_members(members: FunctionSignature[]) -> Diagnostic[] {
     let mut seen: string[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
-    let mut _mbi: number = 0;
+    let mut _mbi: int = 0;
     loop {
         if _mbi >= members.length { break; }
         let member = members[_mbi];
         let _sig_diags = check_function_signature(member);
-        let mut _ci: number = 0;
+        let mut _ci: int = 0;
         loop {
             if _ci >= _sig_diags.length { break; }
             diagnostics.push(_sig_diags[_ci]);
@@ -426,7 +426,7 @@ fn check_extern_signature(signature: FunctionSignature) -> Diagnostic[] {
         diagnostics.push(make_extern_effects_diagnostic(signature.name, signature.effects));
     }
 
-    let mut _pi: number = 0;
+    let mut _pi: int = 0;
     loop {
         if _pi >= signature.parameters.length { break; }
         let parameter = signature.parameters[_pi];
@@ -630,7 +630,7 @@ fn is_extern_opaque_pointee(text: string) -> boolean {
     if text.length == 0 { return false; }
     let first = text[0];
     if !is_ascii_upper(first) { return false; }
-    let mut _i: number = 0;
+    let mut _i: int = 0;
     loop {
         if _i >= text.length { break; }
         let ch = text[_i];
@@ -733,7 +733,7 @@ fn is_c_abi_function_pointer(text: string) -> boolean {
     }
     if !is_c_abi_return_type(return_text) { return false; }
     let args = split_top_level_commas(args_block);
-    let mut _i: number = 0;
+    let mut _i: int = 0;
     loop {
         if _i >= args.length { break; }
         let arg_text = trim_text(args[_i]);
@@ -745,9 +745,9 @@ fn is_c_abi_function_pointer(text: string) -> boolean {
     return true;
 }
 
-fn find_matching_paren(text: string) -> number {
-    let mut depth: number = 1;
-    let mut index: number = 0;
+fn find_matching_paren(text: string) -> int {
+    let mut depth: int = 1;
+    let mut index: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = text[index];
@@ -764,8 +764,8 @@ fn find_matching_paren(text: string) -> number {
 fn split_top_level_commas(text: string) -> string[] {
     let mut out: string[] = [];
     let mut current: string = "";
-    let mut depth: number = 0;
-    let mut index: number = 0;
+    let mut depth: int = 0;
+    let mut index: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = text[index];
@@ -799,8 +799,8 @@ fn split_top_level_commas(text: string) -> string[] {
 // Pure: does the type text contain `[]` at the top level (i.e. it is
 // a Sailfin array type)? Detects both `i32[]` and `string[]` shapes.
 fn extern_type_contains_array_brackets(text: string) -> boolean {
-    let mut index: number = 0;
-    let mut depth: number = 0;
+    let mut index: int = 0;
+    let mut depth: int = 0;
     loop {
         if index >= text.length { break; }
         let ch = text[index];
@@ -953,7 +953,7 @@ fn check_type_parameters(type_parameters: TypeParameter[]) -> Diagnostic[] {
     let mut seen: string[] = [];
     let mut diagnostics: Diagnostic[] = [];
 
-    let mut _tpi: number = 0;
+    let mut _tpi: int = 0;
     loop {
         if _tpi >= type_parameters.length { break; }
         let type_parameter = type_parameters[_tpi];
@@ -977,7 +977,7 @@ fn check_type_parameters(type_parameters: TypeParameter[]) -> Diagnostic[] {
 // compiler's own LLVM lowering uses the pattern e.g.
 // `compiler/src/llvm/lowering/instructions_loops.sfn:492,597`). Other kinds
 // (function/struct/enum/interface/type/test) keep the duplicate diagnostic.
-fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: number) -> ScopeResult {
+fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: int) -> ScopeResult {
     if !strings_equal(kind, "variable") {
         if has_symbol_in_range(bindings, name, scope_start) {
             return ScopeResult {
@@ -1013,7 +1013,7 @@ fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: Sourc
 
 fn clone_bindings(source: SymbolEntry[]) -> SymbolEntry[] {
     let mut copy: SymbolEntry[] = [];
-    let mut _ci: number = 0;
+    let mut _ci: int = 0;
     loop {
         if _ci >= source.length { break; }
         copy.push(source[_ci]);
@@ -1023,7 +1023,7 @@ fn clone_bindings(source: SymbolEntry[]) -> SymbolEntry[] {
 }
 
 fn has_symbol(symbols: SymbolEntry[], name: string) -> boolean {
-    let mut _si: number = 0;
+    let mut _si: int = 0;
     loop {
         if _si >= symbols.length { break; }
         if symbols[_si].name == name { return true; }
@@ -1032,8 +1032,8 @@ fn has_symbol(symbols: SymbolEntry[], name: string) -> boolean {
     return false;
 }
 
-fn has_symbol_in_range(symbols: SymbolEntry[], name: string, start: number) -> boolean {
-    let mut _si: number = start;
+fn has_symbol_in_range(symbols: SymbolEntry[], name: string, start: int) -> boolean {
+    let mut _si: int = start;
     loop {
         if _si >= symbols.length { break; }
         if symbols[_si].name == name { return true; }
@@ -1190,7 +1190,7 @@ fn make_missing_interface_member_diagnostic(struct_name: string, interface_name:
 // to surface a Sailfin diagnostic instead of an `lld` error. The
 // diagnostic carets at the first extraneous parameter so the user can
 // see exactly what to delete.
-fn make_main_signature_param_count_diagnostic(param_count: number, parameter_name: string, span: SourceSpan?) -> Diagnostic {
+fn make_main_signature_param_count_diagnostic(param_count: int, parameter_name: string, span: SourceSpan?) -> Diagnostic {
     return Diagnostic {
         code: "E0010",
         severity: "error",
@@ -1230,27 +1230,31 @@ fn make_main_signature_param_type_diagnostic(parameter_name: string, actual_type
     };
 }
 
-// Render a non-negative integer-valued `number` as a decimal string.
-// Uses repeated subtraction for divmod because Sailfin's `number` type
-// is floating-point (per `compiler/src/main.sfn:number_to_string` and
-// `compiler/src/build_report.sfn:_br_number_to_string`); a `/ 10`
-// division would produce fractional residues that never compare equal
-// to zero, hanging the loop. The repeated-subtraction shape mirrors
-// the canonical implementation in `main.sfn`.
-fn number_to_string(value: number) -> string {
+// Render a non-negative `int` value as a decimal string. The
+// repeated-subtraction divmod shape is kept (rather than `/ 10`)
+// because this helper mirrors the canonical `number_to_string`
+// implementations in `compiler/src/main.sfn` and
+// `compiler/src/build_report.sfn:_br_number_to_string`, both of which
+// still accept a floating-point `number` parameter where `/ 10` would
+// leave fractional residues that never compare equal to zero and hang the
+// loop. Keeping the shape identical across the four shadows makes the
+// final lockstep flip — when `main.sfn` flips in Slice E.3a-bulk-1b
+// child 7 — a one-line signature change rather than an algorithm
+// rewrite.
+fn number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
-    let mut working: number = value;
+    let mut working: int = value;
     let mut negative: boolean = false;
     if working < 0 {
         negative = true;
         working = 0 - working;
     }
     let mut output: string = "";
-    let mut remaining: number = working;
+    let mut remaining: int = working;
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;
-        let mut quotient: number = 0;
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;

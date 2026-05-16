@@ -82,7 +82,7 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
     let parsed = parse_native_artifact_for_import_context(text);
     let interfaces = interfaces_from_native(parsed.interfaces);
     let mut function_effects = empty_import_symbols();
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= parsed.functions.length { break; }
         let function = parsed.functions[i];
@@ -134,7 +134,7 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
     let mut skipped: string[] = [];
     let mut native_texts: string[] = [];
 
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= paths.length { break; }
         let path = paths[i];
@@ -162,7 +162,7 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
         // only standalone fns is `skipped` for interface purposes
         // but still contributes effect entries for cross-module
         // propagation.
-        let mut k: number = 0;
+        let mut k: int = 0;
         loop {
             if k >= parsed.function_effects.functions.length { break; }
             let entry = parsed.function_effects.functions[k];
@@ -170,7 +170,7 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
             k += 1;
         }
         if parsed.interfaces.length == 0 { skipped.push(path); } else {
-            let mut j: number = 0;
+            let mut j: int = 0;
             loop {
                 if j >= parsed.interfaces.length { break; }
                 interfaces.push(parsed.interfaces[j]);
