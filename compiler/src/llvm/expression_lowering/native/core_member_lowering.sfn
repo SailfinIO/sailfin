@@ -127,13 +127,13 @@ fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_in
     if field == "len" { _if70 = true; }
     if field == "length" { _if70 = true; }
     if _if70 {
-        let number_temp = format_temp_name(current_temp);
-        current_lines.push("  " + number_temp
+        let double_temp = format_temp_name(current_temp);
+        current_lines.push("  " + double_temp
             + " = call double @sailfin_runtime_string_to_number(i8* "
             + call_temp
             + ")");
         current_temp += 1;
-        let operand = LLVMOperand { llvm_type: "double", value: number_temp };
+        let operand = LLVMOperand { llvm_type: "double", value: double_temp };
         return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants);
     }
 
