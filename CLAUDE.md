@@ -466,10 +466,13 @@ verification.
 
 ### Adoption Levers (in priority order)
 
-1. **Effect enforcement as compilation gate** — the #1 prerequisite. `validate_effects()`
-   exists in `effect_checker.sfn` but is NOT called from the compilation pipeline in
-   `main.sfn`. Until this ships, "compiler-enforced effects" is aspirational. This is the
-   top item in the Effect System Hardening track on the roadmap.
+1. **Effect enforcement as compilation gate** — the #1 prerequisite. Wiring is in place:
+   `validate_and_render_effects` and `validate_and_render_effects_with_capabilities` are
+   called from every relevant entry point in `compiler/src/main.sfn` (single-file check,
+   emit-native, emit-llvm, multi-file orchestrators). Remaining work is *coverage*, not
+   *wiring* — see #613 for the open headline-integrity gaps (bare `print()` detection
+   hole, macOS arm64 exit-code corruption, capsule capability gate). Until those close,
+   "compile-time enforcement" is real on Linux x86_64 but partial on macOS arm64.
 
 2. **llms.txt** — a canonical single-file language reference at `llms.txt` (also served
    at `sailfin.dev/llms.txt`) designed for LLM context windows. Update it with every

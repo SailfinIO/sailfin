@@ -635,6 +635,21 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
                     effect: "net", description: "serve call", trigger: callee_trigger
                 });
             }
+            // Bare `print(...)` / `console(...)` are the Call-form
+            // analog of the Member-form `print.info(...)` paths
+            // handled below in the "Member" branch. Without this
+            // Call-side check, a capability-less
+            // `fn main() { print("hi"); }` slips through `sfn check`
+            // despite the README's first example asserting exactly
+            // the opposite. Closes #614.
+            let mut _print_or_console: boolean = false;
+            if name == "print" { _print_or_console = true; }
+            if name == "console" { _print_or_console = true; }
+            if _print_or_console {
+                required = append_requirement(required, EffectRequirement {
+                    effect: "io", description: "print/console helper usage", trigger: callee_trigger
+                });
+            }
             // Phase E: cross-module call resolution. The imports
             // table is per-program-localized (alias-rewritten,
             // scope-filtered) so a direct `Identifier` lookup is
