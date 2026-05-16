@@ -1230,13 +1230,17 @@ fn make_main_signature_param_type_diagnostic(parameter_name: string, actual_type
     };
 }
 
-// Render a non-negative integer-valued `number` as a decimal string.
-// Uses repeated subtraction for divmod because Sailfin's `number` type
-// is floating-point (per `compiler/src/main.sfn:number_to_string` and
-// `compiler/src/build_report.sfn:_br_number_to_string`); a `/ 10`
-// division would produce fractional residues that never compare equal
-// to zero, hanging the loop. The repeated-subtraction shape mirrors
-// the canonical implementation in `main.sfn`.
+// Render a non-negative `int` value as a decimal string. The
+// repeated-subtraction divmod shape is kept (rather than `/ 10`)
+// because this helper mirrors the canonical `number_to_string`
+// implementations in `compiler/src/main.sfn` and
+// `compiler/src/build_report.sfn:_br_number_to_string`, both of which
+// still accept a floating-point `number` parameter where `/ 10` would
+// leave fractional residues that never compare equal to zero and hang the
+// loop. Keeping the shape identical across the four shadows makes the
+// final lockstep flip — when `main.sfn` flips in Slice E.3a-bulk-1b
+// child 7 — a one-line signature change rather than an algorithm
+// rewrite.
 fn number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
     let mut working: int = value;

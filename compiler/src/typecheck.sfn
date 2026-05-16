@@ -494,7 +494,7 @@ fn check_block(block: Block, parent_bindings: SymbolEntry[], interfaces: Stateme
 //   - `fn main(argv: string[])` — argv is forwarded as a Sailfin slice
 //
 // Trailing return type and effect set are intentionally not validated
-// here. Existing examples and tests use a mix (`-> int`, `-> void`,
+// here. Existing examples and tests use a mix (`-> number`, `-> void`,  // alias-coverage: doc string references legacy `-> number` as accepted main-signature return type (see typecheck_main_signature_test.sfn)
 // no return type, `![io]`, `![net]`, `![unsafe, io]`, …) and the
 // effect-checker already gates body operations against the declared
 // set. Restricting the return type or the effect taxonomy here would
