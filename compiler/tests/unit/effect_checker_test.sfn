@@ -484,6 +484,51 @@ test "effect violation: bare sleep() Call carets at the callee for clock effect"
     assert trig.lexeme == "sleep";
 }
 
+test "effect violation: bare print() Call carets at the callee for io effect" {
+    // Closes #614. The Member-form `print.info(...)` already trips
+    // E0400 (covered by "effect violation: print.<x> Member call
+    // carets at print" above). The bare Call-form was uncovered
+    // because the Call-with-Identifier branch in `effect_checker.sfn`
+    // skipped over `print` / `console`. This test locks the parity in.
+    let stmt = _routine_with_bare_call("noisy", [], 4, "print", 7, 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    let mut found_io: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= v.missing_effects.length { break; }
+        if v.missing_effects[i] == "io" { found_io = true; }
+        i += 1;
+    }
+    assert found_io;
+    assert v.trigger != null;
+    let trig: Token? = v.trigger;
+    assert trig.line == 7;
+    assert trig.column == 5;
+    assert trig.lexeme == "print";
+}
+
+test "effect violation: bare console() Call carets at the callee for io effect" {
+    let stmt = _routine_with_bare_call("chatty", [], 12, "console", 14, 3);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    let mut found_io: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= v.missing_effects.length { break; }
+        if v.missing_effects[i] == "io" { found_io = true; }
+        i += 1;
+    }
+    assert found_io;
+    assert v.trigger != null;
+    let trig: Token? = v.trigger;
+    assert trig.lexeme == "console";
+}
+
 test "effect violation: AST trigger overrides signature fallback" {
     // Lock the precedence rule in: when the body walker captures a
     // per-call-site trigger, that trigger wins over the signature
