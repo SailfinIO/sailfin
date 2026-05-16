@@ -47,9 +47,10 @@ fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> Ex
     // are not known to be unique pointers, unlike user-struct boxes
     // in `core_operands.sfn`); we preserve that exact shape by
     // leaving `RuntimeCallOverrides.return_attributes` empty.
+    let alloc_size_value = number_to_string(array_length);
     let alloc_size_operand = LLVMOperand {
         llvm_type: "i64",
-        value: number_to_string(array_length)
+        value: alloc_size_value
     };
     let alloc_operands: LLVMOperand[] = [alloc_size_operand];
     let alloc_result = emit_runtime_call("alloc_struct", alloc_operands, empty_runtime_call_overrides(), temp_index, current_lines);

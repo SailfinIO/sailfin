@@ -1867,8 +1867,8 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
 //     unconditional; widens that still need to happen run through explicit
 //     `as int` / `as float` casts in source (#532).
 //
-// Slice E.3 (#490) re-applies #296 symmetrically — once every `: number`
-// site in the compiler source has migrated to `: int`/`: float`, the
+// Slice E.3 (#490) re-applies #296 symmetrically — once every `number`-typed
+// site in the compiler source has migrated to `int`/`float`, the
 // rejection re-promotes to `[fatal]` and extends to the permissive
 // sites above. The `numeric_type_kind` helper stays in place as the
 // chokepoint for that re-enablement.
@@ -1903,8 +1903,8 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
     // ABI primitive kind check: observe silent float → int coercion at
     // boundaries that don't opt in to widening. The asymmetric rule
     // (operand kind=float, target kind=int) catches the Slice E.2 partial
-    // migration mismatch — a callee parameter flipped from `: number`
-    // (double) to `: int` (i64) while a caller still has a `double` in
+    // migration mismatch — a callee parameter flipped from `number`
+    // (double) to `int` (i64) while a caller still has a `double` in
     // hand.
     //
     // #550 (relief valve): the diagnostic is emitted as `[warning]`
@@ -2023,8 +2023,8 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
 // correct side of int-vs-float for every same-kind expression.
 // Mixed `i64 + double` expressions still funnel through this rule
 // and silently widen — the rejection rides on E.3 once every
-// `: number` site in the compiler source has been migrated to
-// `: int`/`: float`, at which point the literal-typing seam below
+// `number`-typed site in the compiler source has been migrated to
+// `int`/`float`, at which point the literal-typing seam below
 // can refuse the coercion without breaking the runtime helper
 // helpers and `for i in 0..arr.length` patterns. Slice D shipped
 // the `as` cast lowering matrix so authors can spell the conversion
@@ -2104,7 +2104,7 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
     // Arithmetic harmonisation is the canonical exempted call site:
     // `1 + 2.0` or `arr.length + 0.5` legitimately widen i64 → double here.
     // Slice E.3 (#490) reapplies #296 and removes this opt-out once every
-    // `: number` site in the compiler source has migrated to `: int`/`: float`.
+    // `number`-typed site in the compiler source has migrated to `int`/`float`.
     let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines, true, null);
     let mut _ci0: int = 0;
     loop {

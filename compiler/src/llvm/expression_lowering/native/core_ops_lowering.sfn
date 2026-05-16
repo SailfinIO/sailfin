@@ -283,8 +283,8 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
     // double` mixes still funnels through `dominant_type`'s
     // silent widening (L2 in `docs/runtime_architecture.md`
     // §3.7) — the rejection rides on Slice E.3 (#296) after
-    // every `: number` site in the compiler source has migrated
-    // to explicit `: int`/`: float`. Slice D's `as` casts let authors
+    // every `number`-typed site in the compiler source has migrated
+    // to explicit `int`/`float`. Slice D's `as` casts let authors
     // spell the conversion explicitly today.
     let mut _right_expected: string = "";
     if left_result.operand != null {

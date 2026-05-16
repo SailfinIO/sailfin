@@ -472,7 +472,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         // (no annotation), `int`, or an explicit narrow integer LLVM
         // type (`i64`/`i32`/`i16`/`i8`). Decimal/fractional literals
         // and explicit `double`/`float` pressure (which is what the
-        // deprecated `: number` alias maps to once `map_primitive_type`
+        // deprecated `number` alias maps to once `map_primitive_type`
         // runs) fall through to the `double` path below.
         if is_integer_literal(stripped) {
             let mut integer_target: string = "";
