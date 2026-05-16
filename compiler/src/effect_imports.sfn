@@ -77,8 +77,8 @@ fn empty_import_symbols() -> ImportSymbolTable {
 fn append_import_function(table: ImportSymbolTable, name: string, effects: string[]) -> ImportSymbolTable {
     if name.length == 0 { return table; }
     let mut updated = table;
-    let mut existing_index: number = -1;
-    let mut i: number = 0;
+    let mut existing_index: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= updated.functions.length { break; }
         if updated.functions[i].name == name {
@@ -88,7 +88,7 @@ fn append_import_function(table: ImportSymbolTable, name: string, effects: strin
         i += 1;
     }
     let mut effects_copy: string[] = [];
-    let mut j: number = 0;
+    let mut j: int = 0;
     loop {
         if j >= effects.length { break; }
         effects_copy.push(effects[j]);
@@ -113,7 +113,7 @@ fn append_import_function(table: ImportSymbolTable, name: string, effects: strin
 // at the table sizes this path sees (a few hundred imports per
 // compilation unit, called once per `Call` expression in the body).
 fn lookup_imported_function(table: ImportSymbolTable, name: string) -> ImportedFunctionSignature? {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= table.functions.length { break; }
         if table.functions[i].name == name { return table.functions[i]; }
@@ -144,12 +144,12 @@ fn lookup_imported_function(table: ImportSymbolTable, name: string) -> ImportedF
 // global table + program in-memory and assert the localized result.
 fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTable) -> ImportSymbolTable {
     let mut local = empty_import_symbols();
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= program.statements.length { break; }
         let statement = program.statements[i];
         if statement.variant == "ImportDeclaration" {
-            let mut s: number = 0;
+            let mut s: int = 0;
             loop {
                 if s >= statement.import_specifiers.length { break; }
                 let spec = statement.import_specifiers[s];
