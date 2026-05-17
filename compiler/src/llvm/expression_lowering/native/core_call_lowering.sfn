@@ -153,14 +153,26 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     let is_trait_dispatch = sig.is_trait_dispatch;
     diagnostics = extend_string_array(diagnostics, sig.diagnostics);
 
+    // Issue #633: when `resolve_call_signature` chose the function
+    // entry over a colliding runtime-helper row, drop our own
+    // `helper_descriptor` so the fallback `find_runtime_helper` below
+    // and `coerce_and_emit_call` downstream do not re-fetch the helper
+    // and re-apply its `native_signature` / `c_abi_return_type`
+    // coercion against the function entry's signature.
+    if sig.helper_overridden { helper_descriptor = null; }
+
     // If helper_descriptor is still null, try looking up the target as a
     // runtime helper.  This covers module-level let bindings like
     // `let runtime_char_code_fn = runtime.char_code` where the call uses
     // the binding name directly (no dot — so resolve_call_method_target
-    // doesn't detect it as a method call).
+    // doesn't detect it as a method call). Skip when the resolver
+    // already deferred the helper to a function entry (#633) so we
+    // don't reintroduce the override we just rejected.
     if helper_descriptor == null {
-        let fallback_helper = find_runtime_helper(trimmed_target);
-        if fallback_helper != null { helper_descriptor = fallback_helper; }
+        if !sig.helper_overridden {
+            let fallback_helper = find_runtime_helper(trimmed_target);
+            if fallback_helper != null { helper_descriptor = fallback_helper; }
+        }
     }
 
     // Re-derive helper_descriptor for concat after signature resolution

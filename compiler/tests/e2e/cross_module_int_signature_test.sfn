@@ -1,0 +1,61 @@
+// Runtime regression for issue #633.
+//
+// The bug: a `target == symbol` mirror row in `runtime_helpers.sfn`
+// (e.g. the `number_to_string` row with
+// `parameter_types: ["double"]`) overrode the imported function entry
+// in `resolve_call_signature`, causing every importer to emit
+// `declare i8* @sym__<mod>(double)` against a `define ... (i64 %value)`.
+// Calls passed `double` bits to an `i64` parameter, producing garbage.
+//
+// `number_to_string` is the headline collision case — its fixture
+// alias takes `: int` and returns `int`, so the pre-fix `(double)`
+// override surfaces as both a parameter-ABI mismatch (caller passes
+// `double` bits, callee reads `i64`) and a return-ABI mismatch (caller
+// expects `i8*`, callee returns `i64`). Either of those would corrupt
+// the assertions below; together they reliably fail-fast pre-fix.
+//
+// The remaining `cross_module_int_*` calls are non-colliding
+// baselines that pin the regular `: int` shape — they keep working
+// pre-fix and post-fix, and exist so a future regression that breaks
+// the non-collision path also surfaces here.
+import {
+    cross_module_int_double,
+    cross_module_int_sum_pair,
+    cross_module_int_identity,
+    number_to_string
+} from "./fixtures/cross_module_int_signature_shared";
+
+test "cross-module int parameter: identity round-trip" {
+    assert cross_module_int_identity(0) == 0;
+    assert cross_module_int_identity(1) == 1;
+    assert cross_module_int_identity(42) == 42;
+    assert cross_module_int_identity(-7) == -7;
+    assert cross_module_int_identity(1000000) == 1000000;
+}
+
+test "cross-module int parameter: simple arithmetic" {
+    assert cross_module_int_double(0) == 0;
+    assert cross_module_int_double(21) == 42;
+    assert cross_module_int_double(-5) == -10;
+    assert cross_module_int_double(1000) == 2000;
+}
+
+test "cross-module int parameter: multi-argument call" {
+    assert cross_module_int_sum_pair(10, 32) == 42;
+    assert cross_module_int_sum_pair(0, 0) == 0;
+    assert cross_module_int_sum_pair(-3, 8) == 5;
+}
+
+test "cross-module int parameter: name collides with runtime-helper registry row (#633)" {
+    // `number_to_string` is the `target == symbol` mirror row that
+    // pre-fix overrode the imported function entry. The fixture
+    // returns `value + 100` against an `: int` parameter; pre-fix the
+    // caller would coerce these literals to `double` and the callee
+    // would interpret the `double` bit pattern as `i64`, producing
+    // garbage. Post-fix the imported signature wins and the literals
+    // are passed as `i64` end-to-end.
+    assert number_to_string(0) == 100;
+    assert number_to_string(42) == 142;
+    assert number_to_string(-50) == 50;
+    assert number_to_string(1000) == 1100;
+}
