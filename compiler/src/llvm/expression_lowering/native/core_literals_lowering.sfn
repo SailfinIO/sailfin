@@ -1004,7 +1004,8 @@ fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, te
         parameter_types: [],
         return_type: "",
         symbol: "",
-        return_attributes: "noalias"
+        return_attributes: "noalias",
+        c_abi_return_type: ""
     };
     let box_operands: LLVMOperand[] = [box_size_operand];
     let box_result = emit_runtime_call("alloc_struct", box_operands, box_overrides, current_temp - 1, current_lines);

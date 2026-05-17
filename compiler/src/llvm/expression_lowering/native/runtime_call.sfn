@@ -66,11 +66,21 @@ import { coerce_operand_to_type } from "./core_operands";
 //   today's emission carries `noalias` (e.g., `alloc_struct`) preserve
 //   the attribute through this per-call-site override during M1.7
 //   migrations. Ignored when `return_type == "void"`.
+// - `c_abi_return_type`: when non-empty, replaces the descriptor's
+//   `c_abi_return_type`. Mirrors the precedence pattern of
+//   `return_type` / `symbol`: lets a migrating (or test) call site
+//   exercise the ABI-coercion path without editing the production
+//   registry. When `c_abi_return_type` differs from the resolved
+//   `return_type`, `emit_runtime_call` splices in a post-call
+//   coercion. See issue #638 review for why the override path is
+//   preferred over a `__sfn_test_*` fixture descriptor in the
+//   production registry (Copilot review).
 struct RuntimeCallOverrides {
     parameter_types: string[];
     return_type: string;
     symbol: string;
     return_attributes: string;
+    c_abi_return_type: string;
 }
 
 // Convenience constructor for the common "no overrides" case.
@@ -79,7 +89,8 @@ fn empty_runtime_call_overrides() -> RuntimeCallOverrides {
         parameter_types: [],
         return_type: "",
         symbol: "",
-        return_attributes: ""
+        return_attributes: "",
+        c_abi_return_type: ""
     };
 }
 
@@ -120,6 +131,9 @@ fn _resolve_call_return_type(overrides: RuntimeCallOverrides, descriptor: Runtim
 // issue #638 (mechanism) and #634 (monotonic_millis motivation:
 // the C symbol returns `double`, but Sailfin should see `i64`).
 fn _resolve_abi_return_type(overrides: RuntimeCallOverrides, descriptor: RuntimeHelperDescriptor?) -> string {
+    if overrides.c_abi_return_type.length > 0 {
+        return overrides.c_abi_return_type;
+    }
     if descriptor != null {
         let mut abi: string? = descriptor.c_abi_return_type;
         if abi != null {

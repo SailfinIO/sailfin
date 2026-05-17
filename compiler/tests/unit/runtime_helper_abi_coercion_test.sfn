@@ -7,15 +7,16 @@
 // `call` line against the C ABI type and splice in a post-call
 // coercion (`fptosi double to i64`, etc.) so the LLVMOperand handed
 // back to the caller carries the declared return type.
+// `render_runtime_helper_declarations` follows suit so the `declare`
+// line matches the C body's true ABI.
 //
-// The fixture descriptor lives in `runtime_helpers.sfn` under
-// `target: "__sfn_test_abi_coercion_double_to_i64"` with
-// `return_type: "i64", c_abi_return_type: "double"`. It is the only
-// descriptor in the entire registry with a non-null
-// `c_abi_return_type` today; every other helper keeps
-// `c_abi_return_type: null`, so `_resolve_abi_return_type` collapses
-// onto `_resolve_call_return_type` and no observable behavior shift
-// rides on this PR (see #638 acceptance criteria).
+// To avoid polluting the production registry with test-only entries
+// (#641 review comment), the coercion-path coverage uses
+// `RuntimeCallOverrides.c_abi_return_type` to inject the ABI return
+// type at the call site. The declaration-rendering coverage exercises
+// `effective_helper_declare_return_type` directly against a
+// synthesized descriptor — neither test reaches into the production
+// helper registry.
 //
 // The expected IR shape, matching `coerce_numeric_primitive`'s
 // `double → i64` lowering (`core_operands.sfn:433-454`), is:
@@ -28,12 +29,28 @@
 // `round + fptosi` pair is canonical Sailfin rounding semantics; the
 // `fptosi` line is the lowering specifically called out by #638's
 // acceptance criteria.
-import { emit_runtime_call, empty_runtime_call_overrides } from "../../src/llvm/expression_lowering/native/runtime_call";
-import { LLVMOperand } from "../../src/llvm/types";
+import {
+    RuntimeCallOverrides,
+    emit_runtime_call,
+    empty_runtime_call_overrides
+} from "../../src/llvm/expression_lowering/native/runtime_call";
+import { effective_helper_declare_return_type } from "../../src/llvm/runtime_helpers";
+import { LLVMOperand, RuntimeHelperDescriptor } from "../../src/llvm/types";
 
 test "emit_runtime_call: c_abi_return_type=double, return_type=i64 emits call+coercion" ![io] {
     let operands: LLVMOperand[] = [];
-    let result = emit_runtime_call("__sfn_test_abi_coercion_double_to_i64", operands, empty_runtime_call_overrides(), 0, []);
+    let overrides = RuntimeCallOverrides {
+        parameter_types: [],
+        return_type: "i64",
+        symbol: "__sfn_test_abi_coercion_double_to_i64",
+        return_attributes: "",
+        c_abi_return_type: "double"
+    };
+    // Target name is intentionally unknown to `find_runtime_helper`;
+    // every effective property comes from `overrides`. This is the
+    // override-driven path the fixture-descriptor approach was
+    // replaced with in response to Copilot review of #641.
+    let result = emit_runtime_call("__sfn_test_abi_coercion_double_to_i64", operands, overrides, 0, []);
 
     // The call must land against the C ABI return type so the
     // linker resolves to the `double`-returning symbol in `%xmm0`
@@ -72,4 +89,41 @@ test "emit_runtime_call: c_abi_return_type=null collapses onto pre-#638 shape (n
     assert result.operand.value == "%t0";
     assert result.temp_index == 1;
     assert result.diagnostics.length == 0;
+}
+
+test "effective_helper_declare_return_type: c_abi_return_type wins when set" {
+    // Mirrors the declaration-rendering wiring in
+    // `render_runtime_helper_declarations`. When a descriptor opts
+    // into the ABI coercion mechanism, the `declare` line uses the
+    // C body's true return type rather than the caller-visible one
+    // — without this, the IR would carry `declare i64 @sym(...)`
+    // pointed at a `double`-returning C body and the linker would
+    // mis-resolve the register class.
+    let fixture = RuntimeHelperDescriptor {
+        target: "__fixture",
+        symbol: "__fixture",
+        return_type: "i64",
+        parameter_types: [],
+        effects: [],
+        native_signature: null,
+        c_abi_return_type: "double"
+    };
+    assert effective_helper_declare_return_type(fixture) == "double";
+}
+
+test "effective_helper_declare_return_type: null c_abi_return_type collapses onto return_type" {
+    // Default-path regression: the entire registry has
+    // `c_abi_return_type: null` today (#638 is strictly additive),
+    // so the helper must hand back `descriptor.return_type` to keep
+    // every declared line byte-identical to the pre-#638 shape.
+    let fixture = RuntimeHelperDescriptor {
+        target: "__fixture",
+        symbol: "__fixture",
+        return_type: "i64",
+        parameter_types: [],
+        effects: [],
+        native_signature: null,
+        c_abi_return_type: null
+    };
+    assert effective_helper_declare_return_type(fixture) == "i64";
 }

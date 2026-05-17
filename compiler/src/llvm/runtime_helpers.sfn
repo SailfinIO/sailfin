@@ -658,23 +658,6 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "sailfin_enum_tag_from_instruction_array", symbol: "sailfin_enum_tag_from_instruction_array", return_type: "double", parameter_types: ["i8*", "double"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
-    // Test-only fixture descriptor for the `c_abi_return_type` coercion
-    // path (#638). Exercised exclusively by
-    // `compiler/tests/unit/runtime_helper_abi_coercion_test.sfn`. The
-    // `__sfn_test_*` prefix keeps it unambiguously test-scoped, and
-    // because `render_runtime_helper_declarations` only emits declares
-    // for `used_targets` no production IR ever references the symbol.
-    // Mirrors the monotonic_millis worked example from the #634 RCA:
-    // the C body returns `double`, but Sailfin code receives `i64`,
-    // so `emit_runtime_call` must emit the call against `double` and
-    // then coerce to `i64`. Issue B (the registry flip cleanup) is
-    // free to delete this fixture once a real helper exercises the
-    // same coercion path; until then, this is the only descriptor
-    // with a non-null `c_abi_return_type` in the registry.
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "__sfn_test_abi_coercion_double_to_i64", symbol: "__sfn_test_abi_coercion_double_to_i64", return_type: "i64", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: "double"
-    });
-
     return descriptors;
 }
 
@@ -694,4 +677,21 @@ fn find_runtime_helper(target: string) -> RuntimeHelperDescriptor? {
         index += 1;
     }
     return null;
+}
+
+// LLVM return type for `declare`-line emission. Mirrors the
+// `_resolve_abi_return_type` precedence on the call-site
+// (`expression_lowering/native/runtime_call.sfn`): if the
+// descriptor declares a distinct C ABI return type, use it,
+// otherwise fall back to the user-visible `return_type`. This
+// keeps `declare <T> @sym(...)` aligned with `call <T> @sym(...)`
+// when Issue B flips individual helpers — without this helper the
+// `declare` line would mismatch the C body's true ABI and produce
+// invalid IR (#638 review comment).
+fn effective_helper_declare_return_type(descriptor: RuntimeHelperDescriptor) -> string {
+    let mut abi: string? = descriptor.c_abi_return_type;
+    if abi != null {
+        if abi.length > 0 { return abi; }
+    }
+    return descriptor.return_type;
 }
