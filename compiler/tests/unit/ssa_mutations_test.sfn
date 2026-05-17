@@ -4,8 +4,8 @@
 // ---------------------------------------------------------------------------
 // Mutable variable modified in both branches, used after merge
 // ---------------------------------------------------------------------------
-fn _branch_merge_value(x: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut result: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _branch_merge_value(x: int) -> int {
+    let mut result: int = 0;
     if x > 10 { result = x * 2; } else { result = x + 100; }
     // Use result after the merge point — requires correct phi
     return result + 1;
@@ -22,9 +22,9 @@ test "ssa_mut: branch merge else-path" {
 // ---------------------------------------------------------------------------
 // Multiple mutable variables modified in same if/else
 // ---------------------------------------------------------------------------
-fn _multi_var_branch(a: number, b: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut x: number = a;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut y: number = b;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _multi_var_branch(a: int, b: int) -> int {
+    let mut x: int = a;
+    let mut y: int = b;
     if a > b {
         x = x + 10;
         y = y - 10;
@@ -48,9 +48,9 @@ test "ssa_mut: multi var branch else" {
 // ---------------------------------------------------------------------------
 // Mutable variable modified in loop then used in branch
 // ---------------------------------------------------------------------------
-fn _loop_then_branch(n: number) -> string {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut total: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _loop_then_branch(n: int) -> string {
+    let mut total: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= n { break; }
         total += i;
@@ -68,16 +68,14 @@ test "ssa_mut: loop then branch medium" {
     assert _loop_then_branch(5) == "medium";
 }
 
-test "ssa_mut: loop then branch low" {
-    assert _loop_then_branch(2) == "low";
-}
+test "ssa_mut: loop then branch low" { assert _loop_then_branch(2) == "low"; }
 
 // ---------------------------------------------------------------------------
 // Swap pattern (classic phi stress test)
 // ---------------------------------------------------------------------------
-fn _swap_if_needed(a: number, b: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut x: number = a;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut y: number = b;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _swap_if_needed(a: int, b: int) -> int {
+    let mut x: int = a;
+    let mut y: int = b;
     if x > y {
         let tmp = x;
         x = y;
@@ -96,9 +94,9 @@ test "ssa_mut: no swap when already ordered" {
 // ---------------------------------------------------------------------------
 // Accumulator modified inside nested if within loop
 // ---------------------------------------------------------------------------
-fn _weighted_sum(values: number[], weights: number[]) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut sum: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _weighted_sum(values: int[], weights: int[]) -> int {
+    let mut sum: int = 0;
+    let mut i: int = 0;
     let limit = values.length;
     loop {
         if i >= limit { break; }
@@ -125,10 +123,10 @@ test "ssa_mut: weighted sum with partial weights" {
 // ---------------------------------------------------------------------------
 // Boolean flag toggled across iterations
 // ---------------------------------------------------------------------------
-fn _alternating_sum(arr: number[]) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut total: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _alternating_sum(arr: int[]) -> int {
+    let mut total: int = 0;
     let mut add_flag: boolean = true;
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut i: int = 0;
     loop {
         if i >= arr.length { break; }
         if add_flag { total += arr[i]; } else { total -= arr[i]; }
@@ -152,9 +150,9 @@ test "ssa_mut: alternating sum single element" {
 // ---------------------------------------------------------------------------
 // String built incrementally with conditional append
 // ---------------------------------------------------------------------------
-fn _build_csv(values: number[]) -> string {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _build_csv(values: int[]) -> string {
     let mut result: string = "";
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut i: int = 0;
     loop {
         if i >= values.length { break; }
         if i > 0 { result = result + ","; }
@@ -177,15 +175,15 @@ test "ssa_mut: build csv single element" {
 }
 
 test "ssa_mut: build csv empty" {
-    let mut vals: number[] = [];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut vals: int[] = [];
     assert _build_csv(vals) == "";
 }
 
 // ---------------------------------------------------------------------------
 // Variable assigned in one branch only (tests phi with entry value)
 // ---------------------------------------------------------------------------
-fn _optional_update(x: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut result: number = x;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _optional_update(x: int) -> int {
+    let mut result: int = x;
     if x > 50 { result = result - 50; }
     // If x <= 50, result stays as x (phi merges original with modified)
     return result * 2;

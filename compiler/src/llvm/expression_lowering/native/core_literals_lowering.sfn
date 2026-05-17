@@ -262,6 +262,46 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             inferred_element_type = expected_element_type;
         }
     }
+    // Issue #599 belt-and-suspenders: when the `let`-binding annotation
+    // resolves to `double` AND the parsed `.sfn-asm` metadata resolves to
+    // `i64` (or vice versa), prefer the `let`-binding annotation. The
+    // pre-fix emitter labelled every integer literal as `#element:number`
+    // (→ `double`), so `let arr: int[] = [42]` produced `double` metadata
+    // overriding the `i64` expected — issue #599 itself. The post-fix
+    // emitter labels integer literals as `#element:int` (→ `i64`), which
+    // newly conflicts with `let powers: number[] = [1000000000000000, ...]`
+    // in `compiler/src/llvm/utils.sfn:134` and the analogous table in
+    // `compiler/src/llvm/expression_lowering/native/core_text.sfn:17`
+    // (both legitimately need `double` storage for use in `double`
+    // arithmetic). Limiting the override to the `i64`↔`double` pair
+    // keeps struct/enum element handling (the `_keep_element_type`
+    // ABI logic at line ~330) untouched and avoids overriding the
+    // pointer/string element paths.
+    if expected_element_type.length > 0 {
+        if metadata.element_type.length > 0 {
+            if expected_element_type != metadata.element_type {
+                let mut _expected_is_numeric: boolean = false;
+                if expected_element_type == "i64" {
+                    _expected_is_numeric = true;
+                }
+                if expected_element_type == "double" {
+                    _expected_is_numeric = true;
+                }
+                let mut _metadata_is_numeric: boolean = false;
+                if metadata.element_type == "i64" {
+                    _metadata_is_numeric = true;
+                }
+                if metadata.element_type == "double" {
+                    _metadata_is_numeric = true;
+                }
+                if _expected_is_numeric {
+                    if _metadata_is_numeric {
+                        inferred_element_type = expected_element_type;
+                    }
+                }
+            }
+        }
+    }
     // Slice E.1 (#488): bare integer literals default to `int` (i64) at
     // scalar context, but unannotated array literals keep the pre-E.1
     // `double` element default so the existing `number[]` corpus

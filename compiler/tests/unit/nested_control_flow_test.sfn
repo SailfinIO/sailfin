@@ -6,11 +6,11 @@
 // ---------------------------------------------------------------------------
 // Nested loops with break from inner vs outer
 // ---------------------------------------------------------------------------
-fn _find_pair_sum(arr: number[], target: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _find_pair_sum(arr: int[], target: int) -> int {
+    let mut i: int = 0;
     loop {
         if i >= arr.length { break; }
-        let mut j: number = i + 1;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+        let mut j: int = i + 1;
         loop {
             if j >= arr.length { break; }
             if arr[i] + arr[j] == target { return arr[i] * 100 + arr[j]; }
@@ -35,12 +35,12 @@ test "nested_cf: nested loop break returns -1 when no pair" {
 // ---------------------------------------------------------------------------
 // Triple-nested loop with continue in middle
 // ---------------------------------------------------------------------------
-fn _triple_nested_count(limit: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut count: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _triple_nested_count(limit: int) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= limit { break; }
-        let mut j: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+        let mut j: int = 0;
         loop {
             if j >= limit { break; }
             // Use temp var to avoid operator precedence bug:
@@ -50,7 +50,7 @@ fn _triple_nested_count(limit: number) -> number {  // alias-coverage: test reli
                 j += 1;
                 continue;
             }
-            let mut k: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+            let mut k: int = 0;
             loop {
                 if k >= limit { break; }
                 count += 1;
@@ -71,9 +71,9 @@ test "nested_cf: triple nested loop with continue" {
 // ---------------------------------------------------------------------------
 // Loop with multiple mutable variables and conditional updates (SSA stress)
 // ---------------------------------------------------------------------------
-fn _collatz_steps(start: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut n: number = start;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut steps: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _collatz_steps(start: int) -> int {
+    let mut n: int = start;
+    let mut steps: int = 0;
     loop {
         if n <= 1 { break; }
         if n % 2 == 0 { n = n / 2; } else { n = n * 3 + 1; }
@@ -89,12 +89,10 @@ test "nested_cf: collatz steps for 1" { assert _collatz_steps(1) == 0; }
 // ---------------------------------------------------------------------------
 // Early return from deeply nested branches
 // ---------------------------------------------------------------------------
-fn _classify_triple(a: number, b: number, c: number) -> string {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _classify_triple(a: int, b: int, c: int) -> string {
     if a > 0 {
         if b > 0 {
-            if c > 0 { return "all positive"; } else {
-                return "c non-positive";
-            }
+            if c > 0 { return "all positive"; } else { return "c non-positive"; }
         } else {
             if c > 0 { return "b non-positive"; } else {
                 return "b and c non-positive";
@@ -132,9 +130,9 @@ test "nested_cf: classify triple a and b non-positive" {
 // ---------------------------------------------------------------------------
 // Loop with conditional break vs continue (SSA predecessor labels)
 // ---------------------------------------------------------------------------
-fn _first_above_threshold(arr: number[], threshold: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut result: number = -1;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _first_above_threshold(arr: int[], threshold: int) -> int {
+    let mut result: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= arr.length { break; }
         if arr[i] <= threshold {
@@ -160,7 +158,7 @@ test "nested_cf: first above threshold no match" {
 // ---------------------------------------------------------------------------
 // Mutable variable reassigned across multiple if/else branches (phi stress)
 // ---------------------------------------------------------------------------
-fn _categorize_score(score: number) -> string {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _categorize_score(score: int) -> string {
     let mut grade: string = "F";
     let mut note: string = "none";
     if score >= 90 {
@@ -194,9 +192,9 @@ test "nested_cf: score categorization F" {
 // ---------------------------------------------------------------------------
 // Loop building an array with conditional pushes
 // ---------------------------------------------------------------------------
-fn _filter_and_transform(input: number[]) -> number[] {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut result: number[] = [];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _filter_and_transform(input: int[]) -> int[] {
+    let mut result: int[] = [];
+    let mut i: int = 0;
     loop {
         if i >= input.length { break; }
         let val = input[i];
@@ -223,25 +221,25 @@ test "nested_cf: filter and transform mixed array" {
 // ---------------------------------------------------------------------------
 // Multiple sequential loops (tests phi reset between loops)
 // ---------------------------------------------------------------------------
-fn _multi_loop_accumulate(n: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut sum1: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _multi_loop_accumulate(n: int) -> int {
+    let mut sum1: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= n { break; }
         sum1 += i;
         i += 1;
     }
 
-    let mut sum2: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut j: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut sum2: int = 0;
+    let mut j: int = 0;
     loop {
         if j >= n { break; }
         sum2 += j * 2;
         j += 1;
     }
 
-    let mut sum3: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut k: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut sum3: int = 0;
+    let mut k: int = 0;
     loop {
         if k >= n { break; }
         sum3 += k * k;
