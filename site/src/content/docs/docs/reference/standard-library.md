@@ -251,7 +251,7 @@ You should not call this function directly. It appears in generated code and in 
 > (see the examples below). Structured-concurrency supervision — scope
 > semantics, cancellation, and `spawn` — is on the [roadmap](/roadmap).
 
-#### `monotonic_millis() -> number ![clock]`
+#### `monotonic_millis() -> int ![clock]`
 
 Return the current value of a monotonic clock in milliseconds. Useful for measuring elapsed time. The absolute value is not meaningful; only differences between two calls are useful.
 
