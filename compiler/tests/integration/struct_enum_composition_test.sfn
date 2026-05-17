@@ -15,11 +15,11 @@ fn _color_name(c: Color) -> string {
 }
 
 struct Pixel {
-    x: number;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    y: number;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    x: int;
+    y: int;
     color: Color;
 
-    fn move_to(self, nx: number, ny: number) -> Pixel {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    fn move_to(self, nx: int, ny: int) -> Pixel {
         return Pixel { x: nx, y: ny, color: self.color };
     }
 
@@ -33,16 +33,16 @@ struct Pixel {
     }
 }
 
-fn _num(n: number) -> string {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _num(n: int) -> string {
     if n == 0 { return "0"; }
     let mut result: string = "";
-    let mut remaining: number = n;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut remaining: int = n;
     if remaining < 0 { remaining = 0 - remaining; }
     let digits = "0123456789";
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-        let mut quotient: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -88,24 +88,18 @@ test "composition: enum through function produces correct string" {
 // Struct containing struct
 // ---------------------------------------------------------------------------
 struct Bounds {
-    min_x: number;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    min_y: number;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    max_x: number;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    max_y: number;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    min_x: int;
+    min_y: int;
+    max_x: int;
+    max_y: int;
 
-    fn width(self) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-        return self.max_x - self.min_x;
-    }
+    fn width(self) -> number { return self.max_x - self.min_x; }
 
-    fn height(self) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-        return self.max_y - self.min_y;
-    }
+    fn height(self) -> number { return self.max_y - self.min_y; }
 
-    fn area(self) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-        return self.width() * self.height();
-    }
+    fn area(self) -> number { return self.width() * self.height(); }
 
-    fn contains_point(self, px: number, py: number) -> boolean {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    fn contains_point(self, px: int, py: int) -> boolean {
         if px < self.min_x { return false; }
         if px > self.max_x { return false; }
         if py < self.min_y { return false; }
@@ -123,11 +117,11 @@ fn _compute_bounds(pixels: Pixel[]) -> Bounds {
             max_y: 0
         };
     }
-    let mut min_x: number = pixels[0].x;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut min_y: number = pixels[0].y;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut max_x: number = pixels[0].x;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut max_y: number = pixels[0].y;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 1;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut min_x: int = pixels[0].x;
+    let mut min_y: int = pixels[0].y;
+    let mut max_x: int = pixels[0].x;
+    let mut max_y: int = pixels[0].y;
+    let mut i: int = 1;
     loop {
         if i >= pixels.length { break; }
         let p = pixels[i];
@@ -192,17 +186,17 @@ enum Op {
     Mul
 }
 
-fn _apply_op(op: Op, a: number, b: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _apply_op(op: Op, a: int, b: int) -> int {
     if op == Op.Add { return a + b; }
     if op == Op.Sub { return a - b; }
     if op == Op.Mul { return a * b; }
     return 0;
 }
 
-fn _apply_ops_to_array(ops: Op[], values: number[]) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _apply_ops_to_array(ops: Op[], values: int[]) -> int {
     if values.length == 0 { return 0; }
-    let mut result: number = values[0];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut result: int = values[0];
+    let mut i: int = 0;
     loop {
         if i >= ops.length { break; }
         if i + 1 >= values.length { break; }

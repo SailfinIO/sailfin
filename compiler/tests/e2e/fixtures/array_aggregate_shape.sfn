@@ -9,7 +9,12 @@
 // `sailfin_runtime_concat` / `_append_string` / `_array_push_slot`
 // symbols stay exported for seed-compiled IR.
 fn main() ![io] {
-    let xs = [1, 2, 3];
+    // Fractional literals to pin the `{ double*, i64, i64 }*` shape
+    // independently of the integer-literal default. After #599 the
+    // integer-literal default flipped to `int` (`i64`), so a bare
+    // `[1, 2, 3]` here would lower as `{ i64*, i64, i64 }*` and miss
+    // the double-array shape assertion B2 below.
+    let xs = [1.0, 2.0, 3.0];
     let len = xs.length;
     let words = ["one", "two"];
     print.info(words[0]);

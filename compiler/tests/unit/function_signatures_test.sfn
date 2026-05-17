@@ -6,15 +6,15 @@
 // ---------------------------------------------------------------------------
 // Functions with many parameters
 // ---------------------------------------------------------------------------
-fn _add5(a: number, b: number, c: number, d: number, e: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _add5(a: int, b: int, c: int, d: int, e: int) -> int {
     return a + b + c + d + e;
 }
 
-fn _add6(a: number, b: number, c: number, d: number, e: number, f: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _add6(a: int, b: int, c: int, d: int, e: int, f: int) -> int {
     return a + b + c + d + e + f;
 }
 
-fn _weighted6(a: number, b: number, c: number, d: number, e: number, f: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _weighted6(a: int, b: int, c: int, d: int, e: int, f: int) -> int {
     return a * 1 + b * 2 + c * 3 + d * 4 + e * 5 + f * 6;
 }
 
@@ -33,17 +33,17 @@ test "fn_sig: six parameter weighted sum" {
 // ---------------------------------------------------------------------------
 // Mixed parameter types (number, string, boolean)
 // ---------------------------------------------------------------------------
-fn _format_entry(name: string, value: number, active: boolean) -> string {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _format_entry(name: string, value: int, active: boolean) -> string {
     let mut result: string = name + "=";
     if active {
-        let mut remaining: number = value;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+        let mut remaining: int = value;
         if remaining == 0 { return result + "0*"; }
         let digits = "0123456789";
         let mut num_str: string = "";
         loop {
             if remaining <= 0 { break; }
-            let mut temp: number = remaining;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-            let mut quotient: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+            let mut temp: int = remaining;
+            let mut quotient: int = 0;
             loop {
                 if temp < 10 { break; }
                 temp -= 10;
@@ -72,13 +72,13 @@ test "fn_sig: mixed types zero active" {
 // ---------------------------------------------------------------------------
 // Functions returning boolean
 // ---------------------------------------------------------------------------
-fn _in_range(val: number, min: number, max: number) -> boolean {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _in_range(val: int, min: int, max: int) -> boolean {
     if val < min { return false; }
     if val > max { return false; }
     return true;
 }
 
-fn _all_positive(a: number, b: number, c: number) -> boolean {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _all_positive(a: int, b: int, c: int) -> boolean {
     if a <= 0 { return false; }
     if b <= 0 { return false; }
     if c <= 0 { return false; }
@@ -103,28 +103,28 @@ test "fn_sig: boolean return all positive" {
 // ---------------------------------------------------------------------------
 // Functions calling functions with different signatures
 // ---------------------------------------------------------------------------
-fn _compute_score(base: number, multiplier: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _compute_score(base: int, multiplier: int) -> int {
     return base * multiplier;
 }
 
-fn _apply_bonus(score: number, has_bonus: boolean) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _apply_bonus(score: int, has_bonus: boolean) -> int {
     if has_bonus { return score + 100; }
     return score;
 }
 
-fn _format_score(label: string, score: number) -> string {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _format_score(label: string, score: int) -> string {
     return label + ": " + _num_str(score);
 }
 
-fn _num_str(n: number) -> string {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _num_str(n: int) -> string {
     if n == 0 { return "0"; }
     let mut result: string = "";
-    let mut rem: number = n;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut rem: int = n;
     let digits = "0123456789";
     loop {
         if rem <= 0 { break; }
-        let mut temp: number = rem;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-        let mut q: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+        let mut temp: int = rem;
+        let mut q: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -136,7 +136,7 @@ fn _num_str(n: number) -> string {  // alias-coverage: test relies on int-array 
     return result;
 }
 
-fn _full_pipeline(name: string, base: number, mult: number, bonus: boolean) -> string {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _full_pipeline(name: string, base: int, mult: int, bonus: boolean) -> string {
     let score = _compute_score(base, mult);
     let final_score = _apply_bonus(score, bonus);
     return _format_score(name, final_score);
@@ -153,9 +153,9 @@ test "fn_sig: multi-function pipeline without bonus" {
 // ---------------------------------------------------------------------------
 // Function with array parameter and number return
 // ---------------------------------------------------------------------------
-fn _array_stats_sum(arr: number[]) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut total: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _array_stats_sum(arr: int[]) -> int {
+    let mut total: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= arr.length { break; }
         total += arr[i];
@@ -164,10 +164,10 @@ fn _array_stats_sum(arr: number[]) -> number {  // alias-coverage: test relies o
     return total;
 }
 
-fn _array_stats_max(arr: number[]) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _array_stats_max(arr: int[]) -> int {
     if arr.length == 0 { return 0; }
-    let mut best: number = arr[0];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 1;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut best: int = arr[0];
+    let mut i: int = 1;
     loop {
         if i >= arr.length { break; }
         if arr[i] > best { best = arr[i]; }
@@ -176,10 +176,10 @@ fn _array_stats_max(arr: number[]) -> number {  // alias-coverage: test relies o
     return best;
 }
 
-fn _array_stats_min(arr: number[]) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _array_stats_min(arr: int[]) -> int {
     if arr.length == 0 { return 0; }
-    let mut best: number = arr[0];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 1;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut best: int = arr[0];
+    let mut i: int = 1;
     loop {
         if i >= arr.length { break; }
         if arr[i] < best { best = arr[i]; }
@@ -220,7 +220,7 @@ test "fn_sig: array stats combined" {
 fn _longest_string(arr: string[]) -> string {
     if arr.length == 0 { return ""; }
     let mut best: string = arr[0];
-    let mut i: number = 1;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut i: int = 1;
     loop {
         if i >= arr.length { break; }
         if arr[i].length > best.length { best = arr[i]; }

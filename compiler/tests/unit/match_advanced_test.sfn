@@ -5,8 +5,8 @@
 // ---------------------------------------------------------------------------
 // Match with computation in block bodies
 // ---------------------------------------------------------------------------
-fn _compute_via_match(op: number, a: number, b: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut result: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _compute_via_match(op: int, a: int, b: int) -> int {
+    let mut result: int = 0;
     match op {
         1: {
             result = a + b;
@@ -64,7 +64,7 @@ enum HttpStatus {
     ServerError
 }
 
-fn _status_code(s: HttpStatus) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _status_code(s: HttpStatus) -> int {
     match s {
         HttpStatus.Ok: return 200,
         HttpStatus.Created: return 201,
@@ -104,7 +104,7 @@ test "match_adv: enum with wildcard" {
 // ---------------------------------------------------------------------------
 // Note: Sailfin only has float division (no integer types yet),
 // so scores must be exact multiples of 10 for match arms to hit.
-fn _grade_letter(score: number) -> string {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _grade_letter(score: int) -> string {
     let bracket = score / 10;
     let mut letter: string = "F";
     match bracket {
@@ -143,9 +143,9 @@ test "match_adv: grade F" { assert _grade_letter(50) == "F"; }
 // ---------------------------------------------------------------------------
 // Match in a loop (repeated dispatch)
 // ---------------------------------------------------------------------------
-fn _process_commands(commands: number[]) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut accumulator: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _process_commands(commands: int[]) -> int {
+    let mut accumulator: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= commands.length { break; }
         let cmd = commands[i];
@@ -190,7 +190,7 @@ test "match_adv: command processing with reset" {
 }
 
 test "match_adv: command processing empty" {
-    let mut cmds: number[] = [];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut cmds: int[] = [];
     assert _process_commands(cmds) == 0;
 }
 
@@ -236,7 +236,7 @@ test "match_adv: log prefix all levels" {
 // ---------------------------------------------------------------------------
 // Nested match (match result drives another match)
 // ---------------------------------------------------------------------------
-fn _priority_level(level: LogLevel) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _priority_level(level: LogLevel) -> int {
     match level {
         LogLevel.Debug: return 0,
         LogLevel.Info: return 1,

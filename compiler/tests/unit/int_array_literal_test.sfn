@@ -1,0 +1,67 @@
+// Regression test: array literals of integer-shaped `NumberLiteral`
+// elements must lower as `i64` storage, not `double`.
+//
+// Background: `infer_expression_type` in
+// `compiler/src/emit_native_format.sfn` previously returned `"number"` for
+// every `NumberLiteral` regardless of whether the literal was integral
+// (`42`) or fractional (`42.0`). The downstream `.sfn-asm` therefore carried
+// `#element:number` for `[42]`, which `parse_array_literal_metadata` maps
+// via `map_primitive_type` to `"double"`. `lower_array_literal` then stored
+// the literal as `double 42.0` inside a `{ double*, i64, i64 }*` header,
+// while `let arr: int[]` allocated a `{ i64*, i64, i64 }*` slot. The
+// resulting bitcast of the header pointer left the underlying bytes
+// untouched, so `arr[0]` read the `i64` interpretation of the `double 42.0`
+// bit pattern (4_631_107_791_820_423_168) instead of 42 — issue #599.
+//
+// After the fix, `infer_expression_type` introspects the literal text and
+// returns `"int"` for integers / `"float"` for fractionals, so `[42]` emits
+// as `[#element:int, 42]` and lowers as `i64` storage.
+test "int[] literal indexed access returns the stored value" {
+    let arr: int[] = [42];
+    let x = arr[0];
+    // Direct equality — catches the bit-pattern bug. The `double 42.0`
+    // misinterpretation produces 4_631_107_791_820_423_168 as i64, which
+    // is neither 42 nor 0.
+    assert x == 42;
+    // Defensive against a stale uninitialized read masquerading as 0.
+    assert x != 0;
+}
+
+test "int[] literal multi-element with varying digit counts" {
+    let arr: int[] = [1, 22, 333, 4444];
+    assert arr[0] == 1;
+    assert arr[1] == 22;
+    assert arr[2] == 333;
+    assert arr[3] == 4444;
+}
+
+test "int[] literal — annotated zero and large value" {
+    let arr: int[] = [0, 9007199254740992];
+    assert arr[0] == 0;
+    assert arr[1] == 9007199254740992;
+}
+
+test "int[] inferred from integer-literal elements (no annotation)" {
+    // Slice E.1 (#488) scalar default extends to arrays: an unannotated
+    // array of integer literals infers `int[]`, not `float[]`.
+    let arr = [1, 2, 3];
+    assert arr[0] == 1;
+    assert arr[1] == 2;
+    assert arr[2] == 3;
+}
+
+test "float[] literal continues to round-trip (no regression on legacy path)" {
+    // The pre-existing `number[]` corpus must still compile. `: number[]`
+    // → `: float[]` → `double` storage, and `42.0` retains its value
+    // through the round-trip.
+    let arr: number[] = [42.0];
+    let x = arr[0];
+    assert x == 42.0;
+}
+
+test "float[] inferred from fractional-literal elements (no annotation)" {
+    let arr = [1.5, 2.5, 3.5];
+    assert arr[0] == 1.5;
+    assert arr[1] == 2.5;
+    assert arr[2] == 3.5;
+}

@@ -74,8 +74,12 @@ test_three_field_aggregate_appears() {
     return 0
 }
 
-# B2 — `let xs = [1, 2, 3]` lowers to a `{ double*, i64, i64 }*` (numeric
-# literals lower to double under the bootstrap number ABI).
+# B2 — `let xs = [1.0, 2.0, 3.0]` lowers to a `{ double*, i64, i64 }*`
+# (fractional literals select the `float` element kind via the
+# emit-native inference, which `map_primitive_type` lowers to `double`).
+# The fixture uses fractional literals on purpose so the shape assertion
+# is independent of the post-#599 integer-literal default flip from
+# `double` to `i64`.
 test_numeric_literal_uses_value_typed_data_slot() {
     emit_ir_once || return 1
     local hits
@@ -227,7 +231,7 @@ test_no_legacy_two_field_array_shape() {
 
 run_test 'emitted IR contains the { T*, i64, i64 } aggregate type' \
     test_three_field_aggregate_appears
-run_test 'numeric literal [1, 2, 3] lowers to { double*, i64, i64 }' \
+run_test 'numeric literal [1.0, 2.0, 3.0] lowers to { double*, i64, i64 }' \
     test_numeric_literal_uses_value_typed_data_slot
 run_test 'string literal ["one", "two"] lowers to { i8**, i64, i64 }' \
     test_string_array_uses_pointer_typed_data_slot

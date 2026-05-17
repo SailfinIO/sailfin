@@ -186,8 +186,39 @@ fn infer_array_element_type(elements: Expression[]) -> string {
     return candidate;
 }
 
+// Discriminate integer-vs-float for `NumberLiteral.value`. The lexer captures
+// number tokens as `digits` (integer) or `digits.digits` (float) — no
+// scientific notation, no hex/octal — so the presence of `.` is sufficient.
+// Keeping this aligned with the scalar default from Slice E.1 (#488): bare
+// integer literals are `int`, bare fractional literals are `float`. Without
+// this discrimination, `let arr: int[] = [42]` lowers as `{ double*, i64, i64 }*`
+// and `arr[0]` reads `i64` over a `double` bit pattern — issue #599.
+fn _number_literal_kind(value: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        if value[i] == "." { return "float"; }
+        i += 1;
+    }
+    return "int";
+}
+
 fn infer_expression_type(expression: Expression) -> string {
-    if expression.variant == "NumberLiteral" { return "number"; }
+    if expression.variant == "NumberLiteral" {
+        return _number_literal_kind(expression.value);
+    }
+    if expression.variant == "Unary" {
+        // Signed numeric literals parse as `Unary { -, NumberLiteral }`.
+        // For element-type inference the sign is irrelevant — `-3` has
+        // the same numeric kind as `3`. Without this recursion,
+        // `[1, 2, -3]` would mix `int` with `""` from `infer_array_element_type`
+        // and fall back to the pre-#599 `double` element default, defeating
+        // the int-array fix at any call site with a negative literal.
+        if expression.operand.variant == "NumberLiteral" {
+            return _number_literal_kind(expression.operand.value);
+        }
+        return "";
+    }
     if expression.variant == "BooleanLiteral" { return "boolean"; }
     if expression.variant == "StringLiteral" { return "string"; }
     if expression.variant == "Struct" {

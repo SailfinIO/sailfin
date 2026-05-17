@@ -5,9 +5,9 @@
 // ---------------------------------------------------------------------------
 // Loop with zero iterations (exit condition checked before body)
 // ---------------------------------------------------------------------------
-fn _zero_iter_loop(limit: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut count: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _zero_iter_loop(limit: int) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= limit { break; }
         count += 1;
@@ -29,8 +29,8 @@ test "loop_edge: one iteration" { assert _zero_iter_loop(1) == 1; }
 // ---------------------------------------------------------------------------
 // Loop with multiple break points from different branches
 // ---------------------------------------------------------------------------
-fn _multi_break(arr: number[]) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _multi_break(arr: int[]) -> int {
+    let mut i: int = 0;
     let mut found_neg: boolean = false;
     let mut found_big: boolean = false;
     loop {
@@ -66,19 +66,19 @@ test "loop_edge: multi break no special" {
 }
 
 test "loop_edge: multi break empty array" {
-    let mut data: number[] = [];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut data: int[] = [];
     assert _multi_break(data) == 0;
 }
 
 // ---------------------------------------------------------------------------
 // Nested loop with break in outer from inner condition
 // ---------------------------------------------------------------------------
-fn _find_in_matrix(rows: number, cols: number, target: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut found_at: number = -1;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _find_in_matrix(rows: int, cols: int, target: int) -> int {
+    let mut i: int = 0;
+    let mut found_at: int = -1;
     loop {
         if i >= rows { break; }
-        let mut j: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+        let mut j: int = 0;
         loop {
             if j >= cols { break; }
             let val = i * cols + j;
@@ -114,9 +114,9 @@ test "loop_edge: find in matrix not found" {
 // ---------------------------------------------------------------------------
 // While-like loop with compound condition
 // ---------------------------------------------------------------------------
-fn _gcd(a: number, b: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut x: number = a;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut y: number = b;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _gcd(a: int, b: int) -> int {
+    let mut x: int = a;
+    let mut y: int = b;
     loop {
         if y == 0 { break; }
         let temp = y;
@@ -137,9 +137,9 @@ test "loop_edge: gcd one is zero" { assert _gcd(5, 0) == 5; }
 // ---------------------------------------------------------------------------
 // Countdown loop (decrementing counter)
 // ---------------------------------------------------------------------------
-fn _countdown_sum(start: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut total: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut n: number = start;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _countdown_sum(start: int) -> int {
+    let mut total: int = 0;
+    let mut n: int = start;
     loop {
         if n <= 0 { break; }
         total += n;
@@ -155,9 +155,9 @@ test "loop_edge: countdown sum from 0" { assert _countdown_sum(0) == 0; }
 // ---------------------------------------------------------------------------
 // Loop with continue and mutation after continue (dead code after continue)
 // ---------------------------------------------------------------------------
-fn _skip_multiples_of_3(n: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut sum: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 1;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _skip_multiples_of_3(n: int) -> int {
+    let mut sum: int = 0;
+    let mut i: int = 1;
     loop {
         if i > n { break; }
         if i % 3 == 0 {
@@ -185,7 +185,7 @@ test "loop_edge: skip multiples of 3 up to 3" {
 // ---------------------------------------------------------------------------
 fn _build_until_long(parts: string[]) -> string {
     let mut result: string = "";
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut i: int = 0;
     loop {
         if i >= parts.length { break; }
         result = result + parts[i];
@@ -215,17 +215,17 @@ test "loop_edge: string build no early termination" {
 // ---------------------------------------------------------------------------
 // Double loop with independent counters (phi isolation)
 // ---------------------------------------------------------------------------
-fn _independent_loops(a: number, b: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut sum_a: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _independent_loops(a: int, b: int) -> int {
+    let mut sum_a: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= a { break; }
         sum_a += i + 1;
         i += 1;
     }
 
-    let mut sum_b: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut j: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut sum_b: int = 0;
+    let mut j: int = 0;
     loop {
         if j >= b { break; }
         sum_b += j + 1;
@@ -251,8 +251,8 @@ test "loop_edge: independent loops both zero" {
 // ---------------------------------------------------------------------------
 // Loop with return from middle (not break)
 // ---------------------------------------------------------------------------
-fn _find_first_even(arr: number[]) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _find_first_even(arr: int[]) -> int {
+    let mut i: int = 0;
     loop {
         if i >= arr.length { break; }
         if arr[i] % 2 == 0 { return arr[i]; }
