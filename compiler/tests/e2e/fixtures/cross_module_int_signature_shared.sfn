@@ -3,16 +3,30 @@
 // Pairs with `compiler/tests/e2e/cross_module_int_signature_test.sfn`
 // (runtime correctness) and
 // `compiler/tests/e2e/test_cross_module_int_signature.sh` (LLVM IR
-// declare/call shape). The compiler must emit `declare i8* @... (i64)`
-// in the importer's IR, not `(double)` — the bug surfaced when
-// `compiler/src/llvm/runtime_helpers.sfn` carried a `target == symbol`
-// mirror row for a function that also lives in user-defined Sailfin
-// source, which silently overrode the imported function's parameter
-// types with the registry's hand-typed `["double"]`.
+// declare/call shape).
 //
-// All entry points here use `: int` parameters and `-> int` returns so
-// the fixture exercises the post-flip cross-module shape regardless of
-// what `compiler/src/llvm/utils.sfn:number_to_string` currently uses.
+// The first three exports are plain `: int` cross-module functions
+// that the importer can call without invoking any runtime-helper
+// machinery. They pin the baseline shape:
+// `declare i64 @<sym>__<mod>(i64...)`.
+//
+// `shadow_number_to_string` is the headline #633 regression. Its
+// name collides with the `target == symbol` mirror row at
+// `compiler/src/llvm/runtime_helpers.sfn` for `number_to_string`
+// (registry: `parameter_types: ["double"]`, `return_type: "i8*"`).
+// Pre-fix, `resolve_call_signature` preferred the registry row over
+// the imported function entry and `render_runtime_helper_declarations`
+// emitted the bare `@number_to_string(double)` declare while
+// `render_imported_function_declarations` skipped its own declare on
+// the helper-symbols collision. After mangling, the importer's IR
+// ended up with `declare i8* @number_to_string__<mod>(double)` and
+// `call ... (double %x)` against an `i64`-typed callee define —
+// silent ABI mismatch that corrupted `prelude.ll` validation. Post-fix
+// the imported function entry wins and the importer emits
+// `declare i64 @number_to_string__<mod>(i64)` plus matching call
+// sites. The fixture's `number_to_string` deliberately returns `int`
+// (LLVM `i64`) so the divergence from the registry's `i8*` return
+// type also surfaces if the fix regresses.
 fn cross_module_int_double(value: int) -> int { return value + value; }
 
 fn cross_module_int_sum_pair(left: int, right: int) -> int {
@@ -21,8 +35,15 @@ fn cross_module_int_sum_pair(left: int, right: int) -> int {
 
 fn cross_module_int_identity(value: int) -> int { return value; }
 
+// Name collides with the `target == symbol` runtime-helper mirror row
+// for `number_to_string`. Exposes an `: int` parameter and `-> int`
+// return so the pre-fix `(double)` registry override surfaces as a
+// concrete ABI mismatch instead of an invisible divergence.
+fn number_to_string(value: int) -> int { return value + 100; }
+
 export {
     cross_module_int_double,
     cross_module_int_sum_pair,
-    cross_module_int_identity
+    cross_module_int_identity,
+    number_to_string
 };

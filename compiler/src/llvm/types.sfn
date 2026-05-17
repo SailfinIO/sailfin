@@ -778,6 +778,16 @@ struct CallSignatureResolution {
     expected_params: string[];
     is_trait_dispatch: boolean;
     diagnostics: string[];
+    // Issue #633: when a user-defined function entry wins over a
+    // colliding `target == symbol` runtime-helper row, signal the
+    // caller to drop its `helper_descriptor` so downstream emission
+    // (`coerce_and_emit_call`) does not re-fetch the helper via
+    // `find_runtime_helper` and re-apply its `native_signature` /
+    // `c_abi_return_type` coercion against the function entry's
+    // signature. The legacy precedence let the helper coercion slip
+    // through unconditionally; this flag carries the precedence
+    // decision across the function boundary.
+    helper_overridden: boolean;
 }
 
 // Wraps the output of `lower_all_functions` so the orchestrator can

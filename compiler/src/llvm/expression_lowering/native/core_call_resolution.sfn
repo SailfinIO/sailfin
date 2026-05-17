@@ -808,6 +808,7 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
         result_helper = find_runtime_helper(result_target);
     }
 
+    let mut helper_overridden: boolean = false;
     if !is_trait_dispatch {
         // Issue #633: when a runtime-helper descriptor and a user-defined
         // function entry (local or imported) both match the call target,
@@ -852,11 +853,20 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                 }
                 expected_params = collect_parameter_types(context, function_entry.parameters, result_target);
             }
-            // Drop the helper descriptor when the function entry wins so
-            // downstream emission (`coerce_and_emit_call`) doesn't apply
-            // the helper's `c_abi_return_type` coercion against a
-            // signature it no longer owns.
+            // Signal the caller (lower_call_expression) that the helper
+            // descriptor was deferred to the function entry so it can
+            // drop its own `helper_descriptor` variable. Clearing
+            // `result_helper` locally is insufficient — the outer scope
+            // keeps the Phase-1 helper from `resolve_call_method_target`
+            // and re-runs `find_runtime_helper(trimmed_target)` whenever
+            // it's null, which would otherwise let
+            // `coerce_and_emit_call` reapply the helper's
+            // `native_signature` / `c_abi_return_type` coercion against
+            // the function entry's signature.
             result_helper = null;
+            if find_runtime_helper(result_target) != null {
+                helper_overridden = true;
+            }
         } else if result_helper != null {
             let descriptor = result_helper;
             llvm_return = descriptor.return_type;
@@ -890,7 +900,8 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
         llvm_return: llvm_return,
         expected_params: expected_params,
         is_trait_dispatch: is_trait_dispatch,
-        diagnostics: result_diagnostics
+        diagnostics: result_diagnostics,
+        helper_overridden: helper_overridden
     };
 }
 
