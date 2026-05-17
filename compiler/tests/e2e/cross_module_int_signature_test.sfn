@@ -1,0 +1,39 @@
+// Runtime regression for issue #633.
+//
+// The bug: a `target == symbol` mirror row in `runtime_helpers.sfn`
+// (e.g. the pre-fix `number_to_string` row with
+// `parameter_types: ["double"]`) overrode the imported function entry
+// in `resolve_call_signature`, causing every importer to emit
+// `declare i8* @sym__<mod>(double)` against a `define ... (i64 %value)`.
+// Calls passed `double` bits to an `i64` parameter, producing garbage.
+//
+// This test imports three `: int` cross-module functions and asserts
+// that their results match the values produced by an identical
+// same-module path. If the cross-module call's parameter ABI is wrong,
+// the imported callee reads garbage and the assertions trip.
+import {
+    cross_module_int_double,
+    cross_module_int_sum_pair,
+    cross_module_int_identity
+} from "./fixtures/cross_module_int_signature_shared";
+
+test "cross-module int parameter: identity round-trip" {
+    assert cross_module_int_identity(0) == 0;
+    assert cross_module_int_identity(1) == 1;
+    assert cross_module_int_identity(42) == 42;
+    assert cross_module_int_identity(-7) == -7;
+    assert cross_module_int_identity(1000000) == 1000000;
+}
+
+test "cross-module int parameter: simple arithmetic" {
+    assert cross_module_int_double(0) == 0;
+    assert cross_module_int_double(21) == 42;
+    assert cross_module_int_double(-5) == -10;
+    assert cross_module_int_double(1000) == 2000;
+}
+
+test "cross-module int parameter: multi-argument call" {
+    assert cross_module_int_sum_pair(10, 32) == 42;
+    assert cross_module_int_sum_pair(0, 0) == 0;
+    assert cross_module_int_sum_pair(-3, 8) == 5;
+}

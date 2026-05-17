@@ -98,7 +98,7 @@ fn render_trait_metadata_comments(metadata: TraitMetadata) -> string[] {
 // =============================================================================
 // Runtime Helper Declarations
 // =============================================================================
-fn render_runtime_helper_declarations(used_targets: string[], local_functions: NativeFunction[]) -> string[] {
+fn render_runtime_helper_declarations(used_targets: string[], local_functions: NativeFunction[], imported_functions: NativeFunction[]) -> string[] {
     if used_targets.length == 0 { return []; }
     // Build list of local function symbols to avoid declaring helpers that are defined locally
     let mut local_symbols: string[] = [];
@@ -107,6 +107,26 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
         if local_index >= local_functions.length { break; }
         local_symbols.push(sanitize_symbol(local_functions[local_index].name));
         local_index += 1;
+    }
+
+    // Issue #633: build the set of imported user-function names so the
+    // helper-declare loop can defer to the imported declare when both
+    // sources resolve to the same symbol. The imported declare carries
+    // the source-level signature parsed from the upstream `.sfn-asm`
+    // interface (e.g. `: int` → `i64`), while the registry rows are
+    // hand-typed and historically static. When they disagree the
+    // imported declare must win so the cross-module call lands on a
+    // declare/define pair with matching parameter ABIs. Helpers whose
+    // effective symbol does NOT collide with any imported function
+    // (the bulk of the registry — `sailfin_runtime_*` C entrypoints,
+    // `runtime_*_fn` aliases, intrinsic stubs) continue to emit
+    // unchanged.
+    let mut imported_symbols: string[] = [];
+    let mut imported_index: int = 0;
+    loop {
+        if imported_index >= imported_functions.length { break; }
+        imported_symbols.push(sanitize_symbol(imported_functions[imported_index].name));
+        imported_index += 1;
     }
 
     let mut lines: string[] = [];
@@ -133,6 +153,26 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             }
             // Skip if this helper is actually defined locally (not just a runtime intrinsic)
             if string_array_contains(local_symbols, effective_symbol) {
+                index += 1;
+                continue;
+            }
+            // Issue #633: skip when an imported user function shadows the
+            // helper. The imported declare emitted by
+            // `render_imported_function_declarations` already carries the
+            // source-level signature and would otherwise collide with the
+            // registry's hand-typed shape after symbol mangling renames
+            // `@<sym>` to `@<sym>__<module>`. Limit the skip to
+            // `target == symbol` mirror rows so the helper's alias-declare
+            // path below (which handles `target != symbol` C entrypoints
+            // like `monotonic_millis` → `sailfin_runtime_monotonic_millis`)
+            // is not affected.
+            let mut _shadowed_by_import: boolean = false;
+            if descriptor.target == descriptor.symbol {
+                if string_array_contains(imported_symbols, effective_symbol) {
+                    _shadowed_by_import = true;
+                }
+            }
+            if _shadowed_by_import {
                 index += 1;
                 continue;
             }
@@ -194,16 +234,29 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
                 if descriptor.target != effective_symbol {
                     let sanitized_target = sanitize_symbol(descriptor.target);
                     if sanitized_target != effective_symbol {
-                        if !string_array_contains(declared_symbols, sanitized_target) {
-                            if !string_array_contains(local_symbols, sanitized_target) {
-                                let alias_line = "declare " + declare_return
-                                    + " @"
-                                    + sanitized_target
-                                    + "("
-                                    + parameter_text
-                                    + ")";
-                                lines.push(alias_line);
-                                declared_symbols.push(sanitized_target);
+                        // Issue #633: when an imported user function
+                        // already supplies a declare for the alias name
+                        // (e.g. `is_decimal_digit` exported from the
+                        // parser utilities, `monotonic_millis` exported
+                        // from the prelude wrapper), the imported declare
+                        // carries the source-level signature and would
+                        // otherwise be duplicated by this alias line.
+                        // The main `effective_symbol` declare above stays
+                        // intact so the C entrypoint (`sailfin_runtime_*`)
+                        // is still resolved for the wrapper's internal
+                        // call.
+                        if !string_array_contains(imported_symbols, sanitized_target) {
+                            if !string_array_contains(declared_symbols, sanitized_target) {
+                                if !string_array_contains(local_symbols, sanitized_target) {
+                                    let alias_line = "declare " + declare_return
+                                        + " @"
+                                        + sanitized_target
+                                        + "("
+                                        + parameter_text
+                                        + ")";
+                                    lines.push(alias_line);
+                                    declared_symbols.push(sanitized_target);
+                                }
                             }
                         }
                     }
@@ -220,39 +273,20 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
 // =============================================================================
 fn render_imported_function_declarations(imported_functions: NativeFunction[], local_functions: NativeFunction[], context: TypeContext, runtime_helpers: string[]) -> string[] {
     if imported_functions.length == 0 { return []; }
-    // Collect runtime helper symbols to avoid duplicate declares — but only
-    // for descriptors whose target was actually emitted by
-    // render_runtime_helper_declarations (i.e. listed in runtime_helpers).
-    // Otherwise an imported function aliasing an unused descriptor would be
-    // silently dropped from both paths and vanish from the preamble.
-    let helper_descriptors = runtime_helper_descriptors();
-    let mut helper_symbols: string[] = [];
-    let mut helper_index: int = 0;
-    loop {
-        if helper_index >= helper_descriptors.length { break; }
-        let descriptor = helper_descriptors[helper_index];
-        if string_array_contains(runtime_helpers, descriptor.target) {
-            helper_symbols.push(descriptor.symbol);
-            // M2.4a: a flipped descriptor's effective symbol is the
-            // `native_signature`, not `symbol` — treat both as
-            // already-declared so the imported-function pass below
-            // doesn't emit a stray `declare` for either name.
-            let mut _native_sig: string? = descriptor.native_signature;
-            if _native_sig != null {
-                if _native_sig.length > 0 {
-                    if !string_array_contains(helper_symbols, _native_sig) {
-                        helper_symbols.push(_native_sig);
-                    }
-                }
-            }
-            let helper_target = sanitize_symbol(descriptor.target);
-            if !string_array_contains(helper_symbols, helper_target) {
-                helper_symbols.push(helper_target);
-            }
-        }
-        helper_index += 1;
-    }
-
+    // Issue #633: previously this pass collected the runtime-helper
+    // symbol set and skipped imported declares that collided with any
+    // helper, deferring to the registry-emitted declare. That caused
+    // every cross-module call to a `target == symbol` mirror row
+    // (`number_to_string`, `char_code`, `find_char`, etc.) to adopt the
+    // registry's hand-typed C ABI signature, silently overriding the
+    // imported function's source-level types. After this fix the
+    // imported declare wins and `render_runtime_helper_declarations`
+    // takes the symmetric skip when a `target == symbol` row collides
+    // with an imported user function — so the registry retains its
+    // role for true C entrypoints (`sailfin_runtime_*`, `runtime_*_fn`
+    // aliases) but no longer overrules the source-of-truth signature
+    // for Sailfin functions that happen to mirror a legacy helper name.
+    //
     // Get all local function symbols to avoid redefinitions
     let mut local_symbols: string[] = [];
     let mut local_index: int = 0;
@@ -269,15 +303,9 @@ fn render_imported_function_declarations(imported_functions: NativeFunction[], l
         if index >= imported_functions.length { break; }
         let function = imported_functions[index];
         let sanitized_name = sanitize_symbol(function.name);
-        // Skip if this function is already declared as a runtime helper or defined locally
-        let mut _if285: boolean = false;
-        if string_array_contains(helper_symbols, sanitized_name) {
-            _if285 = true;
-        }
+        // Skip if this function is defined locally — emitting a declare
+        // alongside the local define produces an LLVM redefinition error.
         if string_array_contains(local_symbols, sanitized_name) {
-            _if285 = true;
-        }
-        if _if285 {
             index += 1;
             continue;
         }

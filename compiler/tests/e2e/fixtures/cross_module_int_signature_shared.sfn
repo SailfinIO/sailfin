@@ -1,0 +1,28 @@
+// Cross-module `: int` fixture for issue #633.
+//
+// Pairs with `compiler/tests/e2e/cross_module_int_signature_test.sfn`
+// (runtime correctness) and
+// `compiler/tests/e2e/test_cross_module_int_signature.sh` (LLVM IR
+// declare/call shape). The compiler must emit `declare i8* @... (i64)`
+// in the importer's IR, not `(double)` — the bug surfaced when
+// `compiler/src/llvm/runtime_helpers.sfn` carried a `target == symbol`
+// mirror row for a function that also lives in user-defined Sailfin
+// source, which silently overrode the imported function's parameter
+// types with the registry's hand-typed `["double"]`.
+//
+// All entry points here use `: int` parameters and `-> int` returns so
+// the fixture exercises the post-flip cross-module shape regardless of
+// what `compiler/src/llvm/utils.sfn:number_to_string` currently uses.
+fn cross_module_int_double(value: int) -> int { return value + value; }
+
+fn cross_module_int_sum_pair(left: int, right: int) -> int {
+    return left + right;
+}
+
+fn cross_module_int_identity(value: int) -> int { return value; }
+
+export {
+    cross_module_int_double,
+    cross_module_int_sum_pair,
+    cross_module_int_identity
+};
