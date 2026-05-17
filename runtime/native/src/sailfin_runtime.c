@@ -177,7 +177,7 @@ static void _runtime_init(void)
     }
 }
 
-double sailfin_runtime_monotonic_millis(void)
+int64_t sailfin_runtime_monotonic_millis(void)
 {
 #if defined(__APPLE__)
     // Use the same clock as other macOS codepaths in this runtime.
@@ -190,15 +190,15 @@ double sailfin_runtime_monotonic_millis(void)
     uint64_t t = mach_absolute_time();
     // Convert to nanoseconds.
     uint64_t ns = (t * (uint64_t)timebase.numer) / (uint64_t)timebase.denom;
-    return (double)(ns / 1000000ull);
+    return (int64_t)(ns / 1000000ull);
 #else
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
     {
-        return 0.0;
+        return 0;
     }
     uint64_t ms = (uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull;
-    return (double)ms;
+    return (int64_t)ms;
 #endif
 }
 

@@ -1,0 +1,55 @@
+// Issue #634: pin the runtime-helper signature contract that drives
+// `let x = function_returning_int()` inference. Pre-#634 the
+// `monotonic_millis` / `runtime_monotonic_millis_fn` helpers in
+// `compiler/src/llvm/runtime_helpers.sfn` registered with
+// `return_type: "double"`, mirroring a stale C ABI. Every `let t =
+// monotonic_millis()` site therefore inferred `t :: double` and emitted
+// an `ABI primitive mismatch` warning at the first downstream
+// `int`-typed call (`_ms_since(t)` and friends — see
+// `compiler/src/main.sfn:287-352` and `cli_commands.sfn:827-962`).
+//
+// The fix moved the C ABI to `int64_t` and the registry to `"i64"`
+// (the LLVM spelling of Sailfin's `int`), so the inference now
+// matches the prelude's `fn monotonic_millis() -> int ![clock]`
+// declaration end-to-end. The registry stores LLVM types — every
+// other integer helper in the table (e.g. `string.length` at
+// `runtime_helpers.sfn:407`) uses `"i64"` — so this test asserts the
+// LLVM spelling rather than the Sailfin spelling. This unit test
+// pins the registry shape so a regression in either the C-side ABI
+// or the helper descriptor surfaces here without paying the
+// LLVM-lowering import cost (see `atomic_load_store_test.sfn` for
+// the lowering-cost budget rationale).
+import { find_runtime_helper } from "../../src/llvm/runtime_helpers";
+
+// ── Registry: `monotonic_millis` returns i64 (Sailfin `int`) ──
+test "issue #634: monotonic_millis helper declares i64 return" {
+    let helper = find_runtime_helper("monotonic_millis");
+    assert helper != null;
+    assert helper.return_type == "i64";
+    assert helper.symbol == "sailfin_runtime_monotonic_millis";
+}
+
+test "issue #634: runtime_monotonic_millis_fn helper declares i64 return" {
+    // The prelude binding (`let runtime_monotonic_millis_fn =
+    // runtime.monotonic_millis` in `runtime/prelude.sfn:15`) must
+    // agree with the direct-call entry so that the wrapper's body
+    // (`return runtime_monotonic_millis_fn();` at prelude.sfn:82)
+    // type-checks against its declared `-> int` return without an
+    // implicit `double -> int` coercion.
+    let helper = find_runtime_helper("runtime_monotonic_millis_fn");
+    assert helper != null;
+    assert helper.return_type == "i64";
+    assert helper.symbol == "sailfin_runtime_monotonic_millis";
+}
+
+test "issue #634: monotonic_millis helper carries the clock effect" {
+    // Sibling guard against the registry regressing in a different
+    // dimension. The effect is what gates `fn main() ![clock]`
+    // diagnostics; flipping return_type without preserving effects
+    // would silently degrade capability enforcement.
+    let helper = find_runtime_helper("monotonic_millis");
+    assert helper != null;
+    assert helper.effects.length == 1;
+    assert helper.effects[0] == "clock";
+    assert helper.parameter_types.length == 0;
+}

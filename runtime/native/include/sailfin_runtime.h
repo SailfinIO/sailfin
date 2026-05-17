@@ -96,8 +96,13 @@ extern "C"
     void sfn_sleep(double milliseconds);
 
     // Monotonic clock for profiling/timing.
-    // Returns an integer millisecond count as a `double` for stage2 ABI.
-    double sailfin_runtime_monotonic_millis(void);
+    // Returns an integer millisecond count as `int64_t` (Sailfin `int`).
+    // Pre-#634: returned `double` for legacy stage2 ABI; the registry in
+    // `compiler/src/llvm/runtime_helpers.sfn` mirrored that and forced
+    // every `let t = monotonic_millis()` to infer `double`, producing
+    // spurious ABI primitive mismatch warnings at every `int`-typed
+    // call site downstream.
+    int64_t sailfin_runtime_monotonic_millis(void);
 
     // ---- String helpers ----
 
