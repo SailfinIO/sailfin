@@ -181,7 +181,8 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                         return_type: receiver_type,
                         parameter_types: expected_params,
                         effects: [],
-                        native_signature: null
+                        native_signature: null,
+                        c_abi_return_type: null
                     };
                     function_entry = null;
                 }
@@ -265,7 +266,8 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                         return_type: operands[0].llvm_type,
                         parameter_types: expected_params,
                         effects: [],
-                        native_signature: null
+                        native_signature: null,
+                        c_abi_return_type: null
                     };
                 }
             }

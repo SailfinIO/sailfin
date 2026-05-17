@@ -76,6 +76,19 @@ struct RuntimeHelperDescriptor {
     // by populating this field; until then it stays `null` and
     // the C symbol is used. See issue #392.
     native_signature: string?;
+    // Optional C-ABI return type. When non-null and different from
+    // `return_type`, the lowering emits the `call` against this type
+    // (i.e. the type the C runtime symbol actually returns) and then
+    // injects a post-call coercion into `return_type` at the call
+    // site. This decouples the user-visible return type from the C
+    // ABI without requiring a synchronized C-runtime flip — see
+    // issue #638 (and #634's monotonic_millis worked example, where
+    // the C body returns `double` while Sailfin should see `i64`).
+    // Stays `null` everywhere today; per-helper flips land in
+    // follow-up issues. Only numeric `double ↔ i64` coercion is
+    // supported in this PR; struct/pointer coercion arrives if/when
+    // a future helper needs it.
+    c_abi_return_type: string?;
 }
 
 // =============================================================================

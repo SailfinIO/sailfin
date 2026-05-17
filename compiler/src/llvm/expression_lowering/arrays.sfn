@@ -145,7 +145,8 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
         parameter_types: [],
         return_type: "",
         symbol: "",
-        return_attributes: "noalias"
+        return_attributes: "noalias",
+        c_abi_return_type: ""
     };
     let buffer_operands: LLVMOperand[] = [buffer_size_operand];
     let buffer_result = emit_runtime_call("alloc_struct", buffer_operands, buffer_overrides, current_temp, current_lines);

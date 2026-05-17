@@ -100,7 +100,8 @@ test "emit_runtime_call: alloc_struct with noalias return attribute renders attr
         parameter_types: [],
         return_type: "",
         symbol: "",
-        return_attributes: "noalias"
+        return_attributes: "noalias",
+        c_abi_return_type: ""
     };
     let result = emit_runtime_call("alloc_struct", operands, overrides, 0, []);
     assert result.lines.length == 1;

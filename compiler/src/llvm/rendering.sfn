@@ -9,7 +9,7 @@ import {
     extract_struct_type_from_llvm,
     render_interface_signature
 } from "./rendering_helpers";
-import { runtime_helper_descriptors } from "./runtime_helpers";
+import { effective_helper_declare_return_type, runtime_helper_descriptors } from "./runtime_helpers";
 import { map_parameter_type, map_return_type } from "./type_mapping";
 import { RuntimeHelperDescriptor, TraitMetadata, TypeContext } from "./types";
 import {
@@ -154,8 +154,19 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             if descriptor.parameter_types.length > 0 {
                 parameter_text = join_with_separator(descriptor.parameter_types, ", ");
             }
-            let line = "declare " + descriptor.return_type + " @"
-                + effective_symbol
+            // The `declare` line must use the C body's true ABI return
+            // type, not the caller-visible `return_type`. When the
+            // descriptor opts into the post-call coercion mechanism
+            // (`c_abi_return_type` set, #638), `emit_runtime_call`
+            // renders `call <abi> @sym(...)`; this line keeps the
+            // declare aligned so the IR validates and the linker
+            // resolves the C symbol with its true register class.
+            // For descriptors without a coercion opt-in (the entire
+            // registry today) this collapses to `descriptor.return_type`
+            // and the emitted line is byte-identical to the pre-#638
+            // shape.
+            let declare_return = effective_helper_declare_return_type(descriptor);
+            let line = "declare " + declare_return + " @" + effective_symbol
                 + "("
                 + parameter_text
                 + ")";
@@ -185,7 +196,7 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
                     if sanitized_target != effective_symbol {
                         if !string_array_contains(declared_symbols, sanitized_target) {
                             if !string_array_contains(local_symbols, sanitized_target) {
-                                let alias_line = "declare " + descriptor.return_type
+                                let alias_line = "declare " + declare_return
                                     + " @"
                                     + sanitized_target
                                     + "("

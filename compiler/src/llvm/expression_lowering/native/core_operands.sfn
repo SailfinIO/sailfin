@@ -737,7 +737,8 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
                 parameter_types: [],
                 return_type: "",
                 symbol: "",
-                return_attributes: "noalias"
+                return_attributes: "noalias",
+                c_abi_return_type: ""
             };
             let i8c_operands: LLVMOperand[] = [i8c_size_operand];
             let i8c_result = emit_runtime_call("alloc_struct", i8c_operands, i8c_overrides, temp_index, current_lines);
@@ -935,7 +936,8 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                         parameter_types: [],
                         return_type: "",
                         symbol: "",
-                        return_attributes: "noalias"
+                        return_attributes: "noalias",
+                        c_abi_return_type: ""
                     };
                     let alloc_operands_a: LLVMOperand[] = [alloc_size_op_a];
                     let alloc_result_a = emit_runtime_call("alloc_struct", alloc_operands_a, alloc_overrides_a, temp_index
@@ -1047,7 +1049,8 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             parameter_types: [],
             return_type: "",
             symbol: "",
-            return_attributes: "noalias"
+            return_attributes: "noalias",
+            c_abi_return_type: ""
         };
         let alloc_operands_b: LLVMOperand[] = [alloc_size_op_b];
         let alloc_result_b = emit_runtime_call("alloc_struct", alloc_operands_b, alloc_overrides_b, temp_index
@@ -1155,7 +1158,8 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                         parameter_types: [],
                         return_type: "",
                         symbol: "",
-                        return_attributes: "noalias"
+                        return_attributes: "noalias",
+                        c_abi_return_type: ""
                     };
                     let alloc_operands_c: LLVMOperand[] = [alloc_size_op_c];
                     let alloc_result_c = emit_runtime_call("alloc_struct", alloc_operands_c, alloc_overrides_c, temp_index
@@ -1253,7 +1257,8 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                             parameter_types: [],
                             return_type: "",
                             symbol: "",
-                            return_attributes: "noalias"
+                            return_attributes: "noalias",
+                            c_abi_return_type: ""
                         };
                         let alloc_operands_d: LLVMOperand[] = [alloc_size_op_d];
                         let alloc_result_d = emit_runtime_call("alloc_struct", alloc_operands_d, alloc_overrides_d, local_temp
@@ -1337,7 +1342,8 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                                 parameter_types: [],
                                 return_type: "",
                                 symbol: "",
-                                return_attributes: "noalias"
+                                return_attributes: "noalias",
+                                c_abi_return_type: ""
                             };
                             let alloc_operands_e: LLVMOperand[] = [alloc_size_op_e];
                             let alloc_result_e = emit_runtime_call("alloc_struct", alloc_operands_e, alloc_overrides_e, local_temp
@@ -1528,7 +1534,8 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                     parameter_types: [],
                     return_type: "",
                     symbol: "",
-                    return_attributes: "noalias"
+                    return_attributes: "noalias",
+                    c_abi_return_type: ""
                 };
                 let alloc_operands_f: LLVMOperand[] = [alloc_size_op_f];
                 let alloc_result_f = emit_runtime_call("alloc_struct", alloc_operands_f, alloc_overrides_f, temp_index
@@ -1622,7 +1629,8 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                     parameter_types: [],
                     return_type: "",
                     symbol: "",
-                    return_attributes: "noalias"
+                    return_attributes: "noalias",
+                    c_abi_return_type: ""
                 };
                 let alloc_operands_g: LLVMOperand[] = [alloc_size_op_g];
                 let alloc_result_g = emit_runtime_call("alloc_struct", alloc_operands_g, alloc_overrides_g, temp_index
