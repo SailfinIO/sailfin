@@ -201,17 +201,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
 
     // Monotonic clock for profiling/timing.
     // Support both the prelude binding name and direct calls.
-    // Issue #634: returns `i64` (Sailfin `int`) matching the C ABI in
-    // `runtime/native/src/sailfin_runtime.c` (`int64_t
-    // sailfin_runtime_monotonic_millis(void)`). Pre-#634 this
-    // registered as `double`, which forced every `let t =
-    // monotonic_millis()` site to infer `double` and emit ABI primitive
-    // mismatch warnings at every downstream `int`-typed call boundary.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_monotonic_millis_fn", symbol: "sailfin_runtime_monotonic_millis", return_type: "i64", parameter_types: [], effects: ["clock"], native_signature: null
+        target: "runtime_monotonic_millis_fn", symbol: "sailfin_runtime_monotonic_millis", return_type: "double", parameter_types: [], effects: ["clock"], native_signature: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "monotonic_millis", symbol: "sailfin_runtime_monotonic_millis", return_type: "i64", parameter_types: [], effects: ["clock"], native_signature: null
+        target: "monotonic_millis", symbol: "sailfin_runtime_monotonic_millis", return_type: "double", parameter_types: [], effects: ["clock"], native_signature: null
     });
     // Untyped `channel` / `spawn` / `parallel` descriptors removed under
     // issue #617 — their C bridges were silent no-ops and the

@@ -92,9 +92,9 @@ EOF
 
     local elapsed
     elapsed="${line#ELAPSED_MS=}"
-    # monotonic_millis() returns `int` post-#634; the fractional/
-    # exponent strips below are retained as defense-in-depth in case
-    # a future print path widens the literal back to `double`.
+    # monotonic_millis() returns a `number` (double) — strip any
+    # trailing fractional/exponent component if the print path emits
+    # one, so bash's integer compare stays valid.
     elapsed="${elapsed%%.*}"
     elapsed="${elapsed%%[eE]*}"
     if ! [[ "$elapsed" =~ ^[0-9]+$ ]]; then
