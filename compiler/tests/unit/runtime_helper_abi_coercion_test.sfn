@@ -1,0 +1,75 @@
+// compiler/tests/unit/runtime_helper_abi_coercion_test.sfn
+//
+// Regression coverage for the `c_abi_return_type` decoupling
+// introduced in issue #638. The registry can now declare a helper's
+// LLVM caller-visible return type independently from the C ABI's
+// actual return slot. `emit_runtime_call` is expected to render the
+// `call` line against the C ABI type and splice in a post-call
+// coercion (`fptosi double to i64`, etc.) so the LLVMOperand handed
+// back to the caller carries the declared return type.
+//
+// The fixture descriptor lives in `runtime_helpers.sfn` under
+// `target: "__sfn_test_abi_coercion_double_to_i64"` with
+// `return_type: "i64", c_abi_return_type: "double"`. It is the only
+// descriptor in the entire registry with a non-null
+// `c_abi_return_type` today; every other helper keeps
+// `c_abi_return_type: null`, so `_resolve_abi_return_type` collapses
+// onto `_resolve_call_return_type` and no observable behavior shift
+// rides on this PR (see #638 acceptance criteria).
+//
+// The expected IR shape, matching `coerce_numeric_primitive`'s
+// `double → i64` lowering (`core_operands.sfn:433-454`), is:
+//
+//   %t0 = call double @__sfn_test_abi_coercion_double_to_i64()
+//   %t1 = call double @round(double %t0)
+//   %t2 = fptosi double %t1 to i64
+//
+// The returned operand is `{ llvm_type: "i64", value: "%t2" }`. The
+// `round + fptosi` pair is canonical Sailfin rounding semantics; the
+// `fptosi` line is the lowering specifically called out by #638's
+// acceptance criteria.
+import { emit_runtime_call, empty_runtime_call_overrides } from "../../src/llvm/expression_lowering/native/runtime_call";
+import { LLVMOperand } from "../../src/llvm/types";
+
+test "emit_runtime_call: c_abi_return_type=double, return_type=i64 emits call+coercion" ![io] {
+    let operands: LLVMOperand[] = [];
+    let result = emit_runtime_call("__sfn_test_abi_coercion_double_to_i64", operands, empty_runtime_call_overrides(), 0, []);
+
+    // The call must land against the C ABI return type so the
+    // linker resolves to the `double`-returning symbol in `%xmm0`
+    // rather than the i64 register class. This is the #634 bug
+    // class the mechanism fixes.
+    assert result.lines.length == 3;
+    assert result.lines[0] == "  %t0 = call double @__sfn_test_abi_coercion_double_to_i64()";
+    assert result.lines[1] == "  %t1 = call double @round(double %t0)";
+    assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
+
+    // Caller-visible operand has the declared return type, not the
+    // C ABI type — call sites don't need to know about the coercion.
+    assert result.operand != null;
+    assert result.operand.llvm_type == "i64";
+    assert result.operand.value == "%t2";
+
+    // Three temps consumed: %t0 (call), %t1 (round), %t2 (fptosi).
+    assert result.temp_index == 3;
+    assert result.diagnostics.length == 0;
+}
+
+test "emit_runtime_call: c_abi_return_type=null collapses onto pre-#638 shape (no coercion)" ![io] {
+    // monotonic_millis is the worked example from #634: today it
+    // still declares both fields as `double` (registry flip lives in
+    // a follow-up). Until then this test pins the no-coercion shape
+    // so any accidental change to `_resolve_abi_return_type`'s
+    // default surfaces as a fixture failure rather than miscompiled
+    // timing code.
+    let operands: LLVMOperand[] = [];
+    let result = emit_runtime_call("monotonic_millis", operands, empty_runtime_call_overrides(), 0, []);
+
+    assert result.lines.length == 1;
+    assert result.lines[0] == "  %t0 = call double @sailfin_runtime_monotonic_millis()";
+    assert result.operand != null;
+    assert result.operand.llvm_type == "double";
+    assert result.operand.value == "%t0";
+    assert result.temp_index == 1;
+    assert result.diagnostics.length == 0;
+}

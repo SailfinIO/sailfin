@@ -110,6 +110,25 @@ fn _resolve_call_return_type(overrides: RuntimeCallOverrides, descriptor: Runtim
     return "";
 }
 
+// Resolve the LLVM type the C runtime symbol actually returns.
+// Precedence: descriptor's `c_abi_return_type` when non-null and
+// non-empty, else falls back to the caller-visible return type
+// (`_resolve_call_return_type`). When the two differ,
+// `emit_runtime_call` emits the LLVM `call` against the ABI type
+// and a post-call coercion into the caller-visible type, decoupling
+// the user-facing return shape from the C body's actual ABI. See
+// issue #638 (mechanism) and #634 (monotonic_millis motivation:
+// the C symbol returns `double`, but Sailfin should see `i64`).
+fn _resolve_abi_return_type(overrides: RuntimeCallOverrides, descriptor: RuntimeHelperDescriptor?) -> string {
+    if descriptor != null {
+        let mut abi: string? = descriptor.c_abi_return_type;
+        if abi != null {
+            if abi.length > 0 { return abi; }
+        }
+    }
+    return _resolve_call_return_type(overrides, descriptor);
+}
+
 // Resolve the effective parameter-type list. Empty result is valid
 // (zero-arg helpers); coercion walk handles it.
 fn _resolve_call_parameter_types(overrides: RuntimeCallOverrides, descriptor: RuntimeHelperDescriptor?) -> string[] {
@@ -126,6 +145,7 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
     let descriptor = find_runtime_helper(target);
     let call_symbol = _resolve_call_symbol(overrides, descriptor, target);
     let return_type = _resolve_call_return_type(overrides, descriptor);
+    let abi_return_type = _resolve_abi_return_type(overrides, descriptor);
     let parameter_types = _resolve_call_parameter_types(overrides, descriptor);
 
     let mut result_lines: string[] = lines;
@@ -247,20 +267,46 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
     if overrides.return_attributes.length > 0 {
         return_decoration = overrides.return_attributes + " ";
     }
+    // The LLVM `call` is rendered against the C ABI return type so
+    // the linker resolves to the symbol with its true SysV register
+    // class (`%rax` for i64, `%xmm0` for double, etc.). When the
+    // descriptor's `c_abi_return_type` matches `return_type` (i.e.
+    // the field is null, which is the entire registry today),
+    // `abi_return_type == return_type` and the render is identical
+    // to the pre-#638 shape — no observable behavior change.
     result_lines.push("  " + temp_name + " = call " + return_decoration
-        + return_type
+        + abi_return_type
         + " @"
         + call_symbol
         + "("
         + argument_text
         + ")");
-    let result_operand = LLVMOperand {
-        llvm_type: return_type,
+    let mut result_operand: LLVMOperand = LLVMOperand {
+        llvm_type: abi_return_type,
         value: temp_name
     };
+    let mut next_temp: int = result_temp + 1;
+
+    // Post-call coercion: when the descriptor opts into a different
+    // C ABI return type than the caller-visible one, splice in a
+    // coercion (`fptosi double to i64`, `sitofp i64 to double`, etc.)
+    // so the LLVMOperand handed back to the caller carries
+    // `return_type`. `coerce_operand_to_type` already handles numeric
+    // `double ↔ i64` (issue #638 scope); other directions surface
+    // as a coercion diagnostic and the operand falls back to the
+    // raw C-ABI value rather than emitting malformed IR. See
+    // `_resolve_abi_return_type` for the precedence rules.
+    if abi_return_type != return_type {
+        let coercion = coerce_operand_to_type(result_operand, return_type, next_temp, result_lines, true, null);
+        result_diagnostics = extend_string_array(result_diagnostics, coercion.diagnostics);
+        result_lines = coercion.lines;
+        next_temp = coercion.temp_index;
+        if coercion.operand != null { result_operand = coercion.operand; }
+    }
+
     return ExpressionResult {
         lines: result_lines,
-        temp_index: result_temp + 1,
+        temp_index: next_temp,
         operand: result_operand,
         diagnostics: result_diagnostics,
         string_constants: empty_constants
