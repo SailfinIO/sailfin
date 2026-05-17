@@ -73,17 +73,20 @@ test "emit_runtime_call: c_abi_return_type=double, return_type=i64 emits call+co
 }
 
 test "emit_runtime_call: c_abi_return_type=null collapses onto pre-#638 shape (no coercion)" ![io] {
-    // monotonic_millis is the worked example from #634: today it
-    // still declares both fields as `double` (registry flip lives in
-    // a follow-up). Until then this test pins the no-coercion shape
-    // so any accidental change to `_resolve_abi_return_type`'s
-    // default surfaces as a fixture failure rather than miscompiled
-    // timing code.
-    let operands: LLVMOperand[] = [];
-    let result = emit_runtime_call("monotonic_millis", operands, empty_runtime_call_overrides(), 0, []);
+    // `string.to_number` is the canonical genuinely-fractional helper
+    // (#639 explicitly carves it out of the flip set), so its
+    // descriptor will continue to declare matching `return_type` and
+    // `c_abi_return_type: null` for the foreseeable future. Pinning
+    // its render here guarantees any accidental change to
+    // `_resolve_abi_return_type`'s default surfaces as a fixture
+    // failure rather than silently inserting a coercion at every
+    // `string.to_number` call site.
+    let operand = LLVMOperand { llvm_type: "i8*", value: "%s" };
+    let operands: LLVMOperand[] = [operand];
+    let result = emit_runtime_call("string.to_number", operands, empty_runtime_call_overrides(), 0, []);
 
     assert result.lines.length == 1;
-    assert result.lines[0] == "  %t0 = call double @sailfin_runtime_monotonic_millis()";
+    assert result.lines[0] == "  %t0 = call double @sailfin_runtime_string_to_number(i8* %s)";
     assert result.operand != null;
     assert result.operand.llvm_type == "double";
     assert result.operand.value == "%t0";

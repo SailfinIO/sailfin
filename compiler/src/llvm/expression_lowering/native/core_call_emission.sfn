@@ -572,18 +572,46 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
     if _trace_ccl {
         print.err("call_lowering: checkpoint-I temp_name=" + temp_name);
     }
-    let call_line = "  " + temp_name + " = call " + llvm_return + " @"
+    // Issue #639: honor the descriptor's `c_abi_return_type` when it
+    // differs from the caller-visible `return_type`. This mirrors the
+    // mechanism `emit_runtime_call` already implements (#638), but is
+    // also needed here because user-written calls to helpers like
+    // `monotonic_millis()` flow through this legacy path rather than
+    // `emit_runtime_call`. Without this, a registry entry with
+    // `return_type: "i64", c_abi_return_type: "double"` would emit
+    // `call i64 @sym(...)` against a `double`-returning C function —
+    // the exact register-class mismatch (%rax vs %xmm0) that
+    // crashed PR #637.
+    let mut abi_return_type: string = llvm_return;
+    if helper_descriptor != null {
+        let mut abi: string? = helper_descriptor.c_abi_return_type;
+        if abi != null {
+            if abi.length > 0 { abi_return_type = abi; }
+        }
+    }
+    let call_line = "  " + temp_name + " = call " + abi_return_type + " @"
         + call_symbol
         + "("
         + argument_text
         + ")";
     result_lines.push(call_line);
-    let operand = LLVMOperand { llvm_type: llvm_return, value: temp_name };
+    let mut result_operand: LLVMOperand = LLVMOperand {
+        llvm_type: abi_return_type,
+        value: temp_name
+    };
+    let mut next_temp: int = result_temp + 1;
+    if abi_return_type != llvm_return {
+        let coercion = coerce_operand_to_type(result_operand, llvm_return, next_temp, result_lines, true, null);
+        result_diagnostics = extend_string_array(result_diagnostics, coercion.diagnostics);
+        result_lines = coercion.lines;
+        next_temp = coercion.temp_index;
+        if coercion.operand != null { result_operand = coercion.operand; }
+    }
     if _trace_ccl { print.err("call_lowering: checkpoint-K returning"); }
     return ExpressionResult {
         lines: result_lines,
-        temp_index: result_temp + 1,
-        operand: operand,
+        temp_index: next_temp,
+        operand: result_operand,
         diagnostics: result_diagnostics,
         string_constants: collected_string_constants
     };

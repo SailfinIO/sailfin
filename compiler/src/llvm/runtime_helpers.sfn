@@ -153,7 +153,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // `sailfin_intrinsic_runtime_arena_mark()` (or a friendlier
     // alias added at that time).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_runtime_arena_mark", symbol: "sailfin_intrinsic_runtime_arena_mark", return_type: "double", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_runtime_arena_mark", symbol: "sailfin_intrinsic_runtime_arena_mark", return_type: "i64", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: "double"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "sailfin_intrinsic_runtime_arena_rewind", symbol: "sailfin_intrinsic_runtime_arena_rewind", return_type: "void", parameter_types: ["double"], effects: [], native_signature: null, c_abi_return_type: null
@@ -202,10 +202,10 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // Monotonic clock for profiling/timing.
     // Support both the prelude binding name and direct calls.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_monotonic_millis_fn", symbol: "sailfin_runtime_monotonic_millis", return_type: "double", parameter_types: [], effects: ["clock"], native_signature: null, c_abi_return_type: null
+        target: "runtime_monotonic_millis_fn", symbol: "sailfin_runtime_monotonic_millis", return_type: "i64", parameter_types: [], effects: ["clock"], native_signature: null, c_abi_return_type: "double"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "monotonic_millis", symbol: "sailfin_runtime_monotonic_millis", return_type: "double", parameter_types: [], effects: ["clock"], native_signature: null, c_abi_return_type: null
+        target: "monotonic_millis", symbol: "sailfin_runtime_monotonic_millis", return_type: "i64", parameter_types: [], effects: ["clock"], native_signature: null, c_abi_return_type: "double"
     });
     // Untyped `channel` / `spawn` / `parallel` descriptors removed under
     // issue #617 — their C bridges were silent no-ops and the
@@ -272,7 +272,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "runtime_serve_fn", symbol: "sailfin_runtime_serve", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io", "net"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_char_code_fn", symbol: "sailfin_runtime_char_code", return_type: "double", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "runtime_char_code_fn", symbol: "sailfin_runtime_char_code", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: "double"
     });
 
     // Process helpers
@@ -282,7 +282,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // exported for seed-compiled IR; the registry only points the
     // new compiler at v2.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "process.run", symbol: "sailfin_runtime_process_run_v2", return_type: "double", parameter_types: ["{ i8**, i64, i64 }*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "process.run", symbol: "sailfin_runtime_process_run_v2", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*"], effects: ["io"], native_signature: null, c_abi_return_type: "double"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.exit", symbol: "sailfin_runtime_process_exit", return_type: "void", parameter_types: ["double"], effects: ["io"], native_signature: null, c_abi_return_type: null
@@ -456,7 +456,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "number_to_string", symbol: "number_to_string", return_type: "i8*", parameter_types: ["double"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_grapheme_count_fn", symbol: "sailfin_runtime_grapheme_count", return_type: "double", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "runtime_grapheme_count_fn", symbol: "sailfin_runtime_grapheme_count", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: "double"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_grapheme_at_fn", symbol: "sailfin_runtime_grapheme_at", return_type: "i8*", parameter_types: ["i8*", "double"], effects: [], native_signature: null, c_abi_return_type: null
@@ -655,7 +655,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // Used by get_instruction_tag in lowering_native_helpers.sfn for the seedcheck
     // binary which cannot use match or the fixup pass to read enum tags.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_enum_tag_from_instruction_array", symbol: "sailfin_enum_tag_from_instruction_array", return_type: "double", parameter_types: ["i8*", "double"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "sailfin_enum_tag_from_instruction_array", symbol: "sailfin_enum_tag_from_instruction_array", return_type: "i64", parameter_types: ["i8*", "double"], effects: [], native_signature: null, c_abi_return_type: "double"
     });
 
     return descriptors;

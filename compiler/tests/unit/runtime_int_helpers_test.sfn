@@ -1,0 +1,164 @@
+// compiler/tests/unit/runtime_int_helpers_test.sfn
+//
+// Regression coverage for the six semantic-integer runtime helpers
+// flipped under issue #639 (closing #634). Each entry below previously
+// declared `return_type: "double", c_abi_return_type: null`, which
+// forced every `let x = helper(...); let y: int = x;` site to trip
+// `coerce_numeric_primitive`'s ABI-mismatch warning before silently
+// rounding+fptosi'ing. After the flip:
+//
+//   - `return_type` becomes `"i64"` — what callers see, no warning.
+//   - `c_abi_return_type` becomes `"double"` — the C function in
+//     `runtime/native/src/sailfin_runtime.c` is unchanged, so the
+//     emitted `call` still lands against `%xmm0` (#637's RCA in PR
+//     #641's body documents why flipping the C ABI in lockstep
+//     mis-compiles under the seed).
+//   - `emit_runtime_call` splices a `call @round + fptosi` pair so
+//     the LLVMOperand the call site receives carries `i64`.
+//
+// Each test below pins exactly that three-line render shape for one
+// flipped helper, with the temp-index advance counted (call + round
+// + fptosi = 3 temps consumed). Together they form the bit-identity
+// fence that catches any drift in either the registry or the
+// coercion-injection path.
+import { emit_runtime_call, empty_runtime_call_overrides } from "../../src/llvm/expression_lowering/native/runtime_call";
+import { LLVMOperand } from "../../src/llvm/types";
+
+fn _i8ptr_operand(value: string) -> LLVMOperand {
+    return LLVMOperand { llvm_type: "i8*", value: value };
+}
+
+fn _argv_operand(value: string) -> LLVMOperand {
+    // SfnArray-shaped argv buffer per the M1.B v2 ABI
+    // (`runtime_helpers.sfn:285` parameter type).
+    return LLVMOperand { llvm_type: "{ i8**, i64, i64 }*", value: value };
+}
+
+fn _double_operand(value: string) -> LLVMOperand {
+    return LLVMOperand { llvm_type: "double", value: value };
+}
+
+test "runtime int helper: monotonic_millis emits call+round+fptosi to i64" ![io] {
+    let operands: LLVMOperand[] = [];
+    let result = emit_runtime_call("monotonic_millis", operands, empty_runtime_call_overrides(), 0, []);
+
+    assert result.lines.length == 3;
+    assert result.lines[0] == "  %t0 = call double @sailfin_runtime_monotonic_millis()";
+    assert result.lines[1] == "  %t1 = call double @round(double %t0)";
+    assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
+
+    assert result.operand != null;
+    assert result.operand.llvm_type == "i64";
+    assert result.operand.value == "%t2";
+    assert result.temp_index == 3;
+    assert result.diagnostics.length == 0;
+}
+
+test "runtime int helper: runtime_monotonic_millis_fn alias matches monotonic_millis render" ![io] {
+    // The prelude binds `runtime.monotonic_millis` to the
+    // `runtime_monotonic_millis_fn` alias, so this entry must flip
+    // in lockstep with `monotonic_millis` — otherwise prelude
+    // callers regress while bare-target callers heal.
+    let operands: LLVMOperand[] = [];
+    let result = emit_runtime_call("runtime_monotonic_millis_fn", operands, empty_runtime_call_overrides(), 0, []);
+
+    assert result.lines.length == 3;
+    assert result.lines[0] == "  %t0 = call double @sailfin_runtime_monotonic_millis()";
+    assert result.lines[1] == "  %t1 = call double @round(double %t0)";
+    assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
+
+    assert result.operand != null;
+    assert result.operand.llvm_type == "i64";
+    assert result.operand.value == "%t2";
+    assert result.temp_index == 3;
+    assert result.diagnostics.length == 0;
+}
+
+test "runtime int helper: runtime_char_code_fn emits call+round+fptosi to i64" ![io] {
+    let s = _i8ptr_operand("%s");
+    let operands: LLVMOperand[] = [s];
+    let result = emit_runtime_call("runtime_char_code_fn", operands, empty_runtime_call_overrides(), 0, []);
+
+    assert result.lines.length == 3;
+    assert result.lines[0] == "  %t0 = call double @sailfin_runtime_char_code(i8* %s)";
+    assert result.lines[1] == "  %t1 = call double @round(double %t0)";
+    assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
+
+    assert result.operand != null;
+    assert result.operand.llvm_type == "i64";
+    assert result.operand.value == "%t2";
+    assert result.temp_index == 3;
+    assert result.diagnostics.length == 0;
+}
+
+test "runtime int helper: process.run emits call+round+fptosi to i64" ![io] {
+    let argv = _argv_operand("%argv");
+    let operands: LLVMOperand[] = [argv];
+    let result = emit_runtime_call("process.run", operands, empty_runtime_call_overrides(), 0, []);
+
+    assert result.lines.length == 3;
+    assert result.lines[0] == "  %t0 = call double @sailfin_runtime_process_run_v2({ i8**, i64, i64 }* %argv)";
+    assert result.lines[1] == "  %t1 = call double @round(double %t0)";
+    assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
+
+    assert result.operand != null;
+    assert result.operand.llvm_type == "i64";
+    assert result.operand.value == "%t2";
+    assert result.temp_index == 3;
+    assert result.diagnostics.length == 0;
+}
+
+test "runtime int helper: runtime_grapheme_count_fn emits call+round+fptosi to i64" ![io] {
+    let s = _i8ptr_operand("%s");
+    let operands: LLVMOperand[] = [s];
+    let result = emit_runtime_call("runtime_grapheme_count_fn", operands, empty_runtime_call_overrides(), 0, []);
+
+    assert result.lines.length == 3;
+    assert result.lines[0] == "  %t0 = call double @sailfin_runtime_grapheme_count(i8* %s)";
+    assert result.lines[1] == "  %t1 = call double @round(double %t0)";
+    assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
+
+    assert result.operand != null;
+    assert result.operand.llvm_type == "i64";
+    assert result.operand.value == "%t2";
+    assert result.temp_index == 3;
+    assert result.diagnostics.length == 0;
+}
+
+test "runtime int helper: sailfin_enum_tag_from_instruction_array emits call+round+fptosi to i64" ![io] {
+    // Two-argument helper; param_types `["i8*", "double"]` are
+    // intentionally unchanged (the second argument is a numeric
+    // index that already flows through the legacy double path —
+    // out of scope per #639).
+    let buf = _i8ptr_operand("%buf");
+    let idx = _double_operand("%idx");
+    let operands: LLVMOperand[] = [buf, idx];
+    let result = emit_runtime_call("sailfin_enum_tag_from_instruction_array", operands, empty_runtime_call_overrides(), 0, []);
+
+    assert result.lines.length == 3;
+    assert result.lines[0] == "  %t0 = call double @sailfin_enum_tag_from_instruction_array(i8* %buf, double %idx)";
+    assert result.lines[1] == "  %t1 = call double @round(double %t0)";
+    assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
+
+    assert result.operand != null;
+    assert result.operand.llvm_type == "i64";
+    assert result.operand.value == "%t2";
+    assert result.temp_index == 3;
+    assert result.diagnostics.length == 0;
+}
+
+test "runtime int helper: sailfin_intrinsic_runtime_arena_mark emits call+round+fptosi to i64" ![io] {
+    let operands: LLVMOperand[] = [];
+    let result = emit_runtime_call("sailfin_intrinsic_runtime_arena_mark", operands, empty_runtime_call_overrides(), 0, []);
+
+    assert result.lines.length == 3;
+    assert result.lines[0] == "  %t0 = call double @sailfin_intrinsic_runtime_arena_mark()";
+    assert result.lines[1] == "  %t1 = call double @round(double %t0)";
+    assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
+
+    assert result.operand != null;
+    assert result.operand.llvm_type == "i64";
+    assert result.operand.value == "%t2";
+    assert result.temp_index == 3;
+    assert result.diagnostics.length == 0;
+}
