@@ -6,7 +6,7 @@ import { substring } from "../../../string_utils";
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import { resolve_enum_info_from_llvm_type } from "../../type_context_queries";
-import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
+import { ends_with_pointer_suffix, numeric_type_kind, strip_pointer_suffix } from "../../type_mapping";
 import {
     ExpressionResult,
     LLVMOperand,
@@ -765,14 +765,27 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
         };
     }
 
-    // Slice E.3b (#556): mirror Slice B's LHS → RHS type
-    // propagation so an integer-shaped literal (e.g. `0` in
-    // `length > 0`) takes the integer-literal short-circuit and
-    // doesn't trip `dominant_type`'s int↔float refusal with
-    // `i64 vs double`.
+    // Slice E.3b (#556): mirror Slice B's LHS → RHS type propagation
+    // for INTEGER-shaped LHS only, so an integer-shaped literal
+    // (e.g. `0` in `length > 0`) takes the integer-literal short-circuit
+    // and doesn't trip `dominant_type`'s int↔float refusal with
+    // `i64 vs double`. Pointer-shaped LHS (e.g. `tp.bound == null`)
+    // intentionally skips the hint so `null` lowers via its default
+    // `i8*` path and `harmonise_operands` retypes it via the existing
+    // pointer-null seam — propagating a struct-pointer expected_type
+    // through `lower_expression`'s null literal handler causes a
+    // downstream miscompile that surfaces as a runtime segfault when
+    // the boxed struct is later loaded (observed in
+    // `typecheck_imports_test`'s pointer-vs-null asserts).
     let mut _right_expected: string = "";
     if left_result.operand != null {
-        _right_expected = left_result.operand.llvm_type;
+        let _lhs_kind = numeric_type_kind(left_result.operand.llvm_type);
+        if _lhs_kind == "int" {
+            _right_expected = left_result.operand.llvm_type;
+        }
+        if _lhs_kind == "float" {
+            _right_expected = left_result.operand.llvm_type;
+        }
     }
     let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context, _right_expected);
     diagnostics = extend_string_array(diagnostics, right_result.diagnostics);

@@ -36,6 +36,17 @@ fn _format_binary_operand(operand: Expression) -> string {
     if operand.variant == "Binary" {
         return "(" + format_expression(operand) + ")";
     }
+    if operand.variant == "Cast" {
+        // Wrap Cast operands in parens too. `format_expression(Cast)`
+        // emits `(operand) as Type`, which has weaker precedence than
+        // binary `/`/`*` etc. — without these outer parens, `a /
+        // Cast(len, float)` round-trips as `a / (len) as float`, which
+        // the cast recognizer then re-parses as `(a / (len)) as float`,
+        // silently re-grouping the expression. Surfaced by Slice E.3b
+        // (#556) when the symmetric arithmetic refusal started catching
+        // `double / i64` produced by the mis-grouped re-parse.
+        return "(" + format_expression(operand) + ")";
+    }
     return format_expression(operand);
 }
 

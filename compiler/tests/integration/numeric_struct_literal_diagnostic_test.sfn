@@ -31,7 +31,7 @@ fn _span(line: int, col: int) -> NativeSourceSpan {
 fn _contains(text: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if needle.length > text.length { return false; }
-    let mut i: number = 0;  // alias-coverage: numeric migration coverage
+    let mut i: int = 0;
     let limit = text.length - needle.length;
     loop {
         if i > limit { break; }
