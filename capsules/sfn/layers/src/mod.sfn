@@ -15,14 +15,14 @@
 //   let output = forward(layer, input);
 // ---- Layer types ----
 struct Linear {
-    weights: number[];  // flat [out_features, in_features] row-major
-    biases: number[];  // [out_features]
-    in_features: number;
-    out_features: number;
+    weights: float[];  // flat [out_features, in_features] row-major
+    biases: float[];  // [out_features]
+    in_features: int;
+    out_features: int;
 }
 
 struct ReLULayer {
-    size: number;  // expected input size (for documentation)
+    size: int;  // expected input size (for documentation)
 }
 
 struct SequentialLayer {
@@ -35,23 +35,23 @@ struct SequentialLayer {
 }
 
 // ---- Constructors ----
-fn linear(in_features: number, out_features: number) -> Linear {
+fn linear(in_features: int, out_features: int) -> Linear {
     // Create a linear (fully connected) layer with zero-initialized parameters.
     // In practice, weights should be initialized with small random values.
     // Random initialization will use the `rand` effect once available.
     let weight_count = in_features * out_features;
-    let mut weights: number[] = [];
-    let mut biases: number[] = [];
+    let mut weights: float[] = [];
+    let mut biases: float[] = [];
     let mut i: int = 0;
     loop {
         if i >= weight_count { break; }
-        weights.push(0);
+        weights.push(0.0);
         i += 1;
     }
     i = 0;
     loop {
         if i >= out_features { break; }
-        biases.push(0);
+        biases.push(0.0);
         i += 1;
     }
     return Linear {
@@ -62,7 +62,7 @@ fn linear(in_features: number, out_features: number) -> Linear {
     };
 }
 
-fn relu_layer(size: number) -> ReLULayer {
+fn relu_layer(size: int) -> ReLULayer {
     return ReLULayer { size: size };
 }
 
@@ -71,14 +71,14 @@ fn sequential(linears: Linear[], relu_after: boolean[]) -> SequentialLayer {
 }
 
 // ---- Forward pass ----
-fn forward_linear(layer: Linear, input: number[]) -> number[] {
+fn forward_linear(layer: Linear, input: float[]) -> float[] {
     // Forward pass for a linear layer: output = input * W^T + bias
     // input: [in_features], output: [out_features]
-    let mut output: number[] = [];
-    let mut o: number = 0;
+    let mut output: float[] = [];
+    let mut o: int = 0;
     loop {
         if o >= layer.out_features { break; }
-        let mut val: number = layer.biases[o];
+        let mut val: float = layer.biases[o];
         let mut j: int = 0;
         loop {
             if j >= layer.in_features { break; }
@@ -91,22 +91,24 @@ fn forward_linear(layer: Linear, input: number[]) -> number[] {
     return output;
 }
 
-fn forward_relu(input: number[]) -> number[] {
+fn forward_relu(input: float[]) -> float[] {
     // Apply ReLU activation: max(0, x) for each element.
-    let mut output: number[] = [];
+    let mut output: float[] = [];
     let mut i: int = 0;
     loop {
         if i >= input.length { break; }
-        if input[i] > 0 { output.push(input[i]); } else { output.push(0); }
+        if input[i] > 0 { output.push(input[i]); } else {
+            output.push(0.0);
+        }
         i += 1;
     }
     return output;
 }
 
-fn forward_sequential(model: SequentialLayer, input: number[]) -> number[] {
+fn forward_sequential(model: SequentialLayer, input: float[]) -> float[] {
     // Forward pass through a sequential model.
     // relu_after must have the same length as linears.
-    let mut current: number[] = input;
+    let mut current: float[] = input;
     let mut i: int = 0;
     let n = model.linears.length;
     loop {
@@ -121,7 +123,7 @@ fn forward_sequential(model: SequentialLayer, input: number[]) -> number[] {
 }
 
 // ---- Parameter access ----
-fn parameter_count(layer: Linear) -> number {
+fn parameter_count(layer: Linear) -> int {
     // Total trainable parameters (weights + biases).
     return layer.in_features * layer.out_features + layer.out_features;
 }
