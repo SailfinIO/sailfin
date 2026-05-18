@@ -50,7 +50,7 @@ test "runtime contract: push on array extends in place (amortized)" {
     // would no longer alias dst).
     let arr: number[] = [];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     let mut view = arr;
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut i: int = 0;
     loop {
         if i >= 10 { break; }
         view.push(i);
@@ -74,7 +74,7 @@ test "runtime contract: appending through returned alias is visible through inpu
     let dst: string[] = ["a", "b"];
     let src: string[] = ["c", "d"];
     let mut out = dst;
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut i: int = 0;
     loop {
         if i >= src.length { break; }
         out.push(src[i]);
@@ -94,7 +94,7 @@ test "runtime contract: empty src leaves dst unchanged" {
     let dst: number[] = [42];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     let src: number[] = [];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
     let mut out = dst;
-    let mut i: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut i: int = 0;
     loop {
         if i >= src.length { break; }
         out.push(src[i]);

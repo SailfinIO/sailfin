@@ -77,7 +77,13 @@ struct TypeDescriptor {
     items: TypeDescriptor[];
 }
 
-fn sleep(milliseconds: int) ![clock] { runtime_sleep_fn(milliseconds); }
+// alias-coverage: runtime helper double-ABI seam — `runtime_sleep_fn`
+// (and the underlying `sfn_sleep` / `sailfin_runtime_sleep` C
+// entrypoints) still take `double`. Cast at the boundary so the
+// post-#556 symmetric int↔float refusal stays clean.
+fn sleep(milliseconds: int) ![clock] {
+    runtime_sleep_fn(milliseconds as float);
+}
 
 fn monotonic_millis() -> int ![clock] { return runtime_monotonic_millis_fn(); }
 
@@ -101,7 +107,8 @@ fn char_at(value: string, index: int) -> string {
     if value.length == 0 { return ""; }
     if index < 0 { return ""; }
     if index >= value.length { return ""; }
-    return runtime_grapheme_at_fn(value, index);
+    // alias-coverage: runtime helper double-ABI seam (see `sleep` above).
+    return runtime_grapheme_at_fn(value, index as float);
 }
 
 fn enum_type(name: string) -> EnumType {
@@ -537,7 +544,12 @@ fn substring(text: string, start: int, end: int) -> string {
     // bootstrap runtime (sailfin_runtime.c:4822), so byte-range memcpy
     // produces the same byte sequence as the old loop. Removes ~8M of ~9M
     // string_concat calls per module compile.
-    return substring_unchecked(text, normalized_start, normalized_end);
+    // alias-coverage: runtime helper double-ABI seam — `substring_unchecked`
+    // takes `double` start/end at the C-ABI boundary (the trampoline at
+    // `runtime/native/src/sailfin_runtime.c:6598` forwards to the int64
+    // sailfin_runtime_substring_unchecked). Cast explicitly so the
+    // post-#556 symmetric int↔float refusal stays clean.
+    return substring_unchecked(text, normalized_start as float, normalized_end as float);
 }
 
 fn strings_equal(left: string, right: string) -> boolean {
@@ -601,7 +613,8 @@ fn grapheme_count(text: string) -> int {
 }
 
 fn grapheme_at(text: string, index: int) -> string {
-    return runtime_grapheme_at_fn(text, index);
+    // alias-coverage: runtime helper double-ABI seam (see `sleep` above).
+    return runtime_grapheme_at_fn(text, index as float);
 }
 
 export {

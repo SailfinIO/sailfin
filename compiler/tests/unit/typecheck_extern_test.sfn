@@ -15,7 +15,7 @@ import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 
 fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
-    let mut i: number = 0;  // alias-coverage: diagnostic test exercises legacy : number rejection
+    let mut i: int = 0;
     loop {
         if i >= diagnostics.length { break; }
         if strings_equal(diagnostics[i].code, code) { return true; }
@@ -24,9 +24,9 @@ fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
     return false;
 }
 
-fn _count_code(diagnostics: Diagnostic[], code: string) -> number {  // alias-coverage: diagnostic test exercises legacy : number rejection
-    let mut count: number = 0;  // alias-coverage: diagnostic test exercises legacy : number rejection
-    let mut i: number = 0;  // alias-coverage: diagnostic test exercises legacy : number rejection
+fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= diagnostics.length { break; }
         if strings_equal(diagnostics[i].code, code) { count += 1; }

@@ -443,36 +443,28 @@ compiler features that do not exist in the current toolchain.
 
 ### Hard prerequisites (runtime cannot be written without these)
 
-1. **Integer types (`int` / `float`)** — roadmap §0. **Slices A–D + E.1
-   + E.1.5 + E.2 + E.3a all shipped (A/B/C 2026-05-02, D 2026-05-03,
-   E.1 2026-05-08, E.1.5 2026-05-10, E.2 2026-05-12, E.3a 2026-05-16).**
-   Annotated locals/parameters/returns of `int` and `float` lower to
-   `i64` / `double`; bitwise + shift operators (`&`, `|`, `^`, `<<`,
-   `>>`) lower to the matching LLVM ops on integer operands; the
-   extern accept-list spans the practical libc surface
-   (`i16`/`u16`/`u32`/`u64`/`isize`/`f32`); `expr as Type` lowers via
-   the full LLVM matrix (`sitofp`/`fptosi`/`sext`/`zext`/`trunc`/
-   `fpext`/`fptrunc`); bare unsuffixed integer literals default to
-   `int` at scalar context. **Slice E.3a (the integer-shaped
-   `: number` migration) is complete:** every `: number` / `-> number`
-   site in `compiler/src/*.sfn` and `runtime/prelude.sfn` either
-   flipped to its semantic `: int` / `: float` shape or carries a
-   trailing `// alias-coverage:` marker documenting the opt-out
-   (prelude shadows, C-ABI boundaries, the runtime `is_number`
-   type-guard predicate, literal-text predicates in `core_text.sfn`,
-   and the `Future`-mapping seam in `type_mapping.sfn`). The
-   site-level audit returns zero output:
-
-   ```bash
-   grep -rnE "(: number|-> number)" compiler/src/ runtime/prelude.sfn \
-     | grep -v "// alias-coverage"
-   ```
-
-   Only the strict-refusal reapply remains (Slice E.3b, #556) before
-   `number` itself can be retired in Slice E.4. See
-   `docs/runtime_architecture.md` §3.7 for the slice taxonomy and the
-   limitations table (L1–L6). L1's array-literal carve-out closes
-   alongside E.3b on the v0.6.0 seed.
+1. **Integer types (`int` / `float`) — ✅ closed (Slice E.3b, #556, 2026-05-18).**
+   Every shipped numeric slice: Slice A (annotated `: int`/`: float`
+   lowering, 2026-05-02), Slice B (bitwise + shift, 2026-05-02), Slice
+   C (additional widths, 2026-05-02), Slice D (`as` cast LLVM matrix,
+   2026-05-03), Slice E.1 (bare-literal default + `number` alias,
+   2026-05-08), Slice E.1.5 (observe-only ABI primitive diagnostic,
+   2026-05-10), Slice E.2 (instruction-cluster source migration,
+   2026-05-12), Slice E.3a (residual `: number` migration including
+   prelude and tests, 2026-05-16), Slice E.3a-seedbump-cleanup
+   (`number_to_string` mirrors + C-ABI rows, 2026-05-18), and Slice
+   E.3b (symmetric strict-refusal reapply, 2026-05-18). The
+   `dominant_type` chokepoint now returns an empty-string sentinel
+   on mixed int↔float pairs; `harmonise_operands` and
+   `coerce_operand_to_type` boundary mode emit a `[fatal]` ABI
+   primitive mismatch diagnostic with the canonical fix-it
+   `add \`as float\` or \`as int\` to disambiguate`. The four
+   documented alias-coverage seams (prelude shadows, C-ABI
+   boundaries, the runtime `is_number` predicate, the `Future`
+   mapping seam) spell their boundary conversions explicitly. L1's
+   array-literal carve-out and L2/L3 silent-widening are all
+   closed; only L6 (the `number` keyword itself) remains as a
+   deferred alias for `float`, retired by Slice E.4 post-1.0.
 2. **`Result<T, E>` and the `?` operator** — roadmap §0. The runtime must be
    able to return structured errors (file open failures, HTTP errors, OOM,
    unicode decode errors) without abusing `try`/`catch` or union-sentinels.

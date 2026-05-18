@@ -271,21 +271,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
     // Slice B (2026-05-02): propagate the LHS's LLVM type to the
     // RHS so a bare integer literal (e.g. `2` in `x << 2`) takes
     // the integer-literal short-circuit at `core.sfn:465-505`
-    // rather than defaulting to `double`. Without this hint the
-    // RHS literal would be typed `double`, then `dominant_type`
-    // would coerce both sides to `double`, and bitwise/shift
-    // would silently produce broken IR.
-    //
-    // Slice E.1 (2026-05-08, #488): bare integer literals now
-    // default to `i64` even without LHS pressure, so the hint
-    // here mostly steers the explicit-`double` (`: float`) path.
-    // Pre-existing arithmetic (`+`, `-`, `*`, etc.) on `int +
-    // double` mixes still funnels through `dominant_type`'s
-    // silent widening (L2 in `docs/runtime_architecture.md`
-    // §3.7) — the rejection rides on Slice E.3 (#296) after
-    // every `number`-typed site in the compiler source has migrated
-    // to explicit `int`/`float`. Slice D's `as` casts let authors
-    // spell the conversion explicitly today.
+    // rather than defaulting to `double`.
     let mut _right_expected: string = "";
     if left_result.operand != null {
         _right_expected = left_result.operand.llvm_type;
@@ -779,7 +765,16 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
         };
     }
 
-    let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context, "");
+    // Slice E.3b (#556): mirror Slice B's LHS → RHS type
+    // propagation so an integer-shaped literal (e.g. `0` in
+    // `length > 0`) takes the integer-literal short-circuit and
+    // doesn't trip `dominant_type`'s int↔float refusal with
+    // `i64 vs double`.
+    let mut _right_expected: string = "";
+    if left_result.operand != null {
+        _right_expected = left_result.operand.llvm_type;
+    }
+    let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context, _right_expected);
     diagnostics = extend_string_array(diagnostics, right_result.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_result.operand == null {
