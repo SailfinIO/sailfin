@@ -31,7 +31,7 @@ fn _format_help(cmd: Command, program: string) -> string {
     out = out + "  " + program;
     if cmd.subcmds.length > 0 { out = out + " <command>"; }
     if cmd.flags.length > 0 { out = out + " [options]"; }
-    let mut ai: number = 0;
+    let mut ai: int = 0;
     loop {
         if ai >= cmd.args.length { break; }
         let a = cmd.args[ai];
@@ -46,7 +46,7 @@ fn _format_help(cmd: Command, program: string) -> string {
     if cmd.subcmds.length > 0 {
         out = out + "\ncommands:\n";
         let col_width = _max_name_width(cmd) + 2;
-        let mut si: number = 0;
+        let mut si: int = 0;
         loop {
             if si >= cmd.subcmds.length { break; }
             let sub = cmd.subcmds[si];
@@ -77,7 +77,7 @@ fn _format_help(cmd: Command, program: string) -> string {
     // Flags.
     out = out + "\noptions:\n";
     let flag_width = _max_flag_width(cmd) + 2;
-    let mut fi: number = 0;
+    let mut fi: int = 0;
     loop {
         if fi >= cmd.flags.length { break; }
         let f = cmd.flags[fi];
@@ -105,9 +105,9 @@ fn _flag_label(f: Flag) -> string {
     return label;
 }
 
-fn _max_name_width(cmd: Command) -> number {
-    let mut max: number = 0;
-    let mut i: number = 0;
+fn _max_name_width(cmd: Command) -> int {
+    let mut max: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= cmd.subcmds.length { break; }
         if cmd.subcmds[i].name.length > max {
@@ -118,9 +118,9 @@ fn _max_name_width(cmd: Command) -> number {
     return max;
 }
 
-fn _max_arg_width(cmd: Command) -> number {
-    let mut max: number = 0;
-    let mut i: number = 0;
+fn _max_arg_width(cmd: Command) -> int {
+    let mut max: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= cmd.args.length { break; }
         // +2 for the angle brackets.
@@ -131,13 +131,13 @@ fn _max_arg_width(cmd: Command) -> number {
     return max;
 }
 
-fn _max_flag_width(cmd: Command) -> number {
-    let mut max: number = 0;
+fn _max_flag_width(cmd: Command) -> int {
+    let mut max: int = 0;
     let built_in_help = 10;  // "-h, --help"
     let built_in_version = 13;  // "-V, --version"
     if built_in_help > max { max = built_in_help; }
     if built_in_version > max { max = built_in_version; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= cmd.flags.length { break; }
         let w = _flag_label(cmd.flags[i]).length;
@@ -147,11 +147,11 @@ fn _max_flag_width(cmd: Command) -> number {
     return max;
 }
 
-fn _pad(text: string, width: number) -> string {
+fn _pad(text: string, width: int) -> string {
     // Right-pad text with spaces to the given width.
     if text.length >= width { return text + "  "; }
     let mut out: string = text;
-    let mut i: number = text.length;
+    let mut i: int = text.length;
     loop {
         if i >= width { break; }
         out = out + " ";

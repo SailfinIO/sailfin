@@ -100,7 +100,7 @@ fn with_version(cmd: Command, version: string) -> Command {
 fn with_arg(cmd: Command, a: Arg) -> Command {
     // Add a positional argument to the command.
     let mut new_args: Arg[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= cmd.args.length { break; }
         new_args.push(cmd.args[i]);
@@ -120,7 +120,7 @@ fn with_arg(cmd: Command, a: Arg) -> Command {
 fn with_flag(cmd: Command, f: Flag) -> Command {
     // Add a flag to the command.
     let mut new_flags: Flag[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= cmd.flags.length { break; }
         new_flags.push(cmd.flags[i]);
@@ -140,7 +140,7 @@ fn with_flag(cmd: Command, f: Flag) -> Command {
 fn with_subcommand(cmd: Command, sub: Command) -> Command {
     // Add a subcommand to the command.
     let mut new_subs: Command[] = [];
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= cmd.subcmds.length { break; }
         new_subs.push(cmd.subcmds[i]);
