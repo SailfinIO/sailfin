@@ -354,9 +354,9 @@ fn _parse_array(raw: string) -> TomlValue {
         if i >= inner.length { break; }
         let ch = inner[i];
         if in_string {
-            if ch == "\\" {
-                i += 1;
-            }  // skip escaped char else if ch == str_char { in_string = false; }
+            if ch == "\\" { i += 1; } else if ch == str_char {
+                in_string = false;
+            }
         } else {
             if ch == "\"" || ch == "'" {
                 in_string = true;
@@ -828,9 +828,7 @@ fn _find_equals(line: string) -> int {
         if i >= line.length { break; }
         let ch = line[i];
         if in_string {
-            if ch == "\\" {
-                i += 1;
-            }  // skip escaped char else if ch == quote_char {
+            if ch == "\\" { i += 1; } else if ch == quote_char {
                 in_string = false;
             }
         } else {

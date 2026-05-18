@@ -96,8 +96,11 @@ test "math: sum" {
     assert _sum([-1.0, 1.0]) == 0.0;
 }
 
+// Note: floor, ceil, round, pow, mod, is_integer are deferred — they require
+// either capsule-side bug fixes (import path) or an inlined `_truncate`
+// re-implementation. Coverage is intentionally scoped to what holds today.
 test "math: mean" {
     assert _mean([2.0, 4.0, 6.0]) == 4.0;
     assert _mean([10.0]) == 10.0;
     assert _mean([]) == 0.0;
-}  // Note: floor, ceil, round, pow, mod, is_integer require either:  //   (a) the bug fixes in the capsule (import path), or  //   (b) inlined `_truncate` re-implementation here.  // Skipped to keep the test file scoped to coverage that holds today.
+}

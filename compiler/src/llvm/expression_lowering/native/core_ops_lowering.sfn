@@ -766,24 +766,22 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     }
 
     // Slice E.3b (#556): mirror Slice B's LHS → RHS type propagation
-    // for INTEGER-shaped LHS only, so an integer-shaped literal
-    // (e.g. `0` in `length > 0`) takes the integer-literal short-circuit
-    // and doesn't trip `dominant_type`'s int↔float refusal with
-    // `i64 vs double`. Pointer-shaped LHS (e.g. `tp.bound == null`)
-    // intentionally skips the hint so `null` lowers via its default
-    // `i8*` path and `harmonise_operands` retypes it via the existing
-    // pointer-null seam — propagating a struct-pointer expected_type
-    // through `lower_expression`'s null literal handler causes a
-    // downstream miscompile that surfaces as a runtime segfault when
-    // the boxed struct is later loaded (observed in
-    // `typecheck_imports_test`'s pointer-vs-null asserts).
+    // for numeric-shaped LHS (int or float), so a numeric literal on
+    // the RHS (e.g. `0` in `length > 0`, or `1.5` in `x > 1.5`) takes
+    // the matching literal short-circuit and doesn't trip
+    // `dominant_type`'s int↔float refusal with `i64 vs double`.
+    // Pointer-shaped LHS (e.g. `tp.bound == null`) intentionally skips
+    // the hint so `null` lowers via its default `i8*` path and
+    // `harmonise_operands` retypes it via the existing pointer-null
+    // seam — propagating a struct-pointer expected_type through
+    // `lower_expression`'s null literal handler causes a downstream
+    // miscompile that surfaces as a runtime segfault when the boxed
+    // struct is later loaded (observed in `typecheck_imports_test`'s
+    // pointer-vs-null asserts).
     let mut _right_expected: string = "";
     if left_result.operand != null {
         let _lhs_kind = numeric_type_kind(left_result.operand.llvm_type);
-        if _lhs_kind == "int" {
-            _right_expected = left_result.operand.llvm_type;
-        }
-        if _lhs_kind == "float" {
+        if _lhs_kind == "int" || _lhs_kind == "float" {
             _right_expected = left_result.operand.llvm_type;
         }
     }
