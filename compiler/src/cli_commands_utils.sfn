@@ -2,12 +2,11 @@
 //
 // Utility functions for CLI command handlers: path, string, file, and
 // network operations.
-import { substring } from "./string_utils";
+import { find_char_local, substring } from "./string_utils";
 
 export {
     _ends_with_cmd,
     _dirname_cmd,
-    find_char,
     _toml_trim_cmd,
     _shell_read_cmd,
     _get_env_cmd,
@@ -58,25 +57,6 @@ fn _dirname_cmd(path: string) -> string {
     if last_slash < 0 { return "."; }
     if last_slash == 0 { return "/"; }
     return substring(path, 0, last_slash);
-}
-
-// alias-coverage: name-collision seam — `runtime/prelude.sfn` exports a
-// `find_char` of its own at `(string, string, int = 0) -> int`. If this
-// local helper's signature exactly matches the prelude's `: int / -> int`,
-// the seed's cross-module call-site resolver picks the wrong definition
-// and emits malformed LLVM IR (callers see "publish failed (HTTP …)"
-// silently turn into a passthrough; see #562 PR description). Keep the
-// signature on the legacy number-typed shape so the dispatcher
-// has a discriminating signature to disambiguate. Flips in the bulk PR
-// that migrates the prelude-mirror helpers in lockstep.
-fn find_char(text: string, ch: string, start: number) -> number {  // alias-coverage: prelude shadow
-    let mut i: number = start;  // alias-coverage: prelude shadow (mirrors find_char signature)
-    loop {
-        if i >= text.length { break; }
-        if substring(text, i, i + 1) == ch { return i; }
-        i += 1;
-    }
-    return -1;
 }
 
 fn _toml_trim_cmd(text: string) -> string {
@@ -383,13 +363,13 @@ fn _extract_sfnpkg_cmd(content: string, dest_dir: string) -> void ![io] {
             continue;
         }
         let after_marker = substring(remaining, marker.length, remaining.length);
-        let nl_idx = find_char(after_marker, "\n", 0);
+        let nl_idx = find_char_local(after_marker, "\n", 0);
         if nl_idx < 0 { break; }
         let rel_path = substring(after_marker, 0, nl_idx);
         let body_start = pos + marker.length + nl_idx + 1;
         let mut body_end: int = content.length;
         let next_marker_search = substring(content, body_start, content.length);
-        let next_idx = find_char(next_marker_search, "-", 0);
+        let next_idx = find_char_local(next_marker_search, "-", 0);
         if next_idx >= 0 {
             if next_idx + marker.length <= next_marker_search.length {
                 if substring(next_marker_search, next_idx, next_idx + marker.length) == marker {
@@ -430,7 +410,7 @@ fn _is_stdlib_capsule_cmd(name: string) -> boolean {
 }
 
 fn _has_slash_cmd(name: string) -> boolean {
-    return find_char(name, "/", 0) >= 0;
+    return find_char_local(name, "/", 0) >= 0;
 }
 
 fn _resolve_capsule_name_cmd(name: string) -> string {
@@ -441,7 +421,7 @@ fn _resolve_capsule_name_cmd(name: string) -> string {
 
 fn _display_capsule_name_cmd(name: string) -> string {
     if _has_slash_cmd(name) {
-        let slash = find_char(name, "/", 0);
+        let slash = find_char_local(name, "/", 0);
         let scope = substring(name, 0, slash);
         if scope == "sfn" {
             return substring(name, slash + 1, name.length);
