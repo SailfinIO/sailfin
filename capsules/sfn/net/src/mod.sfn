@@ -16,35 +16,38 @@
 //
 // Implementation status: API surface defined, pending runtime socket
 // intrinsics. All functions currently return zero-values.
-
 // ---- Types ----
-
 struct Connection {
-    id: number;          // opaque handle to the underlying socket
+    id: int;  // opaque handle to the underlying socket
     host: string;
-    port: number;
-    protocol: string;    // "tcp" or "udp"
+    port: int;
+    protocol: string;  // "tcp" or "udp"
     is_open: boolean;
 }
 
 struct Listener {
-    id: number;          // opaque handle to the underlying server socket
+    id: int;  // opaque handle to the underlying server socket
     host: string;
-    port: number;
+    port: int;
     protocol: string;
 }
 
 struct NetAddress {
     host: string;
-    port: number;
+    port: int;
 }
 
 // ---- TCP Client ----
-
-fn connect(host: string, port: number) -> Connection ![net] {
+fn connect(host: string, port: int) -> Connection ![net] {
     // Open a TCP connection to host:port.
     // Pending runtime socket intrinsics.
-    return Connection { id: -1, host: host, port: port, protocol: "tcp", is_open: false };
+    return Connection {
+        id: -1,
+        host: host,
+        port: port,
+        protocol: "tcp",
+        is_open: false
+    };
 }
 
 fn write_all(conn: Connection, data: string) -> void ![net] {
@@ -59,7 +62,7 @@ fn read_all(conn: Connection) -> string ![net] {
     return "";
 }
 
-fn read_bytes(conn: Connection, max_bytes: number) -> string ![net] {
+fn read_bytes(conn: Connection, max_bytes: int) -> string ![net] {
     // Read up to max_bytes from the connection.
     // Returns immediately with whatever data is available.
     // Pending runtime socket intrinsics.
@@ -72,17 +75,27 @@ fn close(conn: Connection) -> void ![net] {
 }
 
 // ---- TCP Server ----
-
-fn listen(host: string, port: number) -> Listener ![net, io] {
+fn listen(host: string, port: int) -> Listener ![net, io] {
     // Bind and listen on host:port for incoming TCP connections.
     // Pending runtime socket intrinsics.
-    return Listener { id: -1, host: host, port: port, protocol: "tcp" };
+    return Listener {
+        id: -1,
+        host: host,
+        port: port,
+        protocol: "tcp"
+    };
 }
 
 fn accept(listener: Listener) -> Connection ![net, io] {
     // Accept the next incoming connection. Blocks until a client connects.
     // Pending runtime socket intrinsics.
-    return Connection { id: -1, host: listener.host, port: listener.port, protocol: "tcp", is_open: false };
+    return Connection {
+        id: -1,
+        host: listener.host,
+        port: listener.port,
+        protocol: "tcp",
+        is_open: false
+    };
 }
 
 fn close_listener(listener: Listener) -> void ![net, io] {
@@ -91,11 +104,16 @@ fn close_listener(listener: Listener) -> void ![net, io] {
 }
 
 // ---- UDP ----
-
-fn udp_bind(host: string, port: number) -> Connection ![net, io] {
+fn udp_bind(host: string, port: int) -> Connection ![net, io] {
     // Create a UDP socket bound to host:port.
     // Pending runtime socket intrinsics.
-    return Connection { id: -1, host: host, port: port, protocol: "udp", is_open: false };
+    return Connection {
+        id: -1,
+        host: host,
+        port: port,
+        protocol: "udp",
+        is_open: false
+    };
 }
 
 fn send_to(conn: Connection, data: string, addr: NetAddress) -> void ![net] {
@@ -103,7 +121,7 @@ fn send_to(conn: Connection, data: string, addr: NetAddress) -> void ![net] {
     // Pending runtime socket intrinsics.
 }
 
-fn recv_from(conn: Connection, max_bytes: number) -> string ![net] {
+fn recv_from(conn: Connection, max_bytes: int) -> string ![net] {
     // Receive a UDP datagram. Returns the payload.
     // Full implementation will also return the sender address.
     // Pending runtime socket intrinsics.
@@ -111,7 +129,6 @@ fn recv_from(conn: Connection, max_bytes: number) -> string ![net] {
 }
 
 // ---- DNS ----
-
 fn resolve(hostname: string) -> string[] ![net] {
     // Resolve a hostname to one or more IP addresses.
     // Pending runtime socket intrinsics.
@@ -119,8 +136,7 @@ fn resolve(hostname: string) -> string[] ![net] {
 }
 
 // ---- Utilities ----
-
-fn address(host: string, port: number) -> NetAddress {
+fn address(host: string, port: int) -> NetAddress {
     // Create a network address.
     return NetAddress { host: host, port: port };
 }
