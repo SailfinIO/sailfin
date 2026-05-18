@@ -30,7 +30,7 @@ extern char *compile_to_llvm(char *source);
 // NOTE: `native_cli_main` has historically varied in symbol spelling across
 // compiler versions (plain vs module-suffixed). Call the stable mangled symbol
 // for the underlying CLI implementation instead.
-extern double sailfin_cli_main__cli_main(SailfinPtrArray *argv);
+extern int64_t sailfin_cli_main__cli_main(SailfinPtrArray *argv);
 
 // Optional process-exit arena telemetry. Gated on SAILFIN_DUMP_ARENA_STATS=1
 // alone — when set, the atexit hook always runs.  At exit it checks
@@ -590,7 +590,7 @@ int main(int argc, char **argv)
 
             _trace_ptr_array("native-cli", &args);
 
-            double rc = sailfin_cli_main__cli_main(&args);
+            int64_t rc = sailfin_cli_main__cli_main(&args);
             free(argv_copy);
             free(runtime_root);
             free(binary_dir);

@@ -490,7 +490,7 @@ fn _outcome_setup_failure(failure: AssertFailure) -> TestFileOutcome {
 // is not directly observable; spec §11 documents the
 // even-distribution approximation used here. Returns 0 when the
 // file produced no test entries.
-fn _trj_per_test_duration(file_elapsed_ms: int, test_count: int) -> float {
+fn _trj_per_test_duration(file_elapsed_ms: int, test_count: int) -> int {
     if test_count <= 0 { return 0; }
     if file_elapsed_ms <= 0 { return 0; }
     let mut quotient: int = 0;

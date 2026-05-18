@@ -214,15 +214,15 @@ fn trim_right(value: string) -> string {
     return substring(value, 0, end);
 }
 
-fn number_to_string(value: number) -> string {  // alias-coverage: seed-ABI constraint — seed binary generated declare double for this name; flip in lockstep with seed bump (Slice E.3a follow-up)
+fn number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
-    let mut remaining: number = value;  // alias-coverage: seed-ABI constraint
+    let mut remaining: int = value;
     let mut output: string = "";
     let digits = "0123456789";
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;  // alias-coverage: seed-ABI constraint
-        let mut quotient: number = 0;  // alias-coverage: seed-ABI constraint
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
