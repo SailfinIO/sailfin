@@ -8,12 +8,12 @@
 //
 //   let loss = mse(predictions, targets);
 // ---- Regression losses ----
-fn mse(predictions: number[], targets: number[]) -> number {
+fn mse(predictions: float[], targets: float[]) -> float {
     // Mean Squared Error: (1/n) * sum((pred - target)^2).
-    if predictions.length == 0 || targets.length == 0 { return 0; }
+    if predictions.length == 0 || targets.length == 0 { return 0.0; }
     let n = predictions.length;
-    if targets.length < n { return 0; }
-    let mut total: number = 0;
+    if targets.length < n { return 0.0; }
+    let mut total: float = 0.0;
     let mut i: int = 0;
     loop {
         if i >= n { break; }
@@ -24,34 +24,34 @@ fn mse(predictions: number[], targets: number[]) -> number {
     return total / (predictions.length as float);
 }
 
-fn mae(predictions: number[], targets: number[]) -> number {
+fn mae(predictions: float[], targets: float[]) -> float {
     // Mean Absolute Error: (1/n) * sum(|pred - target|).
-    if predictions.length == 0 || targets.length == 0 { return 0; }
+    if predictions.length == 0 || targets.length == 0 { return 0.0; }
     let n = predictions.length;
-    if targets.length < n { return 0; }
-    let mut total: number = 0;
+    if targets.length < n { return 0.0; }
+    let mut total: float = 0.0;
     let mut i: int = 0;
     loop {
         if i >= n { break; }
         let diff = predictions[i] - targets[i];
-        if diff < 0 { total = total - diff; } else { total = total + diff; }
+        if diff < 0.0 { total = total - diff; } else { total = total + diff; }
         i += 1;
     }
     return total / (predictions.length as float);
 }
 
-fn huber(predictions: number[], targets: number[], delta: number = 1) -> number {
+fn huber(predictions: float[], targets: float[], delta: float = 1.0) -> float {
     // Huber loss: quadratic for small errors, linear for large errors.
     // Combines the best properties of MSE and MAE.
-    if predictions.length == 0 || targets.length == 0 { return 0; }
+    if predictions.length == 0 || targets.length == 0 { return 0.0; }
     let n = predictions.length;
-    if targets.length < n { return 0; }
-    let mut total: number = 0;
+    if targets.length < n { return 0.0; }
+    let mut total: float = 0.0;
     let mut i: int = 0;
     loop {
         if i >= n { break; }
         let diff = predictions[i] - targets[i];
-        let mut a: number = diff;
+        let mut a: float = diff;
         if a < 0.0 { a = 0.0 - a; }
         if a <= delta { total = total + 0.5 * diff * diff; } else {
             total = total + delta * (a - 0.5 * delta);
@@ -62,18 +62,18 @@ fn huber(predictions: number[], targets: number[], delta: number = 1) -> number 
 }
 
 // ---- Classification losses ----
-fn hinge(predictions: number[], targets: number[]) -> number {
+fn hinge(predictions: float[], targets: float[]) -> float {
     // Hinge loss for binary classification (SVM-style).
     // Targets should be +1 or -1.
-    if predictions.length == 0 || targets.length == 0 { return 0; }
+    if predictions.length == 0 || targets.length == 0 { return 0.0; }
     let n = predictions.length;
-    if targets.length < n { return 0; }
-    let mut total: number = 0;
+    if targets.length < n { return 0.0; }
+    let mut total: float = 0.0;
     let mut i: int = 0;
     loop {
         if i >= n { break; }
         let margin = 1.0 - targets[i] * predictions[i];
-        if margin > 0 { total = total + margin; }
+        if margin > 0.0 { total = total + margin; }
         i += 1;
     }
     return total / (predictions.length as float);
@@ -84,13 +84,13 @@ fn hinge(predictions: number[], targets: number[]) -> number {
 // A placeholder with an incorrect approximation was removed to avoid
 // silently producing wrong training signals.
 // ---- Utility ----
-fn squared_error(prediction: number, target: number) -> number {
+fn squared_error(prediction: float, target: float) -> float {
     // Single-sample squared error.
     let diff = prediction - target;
     return diff * diff;
 }
 
-fn absolute_error(prediction: number, target: number) -> number {
+fn absolute_error(prediction: float, target: float) -> float {
     // Single-sample absolute error.
     let diff = prediction - target;
     if diff < 0.0 { return 0.0 - diff; }
