@@ -6575,7 +6575,12 @@ void sailfin_assert_fail(const char *file, int64_t line, int64_t col, const char
  * with line/col passed as Sailfin `number` (LLVM `double`). The
  * spec-defined symbol (`sailfin_assert_fail`) takes int64_t, so we
  * clamp/convert here. Mirrors `substring_unchecked`'s double→i64
- * trampoline. */
+ * trampoline. The descriptor is kept on `double` so the seed-compiled
+ * compiler binary (which still embeds assert calls with double-coerced
+ * line/col) links cleanly; Slice E.3b's (#556) boundary-mode refusal
+ * is intentionally asymmetric (only `float → int` is fatal) so the
+ * `int → double` silent widening of integer line/col literals at the
+ * call site continues to compile. */
 void runtime_assert_fail_fn(const char *file, double line, double col, const char *msg)
 {
     sailfin_assert_fail(file, _clamp_to_i64(line), _clamp_to_i64(col), msg);

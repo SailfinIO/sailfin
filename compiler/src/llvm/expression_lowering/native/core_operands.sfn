@@ -1835,40 +1835,38 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
     return null;
 }
 
-// Slice E.1.5 (#528, relaxed by #550): `coerce_operand_to_type` is the
-// single chokepoint for numeric ABI shape decisions. `allow_widen`
-// selects the kind-check's strictness:
+// Slice E.3b (#556, re-applies #296): `coerce_operand_to_type` is the
+// single chokepoint for numeric ABI shape decisions. The boundary
+// mode (`allow_widen = false`, used by call args, struct-field
+// assignment, and struct-literal field initialization) refuses
+// `float → int` mismatches with a `[fatal]` diagnostic carrying a
+// fix-it ("add `as float` or `as int` to disambiguate"). The reverse
+// direction (`int → float`) intentionally keeps silent widening
+// pending a paired seed bump — several residual double-ABI helper
+// descriptors (`substring`, `sleep`, `grapheme_at`,
+// `runtime_assert_fail_fn`) still claim `double` for what are
+// semantically integer arguments, and the seed-compiled compiler
+// binary embeds calls of that shape. Arithmetic harmonisation
+// (`harmonise_operands` below) already enforces the symmetric
+// refusal via the `dominant_type` empty-string sentinel — that
+// closes L2/L3 (`let a: int; let b: float; a + b` is the canonical
+// case) regardless of the boundary-mode asymmetry. The permissive
+// mode (`allow_widen = true`, used by pointer-deref stores, lvalue
+// assignments to locals, array-element stores, array-index → i64
+// coercions, and `i1`/`i8*`/`{i8*, i64}` shape coerces) keeps the
+// existing silent widening — those sites don't carry an authoritative
+// target kind.
 //
-//   • `allow_widen = false` — the boundary mode used by call args
-//     (`core_call_emission.sfn`), struct-field assignment
-//     (`statement_assignment.sfn`), and struct-literal field
-//     initialization (`core_literals_lowering.sfn`). When operand and
-//     target disagree on `numeric_type_kind` along the asymmetric
-//     direction (operand=`float`, target=`int`), the coercion logs a
-//     `[warning]` diagnostic and FALLS THROUGH to silent `round +
-//     fptosi` widening via `coerce_numeric_primitive`. The fatal
-//     refusal landed in #528 was downgraded in #550 because the
-//     cluster-internal boundary is effectively all of `compiler/src/
-//     llvm/` (~100 files) and cannot be flipped atomically during the
-//     Slice E.2 source migration — see `docs/runtime_architecture.md`
-//     §3.7 line 1404 and the #530 cluster-flip post-mortem.
-//
-//   • `allow_widen = true` — permissive mode used by every other
-//     callsite, including arithmetic harmonisation (`harmonise_operands`),
-//     the `arr.push(...)` value-shape adjust, pointer-deref stores, lvalue
-//     assignments to locals, array-element stores, array-index → i64
-//     coercions, and the various `i1`/`i8*`/`{i8*, i64}` shape coerces.
-//     These keep today's silent widening so the existing tree continues to
-//     self-host. Slice E.2 (#489a–d, #530) cleared the call-arg site of all
-//     legitimate int↔float widens, so the strict mode there is now
-//     unconditional; widens that still need to happen run through explicit
-//     `as int` / `as float` casts in source (#532).
-//
-// Slice E.3 (#490) re-applies #296 symmetrically — once every `number`-typed
-// site in the compiler source has migrated to `int`/`float`, the
-// rejection re-promotes to `[fatal]` and extends to the permissive
-// sites above. The `numeric_type_kind` helper stays in place as the
-// chokepoint for that re-enablement.
+// History (kept for context): #528 landed the original fatal refusal;
+// #550 downgraded it to `[warning]` + fall-through while Slice E.2
+// migrated the residual `: number` sites. E.3a (#555 → #567) finished
+// the source migration; E.3a-seedbump-cleanup (#611) flipped the
+// `number_to_string` mirror and C-ABI rows in lockstep with the seed.
+// E.3b (this slice) re-promotes the warning to fatal in the
+// `float → int` direction and lands the symmetric arithmetic refusal
+// via `dominant_type`. The symmetric extension of the boundary-mode
+// refusal rides on a future seed bump that flips the residual
+// double-ABI helper descriptors.
 fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: int, lines: string[], allow_widen: boolean, span: NativeSourceSpan?) -> CoercionResult ![io] {
     let debug_coerce = trace_lowering();
     if debug_coerce {
@@ -1897,32 +1895,20 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
         };
     }
 
-    // ABI primitive kind check: observe silent float → int coercion at
-    // boundaries that don't opt in to widening. The asymmetric rule
-    // (operand kind=float, target kind=int) catches the Slice E.2 partial
-    // migration mismatch — a callee parameter flipped from `number`
-    // (double) to `int` (i64) while a caller still has a `double` in
-    // hand.
-    //
-    // #550 (relief valve): the diagnostic is emitted as `[warning]`
-    // (NOT `[fatal]`) and control falls through to the normal
-    // `coerce_numeric_primitive` path below, which emits `round +
-    // fptosi` for `double → i64`. `has_fatal_lowering_diagnostic`
-    // (lowering_core.sfn:294) scans for `[fatal]` only, so emission
-    // continues. The fatal refusal landed in #528 turned out to be
-    // intractable during the Slice E.2 source migration — the cluster
-    // boundary spans the entire `compiler/src/llvm/` tree (~100 files),
-    // not the named cluster of ~30 the original plan assumed, so a
-    // staged flip cannot avoid mixed-kind boundaries mid-migration.
-    // See `docs/runtime_architecture.md:1404` for the original
-    // sequencing constraint (strict refusal rides on E.3) that #528
-    // violated. #490 (Slice E.3) re-promotes the diagnostic to
-    // `[fatal]` symmetrically once E.2 completes.
-    //
-    // The reverse direction (operand=int, target=float) keeps silently
-    // widening today: every existing `arr.length`-into-`:number`
-    // callsite relies on it; the symmetric rejection also rides on
-    // #490.
+    // ABI primitive kind check (Slice E.3b — #556 reapplies #296):
+    // promote the `float → int` refusal from #528 to `[fatal]` and
+    // emit the canonical fix-it. The reverse direction (`int → float`)
+    // intentionally keeps silent widening here because the residual
+    // double-ABI helper descriptors (`substring`, `sleep`,
+    // `grapheme_at`, `runtime_assert_fail_fn`) still claim `double`
+    // for what are semantically integer arguments. Flipping the
+    // reverse direction to `[fatal]` here would fire on every
+    // `substring(text, i64, i64)` call across the existing tree and
+    // require a paired seed bump (the seed-compiled compiler binary
+    // already embeds calls of this shape). Arithmetic harmonisation
+    // (`dominant_type` + `harmonise_operands` below) keeps the
+    // symmetric refusal — that catches the canonical
+    // `let a: int; let b: float; a + b` case from acceptance.
     if !allow_widen {
         let from_kind = numeric_type_kind(operand_type);
         let to_kind = numeric_type_kind(target);
@@ -1934,7 +1920,7 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             // #540 threads a `NativeSourceSpan` so the failing site is
             // locatable in source; pre-#540 callers pass `null` and
             // continue producing the bare message.
-            let mut abi_diag = "llvm lowering [warning]: ABI primitive mismatch: callee expects `"
+            let mut abi_diag = "llvm lowering [fatal]: ABI primitive mismatch: callee expects `"
                 + target
                 + "` ("
                 + to_kind
@@ -1946,9 +1932,16 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             if span != null {
                 abi_diag = abi_diag + " at " + format_coerce_span_location(span);
             }
+            abi_diag = abi_diag
+                + " — add `as float` or `as int` to disambiguate";
             print.err(abi_diag);
             diagnostics.push(abi_diag);
-            // Fall through to coerce_numeric_primitive below — see #550.
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: recover_temp_from_lines(current_lines, temp_index),
+                operand: null,
+                diagnostics: diagnostics
+            };
         }
     }
 
@@ -2011,21 +2004,15 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
     };
 }
 
-// LIMITATION (numeric types L2/L3 — see docs/runtime_architecture.md
-// §3.7 + tracked in issue #296): when one operand is integer (i64)
-// and the other is float (double), the rule below silently widens
-// the integer side to double. Slice E.1 (#488) flipped the bare
-// integer-literal default to `i64`, so the LHS-driven `expected_type`
-// hint in `lower_binary_operation` now keeps RHS literals on the
-// correct side of int-vs-float for every same-kind expression.
-// Mixed `i64 + double` expressions still funnel through this rule
-// and silently widen — the rejection rides on E.3 once every
-// `number`-typed site in the compiler source has been migrated to
-// `int`/`float`, at which point the literal-typing seam below
-// can refuse the coercion without breaking the runtime helper
-// helpers and `for i in 0..arr.length` patterns. Slice D shipped
-// the `as` cast lowering matrix so authors can spell the conversion
-// explicitly today.
+// Slice E.3b (#556 — reapplies #296): when one operand is integer
+// (i64/i32/i16/i8) and the other is float (double/float),
+// `dominant_type` returns the empty-string sentinel to signal the
+// mismatch. `harmonise_operands` checks for the sentinel after the
+// call and emits a fatal diagnostic with the standard fix-it ("add
+// `as float` or `as int` to disambiguate") instead of producing
+// coerced operands. Same-kind pairs (i32 ↔ i64, float ↔ double)
+// continue to widen silently — those are not the int↔float pairs the
+// rejection targets.
 fn dominant_type(first: string, second: string) -> string {
     if first.length == 0 { return second; }
     if second.length == 0 { return first; }
@@ -2041,6 +2028,16 @@ fn dominant_type(first: string, second: string) -> string {
     if first_is_pointer {
         if second_is_pointer { return first; }
     }
+    let first_kind = numeric_type_kind(first);
+    let second_kind = numeric_type_kind(second);
+    let mut _mixed_int_float: boolean = false;
+    if first_kind == "int" {
+        if second_kind == "float" { _mixed_int_float = true; }
+    }
+    if first_kind == "float" {
+        if second_kind == "int" { _mixed_int_float = true; }
+    }
+    if _mixed_int_float { return ""; }
     let mut _if79: boolean = false;
     if first == "double" { _if79 = true; }
     if second == "double" { _if79 = true; }
@@ -2098,10 +2095,31 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
         };
     }
     let target_type = dominant_type(left_operand.llvm_type, right_operand.llvm_type);
-    // Arithmetic harmonisation is the canonical exempted call site:
-    // `1 + 2.0` or `arr.length + 0.5` legitimately widen i64 → double here.
-    // Slice E.3 (#490) reapplies #296 and removes this opt-out once every
-    // `number`-typed site in the compiler source has migrated to `int`/`float`.
+    // Slice E.3b (#556 reapplies #296): `dominant_type` returns ""
+    // when one operand is integer-kind and the other float-kind. The
+    // mismatch is a `[fatal]` lowering diagnostic — refuse to produce
+    // coerced operands and direct the author to spell the conversion
+    // explicitly with `as int` / `as float`.
+    if target_type.length == 0 {
+        let abi_diag = "llvm lowering [fatal]: ABI primitive mismatch: arithmetic mixes `"
+            + left_operand.llvm_type
+            + "` ("
+            + numeric_type_kind(left_operand.llvm_type)
+            + ") and `"
+            + right_operand.llvm_type
+            + "` ("
+            + numeric_type_kind(right_operand.llvm_type)
+            + ") — add `as float` or `as int` to disambiguate";
+        diagnostics.push(abi_diag);
+        return BinaryAlignmentResult {
+            lines: current_lines,
+            temp_index: recover_temp_from_lines(current_lines, current_temp),
+            left: null,
+            right: null,
+            diagnostics: diagnostics,
+            result_type: ""
+        };
+    }
     let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines, true, null);
     let mut _ci0: int = 0;
     loop {

@@ -14,15 +14,15 @@
 struct AssertFailure {
     present: boolean;
     file: string;
-    line: number;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    col: number;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    line: int;
+    col: int;
     message: string;
 }
 
-fn _number_to_string(value: number) -> string {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn _number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
     let mut is_negative: boolean = false;
-    let mut remaining: number = value;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let mut remaining: int = value;
     if value < 0 {
         is_negative = true;
         remaining = 0 - value;
@@ -31,14 +31,17 @@ fn _number_to_string(value: number) -> string {  // alias-coverage: test relies 
     let digits = "0123456789";
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-        let mut quotient: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
             quotient += 1;
         }
-        let ch = substring(digits, temp, temp + 1);
+        // alias-coverage: substring helper descriptor still claims double
+        // for start/end pending the paired seed bump; cast to float at the
+        // boundary so the asymmetric refusal stays clean.
+        let ch = substring(digits, temp as float, (temp + 1) as float);
         output = ch + output;
         remaining = quotient;
     }
@@ -51,8 +54,8 @@ fn _bool_to_string(value: boolean) -> string {
     return "false";
 }
 
-fn _abs(x: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    if x < 0 { return 0 - x; }
+fn _abs(x: float) -> float {
+    if x < 0.0 { return 0.0 - x; }
     return x;
 }
 
@@ -76,7 +79,7 @@ fn _pure_fail(message: string) -> AssertFailure {
     };
 }
 
-fn pure_assert_eq_int(actual: number, expected: number, label: string) -> AssertFailure ![pure] {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn pure_assert_eq_int(actual: int, expected: int, label: string) -> AssertFailure ![pure] {
     if actual == expected { return _pure_ok(); }
     let message = "ASSERTION FAILED: " + label + "; expected: "
         + _number_to_string(expected)
@@ -95,7 +98,7 @@ fn pure_assert_eq_string(actual: string, expected: string, label: string) -> Ass
     return _pure_fail(message);
 }
 
-fn pure_assert_eq_float(actual: number, expected: number, tolerance: number, label: string) -> AssertFailure ![pure] {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+fn pure_assert_eq_float(actual: float, expected: float, tolerance: float, label: string) -> AssertFailure ![pure] {
     let diff = _abs(actual - expected);
     if diff <= tolerance { return _pure_ok(); }
     let message = "ASSERTION FAILED: " + label + "; expected: "

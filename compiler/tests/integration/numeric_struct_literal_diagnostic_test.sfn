@@ -31,7 +31,7 @@ fn _span(line: int, col: int) -> NativeSourceSpan {
 fn _contains(text: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if needle.length > text.length { return false; }
-    let mut i: number = 0;  // alias-coverage: numeric migration coverage
+    let mut i: int = 0;
     let limit = text.length - needle.length;
     loop {
         if i > limit { break; }
@@ -48,12 +48,14 @@ test "coerce_operand_to_type: bare diagnostic when span is null" ![io] {
     let operand = _operand("double", "%t0");
     let mut lines: string[] = [];
     let result = coerce_operand_to_type(operand, "i64", 0, lines, false, null);
-    // #550: warning + fall-through to coerce_numeric_primitive — operand is
-    // now non-null; the diagnostic is preserved verbatim for tooling grep.
-    assert result.operand != null;
+    // Slice E.3b (#556): the boundary-mode kind check refuses
+    // `float → int` with a fatal diagnostic and a null operand. The
+    // bare form (no span) still emits the diagnostic plus the canonical
+    // fix-it suffix without a `" at <line>:<col>"` location.
+    assert result.operand == null;
     assert result.diagnostics.length >= 1;
     let mut saw_bare: boolean = false;
-    let mut idx: number = 0;  // alias-coverage: numeric migration coverage
+    let mut idx: int = 0;
     loop {
         if idx >= result.diagnostics.length { break; }
         let diag = result.diagnostics[idx];
@@ -71,11 +73,12 @@ test "coerce_operand_to_type: span-aware diagnostic carries line:col" ![io] {
     let mut lines: string[] = [];
     let span = _span(42, 17);
     let result = coerce_operand_to_type(operand, "i64", 0, lines, false, span);
-    // #550: warning + fall-through — operand non-null but span enrichment
-    // still attaches to the diagnostic for #540's location plumbing.
-    assert result.operand != null;
+    // Slice E.3b (#556): refusal is fatal (null operand). The span
+    // enrichment still attaches to the diagnostic for #540's location
+    // plumbing.
+    assert result.operand == null;
     let mut saw_location: boolean = false;
-    let mut idx: number = 0;  // alias-coverage: numeric migration coverage
+    let mut idx: int = 0;
     loop {
         if idx >= result.diagnostics.length { break; }
         let diag = result.diagnostics[idx];

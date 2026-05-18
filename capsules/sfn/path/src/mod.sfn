@@ -3,19 +3,14 @@
 // Provides pure string-based path operations (no filesystem access).
 // Uses POSIX-style forward slash separators.
 // No effects required — pure functions.
-
 fn join(a: string, b: string) -> string {
     // Join two path segments with a separator.
     if a.length == 0 { return b; }
     if b.length == 0 { return a; }
     let a_ends = a[a.length - 1] == "/";
     let b_starts = b[0] == "/";
-    if a_ends && b_starts {
-        return a + substring(b, 1, b.length);
-    }
-    if a_ends || b_starts {
-        return a + b;
-    }
+    if a_ends && b_starts { return a + substring(b, 1, b.length); }
+    if a_ends || b_starts { return a + b; }
     return a + "/" + b;
 }
 
@@ -24,8 +19,8 @@ fn dirname(path: string) -> string {
     // dirname("/foo/bar.txt") => "/foo"
     // dirname("bar.txt") => "."
     if path.length == 0 { return "."; }
-    let mut last_sep: number = -1;
-    let mut i: number = 0;
+    let mut last_sep: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= path.length { break; }
         if path[i] == "/" { last_sep = i; }
@@ -41,15 +36,13 @@ fn basename(path: string) -> string {
     // basename("/foo/bar.txt") => "bar.txt"
     if path.length == 0 { return ""; }
     // Strip trailing slashes.
-    let mut end: number = path.length;
+    let mut end: int = path.length;
     loop {
         if end <= 1 { break; }
-        if path[end - 1] == "/" {
-            end -= 1;
-        } else { break; }
+        if path[end - 1] == "/" { end -= 1; } else { break; }
     }
-    let mut last_sep: number = -1;
-    let mut i: number = 0;
+    let mut last_sep: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= end { break; }
         if path[i] == "/" { last_sep = i; }
@@ -64,8 +57,8 @@ fn ext(path: string) -> string {
     // ext("file.tar.gz") => ".gz"
     // ext("Makefile") => ""
     let name = basename(path);
-    let mut last_dot: number = -1;
-    let mut i: number = 0;
+    let mut last_dot: int = -1;
+    let mut i: int = 0;
     loop {
         if i >= name.length { break; }
         if name[i] == "." { last_dot = i; }
@@ -105,14 +98,12 @@ fn normalize(path: string) -> string {
 
     // Split on "/"
     let mut parts: string[] = [];
-    let mut start: number = 0;
-    let mut i: number = 0;
+    let mut start: int = 0;
+    let mut i: int = 0;
     loop {
         if i >= path.length { break; }
         if path[i] == "/" {
-            if i > start {
-                parts.push(substring(path, start, i));
-            }
+            if i > start { parts.push(substring(path, start, i)); }
             start = i + 1;
         }
         i += 1;
@@ -123,7 +114,7 @@ fn normalize(path: string) -> string {
 
     // Resolve . and ..
     let mut resolved: string[] = [];
-    let mut j: number = 0;
+    let mut j: int = 0;
     loop {
         if j >= parts.length { break; }
         let seg = parts[j];
@@ -133,19 +124,15 @@ fn normalize(path: string) -> string {
             if resolved.length > 0 && !strings_equal(resolved[resolved.length - 1], "..") {
                 // Pop last segment.
                 let mut new_resolved: string[] = [];
-                let mut k: number = 0;
+                let mut k: int = 0;
                 loop {
                     if k >= resolved.length - 1 { break; }
                     new_resolved.push(resolved[k]);
                     k += 1;
                 }
                 resolved = new_resolved;
-            } else if !absolute {
-                resolved.push("..");
-            }
-        } else {
-            resolved.push(seg);
-        }
+            } else if !absolute { resolved.push(".."); }
+        } else { resolved.push(seg); }
         j += 1;
     }
 
@@ -156,7 +143,7 @@ fn normalize(path: string) -> string {
     }
     let mut out: string = "";
     if absolute { out = "/"; }
-    let mut m: number = 0;
+    let mut m: int = 0;
     loop {
         if m >= resolved.length { break; }
         if m > 0 { out = out + "/"; }

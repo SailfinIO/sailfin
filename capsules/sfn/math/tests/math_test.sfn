@@ -14,37 +14,36 @@
 //      capsule whose imported function uses array indexing internally).
 //   2. The runtime `_truncate` / `floor` / `round` chain returns correct
 //      values (currently mis-parses `number_to_string` for some inputs).
-
-fn _abs(x: number) -> number {
-    if x < 0 { return 0 - x; }
+fn _abs(x: float) -> float {
+    if x < 0.0 { return 0.0 - x; }
     return x;
 }
 
-fn _min(a: number, b: number) -> number {
+fn _min(a: float, b: float) -> float {
     if a <= b { return a; }
     return b;
 }
 
-fn _max(a: number, b: number) -> number {
+fn _max(a: float, b: float) -> float {
     if a >= b { return a; }
     return b;
 }
 
-fn _clamp(x: number, lo: number, hi: number) -> number {
+fn _clamp(x: float, lo: float, hi: float) -> float {
     if x < lo { return lo; }
     if x > hi { return hi; }
     return x;
 }
 
-fn _sign(x: number) -> number {
-    if x < 0 { return -1; }
-    if x > 0 { return 1; }
-    return 0;
+fn _sign(x: float) -> float {
+    if x < 0.0 { return -1.0; }
+    if x > 0.0 { return 1.0; }
+    return 0.0;
 }
 
-fn _sum(values: number[]) -> number {
-    let mut total: number = 0;
-    let mut i: number = 0;
+fn _sum(values: float[]) -> float {
+    let mut total: float = 0.0;
+    let mut i: int = 0;
     loop {
         if i >= values.length { break; }
         total = total + values[i];
@@ -53,57 +52,55 @@ fn _sum(values: number[]) -> number {
     return total;
 }
 
-fn _mean(values: number[]) -> number {
-    if values.length == 0 { return 0; }
-    return _sum(values) / values.length;
+fn _mean(values: float[]) -> float {
+    if values.length == 0 { return 0.0; }
+    return _sum(values) / (values.length as float);
 }
 
 test "math: abs" {
-    assert _abs(5) == 5;
-    assert _abs(-5) == 5;
-    assert _abs(0) == 0;
+    assert _abs(5.0) == 5.0;
+    assert _abs(-5.0) == 5.0;
+    assert _abs(0.0) == 0.0;
     assert _abs(-0.5) == 0.5;
 }
 
 test "math: min and max" {
-    assert _min(3, 7) == 3;
-    assert _min(-1, 1) == -1;
-    assert _min(5, 5) == 5;
-    assert _max(3, 7) == 7;
-    assert _max(-1, 1) == 1;
-    assert _max(5, 5) == 5;
+    assert _min(3.0, 7.0) == 3.0;
+    assert _min(-1.0, 1.0) == -1.0;
+    assert _min(5.0, 5.0) == 5.0;
+    assert _max(3.0, 7.0) == 7.0;
+    assert _max(-1.0, 1.0) == 1.0;
+    assert _max(5.0, 5.0) == 5.0;
 }
 
 test "math: clamp" {
-    assert _clamp(5, 0, 10) == 5;
-    assert _clamp(-5, 0, 10) == 0;
-    assert _clamp(15, 0, 10) == 10;
-    assert _clamp(0, 0, 10) == 0;
-    assert _clamp(10, 0, 10) == 10;
+    assert _clamp(5.0, 0.0, 10.0) == 5.0;
+    assert _clamp(-5.0, 0.0, 10.0) == 0.0;
+    assert _clamp(15.0, 0.0, 10.0) == 10.0;
+    assert _clamp(0.0, 0.0, 10.0) == 0.0;
+    assert _clamp(10.0, 0.0, 10.0) == 10.0;
 }
 
 test "math: sign" {
-    assert _sign(42) == 1;
-    assert _sign(-42) == -1;
-    assert _sign(0) == 0;
-    assert _sign(0.001) == 1;
-    assert _sign(-0.001) == -1;
+    assert _sign(42.0) == 1.0;
+    assert _sign(-42.0) == -1.0;
+    assert _sign(0.0) == 0.0;
+    assert _sign(0.001) == 1.0;
+    assert _sign(-0.001) == -1.0;
 }
 
 test "math: sum" {
-    assert _sum([1, 2, 3, 4, 5]) == 15;
-    assert _sum([]) == 0;
-    assert _sum([10]) == 10;
-    assert _sum([-1, 1]) == 0;
+    assert _sum([1.0, 2.0, 3.0, 4.0, 5.0]) == 15.0;
+    assert _sum([]) == 0.0;
+    assert _sum([10.0]) == 10.0;
+    assert _sum([-1.0, 1.0]) == 0.0;
 }
 
+// Note: floor, ceil, round, pow, mod, is_integer are deferred — they require
+// either capsule-side bug fixes (import path) or an inlined `_truncate`
+// re-implementation. Coverage is intentionally scoped to what holds today.
 test "math: mean" {
-    assert _mean([2, 4, 6]) == 4;
-    assert _mean([10]) == 10;
-    assert _mean([]) == 0;
+    assert _mean([2.0, 4.0, 6.0]) == 4.0;
+    assert _mean([10.0]) == 10.0;
+    assert _mean([]) == 0.0;
 }
-
-// Note: floor, ceil, round, pow, mod, is_integer require either:
-//   (a) the bug fixes in the capsule (import path), or
-//   (b) inlined `_truncate` re-implementation here.
-// Skipped to keep the test file scoped to coverage that holds today.

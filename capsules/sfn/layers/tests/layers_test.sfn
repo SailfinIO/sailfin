@@ -13,17 +13,17 @@
 // real capsule API.
 // -- Types and helpers copied from sfn/layers --
 struct Linear {
-    weights: number[];
-    biases: number[];
-    in_features: number;
-    out_features: number;
+    weights: float[];
+    biases: float[];
+    in_features: int;
+    out_features: int;
 }
 
-fn _linear(in_features: number, out_features: number) -> Linear {
+fn _linear(in_features: int, out_features: int) -> Linear {
     let weight_count = in_features * out_features;
-    let mut weights: number[] = [];
-    let mut biases: number[] = [];
-    let mut i: number = 0;
+    let mut weights: float[] = [];
+    let mut biases: float[] = [];
+    let mut i: int = 0;
     loop {
         if i >= weight_count { break; }
         weights.push(0);
@@ -43,13 +43,13 @@ fn _linear(in_features: number, out_features: number) -> Linear {
     };
 }
 
-fn _forward_linear(layer: Linear, input: number[]) -> number[] {
-    let mut output: number[] = [];
-    let mut o: number = 0;
+fn _forward_linear(layer: Linear, input: float[]) -> float[] {
+    let mut output: float[] = [];
+    let mut o: int = 0;
     loop {
         if o >= layer.out_features { break; }
-        let mut val: number = layer.biases[o];
-        let mut j: number = 0;
+        let mut val: float = layer.biases[o];
+        let mut j: int = 0;
         loop {
             if j >= layer.in_features { break; }
             val = val + input[j] * layer.weights[o * layer.in_features + j];
@@ -61,9 +61,9 @@ fn _forward_linear(layer: Linear, input: number[]) -> number[] {
     return output;
 }
 
-fn _forward_relu(input: number[]) -> number[] {
-    let mut output: number[] = [];
-    let mut i: number = 0;
+fn _forward_relu(input: float[]) -> float[] {
+    let mut output: float[] = [];
+    let mut i: int = 0;
     loop {
         if i >= input.length { break; }
         if input[i] > 0 { output.push(input[i]); } else { output.push(0); }
@@ -72,7 +72,7 @@ fn _forward_relu(input: number[]) -> number[] {
     return output;
 }
 
-fn _parameter_count(layer: Linear) -> number {
+fn _parameter_count(layer: Linear) -> int {
     return layer.in_features * layer.out_features + layer.out_features;
 }
 

@@ -1,0 +1,176 @@
+// Slice E.3b (#556 — reapplies #296): regression coverage for the
+// symmetric int↔float refusal at the LLVM-lowering chokepoints
+// (`dominant_type` + `harmonise_operands` for arithmetic, and
+// `coerce_operand_to_type` boundary mode for call args / struct
+// fields).
+//
+// The fix-it phrasing ("add `as float` or `as int` to disambiguate")
+// is load-bearing — the architect's stated requirement on #296 was
+// that the diagnostic name the escape valve. Tests below pin both
+// directions and confirm the fix-it text survives any future refactor
+// of the diagnostic emitter.
+import { coerce_operand_to_type, dominant_type, harmonise_operands } from "../../src/llvm/expression_lowering/native/core_operands";
+import { LLVMOperand } from "../../src/llvm/types";
+import { index_of } from "../../src/string_utils";
+
+fn _make_operand(llvm_type: string, value: string) -> LLVMOperand {
+    return LLVMOperand { llvm_type: llvm_type, value: value };
+}
+
+fn _diag_contains(diag: string, needle: string) -> boolean {
+    return index_of(diag, needle) >= 0;
+}
+
+// ── dominant_type empty-string sentinel on int↔float pairs ──────────
+test "dominant_type: i64 + double returns empty sentinel" {
+    assert dominant_type("i64", "double") == "";
+}
+
+test "dominant_type: double + i64 returns empty sentinel symmetrically" {
+    assert dominant_type("double", "i64") == "";
+}
+
+test "dominant_type: i32 + double returns empty sentinel" {
+    assert dominant_type("i32", "double") == "";
+}
+
+test "dominant_type: i64 + float returns empty sentinel" {
+    assert dominant_type("i64", "float") == "";
+}
+
+test "dominant_type: same-kind widening still chooses dominant width" {
+    // int↔int and float↔float widening pairs are unaffected — only
+    // mixed int↔float pairs return the sentinel.
+    assert dominant_type("i32", "i64") == "i64";
+    assert dominant_type("i8", "i64") == "i64";
+    assert dominant_type("double", "double") == "double";
+}
+
+test "dominant_type: pointer and i1 paths unchanged" {
+    // Pointer always dominates non-pointer (regardless of which side).
+    assert dominant_type("i8*", "i64") == "i8*";
+    assert dominant_type("i64", "i8*") == "i8*";
+    assert dominant_type("i1", "i1") == "i1";
+}
+
+// ── harmonise_operands fatal refusal on int↔float arithmetic ────────
+test "harmonise_operands: i64 + double refuses with fatal + fix-it" {
+    let left = _make_operand("i64", "%t0");
+    let right = _make_operand("double", "%t1");
+    let mut lines: string[] = [];
+    let result = harmonise_operands(left, right, 0, lines);
+    // Refused: no coerced operands produced.
+    assert result.left == null;
+    assert result.right == null;
+    assert result.diagnostics.length > 0;
+    let mut found_fatal: boolean = false;
+    let mut found_fixit: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= result.diagnostics.length { break; }
+        let diag = result.diagnostics[i];
+        if _diag_contains(diag, "[fatal]") {
+            if _diag_contains(diag, "i64") {
+                if _diag_contains(diag, "double") { found_fatal = true; }
+            }
+        }
+        if _diag_contains(diag, "add `as float` or `as int` to disambiguate") {
+            found_fixit = true;
+        }
+        i += 1;
+    }
+    assert found_fatal;
+    assert found_fixit;
+}
+
+test "harmonise_operands: double + i64 refuses symmetrically" {
+    let left = _make_operand("double", "%t0");
+    let right = _make_operand("i64", "%t1");
+    let mut lines: string[] = [];
+    let result = harmonise_operands(left, right, 0, lines);
+    assert result.left == null;
+    assert result.right == null;
+    let mut found_fatal: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= result.diagnostics.length { break; }
+        let diag = result.diagnostics[i];
+        if _diag_contains(diag, "[fatal]") { found_fatal = true; }
+        i += 1;
+    }
+    assert found_fatal;
+}
+
+test "harmonise_operands: i64 + i64 still produces coerced operands (same-kind passthrough)" {
+    let left = _make_operand("i64", "%t0");
+    let right = _make_operand("i64", "%t1");
+    let mut lines: string[] = [];
+    let result = harmonise_operands(left, right, 0, lines);
+    assert result.left != null;
+    assert result.right != null;
+    assert result.result_type == "i64";
+}
+
+test "harmonise_operands: double + double still produces coerced operands" {
+    let left = _make_operand("double", "%t0");
+    let right = _make_operand("double", "%t1");
+    let mut lines: string[] = [];
+    let result = harmonise_operands(left, right, 0, lines);
+    assert result.left != null;
+    assert result.right != null;
+    assert result.result_type == "double";
+}
+
+// ── coerce_operand_to_type boundary mode: asymmetric refusal ─────────
+//
+// Slice E.3b (#556) keeps the boundary-mode refusal asymmetric:
+// `float → int` is `[fatal]` (covers the canonical
+// `arr.length: i64`-into-`:number` partial-migration mistake the #528
+// regime caught), and `int → float` keeps silent widening because the
+// residual double-ABI helper descriptors (`substring`, `sleep`,
+// `grapheme_at`, `runtime_assert_fail_fn`) still claim `double` for
+// integer-shaped arguments. Flipping the reverse direction to
+// `[fatal]` here would require a paired seed bump (the seed-compiled
+// compiler binary embeds calls of this shape across the runtime
+// surface). Arithmetic harmonisation already enforces the symmetric
+// refusal via `dominant_type`'s empty-string sentinel — see the
+// `harmonise_operands` tests above.
+test "coerce_operand_to_type: double → i64 boundary refuses with fatal + fix-it" ![io] {
+    let operand = _make_operand("double", "%t0");
+    let mut lines: string[] = [];
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, false, null);
+    assert result.operand == null;
+    let mut found_fatal: boolean = false;
+    let mut found_fixit: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= result.diagnostics.length { break; }
+        let diag = result.diagnostics[i];
+        if _diag_contains(diag, "[fatal]") { found_fatal = true; }
+        if _diag_contains(diag, "add `as float` or `as int` to disambiguate") {
+            found_fixit = true;
+        }
+        i += 1;
+    }
+    assert found_fatal;
+    assert found_fixit;
+}
+
+test "coerce_operand_to_type: i64 → double boundary keeps silent widening (asymmetric)" ![io] {
+    let operand = _make_operand("i64", "%t0");
+    let mut lines: string[] = [];
+    let result = coerce_operand_to_type(operand, "double", 0, lines, false, null);
+    // Reverse direction is silently widened pending the seed bump that
+    // flips the residual double-ABI helper descriptors. Operand is
+    // non-null; the widening uses `sitofp`.
+    assert result.operand != null;
+}
+
+test "coerce_operand_to_type: same-kind i32 → i64 still widens in boundary mode" ![io] {
+    let operand = _make_operand("i32", "%t0");
+    let mut lines: string[] = [];
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, false, null);
+    // Same-kind widening (sext) is unchanged — int↔int is not the
+    // rejection target.
+    assert result.operand != null;
+}

@@ -84,8 +84,16 @@ test "cast: cast binds tighter than `+`" {
     // `x + y as int` parses as `x + (y as int)` because `as` is
     // consumed inside parse_postfix_chain — postfix-position binds
     // tighter than the binary operator ladder. Matches Rust.
+    //
+    // Slice E.3b (#556): `_format_binary_operand` wraps Cast operands
+    // in extra parens (`((y) as int)`) so the native-IR re-parse
+    // honours the original grouping. Without these outer parens, the
+    // `parse_cast_expression` recognizer would mis-group the expression
+    // as `(x + (y)) as int` — surfaced when the symmetric arithmetic
+    // refusal started catching the `int + double` produced by that
+    // mis-grouped re-parse.
     let asm = _emit("fn add_cast(x: int, y: float) -> int { return x + y as int; }");
-    assert index_of(asm, "ret x + (y) as int") >= 0;
+    assert index_of(asm, "ret x + ((y) as int)") >= 0;
 }
 
 // ── Typecheck accepts `as` casts cleanly ──────────────────────────

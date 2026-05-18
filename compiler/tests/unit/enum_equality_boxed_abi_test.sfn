@@ -73,7 +73,7 @@ fn _pointer_vs_value(s: TaskStatus, t: Task) -> boolean {
 // Array of enums: elements are inline (value form when loaded), so
 // `priorities[i] == Priority.High` is value vs pointer.
 fn _contains_critical(priorities: Priority[]) -> boolean {
-    let mut i: number = 0;  // alias-coverage: numeric migration coverage
+    let mut i: int = 0;
     loop {
         if i >= priorities.length { break; }
         if priorities[i] == Priority.Critical { return true; }

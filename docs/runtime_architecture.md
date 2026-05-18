@@ -155,19 +155,17 @@
 >   `compiler/tests/unit/numeric_cast_test.sfn` (extended) and
 >   `compiler/tests/e2e/test_numeric_cast.sh` (8 LLVM-shape
 >   pinning cases). Self-host stays green.
->   **L2/L3 silent-widening rejection deferred to Slice E.**
->   The architect's plan called for `dominant_type` to refuse
->   silent int↔float coercion at the same time, but the lowered
->   compiler source mixes i64 (from runtime helpers like
->   `string.length` returning i64) and double (`number` alias)
->   pervasively — every `for i in 0..arr.length` triggers the
->   tightened path with no semantically meaningful fix-it.
->   Closing L2/L3 properly requires Slice E (retire `number`,
->   default integer literals to `int`) so the language
->   semantics line up with the tightened lowering rule. Slice D
->   ships the `as` cast escape valve so authors can spell the
->   conversion explicitly today. L2/L3 closure follow-up is
->   tracked in issue #296.
+>   **L2/L3 silent-widening rejection closed by Slice E.3b
+>   (2026-05-18, #556).** `dominant_type` now returns an
+>   empty-string sentinel on mixed int↔float pairs;
+>   `harmonise_operands` and `coerce_operand_to_type` boundary
+>   mode emit a `[fatal]` diagnostic with the canonical fix-it
+>   `add \`as float\` or \`as int\` to disambiguate`. Slice D's
+>   `as` cast lowering matrix is the load-bearing escape valve.
+>   The four documented alias-coverage seams (prelude shadows,
+>   C-ABI boundaries, the `Future` mapping seam, and the
+>   runtime `is_number` predicate) spell their boundary
+>   conversions explicitly. #296 closed.
 > - **Issue #295 closed 2026-05-04.** The "alpha.8 seed DCE"
 >   reported alongside Slice D was misdiagnosed. Root cause: the
 >   parser has no `while` keyword (Sailfin's only loop construct
@@ -1411,18 +1409,22 @@ trailing `// alias-coverage:` marker documenting the opt-out
 (prelude shadows, C-ABI boundaries, the runtime `is_number`
 predicate, literal-text predicates in `core_text.sfn`, and the
 `Future`-mapping seam in `type_mapping.sfn`). The site-level audit
-returns zero. **The L2/L3 silent-widening rejection (the architect's
-`dominant_type` tightening) is now the only blocker for L2/L3
-closure and rides on Slice E.3b (the strict-refusal reapply
-tracked by #556), which picks up on the v0.6.0 seed and targets
-v0.6.1.** The sequencing constraint stated below for the original
-E.3 — that the rejection must not land while the lowered tree
-mixes i64 (`string.length`) and double (`: number` aliases) — is
-still active, now gating E.3b alone: after E.3a the residual
-mixed-kind boundaries are the documented alias-coverage seams,
-which E.3b's lockstep work clears with the canonical example
-(`for i in 0..arr.length` over a `: number` counter) no longer
-realisable in unmigrated form.
+returns zero. **Slice E.3b (#556, reapplies #296) landed the
+symmetric arithmetic refusal on 2026-05-18:** the `dominant_type`
+chokepoint returns an empty-string sentinel on mixed int↔float
+pairs and `harmonise_operands` emits a `[fatal]` diagnostic with
+the fix-it `add \`as float\` or \`as int\` to disambiguate`. The
+boundary-mode kind check in `coerce_operand_to_type` re-promotes
+the `float → int` warning to `[fatal]` (Undo #550's relief-valve
+fall-through); the reverse direction (`int → float`) intentionally
+keeps silent widening pending a paired seed bump — several
+residual double-ABI helper descriptors (`substring`, `sleep`,
+`grapheme_at`, `runtime_assert_fail_fn`) still claim `double` for
+integer-shaped arguments, and the seed-compiled compiler binary
+embeds calls of that shape. L2 and L3 are closed by the arithmetic
+refusal regardless of the boundary-mode asymmetry. The symmetric
+boundary-mode extension rides on a future seed bump that flips
+those residual descriptors.
 
 **What ships in Slice A:**
 
@@ -1469,8 +1471,8 @@ realisable in unmigrated form.
 | # | Limitation | Consequence | Slice |
 |---|---|---|---|
 | L1 | ✅ **Closed for scalar context by Slice E.1 (2026-05-08, #488).** Bare unsuffixed integer literals at scalar position now default to `int` (i64). `let x = 42` produces `alloca i64`, `store i64 42`. Decimal/exponent literals stay on the `double` path; `: number` and `: float` annotations both map to `double` as deprecated and primary spellings of the floating-point type. Verified by `compiler/tests/e2e/test_numeric_int_default.sh` and `compiler/tests/unit/numeric_int_default_test.sfn`. **Carve-out:** unannotated array literals (`let xs = [1, 2, 3]`) still default to `double[]` so the existing `: number[]` corpus (compiler source, runtime/prelude.sfn, every test fixture that types arrays as `number[]`) keeps lowering without churn until E.2 migrates the source. After E.2 the array-literal default flips to match the scalar one. | E.1 (scalar closed; array carve-out documented) |
-| L2 | Mixed `int` + `float` silently coerces to `double` | `let x: int = 1; let y: float = 2.0; x + y` lowers to `fadd double` after silent fpext on the integer side. Truncates above 2^53. Slice D shipped the `as` cast escape valve so authors can spell the conversion explicitly. E.3a (2026-05-16) eliminated the canonical break case (`for i in 0..arr.length` mixing `: number` counter with i64 length); the strict-refusal reapply rides on E.3b (#556) and targets v0.6.1. | E.3b |
-| L3 | Comparison with un-annotated literal coerces to `double` | `let x: int = 42; x > 0` lowers to `fcmp ogt double` because `0` defaults to `double` and `dominant_type` widens both sides. Slice D mitigation: spell the literal explicitly with `x > (0 as int)`. After E.3a's source migration the strict-refusal reapply (E.3b, #556) closes this on v0.6.1. | E.3b |
+| L2 | ✅ **Closed by Slice E.3b (2026-05-18, #556).** Mixed `int` + `float` is rejected with a `[fatal]` ABI-primitive-mismatch diagnostic at the LLVM-lowering chokepoint (`dominant_type` returns the empty-string sentinel; `harmonise_operands` halts emission). The diagnostic carries the fix-it `add \`as float\` or \`as int\` to disambiguate` — authors must spell the widening explicitly using Slice D's `as` casts. Verified by `compiler/tests/unit/numeric_int_float_coercion_test.sfn`. | E.3b (closed) |
+| L3 | ✅ **Closed by Slice E.3b (2026-05-18, #556).** `lower_comparison_operation` now propagates the LHS's LLVM type into the RHS literal lookup (mirroring Slice B's binary-op fix at `core_ops_lowering.sfn:271`), so `length > 0` takes the integer-literal short-circuit and lowers to `icmp i64`. A residual `i64 vs double` comparison (e.g. `x > 0.5` with `x: int`) now trips the same fatal refusal that closes L2 — the author spells the conversion with `as float` or `as int`. | E.3b (closed) |
 | L4 | ✅ **Closed by Slice B (2026-05-02).** Bitwise operators (`&`, `|`, `^`, `<<`, `>>`) on integer-annotated operands lower to LLVM `and`/`or`/`xor`/`shl`/`ashr i64`. The pure-Sailfin SHA-256/Base64/flag manipulation paths can leave the C runtime in a follow-up M3 PR. Bitwise on `float`/`number` operands is still a footgun — `operation_name_for_symbol` returns empty when `llvm_type == "double"`, but the typecheck does not yet pre-reject it. Closing that gap rides on Slice E's broader int↔float disambiguation. | B (closed) |
 | L5 | Additional widths (`i16`, `u16`, `u32`, `u64`, `isize`, `f32`) in **user-level arithmetic** still funnel through `dominant_type` / `comparison_predicate_for_symbol`, neither of which knows about them — silent widening to `double` (or returning empty predicate strings) is the current behaviour. The **extern boundary** is no longer affected: Slice C (2026-05-02) admitted these widths into `map_primitive_type` and `is_extern_primitive_type`, so `extern fn ioctl(fd: i32, request: u64) -> i32;` lowers to `declare i32 @ioctl(i32, i64)` cleanly. Slice D's `as` casts give authors the escape valve (`x as i64` to align widths before arithmetic), so the remaining work — teaching `dominant_type`/`comparison_predicate_for_symbol` about the wider widths so they don't need explicit casts every time — is now optional polish, not a blocker. | E (polish, riding on `as` casts) |
 | L6 | `number` keyword still exists | Pre-1.0 alias for `double`. **Source migration completed in Slice E.3a (2026-05-16, #567):** every annotation in `compiler/src/*.sfn` and `runtime/prelude.sfn` either flipped to `: int`/`: float` or carries an `// alias-coverage:` opt-out marker. The keyword itself is retained until E.4 retires it after E.3b lands the strict-refusal regime on v0.6.1. | E.3a (source migration); E.4 (keyword removal) |
@@ -1530,17 +1532,17 @@ realisable in unmigrated form.
   prevents the matrix from firing — `lower_return_instruction` in
   `statement.sfn` works around the same quirk by passing `operand`
   to `coerce_operand_to_type` immediately after binding.
-  **The L2/L3 silent-widening rejection (the architect's
-  `dominant_type` tightening) is deferred to Slice E.** The
-  rejection cannot ship before Slice E retires `number` because
-  the lowered compiler/runtime code mixes i64 (from runtime
-  helpers like `string.length`) and double (`number` alias)
-  pervasively — `for i in 0..arr.length` is the canonical
-  break case with no semantically meaningful fix-it. Slice D
-  ships the `as` cast escape valve so authors can spell the
-  conversion explicitly today; the implicit-rejection path
-  rides on Slice E. Tracked: seed-DCE workaround in issue #295,
-  L2/L3 closure follow-up in issue #296.
+  **L2/L3 closure note:** the original Slice D notes deferred the
+  silent-widening rejection to Slice E because the lowered
+  compiler/runtime tree pervasively mixed i64 (`string.length`) and
+  double (`: number` alias) and the canonical `for i in 0..arr.length`
+  break case had no fix-it. Slice E.3a (#567) migrated every
+  integer-shaped `: number` site, Slice E.3a-seedbump-cleanup (#611)
+  flipped the `number_to_string` mirrors and C-ABI rows, and Slice
+  E.3b (#556) reapplied #296 — `dominant_type` now refuses mixed
+  pairs and `harmonise_operands` / `coerce_operand_to_type` emit the
+  `[fatal]` diagnostic with the canonical fix-it. Slice D's `as` cast
+  is the load-bearing escape valve. L2/L3 closed (#296 closed).
 
 - **Slice E — Bare-literal defaulting + `number` retirement.**
   Per `CLAUDE.md` Pre-1.0 Syntax Reform §3, `number` becomes an

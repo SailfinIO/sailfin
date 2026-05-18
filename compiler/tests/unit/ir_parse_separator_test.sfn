@@ -4,8 +4,8 @@
 // The parser must pick the earliest valid separator to avoid mis-splits.
 // See: docs/proposals/colon-type-annotations.md, Phase 5.
 // ── Minimal helpers ──────────────────────────────────────────────────
-fn _index_of(haystack: string, needle: string) -> number {  // alias-coverage: IR text fixture pins legacy number type token
-    let mut i: number = 0;  // alias-coverage: IR text fixture pins legacy number type token
+fn _index_of(haystack: string, needle: string) -> int {
+    let mut i: int = 0;
     loop {
         if i + needle.length > haystack.length { break; }
         let slice = substring(haystack, i, i + needle.length);
@@ -16,7 +16,7 @@ fn _index_of(haystack: string, needle: string) -> number {  // alias-coverage: I
 }
 
 fn _trim(text: string) -> string {
-    let mut start: number = 0;  // alias-coverage: IR text fixture pins legacy number type token
+    let mut start: int = 0;
     loop {
         if start >= text.length { break; }
         let ch = text[start];
@@ -27,7 +27,7 @@ fn _trim(text: string) -> string {
         if !is_ws { break; }
         start += 1;
     }
-    let mut end: number = text.length;  // alias-coverage: IR text fixture pins legacy number type token
+    let mut end: int = text.length;
     loop {
         if end <= start { break; }
         let ch = text[end - 1];
@@ -43,11 +43,11 @@ fn _trim(text: string) -> string {
 
 // Mirrors the earliest-separator logic used in parse_struct_field_line,
 // parse_enum_variant_field, and the lowering recovery parsers.
-fn _pick_separator(text: string) -> number[] {  // alias-coverage: IR text fixture pins legacy number type token
+fn _pick_separator(text: string) -> int[] {
     let colon_idx = _index_of(text, ": ");
     let arrow_idx = _index_of(text, " -> ");
-    let mut sep_idx: number = -1;  // alias-coverage: IR text fixture pins legacy number type token
-    let mut sep_len: number = 0;  // alias-coverage: IR text fixture pins legacy number type token
+    let mut sep_idx: int = -1;
+    let mut sep_len: int = 0;
     if colon_idx >= 0 {
         sep_idx = colon_idx;
         sep_len = 2;

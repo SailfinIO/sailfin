@@ -1,19 +1,22 @@
-// Slice E.1.5 (#528, relaxed by #550): regression coverage for the ABI
+// Slice E.3b (#556 — reapplies #296): regression coverage for the ABI
 // primitive kind diagnostic. Exercises both `numeric_type_kind` (the
 // helper in `type_mapping.sfn`) and `coerce_operand_to_type`'s
 // boundary-mode behaviour on int↔float coercion.
 //
-// During the Slice E.2 source migration window the boundary-mode
-// kind check emits a `[warning]` diagnostic and falls through to silent
-// `round + fptosi` widening. The fatal refusal landed in #528 was
-// downgraded by #550 — the cluster-internal boundary turned out to span
-// all of `compiler/src/llvm/` and could not be flipped atomically, so
-// the diagnostic provides visibility without aborting emission. Slice
-// E.3 (#490) re-promotes the diagnostic to `[fatal]` symmetrically once
-// every `: number` site has migrated.  // alias-coverage: numeric migration coverage
+// Boundary mode (`allow_widen = false`) is asymmetric: `float → int`
+// is `[fatal]` (the canonical partial-migration mistake the #528
+// regime caught), and `int → float` keeps silent widening pending
+// the paired seed bump that flips the residual double-ABI helper
+// descriptors (substring/sleep/grapheme_at/assert_fail). Arithmetic
+// harmonisation enforces the symmetric refusal via `dominant_type`'s
+// empty-string sentinel — see
+// `compiler/tests/unit/numeric_int_float_coercion_test.sfn`. Permissive
+// mode (`allow_widen = true`) keeps silent widening in both directions
+// (`sitofp` / `fptosi`).  // alias-coverage: numeric migration coverage
 import { coerce_operand_to_type, harmonise_operands } from "../../src/llvm/expression_lowering/native/core_operands";
 import { numeric_type_kind } from "../../src/llvm/type_mapping";
 import { LLVMOperand } from "../../src/llvm/types";
+import { index_of } from "../../src/string_utils";
 
 // -------------------------------------------------------------------
 // Helper classification
@@ -50,71 +53,44 @@ fn _make_operand(llvm_type: string, value: string) -> LLVMOperand {
     return LLVMOperand { llvm_type: llvm_type, value: value };
 }
 
-test "coerce_operand_to_type: warns + silently widens double → i64 in boundary mode" ![io] {
+fn _diag_contains(diag: string, needle: string) -> boolean {
+    return index_of(diag, needle) >= 0;
+}
+
+test "coerce_operand_to_type: refuses double → i64 with fatal in boundary mode" ![io] {
     let operand = _make_operand("double", "%t0");
     let mut lines: string[] = [];
     let result = coerce_operand_to_type(operand, "i64", 0, lines, false, null);
-    // #550: the kind-check now logs a warning and falls through to
-    // `round + fptosi`. Coercion succeeds with a non-null operand and
-    // the i64 LLVM type. The fatal refusal returns in #490 once Slice
-    // E.2 completes the source migration.
-    assert result.operand != null;
-    assert result.operand.llvm_type == "i64";
-    // The diagnostic carries the `[warning]` tag — NOT `[fatal]` —
-    // so `has_fatal_lowering_diagnostic` (lowering_core.sfn:294) does
-    // not trip and emission continues.
-    let mut found_warning = false;
-    let mut found_fatal = false;
-    let mut i: number = 0;  // alias-coverage: numeric migration coverage
+    // Slice E.3b (#556): the boundary-mode kind check returns a null
+    // operand and pushes a `[fatal]` diagnostic with the fix-it phrasing.
+    assert result.operand == null;
+    let mut found_fatal: boolean = false;
+    let mut found_fixit: boolean = false;
+    let mut i: int = 0;
     loop {
         if i >= result.diagnostics.length { break; }
         let diag = result.diagnostics[i];
-        let mut _has_warning = false;
-        let mut _has_fatal = false;
-        let mut _has_double = false;
-        let mut _has_i64 = false;
-        let mut j: number = 0;  // alias-coverage: numeric migration coverage
-        loop {
-            if j + 9 > diag.length { break; }
-            if substring(diag, j, j + 9) == "[warning]" { _has_warning = true; }
-            j += 1;
-        }
-        j = 0;
-        loop {
-            if j + 7 > diag.length { break; }
-            if substring(diag, j, j + 7) == "[fatal]" { _has_fatal = true; }
-            j += 1;
-        }
-        j = 0;
-        loop {
-            if j + 6 > diag.length { break; }
-            if substring(diag, j, j + 6) == "double" { _has_double = true; }
-            j += 1;
-        }
-        j = 0;
-        loop {
-            if j + 3 > diag.length { break; }
-            if substring(diag, j, j + 3) == "i64" { _has_i64 = true; }
-            j += 1;
-        }
-        if _has_warning {
-            if _has_double {
-                if _has_i64 { found_warning = true; }
+        if _diag_contains(diag, "[fatal]") {
+            if _diag_contains(diag, "double") {
+                if _diag_contains(diag, "i64") { found_fatal = true; }
             }
         }
-        if _has_fatal { found_fatal = true; }
+        if _diag_contains(diag, "add `as float` or `as int` to disambiguate") {
+            found_fixit = true;
+        }
         i += 1;
     }
-    assert found_warning;
-    assert ! found_fatal;
+    assert found_fatal;
+    assert found_fixit;
 }
 
-test "coerce_operand_to_type: keeps i64 → double silent in this slice" ![io] {
-    // Slice E.1.5 (#528) is asymmetric: only `float → int` is rejected at
-    // boundaries that don't opt in to widening, because every existing
-    // `arr.length`-into-`:number` callsite in the compiler source relies
-    // on the reverse direction widening silently. Slice E.3 (#490)
-    // tightens the check to symmetric once the migration completes.
+test "coerce_operand_to_type: keeps i64 → double silent in this slice (asymmetric)" ![io] {
+    // Slice E.3b (#556) keeps the boundary mode asymmetric — the
+    // reverse direction stays on silent widening pending the paired
+    // seed bump that flips the residual double-ABI helper descriptors
+    // (substring/sleep/grapheme_at/assert_fail). The arithmetic refusal
+    // in `harmonise_operands` is already symmetric — see
+    // `compiler/tests/unit/numeric_int_float_coercion_test.sfn`.
     let operand = _make_operand("i64", "%t1");
     let mut lines: string[] = [];
     let result = coerce_operand_to_type(operand, "double", 0, lines, false, null);
