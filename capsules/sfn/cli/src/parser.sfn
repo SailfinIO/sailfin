@@ -24,13 +24,13 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
     let mut subcmd_name: string = "";
 
     // Skip argv[0] (the program name).
-    let mut idx: number = 1;
+    let mut idx: int = 1;
 
     // Check for subcommand at argv[1].
     if idx < argv.length {
         let first = argv[idx];
         if !_starts_with(first, "-") {
-            let mut si: number = 0;
+            let mut si: int = 0;
             loop {
                 if si >= cmd.subcmds.length { break; }
                 if strings_equal(cmd.subcmds[si].name, first) {
@@ -50,7 +50,7 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
     let help_cmd = _help_hint(cmd.name, subcmd_name);
 
     // Parse remaining args.
-    let mut pos_idx: number = 0;
+    let mut pos_idx: int = 0;
     loop {
         if idx >= argv.length { break; }
         let token = argv[idx];
@@ -162,7 +162,7 @@ fn _starts_with(text: string, prefix: string) -> boolean {
 }
 
 fn _find_flag_long(cmd: Command, name: string) -> Flag {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= cmd.flags.length { break; }
         if strings_equal(cmd.flags[i].long_name, name) {
@@ -179,7 +179,7 @@ fn _find_flag_long(cmd: Command, name: string) -> Flag {
 }
 
 fn _find_flag_short(cmd: Command, name: string) -> Flag {
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= cmd.flags.length { break; }
         if strings_equal(cmd.flags[i].short_name, name) {
@@ -198,7 +198,7 @@ fn _find_flag_short(cmd: Command, name: string) -> Flag {
 fn _resolve_active(cmd: Command, subcmd_name: string) -> Command {
     // Return the subcommand definition if matched, otherwise the root command.
     if subcmd_name.length == 0 { return cmd; }
-    let mut i: number = 0;
+    let mut i: int = 0;
     loop {
         if i >= cmd.subcmds.length { break; }
         if strings_equal(cmd.subcmds[i].name, subcmd_name) {
