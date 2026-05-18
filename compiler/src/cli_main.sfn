@@ -899,11 +899,10 @@ fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
     return spec;
 }
 
-// alias-coverage: C ABI boundary — runtime/native/src/native_driver.c calls
-// `sailfin_cli_main__cli_main` declared as returning `double`. Until the
-// C runtime moves to Sailfin (post-1.0) the return type must stay `number`
-// so the LLVM declare/define lines up with the C-side caller.
-fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {  // alias-coverage: C-ABI boundary
+// C ABI boundary — `runtime/native/src/native_driver.c` calls
+// `sailfin_cli_main__cli_main` declared as returning `int64_t`. The C-side
+// declaration must be updated in lockstep with this signature.
+fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
     let trace_argv = _env_flag("SAILFIN_TRACE_ARGV") || _legacy_flag_file("build/sailfin/.trace_argv");
     if trace_argv {
         print.err("cli: argv.len=" + number_to_string(argv.length));
@@ -1620,7 +1619,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {  // alias-coverage:
 }
 
 // Exported entrypoint for the native argv shim.
-// alias-coverage: mirrors `sailfin_cli_main` at the C ABI boundary.
-fn native_cli_main(argv: string[]) -> number ![io] {  // alias-coverage: C-ABI boundary
+// Mirrors `sailfin_cli_main` at the C ABI boundary.
+fn native_cli_main(argv: string[]) -> int ![io] {
     return sailfin_cli_main(argv);
 }

@@ -549,28 +549,21 @@ fn _emit_typecheck_diagnostics(entries: Diagnostic[], source: string, file_path:
     }
 }
 
-// Seed alpha.18 compiled cross-module importers (cli_main, cli_commands,
-// capsule_resolver, tools/check) with `declare i8* @number_to_string__main(double)`.
-// Flipping the definition to `int` while the importers still emit `double`
-// call-sites produces an i64↔double mismatch the linker silently accepts and
-// runtime executes as garbage (`xargs -P <pointer-bit-pattern>`). Same
-// carve-out pattern as `emit_native_state.sfn:217`. Flip in lockstep with a
-// seed bump past this PR (tracked under #579's wrap / #567).
-fn number_to_string(value: number) -> string {  // alias-coverage: seed-ABI constraint — see banner above
+fn number_to_string(value: int) -> string {
     if value == 0 { return "0"; }
-    let mut working: number = value;  // alias-coverage: seed-ABI constraint — see number_to_string banner
+    let mut working: int = value;
     let mut negative: boolean = false;
     if working < 0 {
         negative = true;
         working = 0 - working;
     }
     let digits = "0123456789";
-    let mut remaining: number = working;  // alias-coverage: seed-ABI constraint — see number_to_string banner
+    let mut remaining: int = working;
     let mut output: string = "";
     loop {
         if remaining <= 0 { break; }
-        let mut temp: number = remaining;  // alias-coverage: seed-ABI constraint — see number_to_string banner
-        let mut quotient: number = 0;  // alias-coverage: seed-ABI constraint — see number_to_string banner
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
