@@ -4,7 +4,7 @@ struct DivisionError {
     message: string;
 }
 
-fn safeDivide(a: number, b: number) -> number | DivisionError {
+fn safeDivide(a: float, b: float) -> float | DivisionError {
     if b == 0 {
         return DivisionError { message: "Cannot divide by zero!" };
     }

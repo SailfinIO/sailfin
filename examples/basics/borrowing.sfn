@@ -1,10 +1,10 @@
 // examples/basics/borrowing.sfn
 
 struct Counter {
-    value: number;
+    value: int;
 }
 
-fn read_counter(counter: &Counter) ![read] -> number {
+fn read_counter(counter: &Counter) ![read] -> int {
     return counter.value;
 }
 
@@ -12,7 +12,7 @@ fn increment_counter(counter: &mut Counter) ![mut] {
     counter.value = counter.value + 1;
 }
 
-fn snapshot(counter: &mut Counter) ![mut, read] -> number {
+fn snapshot(counter: &mut Counter) ![mut, read] -> int {
     let view: &Counter = borrow(counter);
     return read_counter(view);
 }
@@ -20,9 +20,9 @@ fn snapshot(counter: &mut Counter) ![mut, read] -> number {
 fn main() ![io] {
     let mut counter = Counter { value: 0 };
 
-    let initial: number = read_counter(&counter);
+    let initial: int = read_counter(&counter);
 
-    let mut after_increment: number = initial;
+    let mut after_increment: int = initial;
     {
         let exclusive = &mut counter;
         increment_counter(exclusive);
@@ -30,8 +30,8 @@ fn main() ![io] {
     }
 
     let final_view: &Counter = borrow(counter);
-    let delta: number = read_counter(final_view) - initial;
+    let delta: int = read_counter(final_view) - initial;
 
-    let result: number = after_increment + delta;
+    let result: int = after_increment + delta;
     print("Borrowing result: {{result}}");
 }

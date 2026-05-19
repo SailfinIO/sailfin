@@ -14,7 +14,7 @@ fn handleRequest(req, res) {
     }
 }
 
-fn computeHeavyTask() -> number ![clock] {
+fn computeHeavyTask() -> int ![clock] {
     sleep(2000);
     return 42;
 }

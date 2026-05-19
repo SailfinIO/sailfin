@@ -5,7 +5,7 @@ interface Greeter {
 }
 
 struct User implements Greeter {
-  id: number;
+  id: int;
   name: string;
 
   fn greet(self) -> string {

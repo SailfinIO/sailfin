@@ -1,6 +1,6 @@
 // examples/basics/conditionals.sfn
 
-fn checkNumber(value: number) ![io] {
+fn checkNumber(value: int) ![io] {
   if value > 0 {
     print("{{ value }} is positive");
   } else if value < 0 {

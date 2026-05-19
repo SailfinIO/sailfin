@@ -1,7 +1,7 @@
 // examples/basics/structs.sfn
 
 struct User {
-    id: number;
+    id: int;
     name: string;
 
     fn greet(self) -> string {

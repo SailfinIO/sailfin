@@ -1,7 +1,7 @@
 // examples/types/recursive-types.sfn
 
 struct TreeNode {
-    value: number;
+    value: int;
     left: TreeNode?;
     right: TreeNode?;
 }

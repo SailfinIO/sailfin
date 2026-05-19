@@ -24,7 +24,7 @@ This page lists every reserved keyword in Sailfin. For each keyword, the impleme
 Declare a named function. Parameters use `name: Type` syntax. The return type follows `->`. Effect annotations follow the return type using `![effect, ...]`.
 
 ```sfn
-fn add(x: number, y: number) -> number {
+fn add(x: int, y: int) -> int {
     return x + y;
 }
 
@@ -36,7 +36,7 @@ fn greet(name: string) ![io] {
 Default parameter values and generic type parameters are supported:
 
 ```sfn
-fn find_char(text: string, ch: string, start: number = 0) -> number {
+fn find_char(text: string, ch: string, start: int = 0) -> int {
     // ...
 }
 
@@ -72,7 +72,7 @@ Declare an immutable variable binding. Variables declared with `let` cannot be r
 
 ```sfn
 let name = "Sailfin";
-let count: number = 0;
+let count: int = 0;
 let message: string;   // initialized to null
 ```
 
@@ -102,17 +102,17 @@ Define a named product type with labeled fields. Field declarations use `name: T
 
 ```sfn
 struct Point {
-    x: number;
-    y: number;
+    x: float;
+    y: float;
 }
 
 struct Response<T> {
-    status: number;
+    status: int;
     body: T;
 }
 
 struct User implements Printable {
-    id: number;
+    id: int;
     name: string;
     email: string;
 }
@@ -134,12 +134,12 @@ Define a sum type (algebraic data type). Each variant may carry zero or more pay
 
 ```sfn
 enum Shape {
-    Circle { radius: number },
-    Rectangle { width: number, height: number },
+    Circle { radius: float },
+    Rectangle { width: float, height: float },
     Point,
 }
 
-fn area(shape: Shape) -> number {
+fn area(shape: Shape) -> float {
     match shape {
         Shape.Circle { radius } => return 3.14159 * radius * radius,
         Shape.Rectangle { width, height } => return width * height,
@@ -289,7 +289,7 @@ for i in 0..10 {
 
 ```sfn
 // Planned — not yet parsed. Use `loop { if cond { break; } ... }` today.
-let mut n: number = 1;
+let mut n: int = 1;
 loop {
     if n >= 100 {
         break;
@@ -307,7 +307,7 @@ loop {
 Unconditional loop. Use `break` to exit. This is the primary looping construct used in the self-hosted compiler internals.
 
 ```sfn
-let mut index: number = 0;
+let mut index: int = 0;
 loop {
     if index >= items.length {
         break;
@@ -360,8 +360,8 @@ for item in items {
 Return a value from a function. An unadorned `return` with no expression is valid in `void` functions.
 
 ```sfn
-fn find(items: number[], target: number) -> number {
-    let mut i: number = 0;
+fn find(items: int[], target: int) -> int {
+    let mut i: int = 0;
     loop {
         if i >= items.length {
             return -1;
@@ -427,7 +427,7 @@ fn read_config(path: string) -> string ![io] {
 Raise an exception value. The thrown value can be caught by an enclosing `catch` block.
 
 ```sfn
-fn divide(a: number, b: number) -> number {
+fn divide(a: float, b: float) -> float {
     if b == 0 {
         throw "division by zero";
     }
@@ -772,7 +772,7 @@ Refer to the current struct instance inside a method body.
 
 ```sfn
 struct Counter {
-    value: number;
+    value: int;
 
     fn increment(self) -> Counter {
         return Counter { value: self.value + 1 };

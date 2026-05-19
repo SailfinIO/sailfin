@@ -9,5 +9,5 @@ Explores first-class functions, higher-order patterns, method-style collection h
 
 ## Notes
 
-- Function types like `(number) -> number` are parsed; deeper type inference & closure capture analysis will land in the self-hosted compiler.
+- Function types like `(int) -> int` are parsed; deeper type inference & closure capture analysis will land in the self-hosted compiler.
 - The `|>` pipeline operator is a planned post-1.0 feature — not yet in the parser.

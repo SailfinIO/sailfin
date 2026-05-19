@@ -33,12 +33,12 @@ Effect annotations appear after the parameter list and optional return type, bef
 
 ```sfn
 // No effects declared — guaranteed pure
-fn pure_fn(x: number) -> number {
+fn pure_fn(x: int) -> int {
     return x * 2;
 }
 
 // Single effect
-fn log_value(x: number) ![io] {
+fn log_value(x: int) ![io] {
     print("{{x}}");
 }
 
@@ -193,8 +193,8 @@ Declare the narrowest set of effects possible. Functions that mix pure computati
 
 ```sfn
 // Preferred: pure logic separated from IO
-fn compute_total(items: Item[]) -> number {
-    return array_reduce(items, 0, fn(acc: number, i: Item) -> number {
+fn compute_total(items: Item[]) -> float {
+    return array_reduce(items, 0.0, fn(acc: float, i: Item) -> float {
         return acc + i.price;
     });
 }

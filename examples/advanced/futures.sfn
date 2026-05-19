@@ -1,10 +1,10 @@
 // examples/advanced/futures.sfn
 
-async fn computeTask1() -> number {
+async fn computeTask1() -> int {
     return 21;
 }
 
-async fn computeTask2() -> number {
+async fn computeTask2() -> int {
     return 21;
 }
 

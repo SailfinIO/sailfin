@@ -2,10 +2,10 @@
 
 struct User {
     name: string;
-    age: number;
+    age: int;
 }
 
-fn process(input: string | number) ![io] {
+fn process(input: string | int) ![io] {
     if input is string {
         print("It's a string: {{input}}");
     } else {

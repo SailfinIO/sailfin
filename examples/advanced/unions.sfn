@@ -1,6 +1,6 @@
 // examples/advanced/unions.sfn
 
-fn printValue(value: string | number) ![io] {
+fn printValue(value: string | int) ![io] {
     if value is string {
         print("It's a string: {{value}}");
     } else {
