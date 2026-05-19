@@ -1,0 +1,67 @@
+// Tests for sfn/os process.run_capture — typed stdout/stderr capture
+// over the runtime fork+pipe+poll scaffolding (issue #365).
+import {
+    Env,
+    EnvEntry,
+    ProcessOutput,
+    env_empty,
+    env_set,
+    run_capture
+} from "../src/mod";
+
+test "run_capture: captures stdout from a simple command" ![io] {
+    let result = run_capture(["sh", "-c", "printf hello"], env_empty());
+    assert result.exit == 0;
+    assert strings_equal(result.stdout, "hello");
+    assert strings_equal(result.stderr, "");
+}
+
+test "run_capture: captures stderr separately from stdout" ![io] {
+    // printf to stderr only — stdout should be empty, stderr populated.
+    let result = run_capture(["sh", "-c", "printf err 1>&2"], env_empty());
+    assert result.exit == 0;
+    assert strings_equal(result.stdout, "");
+    assert strings_equal(result.stderr, "err");
+}
+
+test "run_capture: captures both stdout and stderr from one child" ![io] {
+    // Interleaved writes — concurrent drain must keep both streams
+    // intact regardless of timing.
+    let result = run_capture(["sh", "-c", "printf out; printf err 1>&2"], env_empty());
+    assert result.exit == 0;
+    assert strings_equal(result.stdout, "out");
+    assert strings_equal(result.stderr, "err");
+}
+
+test "run_capture: non-zero exit code surfaces in ProcessOutput.exit" ![io] {
+    let result = run_capture(["sh", "-c", "exit 7"], env_empty());
+    assert result.exit == 7;
+}
+
+test "run_capture: env overrides propagate to the child" ![io] {
+    // `env` SfnArray contains a single KEY=VALUE entry; printenv FOO
+    // should print the value followed by a newline.
+    let env = env_set(env_empty(), "FOO", "bar");
+    let result = run_capture(["printenv", "FOO"], env);
+    assert result.exit == 0;
+    assert strings_equal(result.stdout, "bar\n");
+}
+
+test "run_capture: env_set replaces existing entries (last write wins)" ![io] {
+    let env = env_set(env_set(env_empty(), "FOO", "first"), "FOO", "second");
+    let result = run_capture(["printenv", "FOO"], env);
+    assert result.exit == 0;
+    assert strings_equal(result.stdout, "second\n");
+}
+
+test "run_capture: drains output larger than the pipe buffer" ![io] {
+    // POSIX pipe buffer is typically 64 KiB. Generating >128 KiB on
+    // stdout forces the runtime's poll-driven drain to actually
+    // round-trip rather than slurp in one read. If concurrent draining
+    // is broken (e.g. blocked on stderr while stdout fills), this
+    // test deadlocks.
+    let result = run_capture(["sh", "-c", "yes x | head -c 200000"], env_empty());
+    assert result.exit == 0;
+    assert result.stdout.length == 200000;
+    assert strings_equal(result.stderr, "");
+}
