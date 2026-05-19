@@ -1,0 +1,36 @@
+// Regression for #674: `async fn ... -> int` must round-trip through the
+// future ABI. Before the fix, the future-type-mapping seams had no `int`
+// branch, so `await` of an int future loaded the result through the
+// `double`-shaped slot (or fell through to `%SailfinFuturePtr*`) and
+// produced garbage at runtime.
+async fn produce_int() -> int { return 42; }
+
+test "async_int: literal return" {
+    let fut = produce_int();
+    let out = await fut;
+    assert out == 42;
+}
+
+async fn add(x: int, y: int) -> int { return x + y; }
+
+test "async_int: int-typed parameters" {
+    let fut = add(20, 22);
+    let out = await fut;
+    assert out == 42;
+}
+
+async fn negate(n: int) -> int { return 0 - n; }
+
+test "async_int: negative result" {
+    let fut = negate(7);
+    let out = await fut;
+    assert out == 0 - 7;
+}
+
+async fn add_three(a: int, b: int, c: int) -> int { return a + b + c; }
+
+test "async_int: three int params" {
+    let fut = add_three(1, 2, 3);
+    let out = await fut;
+    assert out == 6;
+}

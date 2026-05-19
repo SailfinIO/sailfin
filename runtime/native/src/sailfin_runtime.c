@@ -4827,6 +4827,85 @@ double sailfin_runtime_await_number(struct SailfinFutureNumber *future)
     return result;
 }
 
+struct SailfinFutureInt
+{
+    pthread_t thread;
+    int64_t (*fn0)(void);
+    int64_t (*fn1)(void *);
+    void *ctx;
+    bool has_ctx;
+    int64_t result;
+};
+
+static void *sailfin_future_int_entry(void *arg)
+{
+    struct SailfinFutureInt *future = (struct SailfinFutureInt *)arg;
+    if (future->has_ctx)
+    {
+        future->result = future->fn1 ? future->fn1(future->ctx) : 0;
+    }
+    else
+    {
+        future->result = future->fn0 ? future->fn0() : 0;
+    }
+    return NULL;
+}
+
+struct SailfinFutureInt *sailfin_runtime_spawn_int(int64_t (*fn)(void))
+{
+    if (!fn)
+    {
+        return NULL;
+    }
+    struct SailfinFutureInt *future = (struct SailfinFutureInt *)calloc(1, sizeof(struct SailfinFutureInt));
+    if (!future)
+    {
+        return NULL;
+    }
+    future->fn0 = fn;
+    future->has_ctx = false;
+    if (pthread_create(&future->thread, NULL, sailfin_future_int_entry, future) != 0)
+    {
+        free(future);
+        return NULL;
+    }
+    return future;
+}
+
+struct SailfinFutureInt *sailfin_runtime_spawn_int_ctx(int64_t (*fn)(void *), void *ctx)
+{
+    if (!fn)
+    {
+        return NULL;
+    }
+    struct SailfinFutureInt *future = (struct SailfinFutureInt *)calloc(1, sizeof(struct SailfinFutureInt));
+    if (!future)
+    {
+        return NULL;
+    }
+    future->fn1 = fn;
+    future->ctx = ctx;
+    future->has_ctx = true;
+    if (pthread_create(&future->thread, NULL, sailfin_future_int_entry, future) != 0)
+    {
+        free(future);
+        return NULL;
+    }
+    return future;
+}
+
+int64_t sailfin_runtime_await_int(struct SailfinFutureInt *future)
+{
+    if (!future)
+    {
+        return 0;
+    }
+    pthread_join(future->thread, NULL);
+    int64_t result = future->result;
+    free(future);
+    return result;
+}
+
 struct SailfinFutureVoid
 {
     pthread_t thread;

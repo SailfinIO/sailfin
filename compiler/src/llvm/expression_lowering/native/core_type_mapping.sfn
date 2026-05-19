@@ -402,6 +402,7 @@ fn future_pointer_type_for_return_type(return_type: string) -> string {
     if _if138 { return "%SailfinFutureVoid*"; }
     let normalized = unwrap_move_wrapper(trimmed);
     if normalized == "number" { return "%SailfinFutureNumber*"; }
+    if normalized == "int" { return "%SailfinFutureInt*"; }
     let mut _if139: boolean = false;
     if normalized == "boolean" { _if139 = true; }
     if normalized == "bool" { _if139 = true; }
@@ -414,6 +415,9 @@ fn future_pointer_type_for_return_type(return_type: string) -> string {
 fn await_symbol_for_future_pointer_type(future_ptr_type: string) -> string {
     if future_ptr_type == "%SailfinFutureNumber*" {
         return "sailfin_runtime_await_number";
+    }
+    if future_ptr_type == "%SailfinFutureInt*" {
+        return "sailfin_runtime_await_int";
     }
     if future_ptr_type == "%SailfinFutureBool*" {
         return "sailfin_runtime_await_bool";

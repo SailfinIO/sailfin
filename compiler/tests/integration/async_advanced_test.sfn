@@ -16,7 +16,7 @@ test "async_adv: string return" {
 // ---------------------------------------------------------------------------
 // Async with computation
 // ---------------------------------------------------------------------------
-async fn compute_sum(n: int) -> number {
+async fn compute_sum(n: int) -> int {
     let mut total: int = 0;
     let mut i: int = 1;
     loop {
@@ -36,7 +36,7 @@ test "async_adv: computation in async" {
 // ---------------------------------------------------------------------------
 // Multiple async calls with different types
 // ---------------------------------------------------------------------------
-async fn get_number() -> number { return 42; }
+async fn get_number() -> int { return 42; }
 
 async fn get_string() -> string { return "hello"; }
 
@@ -59,9 +59,9 @@ test "async_adv: multiple async different types" {
 // ---------------------------------------------------------------------------
 // Async result used in further computation
 // ---------------------------------------------------------------------------
-async fn compute_a() -> number { return 10; }
+async fn compute_a() -> int { return 10; }
 
-async fn compute_b() -> number { return 20; }
+async fn compute_b() -> int { return 20; }
 
 test "async_adv: results combined" {
     let fa = compute_a();
@@ -75,7 +75,7 @@ test "async_adv: results combined" {
 // ---------------------------------------------------------------------------
 // Async with conditional logic
 // ---------------------------------------------------------------------------
-async fn conditional_async(flag: boolean) -> number {
+async fn conditional_async(flag: boolean) -> int {
     if flag { return 100; }
     return 0;
 }
@@ -112,11 +112,11 @@ test "async_adv: struct return" {
 // ---------------------------------------------------------------------------
 // Sequential await pattern
 // ---------------------------------------------------------------------------
-async fn step1() -> number { return 5; }
+async fn step1() -> int { return 5; }
 
-async fn step2(input: number) -> number { return input * 3; }
+async fn step2(input: int) -> int { return input * 3; }
 
-async fn step3(input: number) -> number { return input + 10; }
+async fn step3(input: int) -> int { return input + 10; }
 
 test "async_adv: sequential steps" {
     let f1 = step1();

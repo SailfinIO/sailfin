@@ -609,6 +609,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             let mut result_type: string = "i8*";
             if future_operand.llvm_type == "%SailfinFutureNumber*" {
                 result_type = "double";
+            } else if future_operand.llvm_type == "%SailfinFutureInt*" {
+                result_type = "i64";
             } else if future_operand.llvm_type == "%SailfinFutureBool*" {
                 result_type = "i1";
             }

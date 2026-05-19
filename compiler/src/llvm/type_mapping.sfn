@@ -674,6 +674,7 @@ fn future_pointer_type_for_return_type(return_type: string) -> string {
     if normalized == "number" {
         return "%SailfinFutureNumber*";
     }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
+    if normalized == "int" { return "%SailfinFutureInt*"; }
     let mut _if325: boolean = false;
     if normalized == "boolean" { _if325 = true; }
     if normalized == "bool" { _if325 = true; }
@@ -693,6 +694,7 @@ fn spawn_symbol_for_return_type(return_type: string) -> string {
     if normalized == "number" {
         return "sailfin_runtime_spawn_number";
     }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
+    if normalized == "int" { return "sailfin_runtime_spawn_int"; }
     let mut _if327: boolean = false;
     if normalized == "boolean" { _if327 = true; }
     if normalized == "bool" { _if327 = true; }
@@ -711,6 +713,7 @@ fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
     if normalized == "number" {
         return "sailfin_runtime_spawn_number_ctx";
     }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
+    if normalized == "int" { return "sailfin_runtime_spawn_int_ctx"; }
     let mut _if329: boolean = false;
     if normalized == "boolean" { _if329 = true; }
     if normalized == "bool" { _if329 = true; }
