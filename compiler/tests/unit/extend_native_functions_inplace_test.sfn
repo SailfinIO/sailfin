@@ -29,7 +29,7 @@
 // See docs/build-performance.md Phase 1b and the aliasing commentary at
 // lowering_core.sfn:565-578 for the full rationale.
 test "runtime contract: mut binding shares storage with input (no copy)" {
-    let original: number[] = [1, 2, 3];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let original: int[] = [1, 2, 3];
     let mut alias_view = original;
     alias_view.push(4);
     // Read through alias_view so the unused-binding check sees it.
@@ -48,7 +48,7 @@ test "runtime contract: push on array extends in place (amortized)" {
     // regressed to allocate-and-copy, extend_native_functions_inplace
     // would lose its optimization (and its contract — the returned array
     // would no longer alias dst).
-    let arr: number[] = [];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let arr: int[] = [];
     let mut view = arr;
     let mut i: int = 0;
     loop {
@@ -91,8 +91,8 @@ test "runtime contract: appending through returned alias is visible through inpu
 }
 
 test "runtime contract: empty src leaves dst unchanged" {
-    let dst: number[] = [42];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let src: number[] = [];  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    let dst: int[] = [42];
+    let src: int[] = [];
     let mut out = dst;
     let mut i: int = 0;
     loop {
