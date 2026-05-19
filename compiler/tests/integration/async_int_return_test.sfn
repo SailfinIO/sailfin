@@ -1,0 +1,70 @@
+// Regression for #674: `async fn ... -> int` must round-trip through the
+// future ABI. Before the fix, the future-type-mapping seams had no `int`
+// branch, so `await` of an int future loaded the result through the
+// `double`-shaped slot (or fell through to `%SailfinFuturePtr*`) and
+// produced garbage at runtime.
+async fn produce_int() -> int { return 42; }
+
+test "async_int: literal return" {
+    let fut = produce_int();
+    let out = await fut;
+    assert out == 42;
+}
+
+async fn add(x: int, y: int) -> int { return x + y; }
+
+test "async_int: int-typed parameters" {
+    let fut = add(20, 22);
+    let out = await fut;
+    assert out == 42;
+}
+
+async fn negate(n: int) -> int { return 0 - n; }
+
+test "async_int: negative result" {
+    let fut = negate(7);
+    let out = await fut;
+    assert out == 0 - 7;
+}
+
+async fn add_three(a: int, b: int, c: int) -> int { return a + b + c; }
+
+test "async_int: three int params" {
+    let fut = add_three(1, 2, 3);
+    let out = await fut;
+    assert out == 6;
+}
+
+// Alias-coverage: `i64`, `u64`, `usize`, `isize` are all i64-backed and
+// must route through the same `%SailfinFutureInt*` ABI as `int`.
+async fn produce_i64() -> i64 { return 100; }
+
+test "async_int: i64 alias" {
+    let fut = produce_i64();
+    let out = await fut;
+    assert out == 100;
+}
+
+async fn produce_u64() -> u64 { return 200; }
+
+test "async_int: u64 alias" {
+    let fut = produce_u64();
+    let out = await fut;
+    assert out == 200;
+}
+
+async fn produce_usize() -> usize { return 300; }
+
+test "async_int: usize alias" {
+    let fut = produce_usize();
+    let out = await fut;
+    assert out == 300;
+}
+
+async fn produce_isize() -> isize { return 400; }
+
+test "async_int: isize alias" {
+    let fut = produce_isize();
+    let out = await fut;
+    assert out == 400;
+}

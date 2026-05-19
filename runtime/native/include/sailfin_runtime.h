@@ -244,6 +244,7 @@ extern "C"
     // ---- Futures (native runtime) ----
 
     typedef struct SailfinFutureNumber SailfinFutureNumber;
+    typedef struct SailfinFutureInt SailfinFutureInt;
     typedef struct SailfinFutureBool SailfinFutureBool;
     typedef struct SailfinFuturePtr SailfinFuturePtr;
     typedef struct SailfinFutureVoid SailfinFutureVoid;
@@ -252,6 +253,10 @@ extern "C"
     SailfinFutureNumber *sailfin_runtime_spawn_number(double (*fn)(void));
     SailfinFutureNumber *sailfin_runtime_spawn_number_ctx(double (*fn)(void *), void *ctx);
     double sailfin_runtime_await_number(SailfinFutureNumber *future);
+
+    SailfinFutureInt *sailfin_runtime_spawn_int(int64_t (*fn)(void));
+    SailfinFutureInt *sailfin_runtime_spawn_int_ctx(int64_t (*fn)(void *), void *ctx);
+    int64_t sailfin_runtime_await_int(SailfinFutureInt *future);
 
     SailfinFutureBool *sailfin_runtime_spawn_bool(bool (*fn)(void));
     SailfinFutureBool *sailfin_runtime_spawn_bool_ctx(bool (*fn)(void *), void *ctx);

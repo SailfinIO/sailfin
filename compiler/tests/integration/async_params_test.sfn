@@ -1,4 +1,4 @@
-async fn add(x: int, y: int) -> number { return x + y; }
+async fn add(x: int, y: int) -> int { return x + y; }
 
 test "async: params" {
     let fut = add(20, 22);
