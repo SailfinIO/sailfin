@@ -13,7 +13,7 @@
 struct TomlValue {
     kind: string;  // "string", "integer", "float", "boolean", "array", "table", "datetime"
     string_value: string;
-    number_value: number;
+    number_value: float;
     bool_value: boolean;
     items: TomlValue[];  // for arrays
     keys: string[];  // for tables
@@ -33,7 +33,7 @@ fn string_val(value: string) -> TomlValue {
     };
 }
 
-fn integer_val(value: number) -> TomlValue {
+fn integer_val(value: float) -> TomlValue {
     return TomlValue {
         kind: "integer",
         string_value: "",
@@ -45,7 +45,7 @@ fn integer_val(value: number) -> TomlValue {
     };
 }
 
-fn float_val(value: number) -> TomlValue {
+fn float_val(value: float) -> TomlValue {
     return TomlValue {
         kind: "float",
         string_value: "",
@@ -567,7 +567,7 @@ fn get_string(root: TomlValue, key: string) -> string {
     return val.string_value;
 }
 
-fn get_number(root: TomlValue, key: string) -> number {
+fn get_number(root: TomlValue, key: string) -> float {
     let val = _resolve_path(root, key);
     return val.number_value;
 }
