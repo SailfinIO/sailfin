@@ -16,9 +16,9 @@ test "async_adv: string return" {
 // ---------------------------------------------------------------------------
 // Async with computation
 // ---------------------------------------------------------------------------
-async fn compute_sum(n: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut total: number = 0;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    let mut i: number = 1;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+async fn compute_sum(n: int) -> number {
+    let mut total: int = 0;
+    let mut i: int = 1;
     loop {
         if i > n { break; }
         total += i;
@@ -36,9 +36,7 @@ test "async_adv: computation in async" {
 // ---------------------------------------------------------------------------
 // Multiple async calls with different types
 // ---------------------------------------------------------------------------
-async fn get_number() -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    return 42;
-}
+async fn get_number() -> number { return 42; }
 
 async fn get_string() -> string { return "hello"; }
 
@@ -61,13 +59,9 @@ test "async_adv: multiple async different types" {
 // ---------------------------------------------------------------------------
 // Async result used in further computation
 // ---------------------------------------------------------------------------
-async fn compute_a() -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    return 10;
-}
+async fn compute_a() -> number { return 10; }
 
-async fn compute_b() -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    return 20;
-}
+async fn compute_b() -> number { return 20; }
 
 test "async_adv: results combined" {
     let fa = compute_a();
@@ -81,7 +75,7 @@ test "async_adv: results combined" {
 // ---------------------------------------------------------------------------
 // Async with conditional logic
 // ---------------------------------------------------------------------------
-async fn conditional_async(flag: boolean) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+async fn conditional_async(flag: boolean) -> number {
     if flag { return 100; }
     return 0;
 }
@@ -100,11 +94,11 @@ test "async_adv: conditional false" {
 // Async with struct return
 // ---------------------------------------------------------------------------
 struct AsyncResult {
-    value: number;  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+    value: int;
     label: string;
 }
 
-async fn compute_with_label(v: number, l: string) -> AsyncResult {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
+async fn compute_with_label(v: int, l: string) -> AsyncResult {
     return AsyncResult { value: v * 2, label: l };
 }
 
@@ -118,17 +112,11 @@ test "async_adv: struct return" {
 // ---------------------------------------------------------------------------
 // Sequential await pattern
 // ---------------------------------------------------------------------------
-async fn step1() -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    return 5;
-}
+async fn step1() -> number { return 5; }
 
-async fn step2(input: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    return input * 3;
-}
+async fn step2(input: number) -> number { return input * 3; }
 
-async fn step3(input: number) -> number {  // alias-coverage: test relies on int-array literal path pending int[] literal fix
-    return input + 10;
-}
+async fn step3(input: number) -> number { return input + 10; }
 
 test "async_adv: sequential steps" {
     let f1 = step1();
