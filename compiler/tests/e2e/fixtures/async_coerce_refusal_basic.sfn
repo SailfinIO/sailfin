@@ -1,0 +1,19 @@
+// Fixture for compiler/tests/e2e/test_async_coerce_refusal.sh
+// (issue #675): mixed `number → int` signatures across an `await`
+// boundary must be refused with a `[fatal]` diagnostic and the #556
+// fix-it phrasing, not silently miscompiled.
+async fn step1() -> number { return 5; }
+
+async fn step2(input: int) -> number { return input * 3; }
+
+async fn step3(input: int) -> number { return input + 10; }
+
+test "async coerce refusal: number→int across await" {
+    let f1 = step1();
+    let v1 = await f1;
+    let f2 = step2(v1);
+    let v2 = await f2;
+    let f3 = step3(v2);
+    let v3 = await f3;
+    assert v3 == 25;
+}

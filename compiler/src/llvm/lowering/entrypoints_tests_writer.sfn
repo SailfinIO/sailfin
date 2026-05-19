@@ -78,7 +78,10 @@ import {
     string_array_contains
 } from "../utils";
 import { emit_llvm_function } from "./emission";
-import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core";
+import {
+    has_fatal_lowering_diagnostic,
+    lower_to_llvm_lines_with_parsed_context_for_tests
+} from "./lowering_core";
 import {
     empty_trait_metadata,
     extend_native_enums,
@@ -138,6 +141,14 @@ fn write_llvm_ir_for_tests_from_text_with_context(native_text: string, module_na
         print.err("test llvm: no lines emitted from native text");
         return false;
     }
+    // Refuse to write IR when any lowering pass surfaced a `[fatal]`
+    // diagnostic (issue #675). The non-test entry points
+    // (`write_llvm_ir`, `compile_native_text_to_llvm_file`) already
+    // gate on this — the test path bypassed the gate, so a `[fatal]`
+    // ABI primitive mismatch at a call site (e.g. `number → int`
+    // coercion across an `await` boundary) was emitted to stderr but
+    // then the partial IR ran the corrupted call anyway.
+    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) { return false; }
     let ir = _join_llvm_lines_linear(lowered_lines.lines);
     if ir.length == 0 {
         print.err("test llvm: empty IR after join from native text");
