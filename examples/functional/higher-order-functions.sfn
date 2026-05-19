@@ -1,9 +1,12 @@
 // examples/functional/higher-order-functions.sfn
+
 fn apply(value: int, transformer: (int) -> int) -> int {
     return transformer(value);
 }
 
-fn double(x: int) -> int { return x * 2; }
+fn double(x: int) -> int {
+    return x * 2;
+}
 
 fn main() ![io] {
     let result = apply(5, double);

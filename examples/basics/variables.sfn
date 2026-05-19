@@ -1,8 +1,11 @@
 // examples/basics/variables.sfn
-let name: string = "Sailfin";  // Immutable by default
-let mut age: int = 25;  // Mutable variable
 
-fn increment() -> void { age += 1; }
+let name: string = "Sailfin";    // Immutable by default
+let mut age: int = 25;            // Mutable variable
+
+fn increment() -> void {
+    age += 1;
+}
 
 fn main() ![io] {
     increment();

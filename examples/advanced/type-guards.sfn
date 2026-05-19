@@ -1,11 +1,14 @@
 // examples/advanced/type-guards.sfn
+
 struct User {
     name: string;
     age: int;
 }
 
 fn process(input: string | int) ![io] {
-    if input is string { print("It's a string: {{input}}"); } else {
+    if input is string {
+        print("It's a string: {{input}}");
+    } else {
         print("It's a number: {{input}}");
     }
 }
@@ -17,9 +20,8 @@ fn main() ![io] {
     let user = User { name: "Robin", age: 22 };
 
     match user {
-        User { name, age }
-        if age >= 18 => print("Adult user: {{name}}"),
+        User { name, age } if age >= 18 => print("Adult user: {{name}}"),
         User { name, age } => print("Minor user: {{name}}"),
-        _ => print("Unknown entity")
+        _ => print("Unknown entity"),
     }
 }

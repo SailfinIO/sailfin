@@ -1,7 +1,8 @@
 // examples/advanced/unsafe-extern-interop.sfn
+
 // Declare external C functions
-unsafe extern fn malloc(size: usize) -> * u8;
-unsafe extern fn free(ptr: * u8) -> void;
+unsafe extern fn malloc(size: usize) -> *u8;
+unsafe extern fn free(ptr: *u8) -> void;
 
 // Safe wrapper around unsafe memory allocation
 fn allocate_and_free(size: usize) ![unsafe, io] -> void {
@@ -19,4 +20,6 @@ fn allocate_and_free(size: usize) ![unsafe, io] -> void {
     }
 }
 
-fn main() ![unsafe, io] { allocate_and_free(1024); }
+fn main() ![unsafe, io] {
+    allocate_and_free(1024);
+}

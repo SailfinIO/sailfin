@@ -1,15 +1,14 @@
 // examples/web/websocket-chat.sfn
+
 import { websocket } from "http";
 
 fn main() ![io, net] {
-    let server = websocket.serve({
-        port: 8080
-    });
+    let server = websocket.serve({ port: 8080 });
     print("WebSocket server is running on ws://localhost:8080");
 
     routine {
         for client in server.clients() {
-            client.onMessage(fn (message) {
+            client.onMessage(fn(message) {
                 print("Received: {{message}}");
                 client.send("Echo: {{message}}");
             });

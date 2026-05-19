@@ -1,12 +1,13 @@
 // examples/web/http-server.sfn
+
 import { serve } from "http";
 
 fn main() ![net] {
-    serve(fn (req, res) {
-        if req.path == "/" { res.send("Welcome to Sailfin!"); } else {
+    serve(fn(req, res) {
+        if req.path == "/" {
+            res.send("Welcome to Sailfin!");
+        } else {
             res.send("404 Not Found", 404);
         }
-    }, {
-        port: 8080
-    });
+    }, { port: 8080 });
 }
