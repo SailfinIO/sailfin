@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/net"
-version = "0.1.1"
+version = "0.1.2"
 description = "Low-level networking primitives for Sailfin"
 
 [dependencies]
