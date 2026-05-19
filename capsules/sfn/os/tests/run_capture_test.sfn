@@ -65,3 +65,11 @@ test "run_capture: drains output larger than the pipe buffer" ![io] {
     assert result.stdout.length == 200000;
     assert strings_equal(result.stderr, "");
 }
+
+test "run_capture: spawn failure surfaces as exit == -1" ![io] {
+    // Distinguishable from a legitimate child exit code of 127
+    // ("command not found" in the shell convention) — a non-existent
+    // binary makes posix_spawnp fail before the child is ever born.
+    let result = run_capture(["sfn-no-such-binary-12345"], env_empty());
+    assert result.exit == -1;
+}

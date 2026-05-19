@@ -135,6 +135,12 @@ fn env_to_flat(e: Env) -> string[] {
 // list every variable they need to propagate explicitly". The
 // runtime spawn helpers accept an empty `Env` as "empty environment"
 // rather than "inherit", so this still constructs the right shape.
+//
+// The `![io]` annotation is forward-compat: the eventual environ-
+// iteration implementation will read process state, which the
+// effect system gates under `io`. Today the stub body is pure but
+// the signature is locked so callers don't need to adjust their
+// effect declarations when the implementation lands.
 fn env_from_current() -> Env ![io] { return env_empty(); }
 
 // ── Capturing / streaming process APIs ────────────────────────────
@@ -143,7 +149,9 @@ fn env_from_current() -> Env ![io] { return env_empty(); }
 // piping both stdout and stderr. The two streams are drained
 // concurrently by the runtime so the child never blocks on a full
 // pipe buffer. Returns the captured byte streams alongside the
-// exit code.
+// exit code. `ProcessOutput.exit` is `-1` when the runtime itself
+// couldn't complete the call (invalid argv, OOM, spawn failure),
+// distinct from a legitimate child exit code of 127.
 fn run_capture(args: string[], env: Env) -> ProcessOutput ![io] {
     let env_flat = env_to_flat(env);
     let exit_code = process.run_capture(args, env_flat);

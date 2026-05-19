@@ -222,6 +222,11 @@ extern "C"
     // for `env_flat` inherits the parent environment; an empty
     // SfnArray means "no env vars set". Non-empty `env_flat` is a flat
     // list of `"KEY=VALUE"` strings.
+    //
+    // Returns `-1` when the runtime itself can't complete the call
+    // (invalid argv, OOM, pipe/spawn failure) — distinct from a
+    // legitimate child exit code of 127 ("command not found" in the
+    // shell convention).
     int64_t sailfin_runtime_process_run_capture(SfnArray *argv, SfnArray *env_flat);
     char *sailfin_runtime_process_capture_take_stdout(void);
     char *sailfin_runtime_process_capture_take_stderr(void);

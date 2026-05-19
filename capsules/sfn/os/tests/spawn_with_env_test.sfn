@@ -69,3 +69,20 @@ test "spawn_with_env: handle_wait surfaces non-zero exit" ![io] {
     let exit = handle_wait(h);
     assert exit == 3;
 }
+
+test "spawn_with_env: heavy stderr does not deadlock sequential read_stdout" ![io] {
+    // Regression: pre-fix `handle_read_stdout` blocked on a single fd
+    // until EOF, so a child that filled the >64 KiB pipe buffer on
+    // stderr while the parent was reading stdout deadlocked. The
+    // poll-based concurrent drain stashes stderr while serving the
+    // stdout read so the call cannot stall on the unread side.
+    let h = spawn_with_env(["sh", "-c", "yes ERR | head -c 200000 1>&2; yes OUT | head -c 5000"], env_empty());
+    assert h.handle_id != 0;
+    handle_close_stdin(h);
+    let out = handle_read_stdout(h);
+    assert out.length == 5000;
+    let err = handle_read_stderr(h);
+    assert err.length == 200000;
+    let exit = handle_wait(h);
+    assert exit == 0;
+}
