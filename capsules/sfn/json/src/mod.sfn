@@ -5,7 +5,7 @@
 struct JsonValue {
     kind: string;  // "string", "number", "boolean", "null", "array", "object"
     string_value: string;
-    number_value: number;
+    number_value: float;
     bool_value: boolean;
     items: JsonValue[];  // for arrays
     keys: string[];  // for objects
@@ -24,7 +24,7 @@ fn string_val(value: string) -> JsonValue {
     };
 }
 
-fn number_val(value: number) -> JsonValue {
+fn number_val(value: float) -> JsonValue {
     return JsonValue {
         kind: "number",
         string_value: "",
@@ -320,7 +320,7 @@ fn get_string(obj: JsonValue, key: string) -> string {
     return "";
 }
 
-fn get_number(obj: JsonValue, key: string) -> number {
+fn get_number(obj: JsonValue, key: string) -> float {
     if !strings_equal(obj.kind, "object") { return 0; }
     let mut i: int = 0;
     loop {

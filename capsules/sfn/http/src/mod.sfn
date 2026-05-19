@@ -2,9 +2,7 @@
 //
 // Provides a unified API for making HTTP requests and serving HTTP responses.
 // All operations require the `net` effect; server operations also require `io`.
-
 // ---- Types ----
-
 struct Request {
     method: string;
     path: string;
@@ -13,28 +11,31 @@ struct Request {
 }
 
 struct Response {
-    status: number;
+    status: int;
     headers: string[];
     body: string;
 }
 
 struct ServerConfig {
-    port: number;
+    port: int;
     host: string;
 }
 
 // ---- Response helpers ----
-
 fn response(body: string) -> Response {
     return Response { status: 200, headers: [], body: body };
 }
 
-fn response_with_status(status: number, body: string) -> Response {
+fn response_with_status(status: int, body: string) -> Response {
     return Response { status: status, headers: [], body: body };
 }
 
 fn json_response(body: string) -> Response {
-    return Response { status: 200, headers: ["Content-Type: application/json"], body: body };
+    return Response {
+        status: 200,
+        headers: ["Content-Type: application/json"],
+        body: body
+    };
 }
 
 fn not_found(body: string = "Not Found") -> Response {
@@ -42,7 +43,6 @@ fn not_found(body: string = "Not Found") -> Response {
 }
 
 // ---- Client ----
-
 fn get(url: string) -> string ![net] {
     // HTTP GET request. Returns the response body as a string.
     return http.get_body(url);
@@ -54,7 +54,6 @@ fn post(url: string, body: string) -> string ![net] {
 }
 
 // ---- Server ----
-
 fn serve(handler: any, config: any?) -> void ![io, net] {
     // Start an HTTP server that dispatches requests to the handler function.
     //
