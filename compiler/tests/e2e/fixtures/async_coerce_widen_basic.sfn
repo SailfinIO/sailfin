@@ -1,0 +1,22 @@
+// Fixture for compiler/tests/e2e/test_async_coerce_refusal.sh
+// (issue #675): the reverse direction (`int → number`) is widening,
+// which the #556 strict-refusal regime intentionally leaves silent
+// (sitofp) until the residual double-ABI helper descriptors flip.
+// This fixture pins that asymmetry — it must compile cleanly and the
+// assertion must hold, demonstrating that the new fatal-diagnostic
+// gate in `write_llvm_ir_for_tests_from_text_with_context` doesn't
+// over-refuse safe widening.
+async fn produce_int() -> int { return 5; }
+
+async fn double_widening(input: number) -> int {
+    let doubled = input + 3;
+    return doubled as int;
+}
+
+test "async coerce widen: int→number across await" {
+    let f1 = produce_int();
+    let v1 = await f1;
+    let f2 = double_widening(v1);
+    let v2 = await f2;
+    assert v2 == 8;
+}
