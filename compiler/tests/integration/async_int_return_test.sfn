@@ -34,3 +34,37 @@ test "async_int: three int params" {
     let out = await fut;
     assert out == 6;
 }
+
+// Alias-coverage: `i64`, `u64`, `usize`, `isize` are all i64-backed and
+// must route through the same `%SailfinFutureInt*` ABI as `int`.
+async fn produce_i64() -> i64 { return 100; }
+
+test "async_int: i64 alias" {
+    let fut = produce_i64();
+    let out = await fut;
+    assert out == 100;
+}
+
+async fn produce_u64() -> u64 { return 200; }
+
+test "async_int: u64 alias" {
+    let fut = produce_u64();
+    let out = await fut;
+    assert out == 200;
+}
+
+async fn produce_usize() -> usize { return 300; }
+
+test "async_int: usize alias" {
+    let fut = produce_usize();
+    let out = await fut;
+    assert out == 300;
+}
+
+async fn produce_isize() -> isize { return 400; }
+
+test "async_int: isize alias" {
+    let fut = produce_isize();
+    let out = await fut;
+    assert out == 400;
+}

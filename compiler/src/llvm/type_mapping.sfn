@@ -674,7 +674,13 @@ fn future_pointer_type_for_return_type(return_type: string) -> string {
     if normalized == "number" {
         return "%SailfinFutureNumber*";
     }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
-    if normalized == "int" { return "%SailfinFutureInt*"; }
+    let mut _if324b: boolean = false;
+    if normalized == "int" { _if324b = true; }
+    if normalized == "i64" { _if324b = true; }
+    if normalized == "u64" { _if324b = true; }
+    if normalized == "usize" { _if324b = true; }
+    if normalized == "isize" { _if324b = true; }
+    if _if324b { return "%SailfinFutureInt*"; }
     let mut _if325: boolean = false;
     if normalized == "boolean" { _if325 = true; }
     if normalized == "bool" { _if325 = true; }
@@ -694,7 +700,13 @@ fn spawn_symbol_for_return_type(return_type: string) -> string {
     if normalized == "number" {
         return "sailfin_runtime_spawn_number";
     }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
-    if normalized == "int" { return "sailfin_runtime_spawn_int"; }
+    let mut _if326b: boolean = false;
+    if normalized == "int" { _if326b = true; }
+    if normalized == "i64" { _if326b = true; }
+    if normalized == "u64" { _if326b = true; }
+    if normalized == "usize" { _if326b = true; }
+    if normalized == "isize" { _if326b = true; }
+    if _if326b { return "sailfin_runtime_spawn_int"; }
     let mut _if327: boolean = false;
     if normalized == "boolean" { _if327 = true; }
     if normalized == "bool" { _if327 = true; }
@@ -713,7 +725,13 @@ fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
     if normalized == "number" {
         return "sailfin_runtime_spawn_number_ctx";
     }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
-    if normalized == "int" { return "sailfin_runtime_spawn_int_ctx"; }
+    let mut _if328b: boolean = false;
+    if normalized == "int" { _if328b = true; }
+    if normalized == "i64" { _if328b = true; }
+    if normalized == "u64" { _if328b = true; }
+    if normalized == "usize" { _if328b = true; }
+    if normalized == "isize" { _if328b = true; }
+    if _if328b { return "sailfin_runtime_spawn_int_ctx"; }
     let mut _if329: boolean = false;
     if normalized == "boolean" { _if329 = true; }
     if normalized == "bool" { _if329 = true; }

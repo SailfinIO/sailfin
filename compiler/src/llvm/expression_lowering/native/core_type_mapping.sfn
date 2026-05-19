@@ -402,7 +402,13 @@ fn future_pointer_type_for_return_type(return_type: string) -> string {
     if _if138 { return "%SailfinFutureVoid*"; }
     let normalized = unwrap_move_wrapper(trimmed);
     if normalized == "number" { return "%SailfinFutureNumber*"; }
-    if normalized == "int" { return "%SailfinFutureInt*"; }
+    let mut _if138b: boolean = false;
+    if normalized == "int" { _if138b = true; }
+    if normalized == "i64" { _if138b = true; }
+    if normalized == "u64" { _if138b = true; }
+    if normalized == "usize" { _if138b = true; }
+    if normalized == "isize" { _if138b = true; }
+    if _if138b { return "%SailfinFutureInt*"; }
     let mut _if139: boolean = false;
     if normalized == "boolean" { _if139 = true; }
     if normalized == "bool" { _if139 = true; }
