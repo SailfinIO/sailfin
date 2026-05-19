@@ -6,7 +6,6 @@
 // deprecated number alias; the post-#556 strict-refusal regime plus the
 // float-typed API in #661 lets the real capsule be imported clean.
 import {
-    TomlValue,
     string_val,
     integer_val,
     bool_val,
