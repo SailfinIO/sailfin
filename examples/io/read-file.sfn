@@ -1,5 +1,4 @@
 // examples/io/read-file.sfn
-
 import { fs } from "fs";
 
 fn main() ![io] {

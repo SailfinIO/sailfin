@@ -1,5 +1,4 @@
 // examples/advanced/web-server-with-concurrency.sfn
-
 import { serve } from "http";
 import { sleep } from "time";
 
@@ -9,17 +8,17 @@ fn handleRequest(req, res) {
             let result = computeHeavyTask();
             res.send("Computed result: {{result}}");
         }
-    } else {
-        res.send("Welcome to Sailfin!", 200);
-    }
+    } else { res.send("Welcome to Sailfin!", 200); }
 }
 
-fn computeHeavyTask() -> number ![clock] {
+fn computeHeavyTask() -> int ![clock] {
     sleep(2000);
     return 42;
 }
 
 fn main() ![io, net] {
-    serve(handleRequest, { port: 8080 });
+    serve(handleRequest, {
+        port: 8080
+    });
     print("Server is running on http://localhost:8080");
 }

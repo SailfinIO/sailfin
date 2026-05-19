@@ -1,18 +1,12 @@
 // examples/concurrency/parallel.sfn
+fn computeTask1() -> int { return 21; }
 
-fn computeTask1() -> number {
-    return 21;
-}
-
-fn computeTask2() -> number {
-    return 21;
-}
+fn computeTask2() -> int { return 21; }
 
 fn main() ![io] {
-    let results = parallel [
-        fn() -> number { return computeTask1(); },
-        fn() -> number { return computeTask2(); },
-    ];
+    let results = parallel[fn () -> int { return computeTask1(); }, fn () -> int {
+        return computeTask2();
+    },];
 
     print("Results: {{results}}");
 }

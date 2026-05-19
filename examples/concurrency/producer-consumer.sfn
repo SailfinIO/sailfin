@@ -1,13 +1,12 @@
 // examples/concurrency/producer-consumer.sfn
-
 import { Channel, channel } from "sync";
 import { sleep } from "time";
 
 fn main() ![clock, io] {
-    let buffer: Channel<number> = channel(10); // bounded buffer
+    let buffer: Channel < number >= channel(10);  // bounded buffer
 
     routine {
-        for i in 1..20 {
+        for i in 1 .. 20 {
             print("Producing {{i}}");
             buffer.send(i);
             sleep(500);

@@ -10,7 +10,7 @@ sidebar:
 
 ```sfn
 let name = "Sailfin";             // immutable, type inferred
-let x: number = 42;               // immutable, explicit type
+let x: int = 42;                  // immutable, explicit type
 let mut counter = 0;              // mutable
 counter = counter + 1;            // OK
 // name = "Other";                // ERROR: immutable binding
@@ -23,7 +23,7 @@ fields use `:` for type annotations; only function return types use `->`.
 #### §3.2 Functions
 
 ```sfn
-fn add(x: number, y: number) -> number {
+fn add(x: int, y: int) -> int {
     return x + y;
 }
 
@@ -44,19 +44,19 @@ async fn fetch(url: string) -> string ![net] {
 - Effect annotations `![...]` come after the parameter list and optional return type
 - `async fn` records the `is_async` flag; `await` is not yet parsed (Part B)
 - Decorators `@name` are parsed as metadata (no semantic enforcement today)
-- Default parameter values: `fn f(x: number = 0)`
+- Default parameter values: `fn f(x: int = 0)`
 - Generic functions: `fn first<T>(items: T[]) -> T?`
 
 #### §3.3 Structs
 
 ```sfn
 struct Point {
-    x: number;
-    mut y: number;
+    x: float;
+    mut y: float;
 }
 
 struct User implements Greeter {
-    id: number;
+    id: int;
     name: string;
 
     fn greet(self) -> string {
@@ -83,7 +83,7 @@ enum Direction { North, South, East, West }
 enum Response {
     Ok { value: string },
     NotFound,
-    Error { code: number, message: string },
+    Error { code: int, message: string },
 }
 ```
 
@@ -101,8 +101,8 @@ interface Serializable {
 }
 
 interface Container<T> {
-    fn get(self, index: number) -> T?;
-    fn len(self) -> number;
+    fn get(self, index: int) -> T?;
+    fn len(self) -> int;
 }
 ```
 
@@ -114,7 +114,7 @@ by implementing all its methods and declaring `implements InterfaceName`.
 ```sfn
 type UserId = string;
 type MaybeResponse<T> = Response | T;
-type Row = number[];
+type Row = int[];
 ```
 
 > `Result<T, E>` and function type aliases are on the [roadmap](/roadmap);

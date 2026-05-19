@@ -1,11 +1,6 @@
 // examples/concurrency/routines.sfn
-
 fn main() ![io] {
-    routine "named" {
-        print("This is routine 1");
-    }
+    routine "named" { print("This is routine 1"); }
 
-    routine {
-        print("This is an unnamed routine");
-    }
+    routine { print("This is an unnamed routine"); }
 }

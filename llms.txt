@@ -55,14 +55,14 @@ A function with no effect list performs no side effects.
 ### Variables
 
     let name: string = "Sailfin";
-    let mut count: number = 0;
+    let mut count: int = 0;
     count += 1;
 
 Type annotations use `:`. Type inference is supported (annotation optional).
 
 ### Functions
 
-    fn add(x: number, y: number) -> number {
+    fn add(x: int, y: int) -> int {
         return x + y;
     }
 
@@ -77,7 +77,7 @@ Default parameter values are supported. Effect lists come after the return type.
 ### Structs
 
     struct User {
-        id: number;
+        id: int;
         name: string;
 
         fn greet(self) -> string {
@@ -108,11 +108,11 @@ Structs support methods (with `self`), generic type parameters, and
 ### Enums (Algebraic Data Types)
 
     enum Shape {
-        Circle { radius: number },
-        Rectangle { width: number, height: number },
+        Circle { radius: float },
+        Rectangle { width: float, height: float },
     }
 
-    fn area(shape: Shape) -> number {
+    fn area(shape: Shape) -> float {
         match shape {
             Shape.Circle { radius } => return 3.14 * radius * radius,
             Shape.Rectangle { width, height } => return width * height,
@@ -160,7 +160,7 @@ Union return types for typed errors:
 
     struct DivisionError { message: string; }
 
-    fn safe_divide(a: number, b: number) -> number | DivisionError {
+    fn safe_divide(a: float, b: float) -> float | DivisionError {
         if b == 0 {
             return DivisionError { message: "division by zero" };
         }
@@ -178,7 +178,7 @@ Note: Result<T, E> and the ? operator are planned but not yet implemented.
             self.items.append(item);
         }
 
-        fn get(self, index: number) -> T | null {
+        fn get(self, index: int) -> T | null {
             if index < 0 || index >= self.items.length {
                 return null;
             }
@@ -200,7 +200,7 @@ Relative paths use "./" or "../" syntax.
 
 ### Lambdas
 
-    let double = fn(x: number) -> number { return x * 2; };
+    let double = fn(x: int) -> int { return x * 2; };
 
 Lambdas are supported but do not capture enclosing variables (closures with
 capture are planned).
@@ -235,8 +235,8 @@ Uses `{{ }}` syntax (migration to `${ }` is planned pre-1.0).
 
 ### Extern Functions (FFI)
 
-    unsafe extern fn malloc(size: number) -> number;
-    unsafe extern fn free(ptr: number) -> void;
+    unsafe extern fn malloc(size: int) -> int;
+    unsafe extern fn free(ptr: int) -> void;
 
 Declares external C symbols for linking.
 
@@ -261,13 +261,21 @@ Declares external C symbols for linking.
 
 ## Numeric Types
 
-The primary numeric type is `number` (64-bit float, f64). The compiler also
-recognizes `int` and `i64` annotations, which lower to 64-bit integers in LLVM
-IR. However, integer support is incomplete: there are no integer-specific
-operators, no integer literal syntax distinct from float, and stdlib APIs
-generally expect `number`. Broader integer/float ergonomics (bitwise operators,
-`int` as a first-class citizen with full operator and stdlib support) are
-pre-1.0 work.
+Sailfin has two canonical numeric types: `int` (64-bit signed integer, i64) and
+`float` (64-bit IEEE-754 float, f64). Unsuffixed integer literals default to
+`int`; decimal or exponent literals default to `float`. Use `int` for IDs,
+indices, counts, ports, status codes, and byte offsets; use `float` for
+measurements, ratios, scores, and balances.
+
+The legacy `number` keyword is a deprecated alias for `float`, kept only for
+source compatibility during the migration; new code should use `int` or
+`float` explicitly. The compiler source, runtime prelude, standard-library
+capsules, and reference examples completed their migration off `number` in
+Slice E.3 (May 2026); the alias itself is scheduled for removal in Slice E.4.
+
+Fixed-width FFI integer types (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
+`u64`, `usize`) and float types (`f32`, `f64`) are also recognized for
+extern-fn signatures and low-level interop.
 
 Bitwise operators (&, |, ^, >>, <<) are not yet implemented.
 
@@ -382,13 +390,13 @@ Override the registry with `sfn config set registry <url>` (persists to
 ## Idiomatic Patterns
 
 ### Pure function (no effects)
-    fn fibonacci(n: number) -> number {
+    fn fibonacci(n: int) -> int {
         if n <= 1 { return n; }
         return fibonacci(n - 1) + fibonacci(n - 2);
     }
 
 ### Effectful service function
-    fn fetch_user(id: number) -> string ![io, net] {
+    fn fetch_user(id: int) -> string ![io, net] {
         let response = http.get("https://api.example.com/users/{{id}}");
         if response.status != 200 {
             print.err("Failed to fetch user {{id}}");
@@ -404,7 +412,7 @@ Override the registry with `sfn config set registry <url>` (persists to
 
     struct Config implements Serializable {
         host: string;
-        port: number;
+        port: int;
 
         fn to_json(self) -> string {
             return "{\"host\": \"{{self.host}}\", \"port\": {{self.port}}}";

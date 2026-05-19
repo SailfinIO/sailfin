@@ -59,7 +59,7 @@ The following functions are still recognized by the runtime for backward compati
 
 These functions operate on Sailfin strings using Unicode grapheme clusters as the unit of indexing. "Index" always means a grapheme-cluster index, not a byte offset or code-unit index.
 
-#### `substring(text: string, start: number, end: number) -> string`
+#### `substring(text: string, start: int, end: int) -> string`
 
 Extract the substring from grapheme index `start` (inclusive) to `end` (exclusive). Both bounds are clamped to `[0, text.length]`. Returns `""` when the resulting range is empty or inverted.
 
@@ -78,7 +78,7 @@ let clamped = substring(s, 0, 999); // "Hello, world!" (end clamped)
 
 ---
 
-#### `find_char(text: string, character: string, start: number = 0) -> number`
+#### `find_char(text: string, character: string, start: int = 0) -> int`
 
 Find the first occurrence of a single grapheme `character` in `text`, beginning the search at grapheme index `start`. Returns the index of the first match, or `-1` if not found.
 
@@ -101,7 +101,7 @@ let missing = find_char("abc", "z");       // -1
 
 ---
 
-#### `grapheme_count(text: string) -> number`
+#### `grapheme_count(text: string) -> int`
 
 Return the number of Unicode grapheme clusters in `text`. For ASCII strings this equals the byte length. For strings containing multi-byte characters, emoji, or combined sequences this may differ from `.length`.
 
@@ -120,7 +120,7 @@ grapheme_count(empty);       // 0
 
 ---
 
-#### `grapheme_at(text: string, index: number) -> string`
+#### `grapheme_at(text: string, index: int) -> string`
 
 Return the grapheme cluster at the given index. Returns `""` for an out-of-range index (negative or beyond the end of the string). Never panics.
 
@@ -133,7 +133,7 @@ grapheme_at(s, 99); // ""
 
 ---
 
-#### `char_code(character: string) -> number`
+#### `char_code(character: string) -> int`
 
 Return the Unicode code point of the first grapheme cluster in `character`. Returns `-1` for an empty string or an invalid input.
 
@@ -161,7 +161,7 @@ strings_equal("hello", "Hello");  // false
 
 ---
 
-#### `clamp(value: number, minimum: number, maximum: number) -> number`
+#### `clamp(value: float, minimum: float, maximum: float) -> float`
 
 Return `value` clamped to the range `[minimum, maximum]`. Works with both integers and floating-point numbers.
 
@@ -189,8 +189,8 @@ Produce a human-readable debug representation of a struct. The output format is 
 
 ```sfn
 struct Point {
-    x: number;
-    y: number;
+    x: float;
+    y: float;
 }
 
 fn point_repr(p: Point) -> string {
@@ -222,14 +222,15 @@ These functions are used internally by the compiler-generated type guards. They 
 
 #### `check_type(value: any, descriptor: string) -> boolean`
 
-Return `true` if `value` conforms to the type described by the descriptor string. Descriptor syntax mirrors Sailfin type notation: `"string"`, `"number"`, `"boolean"`, `"string[]"`, `"string | null"`, etc.
+Return `true` if `value` conforms to the type described by the descriptor string. Descriptor syntax mirrors Sailfin type notation: `"string"`, `"int"`, `"float"`, `"boolean"`, `"string[]"`, `"string | null"`, etc. The legacy `"number"` descriptor is accepted as an alias for `"float"` to preserve compatibility with the deprecated `number` type alias.
 
 ```sfn
-check_type("hello", "string");           // true
-check_type(42, "number");                // true
-check_type(null, "string?");             // true  (? => union with void/null)
-check_type([1, 2], "number[]");          // true
-check_type("x", "string | number");      // true
+check_type("hello", "string");        // true
+check_type(42, "int");                // true
+check_type(3.14, "float");            // true
+check_type(null, "string?");          // true  (? => union with void/null)
+check_type([1, 2], "int[]");          // true
+check_type("x", "string | int");      // true
 ```
 
 ---
@@ -251,7 +252,7 @@ You should not call this function directly. It appears in generated code and in 
 > (see the examples below). Structured-concurrency supervision — scope
 > semantics, cancellation, and `spawn` — is on the [roadmap](/roadmap).
 
-#### `monotonic_millis() -> number ![clock]`
+#### `monotonic_millis() -> int ![clock]`
 
 Return the current value of a monotonic clock in milliseconds. Useful for measuring elapsed time. The absolute value is not meaningful; only differences between two calls are useful.
 
@@ -264,7 +265,7 @@ fn timed_operation() ![io, clock] {
 }
 ```
 
-#### `channel<T>() -> Channel<T>` and `channel<T>(capacity: number) -> Channel<T>`
+#### `channel<T>() -> Channel<T>` and `channel<T>(capacity: int) -> Channel<T>`
 
 Create an unbuffered or bounded channel for passing values between concurrent
 tasks. `capacity = 0` (the no-argument form) produces an unbuffered
@@ -274,13 +275,13 @@ tasks. `capacity = 0` (the no-argument form) produces an unbuffered
 import { Channel, channel } from "sync";
 
 async fn main() ![io] {
-    let messages: Channel<number> = channel();
+    let messages: Channel<int> = channel();
 
     routine {
         messages.send(42);
     }
 
-    let result: number = await messages.receive();
+    let result: int = await messages.receive();
     print("Received: {{result}}");
 }
 ```
@@ -296,7 +297,7 @@ import { Channel, channel } from "sync";
 import { sleep } from "time";
 
 fn main() ![clock, io] {
-    let buffer: Channel<number> = channel(10); // bounded buffer
+    let buffer: Channel<int> = channel(10); // bounded buffer
 
     routine {
         for i in 1..20 {
@@ -327,13 +328,13 @@ return values. `parallel` is a **keyword**, not a stdlib function — the
 operand is an array literal of `fn() -> T { ... }` expressions.
 
 ```sfn
-fn computeTask1() -> number { return 21; }
-fn computeTask2() -> number { return 21; }
+fn computeTask1() -> int { return 21; }
+fn computeTask2() -> int { return 21; }
 
 fn main() ![io] {
     let results = parallel [
-        fn() -> number { return computeTask1(); },
-        fn() -> number { return computeTask2(); },
+        fn() -> int { return computeTask1(); },
+        fn() -> int { return computeTask2(); },
     ];
 
     print("Results: {{results}}");
@@ -350,7 +351,7 @@ Apply `mapper` to each element and return a new array of results.
 
 ```sfn
 let numbers = [1, 2, 3, 4];
-let doubled = array_map(numbers, fn(n: number) -> number { return n * 2; });
+let doubled = array_map(numbers, fn(n: int) -> int { return n * 2; });
 // [2, 4, 6, 8]
 ```
 
@@ -360,7 +361,7 @@ Return a new array containing only the elements for which `predicate` returns `t
 
 ```sfn
 let numbers = [1, 2, 3, 4, 5];
-let evens = array_filter(numbers, fn(n: number) -> boolean { return n % 2 == 0; });
+let evens = array_filter(numbers, fn(n: int) -> boolean { return n % 2 == 0; });
 // [2, 4]
 ```
 
@@ -370,7 +371,7 @@ Fold `items` into a single value using `reducer`, starting from `initial`.
 
 ```sfn
 let numbers = [1, 2, 3, 4, 5];
-let sum = array_reduce(numbers, 0, fn(acc: number, n: number) -> number { return acc + n; });
+let sum = array_reduce(numbers, 0, fn(acc: int, n: int) -> int { return acc + n; });
 // 15
 ```
 
@@ -629,7 +630,7 @@ All `log` functions require the `![io]` effect.
 Write an informational message to stdout with an `[INFO]` prefix. Use for routine operational messages.
 
 ```sfn
-fn start_server(port: number) ![io] {
+fn start_server(port: int) ![io] {
     log.info("Server starting on port {{port}}");
 }
 ```
@@ -690,7 +691,7 @@ fn parse_token(raw: string) -> string ![io] {
 ### Arrays (available today)
 
 ```sfn
-let numbers: number[] = [1, 2, 3];
+let numbers: int[] = [1, 2, 3];
 numbers.push(4);
 let n = numbers.length;        // 4
 let first = numbers[0];         // 1
@@ -703,12 +704,12 @@ let first = numbers[0];         // 1
 Vec<T>.new() -> Vec<T>
 Vec<T>.push(item: T) -> void
 Vec<T>.pop() -> T?
-Vec<T>.get(index: number) -> T?
-Vec<T>.len() -> number
+Vec<T>.get(index: int) -> T?
+Vec<T>.len() -> int
 Vec<T>.is_empty() -> boolean
 Vec<T>.contains(item: T) -> boolean
-Vec<T>.remove(index: number) -> T
-Vec<T>.slice(start: number, end: number) -> Vec<T>
+Vec<T>.remove(index: int) -> T
+Vec<T>.slice(start: int, end: int) -> Vec<T>
 ```
 
 ### Planned `Map<K, V>`
@@ -722,7 +723,7 @@ Map<K, V>.has(key: K) -> boolean
 Map<K, V>.delete(key: K) -> void
 Map<K, V>.keys() -> K[]
 Map<K, V>.values() -> V[]
-Map<K, V>.len() -> number
+Map<K, V>.len() -> int
 ```
 
 ### Planned `Set<T>`
@@ -733,7 +734,7 @@ Set<T>.new() -> Set<T>
 Set<T>.add(item: T) -> void
 Set<T>.has(item: T) -> boolean
 Set<T>.delete(item: T) -> void
-Set<T>.size() -> number
+Set<T>.size() -> int
 ```
 
 ---
@@ -750,8 +751,8 @@ The modules below are on the roadmap and are documented here to give a preview o
 
 ```sfn
 // Planned — not yet implemented
-rand.int(min: number, max: number) -> number ![rand]
-rand.float() -> number ![rand]          // uniform in [0.0, 1.0)
+rand.int(min: int, max: int) -> int ![rand]
+rand.float() -> float ![rand]          // uniform in [0.0, 1.0)
 rand.bool() -> boolean ![rand]
 rand.shuffle<T>(items: T[]) -> T[] ![rand]
 rand.choice<T>(items: T[]) -> T? ![rand]
@@ -761,7 +762,7 @@ rand.choice<T>(items: T[]) -> T? ![rand]
 
 ### `time` module (`![clock]` effect)
 
-#### `sleep(milliseconds: number) ![clock]`
+#### `sleep(milliseconds: int) ![clock]`
 
 Imported from the `time` module. Suspend the current execution context for at
 least `milliseconds` milliseconds. Requires the `clock` effect.
@@ -783,7 +784,7 @@ fn wait_a_bit() ![clock] {
 // Planned — not yet implemented
 clock.now() -> Timestamp ![clock]
 clock.utc_now() -> Timestamp ![clock]
-Timestamp.unix_millis() -> number
+Timestamp.unix_millis() -> int
 Timestamp.format(pattern: string) -> string
 ```
 
@@ -796,12 +797,12 @@ Timestamp.format(pattern: string) -> string
 ```sfn
 // Planned — not yet implemented
 process.exec(command: string) -> ProcessResult ![io]
-process.exit(code: number) -> never ![io]
+process.exit(code: int) -> never ![io]
 
 struct ProcessResult {
     stdout: string;
     stderr: string;
-    exit_code: number;
+    exit_code: int;
 }
 ```
 

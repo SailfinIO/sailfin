@@ -1,12 +1,11 @@
 // examples/algorithms/quicksort.sfn
-
-fn quicksort(arr: number[]) -> number[] {
+fn quicksort(arr: int[]) -> int[] {
     if arr.length <= 1 { return arr; }
 
     let pivot = arr[0];
-    let less = arr.filter(fn(x) -> boolean { return x < pivot; });
-    let equal = arr.filter(fn(x) -> boolean { return x == pivot; });
-    let greater = arr.filter(fn(x) -> boolean { return x > pivot; });
+    let less = arr.filter(fn (x) -> boolean { return x < pivot; });
+    let equal = arr.filter(fn (x) -> boolean { return x == pivot; });
+    let greater = arr.filter(fn (x) -> boolean { return x > pivot; });
 
     return quicksort(less).concat(equal).concat(quicksort(greater));
 }

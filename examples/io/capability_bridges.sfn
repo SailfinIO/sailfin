@@ -1,6 +1,5 @@
 // examples/io/capability_bridges.sfn
 // Demonstrates runtime capability bridges for filesystem I/O.
-
 import { capability_grant, fs_bridge } from "runtime/prelude";
 
 fn main() ![io] {

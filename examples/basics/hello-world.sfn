@@ -1,5 +1,2 @@
 // examples/basics/hello-world.sfn
-
-fn main() ![io] {
-  print("Hello, Sailfin!");
-}
+fn main() ![io] { print("Hello, Sailfin!"); }

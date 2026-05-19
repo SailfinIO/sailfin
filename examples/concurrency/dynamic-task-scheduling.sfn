@@ -1,11 +1,10 @@
 // examples/concurrency/dynamic-task-scheduling.sfn
-
 import { Channel, channel } from "sync";
 
 fn main() ![io] {
-    let tasks: Channel<fn() -> void> = channel();
+    let tasks: Channel < fn () -> void >= channel();
 
-    for _ in 1..5 {
+    for _ in 1 .. 5 {
         routine {
             loop {
                 let task = await tasks.receive();
@@ -14,6 +13,6 @@ fn main() ![io] {
         }
     }
 
-    tasks.send(fn() { print("Task 1 executed!"); });
-    tasks.send(fn() { print("Task 2 executed!"); });
+    tasks.send(fn () { print("Task 1 executed!"); });
+    tasks.send(fn () { print("Task 2 executed!"); });
 }

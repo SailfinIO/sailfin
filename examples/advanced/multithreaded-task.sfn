@@ -1,22 +1,17 @@
 // examples/advanced/multithreaded-task.sfn
-
 import { sleep } from "time";
 
-fn computeTask(id: number) -> string ![clock, io] {
+fn computeTask(id: int) -> string ![clock, io] {
     print("Task {{id}} started");
     sleep(1000);
     return "Result from Task {{id}}";
 }
 
 fn main() ![clock, io] {
-    let results = parallel [
-        fn() -> string { return computeTask(1); },
-        fn() -> string { return computeTask(2); },
-        fn() -> string { return computeTask(3); },
-    ];
+    let results = parallel[fn () -> string { return computeTask(1); }, fn () -> string {
+        return computeTask(2);
+    }, fn () -> string { return computeTask(3); },];
 
     print("All tasks completed:");
-    for result in results {
-        print(result);
-    }
+    for result in results { print(result); }
 }

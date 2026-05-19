@@ -9,7 +9,7 @@ sidebar:
 Every function that performs side effects must declare them with `![...]`:
 
 ```sfn
-fn pure(x: number) -> number { return x * 2; } // no effects — guaranteed pure
+fn pure(x: int) -> int { return x * 2; } // no effects — guaranteed pure
 fn read_file(path: string) ![io] { ... }       // requires io capability
 fn fetch(url: string) ![net] { ... }           // requires net capability
 fn analyze(text: string) ![io, model] { }      // multiple effects
