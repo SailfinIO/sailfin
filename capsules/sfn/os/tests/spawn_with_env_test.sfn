@@ -76,7 +76,11 @@ test "spawn_with_env: heavy stderr does not deadlock sequential read_stdout" ![i
     // stderr while the parent was reading stdout deadlocked. The
     // poll-based concurrent drain stashes stderr while serving the
     // stdout read so the call cannot stall on the unread side.
-    let h = spawn_with_env(["sh", "-c", "yes ERR | head -c 200000 1>&2; yes OUT | head -c 5000"], env_empty());
+    //
+    // `head | tr` avoids `yes`'s broken-pipe diagnostic landing on
+    // the test's stderr (see the matching note in
+    // `run_capture_test.sfn`'s pipe-buffer test).
+    let h = spawn_with_env(["sh", "-c", "head -c 200000 /dev/zero | tr '\\0' E 1>&2; head -c 5000 /dev/zero | tr '\\0' O"], env_empty());
     assert h.handle_id != 0;
     handle_close_stdin(h);
     let out = handle_read_stdout(h);

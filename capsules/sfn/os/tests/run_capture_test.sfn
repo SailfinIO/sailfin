@@ -60,7 +60,12 @@ test "run_capture: drains output larger than the pipe buffer" ![io] {
     // round-trip rather than slurp in one read. If concurrent draining
     // is broken (e.g. blocked on stderr while stdout fills), this
     // test deadlocks.
-    let result = run_capture(["sh", "-c", "yes x | head -c 200000"], env_empty());
+    //
+    // `head | tr` avoids `yes`'s SIGPIPE-on-broken-pipe diagnostic
+    // (GNU coreutils' `yes` writes "yes: standard output: Broken pipe"
+    // to stderr when its downstream consumer closes the pipe — a real
+    // CI hazard since the stderr assertion below would catch it).
+    let result = run_capture(["sh", "-c", "head -c 200000 /dev/zero | tr '\\0' x"], env_empty());
     assert result.exit == 0;
     assert result.stdout.length == 200000;
     assert strings_equal(result.stderr, "");
