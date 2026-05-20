@@ -68,6 +68,258 @@ fn try_dispatch_atomic_builtin(trimmed_target: string, arguments: string[], bind
     return lower_atomic_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
 }
 
+// ── Closure-callee detection (issue #689) ────────────────────────────
+//
+// Recognise a call whose target is a `__closure__@sfn_lambda_<N>`-typed
+// local (set by `lower_let_instruction` after the lambda-lifting pass
+// rewrites the let) or a `fn(...) -> R`-typed parameter (parser
+// support landed in #688). Both forms hold a `{i8*, i8*}` aggregate at
+// runtime — `coerce_and_emit_call` extracts `fn_ptr` and `env*` and
+// emits the dispatch sequence.
+//
+// Returns the loaded closure-pair operand plus the LLVM return type
+// and parameter types (with the hidden `__env: i8*` parameter
+// stripped from the lifted function's signature). The caller plugs
+// these into the resolved `CallTargetResolution` so signature
+// resolution can route to the closure-dispatch path.
+struct _ClosureCalleeInfo {
+    operand: LLVMOperand;
+    lines: string[];
+    temp_index: int;
+    return_type: string;
+    parameter_types: string[];
+}
+
+fn _parse_fn_pointer_annotation(context: TypeContext, annotation: string) -> _ClosureSignatureParse {
+    let trimmed = trim_text(annotation);
+    // `sfn fmt` normalises `fn(` to `fn (` (with an interior space)
+    // — accept either spelling so the round-trip through the
+    // formatter does not desync the call-site dispatch path.
+    let mut cursor: int = -1;
+    if starts_with(trimmed, "fn(") { cursor = 3; }
+    if starts_with(trimmed, "fn (") { cursor = 4; }
+    if cursor < 0 {
+        return _ClosureSignatureParse {
+            ok: false,
+            parameter_types: [],
+            return_type: ""
+        };
+    }
+    let mut depth: int = 1;
+    let mut params_end: int = -1;
+    loop {
+        if cursor >= trimmed.length { break; }
+        let ch = substring(trimmed, cursor, cursor + 1);
+        if ch == "(" { depth += 1; }
+        if ch == ")" {
+            depth -= 1;
+            if depth == 0 {
+                params_end = cursor;
+                break;
+            }
+        }
+        cursor += 1;
+    }
+    if params_end < 0 {
+        return _ClosureSignatureParse {
+            ok: false,
+            parameter_types: [],
+            return_type: ""
+        };
+    }
+    // Recover where the `(` actually starts so the parameter list
+    // slice excludes both the `fn` keyword and the optional space.
+    let mut params_start: int = 3;
+    if starts_with(trimmed, "fn (") { params_start = 4; }
+    let params_text = trim_text(substring(trimmed, params_start, params_end));
+    let after_params = trim_text(substring(trimmed, params_end + 1, trimmed.length));
+    let return_text = _strip_return_arrow(after_params);
+    if return_text.length == 0 {
+        return _ClosureSignatureParse {
+            ok: false,
+            parameter_types: [],
+            return_type: ""
+        };
+    }
+    let mut param_annotations: string[] = _split_top_level_comma(params_text);
+    let mut parameter_types: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= param_annotations.length { break; }
+        let raw = trim_text(param_annotations[index]);
+        if raw.length == 0 {
+            index += 1;
+            continue;
+        }
+        // Allow `name: T` form (named function-pointer parameters)
+        // by stripping the leading `<name>:` token if present. The
+        // parser preserves the verbatim annotation text, so the
+        // form is `name: type`.
+        let mut param_type_text: string = raw;
+        let colon_pos = index_of(raw, ":");
+        if colon_pos > 0 {
+            param_type_text = trim_text(substring(raw, colon_pos + 1, raw.length));
+        }
+        let mapped = map_return_type(context, param_type_text);
+        let mut effective_mapped: string = mapped;
+        if effective_mapped.length == 0 { effective_mapped = "i8*"; }
+        parameter_types.push(effective_mapped);
+        index += 1;
+    }
+    let mut return_mapped: string = map_return_type(context, return_text);
+    if return_mapped.length == 0 { return_mapped = "void"; }
+    return _ClosureSignatureParse {
+        ok: true,
+        parameter_types: parameter_types,
+        return_type: return_mapped
+    };
+}
+
+struct _ClosureSignatureParse {
+    ok: boolean;
+    parameter_types: string[];
+    return_type: string;
+}
+
+// Predicate for the user-supplied `fn(...) -> R` parameter annotation
+// (issue #688) in either spelling. `sfn fmt --write` injects a space
+// after `fn`, so a round-trip through the formatter produces
+// `fn (int) -> int` even when the source was authored as `fn(int)`.
+fn _looks_like_fn_pointer_annotation(annotation: string) -> boolean {
+    let trimmed = trim_text(annotation);
+    if starts_with(trimmed, "fn(") { return true; }
+    if starts_with(trimmed, "fn (") { return true; }
+    return false;
+}
+
+fn _strip_return_arrow(text: string) -> string {
+    let trimmed = trim_text(text);
+    if starts_with(trimmed, "->") {
+        return trim_text(substring(trimmed, 2, trimmed.length));
+    }
+    return "";
+}
+
+fn _split_top_level_comma(text: string) -> string[] {
+    let mut out: string[] = [];
+    if text.length == 0 { return out; }
+    let mut depth: int = 0;
+    let mut segment: string = "";
+    let mut cursor: int = 0;
+    loop {
+        if cursor >= text.length { break; }
+        let ch = substring(text, cursor, cursor + 1);
+        if ch == "(" { depth += 1; }
+        if ch == "<" { depth += 1; }
+        let mut _close: boolean = false;
+        if ch == ")" { _close = true; }
+        if ch == ">" { _close = true; }
+        if _close {
+            if depth > 0 { depth -= 1; }
+        }
+        if ch == "," {
+            if depth == 0 {
+                out.push(segment);
+                segment = "";
+                cursor += 1;
+                continue;
+            }
+        }
+        segment = segment + ch;
+        cursor += 1;
+    }
+    if segment.length > 0 { out.push(segment); }
+    return out;
+}
+
+// Strip the leading `__env: i8*` parameter (synthesised by
+// `_synthesize_lifted_function` in `lambda_lowering.sfn`) from a
+// lifted function's parameter type list, leaving just the
+// user-visible parameter types for the call-site signature.
+fn _strip_env_parameter(parameter_types: string[]) -> string[] {
+    if parameter_types.length == 0 { return parameter_types; }
+    let mut out: string[] = [];
+    let mut index: int = 1;
+    loop {
+        if index >= parameter_types.length { break; }
+        out.push(parameter_types[index]);
+        index += 1;
+    }
+    return out;
+}
+
+fn try_resolve_closure_callee(target: string, bindings: ParameterBinding[], locals: LocalBinding[], functions: NativeFunction[], context: TypeContext, temp_index: int, lines: string[]) -> _ClosureCalleeInfo? ![io] {
+    let name = trim_text(target);
+    if name.length == 0 { return null; }
+    if !is_simple_identifier(name) { return null; }
+
+    // Locals win over parameters when both bind the same name (the
+    // shadowing rule `find_local_binding` already encodes). Closure
+    // bindings produced by lambda lifting carry the rich form
+    // `__closure__@sfn_lambda_<N>`; a user-supplied
+    // `let f: fn(int) -> int = ...;` keeps its bare `fn(...)`
+    // annotation through `_rewrite_variable` because the lift pass
+    // only overrides when the value is a closure-pair marker — see
+    // `lambda_lowering.sfn:_rewrite_variable`.
+    let local = find_local_binding(locals, name);
+    if local != null {
+        let annotation = local.type_annotation;
+        if starts_with(annotation, "__closure__@") {
+            let symbol = substring(annotation, "__closure__@".length, annotation.length);
+            let target_fn = find_function_by_name(functions, symbol);
+            if target_fn != null {
+                let lifted_params = collect_parameter_types(context, target_fn.parameters, target_fn.name);
+                let user_params = _strip_env_parameter(lifted_params);
+                let return_type = map_return_type(context, target_fn.return_type);
+                let mut effective_return: string = return_type;
+                if effective_return.length == 0 { effective_return = "void"; }
+                let load = load_local_operand(local, temp_index, lines);
+                return _ClosureCalleeInfo {
+                    operand: load.operand,
+                    lines: load.lines,
+                    temp_index: load.temp_index,
+                    return_type: effective_return,
+                    parameter_types: user_params
+                };
+            }
+        }
+        if _looks_like_fn_pointer_annotation(annotation) {
+            let parsed = _parse_fn_pointer_annotation(context, annotation);
+            if parsed.ok {
+                let load = load_local_operand(local, temp_index, lines);
+                return _ClosureCalleeInfo {
+                    operand: load.operand,
+                    lines: load.lines,
+                    temp_index: load.temp_index,
+                    return_type: parsed.return_type,
+                    parameter_types: parsed.parameter_types
+                };
+            }
+        }
+    }
+
+    let parameter = find_parameter_binding(bindings, name);
+    if parameter != null {
+        if _looks_like_fn_pointer_annotation(parameter.type_annotation) {
+            let parsed = _parse_fn_pointer_annotation(context, parameter.type_annotation);
+            if parsed.ok {
+                let operand = LLVMOperand {
+                    llvm_type: parameter.llvm_type,
+                    value: parameter.llvm_name
+                };
+                return _ClosureCalleeInfo {
+                    operand: operand,
+                    lines: lines,
+                    temp_index: temp_index,
+                    return_type: parsed.return_type,
+                    parameter_types: parsed.parameter_types
+                };
+            }
+        }
+    }
+    return null;
+}
+
 // Resolve fused concat/push targets (e.g. `valuesconcat(xs)` → `concat`).
 // Also handles parse_member_access dispatch and struct-method fallback.
 // Returns a CallTargetResolution with the resolved target, method operand, etc.
@@ -84,6 +336,30 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
     let mut array_concat_element_type: string = "";
     let mut is_array_push: boolean = false;
     let mut array_push_element_type: string = "";
+    let mut is_closure_dispatch: boolean = false;
+    let mut closure_return_type: string = "";
+    let mut closure_parameter_types: string[] = [];
+
+    // Issue #689: closure-callee dispatch. If the call target names a
+    // local with a `__closure__@sfn_lambda_<N>` type annotation
+    // (set by `lower_let_instruction` after lambda lifting) or a
+    // parameter with a `fn(...) -> R` annotation (parser support from
+    // #688), the call is a closure-aggregate dispatch — load the
+    // pair and short-circuit to `coerce_and_emit_call`'s new branch.
+    // This must run BEFORE any method-dispatch fan-out because a
+    // closure binding can shadow a member name.
+    if injected_argument_count == 0 {
+        let closure_info = try_resolve_closure_callee(result_target, bindings, locals, functions, context, result_temp, result_lines);
+        if closure_info != null {
+            method_operand = closure_info.operand;
+            result_lines = closure_info.lines;
+            result_temp = closure_info.temp_index;
+            injected_argument_count = 1;
+            is_closure_dispatch = true;
+            closure_return_type = closure_info.return_type;
+            closure_parameter_types = closure_info.parameter_types;
+        }
+    }
 
     // Defensive: some front-end rewriting paths can fuse a receiver name into the call
     // target (e.g. `values.concat(xs)` becomes `valuesconcat(xs)` or (rarely) `@valuesconcat(xs)`).
@@ -350,6 +626,31 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
         }
     }
 
+    // Issue #689: closure-dispatch resolution is final. The method
+    // fan-out below would otherwise re-trigger `parse_member_access`
+    // on `result_target` and try to dispatch the closure binding as
+    // a struct method. Return now with the closure-pair operand
+    // populated.
+    if is_closure_dispatch {
+        return CallTargetResolution {
+            trimmed_target: result_target,
+            method_operand: method_operand,
+            helper_descriptor: null,
+            injected_argument_count: injected_argument_count,
+            is_array_concat: false,
+            array_concat_element_type: "",
+            is_array_push: false,
+            array_push_element_type: "",
+            current_lines: result_lines,
+            current_temp: result_temp,
+            diagnostics: result_diagnostics,
+            string_constants: result_string_constants,
+            is_closure_dispatch: true,
+            closure_return_type: closure_return_type,
+            closure_parameter_types: closure_parameter_types
+        };
+    }
+
     // Delegate parse_member_access dispatch to a separate function to keep
     // each function under ~500 .sfn-asm instructions.
     return resolve_parsed_method_dispatch(result_target, arguments, bindings, locals, result_temp, result_lines, functions, context, result_diagnostics, result_string_constants, method_operand, helper_descriptor, injected_argument_count, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type);
@@ -404,7 +705,10 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         current_lines: r_lines,
                         current_temp: r_temp,
                         diagnostics: r_diagnostics,
-                        string_constants: r_string_constants
+                        string_constants: r_string_constants,
+                        is_closure_dispatch: false,
+                        closure_return_type: "",
+                        closure_parameter_types: []
                     };
                 }
 
@@ -495,7 +799,10 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                 current_lines: r_lines,
                                 current_temp: r_temp,
                                 diagnostics: r_diagnostics,
-                                string_constants: r_string_constants
+                                string_constants: r_string_constants,
+                                is_closure_dispatch: false,
+                                closure_return_type: "",
+                                closure_parameter_types: []
                             };
                         }
                     }
@@ -530,7 +837,10 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             current_lines: r_lines,
                             current_temp: r_temp,
                             diagnostics: r_diagnostics,
-                            string_constants: r_string_constants
+                            string_constants: r_string_constants,
+                            is_closure_dispatch: false,
+                            closure_return_type: "",
+                            closure_parameter_types: []
                         };
                     }
                 }
@@ -566,7 +876,10 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         current_lines: r_lines,
                         current_temp: r_temp,
                         diagnostics: r_diagnostics,
-                        string_constants: r_string_constants
+                        string_constants: r_string_constants,
+                        is_closure_dispatch: false,
+                        closure_return_type: "",
+                        closure_parameter_types: []
                     };
                 }
             } else {
@@ -620,7 +933,10 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             current_lines: r_lines,
                             current_temp: r_temp,
                             diagnostics: r_diagnostics,
-                            string_constants: r_string_constants
+                            string_constants: r_string_constants,
+                            is_closure_dispatch: false,
+                            closure_return_type: "",
+                            closure_parameter_types: []
                         };
                     }
                 } else {
@@ -655,7 +971,10 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                 current_lines: r_lines,
                                 current_temp: r_temp,
                                 diagnostics: r_diagnostics,
-                                string_constants: r_string_constants
+                                string_constants: r_string_constants,
+                                is_closure_dispatch: false,
+                                closure_return_type: "",
+                                closure_parameter_types: []
                             };
                         }
 
@@ -733,13 +1052,16 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
         current_lines: r_lines,
         current_temp: r_temp,
         diagnostics: r_diagnostics,
-        string_constants: r_string_constants
+        string_constants: r_string_constants,
+        is_closure_dispatch: false,
+        closure_return_type: "",
+        closure_parameter_types: []
     };
 }
 
 // Resolve the function signature for a call target: return type, expected parameter
 // types, whether it's a trait dispatch, and the resolved function entry.
-fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelperDescriptor?, method_operand: LLVMOperand?, is_array_concat: boolean, array_concat_element_type: string, functions: NativeFunction[], context: TypeContext) -> CallSignatureResolution {
+fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelperDescriptor?, method_operand: LLVMOperand?, is_array_concat: boolean, array_concat_element_type: string, is_closure_dispatch: boolean, closure_return_type: string, closure_parameter_types: string[], functions: NativeFunction[], context: TypeContext) -> CallSignatureResolution {
     let mut result_target = trimmed_target;
     let mut function_entry: NativeFunction? = null;
     // Empty signals "unresolved". `coerce_and_emit_call` emits a fatal
@@ -755,6 +1077,36 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
     let mut is_trait_dispatch: boolean = false;
     let mut result_diagnostics: string[] = [];
     let mut result_helper = helper_descriptor;
+
+    // Issue #689: closure dispatch carries its own pre-resolved
+    // signature (derived from the lifted lambda's signature or a
+    // user-supplied `fn(...) -> R` annotation in #688), so the
+    // function-entry / helper lookups below are skipped.
+    // `expected_params` includes the closure-pair aggregate as the
+    // implicit "self" operand (`{i8*, i8*}`), mirroring how trait
+    // dispatch prepends the trait object — `coerce_and_emit_call`
+    // splits it out before emitting the extractvalue + call.
+    if is_closure_dispatch {
+        llvm_return = closure_return_type;
+        let mut closure_expected: string[] = ["{i8*, i8*}"];
+        let mut _cei: int = 0;
+        loop {
+            if _cei >= closure_parameter_types.length { break; }
+            closure_expected.push(closure_parameter_types[_cei]);
+            _cei += 1;
+        }
+        expected_params = closure_expected;
+        return CallSignatureResolution {
+            trimmed_target: result_target,
+            function_entry: null,
+            llvm_return: llvm_return,
+            expected_params: expected_params,
+            is_trait_dispatch: false,
+            diagnostics: result_diagnostics,
+            helper_overridden: false,
+            is_closure_dispatch: true
+        };
+    }
 
     if substring(result_target, 0, 16) == "trait_dispatch__" {
         is_trait_dispatch = true;
@@ -901,7 +1253,8 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
         expected_params: expected_params,
         is_trait_dispatch: is_trait_dispatch,
         diagnostics: result_diagnostics,
-        helper_overridden: helper_overridden
+        helper_overridden: helper_overridden,
+        is_closure_dispatch: false
     };
 }
 

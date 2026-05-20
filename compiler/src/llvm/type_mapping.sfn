@@ -286,7 +286,18 @@ fn map_type_annotation(annotation: string) -> string {
     // Maps to the `{i8*, i8*}` closure-pair aggregate emitted by
     // `emit_closure_pair_aggregate`. Users cannot type this
     // annotation by hand; it never surfaces in diagnostics.
+    // The richer `__closure__@sfn_lambda_<N>` form (set at
+    // let-lowering time so #689 call-site dispatch can look up
+    // the lifted function's signature) maps to the same LLVM type.
     if trimmed == "__closure__" { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "__closure__@") { return "{i8*, i8*}"; }
+    // User-supplied fn-pointer annotations (issue #688) also lower
+    // to the closure-pair aggregate. A parameter typed
+    // `cb: fn(int) -> int` is a closure value passed by aggregate.
+    // Both `fn(` and `fn (` are accepted because `sfn fmt` rewrites
+    // the bare keyword form into `fn (` with a separating space.
+    if starts_with(trimmed, "fn(") { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "fn (") { return "{i8*, i8*}"; }
     let normalized = unwrap_move_wrapper(trimmed);
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
@@ -434,6 +445,9 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
     if _if315 { return "void"; }
     // Closure-pair sentinel — see comment in `map_type_annotation`.
     if trimmed == "__closure__" { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "__closure__@") { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "fn(") { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "fn (") { return "{i8*, i8*}"; }
     let normalized = unwrap_move_wrapper(trimmed);
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.

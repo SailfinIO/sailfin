@@ -144,8 +144,17 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     let is_array_push = resolution.is_array_push;
     let array_push_element_type = resolution.array_push_element_type;
 
+    // Issue #689: closure-dispatch flag flows from resolution into
+    // signature resolution so the function-entry / helper lookup
+    // (which would otherwise emit `unknown function` diagnostics
+    // for a closure-typed local) is skipped, and into emission so
+    // the extractvalue + bitcast + call sequence is selected.
+    let is_closure_dispatch = resolution.is_closure_dispatch;
+    let closure_return_type = resolution.closure_return_type;
+    let closure_parameter_types = resolution.closure_parameter_types;
+
     // Phase 2: Resolve function signature (delegated to core_call_resolution)
-    let sig = resolve_call_signature(trimmed_target, helper_descriptor, method_operand, is_array_concat, array_concat_element_type, functions, context);
+    let sig = resolve_call_signature(trimmed_target, helper_descriptor, method_operand, is_array_concat, array_concat_element_type, is_closure_dispatch, closure_return_type, closure_parameter_types, functions, context);
     trimmed_target = sig.trimmed_target;
     let mut function_entry = sig.function_entry;
     let mut llvm_return = sig.llvm_return;
@@ -432,7 +441,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     }
 
     // Phase 4: Coerce operands and emit the call (delegated to core_call_emission)
-    return coerce_and_emit_call(trimmed_target, operands, expected_params, llvm_return, is_trait_dispatch, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type, method_operand, helper_descriptor, function_entry, current_temp, current_lines, diagnostics, collected_string_constants, bindings, locals, context);
+    return coerce_and_emit_call(trimmed_target, operands, expected_params, llvm_return, is_trait_dispatch, is_closure_dispatch, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type, method_operand, helper_descriptor, function_entry, current_temp, current_lines, diagnostics, collected_string_constants, bindings, locals, context);
 }
 
 export { lower_call_expression };

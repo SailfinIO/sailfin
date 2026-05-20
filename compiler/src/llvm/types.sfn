@@ -769,6 +769,16 @@ struct CallTargetResolution {
     current_temp: int;
     diagnostics: string[];
     string_constants: StringConstant[];
+    // Issue #689: closure-callee dispatch. When the call target
+    // resolves to a `__closure__@sfn_lambda_<N>`-typed local or a
+    // `fn(...) -> R`-typed parameter binding, this flag steers
+    // `coerce_and_emit_call` into the extractvalue + bitcast +
+    // call sequence instead of the standard `@symbol(...)` path.
+    // `method_operand` carries the loaded `{i8*, i8*}` closure
+    // aggregate when this flag is set.
+    is_closure_dispatch: boolean;
+    closure_return_type: string;
+    closure_parameter_types: string[];
 }
 
 struct CallSignatureResolution {
@@ -788,6 +798,11 @@ struct CallSignatureResolution {
     // through unconditionally; this flag carries the precedence
     // decision across the function boundary.
     helper_overridden: boolean;
+    // Issue #689: closure-callee dispatch. Propagated from
+    // `CallTargetResolution.is_closure_dispatch` so the signature
+    // resolver short-circuits the function-entry / helper lookup
+    // (a `__closure__@…`-typed local has no function entry).
+    is_closure_dispatch: boolean;
 }
 
 // Wraps the output of `lower_all_functions` so the orchestrator can

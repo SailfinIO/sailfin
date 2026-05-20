@@ -1,0 +1,17 @@
+// compiler/tests/e2e/fixtures/closure_higher_order/main.sfn
+//
+// Issue #689 acceptance — a function whose parameter is typed
+// `fn(int) -> int` accepts a lambda value and dispatches it. The
+// parameter binding's `type_annotation` is the literal
+// `fn(int) -> int` string (parsed by #688's `parse_function_type`),
+// which #689 maps to the same `{i8*, i8*}` closure pair the local
+// `__closure__@sfn_lambda_<N>` binding uses. Dispatch goes through
+// the closure-callee branch in `coerce_and_emit_call`.
+//
+// Expected stdout: 10 (5 + 5).
+fn apply(cb: fn (int) -> int, x: int) -> int { return cb(x); }
+
+fn main() ![io] {
+    let doubler = fn (n: int) -> int { return n + n; };
+    print(apply(doubler, 5));
+}
