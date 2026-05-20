@@ -88,13 +88,14 @@ kind = "runtime"
 # entry-point clash.
 c-sources = ["src/sailfin_arena.c", "src/sailfin_runtime.c", "src/sailfin_sha256.c", "src/sailfin_base64.c"]
 ll-sources = ["ir/runtime_globals.ll"]
-# `clock.sfn` is required after PR 2 of the sleep migration (issue
-# #397) deleted the `sfn_sleep` C trampoline — the prelude always
-# emits a call to `@sfn_sleep` via the `sleep(ms)` wrapper, and
-# without `clock.sfn` linked the synthetic build fails with
-# "undefined reference to sfn_sleep". The list still leads with
-# `test_marker.sfn` so the "consumer fires for sfn-sources"
-# assertions below remain pointed at the marker file.
+# PR 2 of the sleep migration (issue 397) deleted the C
+# `sfn_sleep` trampoline, so `clock.sfn` is now required at link
+# time: the prelude always emits a call to `@sfn_sleep` via the
+# `sleep(ms)` wrapper, and without `clock.sfn` listed here the
+# synthetic build fails with "undefined reference to sfn_sleep".
+# The list still leads with `test_marker.sfn` so the "consumer
+# fires for sfn-sources" assertions below remain pointed at the
+# marker file.
 sfn-sources = ["../sfn/test_marker.sfn", "../sfn/clock.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm"]

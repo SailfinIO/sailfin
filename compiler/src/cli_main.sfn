@@ -295,9 +295,15 @@ fn _runtime_prelude_path(root: string) -> string ![io] {
 // path needs the staged `.o` to resolve the symbol. Search order
 // mirrors `_runtime_prelude_path` so a bundled install and an
 // in-tree dev build both pick the right file. Returns `""` when
-// the artifact is missing — callers warn but proceed, because a
-// user program that doesn't call `sleep()` strips the unresolved
-// reference and links cleanly.
+// the artifact is missing — in practice the link will then fail
+// with "undefined reference to `sfn_sleep`", because the prelude
+// is always linked and its `sleep(milliseconds)` wrapper emits a
+// `call void @sfn_sleep(...)` regardless of whether the user
+// program itself calls `sleep()`. The only situation where an
+// empty return is benign is when linking against a legacy runtime
+// bundle that still defines `sfn_sleep` in `sailfin_runtime.c`
+// (i.e. a runtime that predates this PR); callers don't try to
+// detect that and let `clang`'s linker surface the error.
 fn _runtime_clock_path(root: string) -> string ![io] {
     let bundled = _path_join(root, "native/obj/clock.o");
     if fs.exists(bundled) { return bundled; }
