@@ -1,11 +1,12 @@
 // runtime/sfn/clock.sfn
 //
-// **Status: dormant — not linked into any binary today.** This file
-// pins the future shape of the Sailfin definition of `sfn_sleep`
-// for documentation and typecheck/emit smoke testing. The symbol
-// `@sfn_sleep` that compiled user `sleep(N)` calls actually resolve
-// to today is defined as a C trampoline in
-// `runtime/native/src/sailfin_runtime.c`.
+// Sailfin-native definition of `@sfn_sleep`. PR 2 of the sleep
+// migration (issue #397, part of M2 epic #389) replaces the
+// pre-existing C trampoline in `runtime/native/src/sailfin_runtime.c`
+// with a direct `nanosleep` call from
+// `runtime/sfn/platform/posix.sfn`. The C entrypoint
+// `sailfin_runtime_sleep` and its `platform/libc.sfn` declaration
+// disappear in the same PR.
 //
 // Unit contract: `milliseconds`. This matches the public `sleep(ms)`
 // surface in the prelude (`runtime/prelude.sfn`) and the `time`
@@ -14,38 +15,65 @@
 // `docs/runtime_architecture.md` §2.7.4. Issue #307 is the unit
 // audit that locked this in across all four layers.
 //
-// PR 2 of the sleep migration replaces the C trampoline with a real
-// Sailfin link of this file, once the build infrastructure for
-// compiling `runtime/sfn/*.sfn` modules into link-time `.o`s is
-// reliably in place. That infrastructure depends on issue #308's
-// IPC-isolation track (the parent compiler subprocess-spawning a
-// child compiler currently races on shared `build/sailfin/.foo`
-// scratch state, producing miscompiled IR for runtime modules).
-// Until then, the registry rewire in
-// `compiler/src/llvm/runtime_helpers.sfn` ships the call-site
-// routing and the C trampoline backs the symbol.
+// Linkage: this file is listed in `runtime/native/capsule.toml`'s
+// `sfn-sources` array; `_compile_runtime_sfn_sources` in
+// `compiler/src/cli_main.sfn` compiles it to a `.o` and threads it
+// into the final link. The `@sfn_sleep` symbol becomes the sole
+// definition site once the prior C trampoline (`sfn_sleep` in
+// `sailfin_runtime.c`) is deleted in the same PR.
 //
-// What this file proves today:
-//   - `sfn check runtime/sfn/clock.sfn` typechecks cleanly.
-//   - `sfn fmt --check runtime/sfn/clock.sfn` is canonical.
-//   - `sfn emit llvm runtime/sfn/clock.sfn` produces well-formed
-//     LLVM IR with `define void @sfn_sleep(double)` and a call to
-//     the imported `sailfin_runtime_sleep` trampoline.
+// Timespec layout: `{ tv_sec: i64, tv_nsec: i64 }` matches the
+// C `struct timespec` on every platform Sailfin currently
+// targets (Linux x86_64 and macOS arm64 both use 8-byte
+// `time_t` and 8-byte `long` for `tv_nsec`). Platform-conditional
+// sizing for 32-bit `time_t` targets is out of scope per the
+// architecture doc §2.9 Q7 and this issue's `Out:` scope.
+//
+// EINTR handling: nanosleep is called once with a null `rem`
+// pointer. Signal-driven interruption of the call therefore
+// short-circuits the sleep without remainder tracking — an
+// acceptable v0 limitation because (a) the compiler binary has
+// no installed signal handlers that would interrupt sleep, and
+// (b) full EINTR-resume requires either `errno` access or
+// pointer-write semantics on the `rem` field that Sailfin does
+// not yet expose to user code (the alloca-cache model defeats
+// in-place struct mutation through a C-side pointer write).
+// A proper EINTR loop lands once those primitives ship, alongside
+// the `clock_gettime` migration (sibling adapter PR).
 //
 // Pinned by `compiler/tests/e2e/test_runtime_clock_skeleton.sh`
-// (typecheck + fmt + LLVM `define`/`call` shape) and
-// `test_sleep_routes_to_sfn_clock.sh` (call-site rewrite sentinel —
-// fails the moment the registry rewire is reverted). The end-to-end
-// unit semantics are pinned by
+// (typecheck + fmt + LLVM `define`/`call` shape over `@nanosleep`)
+// and `test_sleep_routes_to_sfn_clock.sh` (call-site rewire
+// sentinel — fails the moment the registry rewire is reverted).
+// The end-to-end unit semantics are pinned by
 // `test_sleep_unit_semantics.sh` (issue #307).
-//
-// When PR 2 lands and this file becomes the sole definition site,
-// the `// dormant` framing here gets stripped, the C trampoline in
-// `sailfin_runtime.c` is deleted, and the libc-direct rewrite
-// (over `nanosleep` in `platform/posix.sfn`, gated on §2.9 Q7) can
-// either land in PR 2 or follow as PR 3.
-import { sailfin_runtime_sleep } from "./platform/libc";
+import { nanosleep } from "./platform/posix";
+
+struct Timespec {
+    tv_sec: i64;
+    tv_nsec: i64;
+}
 
 fn sfn_sleep(milliseconds: float) -> void ![clock] {
-    sailfin_runtime_sleep(milliseconds);
+    // Mirror the pre-PR C contract: non-positive sleeps are no-ops.
+    if milliseconds <= 0.0 { return; }
+
+    // Decompose milliseconds into integer seconds + nanoseconds.
+    // `fptosi` truncates toward zero — matches `(time_t)` in C for
+    // the positive inputs the surface contract permits.
+    let secs: i64 = milliseconds / 1000.0;
+    let secs_as_float: float = secs;
+    let residual_ms: float = milliseconds - secs_as_float * 1000.0;
+    let mut nanos: i64 = residual_ms * 1000000.0;
+
+    // Clamp nanoseconds to nanosleep's permitted range
+    // (`0..=999_999_999`). The C runtime applied the same clamp
+    // (`sailfin_runtime.c`'s pre-deletion body); replicate it here so
+    // floating-point drift never produces an `EINVAL`-triggering
+    // `tv_nsec` value.
+    if nanos < 0 { nanos = 0; }
+    if nanos >= 1000000000 { nanos = 999999999; }
+
+    let req: Timespec = Timespec { tv_sec: secs, tv_nsec: nanos };
+    nanosleep(req, null);
 }

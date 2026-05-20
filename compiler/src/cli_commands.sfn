@@ -159,6 +159,27 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
             }
             pi += 1;
         }
+        // PR 2 of the sleep migration (issue #397) moved `@sfn_sleep`
+        // from `runtime/native/src/sailfin_runtime.c` into the Sailfin
+        // module `runtime/sfn/clock.sfn`. The test-link path globs the
+        // C sources above but doesn't compile Sailfin modules, so the
+        // staged clock.o has to be added explicitly here for any test
+        // that calls `sleep()` (and for the prelude's `sleep` wrapper,
+        // which is always linked even when the test itself doesn't
+        // exercise it — the unresolved external is the failure mode).
+        // Same search order as the prelude paths above.
+        let clock_paths: string[] = ["build/selfhost/native/obj/runtime/clock.o", "build/native/obj/runtime/clock.o", "build/native/obj/clock.o", runtime_root
+            + "/native/obj/runtime/clock.o", runtime_root
+            + "/native/obj/clock.o",];
+        let mut ci: int = 0;
+        loop {
+            if ci >= clock_paths.length { break; }
+            if fs.exists(clock_paths[ci]) {
+                args.push(clock_paths[ci]);
+                break;
+            }
+            ci += 1;
+        }
     }
     args.push("-lm");
     args.push("-pthread");
@@ -1657,6 +1678,34 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         if cp_prelude != 0 {
             print("sfn package: failed to stage prelude object from "
                 + prelude_src);
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
+    }
+
+    // Pre-built clock object — Sailfin-native `@sfn_sleep`
+    // definition added in PR 2 of the sleep migration (issue #397).
+    // Same staging convention as the prelude: optional on a fresh
+    // checkout, hard fail once we commit to including it. Without
+    // this the installer link path resolves `@sfn_sleep` from
+    // nowhere and any program calling `sleep()` fails at link time.
+    let clock_a = "build/selfhost/native/obj/runtime/clock.o";
+    let clock_b = "build/native/obj/runtime/clock.o";
+    let mut clock_src: string = "";
+    if fs.exists(clock_a) { clock_src = clock_a; } else {
+        if fs.exists(clock_b) { clock_src = clock_b; }
+    }
+    if clock_src.length > 0 {
+        let mk_obj_dir = process.run(["mkdir", "-p", staging_runtime_obj]);
+        if mk_obj_dir != 0 {
+            print("sfn package: failed to create runtime obj staging dir");
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
+        let cp_clock = process.run(["cp", "-f", clock_src, staging_runtime_obj
+            + "/clock.o"]);
+        if cp_clock != 0 {
+            print("sfn package: failed to stage clock object from " + clock_src);
             process.run(["rm", "-rf", staging]);
             return 1;
         }

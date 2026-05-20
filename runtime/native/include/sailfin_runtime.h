@@ -71,29 +71,13 @@ extern "C"
     void sailfin_runtime_print_warn(char *msg);
     void sailfin_runtime_print_error(char *msg);
 
-    /* Suspend the calling thread for at least `milliseconds` ms.
-     * Negative or zero values return immediately. POSIX builds use
-     * `nanosleep` and resume on EINTR; Windows uses `Sleep`. The unit
-     * (milliseconds) matches the public `sleep(ms)` surface in the
-     * prelude / `time` capsule and the language spec; see issue #307
-     * for the unit audit. */
-    void sailfin_runtime_sleep(double milliseconds);
-
-    /* Sleep migration trampoline: compiled user `sleep(N)` calls now
-     * lower to `@sfn_sleep` (via the runtime helper registry rewire
-     * in compiler/src/llvm/runtime_helpers.sfn). This C function
-     * provides the symbol globally so all link paths resolve cleanly.
-     * Argument is milliseconds — same contract as `sailfin_runtime_sleep`
-     * and the public `sleep(ms)` surface.
-     *
-     * The eventual Sailfin definition (runtime/sfn/clock.sfn) replaces
-     * this C trampoline in PR 2 of the migration, once the build
-     * infrastructure for compiling runtime/sfn-side modules into
-     * link-time .o artifacts is in place (depends on issue #308's
-     * IPC-isolation track). For now the symbol is defined here so
-     * the call-site rewire ships without requiring that infrastructure.
-     */
-    void sfn_sleep(double milliseconds);
+    /* `sailfin_runtime_sleep` and the `sfn_sleep` C trampoline were
+     * deleted in PR 2 of the sleep migration (issue #397). The
+     * `@sfn_sleep` symbol is now defined in Sailfin at
+     * `runtime/sfn/clock.sfn` and linked via the runtime capsule's
+     * `sfn-sources`. Compiled user `sleep(N)` calls continue to
+     * resolve through the registry's `target: "sleep" -> symbol:
+     * "sfn_sleep"` entry without any header surface here. */
 
     // Monotonic clock for profiling/timing.
     // Returns an integer millisecond count as a `double` for stage2 ABI.

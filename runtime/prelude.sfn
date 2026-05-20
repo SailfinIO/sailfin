@@ -78,9 +78,11 @@ struct TypeDescriptor {
 }
 
 // alias-coverage: runtime helper double-ABI seam — `runtime_sleep_fn`
-// (and the underlying `sfn_sleep` / `sailfin_runtime_sleep` C
-// entrypoints) still take `double`. Cast at the boundary so the
-// post-#556 symmetric int↔float refusal stays clean.
+// (and the underlying `sfn_sleep` Sailfin definition in
+// `runtime/sfn/clock.sfn`, which calls libc `nanosleep` directly
+// as of PR 2 of the sleep migration / issue #397) still takes
+// `double`. Cast at the boundary so the post-#556 symmetric
+// int↔float refusal stays clean.
 fn sleep(milliseconds: int) ![clock] {
     runtime_sleep_fn(milliseconds as float);
 }

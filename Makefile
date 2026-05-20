@@ -776,6 +776,22 @@ rebuild:
 		echo "[rebuild] staging prelude.o..."; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/prelude.ll -o build/native/obj/runtime/prelude.o; \
 	fi
+	@# Stage clock.o (Sailfin-native `@sfn_sleep` from runtime/sfn/clock.sfn).
+	@# PR 2 of the sleep migration (issue #397) deleted the C `sfn_sleep`
+	@# trampoline; `@sfn_sleep` now lives only in the Sailfin module.
+	@# The legacy `sfn run` / `sfn build` link path
+	@# (`_clang_compile_runtime_objects` in `compiler/src/cli_main.sfn`)
+	@# resolves the symbol against this staged .o. The runtime-capsule
+	@# link path (used by `make compile`) instead reaches clock.sfn
+	@# through `runtime/native/capsule.toml`'s `sfn-sources` array.
+	@if [ ! -f build/native/obj/runtime/clock.ll ]; then \
+		echo "[rebuild] staging clock.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/clock.ll llvm runtime/sfn/clock.sfn >/dev/null; \
+	fi
+	@if [ ! -f build/native/obj/runtime/clock.o ]; then \
+		echo "[rebuild] staging clock.o..."; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/clock.ll -o build/native/obj/runtime/clock.o; \
+	fi
 	@# Write build stamp (version + git hash for dev builds).
 	@# `version.sfn::resolve_compiler_version` reads this file
 	@# first, so without it the binary would report whatever stale
@@ -830,12 +846,17 @@ ci-cross-windows:
 	echo "[cross-windows] cross-compiling for Windows from Linux LLVM IR..."; \
 	SAVED_DIR="build/native/raw"; \
 	PRELUDE_LL="build/native/obj/runtime/prelude.ll"; \
+	CLOCK_LL="build/native/obj/runtime/clock.ll"; \
 	if [ ! -d "$$SAVED_DIR" ] || [ ! -f "$$SAVED_DIR/program.ll" ]; then \
 		echo "[cross-windows][error] missing $$SAVED_DIR/*.ll + program.ll — run 'make rebuild' first" >&2; \
 		exit 1; \
 	fi; \
 	if [ ! -f "$$PRELUDE_LL" ]; then \
 		echo "[cross-windows][error] missing $$PRELUDE_LL — 'make rebuild' should have emitted it" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$$CLOCK_LL" ]; then \
+		echo "[cross-windows][error] missing $$CLOCK_LL — 'make rebuild' should have emitted it (sleep migration PR 2, #397)" >&2; \
 		exit 1; \
 	fi; \
 	echo "[cross-windows] using saved sfn build IR layout ($$SAVED_DIR)"; \
@@ -884,6 +905,10 @@ ci-cross-windows:
 			-c "$$PRELUDE_LL" -o "$$WIN_OBJ/runtime/prelude.o"; \
 	fi; \
 	\
+	echo "[cross-windows] compiling clock (Sailfin-native @sfn_sleep, #397)..."; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+		-c "$$CLOCK_LL" -o "$$WIN_OBJ/runtime/clock.o"; \
+	\
 	echo "[cross-windows] compiling C runtime..."; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_arena.c \
 		-o "$$WIN_OBJ/sailfin_arena.o"; \
@@ -917,6 +942,7 @@ ci-cross-windows:
 		"$$WIN_OBJ/runtime_globals.o" \
 		"$$WIN_OBJ/native.linked.o" \
 		"$$WIN_OBJ/runtime/prelude.o" \
+		"$$WIN_OBJ/runtime/clock.o" \
 		$$SHIM_O \
 		-lm -lpthread; \
 	\
@@ -935,6 +961,10 @@ ci-cross-windows:
 	if [ -f "$$WIN_OBJ/runtime/prelude.o" ]; then \
 		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
 		cp -f "$$WIN_OBJ/runtime/prelude.o" "$$INSTALLER_DIR/runtime/native/obj/prelude.o"; \
+	fi; \
+	if [ -f "$$WIN_OBJ/runtime/clock.o" ]; then \
+		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+		cp -f "$$WIN_OBJ/runtime/clock.o" "$$INSTALLER_DIR/runtime/native/obj/clock.o"; \
 	fi; \
 	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
 	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"
