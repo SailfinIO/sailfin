@@ -224,7 +224,11 @@ test_disable_gate_skips_consumer() {
         echo "[test]   expectation if PR 2 of the sleep migration was reverted."
         return 1
     fi
-    if ! grep -qE "undefined reference to .sfn_sleep." "$log"; then
+    # GNU ld (Linux) says: `undefined reference to 'sfn_sleep'`
+    # macOS ld says:       `"_sfn_sleep", referenced from: _sleep in prelude.o`
+    # ld64 prefixes user symbols with an underscore on Mach-O, so the
+    # alternation covers both forms.
+    if ! grep -qE "undefined reference to .sfn_sleep.|\"_sfn_sleep\", referenced from" "$log"; then
         echo "[test]   sfn build failed but not for the expected sfn_sleep reason:"
         tail -40 "$log"
         return 1
