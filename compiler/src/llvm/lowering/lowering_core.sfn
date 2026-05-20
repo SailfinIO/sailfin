@@ -57,7 +57,13 @@ import {
     TraitMetadata,
     TypeContext
 } from "../types";
-import { index_of, number_to_string, sanitize_symbol } from "../utils";
+import {
+    index_of,
+    number_to_string,
+    sanitize_symbol,
+    starts_with,
+    trim_text
+} from "../utils";
 import {
     collect_defined_function_symbols,
     extend_native_enums,
@@ -262,11 +268,23 @@ fn compile_native_text_to_llvm_file(native_text: string, module_name: string, ou
         return false;
     }
     // Refuse to write IR when any lowering pass surfaced a `[fatal]`
-    // diagnostic. Currently issued by `core_call_emission.sfn` for
-    // calls whose return type cannot be resolved (issue #306) — a
+    // diagnostic. Issued by `core_call_emission.sfn` for calls whose
+    // return type cannot be resolved (issue #306) and by
+    // `lower_expression`'s `<closure_pair_fatal_mutable ...>` handler
+    // for capturing lambdas with mutable captures (issue #687). A
     // partial IR file with the side-effecting call silently dropped
-    // would be worse than no output at all.
-    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) { return false; }
+    // would be worse than no output at all. Print every fatal so the
+    // user sees the underlying cause before the build aborts.
+    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
+        let mut _fdi: int = 0;
+        loop {
+            if _fdi >= lowered_lines.diagnostics.length { break; }
+            let _diag = lowered_lines.diagnostics[_fdi];
+            if index_of(_diag, "[fatal]") >= 0 { print.err(_diag); }
+            _fdi += 1;
+        }
+        return false;
+    }
     let lowered_count = lowered_lines.lines.length;
     if lowered_count > 0 {
         let defined = collect_defined_function_symbols(lowered_lines.lines);
@@ -553,6 +571,15 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     lines = extend_string_lines(lines, function_result.lines);
     diagnostics = extend_string_lines_checked(diagnostics, function_result.diagnostics, "function lowering");
 
+    // Capturing-lambda env type decls (#687). The lambda-site
+    // env_alloc marker and the lifted-function prologue marker each
+    // emit a `; closure_env_type_decl %sfn_closure_env_<N> = type {...}`
+    // hint inline with the using function's IR. LLVM requires named
+    // struct types to be declared at module scope BEFORE any use, so
+    // we lift the hints to the preamble — right after the
+    // `source_filename` line — with dedup by type name.
+    lines = hoist_closure_env_type_decls(lines);
+
     if timing {
         print.err("test llvm: phase=functions ms=" + number_to_string(monotonic_millis() - start_ms));
     }
@@ -635,4 +662,115 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         capability_manifest: manifest,
         string_constants: all_string_constants
     };
+}
+
+// Hoist `; closure_env_type_decl %T = type { ... }` hint comments
+// from inside function bodies up to the module preamble (issue #687).
+// Each lambda's hint is emitted twice — once at the lambda-site
+// alloc and once at the lifted-function load prologue — so the
+// dedup table tracks the LLVM type name (`%sfn_closure_env_<N>`)
+// and skips duplicates. The hoist inserts the unique decls
+// immediately after the `source_filename = "..."` line, which
+// guarantees they appear before any function body that references
+// the named type.
+fn hoist_closure_env_type_decls(lines: string[]) -> string[] {
+    let hint_prefix = "; closure_env_type_decl ";
+    let mut hoisted: string[] = [];
+    let mut seen_names: string[] = [];
+    let mut filtered: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = lines[index];
+        let trimmed = trim_text(line);
+        if starts_with(trimmed, hint_prefix) {
+            let decl_text = trim_text(substring(trimmed, hint_prefix.length, trimmed.length));
+            let type_name = _hoist_extract_type_name(decl_text);
+            if type_name.length > 0 {
+                let mut already: boolean = false;
+                let mut _si: int = 0;
+                loop {
+                    if _si >= seen_names.length { break; }
+                    if seen_names[_si] == type_name {
+                        already = true;
+                        break;
+                    }
+                    _si += 1;
+                }
+                if !already {
+                    seen_names.push(type_name);
+                    hoisted.push(decl_text);
+                }
+            }
+            // Drop the hint line — it has been hoisted (or was a duplicate).
+        } else { filtered.push(line); }
+        index += 1;
+    }
+    if hoisted.length == 0 { return lines; }
+
+    // Find the insertion point: the line right after `source_filename = `.
+    let mut insert_after: int = -1;
+    let mut fi: int = 0;
+    loop {
+        if fi >= filtered.length { break; }
+        if starts_with(trim_text(filtered[fi]), "source_filename = ") {
+            insert_after = fi;
+            break;
+        }
+        fi += 1;
+    }
+
+    let mut result: string[] = [];
+    let mut ri: int = 0;
+    loop {
+        if ri >= filtered.length { break; }
+        result.push(filtered[ri]);
+        if ri == insert_after {
+            result.push("");
+            let mut hi: int = 0;
+            loop {
+                if hi >= hoisted.length { break; }
+                result.push(hoisted[hi]);
+                hi += 1;
+            }
+        }
+        ri += 1;
+    }
+    // Fallback: if we never found a source_filename anchor, prepend.
+    if insert_after < 0 {
+        let mut prepended: string[] = [];
+        let mut hi2: int = 0;
+        loop {
+            if hi2 >= hoisted.length { break; }
+            prepended.push(hoisted[hi2]);
+            hi2 += 1;
+        }
+        prepended.push("");
+        let mut _fi2: int = 0;
+        loop {
+            if _fi2 >= filtered.length { break; }
+            prepended.push(filtered[_fi2]);
+            _fi2 += 1;
+        }
+        return prepended;
+    }
+    return result;
+}
+
+// Extract `%T` from `%T = type { ... }`. The name spans from the
+// leading `%` up to (but not including) the first space.
+fn _hoist_extract_type_name(decl: string) -> string {
+    let trimmed = trim_text(decl);
+    if trimmed.length == 0 { return ""; }
+    if trimmed[0] != "%" { return ""; }
+    let mut cursor: int = 0;
+    let mut name: string = "";
+    loop {
+        if cursor >= trimmed.length { break; }
+        let ch = trimmed[cursor];
+        if ch == " " { break; }
+        name = name + ch;
+        cursor += 1;
+    }
+    return name;
 }

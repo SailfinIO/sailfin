@@ -158,23 +158,104 @@ test "lift: lambda referencing a top-level fn lifts without producing captures" 
     assert init.text == "<closure_pair @sfn_lambda_0 null>";
 }
 
-// ── Capturing lambdas are NOT lifted (regression guard for #687) ─────
-test "lift: capturing lambda keeps its Expression.Lambda node" ![io] {
-    // `x` is bound in the enclosing scope, so the lambda captures
-    // it — `analyze_lambda_captures` returns a record with
-    // `captures.length == 1`. The lifting pass MUST refuse to lift
-    // (the `<lambda>` placeholder + capturing dispatch are #687's
-    // territory).
+// ── Capturing lambdas: env_alloc marker + prologue body (issue #687) ─
+//
+// With #687 in place, capturing lambdas are lifted exactly like
+// non-capturing ones except (a) the closure-pair marker carries an
+// `env_alloc lambda_id=<N> captures=<encoded>` payload, and (b) the
+// lifted body's first statement is a `<closure_env_load_prologue ...>`
+// marker whose LLVM lowering emits the A2 prologue and registers the
+// loaded SSA temps as local bindings.
+test "lift #687: single-int-capturing lambda lifts and emits env_alloc marker" ![io] {
     let source = "fn main() { let x: int = 5; let f = fn() -> int { return x; }; }";
     let program = parse_program(source);
     let result: LiftResult = lift_non_capturing_lambdas(program);
-    assert result.counter == 0;
-    // No lifted fn appended — the original statement count is
-    // unchanged.
-    assert result.program.statements.length == 1;
+    assert result.counter == 1;
+    assert result.program.statements.length == 2;
+
+    // The lambda site receives an env_alloc closure-pair marker.
     let main_fn: Statement = result.program.statements[0];
     let lambda_stmt: Statement = main_fn.body.statements[1];
     assert lambda_stmt.variant == "VariableDeclaration";
     let init: Expression = lambda_stmt.initializer;
-    assert init.variant == "Lambda";
+    assert init.variant == "Raw";
+    assert init.text == "<closure_pair @sfn_lambda_0 env_alloc lambda_id=0 captures=x:int>";
+
+    // The lifted fn carries the env-load prologue marker as its
+    // first body statement.
+    let lifted: Statement = result.program.statements[1];
+    assert lifted.variant == "FunctionDeclaration";
+    assert lifted.signature.name == "sfn_lambda_0";
+    assert lifted.body.statements.length >= 1;
+    let prologue: Statement = lifted.body.statements[0];
+    assert prologue.variant == "ExpressionStatement";
+    assert prologue.expression.variant == "Raw";
+    assert prologue.expression.text == "<closure_env_load_prologue lambda_id=0 captures=x:int>";
+}
+
+test "lift #687: multi-typed captures preserve A1 first-use order" ![io] {
+    let source = "fn main() { let a: int = 1; let b: boolean = true; let c: string = \"s\"; let f = fn() -> int { if b { return a + c.length; } return a; }; }";
+    let program = parse_program(source);
+    let result: LiftResult = lift_non_capturing_lambdas(program);
+    assert result.counter == 1;
+    assert result.program.statements.length == 2;
+    let main_fn: Statement = result.program.statements[0];
+    let lambda_stmt: Statement = main_fn.body.statements[3];
+    let init: Expression = lambda_stmt.initializer;
+    assert init.variant == "Raw";
+    // A1's walk records captures in first-use order; the lambda
+    // body reads `b` first (in the if-condition), then `a`, then
+    // `c`. The marker must reflect that ordering verbatim so the
+    // env-struct field indices stay consistent across the
+    // lambda-site alloc and the lifted-body prologue.
+    assert init.text == "<closure_pair @sfn_lambda_0 env_alloc lambda_id=0 captures=b:boolean,a:int,c:string>";
+}
+
+test "lift #687: shadowing — capture `x` resolves to prologue, not outer" ![io] {
+    // Acceptance criterion: outer `let x = 1; let f = fn(y) { return x + y; };`
+    // — the capture `x` must bind to the prologue temp, not any
+    // outer SSA value. At the AST level, this manifests as the
+    // lifted function body's prologue marker naming `x` as a
+    // capture. The LLVM-side splice (in
+    // `_lower_closure_env_load_prologue_marker`) appends a
+    // `LocalBinding` named `x` to the lifted function's locals so
+    // `find_local_binding` finds it before any module-global `x`.
+    let source = "fn main() { let x: int = 1; let f = fn(y: int) -> int { return x + y; }; }";
+    let program = parse_program(source);
+    let result: LiftResult = lift_non_capturing_lambdas(program);
+    assert result.counter == 1;
+    let lifted: Statement = result.program.statements[1];
+    assert lifted.signature.parameters.length == 2;
+    assert lifted.signature.parameters[0].name == "__env";
+    assert lifted.signature.parameters[1].name == "y";
+    let prologue: Statement = lifted.body.statements[0];
+    assert prologue.expression.text == "<closure_env_load_prologue lambda_id=0 captures=x:int>";
+    // The user's `return x + y;` statement still appears AFTER the
+    // prologue — name resolution at lower time picks up the
+    // prologue's `x` binding (appended to locals) over any outer
+    // module-global.
+    assert lifted.body.statements.length == 2;
+    let user_return: Statement = lifted.body.statements[1];
+    assert user_return.variant == "ReturnStatement";
+}
+
+test "lift #687: mutable capture is refused with a fatal marker" ![io] {
+    // Per the M1.5 capture freeze, mutable captures are not yet
+    // supported. The lifting pass emits a
+    // `closure_pair_fatal_mutable` marker instead of synthesising a
+    // lifted function — the LLVM-side handler turns it into a
+    // `llvm lowering [fatal]:` diagnostic and the build refuses to
+    // write IR.
+    let source = "fn main() { let mut x: int = 1; let f = fn() -> int { return x; }; }";
+    let program = parse_program(source);
+    let result: LiftResult = lift_non_capturing_lambdas(program);
+    // Mutable-capture refusal short-circuits before counter advance
+    // so the lambda_id stays at 0 (the first available slot).
+    assert result.counter == 0;
+    assert result.program.statements.length == 1;
+    let main_fn: Statement = result.program.statements[0];
+    let lambda_stmt: Statement = main_fn.body.statements[1];
+    let init: Expression = lambda_stmt.initializer;
+    assert init.variant == "Raw";
+    assert init.text == "<closure_pair_fatal_mutable lambda_id=0 name=x>";
 }

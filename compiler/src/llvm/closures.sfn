@@ -59,6 +59,57 @@ import { format_temp_name } from "./expressions_helpers";
 import { ends_with_pointer_suffix, map_type_annotation } from "./type_mapping";
 import { join_with_separator, number_to_string, trim_text } from "./utils";
 
+// Decode the `name:type,name:type,...` capture list produced by the
+// lifting pass (see `_encode_captures` in `lambda_lowering.sfn`)
+// back into a `Capture[]` suitable for `synthesize_closure_env_struct`.
+// `by_value` is set true (M1.5 captures are by-value snapshots) and
+// `mutable` is false (the lift pass refuses mutable captures via a
+// separate fatal marker before any encoding happens — anything that
+// reaches `decode_captures` is guaranteed-immutable).
+fn decode_captures(encoded: string) -> Capture[] {
+    let mut captures: Capture[] = [];
+    if encoded.length == 0 { return captures; }
+    let mut cursor: int = 0;
+    loop {
+        if cursor >= encoded.length { break; }
+        let mut field_text: string = "";
+        loop {
+            if cursor >= encoded.length { break; }
+            let ch = encoded[cursor];
+            if ch == "," {
+                cursor += 1;
+                break;
+            }
+            field_text = field_text + ch;
+            cursor += 1;
+        }
+        if field_text.length == 0 { continue; }
+        let mut name: string = "";
+        let mut type_text: string = "";
+        let mut at_type: boolean = false;
+        let mut fi: int = 0;
+        loop {
+            if fi >= field_text.length { break; }
+            let fch = field_text[fi];
+            if fch == ":" {
+                if !at_type {
+                    at_type = true;
+                    fi += 1;
+                    continue;
+                }
+            }
+            if at_type { type_text = type_text + fch; } else {
+                name = name + fch;
+            }
+            fi += 1;
+        }
+        captures.push(Capture {
+            name: name, type_text: type_text, by_value: true, mutable: false, span: null
+        });
+    }
+    return captures;
+}
+
 // One env-struct field, materialised from a `Capture`. Index is
 // the position in `fields[]`; LLVM emits `getelementptr ... i32 0,
 // i32 <index>`. `llvm_type` is mapped through
@@ -447,6 +498,7 @@ export {
     ClosureEnvPrologueResult,
     closure_env_type_name,
     closure_field_llvm_type,
+    decode_captures,
     emit_closure_env_alloc,
     emit_closure_env_load_prologue,
     emit_closure_pair_aggregate,
