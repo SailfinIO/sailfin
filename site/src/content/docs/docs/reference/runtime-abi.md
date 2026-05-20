@@ -93,7 +93,7 @@ declared source parameter:
 define <ret_ty> @sfn_lambda_<id>(i8* %env, <decl_param_tys>...)
 ```
 
-Callers materialise the closure pair at the lambda expression site and
+Callers materialize the closure pair at the lambda expression site and
 pass `env_ptr` as the first argument on every invocation. Non-capturing
 lambdas use the same signature — the `%env` parameter is unused but
 present, so the call shape is uniform.
@@ -110,17 +110,26 @@ helper API in `compiler/src/llvm/closures.sfn` settles this contract:
 - `emit_closure_env_alloc(layout, operands, temp_index)` — the alloc +
   GEP+store sequence at the lambda expression site. The allocation
   routes through the [`sailfin_runtime_alloc_struct`](#allocation-helpers)
-  entry point documented above, sized via the standard
-  `getelementptr null, i32 1` + `ptrtoint` size-of idiom.
+  entry point documented above, sized via the standard size-of idiom
+  (no `inbounds`):
+
+  ```llvm
+  %size_ptr = getelementptr %sfn_closure_env_<id>,
+                            %sfn_closure_env_<id>* null, i32 1
+  %size_i64 = ptrtoint %sfn_closure_env_<id>* %size_ptr to i64
+  ```
 - `emit_closure_env_load_prologue(layout, env_param_name, temp_index)` —
   the GEP+load prologue inside the lifted lambda body that rebinds each
   capture to a local SSA name keyed by `Capture.name`.
 
 **Non-capturing case.** When `captures.length == 0` the layout is
 flagged `is_empty` and both emit helpers return no lines. The closure
-pair is materialised with `env_ptr = null` (an `i8* null` literal); the
+pair is materialized with `env_ptr = null` (an `i8* null` literal); the
 lifted lambda still takes the hidden `%env` parameter and simply ignores
-it. Callers must not branch on `env_ptr == null` — the value is opaque.
+it. Callers should treat `env_ptr` as opaque — nullness for the
+non-capturing case is an implementation detail, not a stable contract,
+and the uniform call shape means non-capturing dispatch needs no
+special case.
 
 **Lifetime stance (env outlives the closure pair; no drop yet).** The
 env struct is allocated through `sailfin_runtime_alloc_struct`, which
