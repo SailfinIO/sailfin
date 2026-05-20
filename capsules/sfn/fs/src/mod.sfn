@@ -2,7 +2,6 @@
 //
 // Provides typed access to the local filesystem. All operations require
 // the `io` effect and are synchronous in the current runtime.
-
 fn read(path: string) -> string ![io] {
     // Read the entire contents of a file as a UTF-8 string.
     return fs.readFile(path);
@@ -37,4 +36,59 @@ fn mkdir(path: string) -> void ![io] {
 fn read_dir(path: string) -> string[] ![io] {
     // List the entries in a directory.
     return fs.listDirectory(path);
+}
+
+// ---------------------------------------------------------------------
+// P5 (#366): Phase 0 precondition — five POSIX primitives the test
+// infrastructure epic (#362) relies on. Until the canonical
+// `Result<(), IoError>` type ships (runtime-enablement Phase 1), the
+// state-changing helpers follow the existing capsule convention:
+// `boolean` for "did the call succeed", numeric for "what value was
+// observed". POSIX-only; Windows builds return a benign failure.
+// ---------------------------------------------------------------------
+fn set_perms(path: string, mode: int) -> boolean ![io] {
+    // chmod(2) wrapper. `mode` is masked to the lower 12 bits before
+    // the syscall so callers can pass either the canonical permission
+    // bits (e.g. `0o644` once octal literals ship; until then,
+    // decimal 420) or a full `st_mode` and get sensible behavior.
+    // TODO: switch to Result<(), IoError> once shipped.
+    return fs.set_perms(path, mode);
+}
+
+fn get_perms(path: string) -> int ![io] {
+    // Returns the lower 12 bits of `st_mode` (perm + sticky/setuid/
+    // setgid) or -1 on any error. The 12-bit mask matches
+    // `stat -c '%a'` and Rust's `Permissions::mode() & 0o7777`.
+    // TODO: switch to Result<int, IoError> once shipped.
+    return fs.get_perms(path);
+}
+
+fn mkdtemp(prefix: string) -> string ![io] {
+    // Creates a unique directory under `$TMPDIR` (or `/tmp`) with
+    // mode `0700` and returns its absolute path. Uses `mkdtemp(3)`
+    // directly so the kernel guarantees uniqueness. Returns an
+    // empty string on failure.
+    //
+    // If `prefix` contains a `/`, it is treated as a path-prefixed
+    // template (the caller picks the parent dir); otherwise the
+    // result lives under the system temp dir.
+    // TODO: switch to Result<string, IoError> once shipped.
+    return fs.mkdtemp(prefix);
+}
+
+fn is_executable(path: string) -> boolean ![io] {
+    // True iff the current process can `exec` the path. Maps to
+    // `access(path, X_OK)`. Permission errors and missing files
+    // both collapse to `false`, mirroring POSIX semantics and
+    // Rust's `std::fs::metadata(...).permissions().mode() & 0o111`
+    // probe.
+    return fs.is_executable(path);
+}
+
+fn symlink(target: string, link: string) -> boolean ![io] {
+    // Creates `link` pointing at `target`. Per POSIX, the target
+    // need not exist; dangling symlinks are intentionally allowed.
+    // Returns true on success.
+    // TODO: switch to Result<(), IoError> once shipped.
+    return fs.symlink(target, link);
 }

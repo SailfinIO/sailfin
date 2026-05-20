@@ -6936,6 +6936,174 @@ bool sailfin_intrinsic_fs_exists(void *path)
 }
 
 /* ------------------------------------------------------------------ */
+/* P5 (#366): Filesystem stdlib gap-fill — perms / mkdtemp /          */
+/* symlink / is_executable. POSIX-only; Windows stubs return a        */
+/* benign failure code so callers under WSL/MSYS see a consistent     */
+/* "not supported" result rather than a link-time miss.               */
+/* ------------------------------------------------------------------ */
+
+/* fs.set_perms(path, mode) — `chmod(2)` equivalent. Returns true on  */
+/* success, false on any error. `mode` is interpreted as the POSIX    */
+/* permission bits (lower 12 bits of `mode_t`); higher bits are       */
+/* masked off before the syscall to keep the surface narrow.          */
+bool sailfin_adapter_fs_set_perms(void *path, int64_t mode)
+{
+    _runtime_enter();
+    const char *path_str = (const char *)path;
+    if (!path_str)
+    {
+        return false;
+    }
+#if defined(_WIN32)
+    (void)mode;
+    return false;
+#else
+    mode_t masked = (mode_t)(mode & 07777);
+    return chmod(path_str, masked) == 0;
+#endif
+}
+
+/* fs.get_perms(path) — returns the lower 12 bits of `st_mode`        */
+/* (perm + sticky/setuid/setgid). Returns -1 on any error. The        */
+/* 12-bit mask matches `stat -c '%a'` and Rust's                      */
+/* `Permissions::mode() & 0o7777` convention.                         */
+int64_t sailfin_adapter_fs_get_perms(void *path)
+{
+    _runtime_enter();
+    const char *path_str = (const char *)path;
+    if (!path_str)
+    {
+        return -1;
+    }
+    struct stat st;
+    if (stat(path_str, &st) != 0)
+    {
+        return -1;
+    }
+    return (int64_t)(st.st_mode & 07777);
+}
+
+/* fs.mkdtemp(prefix) — uses `mkdtemp(3)` so the kernel guarantees a  */
+/* unique name. The returned path is allocated via `malloc` and owned */
+/* by the Sailfin caller; mode is `0700` per `mkdtemp` semantics.     */
+/* Returns an empty malloc'd string on error (the Sailfin caller can  */
+/* check for zero length).                                            */
+void *sailfin_adapter_fs_mkdtemp(void *prefix)
+{
+    _runtime_enter();
+    const char *prefix_str = prefix ? (const char *)prefix : "";
+#if defined(_WIN32)
+    /* Windows lacks mkdtemp; the issue scopes this to POSIX.         */
+    char *empty = (char *)malloc(1);
+    if (empty)
+    {
+        empty[0] = '\0';
+    }
+    return empty;
+#else
+    /* Determine the parent directory. If `prefix` is absolute or     */
+    /* contains a `/`, treat it as a full template prefix; otherwise  */
+    /* anchor under `$TMPDIR` (or `/tmp`).                            */
+    const char *tmpdir = NULL;
+    bool has_dir = false;
+    for (const char *p = prefix_str; *p; p++)
+    {
+        if (*p == '/')
+        {
+            has_dir = true;
+            break;
+        }
+    }
+    if (!has_dir)
+    {
+        tmpdir = getenv("TMPDIR");
+        if (!tmpdir || tmpdir[0] == '\0')
+        {
+            tmpdir = "/tmp";
+        }
+    }
+
+    size_t prefix_len = strlen(prefix_str);
+    size_t dir_len = tmpdir ? strlen(tmpdir) : 0;
+    /* Layout: [dir] [/] [prefix] [XXXXXX] [\0]                       */
+    size_t needed = dir_len + (dir_len > 0 ? 1 : 0) + prefix_len + 6 + 1;
+    char *template_buf = (char *)malloc(needed);
+    if (!template_buf)
+    {
+        char *empty = (char *)malloc(1);
+        if (empty)
+        {
+            empty[0] = '\0';
+        }
+        return empty;
+    }
+    size_t off = 0;
+    if (dir_len > 0)
+    {
+        memcpy(template_buf + off, tmpdir, dir_len);
+        off += dir_len;
+        template_buf[off++] = '/';
+    }
+    memcpy(template_buf + off, prefix_str, prefix_len);
+    off += prefix_len;
+    memcpy(template_buf + off, "XXXXXX", 6);
+    off += 6;
+    template_buf[off] = '\0';
+
+    char *created = mkdtemp(template_buf);
+    if (!created)
+    {
+        free(template_buf);
+        char *empty = (char *)malloc(1);
+        if (empty)
+        {
+            empty[0] = '\0';
+        }
+        return empty;
+    }
+    /* `mkdtemp` returns the same buffer it mutated in place.         */
+    return created;
+#endif
+}
+
+/* fs.is_executable(path) — true iff the current process has         */
+/* execute access. Maps to `access(path, X_OK)`. Missing files and   */
+/* permission errors both collapse to `false` per the issue spec.    */
+bool sailfin_adapter_fs_is_executable(void *path)
+{
+    _runtime_enter();
+    const char *path_str = (const char *)path;
+    if (!path_str)
+    {
+        return false;
+    }
+#if defined(_WIN32)
+    return false;
+#else
+    return access(path_str, X_OK) == 0;
+#endif
+}
+
+/* fs.symlink(target, link) — creates `link` pointing at `target`.   */
+/* Per POSIX, the target need not exist; dangling symlinks are       */
+/* valid. Returns true on success.                                    */
+bool sailfin_adapter_fs_symlink(void *target, void *link)
+{
+    _runtime_enter();
+    const char *target_str = (const char *)target;
+    const char *link_str = (const char *)link;
+    if (!target_str || !link_str)
+    {
+        return false;
+    }
+#if defined(_WIN32)
+    return false;
+#else
+    return symlink(target_str, link_str) == 0;
+#endif
+}
+
+/* ------------------------------------------------------------------ */
 /* Phase 5a: arena mark / rewind                                      */
 /* ------------------------------------------------------------------ */
 

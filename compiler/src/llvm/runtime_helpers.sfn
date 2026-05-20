@@ -365,6 +365,28 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "fs.createDirectory", symbol: "sailfin_adapter_fs_create_directory", return_type: "i1", parameter_types: ["i8*", "i1"], effects: ["io"], native_signature: null, c_abi_return_type: null
     });
 
+    // P5 (#366): filesystem stdlib gap-fill. Permission ops, temp-dir
+    // creation, exec-bit probing, and symlinks — the five POSIX
+    // primitives ~12 e2e bash scripts depend on. The seed cannot
+    // produce these calls yet; the descriptors land first so once
+    // the next seed includes them, capsule-level `fs.set_perms(...)`
+    // calls lower through this table just like `fs.exists`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.set_perms", symbol: "sailfin_adapter_fs_set_perms", return_type: "i1", parameter_types: ["i8*", "i64"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.get_perms", symbol: "sailfin_adapter_fs_get_perms", return_type: "i64", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.mkdtemp", symbol: "sailfin_adapter_fs_mkdtemp", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.is_executable", symbol: "sailfin_adapter_fs_is_executable", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.symlink", symbol: "sailfin_adapter_fs_symlink", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+
     // HTTP adapters (distinct from intrinsics for adapter infrastructure)
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "http_get", symbol: "sailfin_adapter_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: null, c_abi_return_type: null

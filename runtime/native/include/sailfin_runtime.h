@@ -345,6 +345,14 @@ extern "C"
     bool sailfin_adapter_fs_create_directory(void *path, bool recursive);
     bool sailfin_intrinsic_fs_exists(void *path);
 
+    // P5 (#366): perms / mkdtemp / symlink / is_executable. POSIX-only;
+    // Windows builds stub to a benign failure return.
+    bool sailfin_adapter_fs_set_perms(void *path, int64_t mode);
+    int64_t sailfin_adapter_fs_get_perms(void *path);
+    void *sailfin_adapter_fs_mkdtemp(void *prefix);
+    bool sailfin_adapter_fs_is_executable(void *path);
+    bool sailfin_adapter_fs_symlink(void *target, void *link);
+
     // Arena mark/rewind. Phase 5a (`docs/proposals/phase-5a-arena-reset.md`)
     // exposes the existing bump-allocator's mark/rewind primitive to
     // Sailfin code so in-process multi-module tools (`sfn check`,

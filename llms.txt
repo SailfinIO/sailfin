@@ -250,7 +250,7 @@ Declares external C symbols for linking.
 | sfn/math  | "math"      | None          | abs, min, max, clamp, pow, floor, ceil   |
 | sfn/path  | "path"      | None          | join, dirname, basename, ext, normalize  |
 | sfn/toml  | "toml"      | None          | TOML parsing and serialization           |
-| sfn/fs    | "fs"        | io            | File read/write/append, exists, mkdir    |
+| sfn/fs    | "fs"        | io            | File r/w/append, exists, mkdir, perms, symlink, mkdtemp |
 | sfn/os    | "os"        | io            | Env vars, home dir, exec, exit           |
 | sfn/log   | "log"       | io, clock     | Structured leveled logging               |
 | sfn/time  | "time"      | clock         | Sleep, monotonic timing, elapsed         |
