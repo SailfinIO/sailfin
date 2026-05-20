@@ -12,6 +12,7 @@ import {
     NativeStruct,
     NativeEnum
 } from "../../../native_ir";
+import { Capture } from "../../../ast";
 import { trace_lowering } from "../../lowering_debug_state";
 import {
     substring,
@@ -388,7 +389,13 @@ import {
     try_lower_interpolated_string_literal
 } from "./core_literals_lowering";
 
-import { emit_closure_pair_aggregate } from "../../closures";
+import {
+    ClosureCaptureOperand,
+    decode_captures,
+    emit_closure_env_alloc,
+    emit_closure_pair_aggregate,
+    synthesize_closure_env_struct
+} from "../../closures";
 import { map_return_type, map_local_type } from "../../type_mapping";
 
 // Result of `lower_closure_pair_marker`. Mirrors the relevant
@@ -406,7 +413,16 @@ struct _ClosurePairLowerResult {
 // `functions` (added there by the standard `parse_native_artifact`
 // pass — lifted lambdas appear as ordinary top-level `.fn`s) and
 // reconstructs its LLVM fn-pointer type for the bitcast operand.
-fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], context: TypeContext, temp_index: int, lines: string[]) -> _ClosurePairLowerResult {
+//
+// Two forms are accepted:
+//   * `<closure_pair @sfn_lambda_<N> null>` — non-capturing (#686).
+//     Emits the aggregate with a null env slot.
+//   * `<closure_pair @sfn_lambda_<N> env_alloc lambda_id=<N> captures=name:type,...>`
+//     — capturing (#687). Emits the A2 env-struct alloc+populate
+//     sequence (preceded by a hoistable `; closure_env_type_decl ...`
+//     comment) and the aggregate with the alloc's `i8*` env raw var
+//     as the env slot.
+fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], context: TypeContext, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> _ClosurePairLowerResult {
     let mut diagnostics: string[] = [];
     let prefix = "<closure_pair ";
     let mut cursor: int = prefix.length;
@@ -422,7 +438,8 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
     }
 
     // Skip the separating space and read the env operand text
-    // (everything up to the closing `>`).
+    // (everything up to the closing `>` — for capturing lambdas
+    // this includes the full `env_alloc ...` extension form).
     if cursor < marker.length { cursor += 1; }
     let mut env_var: string = "";
     loop {
@@ -464,8 +481,36 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
     }
 
     let fn_ptr_type = _compute_function_pointer_type(target, context);
-    let pair = emit_closure_pair_aggregate(fn_symbol, fn_ptr_type, env_var, temp_index);
     let mut new_lines: string[] = lines;
+    let mut current_temp: int = temp_index;
+    let mut effective_env_var: string = env_var;
+
+    // Capturing path — env_alloc marker. Synthesize the layout from
+    // the encoded captures, emit a hoistable type-decl comment, emit
+    // the alloc+populate walk, then fall through to the closure-pair
+    // aggregate emission with the alloc's env_raw_var.
+    if starts_with(env_var, "env_alloc ") {
+        let alloc_diag = _lower_closure_env_alloc(env_var, target, bindings, locals, current_temp, new_lines);
+        let mut _aci: int = 0;
+        loop {
+            if _aci >= alloc_diag.diagnostics.length { break; }
+            diagnostics.push(alloc_diag.diagnostics[_aci]);
+            _aci += 1;
+        }
+        if alloc_diag.operand == null {
+            return _ClosurePairLowerResult {
+                lines: alloc_diag.lines,
+                temp_index: alloc_diag.temp_index,
+                operand: null,
+                diagnostics: diagnostics
+            };
+        }
+        new_lines = alloc_diag.lines;
+        current_temp = alloc_diag.temp_index;
+        effective_env_var = alloc_diag.operand.value;
+    }
+
+    let pair = emit_closure_pair_aggregate(fn_symbol, fn_ptr_type, effective_env_var, current_temp);
     let mut li: int = 0;
     loop {
         if li >= pair.lines.length { break; }
@@ -482,6 +527,171 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
         operand: operand,
         diagnostics: diagnostics
     };
+}
+
+// Helper: parse the `env_alloc lambda_id=<N> captures=<encoded>`
+// suffix, synthesize the closure-env layout, emit the type-decl
+// comment + alloc walk, and return the env_raw_var via the
+// `_ClosurePairLowerResult.operand.value` slot (callers read this
+// to wire the closure-pair aggregate's env slot).
+fn _lower_closure_env_alloc(env_var_text: string, target: NativeFunction, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> _ClosurePairLowerResult {
+    let mut diagnostics: string[] = [];
+    let lambda_id = _parse_marker_int_field(env_var_text, "lambda_id=");
+    let captures_text = _parse_marker_string_field(env_var_text, "captures=");
+    let captures = decode_captures(captures_text);
+    let layout = synthesize_closure_env_struct(captures, lambda_id);
+    let mut new_lines: string[] = lines;
+    let mut current_temp: int = temp_index;
+    // Emit the type-decl as a hoistable comment so the
+    // module-level post-pass can lift it to the preamble (LLVM
+    // requires named struct types to be declared before any use,
+    // and the lambda site appears before the lifted function).
+    if !layout.is_empty {
+        new_lines.push("; closure_env_type_decl " + layout.type_decl);
+    }
+    // Resolve each capture name to an SSA value, emitting `load`
+    // instructions for stack-allocated locals (whose `pointer`
+    // field is the alloca address, not a value). Loads MUST precede
+    // the `emit_closure_env_alloc` walk because the alloc walk
+    // emits `store <type> <value>, <type>* <field_ptr>` with the
+    // value text spliced verbatim from the operand list — passing a
+    // pointer text where a value is expected is a type error.
+    let resolved = _resolve_capture_operands(captures, bindings, locals, current_temp, new_lines);
+    let mut _ri: int = 0;
+    loop {
+        if _ri >= resolved.diagnostics.length { break; }
+        diagnostics.push(resolved.diagnostics[_ri]);
+        _ri += 1;
+    }
+    new_lines = resolved.lines;
+    current_temp = resolved.temp_index;
+    let alloc = emit_closure_env_alloc(layout, resolved.operands, current_temp);
+    let mut ai: int = 0;
+    loop {
+        if ai >= alloc.lines.length { break; }
+        new_lines.push(alloc.lines[ai]);
+        ai += 1;
+    }
+    let env_operand = LLVMOperand {
+        llvm_type: "i8*",
+        value: alloc.env_raw_var
+    };
+    return _ClosurePairLowerResult {
+        lines: new_lines,
+        temp_index: alloc.next_temp,
+        operand: env_operand,
+        diagnostics: diagnostics
+    };
+}
+
+// Result of `_resolve_capture_operands`. `operands` carries one
+// entry per capture; `lines`/`temp_index` reflect any `load`
+// instructions emitted to materialise the value of a stack-
+// allocated local before storing it into the env struct.
+struct _ResolvedCaptureOperands {
+    operands: ClosureCaptureOperand[];
+    lines: string[];
+    temp_index: int;
+    diagnostics: string[];
+}
+
+// Resolve each capture name against the caller's
+// `LocalBinding[]`/`ParameterBinding[]` lists to produce a
+// `ClosureCaptureOperand` carrying the SSA value text for the env
+// store. For locals whose `pointer` is an alloca address, a
+// `load <type>, <type>* <pointer>` is emitted and the load result
+// becomes the operand value. Parameter bindings (true SSA names)
+// are used verbatim. Missing names fall through to
+// `_field_zero_value` behaviour inside `emit_closure_env_alloc` —
+// that path is instrumented by the A2 golden tests.
+fn _resolve_capture_operands(captures: Capture[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> _ResolvedCaptureOperands {
+    let mut diagnostics: string[] = [];
+    let mut operands: ClosureCaptureOperand[] = [];
+    let mut current_lines: string[] = lines;
+    let mut current_temp: int = temp_index;
+    let mut index: int = 0;
+    loop {
+        if index >= captures.length { break; }
+        let capture = captures[index];
+        let mut value_text: string = "";
+        let local = find_local_binding(locals, capture.name);
+        if local != null {
+            // Heuristic: bindings whose `pointer` starts with `%l`
+            // are stack-allocated and need a `load`; bindings whose
+            // `pointer` already names a value-typed SSA temp (e.g.
+            // the env-load prologue's loaded captures, or the load
+            // emitted here for a nested capture) can be used
+            // directly. The prologue path produces `pointer = %t<N>`
+            // (an SSA value name), so this discriminates correctly.
+            if substring(local.pointer, 0, 2) == "%l" {
+                let load_result = load_local_operand(local, current_temp, current_lines);
+                current_lines = load_result.lines;
+                current_temp = load_result.temp_index;
+                value_text = load_result.operand.value;
+                let mut _ldi: int = 0;
+                loop {
+                    if _ldi >= load_result.diagnostics.length { break; }
+                    diagnostics.push(load_result.diagnostics[_ldi]);
+                    _ldi += 1;
+                }
+            } else { value_text = local.pointer; }
+        } else {
+            let param = find_parameter_binding(bindings, capture.name);
+            if param != null { value_text = param.llvm_name; }
+        }
+        operands.push(ClosureCaptureOperand {
+            name: capture.name, llvm_value: value_text
+        });
+        index += 1;
+    }
+    return _ResolvedCaptureOperands {
+        operands: operands,
+        lines: current_lines,
+        temp_index: current_temp,
+        diagnostics: diagnostics
+    };
+}
+
+// Parse `<key>=<digits>` from a marker substring. Returns 0 when the
+// key is absent or the parse fails — the caller surfaces the broken
+// marker via a malformed-marker diagnostic at the alloc helper.
+fn _parse_marker_int_field(text: string, key: string) -> int {
+    let raw = _parse_marker_string_field(text, key);
+    if raw.length == 0 { return 0; }
+    let mut value: int = 0;
+    let mut idx: int = 0;
+    let zero = char_code("0");
+    let nine = char_code("9");
+    loop {
+        if idx >= raw.length { break; }
+        let ch = raw[idx];
+        let code = char_code(ch);
+        if code < zero { break; }
+        if code > nine { break; }
+        value = value * 10 + (code - zero);
+        idx += 1;
+    }
+    return value;
+}
+
+// Parse `<key>=<value>` where the value runs to the next space, the
+// trailing `>` of the marker, or end-of-string. Returns the empty
+// string when the key is absent.
+fn _parse_marker_string_field(text: string, key: string) -> string {
+    let key_start = index_of(text, key);
+    if key_start < 0 { return ""; }
+    let value_start = key_start + key.length;
+    let mut cursor: int = value_start;
+    let mut value: string = "";
+    loop {
+        if cursor >= text.length { break; }
+        let ch = text[cursor];
+        if ch == " " { break; }
+        if ch == ">" { break; }
+        value = value + ch;
+        cursor += 1;
+    }
+    return value;
 }
 
 // Reconstruct the LLVM fn-pointer text for a lifted lambda from
@@ -555,9 +765,11 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     // into `<closure_pair @sfn_lambda_<N> null>`, which arrives here
     // verbatim as the `.let` initializer text. Detect the prefix
     // before any other parse so the marker never gets mistaken for
-    // a regular identifier or member-access expression.
+    // a regular identifier or member-access expression. Capturing
+    // lambdas (#687) use the same prefix with an extended env_alloc
+    // payload — handled by `lower_closure_pair_marker`.
     if starts_with(stripped, "<closure_pair ") {
-        let pair_result = lower_closure_pair_marker(stripped, functions, context, temp_index, lines);
+        let pair_result = lower_closure_pair_marker(stripped, functions, context, bindings, locals, temp_index, lines);
         let mut _ci_pair: int = 0;
         loop {
             if _ci_pair >= pair_result.diagnostics.length { break; }
@@ -568,6 +780,31 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             lines: pair_result.lines,
             temp_index: pair_result.temp_index,
             operand: pair_result.operand,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    // Mutable-capture refusal (issue #687). The lifting pass emits
+    // this marker in place of a real closure pair when the lambda's
+    // capture set contains a `mutable` binding. The `[fatal]` prefix
+    // matches the sentinel scanned by
+    // `lowering_core.sfn:has_fatal_lowering_diagnostic` — IR writes
+    // are skipped, the build exits non-zero.
+    if starts_with(stripped, "<closure_pair_fatal_mutable ") {
+        let cap_name = _parse_marker_string_field(stripped, "name=");
+        let lam_id = _parse_marker_int_field(stripped, "lambda_id=");
+        let mut name_for_diag: string = cap_name;
+        if name_for_diag.length == 0 { name_for_diag = "<unknown>"; }
+        diagnostics.push("llvm lowering [fatal]: capturing lambda #"
+            + number_to_string(lam_id)
+            + " has mutable capture `"
+            + name_for_diag
+            + "` (not yet supported, see #687)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
             diagnostics: diagnostics,
             string_constants: empty_constants
         };

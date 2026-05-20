@@ -42,6 +42,7 @@
 // keeps cross-module name collisions impossible.
 import {
     Block,
+    Capture,
     Decorator,
     ElseBranch,
     Expression,
@@ -56,6 +57,7 @@ import {
 } from "../../../ast";
 import { Parser, parse_block } from "../../../parser/mod";
 import { LambdaCaptureRecord, analyze_lambda_captures } from "../../../typecheck_captures";
+import { percent_escape_capture_text } from "../../closures";
 import { number_to_string } from "../../utils";
 
 // Mutable walker state threaded through every rewrite call. The
@@ -124,13 +126,51 @@ fn lift_non_capturing_lambdas(program: Program) -> LiftResult {
     return LiftResult { program: new_program, counter: ctx.counter as int };
 }
 
-// Builds the closure-pair marker string. Used by both the lifting
-// pass (writes it into the `Raw` expression) and the LLVM-side
-// dispatcher (matches on the `<closure_pair ` prefix to recognise
-// lifted lambda binding values).
+// Builds the closure-pair marker string for non-capturing lambdas
+// (env_var is typically "null"). Used by both the lifting pass
+// (writes it into the `Raw` expression) and the LLVM-side dispatcher
+// (matches on the `<closure_pair ` prefix to recognise lifted lambda
+// binding values).
 fn closure_pair_marker(lambda_id: int, env_var: string) -> string {
     return "<closure_pair @sfn_lambda_" + number_to_string(lambda_id) + " "
         + env_var
+        + ">";
+}
+
+// Builds the closure-pair marker string for capturing lambdas.
+// `captures_text` is the encoded `name:type,name:type,...` list
+// produced by `_encode_captures` — the LLVM-side dispatcher rebuilds
+// the `Capture[]` from it before invoking the A2 env helpers.
+fn closure_pair_env_alloc_marker(lambda_id: int, captures_text: string) -> string {
+    return "<closure_pair @sfn_lambda_" + number_to_string(lambda_id)
+        + " env_alloc lambda_id="
+        + number_to_string(lambda_id)
+        + " captures="
+        + captures_text
+        + ">";
+}
+
+// Marker for the env-load prologue spliced as the first statement of
+// the lifted capturing lambda body. Recognised in
+// `lower_instruction_range`: emits the A2 load-prologue lines and
+// registers `ClosureEnvLoadedBinding` entries as locals so capture
+// names resolve against the prologue temps.
+fn closure_env_load_prologue_marker(lambda_id: int, captures_text: string) -> string {
+    return "<closure_env_load_prologue lambda_id=" + number_to_string(lambda_id)
+        + " captures="
+        + captures_text
+        + ">";
+}
+
+// Marker for refusing IR emission on a capturing lambda whose
+// `LambdaCaptureRecord` contains a mutable binding. The lowering
+// side recognises the prefix and pushes a `llvm lowering [fatal]:`
+// diagnostic naming the offender — the build then refuses to write
+// IR. See acceptance criterion #5 in issue #687.
+fn closure_pair_fatal_mutable_marker(lambda_id: int, capture_name: string) -> string {
+    return "<closure_pair_fatal_mutable lambda_id=" + number_to_string(lambda_id)
+        + " name="
+        + capture_name
         + ">";
 }
 
@@ -146,7 +186,7 @@ fn lifted_function_name(lambda_id: int) -> string {
 // user cannot type by hand.
 fn closure_sentinel_type_text() -> string { return "__closure__"; }
 
-// ── Lookup: is this lambda non-capturing? ───────────────────────────
+// ── Lookup: locate the LambdaCaptureRecord for this lambda ──────────
 //
 // `LambdaCaptureRecord`s are keyed by the body's opening `{` token
 // line/column. The same key is computable from
@@ -154,14 +194,8 @@ fn closure_sentinel_type_text() -> string { return "__closure__"; }
 // scan over the records list. The number of lambdas per module is
 // small (single digits in practice), so the linear cost is
 // negligible compared with introducing a map.
-//
-// Returns `true` only when a matching record exists AND that record
-// reports zero captures. A missing record (which would indicate a
-// programmer error in `analyze_lambda_captures`) keeps the lambda
-// in `<lambda>`-placeholder form — refusing to lift is safer than
-// silently dropping captures.
-fn _is_non_capturing(records: LambdaCaptureRecord[], lambda: Expression) -> boolean {
-    if lambda.body.tokens.length == 0 { return false; }
+fn _find_capture_record(records: LambdaCaptureRecord[], lambda: Expression) -> LambdaCaptureRecord? {
+    if lambda.body.tokens.length == 0 { return null; }
     let body_line = lambda.body.tokens[0].line;
     let body_column = lambda.body.tokens[0].column;
     let mut index: int = 0;
@@ -172,13 +206,70 @@ fn _is_non_capturing(records: LambdaCaptureRecord[], lambda: Expression) -> bool
         if record.body_start_line == body_line {
             if record.body_start_column == body_column { _match = true; }
         }
-        if _match {
-            if record.captures.length == 0 { return true; }
-            return false;
-        }
+        if _match { return record; }
         index += 1;
     }
+    return null;
+}
+
+// True only when a matching record exists AND that record reports
+// zero captures. A missing record (which would indicate a programmer
+// error in `analyze_lambda_captures`) keeps the lambda in
+// `<lambda>`-placeholder form — refusing to lift is safer than
+// silently dropping captures.
+fn _is_non_capturing(records: LambdaCaptureRecord[], lambda: Expression) -> boolean {
+    let record = _find_capture_record(records, lambda);
+    if record == null { return false; }
+    if record.captures.length == 0 { return true; }
     return false;
+}
+
+// ── Capture encoding for marker text ────────────────────────────────
+//
+// Captures are serialised as `name:type,name:type,...` inside the
+// closure-pair env_alloc marker and the env-load prologue marker.
+// Each `name` and `type` segment is percent-escaped via
+// `percent_escape_capture_text`, so the literal `,`/`:` delimiters
+// stay unambiguous even when a type annotation contains them (e.g.
+// `Map<string, Result<int, Error>>`). The escape also encodes `<`
+// and `>` so a generic-typed capture cannot terminate the outer
+// `<closure_pair … >` marker prematurely. The LLVM-side dispatchers
+// rebuild a `Capture[]` from the encoded list (via `decode_captures`
+// in `closures.sfn`), which reverses the same escape. Empty
+// `type_text` is preserved as an empty segment after the `:` — the
+// helper maps that back to the `i8*` opaque-pointer field.
+fn _encode_captures(captures: Capture[]) -> string {
+    let mut buffer: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= captures.length { break; }
+        let capture = captures[index];
+        if index > 0 { buffer = buffer + ","; }
+        buffer = buffer + percent_escape_capture_text(capture.name) + ":"
+            + percent_escape_capture_text(capture.type_text);
+        index += 1;
+    }
+    return buffer;
+}
+
+// ── Mutable-capture refusal ─────────────────────────────────────────
+//
+// Returns the name of the first mutable capture, or the empty string
+// when every capture is immutable. The lifting pass uses this to
+// emit a `closure_pair_fatal_mutable_marker` instead of a real
+// closure-pair so the LLVM-side dispatcher can surface a
+// `llvm lowering [fatal]:` diagnostic naming the offender. M1.5 ABI
+// freezes captures as by-value snapshots; mutable-capture semantics
+// require additional infrastructure (heap-allocated cells) that
+// lands post-M1.
+fn _find_mutable_capture_name(captures: Capture[]) -> string {
+    let mut index: int = 0;
+    loop {
+        if index >= captures.length { break; }
+        if captures[index].mutable { return captures[index].name; }
+        index += 1;
+    }
+    return "";
 }
 
 // ── Synthesis: lifted FunctionDeclaration ───────────────────────────
@@ -195,6 +286,17 @@ fn _is_non_capturing(records: LambdaCaptureRecord[], lambda: Expression) -> bool
 // `parse_block` for the same reason; we follow that pattern so the
 // emitted body sees structured statements.
 fn _synthesize_lifted_function(lambda: Expression, lambda_id: int) -> Statement {
+    return _synthesize_lifted_function_with_captures(lambda, lambda_id, []);
+}
+
+// Synthesise the lifted top-level function. When `captures.length > 0`,
+// prepends a `Statement.ExpressionStatement` wrapping the env-load
+// prologue marker as the first statement of the body. The marker is
+// recognised by `lower_instruction_range` (see #687 in
+// `instructions.sfn`): it emits the A2 prologue lines and registers
+// the loaded SSA temps as `LocalBinding[]` so capture references in
+// the body resolve through the existing name-resolution path.
+fn _synthesize_lifted_function_with_captures(lambda: Expression, lambda_id: int, captures: Capture[]) -> Statement {
     let mut parameters: Parameter[] = [];
     parameters.push(Parameter {
         name: "__env", type_annotation: TypeAnnotation { text: "i8*" }, default_value: null, mutable: false, span: null
@@ -217,11 +319,41 @@ fn _synthesize_lifted_function(lambda: Expression, lambda_id: int) -> Statement 
     };
 
     let parsed_body = _reparse_lambda_body(lambda.body);
+    let body_with_prologue = _prepend_capture_prologue(parsed_body, lambda_id, captures);
     let no_decorators: Decorator[] = [];
     return Statement.FunctionDeclaration {
         signature: signature,
-        body: parsed_body,
+        body: body_with_prologue,
         decorators: no_decorators
+    };
+}
+
+// Prepend the env-load prologue marker statement to a re-parsed
+// lambda body when the lambda has captures. Non-capturing lambdas
+// return the block unchanged so #686's IR shape is preserved.
+//
+// The marker is rendered into `.sfn-asm` by `format_expression`'s
+// Raw-expression passthrough (`<closure_env_load_prologue ...>` is
+// emitted verbatim) and recognised at lowering time by an
+// expression-statement prefix check.
+fn _prepend_capture_prologue(body: Block, lambda_id: int, captures: Capture[]) -> Block {
+    if captures.length == 0 { return body; }
+    let marker_text = closure_env_load_prologue_marker(lambda_id, _encode_captures(captures));
+    let prologue_stmt = Statement.ExpressionStatement {
+        expression: Expression.Raw { text: marker_text },
+        span: null
+    };
+    let mut new_statements: Statement[] = [prologue_stmt];
+    let mut index: int = 0;
+    loop {
+        if index >= body.statements.length { break; }
+        new_statements.push(body.statements[index]);
+        index += 1;
+    }
+    return Block {
+        tokens: body.tokens,
+        text: body.text,
+        statements: new_statements
     };
 }
 
@@ -416,11 +548,47 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
 }
 
 fn _rewrite_lambda(ctx: LiftContext, lambda: Expression) -> ExpressionRewriteResult {
-    if !_is_non_capturing(ctx.records, lambda) {
+    let record = _find_capture_record(ctx.records, lambda);
+    if record == null {
+        // No record means `analyze_lambda_captures` did not see this
+        // lambda — leave it untouched so the placeholder fallback in
+        // `format_expression` (or a downstream pass) handles it.
         return ExpressionRewriteResult { ctx: ctx, expression: lambda };
     }
+
+    // Non-capturing path — unchanged from #686.
+    if record.captures.length == 0 {
+        let lambda_id = ctx.counter;
+        let lifted_fn = _synthesize_lifted_function(lambda, lambda_id);
+        let mut new_lifted: Statement[] = ctx.lifted;
+        new_lifted.push(lifted_fn);
+        let new_ctx: LiftContext = LiftContext {
+            counter: (ctx.counter + 1) as int,
+            lifted: new_lifted,
+            records: ctx.records
+        };
+        let marker_text = closure_pair_marker(lambda_id, "null");
+        return ExpressionRewriteResult {
+            ctx: new_ctx,
+            expression: Expression.Raw { text: marker_text }
+        };
+    }
+
+    // Capturing path (#687). Mutable captures are unsupported in M1.5
+    // — emit the fatal marker and DO NOT advance the counter or
+    // synthesise a lifted function (the lambda site would otherwise
+    // reference a sfn_lambda_<N> symbol that does not exist).
+    let mutable_name = _find_mutable_capture_name(record.captures);
+    if mutable_name.length > 0 {
+        let fatal_text = closure_pair_fatal_mutable_marker(ctx.counter, mutable_name);
+        return ExpressionRewriteResult {
+            ctx: ctx,
+            expression: Expression.Raw { text: fatal_text }
+        };
+    }
+
     let lambda_id = ctx.counter;
-    let lifted_fn = _synthesize_lifted_function(lambda, lambda_id);
+    let lifted_fn = _synthesize_lifted_function_with_captures(lambda, lambda_id, record.captures);
     let mut new_lifted: Statement[] = ctx.lifted;
     new_lifted.push(lifted_fn);
     let new_ctx: LiftContext = LiftContext {
@@ -428,8 +596,7 @@ fn _rewrite_lambda(ctx: LiftContext, lambda: Expression) -> ExpressionRewriteRes
         lifted: new_lifted,
         records: ctx.records
     };
-
-    let marker_text = closure_pair_marker(lambda_id, "null");
+    let marker_text = closure_pair_env_alloc_marker(lambda_id, _encode_captures(record.captures));
     return ExpressionRewriteResult {
         ctx: new_ctx,
         expression: Expression.Raw { text: marker_text }
@@ -690,6 +857,9 @@ fn _is_closure_pair_marker_text(text: string) -> boolean {
 
 export {
     LiftResult,
+    closure_env_load_prologue_marker,
+    closure_pair_env_alloc_marker,
+    closure_pair_fatal_mutable_marker,
     closure_pair_marker,
     closure_sentinel_type_text,
     lift_non_capturing_lambdas,

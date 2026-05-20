@@ -73,12 +73,18 @@ export {
 // Historically consumers imported these via expression_lowering_stage2.
 export { format_temp_name } from "../../expressions_helpers";
 
-// Lambda lifting (issue #686). Pre-pass that runs inside
-// `emit_native_with_module_name` to convert non-capturing
-// `Expression.Lambda` nodes into top-level `Statement.FunctionDeclaration`s
-// + closure-pair `Raw` markers consumed by `lower_expression`.
+// Lambda lifting (issues #686 + #687). Pre-pass that runs inside
+// `emit_native_with_module_name` to convert `Expression.Lambda`
+// nodes into top-level `Statement.FunctionDeclaration`s plus a
+// closure-pair `Raw` marker consumed by `lower_expression`.
+// Capturing lambdas (#687) carry an env-alloc marker at the
+// lambda site and an env-load prologue marker as the first body
+// statement of the lifted function.
 export {
     LiftResult,
+    closure_env_load_prologue_marker,
+    closure_pair_env_alloc_marker,
+    closure_pair_fatal_mutable_marker,
     closure_pair_marker,
     closure_sentinel_type_text,
     lift_non_capturing_lambdas,

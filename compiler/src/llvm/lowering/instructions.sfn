@@ -10,6 +10,11 @@
 import { NativeFunction, NativeInstruction } from "../../native_ir";
 import { substring } from "../../string_utils";
 import { test_runner_trace } from "../../test_runner_state";
+import {
+    decode_captures,
+    emit_closure_env_load_prologue,
+    synthesize_closure_env_struct
+} from "../closures";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
 import { lower_expression_statement, lower_return_instruction } from "../expression_lowering/native/statement";
 import { parse_inline_let_expression } from "../expression_lowering/native/statement_parsing";
@@ -219,34 +224,74 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                 let _raw_expr = get_instruction_text(function.instructions, index);
                 let trimmed_expression = trim_text(_raw_expr);
                 let mut handled_inline_let: boolean = false;
+
+                // Capturing-lambda env-load prologue (issue #687). The
+                // lifting pass prepends a `<closure_env_load_prologue ...>`
+                // expression-statement marker to every capturing
+                // lifted function. Recognise it before any other parse
+                // so the A2 prologue runs as the first instruction —
+                // its loaded SSA temps are appended to
+                // `current_bindings` as `ParameterBinding` entries so
+                // capture references resolve to the loaded values
+                // verbatim, without `find_local_binding` emitting an
+                // extra `load` indirection on the prologue temp.
+                let prologue_prefix = "<closure_env_load_prologue ";
+                if trimmed_expression.length >= prologue_prefix.length {
+                    let mut _is_prologue: boolean = true;
+                    let mut _pi: int = 0;
+                    loop {
+                        if _pi >= prologue_prefix.length { break; }
+                        if trimmed_expression[_pi] != prologue_prefix[_pi] {
+                            _is_prologue = false;
+                            break;
+                        }
+                        _pi += 1;
+                    }
+                    if _is_prologue {
+                        let prologue_result = _lower_closure_env_load_prologue_marker(trimmed_expression, current_bindings, current_temp, current_lines);
+                        diagnostics = extend_string_array(diagnostics, prologue_result.diagnostics);
+                        current_lines = prologue_result.lines;
+                        current_bindings = prologue_result.bindings;
+                        current_temp = prologue_result.temp_index;
+                        // Don't bump `index` or set `_tag_handled` here —
+                        // the surrounding tag==1 block does both at its
+                        // tail. We only need `handled_inline_let = true`
+                        // to short-circuit the let / expression-statement
+                        // fallbacks below.
+                        handled_inline_let = true;
+                    }
+                }
+
                 if trimmed_expression.length >= 4 {
                     let prefix = substring(trimmed_expression, 0, 4);
-                    if prefix == "let " {
-                        let inline_parse = parse_inline_let_expression(trimmed_expression);
-                        diagnostics = extend_string_array(diagnostics, inline_parse.diagnostics);
-                        if inline_parse.success {
-                            let inline_instruction = NativeInstruction.Let {
-                                name: inline_parse.name,
-                                mutable: inline_parse.mutable,
-                                type_annotation: inline_parse.type_annotation,
-                                value: inline_parse.initializer,
-                                span: null,
-                                value_span: null
-                            };
-                            let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
-                            diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
-                            collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
-                            collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
-                            current_lines = lowered.lines;
-                            current_allocas = lowered.allocas;
-                            current_locals = lowered.locals;
-                            current_bindings = lowered.bindings;
-                            current_temp = lowered.temp_index;
-                            current_next_local = lowered.next_local_id;
-                            current_next_region = lowered.next_region_id;
-                            current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
-                            handled_inline_let = true;
+                    if !handled_inline_let {
+                        if prefix == "let " {
+                            let inline_parse = parse_inline_let_expression(trimmed_expression);
+                            diagnostics = extend_string_array(diagnostics, inline_parse.diagnostics);
+                            if inline_parse.success {
+                                let inline_instruction = NativeInstruction.Let {
+                                    name: inline_parse.name,
+                                    mutable: inline_parse.mutable,
+                                    type_annotation: inline_parse.type_annotation,
+                                    value: inline_parse.initializer,
+                                    span: null,
+                                    value_span: null
+                                };
+                                let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
+                                diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
+                                collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
+                                collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
+                                current_lines = lowered.lines;
+                                current_allocas = lowered.allocas;
+                                current_locals = lowered.locals;
+                                current_bindings = lowered.bindings;
+                                current_temp = lowered.temp_index;
+                                current_next_local = lowered.next_local_id;
+                                current_next_region = lowered.next_region_id;
+                                current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+                                handled_inline_let = true;
+                            }
                         }
                     }
                 }
@@ -673,4 +718,96 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         mutations: current_mutations,
         string_constants: collected_string_constants
     };
+}
+
+// ── Capturing-lambda env-load prologue (#687) ──────────────────────────
+//
+// Result of `_lower_closure_env_load_prologue_marker`. The
+// `bindings` field is the input list with one `ParameterBinding`
+// per loaded capture appended. ParameterBinding (not LocalBinding)
+// is used so identifier resolution returns the loaded SSA temp
+// directly without emitting a spurious `load` — captures are
+// already true SSA values after the A2 prologue, not stack
+// allocations needing further dereference.
+struct _ClosureEnvPrologueLowerResult {
+    lines: string[];
+    bindings: ParameterBinding[];
+    temp_index: int;
+    diagnostics: string[];
+}
+
+// Parse a `<closure_env_load_prologue lambda_id=<N> captures=<encoded>>`
+// marker and emit the A2 env-load prologue (one bitcast + one
+// GEP+load per capture). The hidden `__env: i8*` parameter is named
+// `%__env` after `sanitize_symbol` (see
+// `prepare_parameters_from_function`); we hardcode that name here
+// rather than threading the binding through.
+fn _lower_closure_env_load_prologue_marker(marker: string, bindings: ParameterBinding[], temp_index: int, lines: string[]) -> _ClosureEnvPrologueLowerResult {
+    let mut diagnostics: string[] = [];
+    let lambda_id = _parse_prologue_int(marker, "lambda_id=");
+    let captures_text = _parse_prologue_string(marker, "captures=");
+    let captures = decode_captures(captures_text);
+    let layout = synthesize_closure_env_struct(captures, lambda_id);
+    let mut new_lines: string[] = lines;
+    if !layout.is_empty {
+        new_lines.push("; closure_env_type_decl " + layout.type_decl);
+    }
+    let prologue = emit_closure_env_load_prologue(layout, "%__env", temp_index);
+    let mut li: int = 0;
+    loop {
+        if li >= prologue.lines.length { break; }
+        new_lines.push(prologue.lines[li]);
+        li += 1;
+    }
+    let mut new_bindings: ParameterBinding[] = bindings;
+    let mut bi: int = 0;
+    loop {
+        if bi >= prologue.bindings.length { break; }
+        let loaded = prologue.bindings[bi];
+        new_bindings.push(ParameterBinding {
+            name: loaded.name, llvm_name: loaded.llvm_name, llvm_type: loaded.llvm_type, type_annotation: captures[bi].type_text, consumed: false, span: null
+        });
+        bi += 1;
+    }
+    return _ClosureEnvPrologueLowerResult {
+        lines: new_lines,
+        bindings: new_bindings,
+        temp_index: prologue.next_temp,
+        diagnostics: diagnostics
+    };
+}
+
+fn _parse_prologue_int(text: string, key: string) -> int {
+    let raw = _parse_prologue_string(text, key);
+    if raw.length == 0 { return 0; }
+    let mut value: int = 0;
+    let mut idx: int = 0;
+    let zero_code = char_code("0");
+    let nine_code = char_code("9");
+    loop {
+        if idx >= raw.length { break; }
+        let code = char_code(raw[idx]);
+        if code < zero_code { break; }
+        if code > nine_code { break; }
+        value = value * 10 + (code - zero_code);
+        idx += 1;
+    }
+    return value;
+}
+
+fn _parse_prologue_string(text: string, key: string) -> string {
+    let key_start = index_of(text, key);
+    if key_start < 0 { return ""; }
+    let value_start = key_start + key.length;
+    let mut cursor: int = value_start;
+    let mut value: string = "";
+    loop {
+        if cursor >= text.length { break; }
+        let ch = text[cursor];
+        if ch == " " { break; }
+        if ch == ">" { break; }
+        value = value + ch;
+        cursor += 1;
+    }
+    return value;
 }

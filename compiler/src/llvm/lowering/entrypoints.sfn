@@ -248,7 +248,11 @@ fn lower_to_llvm_ir_from_text(native_text: string, module_name: string) -> strin
 // Returns true on success. Unlike `lower_to_llvm_ir_from_text`, this prints
 // lines directly rather than joining into one huge string and returning it —
 // avoids `_join_llvm_lines_linear` memory amplification for very large LLVM
-// outputs.
+// outputs. Refuses to print and returns false when any lowering pass surfaced
+// a `[fatal]` diagnostic — the IR may look complete but a side-effecting
+// expression could have been silently dropped (e.g. a capturing lambda with
+// a mutable capture, issue #687) and printing the partial output would
+// silently miscompile.
 fn print_llvm_ir_from_text(native_text: string, module_name: string) -> boolean ![io] {
     if native_text.length == 0 { return false; }
     let parse = parse_native_artifact(native_text);
@@ -275,6 +279,16 @@ fn print_llvm_ir_from_text(native_text: string, module_name: string) -> boolean 
             + " diagnostics="
             + number_to_string(parse.diagnostics.length)
             + ")");
+        return false;
+    }
+    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
+        let mut _fpi: int = 0;
+        loop {
+            if _fpi >= lowered_lines.diagnostics.length { break; }
+            let _pdiag = lowered_lines.diagnostics[_fpi];
+            if index_of(_pdiag, "[fatal]") >= 0 { print.err(_pdiag); }
+            _fpi += 1;
+        }
         return false;
     }
     let lines = lowered_lines.lines;
