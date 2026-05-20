@@ -71,6 +71,72 @@ The async-context calloc/free pair in `compiler/src/llvm/lowering/emission_async
 intentionally stays on raw `@calloc` / `@free` because both ends of the
 allocation are libc-resident regardless of arena state.
 
+## Typed Closures
+
+A typed closure is represented at the ABI boundary as a two-word aggregate:
+
+```llvm
+%sfn_closure = type { i8*, i8* }   ; { fn_ptr, env_ptr }
+```
+
+The first word is the function pointer for the lifted lambda body; the
+second is the captured-environment pointer. Both slots are erased to
+`i8*` so that closure values are uniformly passable across runtime
+boundaries (spawn handlers, channels, higher-order helpers) without
+per-capture-shape ABI variants.
+
+**Hidden-env-first calling convention.** The lifted lambda is lowered
+with the env pointer as its first (hidden) parameter, ahead of every
+declared source parameter:
+
+```llvm
+define <ret_ty> @sfn_lambda_<id>(i8* %env, <decl_param_tys>...)
+```
+
+Callers materialise the closure pair at the lambda expression site and
+pass `env_ptr` as the first argument on every invocation. Non-capturing
+lambdas use the same signature — the `%env` parameter is unused but
+present, so the call shape is uniform.
+
+**Env-struct allocation.** Captures are packed into a per-lambda env
+struct laid out in first-use order (deterministic across runs of the
+same source). The compiler synthesises the env type, allocates it via
+the runtime, and populates each slot at the expression site. The
+helper API in `compiler/src/llvm/closures.sfn` settles this contract:
+
+- `closure_env_type_name(lambda_id)` — the `%sfn_closure_env_<id>` name.
+- `synthesize_closure_env_struct(captures, lambda_id)` — the
+  `ClosureEnvLayout` (type declaration plus field index map).
+- `emit_closure_env_alloc(layout, operands, temp_index)` — the alloc +
+  GEP+store sequence at the lambda expression site. The allocation
+  routes through the [`sailfin_runtime_alloc_struct`](#allocation-helpers)
+  entry point documented above, sized via the standard
+  `getelementptr null, i32 1` + `ptrtoint` size-of idiom.
+- `emit_closure_env_load_prologue(layout, env_param_name, temp_index)` —
+  the GEP+load prologue inside the lifted lambda body that rebinds each
+  capture to a local SSA name keyed by `Capture.name`.
+
+**Non-capturing case.** When `captures.length == 0` the layout is
+flagged `is_empty` and both emit helpers return no lines. The closure
+pair is materialised with `env_ptr = null` (an `i8* null` literal); the
+lifted lambda still takes the hidden `%env` parameter and simply ignores
+it. Callers must not branch on `env_ptr == null` — the value is opaque.
+
+**Lifetime stance (env outlives the closure pair; no drop yet).** The
+env struct is allocated through `sailfin_runtime_alloc_struct`, which
+routes through the arena when `SAILFIN_USE_ARENA=1` and through libc
+`calloc` otherwise. The compiler does **not** emit a paired
+`sailfin_runtime_free` for the env on closure-pair drop; arena reclaim
+covers the arena case, and the off-arena case leaks until the process
+exits. This is intentional for M1.5: the closure pair has no
+deterministic owner (it can be copied into spawn handlers, channels, or
+returned upward), so a drop point cannot be assigned without escape
+analysis. Per-capture RC retain/release and a deterministic env drop
+are deferred to a post-M1 issue; until then, treat the env as an
+arena-lifetime allocation. See
+[`docs/runtime_architecture.md` §3.4 "Typed Closures"](https://github.com/SailfinIO/sailfin/blob/main/docs/runtime_architecture.md#34-typed-closures)
+for the design rationale and the M2 ownership plan.
+
 ## Exception / Unwind ABI
 
 Structured frames with deterministic unwind. Currently implemented via C runtime's `setjmp`/`longjmp`, planned to move to native structured exceptions.

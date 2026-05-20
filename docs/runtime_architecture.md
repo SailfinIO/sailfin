@@ -1225,6 +1225,9 @@ is derived from the concatenation of all runtime struct layouts.
 
 ### 3.4 Typed Closures
 
+**Reference:** User-facing ABI specification lives in
+[`runtime-abi.md` § Typed Closures](https://sailfin.dev/docs/reference/runtime-abi/#typed-closures).
+
 **Current state:** The compiler represents closures as `i8*` function pointers
 with an optional `i8*` context. This works for thunks but not for closures that
 capture typed state.
