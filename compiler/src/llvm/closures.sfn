@@ -59,13 +59,92 @@ import { format_temp_name } from "./expressions_helpers";
 import { ends_with_pointer_suffix, map_type_annotation } from "./type_mapping";
 import { join_with_separator, number_to_string, trim_text } from "./utils";
 
-// Decode the `name:type,name:type,...` capture list produced by the
-// lifting pass (see `_encode_captures` in `lambda_lowering.sfn`)
-// back into a `Capture[]` suitable for `synthesize_closure_env_struct`.
-// `by_value` is set true (M1.5 captures are by-value snapshots) and
-// `mutable` is false (the lift pass refuses mutable captures via a
-// separate fatal marker before any encoding happens — anything that
-// reaches `decode_captures` is guaranteed-immutable).
+// Percent-escape every character that doubles as either a marker
+// delimiter (`,`, `:`) or as part of the outer closure-pair marker
+// boundary (`<`, `>`). The escape character itself (`%`) is also
+// escaped so the substitution round-trips cleanly. Used to make
+// `_encode_captures` safe against type annotations like
+// `Map<string, int>` whose literal characters would otherwise either
+// terminate the outer `<closure_pair … >` marker prematurely or
+// collide with the `,`/`:` capture delimiters.
+fn percent_escape_capture_text(text: string) -> string {
+    let mut buffer: string = "";
+    let mut idx: int = 0;
+    loop {
+        if idx >= text.length { break; }
+        let ch = text[idx];
+        if ch == "%" { buffer = buffer + "%25"; } else if ch == "," {
+            buffer = buffer + "%2C";
+        } else if ch == ":" { buffer = buffer + "%3A"; } else if ch == "<" {
+            buffer = buffer + "%3C";
+        } else if ch == ">" { buffer = buffer + "%3E"; } else {
+            buffer = buffer + ch;
+        }
+        idx += 1;
+    }
+    return buffer;
+}
+
+// Inverse of `percent_escape_capture_text`. Unknown `%XX` sequences
+// fall through verbatim so a malformed payload never crashes the
+// decoder — at worst the resulting capture record carries the same
+// stray characters the encoder did, which the layout helper would
+// then reject downstream.
+fn percent_unescape_capture_text(text: string) -> string {
+    let mut buffer: string = "";
+    let mut idx: int = 0;
+    loop {
+        if idx >= text.length { break; }
+        let ch = text[idx];
+        if ch != "%" {
+            buffer = buffer + ch;
+            idx += 1;
+            continue;
+        }
+        let mut decoded: boolean = false;
+        if idx + 2 < text.length {
+            let two = substring(text, idx + 1, idx + 3);
+            if two == "25" {
+                buffer = buffer + "%";
+                idx += 3;
+                decoded = true;
+            } else if two == "2C" {
+                buffer = buffer + ",";
+                idx += 3;
+                decoded = true;
+            } else if two == "3A" {
+                buffer = buffer + ":";
+                idx += 3;
+                decoded = true;
+            } else if two == "3C" {
+                buffer = buffer + "<";
+                idx += 3;
+                decoded = true;
+            } else if two == "3E" {
+                buffer = buffer + ">";
+                idx += 3;
+                decoded = true;
+            }
+        }
+        if !decoded {
+            buffer = buffer + ch;
+            idx += 1;
+        }
+    }
+    return buffer;
+}
+
+// Decode the percent-escaped, comma-separated capture list produced
+// by `_encode_captures` (in `lambda_lowering.sfn`) back into a
+// `Capture[]` suitable for `synthesize_closure_env_struct`. The
+// outer encoding is `name:type,name:type,...` where `name` and
+// `type` segments are individually percent-escaped, so the literal
+// `,` and `:` separators are unambiguous regardless of what the
+// source-level type annotation contained. `by_value` is set true
+// (M1.5 captures are by-value snapshots) and `mutable` is false
+// (the lift pass refuses mutable captures via a separate fatal
+// marker before any encoding happens — anything that reaches
+// `decode_captures` is guaranteed-immutable).
 fn decode_captures(encoded: string) -> Capture[] {
     let mut captures: Capture[] = [];
     if encoded.length == 0 { return captures; }
@@ -84,8 +163,8 @@ fn decode_captures(encoded: string) -> Capture[] {
             cursor += 1;
         }
         if field_text.length == 0 { continue; }
-        let mut name: string = "";
-        let mut type_text: string = "";
+        let mut name_raw: string = "";
+        let mut type_raw: string = "";
         let mut at_type: boolean = false;
         let mut fi: int = 0;
         loop {
@@ -98,13 +177,13 @@ fn decode_captures(encoded: string) -> Capture[] {
                     continue;
                 }
             }
-            if at_type { type_text = type_text + fch; } else {
-                name = name + fch;
+            if at_type { type_raw = type_raw + fch; } else {
+                name_raw = name_raw + fch;
             }
             fi += 1;
         }
         captures.push(Capture {
-            name: name, type_text: type_text, by_value: true, mutable: false, span: null
+            name: percent_unescape_capture_text(name_raw), type_text: percent_unescape_capture_text(type_raw), by_value: true, mutable: false, span: null
         });
     }
     return captures;
@@ -502,5 +581,7 @@ export {
     emit_closure_env_alloc,
     emit_closure_env_load_prologue,
     emit_closure_pair_aggregate,
+    percent_escape_capture_text,
+    percent_unescape_capture_text,
     synthesize_closure_env_struct
 };

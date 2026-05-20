@@ -283,6 +283,11 @@ fn compile_native_text_to_llvm_file(native_text: string, module_name: string, ou
             if index_of(_diag, "[fatal]") >= 0 { print.err(_diag); }
             _fdi += 1;
         }
+        // Drop any stale `.ll` from a previous successful build so
+        // downstream tooling that only stats `out_path` cannot mistake
+        // it for fresh output (mirrors the empty-native-text branch in
+        // `compile_to_llvm_file_with_module`).
+        if fs.exists(out_path) { fs.deleteFile(out_path); }
         return false;
     }
     let lowered_count = lowered_lines.lines.length;

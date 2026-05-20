@@ -230,9 +230,11 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                 // expression-statement marker to every capturing
                 // lifted function. Recognise it before any other parse
                 // so the A2 prologue runs as the first instruction —
-                // its loaded `ClosureEnvLoadedBinding[]` entries are
-                // appended to `current_locals` so capture references
-                // in the body resolve through standard name lookup.
+                // its loaded SSA temps are appended to
+                // `current_bindings` as `ParameterBinding` entries so
+                // capture references resolve to the loaded values
+                // verbatim, without `find_local_binding` emitting an
+                // extra `load` indirection on the prologue temp.
                 let prologue_prefix = "<closure_env_load_prologue ";
                 if trimmed_expression.length >= prologue_prefix.length {
                     let mut _is_prologue: boolean = true;

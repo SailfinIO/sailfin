@@ -57,6 +57,7 @@ import {
 } from "../../../ast";
 import { Parser, parse_block } from "../../../parser/mod";
 import { LambdaCaptureRecord, analyze_lambda_captures } from "../../../typecheck_captures";
+import { percent_escape_capture_text } from "../../closures";
 import { number_to_string } from "../../utils";
 
 // Mutable walker state threaded through every rewrite call. The
@@ -226,12 +227,17 @@ fn _is_non_capturing(records: LambdaCaptureRecord[], lambda: Expression) -> bool
 // ── Capture encoding for marker text ────────────────────────────────
 //
 // Captures are serialised as `name:type,name:type,...` inside the
-// closure-pair env_alloc marker and the env-load prologue marker. The
-// LLVM-side dispatchers rebuild a `Capture[]` from the encoded list
-// (via `decode_captures` in `closures.sfn`) and feed it to
-// `synthesize_closure_env_struct`. Empty `type_text` is preserved as
-// an empty segment after the `:` — the helper maps that back to the
-// `i8*` opaque-pointer field.
+// closure-pair env_alloc marker and the env-load prologue marker.
+// Each `name` and `type` segment is percent-escaped via
+// `percent_escape_capture_text`, so the literal `,`/`:` delimiters
+// stay unambiguous even when a type annotation contains them (e.g.
+// `Map<string, Result<int, Error>>`). The escape also encodes `<`
+// and `>` so a generic-typed capture cannot terminate the outer
+// `<closure_pair … >` marker prematurely. The LLVM-side dispatchers
+// rebuild a `Capture[]` from the encoded list (via `decode_captures`
+// in `closures.sfn`), which reverses the same escape. Empty
+// `type_text` is preserved as an empty segment after the `:` — the
+// helper maps that back to the `i8*` opaque-pointer field.
 fn _encode_captures(captures: Capture[]) -> string {
     let mut buffer: string = "";
     let mut index: int = 0;
@@ -239,7 +245,8 @@ fn _encode_captures(captures: Capture[]) -> string {
         if index >= captures.length { break; }
         let capture = captures[index];
         if index > 0 { buffer = buffer + ","; }
-        buffer = buffer + capture.name + ":" + capture.type_text;
+        buffer = buffer + percent_escape_capture_text(capture.name) + ":"
+            + percent_escape_capture_text(capture.type_text);
         index += 1;
     }
     return buffer;

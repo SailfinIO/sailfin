@@ -24,8 +24,19 @@
 //      `Expression.Lambda` node so they continue to flow through
 //      `format_expression` as `<lambda>` until #687 wires the env
 //      struct end-to-end.
-import { Expression, Program, Statement } from "../../src/ast";
-import { ClosurePairResult, emit_closure_pair_aggregate } from "../../src/llvm/closures";
+import {
+    Capture,
+    Expression,
+    Program,
+    Statement
+} from "../../src/ast";
+import {
+    ClosurePairResult,
+    decode_captures,
+    emit_closure_pair_aggregate,
+    percent_escape_capture_text,
+    percent_unescape_capture_text
+} from "../../src/llvm/closures";
 import {
     LiftResult,
     closure_pair_marker,
@@ -217,9 +228,11 @@ test "lift #687: shadowing — capture `x` resolves to prologue, not outer" ![io
     // outer SSA value. At the AST level, this manifests as the
     // lifted function body's prologue marker naming `x` as a
     // capture. The LLVM-side splice (in
-    // `_lower_closure_env_load_prologue_marker`) appends a
-    // `LocalBinding` named `x` to the lifted function's locals so
-    // `find_local_binding` finds it before any module-global `x`.
+    // `_lower_closure_env_load_prologue_marker`) appends each
+    // loaded capture to the lifted function's
+    // `ParameterBinding[]` (not `LocalBinding[]`) so identifier
+    // resolution reads the env-loaded SSA temp directly without
+    // emitting a redundant `load` against a fake alloca pointer.
     let source = "fn main() { let x: int = 1; let f = fn(y: int) -> int { return x + y; }; }";
     let program = parse_program(source);
     let result: LiftResult = lift_non_capturing_lambdas(program);
@@ -258,4 +271,42 @@ test "lift #687: mutable capture is refused with a fatal marker" ![io] {
     let init: Expression = lambda_stmt.initializer;
     assert init.variant == "Raw";
     assert init.text == "<closure_pair_fatal_mutable lambda_id=0 name=x>";
+}
+
+// ── Capture-payload percent escape round-trip ────────────────────────
+//
+// The marker payload's `name:type,name:type,...` shape would be
+// ambiguous if a type annotation contained `,` or `:` (e.g. a future
+// generic like `Map<string, int>`), and a literal `>` in the payload
+// would terminate the outer `<closure_pair … >` marker prematurely.
+// `_encode_captures` percent-escapes those characters; `decode_captures`
+// reverses the escape. The round-trip must preserve the original
+// `Capture.name` / `Capture.type_text` exactly so the env-struct
+// layout agrees between the lambda site and the lifted function's
+// prologue.
+test "captures: percent_escape round-trips the delimiter character set" {
+    assert percent_escape_capture_text("Map<string, int>") == "Map%3Cstring%2C int%3E";
+    assert percent_unescape_capture_text("Map%3Cstring%2C int%3E") == "Map<string, int>";
+    assert percent_escape_capture_text("a:b") == "a%3Ab";
+    assert percent_unescape_capture_text("a%3Ab") == "a:b";
+    assert percent_escape_capture_text("100%") == "100%25";
+    assert percent_unescape_capture_text("100%25") == "100%";
+    // No-op for the common case so simple types stay byte-for-byte
+    // identical with the pre-escape encoding.
+    assert percent_escape_capture_text("int") == "int";
+    assert percent_escape_capture_text("boolean") == "boolean";
+    assert percent_escape_capture_text("User_Type") == "User_Type";
+}
+
+test "captures: decode_captures recovers generic-typed entries" {
+    // Hand-rolled the encoded form so we don't depend on the lift
+    // pass's encoder being run against a parsed program that the
+    // grammar may not yet accept.
+    let encoded = "items:Map%3Cstring%2C int%3E,handler:fn(int) -%3E boolean";
+    let decoded: Capture[] = decode_captures(encoded);
+    assert decoded.length == 2;
+    assert decoded[0].name == "items";
+    assert decoded[0].type_text == "Map<string, int>";
+    assert decoded[1].name == "handler";
+    assert decoded[1].type_text == "fn(int) -> boolean";
 }
