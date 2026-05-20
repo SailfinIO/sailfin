@@ -769,6 +769,14 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "fs.writeLines");
     helpers = append_unique_effect(helpers, "fs.createDirectory");
     helpers = append_unique_effect(helpers, "fs.read_bytes");
+    // P5 (#366): five new fs adapters — perms, mkdtemp, is_executable,
+    // symlink. Separate-compilation needs the declare-tracking entry
+    // for the same reason readFile / writeFile have one above.
+    helpers = append_unique_effect(helpers, "fs.set_perms");
+    helpers = append_unique_effect(helpers, "fs.get_perms");
+    helpers = append_unique_effect(helpers, "fs.mkdtemp");
+    helpers = append_unique_effect(helpers, "fs.is_executable");
+    helpers = append_unique_effect(helpers, "fs.symlink");
     // Additional helpers used by the compiler but not auto-collected
     helpers = append_unique_effect(helpers, "monotonic_millis");
     helpers = append_unique_effect(helpers, "find_char");

@@ -701,7 +701,7 @@ The following capsules ship as part of the Sailfin standard library under
 | `sfn/math` | `"math"` | Shipped | None | abs, min/max, clamp, floor/ceil/round, pow, sum/mean |
 | `sfn/path` | `"path"` | Shipped | None | Path join, dirname, basename, ext, normalize |
 | `sfn/toml` | `"toml"` | Shipped | None | TOML v1.0 parsing, serialization, dotted-path access |
-| `sfn/fs` | `"fs"` | Shipped | `io` | File read/write/append, exists, mkdir, read_dir |
+| `sfn/fs` | `"fs"` | Shipped | `io` | File read/write/append, exists, mkdir, read_dir, set_perms, get_perms, mkdtemp, is_executable, symlink |
 | `sfn/os` | `"os"` | Shipped | `io` | Env vars, home dir, exec, exit |
 | `sfn/log` | `"log"` | Shipped | `io`, `clock` | Structured leveled logging with named loggers |
 | `sfn/time` | `"time"` | Shipped | `clock` | Sleep, monotonic timing, elapsed |

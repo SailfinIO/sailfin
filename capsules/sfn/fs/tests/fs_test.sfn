@@ -1,0 +1,171 @@
+// Tests for sfn/fs — P5 (#366) gap-fill primitives. The five
+// POSIX wrappers (`set_perms`, `get_perms`, `mkdtemp`,
+// `is_executable`, `symlink`) are what Phase 2 fixtures and the
+// Phase 3 bash collapse depend on; without these the rest of the
+// test-infra epic (#362) can't land.
+//
+// Tests use `mkdtemp` itself to mint a per-test scratch dir so the
+// suite is hermetic — no fixed `/tmp/sfn-fs-test-…` paths, no
+// races between parallel test invocations. Cleanup uses
+// `process.run(["rm", "-rf", …])` since the capsule doesn't ship a
+// recursive remove yet (Out-of-scope per the issue).
+import {
+    set_perms,
+    get_perms,
+    mkdtemp,
+    is_executable,
+    symlink,
+    exists,
+    write,
+    read,
+    remove
+} from "../src/mod";
+
+// ---------------------------------------------------------------------
+// Permission constants. The seed parser doesn't yet accept octal
+// literals (`0o644`); decimal is the canonical form per the issue's
+// "do not block on parser changes" guidance. The comments document
+// the POSIX intent so the round-trip values aren't magic.
+// ---------------------------------------------------------------------
+//   420 = 0o644 = rw-r--r--   (typical regular-file perms)
+//   384 = 0o600 = rw-------   (private file)
+//   493 = 0o755 = rwxr-xr-x   (typical executable)
+//   448 = 0o700 = rwx------   (mkdtemp's documented mode)
+// ---------------------------------------------------------------------
+// ── set_perms / get_perms ──────────────────────────────────────────
+test "fs: set_perms + get_perms round-trip on a regular file" ![io] {
+    let scratch = mkdtemp("sfn-fs-test-perms-");
+    assert scratch.length > 0;
+    let target = scratch + "/file.txt";
+    write(target, "round-trip");
+
+    // 420 = 0o644
+    assert set_perms(target, 420);
+    assert get_perms(target) == 420;
+
+    // 384 = 0o600 — confirm we can flip an existing file's bits.
+    assert set_perms(target, 384);
+    assert get_perms(target) == 384;
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "fs: set_perms returns false on a missing path" ![io] {
+    // chmod on a non-existent path must surface as `false`, not
+    // silently report success. The negative path is what callers
+    // rely on when they don't want to pre-check existence.
+    assert set_perms("/tmp/sfn-fs-test-missing-path-XXXX", 420) == false;
+}
+
+test "fs: get_perms returns -1 on a missing path" ![io] {
+    // Per the issue spec: missing files map to a sentinel error
+    // value, not a permission-bit collision. -1 is unambiguous
+    // because `st_mode & 07777` can never produce a negative.
+    assert get_perms("/tmp/sfn-fs-test-missing-path-XXXX") == -1;
+}
+
+// ── mkdtemp ────────────────────────────────────────────────────────
+test "fs: mkdtemp creates a unique directory with mode 0700" ![io] {
+    let path = mkdtemp("sfn-fs-test-mkd-");
+    assert path.length > 0;
+    assert exists(path);
+    // 448 = 0o700 — `mkdtemp(3)` is documented to create the dir
+    // with this mode regardless of umask.
+    assert get_perms(path) == 448;
+
+    process.run(["rmdir", path]);
+}
+
+test "fs: mkdtemp returns distinct paths across calls" ![io] {
+    // Kernel-side uniqueness — two calls in quick succession must
+    // never collide. This is the whole reason for using
+    // `mkdtemp(3)` instead of generate-then-mkdir.
+    let a = mkdtemp("sfn-fs-test-uniq-");
+    let b = mkdtemp("sfn-fs-test-uniq-");
+    assert a.length > 0;
+    assert b.length > 0;
+    assert strings_equal(a, b) == false;
+
+    process.run(["rmdir", a]);
+    process.run(["rmdir", b]);
+}
+
+// ── is_executable ──────────────────────────────────────────────────
+test "fs: is_executable returns true for /bin/sh" ![io] {
+    // `/bin/sh` is POSIX-mandated. If a host doesn't have it, the
+    // rest of the runtime's `process.run`-based tests would already
+    // be broken — so this is a safe sentinel.
+    assert is_executable("/bin/sh");
+}
+
+test "fs: is_executable returns false for /etc/passwd" ![io] {
+    // /etc/passwd exists on every POSIX system but is never `+x`.
+    assert is_executable("/etc/passwd") == false;
+}
+
+test "fs: is_executable returns false for a missing path" ![io] {
+    // Missing files collapse to `false` rather than surfacing an
+    // error — matches Rust's `Path::exists`-style probe APIs.
+    assert is_executable("/tmp/sfn-fs-test-missing-exec-XXXX") == false;
+}
+
+test "fs: is_executable tracks set_perms flips" ![io] {
+    let scratch = mkdtemp("sfn-fs-test-exec-");
+    let script = scratch + "/probe.sh";
+    write(script, "#!/bin/sh\nexit 0\n");
+
+    // 420 = 0o644 — readable but not executable.
+    assert set_perms(script, 420);
+    assert is_executable(script) == false;
+
+    // 493 = 0o755 — owner exec bit set.
+    assert set_perms(script, 493);
+    assert is_executable(script);
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+// ── symlink ────────────────────────────────────────────────────────
+test "fs: symlink creates a link readable through the target" ![io] {
+    let scratch = mkdtemp("sfn-fs-test-link-");
+    let target = scratch + "/target.txt";
+    let link = scratch + "/alias";
+    write(target, "linked-content");
+
+    assert symlink(target, link);
+    // Read through the symlink — exercises both `symlink(2)`
+    // creating the link and the kernel resolving it on open.
+    assert strings_equal(read(link), "linked-content");
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "fs: symlink accepts a dangling target" ![io] {
+    // POSIX `symlink(2)` does not require the target to exist;
+    // dangling links are valid. The C runtime preserves that.
+    let scratch = mkdtemp("sfn-fs-test-dangling-");
+    let link = scratch + "/dangling";
+    let nonexistent = scratch + "/never-created";
+
+    assert symlink(nonexistent, link);
+    // `fs.exists` follows symlinks, so a dangling link reads as
+    // non-existent through that surface. We use `test -L` (true
+    // for symlinks regardless of target) to confirm the link
+    // file itself was created.
+    assert process.run(["test", "-L", link]) == 0;
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "fs: symlink returns false when link path already exists" ![io] {
+    // POSIX rejects `symlink(2)` when the `link` path already
+    // exists. The wrapper should surface that as `false`, not
+    // a silent overwrite.
+    let scratch = mkdtemp("sfn-fs-test-collision-");
+    let link = scratch + "/already-there";
+    write(link, "occupant");
+
+    assert symlink("/tmp", link) == false;
+
+    process.run(["rm", "-rf", scratch]);
+}

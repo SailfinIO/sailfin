@@ -540,16 +540,86 @@ fn write_report(path: string, lines: string[]) ![io] {
 
 ---
 
+#### `fs.set_perms(path: string, mode: int) -> boolean ![io]`
+
+Set POSIX permission bits on `path` — the `chmod(2)` wrapper. `mode` is masked to the lower 12 bits (perm + sticky/setuid/setgid). Returns `true` on success, `false` on any error (missing file, permission denied, etc.). POSIX-only; Windows returns `false`.
+
+```sfn
+fn make_executable(path: string) ![io] {
+    // 0o755 = rwxr-xr-x (octal literals are pending; decimal for now)
+    fs.set_perms(path, 493);
+}
+```
+
+Note: octal literals (`0o755`) are pending parser support. Until they land, pass the decimal equivalent.
+
+---
+
+#### `fs.get_perms(path: string) -> int ![io]`
+
+Return the lower 12 bits of `st_mode` for `path` — the `stat -c '%a'` equivalent. Returns `-1` on any error (missing file, permission denied, etc.).
+
+```sfn
+fn is_world_readable(path: string) -> boolean ![io] {
+    let mode = fs.get_perms(path);
+    if mode == -1 { return false; }
+    // 4 = 0o004 = world-readable bit
+    return (mode & 4) != 0;
+}
+```
+
+---
+
+#### `fs.mkdtemp(prefix: string) -> string ![io]`
+
+Create a unique directory under `$TMPDIR` (or `/tmp` if unset) with mode `0700`, using `mkdtemp(3)` so the kernel guarantees uniqueness. Returns the absolute path, or an empty string on failure.
+
+If `prefix` contains a `/`, it is treated as a path-prefixed template (the caller picks the parent dir); otherwise the result lives under the system temp dir.
+
+```sfn
+fn scratch_for_run() -> string ![io] {
+    return fs.mkdtemp("sfn-build-");
+}
+```
+
+POSIX-only; Windows returns an empty string.
+
+---
+
+#### `fs.is_executable(path: string) -> boolean ![io]`
+
+Return `true` iff the current process can `exec` the path — the `access(path, X_OK)` equivalent. Permission errors and missing files both collapse to `false`. POSIX-only; Windows returns `false`.
+
+```sfn
+fn find_in_path(name: string) -> string ![io] {
+    let candidate = "/usr/local/bin/" + name;
+    if fs.is_executable(candidate) { return candidate; }
+    return "";
+}
+```
+
+---
+
+#### `fs.symlink(target: string, link: string) -> boolean ![io]`
+
+Create a symbolic link at `link` pointing at `target` — the `symlink(2)` wrapper. Per POSIX, the target need not exist; dangling links are intentionally allowed. Returns `true` on success, `false` if `link` already exists or any other error occurs. POSIX-only; Windows returns `false`.
+
+```sfn
+fn pin_current_release(target: string, link: string) ![io] {
+    fs.symlink(target, link);
+}
+```
+
+---
+
 ### Filesystem — Planned
 
 The following filesystem helpers are planned for a future release and are not available today:
 
 - `fs.readLines(path: string) -> string[] ![io]` — read file as an array of lines
-- `fs.deleteFile(path: string) ![io]` — delete a file
-- `fs.listDir(path: string) -> string[] ![io]` — list directory contents
-- `fs.makeDir(path: string) ![io]` — create a directory (and parents)
 - `fs.move(src: string, dst: string) ![io]` — rename or move a file
 - `fs.copy(src: string, dst: string) ![io]` — copy a file
+- `fs.walk(path: string) -> string[] ![io]` — recursive directory walk
 
 ---
 

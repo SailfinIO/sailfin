@@ -284,6 +284,10 @@ survives until process exit. This is why per-module compiler RAM reaches
 | `sailfin_adapter_fs_list_directory` | ✅ | Returns `SailfinPtrArray` |
 | `sailfin_adapter_fs_delete_file` / `_create_directory` | ✅ | |
 | `sailfin_intrinsic_fs_exists` | ✅ | stat-based |
+| `sailfin_adapter_fs_set_perms` / `_get_perms` | ✅ | `chmod(2)` + `stat(2) & 07777`; POSIX-only (#366) |
+| `sailfin_adapter_fs_mkdtemp` | ✅ | `mkdtemp(3)` direct; POSIX-only (#366) |
+| `sailfin_adapter_fs_is_executable` | ✅ | `access(X_OK)`; POSIX-only (#366) |
+| `sailfin_adapter_fs_symlink` | ✅ | `symlink(2)`; dangling targets allowed; POSIX-only (#366) |
 
 ### HTTP / network
 
