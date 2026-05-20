@@ -1,0 +1,163 @@
+// Regression coverage for fn-pointer type annotations (issue #688,
+// part of M1.5 closures-with-capture). The parser captures
+// `fn(T1, T2) -> R` text through the existing
+// `collect_type_annotation_until` path — paren-balancing keeps the
+// nested arg list together, and `->` is not in the terminator set —
+// so the production is a faithful round-trip of the source text
+// into `TypeAnnotation.text`. These tests pin the AST shape at the
+// four spellings called out in the issue's acceptance criteria so a
+// later refactor (or any change to whitespace handling in
+// `tokens_to_text`) cannot silently drop the annotation.
+//
+// The companion compat rule in `compiler/src/typecheck.sfn`
+// (`type_text_compatible`) recognises `__closure__` (the sentinel
+// #686 will attach to lifted lambdas) as a subtype of any
+// `fn(...) -> R`-typed binding. The test below pins that predicate
+// directly — there is no caller yet (call-site dispatch is #689)
+// but the helper is the load-bearing piece that lets #689 enforce
+// assignment compat without re-litigating the closure ABI.
+import { Block, Program, Statement } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+import { type_text_compatible } from "../../src/typecheck";
+
+// -------------------------------------------------------------------
+// Helpers
+// -------------------------------------------------------------------
+fn _find_function(program: Program, name: string) -> Statement {
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "FunctionDeclaration" {
+            if stmt.signature.name == name { return stmt; }
+        }
+        index += 1;
+    }
+    return program.statements[0];
+}
+
+fn _function_body(program: Program, name: string) -> Block {
+    let fn_decl = _find_function(program, name);
+    return fn_decl.body;
+}
+
+fn _first_variable_decl(block: Block) -> Statement {
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        let stmt = block.statements[index];
+        if stmt.variant == "VariableDeclaration" { return stmt; }
+        index += 1;
+    }
+    return block.statements[0];
+}
+
+// -------------------------------------------------------------------
+// Acceptance criterion (a): `let f: fn(int) -> int = ...` parses and
+// the annotation text round-trips into `TypeAnnotation.text`.
+// -------------------------------------------------------------------
+test "fn-types: let-binding with fn(int) -> int annotation parses" {
+    let source = "fn main() { let f: fn(int) -> int = fn(x: int) -> int { return x + 1; }; }";
+    let program = parse_program(source);
+    let body = _function_body(program, "main");
+    let decl = _first_variable_decl(body);
+    assert decl.variant == "VariableDeclaration";
+    assert strings_equal(decl.name, "f");
+    assert decl.type_annotation != null;
+    assert strings_equal(decl.type_annotation.text, "fn(int) -> int");
+    // Initializer must also be present so we know the `=` was reached
+    // — the type capture's terminator set includes `=` and a regression
+    // there would either swallow the initializer or pull `=` into the
+    // type text.
+    assert decl.initializer != null;
+}
+
+// -------------------------------------------------------------------
+// Acceptance criterion (b): `fn callback(cb: fn(int) -> int)` —
+// parameter-position fn-type annotation parses and the wrapped
+// `(int)` paren pair does not prematurely terminate the parameter
+// list.
+// -------------------------------------------------------------------
+test "fn-types: parameter typed as fn(int) -> int parses" {
+    let source = "fn apply(cb: fn(int) -> int, x: int) -> int { return cb(x); }";
+    let program = parse_program(source);
+    let decl = _find_function(program, "apply");
+    assert decl.variant == "FunctionDeclaration";
+    let params = decl.signature.parameters;
+    assert params.length == 2;
+    assert strings_equal(params[0].name, "cb");
+    assert params[0].type_annotation != null;
+    assert strings_equal(params[0].type_annotation.text, "fn(int) -> int");
+    assert strings_equal(params[1].name, "x");
+    assert params[1].type_annotation != null;
+    assert strings_equal(params[1].type_annotation.text, "int");
+    // Return type must still parse as `int` — a regression where the
+    // closing paren of the fn-type pulled into the surrounding
+    // parameter list would corrupt this.
+    assert decl.signature.return_type != null;
+    assert strings_equal(decl.signature.return_type.text, "int");
+}
+
+// -------------------------------------------------------------------
+// Acceptance criterion (c): nested-arity `fn() -> fn(int) -> int`
+// — the return-type capture must itself accept an fn-type, so the
+// `->` token between the two arrows is not greedy.
+// -------------------------------------------------------------------
+test "fn-types: nested fn() -> fn(int) -> int annotation parses" {
+    let source = "fn main() { let f: fn() -> fn(int) -> int = 0; }";
+    let program = parse_program(source);
+    let body = _function_body(program, "main");
+    let decl = _first_variable_decl(body);
+    assert decl.type_annotation != null;
+    assert strings_equal(decl.type_annotation.text, "fn() -> fn(int) -> int");
+}
+
+// -------------------------------------------------------------------
+// Acceptance criterion (d): zero-arity `fn() -> int` parses (the
+// empty arg list is a balanced `()` pair that must not be mistaken
+// for a function call or trailing parenthesised expression).
+// -------------------------------------------------------------------
+test "fn-types: zero-arg fn() -> int annotation parses" {
+    let source = "fn main() { let f: fn() -> int = 0; }";
+    let program = parse_program(source);
+    let body = _function_body(program, "main");
+    let decl = _first_variable_decl(body);
+    assert decl.type_annotation != null;
+    assert strings_equal(decl.type_annotation.text, "fn() -> int");
+}
+
+// -------------------------------------------------------------------
+// Compat-rule pin: `__closure__` ⇔ `fn(...) -> R`. The helper is
+// preemptive — no caller wires it through assignment-compat today
+// (#689 will be the first consumer) — but the predicate itself
+// must be correct so the sentinel can flow cleanly into any
+// fn-pointer binding once dispatch lands.
+// -------------------------------------------------------------------
+test "fn-types compat: __closure__ flows into fn(int) -> int" {
+    assert type_text_compatible("fn(int) -> int", "__closure__");
+}
+
+test "fn-types compat: __closure__ flows into fn() -> int (zero-arg)" {
+    assert type_text_compatible("fn() -> int", "__closure__");
+}
+
+test "fn-types compat: identical type texts are compatible" {
+    assert type_text_compatible("fn(int) -> int", "fn(int) -> int");
+    assert type_text_compatible("int", "int");
+}
+
+test "fn-types compat: __closure__ does NOT flow into a non-fn-type" {
+    // The sentinel is wildcard-like only for fn-pointer expected
+    // types. A binding annotated with, say, `int` must reject a
+    // closure-typed value — otherwise lambda values would silently
+    // flow into integer slots once an assignment-compat caller wires
+    // through.
+    assert ! type_text_compatible("int", "__closure__");
+    assert ! type_text_compatible("string", "__closure__");
+}
+
+test "fn-types compat: distinct concrete types are NOT compatible" {
+    // Negative anchor — the helper must not collapse to "always true."
+    assert ! type_text_compatible("int", "string");
+    assert ! type_text_compatible("fn(int) -> int", "fn(int) -> string");
+}
