@@ -100,7 +100,7 @@ present, so the call shape is uniform.
 
 **Env-struct allocation.** Captures are packed into a per-lambda env
 struct laid out in first-use order (deterministic across runs of the
-same source). The compiler synthesises the env type, allocates it via
+same source). The compiler synthesizes the env type, allocates it via
 the runtime, and populates each slot at the expression site. The
 helper API in `compiler/src/llvm/closures.sfn` settles this contract:
 
