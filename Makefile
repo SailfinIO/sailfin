@@ -776,6 +776,22 @@ rebuild:
 		echo "[rebuild] staging prelude.o..."; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/prelude.ll -o build/native/obj/runtime/prelude.o; \
 	fi
+	@# Stage clock.o (Sailfin-native `@sfn_sleep` from runtime/sfn/clock.sfn).
+	@# PR 2 of the sleep migration (issue #397) deleted the C `sfn_sleep`
+	@# trampoline; `@sfn_sleep` now lives only in the Sailfin module.
+	@# The legacy `sfn run` / `sfn build` link path
+	@# (`_clang_compile_runtime_objects` in `compiler/src/cli_main.sfn`)
+	@# resolves the symbol against this staged .o. The runtime-capsule
+	@# link path (used by `make compile`) instead reaches clock.sfn
+	@# through `runtime/native/capsule.toml`'s `sfn-sources` array.
+	@if [ ! -f build/native/obj/runtime/clock.ll ]; then \
+		echo "[rebuild] staging clock.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/clock.ll llvm runtime/sfn/clock.sfn >/dev/null; \
+	fi
+	@if [ ! -f build/native/obj/runtime/clock.o ]; then \
+		echo "[rebuild] staging clock.o..."; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/clock.ll -o build/native/obj/runtime/clock.o; \
+	fi
 	@# Write build stamp (version + git hash for dev builds).
 	@# `version.sfn::resolve_compiler_version` reads this file
 	@# first, so without it the binary would report whatever stale

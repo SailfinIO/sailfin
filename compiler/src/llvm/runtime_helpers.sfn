@@ -173,30 +173,16 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // Concurrency intrinsics. Sleep call sites route through the
     // Sailfin-native wrapper `@sfn_sleep` (defined in
     // `runtime/sfn/clock.sfn` and linked via the runtime capsule's
-    // `sfn-sources`) rather than directly through the C
-    // `@sailfin_runtime_sleep` entrypoint. The wrapper body
-    // currently trampolines through the C function for one PR —
-    // the libc-direct rewrite (over `nanosleep`) is gated on
-    // §2.9 Q7 of the runtime architecture (platform-conditional
-    // opaque-handle sizing). When that lands, `sailfin_runtime_sleep`
-    // disappears from both the C runtime and `platform/libc.sfn`.
+    // `sfn-sources`). PR 2 of the sleep migration (issue #397)
+    // rewrote the wrapper body to call `nanosleep` directly via
+    // `runtime/sfn/platform/posix.sfn`; the prior C trampoline
+    // (`sailfin_runtime_sleep`) and its per-symbol descriptor are
+    // both gone.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "sleep", symbol: "sfn_sleep", return_type: "void", parameter_types: ["double"], effects: ["clock"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_sleep_fn", symbol: "sfn_sleep", return_type: "void", parameter_types: ["double"], effects: ["clock"], native_signature: null, c_abi_return_type: null
-    });
-    // Type signature for the C entrypoint `sailfin_runtime_sleep`,
-    // which `runtime/sfn/clock.sfn`'s `sfn_sleep` body imports
-    // (and the C-trampoline `sfn_sleep` in `sailfin_runtime.c`
-    // also calls). Without this descriptor, calls to
-    // `sailfin_runtime_sleep` from a runtime module fall through
-    // the default call path which string-coerces numeric args via
-    // `sailfin_runtime_number_to_string`. Registering the
-    // signature makes the call lowering type-correct for any
-    // future caller.
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_runtime_sleep", symbol: "sailfin_runtime_sleep", return_type: "void", parameter_types: ["double"], effects: ["clock"], native_signature: null, c_abi_return_type: null
     });
 
     // Monotonic clock for profiling/timing.

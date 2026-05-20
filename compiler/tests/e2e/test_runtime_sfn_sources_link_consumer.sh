@@ -88,7 +88,14 @@ kind = "runtime"
 # entry-point clash.
 c-sources = ["src/sailfin_arena.c", "src/sailfin_runtime.c", "src/sailfin_sha256.c", "src/sailfin_base64.c"]
 ll-sources = ["ir/runtime_globals.ll"]
-sfn-sources = ["../sfn/test_marker.sfn"]
+# `clock.sfn` is required after PR 2 of the sleep migration (issue
+# #397) deleted the `sfn_sleep` C trampoline — the prelude always
+# emits a call to `@sfn_sleep` via the `sleep(ms)` wrapper, and
+# without `clock.sfn` linked the synthetic build fails with
+# "undefined reference to sfn_sleep". The list still leads with
+# `test_marker.sfn` so the "consumer fires for sfn-sources"
+# assertions below remain pointed at the marker file.
+sfn-sources = ["../sfn/test_marker.sfn", "../sfn/clock.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm"]
 prelude-entry = "../prelude.sfn"
@@ -104,6 +111,14 @@ EOF
 
     # Mirror prelude.sfn (the runtime capsule's prelude-entry).
     ln -s "$REPO_ROOT/runtime/prelude.sfn" "$ws/runtime/prelude.sfn"
+
+    # Mirror the real clock.sfn + posix.sfn (its dep) — the synthetic
+    # capsule's `sfn-sources` list above references them by relative
+    # path under `runtime/sfn/`, so they have to exist on disk for
+    # `_compile_runtime_sfn_sources` to find them.
+    mkdir -p "$ws/runtime/sfn/platform"
+    ln -s "$REPO_ROOT/runtime/sfn/clock.sfn" "$ws/runtime/sfn/clock.sfn"
+    ln -s "$REPO_ROOT/runtime/sfn/platform/posix.sfn" "$ws/runtime/sfn/platform/posix.sfn"
 
     # The sfn-source under test. Tiny self-contained module.
     cat > "$ws/runtime/sfn/test_marker.sfn" <<'EOF'
@@ -186,8 +201,30 @@ test_disable_gate_skips_consumer() {
     local ws="$SCRATCH/ws-disabled"
     setup_workspace "$ws"
     local log="$SCRATCH/ws-disabled.log"
-    if ! build_scratch_app "$ws" "$log" "SAILFIN_DISABLE_RUNTIME_SFN_SOURCES=1"; then
-        echo "[test]   sfn build with disable gate failed (it should still succeed):"
+    # Post-#397 (PR 2 of the sleep migration), the prelude's
+    # `sleep` wrapper emits `call void @sfn_sleep(...)` and the C
+    # runtime no longer defines `sfn_sleep` — only the Sailfin
+    # `runtime/sfn/clock.sfn` module does, via the same
+    # `sfn-sources` consumer this gate disables. So the build is
+    # now EXPECTED to fail when the gate is set (the link surfaces
+    # an undefined reference to `sfn_sleep`). The gate's
+    # short-circuit behavior — no `.o` produced for any
+    # `sfn-source` entry — is still pinned below; what changed is
+    # the rollback story: disabling the consumer no longer keeps
+    # the rest of the build healthy. A future PR that restores a
+    # C-side fallback for `sfn_sleep` would re-make this build
+    # succeed, at which point this expect-failure assertion flips
+    # back to expect-success without changing the .o-absence check.
+    local rc=0
+    build_scratch_app "$ws" "$log" "SAILFIN_DISABLE_RUNTIME_SFN_SOURCES=1" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        echo "[test]   sfn build with disable gate UNEXPECTEDLY succeeded — the C"
+        echo "[test]   sfn_sleep trampoline is back? Update this test's gate-failure"
+        echo "[test]   expectation if PR 2 of the sleep migration was reverted."
+        return 1
+    fi
+    if ! grep -qE "undefined reference to .sfn_sleep." "$log"; then
+        echo "[test]   sfn build failed but not for the expected sfn_sleep reason:"
         tail -40 "$log"
         return 1
     fi
@@ -195,6 +232,12 @@ test_disable_gate_skips_consumer() {
     if [ -f "$expected_o" ]; then
         echo "[test]   disable gate did NOT skip the consumer; .o was produced anyway:"
         echo "[test]   $expected_o"
+        return 1
+    fi
+    local clock_o="$ws/build/sailfin/sfn__runtime-native__clock.sfn-O2.o"
+    if [ -f "$clock_o" ]; then
+        echo "[test]   disable gate did NOT skip the consumer; clock.o was produced:"
+        echo "[test]   $clock_o"
         return 1
     fi
     return 0

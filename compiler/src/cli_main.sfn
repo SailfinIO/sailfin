@@ -288,6 +288,33 @@ fn _runtime_prelude_path(root: string) -> string ![io] {
     return "";
 }
 
+// PR 2 of the sleep migration (issue #397) deleted the C
+// `sfn_sleep` trampoline from `runtime/native/src/sailfin_runtime.c`.
+// `@sfn_sleep` now lives only in the Sailfin module
+// `runtime/sfn/clock.sfn`; the legacy `sfn run` / `sfn build` link
+// path needs the staged `.o` to resolve the symbol. Search order
+// mirrors `_runtime_prelude_path` so a bundled install and an
+// in-tree dev build both pick the right file. Returns `""` when
+// the artifact is missing — callers warn but proceed, because a
+// user program that doesn't call `sleep()` strips the unresolved
+// reference and links cleanly.
+fn _runtime_clock_path(root: string) -> string ![io] {
+    let bundled = _path_join(root, "native/obj/clock.o");
+    if fs.exists(bundled) { return bundled; }
+    let bundled_nested = _path_join(root, "native/obj/runtime/clock.o");
+    if fs.exists(bundled_nested) { return bundled_nested; }
+    let parent = _dirname(root);
+    let fallback = _path_join(parent, "build/native/obj/clock.o");
+    if fs.exists(fallback) { return fallback; }
+    let fallback_nested = _path_join(parent, "build/native/obj/runtime/clock.o");
+    if fs.exists(fallback_nested) { return fallback_nested; }
+    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/clock.o");
+    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
+    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/clock.o");
+    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
+    return "";
+}
+
 // Last `/`-separated segment of a path. Returns the input itself
 // when there's no slash. Used for naming runtime obj outputs after
 // their source basename, matching the legacy `_clang_compile_runtime_objects`
@@ -616,11 +643,19 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
 fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_flag: string) -> string[] ![io] {
     // Build (or reuse) cached runtime object files so repeated `test` invocations
     // don't recompile the runtime C sources per test file.
+    //
+    // Return shape: `[runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj]`.
+    // The trailing `clock_obj` slot is the PR 2 (#397) addition for the
+    // Sailfin-native `@sfn_sleep` definition. An empty `clock_obj` is
+    // tolerated when `runtime/sfn/clock.sfn` has not yet been staged into
+    // the runtime bundle — callers skip empty entries when assembling
+    // the link line. Any of the first four going empty signals a failed
+    // runtime compile and propagates back to the caller as a hard fail.
     if runtime_root.length == 0 {
-        return ["", "", "", ""];
+        return ["", "", "", "", ""];
     }
     if !_runtime_bundle_exists(runtime_root) {
-        return ["", "", "", ""];
+        return ["", "", "", "", ""];
     }
 
     let include_dir = _path_join(runtime_root, "native/include");
@@ -628,6 +663,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     let arena_src = _path_join(runtime_root, "native/src/sailfin_arena.c");
     let runtime_ir = _path_join(runtime_root, "native/ir/runtime_globals.ll");
     let prelude_obj = _runtime_prelude_path(runtime_root);
+    let clock_obj = _runtime_clock_path(runtime_root);
 
     let runtime_obj = _path_join(out_dir, "sailfin_runtime" + opt_flag + ".o");
     let arena_obj = _path_join(out_dir, "sailfin_arena" + opt_flag + ".o");
@@ -637,7 +673,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
         let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
             + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
         if rc != 0 {
-            return ["", "", "", ""];
+            return ["", "", "", "", ""];
         }
     }
 
@@ -645,18 +681,18 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
         let rc_arena = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
             + include_dir, "-c", arena_src, "-o", arena_obj,]);
         if rc_arena != 0 {
-            return ["", "", "", ""];
+            return ["", "", "", "", ""];
         }
     }
 
     if !fs.exists(globals_obj) {
         let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", runtime_ir, "-o", globals_obj,]);
         if rc2 != 0 {
-            return ["", "", "", ""];
+            return ["", "", "", "", ""];
         }
     }
 
-    return [runtime_obj, arena_obj, globals_obj, prelude_obj];
+    return [runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj];
 }
 
 fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> int ![io] {
@@ -752,6 +788,10 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         let arena_obj = cached[1];
         let globals_obj = cached[2];
         let prelude_obj = cached[3];
+        // PR 2 (#397): `clock_obj` carries the Sailfin-native
+        // `@sfn_sleep` definition. Empty-string fallback covers
+        // older runtime bundles that predate the staging step.
+        let clock_obj = cached[4];
         let mut _missing: boolean = false;
         if runtime_obj.length == 0 { _missing = true; }
         if arena_obj.length == 0 { _missing = true; }
@@ -765,6 +805,7 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         runtime_objs.push(arena_obj);
         runtime_objs.push(globals_obj);
         runtime_objs.push(prelude_obj);
+        if clock_obj.length > 0 { runtime_objs.push(clock_obj); }
         runtime_link_libs.push("-lm");
     }
 
