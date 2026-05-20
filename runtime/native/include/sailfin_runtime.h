@@ -211,6 +211,39 @@ extern "C"
     // Terminate the process with the given exit code. Never returns.
     void sailfin_runtime_process_exit(double code);
 
+    // Issue #365: capturing / streaming process APIs.
+    //
+    // `run_capture` runs the child to completion with both stdout and
+    // stderr piped, drained concurrently via poll(2) to avoid pipe-
+    // buffer deadlock. The exit code is returned directly (matching the
+    // i64 ABI); captured stdout/stderr are stashed in thread-local
+    // storage and retrieved by the Sailfin wrapper via
+    // `_capture_take_stdout` / `_capture_take_stderr`. Passing `NULL`
+    // for `env_flat` inherits the parent environment; an empty
+    // SfnArray means "no env vars set". Non-empty `env_flat` is a flat
+    // list of `"KEY=VALUE"` strings.
+    //
+    // Returns `-1` when the runtime itself can't complete the call
+    // (invalid argv, OOM, pipe/spawn failure) — distinct from a
+    // legitimate child exit code of 127 ("command not found" in the
+    // shell convention).
+    int64_t sailfin_runtime_process_run_capture(SfnArray *argv, SfnArray *env_flat);
+    char *sailfin_runtime_process_capture_take_stdout(void);
+    char *sailfin_runtime_process_capture_take_stderr(void);
+
+    // `spawn_with_env` returns a malloc'd opaque handle cast to int64
+    // (handle == 0 indicates spawn failure). The Sailfin wrapper drives
+    // the child's streams via `_handle_write` / `_handle_read_stdout` /
+    // `_handle_read_stderr` / `_handle_close_stdin` and reaps the child
+    // with `_handle_wait`, which closes any still-open fds and frees
+    // the handle. `_handle_*` calls against handle == 0 are no-ops.
+    int64_t sailfin_runtime_process_spawn_with_env(SfnArray *argv, SfnArray *env_flat);
+    int64_t sailfin_runtime_process_handle_write(int64_t handle_id, char *data);
+    void sailfin_runtime_process_handle_close_stdin(int64_t handle_id);
+    char *sailfin_runtime_process_handle_read_stdout(int64_t handle_id);
+    char *sailfin_runtime_process_handle_read_stderr(int64_t handle_id);
+    int64_t sailfin_runtime_process_handle_wait(int64_t handle_id);
+
     // Execute `cmd` via popen("r") and return its stdout as a
     // freshly-allocated runtime string. Used by `_shell_read_cmd`
     // and friends to capture command output without the shared-tmp-

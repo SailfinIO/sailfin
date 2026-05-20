@@ -288,6 +288,40 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "process.exit", symbol: "sailfin_runtime_process_exit", return_type: "void", parameter_types: ["double"], effects: ["io"], native_signature: null, c_abi_return_type: null
     });
 
+    // Issue #365: stdout/stderr-capturing process APIs. argv and
+    // env_flat are SfnArray<string>; env_flat carries `"KEY=VALUE"`
+    // entries. `run_capture` returns the exit code; captured streams
+    // are retrieved via the `_take_*` helpers from thread-local
+    // storage. `spawn_with_env` returns a malloc'd handle (cast to
+    // int64); 0 indicates failure.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.run_capture", symbol: "sailfin_runtime_process_run_capture", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.capture_take_stdout", symbol: "sailfin_runtime_process_capture_take_stdout", return_type: "i8*", parameter_types: [], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.capture_take_stderr", symbol: "sailfin_runtime_process_capture_take_stderr", return_type: "i8*", parameter_types: [], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.spawn_with_env", symbol: "sailfin_runtime_process_spawn_with_env", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_write", symbol: "sailfin_runtime_process_handle_write", return_type: "i64", parameter_types: ["i64", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_close_stdin", symbol: "sailfin_runtime_process_handle_close_stdin", return_type: "void", parameter_types: ["i64"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_read_stdout", symbol: "sailfin_runtime_process_handle_read_stdout", return_type: "i8*", parameter_types: ["i64"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_read_stderr", symbol: "sailfin_runtime_process_handle_read_stderr", return_type: "i8*", parameter_types: ["i64"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.handle_wait", symbol: "sailfin_runtime_process_handle_wait", return_type: "i64", parameter_types: ["i64"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+
     // Filesystem adapters
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs_read_file", symbol: "sailfin_adapter_fs_read_file", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null

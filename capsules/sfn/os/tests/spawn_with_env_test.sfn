@@ -1,0 +1,92 @@
+// Tests for sfn/os process.spawn_with_env — streaming child-process
+// handle with stdin write + stdout/stderr read (issue #365).
+import {
+    Env,
+    ProcessHandle,
+    env_empty,
+    env_set,
+    spawn_with_env,
+    handle_write,
+    handle_close_stdin,
+    handle_read_stdout,
+    handle_read_stderr,
+    handle_wait
+} from "../src/mod";
+
+test "spawn_with_env: cat echoes piped stdin to stdout" ![io] {
+    let h = spawn_with_env(["cat"], env_empty());
+    assert h.handle_id != 0;
+    let written = handle_write(h, "hello world\n");
+    assert written == 12;
+    // cat exits on stdin EOF, so close stdin before reading stdout.
+    handle_close_stdin(h);
+    let out = handle_read_stdout(h);
+    assert strings_equal(out, "hello world\n");
+    let exit = handle_wait(h);
+    assert exit == 0;
+}
+
+test "spawn_with_env: multiple writes accumulate before EOF" ![io] {
+    let h = spawn_with_env(["cat"], env_empty());
+    assert h.handle_id != 0;
+    handle_write(h, "alpha\n");
+    handle_write(h, "beta\n");
+    handle_write(h, "gamma\n");
+    handle_close_stdin(h);
+    let out = handle_read_stdout(h);
+    assert strings_equal(out, "alpha\nbeta\ngamma\n");
+    let exit = handle_wait(h);
+    assert exit == 0;
+}
+
+test "spawn_with_env: stderr is captured independently of stdout" ![io] {
+    let h = spawn_with_env(["sh", "-c", "printf to_out; printf to_err 1>&2"], env_empty());
+    assert h.handle_id != 0;
+    handle_close_stdin(h);
+    let out = handle_read_stdout(h);
+    let err = handle_read_stderr(h);
+    assert strings_equal(out, "to_out");
+    assert strings_equal(err, "to_err");
+    let exit = handle_wait(h);
+    assert exit == 0;
+}
+
+test "spawn_with_env: env overrides propagate to the spawned child" ![io] {
+    let env = env_set(env_empty(), "GREETING", "salve");
+    let h = spawn_with_env(["printenv", "GREETING"], env);
+    assert h.handle_id != 0;
+    handle_close_stdin(h);
+    let out = handle_read_stdout(h);
+    assert strings_equal(out, "salve\n");
+    let exit = handle_wait(h);
+    assert exit == 0;
+}
+
+test "spawn_with_env: handle_wait surfaces non-zero exit" ![io] {
+    let h = spawn_with_env(["sh", "-c", "exit 3"], env_empty());
+    assert h.handle_id != 0;
+    handle_close_stdin(h);
+    let exit = handle_wait(h);
+    assert exit == 3;
+}
+
+test "spawn_with_env: heavy stderr does not deadlock sequential read_stdout" ![io] {
+    // Regression: pre-fix `handle_read_stdout` blocked on a single fd
+    // until EOF, so a child that filled the >64 KiB pipe buffer on
+    // stderr while the parent was reading stdout deadlocked. The
+    // poll-based concurrent drain stashes stderr while serving the
+    // stdout read so the call cannot stall on the unread side.
+    //
+    // `head | tr` avoids `yes`'s broken-pipe diagnostic landing on
+    // the test's stderr (see the matching note in
+    // `run_capture_test.sfn`'s pipe-buffer test).
+    let h = spawn_with_env(["sh", "-c", "head -c 200000 /dev/zero | tr '\\0' E 1>&2; head -c 5000 /dev/zero | tr '\\0' O"], env_empty());
+    assert h.handle_id != 0;
+    handle_close_stdin(h);
+    let out = handle_read_stdout(h);
+    assert out.length == 5000;
+    let err = handle_read_stderr(h);
+    assert err.length == 200000;
+    let exit = handle_wait(h);
+    assert exit == 0;
+}

@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <spawn.h>
 #include <sys/wait.h>
+#include <poll.h>
 #endif
 
 #if !defined(_WIN32)
@@ -5512,6 +5513,860 @@ void sailfin_runtime_process_exit(double code)
     int exit_code = (int)code;
     exit(exit_code);
 }
+
+/* ===================================================================
+ * Process run_capture / spawn_with_env (issue #365)
+ *
+ * Stdout/stderr-capturing variants that complement `process.run`.
+ * `run_capture` runs the child to completion and stashes the captured
+ * streams in thread-local storage; the Sailfin wrapper retrieves them
+ * via `_capture_take_stdout` / `_capture_take_stderr` after the call
+ * returns. `spawn_with_env` returns a malloc'd handle (cast through
+ * int64_t for ABI symmetry with the i64 runtime helpers); the
+ * `_handle_*` helpers drive the child's streams and reap it via
+ * `_handle_wait`. Envp is a NULL-terminated SfnArray of "KEY=VALUE"
+ * strings, or a NULL SfnArray to inherit the parent environment.
+ *
+ * POSIX path uses `posix_spawnp` with `posix_spawn_file_actions_t`
+ * to wire dup2/close cleanly (no stray parent fds in the child) and
+ * `poll(2)` to drain stdout/stderr concurrently without deadlock on
+ * large pipe writes. Windows path is stub-only — these APIs target
+ * the test-infra workstream, which runs on POSIX in CI.
+ * =================================================================== */
+
+#if !defined(_WIN32)
+
+static __thread char *_sfn_capture_stdout_stash = NULL;
+static __thread char *_sfn_capture_stderr_stash = NULL;
+
+/* Read every remaining byte from `fd` into a malloc-backed buffer
+ * (NUL-terminated, returned via the function value; effective byte
+ * count returned through *out_len when non-NULL). Returns NULL on
+ * allocation failure or unrecoverable I/O error. Caller frees. */
+static char *_sfn_read_fd_all(int fd, size_t *out_len)
+{
+    size_t cap = 4096;
+    size_t len = 0;
+    char *buf = (char *)malloc(cap);
+    if (!buf)
+        return NULL;
+    for (;;)
+    {
+        if (len + 1 >= cap)
+        {
+            size_t new_cap = cap * 2;
+            char *r = (char *)realloc(buf, new_cap);
+            if (!r)
+            {
+                free(buf);
+                return NULL;
+            }
+            buf = r;
+            cap = new_cap;
+        }
+        ssize_t n = read(fd, buf + len, cap - len - 1);
+        if (n > 0)
+        {
+            len += (size_t)n;
+        }
+        else if (n == 0)
+        {
+            break;
+        }
+        else
+        {
+            if (errno == EINTR)
+                continue;
+            free(buf);
+            return NULL;
+        }
+    }
+    buf[len] = '\0';
+    if (out_len)
+        *out_len = len;
+    return buf;
+}
+
+/* Materialize a NULL-terminated C argv from an SfnArray of strings.
+ * Returns calloc'd `char **` (caller frees the outer array; the
+ * element pointers are borrowed from the SfnArray and must not be
+ * freed). NULL on allocation failure or empty/invalid input. */
+static char **_sfn_build_argv(SfnArray *arr)
+{
+    if (!arr || arr->len < 0 || !arr->data)
+        return NULL;
+    size_t n = (size_t)arr->len;
+    char **out = (char **)calloc(n + 1, sizeof(char *));
+    if (!out)
+        return NULL;
+    char **src = (char **)arr->data;
+    for (size_t i = 0; i < n; i++)
+        out[i] = src[i];
+    out[n] = NULL;
+    return out;
+}
+
+/* Drain `fd_out` and `fd_err` concurrently with poll(2), appending
+ * received bytes to the respective buffers. Returns 0 on success,
+ * -1 on allocation failure. Both file descriptors are closed by the
+ * time this returns. */
+static int _sfn_drain_pipes(int fd_out, int fd_err,
+                            char **buf_out_ptr, size_t *len_out_ptr,
+                            char **buf_err_ptr, size_t *len_err_ptr)
+{
+    size_t cap_out = *len_out_ptr > 4096 ? *len_out_ptr * 2 : 4096;
+    size_t cap_err = *len_err_ptr > 4096 ? *len_err_ptr * 2 : 4096;
+    char *buf_out = (char *)malloc(cap_out);
+    char *buf_err = (char *)malloc(cap_err);
+    if (!buf_out || !buf_err)
+    {
+        free(buf_out);
+        free(buf_err);
+        if (fd_out >= 0)
+            close(fd_out);
+        if (fd_err >= 0)
+            close(fd_err);
+        return -1;
+    }
+    size_t len_out = 0, len_err = 0;
+    int open_count = 0;
+    if (fd_out >= 0)
+        open_count++;
+    if (fd_err >= 0)
+        open_count++;
+    while (open_count > 0)
+    {
+        struct pollfd pfds[2];
+        int nfds = 0;
+        if (fd_out >= 0)
+        {
+            pfds[nfds].fd = fd_out;
+            pfds[nfds].events = POLLIN;
+            pfds[nfds].revents = 0;
+            nfds++;
+        }
+        if (fd_err >= 0)
+        {
+            pfds[nfds].fd = fd_err;
+            pfds[nfds].events = POLLIN;
+            pfds[nfds].revents = 0;
+            nfds++;
+        }
+        int pr = poll(pfds, (nfds_t)nfds, -1);
+        if (pr < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        for (int i = 0; i < nfds; i++)
+        {
+            short revents = pfds[i].revents;
+            if (revents == 0)
+                continue;
+            int fd = pfds[i].fd;
+            char tmp[4096];
+            ssize_t n = read(fd, tmp, sizeof(tmp));
+            if (n > 0)
+            {
+                char **buf_pp = (fd == fd_out) ? &buf_out : &buf_err;
+                size_t *len_p = (fd == fd_out) ? &len_out : &len_err;
+                size_t *cap_p = (fd == fd_out) ? &cap_out : &cap_err;
+                if (*len_p + (size_t)n + 1 > *cap_p)
+                {
+                    size_t new_cap = *cap_p;
+                    while (*len_p + (size_t)n + 1 > new_cap)
+                        new_cap *= 2;
+                    char *r = (char *)realloc(*buf_pp, new_cap);
+                    if (!r)
+                    {
+                        free(buf_out);
+                        free(buf_err);
+                        if (fd_out >= 0)
+                            close(fd_out);
+                        if (fd_err >= 0)
+                            close(fd_err);
+                        return -1;
+                    }
+                    *buf_pp = r;
+                    *cap_p = new_cap;
+                }
+                memcpy(*buf_pp + *len_p, tmp, (size_t)n);
+                *len_p += (size_t)n;
+            }
+            else if (n == 0 || (revents & (POLLHUP | POLLERR | POLLNVAL)))
+            {
+                if (fd == fd_out)
+                {
+                    close(fd_out);
+                    fd_out = -1;
+                }
+                else
+                {
+                    close(fd_err);
+                    fd_err = -1;
+                }
+                open_count--;
+            }
+            else if (n < 0 && errno != EINTR && errno != EAGAIN)
+            {
+                if (fd == fd_out)
+                {
+                    close(fd_out);
+                    fd_out = -1;
+                }
+                else
+                {
+                    close(fd_err);
+                    fd_err = -1;
+                }
+                open_count--;
+            }
+        }
+    }
+    if (fd_out >= 0)
+        close(fd_out);
+    if (fd_err >= 0)
+        close(fd_err);
+    buf_out[len_out] = '\0';
+    buf_err[len_err] = '\0';
+    *buf_out_ptr = buf_out;
+    *len_out_ptr = len_out;
+    *buf_err_ptr = buf_err;
+    *len_err_ptr = len_err;
+    return 0;
+}
+
+int64_t sailfin_runtime_process_run_capture(SfnArray *argv, SfnArray *env_flat)
+{
+    if (_sfn_capture_stdout_stash)
+    {
+        free(_sfn_capture_stdout_stash);
+        _sfn_capture_stdout_stash = NULL;
+    }
+    if (_sfn_capture_stderr_stash)
+    {
+        free(_sfn_capture_stderr_stash);
+        _sfn_capture_stderr_stash = NULL;
+    }
+
+    if (!argv || argv->len <= 0 || !argv->data)
+        return -1;
+
+    char **child_argv = _sfn_build_argv(argv);
+    if (!child_argv || !child_argv[0])
+    {
+        free(child_argv);
+        return -1;
+    }
+
+    /* env_flat NULL means "no SfnArray given" — inherit parent env.
+     * env_flat with len == 0 means "empty environment". Sailfin
+     * callers that want inheritance pass `env_from_current()`; an
+     * `Env { entries: [] }` is interpreted as the empty environment. */
+    char **child_envp = NULL;
+    bool inherit_env = (env_flat == NULL);
+    if (!inherit_env)
+    {
+        if (env_flat->len == 0)
+        {
+            child_envp = (char **)calloc(1, sizeof(char *));
+            if (!child_envp)
+            {
+                free(child_argv);
+                return -1;
+            }
+            child_envp[0] = NULL;
+        }
+        else
+        {
+            child_envp = _sfn_build_argv(env_flat);
+            if (!child_envp)
+            {
+                free(child_argv);
+                return -1;
+            }
+        }
+    }
+
+    int out_pipe[2] = {-1, -1};
+    int err_pipe[2] = {-1, -1};
+    if (pipe(out_pipe) < 0)
+    {
+        free(child_argv);
+        free(child_envp);
+        return -1;
+    }
+    if (pipe(err_pipe) < 0)
+    {
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        free(child_argv);
+        free(child_envp);
+        return -1;
+    }
+
+    posix_spawn_file_actions_t actions;
+    if (posix_spawn_file_actions_init(&actions) != 0)
+    {
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        close(err_pipe[0]);
+        close(err_pipe[1]);
+        free(child_argv);
+        free(child_envp);
+        return -1;
+    }
+    /* Child closes the parent-side read ends, dup2's the write ends
+     * over stdout/stderr, and closes the original write fds so the
+     * parent's `read` sees EOF when the child exits. */
+    posix_spawn_file_actions_addclose(&actions, out_pipe[0]);
+    posix_spawn_file_actions_addclose(&actions, err_pipe[0]);
+    posix_spawn_file_actions_adddup2(&actions, out_pipe[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, err_pipe[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&actions, out_pipe[1]);
+    posix_spawn_file_actions_addclose(&actions, err_pipe[1]);
+
+    char *const *envp = inherit_env ? environ : child_envp;
+    pid_t pid;
+    int spawn_err = posix_spawnp(&pid, child_argv[0], &actions, NULL, child_argv, envp);
+    posix_spawn_file_actions_destroy(&actions);
+    if (spawn_err != 0)
+    {
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        close(err_pipe[0]);
+        close(err_pipe[1]);
+        free(child_argv);
+        free(child_envp);
+        return -1;
+    }
+
+    /* Parent closes the write ends so the read ends see EOF on child
+     * exit. */
+    close(out_pipe[1]);
+    close(err_pipe[1]);
+    free(child_argv);
+    free(child_envp);
+
+    char *buf_out = NULL;
+    char *buf_err = NULL;
+    size_t len_out = 0;
+    size_t len_err = 0;
+    int drain_err = _sfn_drain_pipes(out_pipe[0], err_pipe[0],
+                                     &buf_out, &len_out,
+                                     &buf_err, &len_err);
+    if (drain_err < 0)
+    {
+        waitpid(pid, NULL, 0);
+        return -1;
+    }
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0)
+    {
+        free(buf_out);
+        free(buf_err);
+        return -1;
+    }
+
+    _sfn_capture_stdout_stash = buf_out;
+    _sfn_capture_stderr_stash = buf_err;
+
+    if (WIFEXITED(status))
+        return (int64_t)WEXITSTATUS(status);
+    if (WIFSIGNALED(status))
+        return (int64_t)(128 + WTERMSIG(status));
+    return -1;
+}
+
+char *sailfin_runtime_process_capture_take_stdout(void)
+{
+    char *result = _sfn_capture_stdout_stash;
+    _sfn_capture_stdout_stash = NULL;
+    if (!result)
+    {
+        result = (char *)malloc(1);
+        if (result)
+            result[0] = '\0';
+    }
+    return result;
+}
+
+char *sailfin_runtime_process_capture_take_stderr(void)
+{
+    char *result = _sfn_capture_stderr_stash;
+    _sfn_capture_stderr_stash = NULL;
+    if (!result)
+    {
+        result = (char *)malloc(1);
+        if (result)
+            result[0] = '\0';
+    }
+    return result;
+}
+
+typedef struct
+{
+    pid_t pid;
+    int stdin_fd;
+    int stdout_fd;
+    int stderr_fd;
+    /* Per-stream stash buffers populated by `_sfn_handle_drain_one`.
+     * The poll-based drain reads from both pipes whenever either side
+     * has data so a child writing >PIPE_BUF to one stream cannot
+     * deadlock by filling its kernel buffer while the parent is
+     * blocked reading the other. Whatever the caller didn't ask for
+     * stays in the stash for the matching `_handle_read_*` call. */
+    char *stdout_buf;
+    size_t stdout_len;
+    size_t stdout_cap;
+    char *stderr_buf;
+    size_t stderr_len;
+    size_t stderr_cap;
+} SailfinProcessHandle;
+
+int64_t sailfin_runtime_process_spawn_with_env(SfnArray *argv, SfnArray *env_flat)
+{
+    if (!argv || argv->len <= 0 || !argv->data)
+        return 0;
+
+    char **child_argv = _sfn_build_argv(argv);
+    if (!child_argv || !child_argv[0])
+    {
+        free(child_argv);
+        return 0;
+    }
+
+    char **child_envp = NULL;
+    bool inherit_env = (env_flat == NULL);
+    if (!inherit_env)
+    {
+        if (env_flat->len == 0)
+        {
+            child_envp = (char **)calloc(1, sizeof(char *));
+            if (!child_envp)
+            {
+                free(child_argv);
+                return 0;
+            }
+            child_envp[0] = NULL;
+        }
+        else
+        {
+            child_envp = _sfn_build_argv(env_flat);
+            if (!child_envp)
+            {
+                free(child_argv);
+                return 0;
+            }
+        }
+    }
+
+    int in_pipe[2] = {-1, -1};
+    int out_pipe[2] = {-1, -1};
+    int err_pipe[2] = {-1, -1};
+    if (pipe(in_pipe) < 0)
+    {
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+    if (pipe(out_pipe) < 0)
+    {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+    if (pipe(err_pipe) < 0)
+    {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+
+    posix_spawn_file_actions_t actions;
+    if (posix_spawn_file_actions_init(&actions) != 0)
+    {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        close(err_pipe[0]);
+        close(err_pipe[1]);
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+    posix_spawn_file_actions_addclose(&actions, in_pipe[1]);
+    posix_spawn_file_actions_addclose(&actions, out_pipe[0]);
+    posix_spawn_file_actions_addclose(&actions, err_pipe[0]);
+    posix_spawn_file_actions_adddup2(&actions, in_pipe[0], STDIN_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, out_pipe[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, err_pipe[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&actions, in_pipe[0]);
+    posix_spawn_file_actions_addclose(&actions, out_pipe[1]);
+    posix_spawn_file_actions_addclose(&actions, err_pipe[1]);
+
+    char *const *envp = inherit_env ? environ : child_envp;
+    pid_t pid;
+    int spawn_err = posix_spawnp(&pid, child_argv[0], &actions, NULL, child_argv, envp);
+    posix_spawn_file_actions_destroy(&actions);
+    if (spawn_err != 0)
+    {
+        close(in_pipe[0]);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(out_pipe[1]);
+        close(err_pipe[0]);
+        close(err_pipe[1]);
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+
+    /* Parent keeps the write end of stdin and the read ends of
+     * stdout/stderr; the child-side originals were closed by the
+     * file_actions list. */
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+    close(err_pipe[1]);
+    free(child_argv);
+    free(child_envp);
+
+    SailfinProcessHandle *h = (SailfinProcessHandle *)malloc(sizeof(SailfinProcessHandle));
+    if (!h)
+    {
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(err_pipe[0]);
+        waitpid(pid, NULL, 0);
+        return 0;
+    }
+    h->pid = pid;
+    h->stdin_fd = in_pipe[1];
+    h->stdout_fd = out_pipe[0];
+    h->stderr_fd = err_pipe[0];
+    h->stdout_buf = NULL;
+    h->stdout_len = 0;
+    h->stdout_cap = 0;
+    h->stderr_buf = NULL;
+    h->stderr_len = 0;
+    h->stderr_cap = 0;
+    return (int64_t)(intptr_t)h;
+}
+
+int64_t sailfin_runtime_process_handle_write(int64_t handle_id, char *data)
+{
+    SailfinProcessHandle *h = (SailfinProcessHandle *)(intptr_t)handle_id;
+    if (!h || h->stdin_fd < 0 || !data)
+        return -1;
+    size_t total = strlen(data);
+    size_t written = 0;
+    while (written < total)
+    {
+        ssize_t n = write(h->stdin_fd, data + written, total - written);
+        if (n < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            return -1;
+        }
+        written += (size_t)n;
+    }
+    return (int64_t)written;
+}
+
+void sailfin_runtime_process_handle_close_stdin(int64_t handle_id)
+{
+    SailfinProcessHandle *h = (SailfinProcessHandle *)(intptr_t)handle_id;
+    if (!h || h->stdin_fd < 0)
+        return;
+    close(h->stdin_fd);
+    h->stdin_fd = -1;
+}
+
+/* Drain stdout and stderr concurrently into the handle's stash
+ * buffers, returning the requested stream. Polling both fds at once
+ * is mandatory: a sequential read on one side would let the child
+ * block on a full pipe buffer when writing the other side (~64KiB
+ * on Linux), deadlocking against the parent's blocking read. The
+ * "other" stream's bytes stay in the handle for the matching
+ * `_handle_read_*` call. Returns malloc'd NUL-terminated string;
+ * caller owns. */
+static char *_sfn_handle_drain_one(SailfinProcessHandle *h, bool want_stdout)
+{
+    while ((want_stdout && h->stdout_fd >= 0) || (!want_stdout && h->stderr_fd >= 0))
+    {
+        struct pollfd pfds[2];
+        int nfds = 0;
+        if (h->stdout_fd >= 0)
+        {
+            pfds[nfds].fd = h->stdout_fd;
+            pfds[nfds].events = POLLIN;
+            pfds[nfds].revents = 0;
+            nfds++;
+        }
+        if (h->stderr_fd >= 0)
+        {
+            pfds[nfds].fd = h->stderr_fd;
+            pfds[nfds].events = POLLIN;
+            pfds[nfds].revents = 0;
+            nfds++;
+        }
+        if (nfds == 0)
+            break;
+        int pr = poll(pfds, (nfds_t)nfds, -1);
+        if (pr < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        for (int i = 0; i < nfds; i++)
+        {
+            short revents = pfds[i].revents;
+            if (revents == 0)
+                continue;
+            int fd = pfds[i].fd;
+            bool is_stdout = (fd == h->stdout_fd);
+            char tmp[4096];
+            ssize_t n = read(fd, tmp, sizeof(tmp));
+            if (n > 0)
+            {
+                char **buf_pp = is_stdout ? &h->stdout_buf : &h->stderr_buf;
+                size_t *len_p = is_stdout ? &h->stdout_len : &h->stderr_len;
+                size_t *cap_p = is_stdout ? &h->stdout_cap : &h->stderr_cap;
+                size_t needed = *len_p + (size_t)n + 1;
+                if (needed > *cap_p)
+                {
+                    size_t new_cap = *cap_p > 0 ? *cap_p : 4096;
+                    while (needed > new_cap)
+                        new_cap *= 2;
+                    char *r = (char *)realloc(*buf_pp, new_cap);
+                    if (!r)
+                    {
+                        /* OOM — stop draining; whatever we already
+                         * stashed will still be returned below. */
+                        if (h->stdout_fd >= 0)
+                        {
+                            close(h->stdout_fd);
+                            h->stdout_fd = -1;
+                        }
+                        if (h->stderr_fd >= 0)
+                        {
+                            close(h->stderr_fd);
+                            h->stderr_fd = -1;
+                        }
+                        goto drain_done;
+                    }
+                    *buf_pp = r;
+                    *cap_p = new_cap;
+                }
+                memcpy(*buf_pp + *len_p, tmp, (size_t)n);
+                *len_p += (size_t)n;
+            }
+            else if (n == 0 || (revents & (POLLHUP | POLLERR | POLLNVAL)))
+            {
+                if (is_stdout)
+                {
+                    close(h->stdout_fd);
+                    h->stdout_fd = -1;
+                }
+                else
+                {
+                    close(h->stderr_fd);
+                    h->stderr_fd = -1;
+                }
+            }
+            else if (n < 0 && errno != EINTR && errno != EAGAIN)
+            {
+                if (is_stdout)
+                {
+                    close(h->stdout_fd);
+                    h->stdout_fd = -1;
+                }
+                else
+                {
+                    close(h->stderr_fd);
+                    h->stderr_fd = -1;
+                }
+            }
+        }
+    }
+drain_done:;
+    char **take_buf = want_stdout ? &h->stdout_buf : &h->stderr_buf;
+    size_t *take_len = want_stdout ? &h->stdout_len : &h->stderr_len;
+    size_t *take_cap = want_stdout ? &h->stdout_cap : &h->stderr_cap;
+    char *result = *take_buf;
+    if (!result)
+    {
+        result = (char *)malloc(1);
+        if (result)
+            result[0] = '\0';
+    }
+    else
+    {
+        if (*take_len + 1 > *take_cap)
+        {
+            char *r = (char *)realloc(result, *take_len + 1);
+            if (r)
+                result = r;
+        }
+        result[*take_len] = '\0';
+    }
+    *take_buf = NULL;
+    *take_len = 0;
+    *take_cap = 0;
+    return result;
+}
+
+char *sailfin_runtime_process_handle_read_stdout(int64_t handle_id)
+{
+    SailfinProcessHandle *h = (SailfinProcessHandle *)(intptr_t)handle_id;
+    if (!h)
+    {
+        char *r = (char *)malloc(1);
+        if (r)
+            r[0] = '\0';
+        return r;
+    }
+    return _sfn_handle_drain_one(h, true);
+}
+
+char *sailfin_runtime_process_handle_read_stderr(int64_t handle_id)
+{
+    SailfinProcessHandle *h = (SailfinProcessHandle *)(intptr_t)handle_id;
+    if (!h)
+    {
+        char *r = (char *)malloc(1);
+        if (r)
+            r[0] = '\0';
+        return r;
+    }
+    return _sfn_handle_drain_one(h, false);
+}
+
+int64_t sailfin_runtime_process_handle_wait(int64_t handle_id)
+{
+    SailfinProcessHandle *h = (SailfinProcessHandle *)(intptr_t)handle_id;
+    if (!h)
+        return -1;
+    if (h->stdin_fd >= 0)
+    {
+        close(h->stdin_fd);
+        h->stdin_fd = -1;
+    }
+    if (h->stdout_fd >= 0)
+    {
+        close(h->stdout_fd);
+        h->stdout_fd = -1;
+    }
+    if (h->stderr_fd >= 0)
+    {
+        close(h->stderr_fd);
+        h->stderr_fd = -1;
+    }
+    int status = 0;
+    int64_t result = -1;
+    if (waitpid(h->pid, &status, 0) >= 0)
+    {
+        if (WIFEXITED(status))
+            result = (int64_t)WEXITSTATUS(status);
+        else if (WIFSIGNALED(status))
+            result = (int64_t)(128 + WTERMSIG(status));
+        else
+            result = 127;
+    }
+    /* Free any bytes still in the stash from an unmatched
+     * `_handle_read_*` (e.g. the caller drained stdout but didn't ask
+     * for the stashed stderr). The handle itself goes away below. */
+    if (h->stdout_buf)
+    {
+        free(h->stdout_buf);
+        h->stdout_buf = NULL;
+    }
+    if (h->stderr_buf)
+    {
+        free(h->stderr_buf);
+        h->stderr_buf = NULL;
+    }
+    free(h);
+    return result;
+}
+
+#else /* _WIN32 — stubs; the test-infra workstream that consumes these is POSIX-only. */
+
+int64_t sailfin_runtime_process_run_capture(SfnArray *argv, SfnArray *env_flat)
+{
+    (void)argv;
+    (void)env_flat;
+    return -1;
+}
+
+char *sailfin_runtime_process_capture_take_stdout(void)
+{
+    char *r = (char *)malloc(1);
+    if (r)
+        r[0] = '\0';
+    return r;
+}
+
+char *sailfin_runtime_process_capture_take_stderr(void)
+{
+    char *r = (char *)malloc(1);
+    if (r)
+        r[0] = '\0';
+    return r;
+}
+
+int64_t sailfin_runtime_process_spawn_with_env(SfnArray *argv, SfnArray *env_flat)
+{
+    (void)argv;
+    (void)env_flat;
+    return 0;
+}
+
+int64_t sailfin_runtime_process_handle_write(int64_t handle_id, char *data)
+{
+    (void)handle_id;
+    (void)data;
+    return -1;
+}
+
+void sailfin_runtime_process_handle_close_stdin(int64_t handle_id) { (void)handle_id; }
+
+char *sailfin_runtime_process_handle_read_stdout(int64_t handle_id)
+{
+    (void)handle_id;
+    char *r = (char *)malloc(1);
+    if (r)
+        r[0] = '\0';
+    return r;
+}
+
+char *sailfin_runtime_process_handle_read_stderr(int64_t handle_id)
+{
+    (void)handle_id;
+    char *r = (char *)malloc(1);
+    if (r)
+        r[0] = '\0';
+    return r;
+}
+
+int64_t sailfin_runtime_process_handle_wait(int64_t handle_id)
+{
+    (void)handle_id;
+    return -1;
+}
+
+#endif
 
 /*
  * sailfin_runtime_shell_capture

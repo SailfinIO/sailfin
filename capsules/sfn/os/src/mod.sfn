@@ -22,3 +22,189 @@ fn exit(code: int) -> void ![io] {
     // Terminate the current process with the given exit code.
     process.exit(code);
 }
+
+// ── Typed environment (issue #365) ────────────────────────────
+//
+// `Env` is a typed map struct over `EnvEntry { name, value }` pairs.
+// Construction goes through the `env_*` helpers — callers should not
+// hand-roll `string[]` of `"KEY=VALUE"` pairs at the public surface.
+// The capsule flattens entries internally before passing them to the
+// runtime spawn primitives.
+struct EnvEntry {
+    name: string;
+    value: string;
+}
+
+struct Env {
+    entries: EnvEntry[];
+}
+
+// Captured output from `run_capture`. `exit` is the child's exit code
+// (or 128 + signal number on signal termination, matching the
+// existing `process.run` shape). `stdout` and `stderr` are the full
+// captured byte streams, drained concurrently so neither side blocks
+// on a full pipe buffer.
+struct ProcessOutput {
+    stdout: string;
+    stderr: string;
+    exit: int;
+}
+
+// Opaque handle to a child spawned by `spawn_with_env`. `handle_id`
+// is a malloc'd C-side pointer carried as an int. Callers must reap
+// the child by calling `handle_wait` exactly once; the wait reaps
+// any open stdin/stdout/stderr fds and frees the handle.
+struct ProcessHandle {
+    handle_id: int;
+}
+
+// Return an empty `Env`. The resulting environment passed to the
+// runtime is literally empty — the child sees no environment
+// variables. Use `env_from_current` to seed from the parent.
+fn env_empty() -> Env {
+    return Env { entries: [] };
+}
+
+// Return `e` with `name` set to `value`. If `name` already exists,
+// the new entry replaces the old one (last write wins). The input
+// `Env` is not mutated; a new value is returned.
+fn env_set(e: Env, name: string, value: string) -> Env {
+    let mut out: EnvEntry[] = [];
+    let mut found = false;
+    let mut i = 0;
+    loop {
+        if i >= e.entries.length { break; }
+        let entry = e.entries[i];
+        if entry.name == name {
+            out.push(EnvEntry { name: name, value: value });
+            found = true;
+        } else { out.push(entry); }
+        i += 1;
+    }
+    if !found {
+        out.push(EnvEntry { name: name, value: value });
+    }
+    return Env { entries: out };
+}
+
+// Look up `name`'s value. Returns the empty string if not set; use
+// `env_has` to distinguish "unset" from "set to empty".
+fn env_get(e: Env, name: string) -> string {
+    let mut i = 0;
+    loop {
+        if i >= e.entries.length { break; }
+        let entry = e.entries[i];
+        if entry.name == name { return entry.value; }
+        i += 1;
+    }
+    return "";
+}
+
+// True iff `name` has an entry (regardless of value).
+fn env_has(e: Env, name: string) -> boolean {
+    let mut i = 0;
+    loop {
+        if i >= e.entries.length { break; }
+        if e.entries[i].name == name { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Flatten an `Env` into a `string[]` of `"KEY=VALUE"` entries, in
+// insertion order. This is the format the runtime spawn primitives
+// expect.
+fn env_to_flat(e: Env) -> string[] {
+    let mut out: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= e.entries.length { break; }
+        let entry = e.entries[i];
+        out.push(entry.name + "=" + entry.value);
+        i += 1;
+    }
+    return out;
+}
+
+// Snapshot the parent process environment. Implementation note:
+// today the runtime exposes per-variable reads (`env.get`) but no
+// "iterate all env vars" primitive, so this returns an empty Env
+// that callers can layer overrides on top of via `env_set`. When a
+// generic environ-iteration primitive lands, this fills in the
+// remaining variables; until then, the contract is "callers should
+// list every variable they need to propagate explicitly". The
+// runtime spawn helpers accept an empty `Env` as "empty environment"
+// rather than "inherit", so this still constructs the right shape.
+//
+// The `![io]` annotation is forward-compat: the eventual environ-
+// iteration implementation will read process state, which the
+// effect system gates under `io`. Today the stub body is pure but
+// the signature is locked so callers don't need to adjust their
+// effect declarations when the implementation lands.
+fn env_from_current() -> Env ![io] { return env_empty(); }
+
+// ── Capturing / streaming process APIs ────────────────────────────
+//
+// `run_capture` runs `args` to completion with the given `env`,
+// piping both stdout and stderr. The two streams are drained
+// concurrently by the runtime so the child never blocks on a full
+// pipe buffer. Returns the captured byte streams alongside the
+// exit code. `ProcessOutput.exit` is `-1` when the runtime itself
+// couldn't complete the call (invalid argv, OOM, spawn failure),
+// distinct from a legitimate child exit code of 127.
+fn run_capture(args: string[], env: Env) -> ProcessOutput ![io] {
+    let env_flat = env_to_flat(env);
+    let exit_code = process.run_capture(args, env_flat);
+    let captured_stdout = process.capture_take_stdout();
+    let captured_stderr = process.capture_take_stderr();
+    return ProcessOutput {
+        stdout: captured_stdout,
+        stderr: captured_stderr,
+        exit: exit_code
+    };
+}
+
+// `spawn_with_env` forks `args` with the given `env` and returns a
+// handle the caller drives. The child inherits no fds beyond the
+// three standard streams (the runtime closes the parent ends inside
+// `posix_spawn_file_actions`). Callers must reap the child via
+// `handle_wait`. Returns a handle whose `handle_id` is 0 on spawn
+// failure — call sites can branch on that to surface a typed error.
+fn spawn_with_env(args: string[], env: Env) -> ProcessHandle ![io] {
+    let env_flat = env_to_flat(env);
+    let id = process.spawn_with_env(args, env_flat);
+    return ProcessHandle { handle_id: id };
+}
+
+// Write `data` to the child's stdin. Returns bytes written, or -1
+// on error (closed handle, child already exited).
+fn handle_write(h: ProcessHandle, data: string) -> int ![io] {
+    return process.handle_write(h.handle_id, data);
+}
+
+// Close the child's stdin. Children that read until EOF (e.g. `cat`)
+// will then finish their work and exit.
+fn handle_close_stdin(h: ProcessHandle) -> void ![io] {
+    process.handle_close_stdin(h.handle_id);
+}
+
+// Read all remaining bytes from the child's stdout. Blocks until the
+// child closes its stdout (typically on exit). The fd is closed when
+// this returns, so the call is idempotent — a second call gives "".
+fn handle_read_stdout(h: ProcessHandle) -> string ![io] {
+    return process.handle_read_stdout(h.handle_id);
+}
+
+// Read all remaining bytes from the child's stderr. Same blocking /
+// idempotency contract as `handle_read_stdout`.
+fn handle_read_stderr(h: ProcessHandle) -> string ![io] {
+    return process.handle_read_stderr(h.handle_id);
+}
+
+// Wait for the child to exit. Closes any still-open fds, reaps the
+// child, frees the handle, and returns the exit code (or 128 + signal
+// on signal termination, or -1 if the handle was already invalid).
+// Must be called exactly once per `spawn_with_env`.
+fn handle_wait(h: ProcessHandle) -> int ![io] {
+    return process.handle_wait(h.handle_id);
+}

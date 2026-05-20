@@ -772,6 +772,23 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "string_starts_with");
     helpers = append_unique_effect(helpers, "process.run");
     helpers = append_unique_effect(helpers, "process.exit");
+    // `env.get` / `env.home` lower to `sailfin_runtime_getenv` /
+    // `sailfin_runtime_home_dir`; without explicit declare-tracking,
+    // modules that consume them produce IR that clang rejects with
+    // "use of undefined value" (see the env-var workaround note in
+    // `compiler/src/effect_gate.sfn` — same root cause, surfacing as
+    // a hard blocker for capsules/sfn/os clients of #365).
+    helpers = append_unique_effect(helpers, "env.get");
+    helpers = append_unique_effect(helpers, "env.home");
+    helpers = append_unique_effect(helpers, "process.run_capture");
+    helpers = append_unique_effect(helpers, "process.capture_take_stdout");
+    helpers = append_unique_effect(helpers, "process.capture_take_stderr");
+    helpers = append_unique_effect(helpers, "process.spawn_with_env");
+    helpers = append_unique_effect(helpers, "process.handle_write");
+    helpers = append_unique_effect(helpers, "process.handle_close_stdin");
+    helpers = append_unique_effect(helpers, "process.handle_read_stdout");
+    helpers = append_unique_effect(helpers, "process.handle_read_stderr");
+    helpers = append_unique_effect(helpers, "process.handle_wait");
     helpers = append_unique_effect(helpers, "is_decimal_digit");
     return helpers;
 }
