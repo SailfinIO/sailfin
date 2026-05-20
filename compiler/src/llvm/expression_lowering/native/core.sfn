@@ -276,7 +276,7 @@ import {
     find_variant_field_info
 } from "../../type_context_queries";
 
-import { find_function_by_name } from "../../rendering";
+import { find_function_by_name } from "../../rendering_helpers";
 
 import { find_runtime_helper } from "../../runtime_helpers";
 
@@ -388,6 +388,124 @@ import {
     try_lower_interpolated_string_literal
 } from "./core_literals_lowering";
 
+import { emit_closure_pair_aggregate } from "../../closures";
+import { map_return_type, map_local_type } from "../../type_mapping";
+
+// Result of `lower_closure_pair_marker`. Mirrors the relevant
+// fields of `ExpressionResult` so the call-site can splice it into
+// the public `lower_expression` return.
+struct _ClosurePairLowerResult {
+    lines: string[];
+    temp_index: int;
+    operand: LLVMOperand?;
+    diagnostics: string[];
+}
+
+// Parse `<closure_pair @sfn_lambda_<N> <env_var>>` and emit the
+// `{i8*, i8*}` aggregate. Looks the lifted function up in
+// `functions` (added there by the standard `parse_native_artifact`
+// pass — lifted lambdas appear as ordinary top-level `.fn`s) and
+// reconstructs its LLVM fn-pointer type for the bitcast operand.
+fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], context: TypeContext, temp_index: int, lines: string[]) -> _ClosurePairLowerResult {
+    let mut diagnostics: string[] = [];
+    let prefix = "<closure_pair ";
+    let mut cursor: int = prefix.length;
+
+    // Parse the function symbol (starts with `@`, runs until space).
+    let mut fn_symbol: string = "";
+    loop {
+        if cursor >= marker.length { break; }
+        let ch = marker[cursor];
+        if ch == " " { break; }
+        fn_symbol = fn_symbol + ch;
+        cursor += 1;
+    }
+
+    // Skip the separating space and read the env operand text
+    // (everything up to the closing `>`).
+    if cursor < marker.length { cursor += 1; }
+    let mut env_var: string = "";
+    loop {
+        if cursor >= marker.length { break; }
+        let ch = marker[cursor];
+        if ch == ">" { break; }
+        env_var = env_var + ch;
+        cursor += 1;
+    }
+
+    if fn_symbol.length == 0 {
+        diagnostics.push("llvm lowering: malformed closure_pair marker `"
+            + marker
+            + "`");
+        return _ClosurePairLowerResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics
+        };
+    }
+
+    // Strip leading `@` so we can match against `NativeFunction.name`.
+    let mut function_name: string = fn_symbol;
+    if substring(fn_symbol, 0, 1) == "@" {
+        function_name = substring(fn_symbol, 1, fn_symbol.length);
+    }
+
+    let target = find_function_by_name(functions, function_name);
+    if target == null {
+        diagnostics.push("llvm lowering: lifted lambda `" + function_name
+            + "` not found in module function table");
+        return _ClosurePairLowerResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics
+        };
+    }
+
+    let fn_ptr_type = _compute_function_pointer_type(target, context);
+    let pair = emit_closure_pair_aggregate(fn_symbol, fn_ptr_type, env_var, temp_index);
+    let mut new_lines: string[] = lines;
+    let mut li: int = 0;
+    loop {
+        if li >= pair.lines.length { break; }
+        new_lines.push(pair.lines[li]);
+        li += 1;
+    }
+    let operand = LLVMOperand {
+        llvm_type: pair.operand_type,
+        value: pair.operand_value
+    };
+    return _ClosurePairLowerResult {
+        lines: new_lines,
+        temp_index: pair.next_temp,
+        operand: operand,
+        diagnostics: diagnostics
+    };
+}
+
+// Reconstruct the LLVM fn-pointer text for a lifted lambda from
+// its `NativeFunction` record — needed as the bitcast source type
+// inside `emit_closure_pair_aggregate`. The shape is
+// `<ret> (<p0_type>, <p1_type>, ...)*` with each parameter mapped
+// through `map_local_type` and the return through `map_return_type`.
+fn _compute_function_pointer_type(target: NativeFunction, context: TypeContext) -> string {
+    let mut ret_type = map_return_type(context, target.return_type);
+    if ret_type.length == 0 { ret_type = "void"; }
+    let mut parameter_types: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= target.parameters.length { break; }
+        let param = target.parameters[index];
+        let mut mapped = map_local_type(context, param.type_annotation);
+        if mapped.length == 0 { mapped = "i8*"; }
+        parameter_types.push(mapped);
+        index += 1;
+    }
+    let params_joined = join_with_separator(parameter_types, ", ");
+    return ret_type + " (" + params_joined + ")*";
+}
+
 fn analyze_value_ownership(initializer: string?, span: NativeSourceSpan?, locals: LocalBinding[], bindings: ParameterBinding[]) -> OwnershipAnalysis {
     return analyze_value_ownership_impl(initializer, span, locals, bindings);
 }
@@ -430,6 +548,29 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     let stripped = strip_enclosing_parentheses(trimmed);
     if stripped != trimmed {
         return lower_expression(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
+    }
+
+    // Closure-pair marker (issue #686). The lambda-lifting pre-pass
+    // in `emit_native` rewrites every non-capturing `Expression.Lambda`
+    // into `<closure_pair @sfn_lambda_<N> null>`, which arrives here
+    // verbatim as the `.let` initializer text. Detect the prefix
+    // before any other parse so the marker never gets mistaken for
+    // a regular identifier or member-access expression.
+    if starts_with(stripped, "<closure_pair ") {
+        let pair_result = lower_closure_pair_marker(stripped, functions, context, temp_index, lines);
+        let mut _ci_pair: int = 0;
+        loop {
+            if _ci_pair >= pair_result.diagnostics.length { break; }
+            diagnostics.push(pair_result.diagnostics[_ci_pair]);
+            _ci_pair += 1;
+        }
+        return ExpressionResult {
+            lines: pair_result.lines,
+            temp_index: pair_result.temp_index,
+            operand: pair_result.operand,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
 
     // Literal expressions.

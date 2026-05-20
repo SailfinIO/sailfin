@@ -1,0 +1,180 @@
+// compiler/tests/integration/closure_lifting_test.sfn
+//
+// Pins the lifting + closure-pair emission shape introduced for
+// issue #686 (M1.5 A3-part-1 of #450). Coverage:
+//
+//   1. `emit_closure_pair_aggregate` produces the documented
+//      bitcast + insertvalue + insertvalue sequence for a
+//      non-capturing lambda (`env_var = "null"`). Three lines,
+//      three temps consumed.
+//   2. `closure_pair_marker` and `lifted_function_name` produce
+//      stable, monotonic strings — both the emitter and the
+//      LLVM-side dispatcher depend on these.
+//   3. `lift_non_capturing_lambdas` walks a parsed program and
+//      rewrites non-capturing lambdas in place. Acceptance
+//      criteria from #686:
+//        (a) zero-arg non-capturing lambda
+//            `fn() -> int { return 42; }`
+//        (b) single-arg non-capturing lambda
+//            `fn(x: int) -> int { return x + 1; }`
+//        (c) lambda whose body references a top-level fn
+//            (closed-over by symbol, not captured — must not
+//            produce a capture record and must still lift).
+//   4. Capturing lambdas are NOT lifted — they keep their
+//      `Expression.Lambda` node so they continue to flow through
+//      `format_expression` as `<lambda>` until #687 wires the env
+//      struct end-to-end.
+import { Expression, Program, Statement } from "../../src/ast";
+import { ClosurePairResult, emit_closure_pair_aggregate } from "../../src/llvm/closures";
+import {
+    LiftResult,
+    closure_pair_marker,
+    closure_sentinel_type_text,
+    lift_non_capturing_lambdas,
+    lifted_function_name
+} from "../../src/llvm/expression_lowering/native/mod";
+import { parse_program } from "../../src/parser/mod";
+
+// ── Closure-pair aggregate emission ──────────────────────────────────
+test "closure_pair: non-capturing lambda emits bitcast + two insertvalues" {
+    let result: ClosurePairResult = emit_closure_pair_aggregate("@sfn_lambda_0", "i64 (i8*)*", "null", 0);
+    assert result.lines.length == 3;
+    assert result.lines[0] == "  %t0 = bitcast i64 (i8*)* @sfn_lambda_0 to i8*";
+    assert result.lines[1] == "  %t1 = insertvalue {i8*, i8*} undef, i8* %t0, 0";
+    assert result.lines[2] == "  %t2 = insertvalue {i8*, i8*} %t1, i8* null, 1";
+    assert result.operand_value == "%t2";
+    assert result.operand_type == "{i8*, i8*}";
+    assert result.next_temp == 3;
+}
+
+test "closure_pair: temp index advances from caller offset" {
+    let result: ClosurePairResult = emit_closure_pair_aggregate("@sfn_lambda_3", "i1 (i8*, i64)*", "%env_raw", 7);
+    assert result.lines.length == 3;
+    assert result.lines[0] == "  %t7 = bitcast i1 (i8*, i64)* @sfn_lambda_3 to i8*";
+    assert result.lines[1] == "  %t8 = insertvalue {i8*, i8*} undef, i8* %t7, 0";
+    assert result.lines[2] == "  %t9 = insertvalue {i8*, i8*} %t8, i8* %env_raw, 1";
+    assert result.next_temp == 10;
+}
+
+// ── Marker / symbol helpers ──────────────────────────────────────────
+test "closure_pair: marker text matches the LLVM-side dispatch prefix" {
+    assert closure_pair_marker(0, "null") == "<closure_pair @sfn_lambda_0 null>";
+    assert closure_pair_marker(7, "%env_raw") == "<closure_pair @sfn_lambda_7 %env_raw>";
+}
+
+test "closure_pair: lifted function name is monotonic" {
+    assert lifted_function_name(0) == "sfn_lambda_0";
+    assert lifted_function_name(12) == "sfn_lambda_12";
+}
+
+test "closure_pair: sentinel type-text is the internal __closure__ marker" {
+    assert closure_sentinel_type_text() == "__closure__";
+}
+
+// ── Lifting pass: AC (a) zero-arg non-capturing ──────────────────────
+test "lift: zero-arg non-capturing lambda is lifted to top-level fn" ![io] {
+    let source = "fn main() { let f = fn() -> int { return 42; }; }";
+    let program = parse_program(source);
+    let result: LiftResult = lift_non_capturing_lambdas(program);
+    assert result.counter == 1;
+    // Original statement count was 1 (`fn main`); the lifted fn is
+    // appended, giving 2 total.
+    assert result.program.statements.length == 2;
+    // Index 0 is `fn main`; the lifted fn lives at index 1.
+    let main_fn: Statement = result.program.statements[0];
+    assert main_fn.variant == "FunctionDeclaration";
+    assert main_fn.signature.name == "main";
+    let lifted: Statement = result.program.statements[1];
+    assert lifted.variant == "FunctionDeclaration";
+    assert lifted.signature.name == "sfn_lambda_0";
+    // The hidden `__env: i8*` parameter is prepended to the lambda's
+    // own parameter list (here: zero own params, so length 1).
+    assert lifted.signature.parameters.length == 1;
+    assert lifted.signature.parameters[0].name == "__env";
+    assert lifted.signature.parameters[0].type_annotation.text == "i8*";
+    // Return type passes through unchanged.
+    assert lifted.signature.return_type.text == "int";
+}
+
+test "lift: zero-arg case rewrites the let initializer to a closure-pair marker" ![io] {
+    let source = "fn main() { let f = fn() -> int { return 42; }; }";
+    let program = parse_program(source);
+    let result: LiftResult = lift_non_capturing_lambdas(program);
+    let main_fn: Statement = result.program.statements[0];
+    let body_stmt: Statement = main_fn.body.statements[0];
+    assert body_stmt.variant == "VariableDeclaration";
+    assert body_stmt.name == "f";
+    // The lifting pass overrides the binding's annotation with the
+    // `__closure__` sentinel so subsequent uses (e.g. call-site
+    // dispatch in #689) can resolve it as a closure-pair type.
+    assert body_stmt.type_annotation.text == "__closure__";
+    let init: Expression = body_stmt.initializer;
+    assert init.variant == "Raw";
+    assert init.text == "<closure_pair @sfn_lambda_0 null>";
+}
+
+// ── Lifting pass: AC (b) single-arg non-capturing ────────────────────
+test "lift: single-arg non-capturing lambda preserves the user parameter" ![io] {
+    let source = "fn main() { let f = fn(x: int) -> int { return x + 1; }; }";
+    let program = parse_program(source);
+    let result: LiftResult = lift_non_capturing_lambdas(program);
+    assert result.counter == 1;
+    assert result.program.statements.length == 2;
+    let lifted: Statement = result.program.statements[1];
+    assert lifted.variant == "FunctionDeclaration";
+    assert lifted.signature.name == "sfn_lambda_0";
+    // `__env` + `x` = 2 parameters total.
+    assert lifted.signature.parameters.length == 2;
+    assert lifted.signature.parameters[0].name == "__env";
+    assert lifted.signature.parameters[1].name == "x";
+    assert lifted.signature.parameters[1].type_annotation.text == "int";
+}
+
+// ── Lifting pass: AC (c) closed-over top-level fn (NOT captured) ─────
+test "lift: lambda referencing a top-level fn lifts without producing captures" ![io] {
+    // `helper` is a top-level fn — it's resolved by symbol, not
+    // captured. The lambda body references it, but
+    // `analyze_lambda_captures` correctly classifies the lambda as
+    // non-capturing, so the lifting pass MUST still lift it.
+    let source = "fn helper() -> int { return 7; }\nfn main() { let f = fn() -> int { return helper(); }; }";
+    let program = parse_program(source);
+    let result: LiftResult = lift_non_capturing_lambdas(program);
+    assert result.counter == 1;
+    // Original: `helper`, `main` (2 statements). Lifted appends 1.
+    assert result.program.statements.length == 3;
+    let lifted: Statement = result.program.statements[2];
+    assert lifted.variant == "FunctionDeclaration";
+    assert lifted.signature.name == "sfn_lambda_0";
+    assert lifted.signature.parameters.length == 1;
+    assert lifted.signature.parameters[0].name == "__env";
+    // The let-binding inside main was rewritten to a closure-pair
+    // marker — confirms that referencing a top-level fn does not
+    // disqualify a lambda from lifting.
+    let main_fn: Statement = result.program.statements[1];
+    let body_stmt: Statement = main_fn.body.statements[0];
+    assert body_stmt.variant == "VariableDeclaration";
+    let init: Expression = body_stmt.initializer;
+    assert init.variant == "Raw";
+    assert init.text == "<closure_pair @sfn_lambda_0 null>";
+}
+
+// ── Capturing lambdas are NOT lifted (regression guard for #687) ─────
+test "lift: capturing lambda keeps its Expression.Lambda node" ![io] {
+    // `x` is bound in the enclosing scope, so the lambda captures
+    // it — `analyze_lambda_captures` returns a record with
+    // `captures.length == 1`. The lifting pass MUST refuse to lift
+    // (the `<lambda>` placeholder + capturing dispatch are #687's
+    // territory).
+    let source = "fn main() { let x: int = 5; let f = fn() -> int { return x; }; }";
+    let program = parse_program(source);
+    let result: LiftResult = lift_non_capturing_lambdas(program);
+    assert result.counter == 0;
+    // No lifted fn appended — the original statement count is
+    // unchanged.
+    assert result.program.statements.length == 1;
+    let main_fn: Statement = result.program.statements[0];
+    let lambda_stmt: Statement = main_fn.body.statements[1];
+    assert lambda_stmt.variant == "VariableDeclaration";
+    let init: Expression = lambda_stmt.initializer;
+    assert init.variant == "Lambda";
+}

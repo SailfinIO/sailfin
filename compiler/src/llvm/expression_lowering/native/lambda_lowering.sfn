@@ -1,0 +1,697 @@
+// compiler/src/llvm/expression_lowering/native/lambda_lowering.sfn
+//
+// Lambda-lifting pass for non-capturing lambdas (issue #686, M1.5
+// A3-part-1 of #450). Runs as a pre-pass over the AST inside
+// `emit_native_with_module_name`, before any `.sfn-asm` text is
+// generated. For each `Expression.Lambda` whose `LambdaCaptureRecord`
+// reports zero captures, the pass:
+//
+//   1. Synthesises a top-level `Statement.FunctionDeclaration`
+//      named `sfn_lambda_<N>` with a hidden `__env: i8*` first
+//      parameter (unused) followed by the lambda's own parameters.
+//      The body is re-parsed from `lambda.body.tokens` because the
+//      expression-side `parse_block_for_lambda` only collects raw
+//      tokens (see `typecheck_captures.sfn:analyze_lambda` for the
+//      same workaround).
+//   2. Replaces the in-tree `Expression.Lambda` with
+//      `Expression.Raw { text: "<closure_pair @sfn_lambda_<N> null>" }`.
+//      The Raw marker rides through `format_expression` verbatim
+//      (it just returns `trim_text(expression.text)`), so the
+//      `.let` value text in `.sfn-asm` becomes
+//      `.let f -> __closure__ = <closure_pair @sfn_lambda_0 null>`.
+//      The LLVM-side `lower_expression` pattern-matches the leading
+//      `<closure_pair ` prefix and dispatches to
+//      `emit_closure_pair_aggregate` (see `compiler/src/llvm/closures.sfn`).
+//   3. Marks the binding's `type_annotation` as the `__closure__`
+//      sentinel so subsequent uses don't crash typecheck. The
+//      sentinel maps to `{i8*, i8*}` in `map_type_annotation`
+//      (`compiler/src/llvm/type_mapping.sfn`).
+//
+// Capturing lambdas (records with `captures.length > 0`) are left
+// alone — their `Expression.Lambda` node keeps flowing through
+// `format_expression` as `<lambda>` until #687 wires up the env
+// struct end-to-end. A non-capturing lambda whose body itself
+// contains another non-capturing lambda is lifted recursively
+// inner-first, so the synthesised parent body holds a Raw marker
+// pointing at the synthesised child.
+//
+// The pass returns a fresh `Program` whose `statements[]` is the
+// rewritten original list followed by every lifted
+// `FunctionDeclaration` (in synthesis order). The counter starts at
+// zero per module — LLVM `internal` linkage on synthesised fns
+// keeps cross-module name collisions impossible.
+import {
+    Block,
+    Decorator,
+    ElseBranch,
+    Expression,
+    FunctionSignature,
+    MatchCase,
+    ObjectField,
+    Parameter,
+    Program,
+    Statement,
+    TypeAnnotation,
+    WithClause
+} from "../../../ast";
+import { Parser, parse_block } from "../../../parser/mod";
+import { LambdaCaptureRecord, analyze_lambda_captures } from "../../../typecheck_captures";
+import { number_to_string } from "../../utils";
+
+// Mutable walker state threaded through every rewrite call. The
+// counter is module-monotonic and is the source of truth for both
+// the synthesised function name and the closure-pair marker text.
+struct LiftContext {
+    counter: int;
+    lifted: Statement[];
+    records: LambdaCaptureRecord[];
+}
+
+struct LiftResult {
+    program: Program;
+    counter: int;
+}
+
+struct ExpressionRewriteResult {
+    ctx: LiftContext;
+    expression: Expression;
+}
+
+struct StatementRewriteResult {
+    ctx: LiftContext;
+    statement: Statement;
+}
+
+struct _BlockRewriteResult {
+    ctx: LiftContext;
+    block: Block;
+}
+
+// Public entry point. `analyze_lambda_captures` is invoked here so
+// callers don't have to thread the records list in — and so the
+// pass owns the precondition that records key by body span.
+fn lift_non_capturing_lambdas(program: Program) -> LiftResult {
+    let records = analyze_lambda_captures(program);
+    let mut ctx: LiftContext = LiftContext {
+        counter: 0,
+        lifted: [],
+        records: records
+    };
+
+    let mut rewritten_statements: Statement[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let result = _rewrite_statement(ctx, program.statements[index]);
+        ctx = result.ctx;
+        rewritten_statements.push(result.statement);
+        index += 1;
+    }
+
+    // Append lifted functions after the original statements. Order
+    // matches synthesis (depth-first, inner-first) so that earlier
+    // entries' bodies can reference later entries' names safely —
+    // function declarations are resolved by name, not by position.
+    let mut final_statements: Statement[] = rewritten_statements;
+    let mut lifted_index: int = 0;
+    loop {
+        if lifted_index >= ctx.lifted.length { break; }
+        final_statements.push(ctx.lifted[lifted_index]);
+        lifted_index += 1;
+    }
+
+    let new_program = Program { statements: final_statements };
+    return LiftResult { program: new_program, counter: ctx.counter as int };
+}
+
+// Builds the closure-pair marker string. Used by both the lifting
+// pass (writes it into the `Raw` expression) and the LLVM-side
+// dispatcher (matches on the `<closure_pair ` prefix to recognise
+// lifted lambda binding values).
+fn closure_pair_marker(lambda_id: int, env_var: string) -> string {
+    return "<closure_pair @sfn_lambda_" + number_to_string(lambda_id) + " "
+        + env_var
+        + ">";
+}
+
+// Symbol name for the lifted top-level function. Stable across
+// runs — drives the LLVM `define @sfn_lambda_<N>` symbol.
+fn lifted_function_name(lambda_id: int) -> string {
+    return "sfn_lambda_" + number_to_string(lambda_id);
+}
+
+// Type-text sentinel assigned to the let binding whose initializer
+// is a lifted lambda. Maps to the `{i8*, i8*}` closure-pair LLVM
+// type via `map_type_annotation` and is intentionally a string the
+// user cannot type by hand.
+fn closure_sentinel_type_text() -> string { return "__closure__"; }
+
+// ── Lookup: is this lambda non-capturing? ───────────────────────────
+//
+// `LambdaCaptureRecord`s are keyed by the body's opening `{` token
+// line/column. The same key is computable from
+// `Expression.Lambda.body.tokens[0]`, so the lookup is a linear
+// scan over the records list. The number of lambdas per module is
+// small (single digits in practice), so the linear cost is
+// negligible compared with introducing a map.
+//
+// Returns `true` only when a matching record exists AND that record
+// reports zero captures. A missing record (which would indicate a
+// programmer error in `analyze_lambda_captures`) keeps the lambda
+// in `<lambda>`-placeholder form — refusing to lift is safer than
+// silently dropping captures.
+fn _is_non_capturing(records: LambdaCaptureRecord[], lambda: Expression) -> boolean {
+    if lambda.body.tokens.length == 0 { return false; }
+    let body_line = lambda.body.tokens[0].line;
+    let body_column = lambda.body.tokens[0].column;
+    let mut index: int = 0;
+    loop {
+        if index >= records.length { break; }
+        let record = records[index];
+        let mut _match: boolean = false;
+        if record.body_start_line == body_line {
+            if record.body_start_column == body_column { _match = true; }
+        }
+        if _match {
+            if record.captures.length == 0 { return true; }
+            return false;
+        }
+        index += 1;
+    }
+    return false;
+}
+
+// ── Synthesis: lifted FunctionDeclaration ───────────────────────────
+//
+// The synthesised signature prepends a hidden `__env: i8*` parameter
+// to the lambda's own parameter list. Even non-capturing lifted
+// lambdas carry the env parameter so call-site dispatch (#689) can
+// pass through the env slot uniformly across capturing and
+// non-capturing closures. The parameter is named `__env` to avoid
+// shadowing any user-declared binding.
+//
+// Body re-parse: the parser stashes only raw tokens on the lambda
+// body. `analyze_lambda` in `typecheck_captures.sfn` re-parses via
+// `parse_block` for the same reason; we follow that pattern so the
+// emitted body sees structured statements.
+fn _synthesize_lifted_function(lambda: Expression, lambda_id: int) -> Statement {
+    let mut parameters: Parameter[] = [];
+    parameters.push(Parameter {
+        name: "__env", type_annotation: TypeAnnotation { text: "i8*" }, default_value: null, mutable: false, span: null
+    });
+    let mut original_index: int = 0;
+    loop {
+        if original_index >= lambda.parameters.length { break; }
+        parameters.push(lambda.parameters[original_index]);
+        original_index += 1;
+    }
+
+    let signature = FunctionSignature {
+        name: lifted_function_name(lambda_id),
+        is_async: false,
+        parameters: parameters,
+        return_type: lambda.return_type,
+        effects: [],
+        type_parameters: [],
+        name_span: null
+    };
+
+    let parsed_body = _reparse_lambda_body(lambda.body);
+    let no_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: signature,
+        body: parsed_body,
+        decorators: no_decorators
+    };
+}
+
+fn _reparse_lambda_body(body: Block) -> Block {
+    if body.tokens.length == 0 { return body; }
+    let body_parser = Parser { tokens: body.tokens, index: 0 };
+    let parsed = parse_block(body_parser);
+    return parsed.block;
+}
+
+// ── Block rewriter ──────────────────────────────────────────────────
+fn _rewrite_block(ctx: LiftContext, block: Block) -> _BlockRewriteResult {
+    let mut current_ctx: LiftContext = ctx;
+    let mut new_statements: Statement[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        let result = _rewrite_statement(current_ctx, block.statements[index]);
+        current_ctx = result.ctx;
+        new_statements.push(result.statement);
+        index += 1;
+    }
+    let new_block = Block {
+        tokens: block.tokens,
+        text: block.text,
+        statements: new_statements
+    };
+    return _BlockRewriteResult { ctx: current_ctx, block: new_block };
+}
+
+// ── Expression rewriter ─────────────────────────────────────────────
+//
+// Walks every Expression position that can transitively hold a
+// `Lambda` node and substitutes the closure-pair marker for any
+// non-capturing lambda the lifting pass synthesises. Nested
+// lambdas are processed inner-first so the substituted Raw marker
+// already points at a synthesised function by the time the
+// enclosing rewrite returns.
+//
+// Threading the `LiftContext` by value (and returning a fresh one
+// in `ExpressionRewriteResult`) keeps the walker pure and lets us
+// avoid surprise mutations when the caller later iterates the
+// program.
+fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRewriteResult {
+    if expression.variant == "Lambda" {
+        return _rewrite_lambda(ctx, expression);
+    }
+    if expression.variant == "Unary" {
+        let inner = _rewrite_expression(ctx, expression.operand);
+        return ExpressionRewriteResult {
+            ctx: inner.ctx,
+            expression: Expression.Unary {
+                operator: expression.operator,
+                operand: inner.expression
+            }
+        };
+    }
+    if expression.variant == "Binary" {
+        let left = _rewrite_expression(ctx, expression.left);
+        let right = _rewrite_expression(left.ctx, expression.right);
+        return ExpressionRewriteResult {
+            ctx: right.ctx,
+            expression: Expression.Binary {
+                operator: expression.operator,
+                left: left.expression,
+                right: right.expression
+            }
+        };
+    }
+    if expression.variant == "Member" {
+        let inner = _rewrite_expression(ctx, expression.object);
+        return ExpressionRewriteResult {
+            ctx: inner.ctx,
+            expression: Expression.Member {
+                object: inner.expression,
+                member: expression.member,
+                span: expression.span
+            }
+        };
+    }
+    if expression.variant == "Call" {
+        let callee = _rewrite_expression(ctx, expression.callee);
+        let mut current_ctx: LiftContext = callee.ctx;
+        let mut new_args: Expression[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= expression.arguments.length { break; }
+            let arg_result = _rewrite_expression(current_ctx, expression.arguments[index]);
+            current_ctx = arg_result.ctx;
+            new_args.push(arg_result.expression);
+            index += 1;
+        }
+        return ExpressionRewriteResult {
+            ctx: current_ctx,
+            expression: Expression.Call {
+                callee: callee.expression,
+                arguments: new_args,
+                span: expression.span
+            }
+        };
+    }
+    if expression.variant == "Index" {
+        let seq = _rewrite_expression(ctx, expression.sequence);
+        let idx = _rewrite_expression(seq.ctx, expression.index);
+        return ExpressionRewriteResult {
+            ctx: idx.ctx,
+            expression: Expression.Index {
+                sequence: seq.expression,
+                index: idx.expression
+            }
+        };
+    }
+    if expression.variant == "Array" {
+        let mut current_ctx: LiftContext = ctx;
+        let mut new_elements: Expression[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= expression.elements.length { break; }
+            let elem = _rewrite_expression(current_ctx, expression.elements[index]);
+            current_ctx = elem.ctx;
+            new_elements.push(elem.expression);
+            index += 1;
+        }
+        return ExpressionRewriteResult {
+            ctx: current_ctx,
+            expression: Expression.Array { elements: new_elements }
+        };
+    }
+    if expression.variant == "Object" {
+        let mut current_ctx: LiftContext = ctx;
+        let mut new_fields: ObjectField[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= expression.fields.length { break; }
+            let field = expression.fields[index];
+            let value = _rewrite_expression(current_ctx, field.value);
+            current_ctx = value.ctx;
+            new_fields.push(ObjectField {
+                name: field.name, value: value.expression
+            });
+            index += 1;
+        }
+        return ExpressionRewriteResult {
+            ctx: current_ctx,
+            expression: Expression.Object { fields: new_fields }
+        };
+    }
+    if expression.variant == "Struct" {
+        let mut current_ctx: LiftContext = ctx;
+        let mut new_fields: ObjectField[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= expression.fields.length { break; }
+            let field = expression.fields[index];
+            let value = _rewrite_expression(current_ctx, field.value);
+            current_ctx = value.ctx;
+            new_fields.push(ObjectField {
+                name: field.name, value: value.expression
+            });
+            index += 1;
+        }
+        return ExpressionRewriteResult {
+            ctx: current_ctx,
+            expression: Expression.Struct {
+                type_name: expression.type_name,
+                fields: new_fields
+            }
+        };
+    }
+    if expression.variant == "Range" {
+        let start = _rewrite_expression(ctx, expression.start);
+        let end = _rewrite_expression(start.ctx, expression.end);
+        return ExpressionRewriteResult {
+            ctx: end.ctx,
+            expression: Expression.Range {
+                start: start.expression,
+                end: end.expression
+            }
+        };
+    }
+    if expression.variant == "Cast" {
+        let inner = _rewrite_expression(ctx, expression.operand);
+        return ExpressionRewriteResult {
+            ctx: inner.ctx,
+            expression: Expression.Cast {
+                operand: inner.expression,
+                target_type: expression.target_type
+            }
+        };
+    }
+    return ExpressionRewriteResult { ctx: ctx, expression: expression };
+}
+
+fn _rewrite_lambda(ctx: LiftContext, lambda: Expression) -> ExpressionRewriteResult {
+    if !_is_non_capturing(ctx.records, lambda) {
+        return ExpressionRewriteResult { ctx: ctx, expression: lambda };
+    }
+    let lambda_id = ctx.counter;
+    let lifted_fn = _synthesize_lifted_function(lambda, lambda_id);
+    let mut new_lifted: Statement[] = ctx.lifted;
+    new_lifted.push(lifted_fn);
+    let new_ctx: LiftContext = LiftContext {
+        counter: (ctx.counter + 1) as int,
+        lifted: new_lifted,
+        records: ctx.records
+    };
+
+    let marker_text = closure_pair_marker(lambda_id, "null");
+    return ExpressionRewriteResult {
+        ctx: new_ctx,
+        expression: Expression.Raw { text: marker_text }
+    };
+}
+
+// ── Statement rewriter ──────────────────────────────────────────────
+fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewriteResult {
+    if statement.variant == "VariableDeclaration" {
+        return _rewrite_variable(ctx, statement);
+    }
+    if statement.variant == "ExpressionStatement" {
+        let result = _rewrite_expression(ctx, statement.expression);
+        return StatementRewriteResult {
+            ctx: result.ctx,
+            statement: Statement.ExpressionStatement {
+                expression: result.expression,
+                span: statement.span
+            }
+        };
+    }
+    if statement.variant == "ReturnStatement" {
+        if statement.expression == null {
+            return StatementRewriteResult { ctx: ctx, statement: statement };
+        }
+        let result = _rewrite_expression(ctx, statement.expression);
+        return StatementRewriteResult {
+            ctx: result.ctx,
+            statement: Statement.ReturnStatement {
+                expression: result.expression,
+                span: statement.span
+            }
+        };
+    }
+    if statement.variant == "ThrowStatement" {
+        let result = _rewrite_expression(ctx, statement.expression);
+        return StatementRewriteResult {
+            ctx: result.ctx,
+            statement: Statement.ThrowStatement {
+                expression: result.expression,
+                span: statement.span
+            }
+        };
+    }
+    if statement.variant == "FunctionDeclaration" {
+        let body_result = _rewrite_block(ctx, statement.body);
+        return StatementRewriteResult {
+            ctx: body_result.ctx,
+            statement: Statement.FunctionDeclaration {
+                signature: statement.signature,
+                body: body_result.block,
+                decorators: statement.decorators
+            }
+        };
+    }
+    if statement.variant == "TestDeclaration" {
+        let body_result = _rewrite_block(ctx, statement.body);
+        return StatementRewriteResult {
+            ctx: body_result.ctx,
+            statement: Statement.TestDeclaration {
+                name: statement.name,
+                name_span: statement.name_span,
+                body: body_result.block,
+                effects: statement.effects,
+                decorators: statement.decorators
+            }
+        };
+    }
+    if statement.variant == "IfStatement" {
+        let cond = _rewrite_expression(ctx, statement.condition);
+        let then_result = _rewrite_block(cond.ctx, statement.then_block);
+        let mut final_ctx: LiftContext = then_result.ctx;
+        let mut new_else: ElseBranch? = statement.else_branch;
+        if statement.else_branch != null {
+            let branch = statement.else_branch;
+            if branch.body != null {
+                let else_result = _rewrite_block(final_ctx, branch.body);
+                final_ctx = else_result.ctx;
+                new_else = ElseBranch {
+                    statement: branch.statement,
+                    body: else_result.block
+                };
+            } else if branch.statement != null {
+                let stmt_result = _rewrite_statement(final_ctx, branch.statement);
+                final_ctx = stmt_result.ctx;
+                new_else = ElseBranch {
+                    statement: stmt_result.statement,
+                    body: branch.body
+                };
+            }
+        }
+        return StatementRewriteResult {
+            ctx: final_ctx,
+            statement: Statement.IfStatement {
+                condition: cond.expression,
+                then_block: then_result.block,
+                else_branch: new_else,
+                decorators: statement.decorators
+            }
+        };
+    }
+    if statement.variant == "BlockStatement" {
+        let body_result = _rewrite_block(ctx, statement.body);
+        return StatementRewriteResult {
+            ctx: body_result.ctx,
+            statement: Statement.BlockStatement { body: body_result.block }
+        };
+    }
+    if statement.variant == "ForStatement" {
+        let body_result = _rewrite_block(ctx, statement.body);
+        return StatementRewriteResult {
+            ctx: body_result.ctx,
+            statement: Statement.ForStatement {
+                clause: statement.clause,
+                body: body_result.block,
+                decorators: statement.decorators
+            }
+        };
+    }
+    if statement.variant == "LoopStatement" {
+        let body_result = _rewrite_block(ctx, statement.body);
+        return StatementRewriteResult {
+            ctx: body_result.ctx,
+            statement: Statement.LoopStatement {
+                body: body_result.block,
+                decorators: statement.decorators
+            }
+        };
+    }
+    if statement.variant == "WithStatement" {
+        let mut current_ctx: LiftContext = ctx;
+        let mut new_clauses: WithClause[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= statement.clauses.length { break; }
+            let expr_result = _rewrite_expression(current_ctx, statement.clauses[index].expression);
+            current_ctx = expr_result.ctx;
+            new_clauses.push(WithClause { expression: expr_result.expression });
+            index += 1;
+        }
+        let body_result = _rewrite_block(current_ctx, statement.body);
+        return StatementRewriteResult {
+            ctx: body_result.ctx,
+            statement: Statement.WithStatement {
+                clauses: new_clauses,
+                body: body_result.block,
+                decorators: statement.decorators
+            }
+        };
+    }
+    if statement.variant == "MatchStatement" {
+        let expr_result = _rewrite_expression(ctx, statement.expression);
+        let mut current_ctx: LiftContext = expr_result.ctx;
+        let mut new_cases: MatchCase[] = [];
+        let mut case_index: int = 0;
+        loop {
+            if case_index >= statement.cases.length { break; }
+            let original_case = statement.cases[case_index];
+            let pattern_result = _rewrite_expression(current_ctx, original_case.pattern);
+            current_ctx = pattern_result.ctx;
+            let mut new_guard: Expression? = original_case.guard;
+            if original_case.guard != null {
+                let guard_result = _rewrite_expression(current_ctx, original_case.guard);
+                current_ctx = guard_result.ctx;
+                new_guard = guard_result.expression;
+            }
+            let body_result = _rewrite_block(current_ctx, original_case.body);
+            current_ctx = body_result.ctx;
+            new_cases.push(MatchCase {
+                pattern: pattern_result.expression, guard: new_guard, body: body_result.block
+            });
+            case_index += 1;
+        }
+        return StatementRewriteResult {
+            ctx: current_ctx,
+            statement: Statement.MatchStatement {
+                expression: expr_result.expression,
+                cases: new_cases,
+                decorators: statement.decorators
+            }
+        };
+    }
+    if statement.variant == "TryStatement" {
+        let try_result = _rewrite_block(ctx, statement.try_block);
+        let mut current_ctx: LiftContext = try_result.ctx;
+        let mut new_catch: Block? = statement.catch_block;
+        let mut new_finally: Block? = statement.finally_block;
+        if statement.catch_block != null {
+            let catch_result = _rewrite_block(current_ctx, statement.catch_block);
+            current_ctx = catch_result.ctx;
+            new_catch = catch_result.block;
+        }
+        if statement.finally_block != null {
+            let finally_result = _rewrite_block(current_ctx, statement.finally_block);
+            current_ctx = finally_result.ctx;
+            new_finally = finally_result.block;
+        }
+        return StatementRewriteResult {
+            ctx: current_ctx,
+            statement: Statement.TryStatement {
+                try_block: try_result.block,
+                catch_name: statement.catch_name,
+                catch_name_token: statement.catch_name_token,
+                catch_block: new_catch,
+                finally_block: new_finally
+            }
+        };
+    }
+    // StructDeclaration: method bodies could contain lambdas, but
+    // the AST shape for `MethodDeclaration` is awkward to round-trip
+    // through this pure-functional walker. For #686 the acceptance
+    // criteria exercise top-level / function-body lambdas only, so
+    // leaving method-body lambdas in `<lambda>`-placeholder form is
+    // a deliberate no-op. #687 (capturing lambdas) will revisit.
+    return StatementRewriteResult { ctx: ctx, statement: statement };
+}
+
+fn _rewrite_variable(ctx: LiftContext, statement: Statement) -> StatementRewriteResult {
+    if statement.initializer == null {
+        return StatementRewriteResult { ctx: ctx, statement: statement };
+    }
+    let result = _rewrite_expression(ctx, statement.initializer);
+    let mut new_annotation: TypeAnnotation? = statement.type_annotation;
+    if result.expression.variant == "Raw" {
+        // Override the annotation only when THIS rewrite produced a
+        // closure-pair marker — a preexisting Raw expression keeps
+        // its caller-supplied annotation untouched.
+        if _is_closure_pair_marker_text(result.expression.text) {
+            new_annotation = TypeAnnotation {
+                text: closure_sentinel_type_text()
+            };
+        }
+    }
+    return StatementRewriteResult {
+        ctx: result.ctx,
+        statement: Statement.VariableDeclaration {
+            name: statement.name,
+            mutable: statement.mutable,
+            type_annotation: new_annotation,
+            initializer: result.expression,
+            span: statement.span,
+            initializer_span: statement.initializer_span
+        }
+    };
+}
+
+fn _is_closure_pair_marker_text(text: string) -> boolean {
+    let prefix = "<closure_pair ";
+    if text.length < prefix.length { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= prefix.length { break; }
+        if text[index] != prefix[index] { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+export {
+    LiftResult,
+    closure_pair_marker,
+    closure_sentinel_type_text,
+    lift_non_capturing_lambdas,
+    lifted_function_name
+};

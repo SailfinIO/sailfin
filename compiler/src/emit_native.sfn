@@ -66,6 +66,7 @@ import {
     state_pop_indent,
     state_push_indent
 } from "./emit_native_state";
+import { lift_non_capturing_lambdas } from "./llvm/expression_lowering/native/mod";
 import { char_code, contains_string, substring } from "./string_utils";
 
 // ── Public data structures ───────────────────────────────────────────
@@ -87,7 +88,15 @@ fn emit_native(program: Program) -> EmitNativeResult {
 }
 
 fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNativeResult {
-    let layout_context = build_layout_context(program);
+    // Lambda lifting pre-pass (issue #686): every non-capturing
+    // `Expression.Lambda` becomes a synthesised top-level
+    // `FunctionDeclaration` named `sfn_lambda_<N>`, and the lambda
+    // expression site is rewritten to a `<closure_pair @sfn_lambda_<N> null>`
+    // marker. Capturing lambdas are left untouched until #687.
+    let lifted = lift_non_capturing_lambdas(program);
+    let lifted_program = lifted.program;
+
+    let layout_context = build_layout_context(lifted_program);
     let mut state: NativeState = state_new(layout_context);
     state = state_emit_line(state, "; Sailfin Native Prototype");
     let mut module_line = ".module ";
@@ -95,14 +104,16 @@ fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNa
         module_line = module_line + module_name;
     }
     state = state_emit_line(state, module_line);
-    if program.statements.length > 0 { state = state_emit_blank(state); }
+    if lifted_program.statements.length > 0 {
+        state = state_emit_blank(state);
+    }
 
     let mut index: int = 0;
     loop {
-        if index >= program.statements.length { break; }
-        state = emit_statement(state, program.statements[index]);
+        if index >= lifted_program.statements.length { break; }
+        state = emit_statement(state, lifted_program.statements[index]);
         let _next_stmt = index + 1;
-        if _next_stmt < program.statements.length {
+        if _next_stmt < lifted_program.statements.length {
             state = state_emit_blank(state);
         }
         index += 1;
@@ -114,13 +125,13 @@ fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNa
         contents: builder_to_string(state.builder)
     };
 
-    let manifest_artifact = generate_layout_manifest(program, layout_context);
+    let manifest_artifact = generate_layout_manifest(lifted_program, layout_context);
 
     let module = NativeModule {
         module_name: module_name,
         artifacts: [artifact, manifest_artifact],
-        entry_points: collect_entry_points(program),
-        symbol_count: count_exported_symbols(program)
+        entry_points: collect_entry_points(lifted_program),
+        symbol_count: count_exported_symbols(lifted_program)
     };
 
     return EmitNativeResult {
@@ -131,7 +142,11 @@ fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNa
 
 // Emit native text without returning the NativeModule struct (avoids ABI issues in stage2).
 fn emit_native_text_with_module_name(program: Program, module_name: string) -> string {
-    let layout_context = build_layout_context(program);
+    // Issue #686 — match the lifting in `emit_native_with_module_name`.
+    let lifted = lift_non_capturing_lambdas(program);
+    let lifted_program = lifted.program;
+
+    let layout_context = build_layout_context(lifted_program);
     let mut state: NativeState = state_new(layout_context);
     state = state_emit_line(state, "; Sailfin Native Prototype");
     let mut module_line = ".module ";
@@ -139,14 +154,16 @@ fn emit_native_text_with_module_name(program: Program, module_name: string) -> s
         module_line = module_line + module_name;
     }
     state = state_emit_line(state, module_line);
-    if program.statements.length > 0 { state = state_emit_blank(state); }
+    if lifted_program.statements.length > 0 {
+        state = state_emit_blank(state);
+    }
 
     let mut index: int = 0;
     loop {
-        if index >= program.statements.length { break; }
-        state = emit_statement(state, program.statements[index]);
+        if index >= lifted_program.statements.length { break; }
+        state = emit_statement(state, lifted_program.statements[index]);
         let _next_stmt2 = index + 1;
-        if _next_stmt2 < program.statements.length {
+        if _next_stmt2 < lifted_program.statements.length {
             state = state_emit_blank(state);
         }
         index += 1;

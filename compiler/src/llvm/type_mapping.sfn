@@ -280,6 +280,13 @@ fn array_pointer_type_for_element(element_type: string) -> string {
 fn map_type_annotation(annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 { return "void"; }
+    // `__closure__` is the internal sentinel assigned by the
+    // lambda-lifting pass (`lambda_lowering.sfn`) to bindings whose
+    // initializer was a non-capturing lifted lambda (issue #686).
+    // Maps to the `{i8*, i8*}` closure-pair aggregate emitted by
+    // `emit_closure_pair_aggregate`. Users cannot type this
+    // annotation by hand; it never surfaces in diagnostics.
+    if trimmed == "__closure__" { return "{i8*, i8*}"; }
     let normalized = unwrap_move_wrapper(trimmed);
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
@@ -425,6 +432,8 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
     if trimmed.length == 0 { _if315 = true; }
     if trimmed == "void" { _if315 = true; }
     if _if315 { return "void"; }
+    // Closure-pair sentinel — see comment in `map_type_annotation`.
+    if trimmed == "__closure__" { return "{i8*, i8*}"; }
     let normalized = unwrap_move_wrapper(trimmed);
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
