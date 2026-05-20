@@ -739,6 +739,17 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "runtime_resolve_runtime_type_fn");
     helpers = append_unique_effect(helpers, "runtime_serve_fn");
     helpers = append_unique_effect(helpers, "runtime_sleep_fn");
+    // libc `nanosleep`, called from `runtime/sfn/clock.sfn::sfn_sleep`
+    // (PR 2 of the sleep migration, issue #397). Without the
+    // helper-preamble entry the per-symbol descriptor's call-emit path
+    // produces `call i32 @nanosleep(...)` without a paired
+    // `declare i32 @nanosleep(i8*, i8*)`, which clang rejects as
+    // "use of undefined value '@nanosleep'". Retires when issue #306
+    // Phase B lands typecheck-level cross-module extern resolution
+    // (at which point the per-symbol descriptor + this preamble entry
+    // both retire together, mirroring the `sailfin_runtime_sleep`
+    // cleanup PR 2 already did).
+    helpers = append_unique_effect(helpers, "nanosleep");
     helpers = append_unique_effect(helpers, "runtime_to_debug_string_fn");
     helpers = append_unique_effect(helpers, "runtime_create_capability_grant");
     helpers = append_unique_effect(helpers, "runtime_create_filesystem_bridge");
