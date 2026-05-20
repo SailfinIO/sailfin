@@ -72,3 +72,15 @@ export {
 
 // Historically consumers imported these via expression_lowering_stage2.
 export { format_temp_name } from "../../expressions_helpers";
+
+// Lambda lifting (issue #686). Pre-pass that runs inside
+// `emit_native_with_module_name` to convert non-capturing
+// `Expression.Lambda` nodes into top-level `Statement.FunctionDeclaration`s
+// + closure-pair `Raw` markers consumed by `lower_expression`.
+export {
+    LiftResult,
+    closure_pair_marker,
+    closure_sentinel_type_text,
+    lift_non_capturing_lambdas,
+    lifted_function_name
+} from "./lambda_lowering";

@@ -371,6 +371,14 @@ fn map_union_type(context: TypeContext, annotation: string) -> string {
 // standard precedence order (union → optional → reference → array → primitive).
 // Returns "" when the annotation cannot be resolved.
 fn _map_type_core(context: TypeContext, normalized: string) -> string {
+    // Closure-pair sentinel (issue #686). `__closure__` is the
+    // internal type-text the lambda-lifting pass assigns to
+    // bindings whose initializer is a non-capturing lifted
+    // lambda; it maps to the `{i8*, i8*}` aggregate emitted by
+    // `emit_closure_pair_aggregate`. Mirrors the same case in
+    // `compiler/src/llvm/type_mapping.sfn:map_return_type`.
+    if normalized == "__closure__" { return "{i8*, i8*}"; }
+
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
     if starts_with(normalized, "*") {
         let mut remainder = trim_text(substring(normalized, 1, normalized.length));

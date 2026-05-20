@@ -375,16 +375,80 @@ fn emit_closure_env_load_prologue(layout: ClosureEnvLayout, env_param_name: stri
     };
 }
 
+// Result of `emit_closure_pair_aggregate`. The closure pair is a
+// `{i8*, i8*}` aggregate whose first slot holds the function
+// pointer (bitcast to `i8*`) and second slot holds the env pointer
+// (also `i8*`). `operand_value` is the SSA temp of the final
+// aggregate; `operand_type` is the structural type the caller can
+// stash into a local of type `{i8*, i8*}` (the `__closure__`
+// sentinel maps onto this LLVM type at the binding site).
+struct ClosurePairResult {
+    lines: string[];
+    operand_value: string;
+    operand_type: string;
+    next_temp: int;
+}
+
+// Emit the `{i8*, i8*}` closure-pair aggregate at a lambda
+// expression site. The function pointer is bitcast to `i8*` so the
+// aggregate type stays uniform across every lambda shape — call-site
+// dispatch (#689) re-derives the typed signature from the binding's
+// resolved fn-pointer type. The env operand text is splice in
+// verbatim: pass `"null"` for non-capturing lambdas (#686) and the
+// `i8* %env_raw` SSA name returned by `emit_closure_env_alloc` for
+// capturing lambdas (#687).
+//
+// Emission shape (3 instructions, 3 temps consumed):
+//
+//   %t0 = bitcast <fn_ptr_llvm_type> <fn_ptr_symbol> to i8*
+//   %t1 = insertvalue {i8*, i8*} undef, i8* %t0, 0
+//   %t2 = insertvalue {i8*, i8*} %t1, i8* <env_var>, 1
+//
+// The final aggregate (`%t2`) is the operand the caller should
+// store into the binding's slot.
+fn emit_closure_pair_aggregate(fn_ptr_symbol: string, fn_ptr_llvm_type: string, env_var: string, temp_index: int) -> ClosurePairResult {
+    let mut lines: string[] = [];
+    let mut current_temp: int = temp_index;
+
+    let fn_cast = format_temp_name(current_temp);
+    current_temp += 1;
+    lines.push("  " + fn_cast + " = bitcast " + fn_ptr_llvm_type + " "
+        + fn_ptr_symbol
+        + " to i8*");
+
+    let with_fn = format_temp_name(current_temp);
+    current_temp += 1;
+    lines.push("  " + with_fn + " = insertvalue {i8*, i8*} undef, i8* "
+        + fn_cast
+        + ", 0");
+
+    let with_env = format_temp_name(current_temp);
+    current_temp += 1;
+    lines.push("  " + with_env + " = insertvalue {i8*, i8*} " + with_fn
+        + ", i8* "
+        + env_var
+        + ", 1");
+
+    return ClosurePairResult {
+        lines: lines,
+        operand_value: with_env,
+        operand_type: "{i8*, i8*}",
+        next_temp: current_temp as int
+    };
+}
+
 export {
     ClosureCaptureOperand,
     ClosureEnvAllocResult,
     ClosureEnvField,
     ClosureEnvLayout,
     ClosureEnvLoadedBinding,
+    ClosurePairResult,
     ClosureEnvPrologueResult,
     closure_env_type_name,
     closure_field_llvm_type,
     emit_closure_env_alloc,
     emit_closure_env_load_prologue,
+    emit_closure_pair_aggregate,
     synthesize_closure_env_struct
 };
