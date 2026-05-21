@@ -248,18 +248,6 @@ fn get_instruction_tag(instructions: NativeInstruction[], idx: int) -> int {
     return sailfin_enum_tag_from_instruction_array(instructions, idx);
 }
 
-fn get_instruction_text(instructions: NativeInstruction[], idx: int) -> string {
-    // Seed drops this; fixup pass replaces with payload[0] read
-    let instr = instructions[idx];
-    return instr.expression;
-}
-
-fn get_instruction_condition(instructions: NativeInstruction[], idx: int) -> string {
-    // Seed drops this; fixup pass replaces with payload[0] read
-    let instr = instructions[idx];
-    return instr.condition;
-}
-
 fn get_instruction_let_name(instructions: NativeInstruction[], idx: int) -> string {
     let instr = instructions[idx];
     return instr.name;
@@ -278,18 +266,6 @@ fn get_instruction_let_type(instructions: NativeInstruction[], idx: int) -> stri
 fn get_instruction_let_value(instructions: NativeInstruction[], idx: int) -> string? {
     let instr = instructions[idx];
     return instr.value;
-}
-
-fn get_instruction_for_target(instructions: NativeInstruction[], idx: int) -> string {
-    // Seed drops this; fixup pass replaces with payload[0] read
-    let instr = instructions[idx];
-    return instr.target;
-}
-
-fn get_instruction_for_iterable(instructions: NativeInstruction[], idx: int) -> string {
-    // Seed drops this; fixup pass replaces with payload[1] read
-    let instr = instructions[idx];
-    return instr.iterable;
 }
 
 // ── NativeFunction field accessors ───────────────────────────────────
