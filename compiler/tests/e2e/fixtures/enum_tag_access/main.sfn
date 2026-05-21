@@ -1,0 +1,53 @@
+// Fixture for compiler/tests/e2e/test_enum_tag_access.sh.
+//
+// Exercises the two enum-tag readback paths fixed in #704:
+//   1. `.tag` field accessor — both when the enum subject is a
+//      pointer (`s: Shape`) and when it's a by-value aggregate
+//      (`shapes[idx]`).
+//   2. `match` over a by-value enum with destructured fields.
+//
+// Without the fixes the `.tag` paths silently returned 0 (the
+// extractvalue/load was emitted but discarded with no `sext`
+// widening to the i64 return type), and the by-value `match`
+// emitted malformed LLVM IR (`getelementptr ..., %Shape %t, ...`
+// — GEP base must be a pointer).
+enum Shape {
+    Circle { r: int },
+    Square { s: int },
+    Triangle { base: int, height: int }
+}
+
+fn shape_tag_direct(s: Shape) -> int { return s.tag; }
+
+fn shapes_tag_indexed(shapes: Shape[], idx: int) -> int {
+    let s = shapes[idx];
+    return s.tag;
+}
+
+fn shapes_tag_match(shapes: Shape[], idx: int) -> int {
+    let s = shapes[idx];
+    match s {
+        Shape.Circle { r } => return 0,
+        Shape.Square { s } => return 1,
+        Shape.Triangle { base, height } => return 2
+    }
+    return 99;
+}
+
+fn main() ![io] {
+    let shapes: Shape[] = [Shape.Circle { r: 1 }, Shape.Square { s: 2 }, Shape.Triangle {
+        base: 3, height: 4
+    }];
+    let d0 = shape_tag_direct(shapes[0]);
+    let d1 = shape_tag_direct(shapes[1]);
+    let d2 = shape_tag_direct(shapes[2]);
+    let i0 = shapes_tag_indexed(shapes, 0);
+    let i1 = shapes_tag_indexed(shapes, 1);
+    let i2 = shapes_tag_indexed(shapes, 2);
+    let m0 = shapes_tag_match(shapes, 0);
+    let m1 = shapes_tag_match(shapes, 1);
+    let m2 = shapes_tag_match(shapes, 2);
+    print("direct {{ d0 }} {{ d1 }} {{ d2 }}");
+    print("indexed {{ i0 }} {{ i1 }} {{ i2 }}");
+    print("match {{ m0 }} {{ m1 }} {{ m2 }}");
+}
