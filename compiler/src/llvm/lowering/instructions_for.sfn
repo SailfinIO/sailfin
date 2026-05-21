@@ -47,7 +47,6 @@ import {
     extend_mutations
 } from "./instructions_helpers";
 import { append_loop_context, collect_loop_structure } from "./instructions_loops";
-import { get_instruction_for_iterable, get_instruction_for_target } from "./lowering_native_helpers";
 import { collect_mutation_names, find_mutation_for_name } from "./phi";
 
 // Lower a range-based for loop (e.g., `for i in 0..10`).
@@ -315,8 +314,8 @@ fn lower_for_instruction(function: NativeFunction, start_index: int, llvm_return
 
     let instruction = function.instructions[start_index];
 
-    let for_target_text = get_instruction_for_target(function.instructions, start_index);
-    let for_iterable_text = get_instruction_for_iterable(function.instructions, start_index);
+    let for_target_text = instruction.target;
+    let for_iterable_text = instruction.iterable;
 
     let mut raw_target = trim_text(for_target_text);
     raw_target = strip_mut_prefix(raw_target);

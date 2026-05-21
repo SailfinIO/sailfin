@@ -52,7 +52,7 @@ import { lower_let_instruction } from "./instructions_let";
 import { append_loop_context, last_loop_context, lower_loop_instruction } from "./instructions_loops";
 import { lower_match_instruction } from "./instructions_match";
 import { lower_throw_instruction, lower_try_instruction } from "./instructions_try";
-import { get_instruction_condition, get_instruction_tag, get_instruction_text } from "./lowering_native_helpers";
+import { get_instruction_tag } from "./lowering_native_helpers";
 import { find_last_label } from "./phi";
 
 fn lower_instruction_range(function: NativeFunction, start_index: int, end: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
@@ -221,7 +221,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         }
         if !_tag_handled {
             if _instr_tag == 1 {
-                let _raw_expr = get_instruction_text(function.instructions, index);
+                let _raw_expr = instruction.expression;
                 let trimmed_expression = trim_text(_raw_expr);
                 let mut handled_inline_let: boolean = false;
 
@@ -560,7 +560,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
         // compiled get_instruction_tag lacks the fixup) to lower instructions.
         if !_tag_handled {
             if _instr_tag == 21 {
-                let _raw_expr_21 = get_instruction_text(function.instructions, index);
+                let _raw_expr_21 = instruction.expression;
                 let trimmed_21 = trim_text(_raw_expr_21);
                 // Detect return instructions that the tag couldn't distinguish
                 let mut _is_ret_21: boolean = false;

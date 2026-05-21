@@ -34,7 +34,7 @@ import {
     extend_lifetime_regions,
     extend_mutations
 } from "./instructions_helpers";
-import { get_instruction_condition, get_instruction_tag } from "./lowering_native_helpers";
+import { get_instruction_tag } from "./lowering_native_helpers";
 import { collect_mutation_names, find_mutation_for_name } from "./phi";
 
 fn collect_loop_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> LoopStructure {
@@ -168,7 +168,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
             let third_body_tag = get_instruction_tag(function.instructions, structure.body_start
                 + 2);
             if third_body_tag == 5 {
-                let raw_exit_cond = trim_text(get_instruction_condition(function.instructions, structure.body_start));
+                let raw_exit_cond = trim_text(function.instructions[structure.body_start].condition);
                 if raw_exit_cond.length > 0 {
                     loop_exit_condition = sanitize_if_condition_text(raw_exit_cond);
                     if debug_loop {
