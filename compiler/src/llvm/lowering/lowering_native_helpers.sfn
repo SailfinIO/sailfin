@@ -233,18 +233,10 @@ fn get_enum_name_at(enums: NativeEnum[], idx: int) -> string {
 }
 
 // ── NativeInstruction field accessors ────────────────────────────────
-// The seed v0.1.1 compiles enum field access as sailfin_runtime_get_field
-// which is a runtime stub returning empty data.  These helpers use
-// explicit array indexing; the fixup pass replaces their bodies.
 fn get_instruction_tag(instructions: NativeInstruction[], idx: int) -> int {
-    // Enum tag accessor. The seed v0.1.1 can't compile this correctly;
-    // _fix_struct_construction_helpers replaces the body for the first-pass
-    // binary. Once a new seed is cut from a working binary, this source
-    // implementation takes over and the fixup is no longer needed.
-    //
-    // For the seedcheck (compiled by the first-pass binary without fixups),
-    // we delegate to a C runtime function that reads the i32 tag directly
-    // from the array element's memory.
+    // Delegates to a C runtime helper that reads the i32 tag directly from
+    // the array element's memory. Cleaning up this last C delegate is
+    // tracked separately (see #620 epic / #620d).
     return sailfin_enum_tag_from_instruction_array(instructions, idx);
 }
 
