@@ -226,46 +226,6 @@ fn append_instruction_to_function(func: NativeFunction, instr: NativeInstruction
     return update_function_instructions(func, instrs);
 }
 
-// ── NativeInstruction constructors ───────────────────────────────────
-// NativeInstruction construction helpers (seed v0.1.1 drops enum variant constructors)
-// Tags: Return=0, Expression=1, If=3, Else=4, EndIf=5, Loop=8, EndLoop=9, Break=10, Continue=11, Unknown=21
-fn make_instruction_text(tag_val: int, text: string) -> NativeInstruction {
-    // Seed drops this; fixup pass replaces body
-    if tag_val == 0 {
-        return NativeInstruction.Return { expression: text, span: null };
-    }
-    if tag_val == 1 {
-        return NativeInstruction.Expression { expression: text, span: null };
-    }
-    if tag_val == 3 {
-        return NativeInstruction.If { condition: text };
-    }
-    if tag_val == 12 {
-        return NativeInstruction.Match { expression: text };
-    }
-    if tag_val == 13 {
-        return NativeInstruction.Case { pattern: text, guard: null };
-    }
-    return NativeInstruction.Unknown { text: text };
-}
-
-fn make_instruction_simple(tag_val: int) -> NativeInstruction {
-    // Seed drops this; fixup pass replaces body
-    if tag_val == 4 { return NativeInstruction.Else(); }
-    if tag_val == 5 { return NativeInstruction.EndIf(); }
-    if tag_val == 7 { return NativeInstruction.EndFor(); }
-    if tag_val == 8 { return NativeInstruction.Loop(); }
-    if tag_val == 9 { return NativeInstruction.EndLoop(); }
-    if tag_val == 10 { return NativeInstruction.Break(); }
-    if tag_val == 14 { return NativeInstruction.EndMatch(); }
-    return NativeInstruction.Continue();
-}
-
-fn make_instruction_for(target: string, iterable: string) -> NativeInstruction {
-    // Seed drops this; fixup pass replaces body
-    return NativeInstruction.For { target: target, iterable: iterable };
-}
-
 // ── NativeEnum field accessors ───────────────────────────────────────
 fn get_enum_name_at(enums: NativeEnum[], idx: int) -> string {
     let e = enums[idx];
