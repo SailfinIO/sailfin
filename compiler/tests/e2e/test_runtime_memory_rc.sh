@@ -210,31 +210,30 @@ test_roundtrip_frees_once() {
 
     local harness="$SCRATCH/harness.c"
     cat > "$harness" <<'CHARNESS'
-/* Counts libc free() calls via interposition without an extra
- * library. The harness defines its own `free` that bumps a counter
- * and forwards to the real allocator's deallocation entry point —
- * since the rc.ll module emits `declare void @free(i8*)`, the
- * linker binds those references to this shim instead of libc. The
- * shim then calls `__libc_free` (glibc) or `free` from a private
- * dlopen on macOS. Linux glibc exposes `__libc_free` directly;
- * we use it here because the rc CI matrix is Linux x86_64 today.
- * macOS arm64 ships a separate test run that the issue's `Out:`
- * notes (M2 epic #389 ships Linux-first).
+/* Counts libc free() calls via link-time interposition. The harness
+ * defines its own `free` that bumps a counter; the emitted rc.ll
+ * module's `declare void @free(i8*)` references bind to this shim
+ * instead of the system free at link time. The shim intentionally
+ * does NOT forward to the real allocator's deallocation entry — the
+ * test runs for milliseconds and the kernel reclaims the leaked
+ * payload on exit, so swallowing the bytes here avoids the platform-
+ * specific incantation needed to reach the real `free` (`__libc_free`
+ * on glibc, `dlsym(RTLD_NEXT, "free")` on macOS / musl). The
+ * acceptance criterion is "exactly one `free` call", not "memory
+ * actually returned to the allocator" — counting is the contract.
  */
 #include <stddef.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 
-extern void __libc_free(void *ptr);
-
 static long free_count = 0;
 
 void free(void *ptr) {
     if (ptr) {
         free_count++;
-        __libc_free(ptr);
     }
+    /* Intentionally leak — see file header. */
 }
 
 extern void *sfn_rc_sfn_alloc(int64_t size, void *drop_fn);
