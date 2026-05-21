@@ -36,9 +36,6 @@ import {
     append_instruction_to_function,
     append_native_import,
     append_param_to_function,
-    make_instruction_for,
-    make_instruction_simple,
-    make_instruction_text,
     make_native_enum,
     make_native_enum_layout,
     make_native_enum_variant,
@@ -371,9 +368,14 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         }
 
         // --- Instruction parsing ---
-        let mut next_instruction: NativeInstruction = make_instruction_text(21, line);
+        let mut next_instruction: NativeInstruction = NativeInstruction.Unknown {
+            text: line
+        };
         if is_eval {
-            next_instruction = make_instruction_text(1, trim_text_local(substring(line, 5, line.length)));
+            next_instruction = NativeInstruction.Expression {
+                expression: trim_text_local(substring(line, 5, line.length)),
+                span: null
+            };
         }
         // --- Multiline struct literal gathering for eval instructions ---
         // When an eval line has an unquoted '{' with no matching '}', gather
@@ -415,37 +417,65 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
             _gi += 1;
         }
         if _gather_score >= 3 {
-            next_instruction = make_instruction_text(1, trim_text_local(_eval_gathered));
+            next_instruction = NativeInstruction.Expression {
+                expression: trim_text_local(_eval_gathered),
+                span: null
+            };
             index = _gi - 1;
         }
         if is_dotreturn {
-            next_instruction = make_instruction_text(0, trim_text_local(substring(line, 7, line.length)));
+            next_instruction = NativeInstruction.Return {
+                expression: trim_text_local(substring(line, 7, line.length)),
+                span: null
+            };
         }
         if is_ret_space {
-            next_instruction = make_instruction_text(0, trim_text_local(substring(line, 4, line.length)));
+            next_instruction = NativeInstruction.Return {
+                expression: trim_text_local(substring(line, 4, line.length)),
+                span: null
+            };
         }
-        if is_ret_bare { next_instruction = make_instruction_text(0, ""); }
-        if is_else_kw { next_instruction = make_instruction_simple(4); }
-        if is_endif_kw { next_instruction = make_instruction_simple(5); }
+        if is_ret_bare {
+            next_instruction = NativeInstruction.Return {
+                expression: "",
+                span: null
+            };
+        }
+        if is_else_kw { next_instruction = NativeInstruction.Else(); }
+        if is_endif_kw { next_instruction = NativeInstruction.EndIf(); }
         if is_if_kw {
-            next_instruction = make_instruction_text(3, trim_text_local(substring(line, 4, line.length)));
+            next_instruction = NativeInstruction.If {
+                condition: trim_text_local(substring(line, 4, line.length))
+            };
         }
-        if is_loop_kw { next_instruction = make_instruction_simple(8); }
-        if is_endloop_kw { next_instruction = make_instruction_simple(9); }
+        if is_loop_kw { next_instruction = NativeInstruction.Loop(); }
+        if is_endloop_kw { next_instruction = NativeInstruction.EndLoop(); }
         if is_for_kw {
             if for_in_idx >= 0 {
-                next_instruction = make_instruction_for(for_target_raw, for_iterable_raw);
+                next_instruction = NativeInstruction.For {
+                    target: for_target_raw,
+                    iterable: for_iterable_raw
+                };
             }
         }
-        if is_endfor_kw { next_instruction = make_instruction_simple(7); }
-        if is_break_kw { next_instruction = make_instruction_simple(10); }
-        if is_continue_kw { next_instruction = make_instruction_simple(11); }
-        if is_match_kw {
-            next_instruction = make_instruction_text(12, match_expr_raw);
+        if is_endfor_kw { next_instruction = NativeInstruction.EndFor(); }
+        if is_break_kw { next_instruction = NativeInstruction.Break(); }
+        if is_continue_kw {
+            next_instruction = NativeInstruction.Continue();
         }
-        if is_endmatch_kw { next_instruction = make_instruction_simple(14); }
+        if is_match_kw {
+            next_instruction = NativeInstruction.Match {
+                expression: match_expr_raw
+            };
+        }
+        if is_endmatch_kw {
+            next_instruction = NativeInstruction.EndMatch();
+        }
         if is_case_kw {
-            next_instruction = make_instruction_text(13, case_pattern_raw);
+            next_instruction = NativeInstruction.Case {
+                pattern: case_pattern_raw,
+                guard: null
+            };
         }
         // Inline match case: `pattern => body,` — emit Case + body instructions.
         // Must NOT fire on `.case` or `.match` lines that happen to contain ` => `.
@@ -462,13 +492,22 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         if !is_fn_start { _inline_score += 1; }
         if !is_fn_end { _inline_score += 1; }
         if _inline_score >= 7 {
-            let case_instr = make_instruction_text(13, inline_pattern_raw);
+            let case_instr = NativeInstruction.Case {
+                pattern: inline_pattern_raw,
+                guard: null
+            };
             current = append_instruction_to_function(current, case_instr);
             if inline_body_is_return {
-                next_instruction = make_instruction_text(0, inline_return_expr);
+                next_instruction = NativeInstruction.Return {
+                    expression: inline_return_expr,
+                    span: null
+                };
             }
             if !inline_body_is_return {
-                next_instruction = make_instruction_text(1, inline_body_raw);
+                next_instruction = NativeInstruction.Expression {
+                    expression: inline_body_raw,
+                    span: null
+                };
             }
         }
 
