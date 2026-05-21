@@ -200,17 +200,6 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         };
     }
 
-    // #704 fix A: `.tag` is the canonical enum tag accessor. Without
-    // this short-circuit the function falls through to the variant-
-    // field search (no variant has a field literally named "tag"),
-    // hits `matched_variants.length == 0`, and returns operand=null.
-    // The receiving `return` then drops the extractvalue/load already
-    // emitted above and falls back to `ret <default>` — producing
-    // silent miscompiles for callers reading the tag in pure Sailfin.
-    if parse.field == "tag" {
-        return make_expression_result(current_lines, current_temp, tag_operand, messages, enum_string_constants);
-    }
-
     if parse.field == "variant" {
         let sanitized_enum = sanitize_symbol(enum_info.name);
         let default_constant_name = "@.enum." + sanitized_enum
@@ -322,6 +311,20 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     }
 
     if matched_variants.length == 0 {
+        // #704 fix A: `.tag` with no variant defining a literal `tag`
+        // field is the canonical enum discriminator accessor. Return
+        // the already-extracted tag operand so the receiving `return`
+        // (or further consumer) sees the live value — pre-fix the
+        // function fell through to operand=null and the caller's
+        // `return` dropped the extractvalue/load and emitted
+        // `ret <default>` (silently returning 0 for every variant).
+        // The check sits AFTER the variant-field search so callers
+        // whose enum *does* declare a user-named `tag` field on at
+        // least one variant continue to read the user value, not the
+        // implicit discriminator.
+        if parse.field == "tag" {
+            return make_expression_result(current_lines, current_temp, tag_operand, messages, enum_string_constants);
+        }
         messages.push("llvm lowering: enum `" + enum_info.name
             + "` has no field `"
             + parse.field
