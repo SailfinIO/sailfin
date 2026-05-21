@@ -389,6 +389,31 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                 string_constants: collected_string_constants
             };
         }
+        // Validate arity against the closure's declared parameter
+        // shape (`expected_params[0]` is the `{i8*, i8*}` self slot
+        // injected by `resolve_call_signature`; the remainder is the
+        // user-visible signature). Without this guard, a wrong arg
+        // count would silently bitcast the function pointer to a
+        // signature derived from the provided operand types and emit
+        // a call that mismatches the callee's real ABI — exactly the
+        // UB the `[fatal]` sentinel is meant to refuse IR over.
+        if final_operands.length != expected_params.length {
+            let arity_diag = "llvm lowering [fatal]: closure dispatch arity mismatch for `"
+                + trimmed_target
+                + "`: expected "
+                + number_to_string(expected_params.length - 1)
+                + " user argument(s), got "
+                + number_to_string(final_operands.length - 1);
+            print.err(arity_diag);
+            result_diagnostics.push(arity_diag);
+            return ExpressionResult {
+                lines: result_lines,
+                temp_index: result_temp,
+                operand: null,
+                diagnostics: result_diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
         let closure_pair = final_operands[0];
 
         let fn_ptr_temp = "%t" + number_to_string(result_temp);

@@ -45,6 +45,7 @@ import { sanitize_symbol } from "./core_text";
 import {
     future_pointer_type_for_return_type,
     map_array_pointer_type,
+    map_parameter_type,
     map_return_type
 } from "./core_type_mapping";
 
@@ -160,7 +161,7 @@ fn _parse_fn_pointer_annotation(context: TypeContext, annotation: string) -> _Cl
         if colon_pos > 0 {
             param_type_text = trim_text(substring(raw, colon_pos + 1, raw.length));
         }
-        let mapped = map_return_type(context, param_type_text);
+        let mapped = map_parameter_type(context, param_type_text);
         let mut effective_mapped: string = mapped;
         if effective_mapped.length == 0 { effective_mapped = "i8*"; }
         parameter_types.push(effective_mapped);

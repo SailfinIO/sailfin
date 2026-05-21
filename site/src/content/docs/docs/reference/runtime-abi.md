@@ -155,7 +155,9 @@ sources, depending on the callee binding's type-text:
   hidden `__env: i8*` slot).
 - A parameter typed `fn(<param_tys>) -> <ret_ty>` (user-written
   fn-pointer annotation) — the compiler parses the annotation and maps
-  each component through `map_return_type`.
+  each `<param_ty>` through `map_parameter_type` (to honour the boxed-
+  struct ABI applied to closure-call arguments) and the `<ret_ty>`
+  through `map_return_type`.
 
 Both forms map to the same `{i8*, i8*}` LLVM type, so closure values
 flow uniformly through assignment, parameter passing, and call dispatch.

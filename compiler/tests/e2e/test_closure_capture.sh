@@ -53,11 +53,24 @@ run_test() {
 # Compile + run a fixture and compare stdout to an exact expected
 # value. The compiler's `run` command compiles, links, and executes
 # in one step — exactly the surface a user would exercise.
+#
+# Two of our fixtures share the basename `main.sfn` because each
+# lives in its own capsule directory (see the comment in
+# `test_single_int_capture` for why each fixture needs its own
+# `capsule.toml`). Deriving the log name from `basename` alone would
+# overwrite the first fixture's logs with the second's; we use the
+# parent directory + basename instead so post-mortem inspection of a
+# failing run preserves the per-fixture diagnostic.
 run_fixture() {
     local fixture="$1"
     local expected="$2"
-    local stdout_log="$SCRATCH/$(basename "${fixture%.sfn}").out"
-    local stderr_log="$SCRATCH/$(basename "${fixture%.sfn}").err"
+    local fixture_dir_name
+    fixture_dir_name="$(basename "$(dirname "$fixture")")"
+    local fixture_base
+    fixture_base="$(basename "${fixture%.sfn}")"
+    local log_prefix="$SCRATCH/${fixture_dir_name}__${fixture_base}"
+    local stdout_log="${log_prefix}.out"
+    local stderr_log="${log_prefix}.err"
     if ! "$BINARY" run "$fixture" > "$stdout_log" 2> "$stderr_log"; then
         echo "[test]   compile/run failed for $(basename "$fixture")"
         echo "         stderr:"
