@@ -131,6 +131,37 @@ non-capturing case is an implementation detail, not a stable contract,
 and the uniform call shape means non-capturing dispatch needs no
 special case.
 
+**Call-site dispatch.** A call whose callee is a closure-pair value
+extracts the function-pointer and env-pointer slots from the aggregate,
+bitcasts the function pointer to the typed `<ret_ty> (i8*, <param_tys>)*`,
+and invokes it with the env pointer as the first argument:
+
+```llvm
+%fn_ptr = extractvalue {i8*, i8*} %closure, 0
+%env    = extractvalue {i8*, i8*} %closure, 1
+%typed  = bitcast i8* %fn_ptr to <ret_ty> (i8*, <param_tys>)*
+%result = call <ret_ty> %typed(i8* %env, <args>...)
+```
+
+This mirrors the trait-dispatch shape, so the IR-shape vocabulary stays
+uniform across closures, trait objects, and any future indirect-call
+primitive. The signature for the bitcast is recovered from one of two
+sources, depending on the callee binding's type-text:
+
+- A local typed `__closure__@sfn_lambda_<N>` (the lambda-lifting pass's
+  internal sentinel, set on lifted closure bindings) — the compiler
+  looks up `@sfn_lambda_<N>` in the module's function table and reads
+  its return type and parameter types directly (dropping the leading
+  hidden `__env: i8*` slot).
+- A parameter typed `fn(<param_tys>) -> <ret_ty>` (user-written
+  fn-pointer annotation) — the compiler parses the annotation and maps
+  each `<param_ty>` through `map_parameter_type` (to honour the boxed-
+  struct ABI applied to closure-call arguments) and the `<ret_ty>`
+  through `map_return_type`.
+
+Both forms map to the same `{i8*, i8*}` LLVM type, so closure values
+flow uniformly through assignment, parameter passing, and call dispatch.
+
 **Lifetime stance (env outlives the closure pair; no drop yet).** The
 env struct is allocated through `sailfin_runtime_alloc_struct`, which
 routes through the arena when `SAILFIN_USE_ARENA=1` and through libc

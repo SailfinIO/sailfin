@@ -376,8 +376,15 @@ fn _map_type_core(context: TypeContext, normalized: string) -> string {
     // bindings whose initializer is a non-capturing lifted
     // lambda; it maps to the `{i8*, i8*}` aggregate emitted by
     // `emit_closure_pair_aggregate`. Mirrors the same case in
-    // `compiler/src/llvm/type_mapping.sfn:map_return_type`.
+    // `compiler/src/llvm/type_mapping.sfn:map_return_type`. The
+    // richer `__closure__@sfn_lambda_<N>` form (set at let-lowering
+    // time for #689 call-site dispatch) maps to the same LLVM type,
+    // as does the user-supplied `fn(...) -> R` parameter annotation
+    // accepted by the parser in #688.
     if normalized == "__closure__" { return "{i8*, i8*}"; }
+    if starts_with(normalized, "__closure__@") { return "{i8*, i8*}"; }
+    if starts_with(normalized, "fn(") { return "{i8*, i8*}"; }
+    if starts_with(normalized, "fn (") { return "{i8*, i8*}"; }
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
     if starts_with(normalized, "*") {

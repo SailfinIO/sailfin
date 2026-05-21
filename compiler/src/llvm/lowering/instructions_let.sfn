@@ -42,9 +42,35 @@ import {
     is_identifier_part_char,
     is_identifier_start_char,
     number_to_string,
+    starts_with,
     trim_text
 } from "../utils";
 import { scope_id_inside_try_body } from "./instructions_helpers";
+
+// Extract the lifted lambda symbol from a `<closure_pair @<name> ...>`
+// marker. Returns the bare symbol name (e.g. `sfn_lambda_0`) when the
+// initializer is a closure-pair marker, otherwise the empty string.
+// Used to enrich the let-binding's `type_annotation` from the bare
+// `__closure__` sentinel into the richer `__closure__@sfn_lambda_<N>`
+// form so #689 call-site dispatch can look up the lifted function's
+// signature without a side-channel.
+fn _extract_closure_pair_symbol(expression: string) -> string {
+    let trimmed = trim_text(expression);
+    let prefix = "<closure_pair @";
+    if trimmed.length < prefix.length { return ""; }
+    if !starts_with(trimmed, prefix) { return ""; }
+    let mut cursor: int = prefix.length;
+    let mut symbol: string = "";
+    loop {
+        if cursor >= trimmed.length { break; }
+        let ch = substring(trimmed, cursor, cursor + 1);
+        if ch == " " { break; }
+        if ch == ">" { break; }
+        symbol = symbol + ch;
+        cursor += 1;
+    }
+    return symbol;
+}
 
 // Extract the leading function-call target identifier from a let initializer
 // expression. Returns the identifier when the expression is shaped like
@@ -454,6 +480,20 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     // reach the same `NativeFunction.return_type` the file-IPC channel used
     // to carry for both local and imported async functions.
     let mut local_type_annotation: string = instruction.type_annotation;
+    // Issue #689: enrich the bare `__closure__` sentinel with the
+    // lifted lambda's symbol so call-site dispatch can recover the
+    // function signature without a side-channel. The AST-level
+    // annotation stays `__closure__` (#686 lifting tests pin that
+    // exact string); only the LocalBinding's runtime annotation
+    // gains the `@sfn_lambda_<N>` suffix. `map_local_type` accepts
+    // both forms via `starts_with("__closure__")` so the alloca's
+    // LLVM type is unaffected.
+    if local_type_annotation == "__closure__" {
+        let lifted_symbol = _extract_closure_pair_symbol(instruction.value);
+        if lifted_symbol.length > 0 {
+            local_type_annotation = "__closure__@" + lifted_symbol;
+        }
+    }
     if llvm_type == "%SailfinFuturePtr*" {
         let call_target = _extract_leading_call_target(instruction.value);
         if call_target.length > 0 {

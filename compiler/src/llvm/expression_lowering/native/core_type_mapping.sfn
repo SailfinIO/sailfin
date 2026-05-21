@@ -332,6 +332,14 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
     if trimmed.length == 0 { _if135 = true; }
     if trimmed == "void" { _if135 = true; }
     if _if135 { return "void"; }
+    // Closure-pair sentinel (issue #686) + enriched form (issue #689)
+    // + user-supplied fn-pointer annotation (issue #688) all map to
+    // the `{i8*, i8*}` aggregate. See the parallel comments in
+    // `compiler/src/llvm/type_mapping.sfn`.
+    if trimmed == "__closure__" { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "__closure__@") { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "fn(") { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "fn (") { return "{i8*, i8*}"; }
     let normalized = unwrap_move_wrapper(trimmed);
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
@@ -443,6 +451,17 @@ fn await_symbol_for_future_pointer_type(future_ptr_type: string) -> string {
 fn map_parameter_type(context: TypeContext, parameter_type: string) -> string {
     let trimmed = trim_text(parameter_type);
     if trimmed.length == 0 { return "double"; }
+    // Closure-pair sentinel (issue #686) + enriched form (issue #689)
+    // + user-supplied fn-pointer annotation (issue #688) all map to
+    // the `{i8*, i8*}` aggregate. The parameter must cross the call
+    // boundary by value so #689's call-site dispatch can
+    // `extractvalue` the `{fn_ptr, env*}` slots — boxing it through
+    // the user-struct ABI below would mismatch the function's
+    // declared signature (`{i8*, i8*} %cb`).
+    if trimmed == "__closure__" { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "__closure__@") { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "fn(") { return "{i8*, i8*}"; }
+    if starts_with(trimmed, "fn (") { return "{i8*, i8*}"; }
     let normalized = unwrap_move_wrapper(trimmed);
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.

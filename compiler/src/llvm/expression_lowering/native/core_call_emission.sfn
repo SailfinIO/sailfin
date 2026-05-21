@@ -56,8 +56,8 @@ fn _abi_mismatch_diagnostic_prefix(diagnostics: string[]) -> string {
 }
 
 // Coerce operands to expected types and emit the final call instruction.
-// Handles array concat/push, trait dispatch, and normal function calls.
-fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, function_entry: NativeFunction?, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> ExpressionResult ![io] {
+// Handles array concat/push, trait dispatch, closure dispatch, and normal function calls.
+fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_closure_dispatch: boolean, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, function_entry: NativeFunction?, current_temp: int, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> ExpressionResult ![io] {
     let mut result_lines = current_lines;
     let mut result_temp: int = current_temp;
     let mut result_diagnostics = diagnostics;
@@ -89,6 +89,13 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
         }
         let mut _if55: boolean = false;
         if is_trait_dispatch {
+            if index == 0 { _if55 = true; }
+        }
+        // Issue #689: like trait dispatch, the closure-pair operand at
+        // slot 0 is a self-shaped aggregate that bypasses coercion;
+        // `coerce_and_emit_call`'s closure-dispatch branch consumes it
+        // directly via `extractvalue`.
+        if is_closure_dispatch {
             if index == 0 { _if55 = true; }
         }
         if _if55 { coerced_operands.push(operand); } else if target_type.length == 0 {
@@ -358,6 +365,126 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
             lines: result_lines,
             temp_index: result_temp,
             operand: null,
+            diagnostics: result_diagnostics,
+            string_constants: collected_string_constants
+        };
+    }
+
+    // Issue #689: closure-callee dispatch. `final_operands[0]` is the
+    // `{i8*, i8*}` closure-pair aggregate loaded by
+    // `try_resolve_closure_callee`; the remaining operands are the
+    // user-supplied call arguments (already coerced against the
+    // closure's parameter types in the coerce loop above). The
+    // dispatch sequence mirrors trait dispatch: extract `fn_ptr` and
+    // `env*`, bitcast `fn_ptr` to the typed function-pointer type,
+    // and emit the call with `env*` as the hidden first argument.
+    if is_closure_dispatch {
+        if final_operands.length == 0 {
+            result_diagnostics.push("llvm lowering: closure dispatch requires a closure-pair operand");
+            return ExpressionResult {
+                lines: result_lines,
+                temp_index: result_temp,
+                operand: null,
+                diagnostics: result_diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+        // Validate arity against the closure's declared parameter
+        // shape (`expected_params[0]` is the `{i8*, i8*}` self slot
+        // injected by `resolve_call_signature`; the remainder is the
+        // user-visible signature). Without this guard, a wrong arg
+        // count would silently bitcast the function pointer to a
+        // signature derived from the provided operand types and emit
+        // a call that mismatches the callee's real ABI — exactly the
+        // UB the `[fatal]` sentinel is meant to refuse IR over.
+        if final_operands.length != expected_params.length {
+            let arity_diag = "llvm lowering [fatal]: closure dispatch arity mismatch for `"
+                + trimmed_target
+                + "`: expected "
+                + number_to_string(expected_params.length - 1)
+                + " user argument(s), got "
+                + number_to_string(final_operands.length - 1);
+            print.err(arity_diag);
+            result_diagnostics.push(arity_diag);
+            return ExpressionResult {
+                lines: result_lines,
+                temp_index: result_temp,
+                operand: null,
+                diagnostics: result_diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+        let closure_pair = final_operands[0];
+
+        let fn_ptr_temp = "%t" + number_to_string(result_temp);
+        result_temp += 1;
+        result_lines.push("  " + fn_ptr_temp + " = extractvalue " + closure_pair.llvm_type
+            + " "
+            + closure_pair.value
+            + ", 0");
+
+        let env_ptr_temp = "%t" + number_to_string(result_temp);
+        result_temp += 1;
+        result_lines.push("  " + env_ptr_temp + " = extractvalue "
+            + closure_pair.llvm_type
+            + " "
+            + closure_pair.value
+            + ", 1");
+
+        let mut closure_fp_param_types: string[] = ["i8*"];
+        let mut closure_arg_idx: int = 1;
+        loop {
+            if closure_arg_idx >= final_operands.length { break; }
+            closure_fp_param_types.push(final_operands[closure_arg_idx].llvm_type);
+            closure_arg_idx += 1;
+        }
+        let closure_fp_params = join_with_separator(closure_fp_param_types, ", ");
+        let closure_function_type = llvm_return + " (" + closure_fp_params
+            + ")*";
+
+        let typed_fn_temp = "%t" + number_to_string(result_temp);
+        result_temp += 1;
+        result_lines.push("  " + typed_fn_temp + " = bitcast i8* " + fn_ptr_temp
+            + " to "
+            + closure_function_type);
+
+        let mut closure_call_args: string[] = ["i8* " + env_ptr_temp];
+        closure_arg_idx = 1;
+        loop {
+            if closure_arg_idx >= rendered_args.length { break; }
+            closure_call_args.push(rendered_args[closure_arg_idx]);
+            closure_arg_idx += 1;
+        }
+        let closure_arg_text = join_with_separator(closure_call_args, ", ");
+
+        if llvm_return == "void" {
+            result_lines.push("  call void " + typed_fn_temp + "("
+                + closure_arg_text
+                + ")");
+            return ExpressionResult {
+                lines: result_lines,
+                temp_index: result_temp,
+                operand: null,
+                diagnostics: result_diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+        let closure_result_temp_name = format_temp_name(result_temp);
+        result_lines.push("  " + closure_result_temp_name + " = call "
+            + llvm_return
+            + " "
+            + typed_fn_temp
+            + "("
+            + closure_arg_text
+            + ")");
+        let closure_result_operand = LLVMOperand {
+            llvm_type: llvm_return,
+            value: closure_result_temp_name
+        };
+        return ExpressionResult {
+            lines: result_lines,
+            temp_index: result_temp + 1,
+            operand: closure_result_operand,
             diagnostics: result_diagnostics,
             string_constants: collected_string_constants
         };

@@ -81,7 +81,22 @@ trap _sfn_test_cleanup EXIT
 # enforces its own per-phase cap), so this just bounds the outer
 # shell wait. Override with `SAILFIN_TEST_TIMEOUT=<seconds>` for
 # investigations or perf work.
-TIMEOUT="${SAILFIN_TEST_TIMEOUT:-180}"
+#
+# May 2026 (issue #689): emit_native_extern_test crept up to
+# ~250s on the ubuntu-24.04 PR runner — that test imports the
+# entire `emit_native` graph (transitively pulling in #686/#687/
+# #689's lifting + closure-dispatch code), and is the largest
+# deps-import in the unit suite. macOS already absorbs the spread
+# because the runner image ships neither `timeout` nor `gtimeout`,
+# so the per-test cap silently no-ops there. Linux enforces the
+# cap, and three consecutive PR runs wedged at 180s → 240s → still
+# 240s+. The fix bumps the default to 300s — five minutes is wide
+# enough to absorb the linux runner's I/O variance without masking
+# a hung process (the per-phase cap inside `compiler/src/main.sfn`
+# trips long before 300s for any genuine infinite loop). A follow-
+# up perf workstream should look at why this one test scales so
+# poorly on cold-cache linux runners (local: ~20s, CI: ~250s).
+TIMEOUT="${SAILFIN_TEST_TIMEOUT:-300}"
 
 # macOS doesn't ship `timeout`; use gtimeout (coreutils) if available, else fallback
 if command -v timeout &>/dev/null; then

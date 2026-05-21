@@ -1,0 +1,14 @@
+// compiler/tests/e2e/fixtures/closure_single_capture/main.sfn
+//
+// Issue #689 acceptance — a capturing lambda whose env contains a
+// single `int` capture. Exercises the full M1.5 chain: #686 lifts
+// the lambda to a top-level function, #687 builds the env struct and
+// splices the load prologue, and #689 dispatches the call by
+// extracting `fn_ptr` and `env*` from the closure pair aggregate.
+//
+// Expected stdout: 12 (4 captured + 8 argument).
+fn main() ![io] {
+    let base: int = 4;
+    let add_base = fn (extra: int) -> int { return base + extra; };
+    print(add_base(8));
+}
