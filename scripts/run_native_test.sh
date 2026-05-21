@@ -96,22 +96,7 @@ trap _sfn_test_cleanup EXIT
 # trips long before 300s for any genuine infinite loop). A follow-
 # up perf workstream should look at why this one test scales so
 # poorly on cold-cache linux runners (local: ~20s, CI: ~250s).
-#
-# May 2026 (issue #704): the cap crept again past 300s on the
-# linux-x86_64 PR runner — `emit_native_extern_test` transitively
-# pulls the full `llvm/expression_lowering/native/` graph in via
-# `emit_native.sfn`'s import of `lift_non_capturing_lambdas`, and
-# every lowering-side fix since #689 (closures #699/#701, exception
-# rewiring #703, constructor inlining #707, the #704 enum-tag
-# fix in this PR) adds more code to that graph. Local run is still
-# ~30s — the bottleneck is cold-cache module compilation on the
-# linux runner, not the test's own runtime. Bump to 480s to absorb
-# the existing trend without masking a real infinite loop (the
-# per-phase cap inside `compiler/src/main.sfn` still trips well
-# before 480s). The same follow-up perf workstream applies: this
-# one test shouldn't need to compile the entire LLVM lowering
-# graph just to verify `extern fn` → `.meta extern`.
-TIMEOUT="${SAILFIN_TEST_TIMEOUT:-480}"
+TIMEOUT="${SAILFIN_TEST_TIMEOUT:-300}"
 
 # macOS doesn't ship `timeout`; use gtimeout (coreutils) if available, else fallback
 if command -v timeout &>/dev/null; then
