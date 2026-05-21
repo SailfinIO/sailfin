@@ -66,7 +66,20 @@ import {
     state_pop_indent,
     state_push_indent
 } from "./emit_native_state";
-import { lift_non_capturing_lambdas } from "./llvm/expression_lowering/native/mod";
+// #704: import directly from the leaf module rather than the
+// `mod.sfn` re-export barrel. Pre-fix, importing from
+// `./llvm/expression_lowering/native/mod` dragged the entire
+// lowering-side graph (statement.sfn, core.sfn,
+// core_member_lowering.sfn, ...) into emit_native's transitive
+// compilation, even though the lambda-lifting pre-pass needs none
+// of it. `emit_native_extern_test` (whose only job is verifying
+// `extern fn` → `.meta extern`) ended up cold-compiling every
+// lowering-side file to LLVM IR on every CI run — its wall-clock
+// budget crept from 60s → 110s → 180s → 240s → 300s and tipped
+// past the cap with each new lowering-side PR. Until the broader
+// `mod.sfn` barrel audit lands, any *new* import from this
+// subtree should likewise target the leaf file directly.
+import { lift_non_capturing_lambdas } from "./llvm/expression_lowering/native/lambda_lowering";
 import { char_code, contains_string, substring } from "./string_utils";
 
 // ── Public data structures ───────────────────────────────────────────
