@@ -1,0 +1,124 @@
+// runtime/sfn/memory/rc.sfn
+//
+// Sailfin-native reference counting primitive shipped into the
+// `build/native/sailfin` binary alongside the C runtime. M2.3
+// (issue #395, epic #389) lights up the second Sailfin-defined
+// runtime module after `runtime/sfn/memory/arena.sfn`.
+//
+// Header layout (16 bytes, per `docs/runtime_architecture.md`
+// §2.1.2):
+//
+//   offset 0:  refcount     (i64)        — atomic refcount, init 1
+//   offset 8:  drop_fn_addr (i64 slot)   — `fn(*u8) -> void` storage
+//
+// The header sits at `payload - 16`; `sfn_rc_sfn_alloc` returns
+// the payload pointer so user code never sees the bookkeeping
+// slot. `sfn_rc_sfn_retain` / `sfn_rc_sfn_release` step back to
+// the refcount field via pointer arithmetic and emit LLVM
+// `atomicrmw add` / `atomicrmw sub` with `seq_cst` ordering —
+// the IR shape that the test harness pins as the M2.3 proof of
+// life.
+//
+// drop_fn storage uses an `i64` slot (`drop_fn_addr`) rather
+// than `* u8`. The seed compiler's struct-field assignment
+// silently drops stores to `* u8` fields routed through a
+// `* StructTy` pointer (verified during this M2.3 implementation
+// — `header.drop_fn = ptr;` emits no `store i8*, ...` in the
+// resulting IR). Reinterpreting the function-pointer address as
+// `i64` via `as i64` lowers to a clean `ptrtoint i8* … to i64`
+// and a 64-bit store, which is byte-equivalent to storing the
+// raw pointer on every platform Sailfin currently targets (the
+// pointer width is 64 bits everywhere extern function pointers
+// are valid). The architecture spec's `drop_fn: fn(*u8) -> void`
+// shape is preserved at the public API boundary — only the
+// in-header storage type changes. The slot retypes to a proper
+// function pointer once the seed grows aggregate-field
+// assignment for raw pointers (tracked for M2.4/M2.6, where
+// `sfn_drop_SfnString` / `sfn_drop_SfnArray` callers light up).
+//
+// drop_fn **invocation** lives in the issue's `Out:` list and
+// is deferred to M2.4/M2.6. M2.3 stores the address but never
+// dereferences it; releases that hit zero call `free` directly
+// and skip the destructor hook. The roundtrip test in
+// `compiler/tests/e2e/test_runtime_memory_rc.sh` passes a null
+// drop_fn so this gap is explicitly modeled.
+//
+// Naming: every export uses the `sfn_rc_sfn_*` infix so the
+// Sailfin module coexists with the C runtime's existing
+// `sfn_rc_release` no-op stub in
+// `runtime/native/src/sailfin_runtime.c:1885` (M1.5.2 placeholder
+// from #326) without a link-time collision. Mirrors the
+// `sfn_arena_sfn_*` infix in `runtime/sfn/memory/arena.sfn` and
+// the same rationale documented there. When M3 retires the C
+// stub, these symbols rename to the bare canonical form
+// (`sfn_rc_alloc` / `sfn_rc_retain` / `sfn_rc_release`) in a
+// single rollback-safe PR.
+//
+// Effects: none. Memory primitives live below the I/O layer
+// (same discipline as `runtime/sfn/memory/arena.sfn` and the
+// other `runtime/sfn/*` modules). The `![io]` / `![clock]`
+// annotations attach to *adapters* that wrap these primitives,
+// never to the primitives themselves.
+//
+// Why inline `extern fn malloc / free`? The same reason
+// `arena.sfn` does: importing from `runtime/sfn/platform/libc.sfn`
+// would force a typecheck of `sailfin_runtime_sleep(milliseconds:
+// float)` and trip the seed's pre-`float` extern accept-list
+// (E0805). Inlining the two declarations we need keeps this
+// module self-contained for every seed, regardless of the
+// libc.sfn declaration surface.
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+// `RcHeader` lays out the 16-byte bookkeeping prefix. The
+// architecture spec's `drop_fn: fn(*u8) -> void` field appears
+// here as `drop_fn_addr: i64` — see the file-header note for
+// the storage-type rationale. Field offsets are pinned by the
+// IR-shape assertions in `test_runtime_memory_rc.sh`.
+struct RcHeader {
+    refcount: i64;
+    drop_fn_addr: i64;
+}
+
+// `sfn_rc_sfn_alloc(size, drop_fn)` allocates a 16-byte header
+// plus `size` payload bytes, initializes the refcount to 1,
+// stores `drop_fn` (as a raw 64-bit address) in the header
+// drop-fn slot, and returns the payload pointer. The header is
+// reachable from the payload via `payload - 16`. Architect spec:
+// §2.1.2 of `docs/runtime_architecture.md`.
+fn sfn_rc_sfn_alloc(size: i64, drop_fn: * u8) -> * u8 {
+    let header_ptr = malloc((size + 16) as usize);
+    let header = header_ptr as * RcHeader;
+    header.refcount = 1;
+    header.drop_fn_addr = drop_fn as i64;
+    return header_ptr + 16;
+}
+
+// `sfn_rc_sfn_retain(payload)` atomically increments the
+// refcount of the value at `payload`. Steps back 16 bytes
+// (two `i64` slots — refcount sits at slot 0, drop_fn at slot 1)
+// to reach the refcount field, then emits `atomicrmw add ptr %p,
+// i64 1 seq_cst, align 8`. The previous-value return from
+// `atomic_add` is intentionally discarded — retains do not need
+// to observe the old count.
+fn sfn_rc_sfn_retain(payload: * u8) -> void {
+    let slots = payload as * i64;
+    let refcount_ptr = slots - 2;
+    atomic_add(refcount_ptr, 1);
+}
+
+// `sfn_rc_sfn_release(payload)` atomically decrements the
+// refcount and frees the allocation when the previous value was
+// 1 (i.e. this release dropped the last reference). Emits
+// `atomicrmw sub ptr %p, i64 1 seq_cst, align 8`. drop_fn
+// invocation is deferred to M2.4/M2.6 per the issue's `Out:`
+// scope; the released allocation is freed directly via libc
+// `free` once SfnString / SfnArray drop synthesis ships, this
+// body inserts a `drop_fn(payload)` call ahead of the `free`.
+fn sfn_rc_sfn_release(payload: * u8) -> void {
+    let slots = payload as * i64;
+    let refcount_ptr = slots - 2;
+    let prev = atomic_sub(refcount_ptr, 1);
+    if prev == 1 { free(refcount_ptr as * u8); }
+}

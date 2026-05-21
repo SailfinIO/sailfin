@@ -88,6 +88,37 @@
 >   check), and
 >   `compiler/tests/e2e/test_runtime_memory_arena.sh`
 >   (per-export typecheck/fmt/IR shape).
+> - **Sailfin-native RC primitive — shipped 2026-05-21 (M2.3,
+>   issue #395).** `runtime/sfn/memory/rc.sfn` exports three
+>   `sfn_rc_sfn_*` symbols (`alloc` / `retain` / `release`) and
+>   joins the `sfn-sources` array. The header layout
+>   (`docs/runtime_architecture.md` §2.1.2) is a 16-byte prefix
+>   `{ refcount: i64, drop_fn_addr: i64 }` sitting at
+>   `payload - 16`; `sfn_rc_sfn_alloc` returns the payload
+>   pointer with refcount initialised to 1, `sfn_rc_sfn_retain`
+>   emits `atomicrmw add ptr %p, i64 1 seq_cst, align 8`, and
+>   `sfn_rc_sfn_release` emits `atomicrmw sub ptr %p, i64 1
+>   seq_cst, align 8` then calls `free` exactly when the
+>   post-decrement guard `prev == 1` fires. drop_fn storage uses
+>   an `i64` slot (`drop_fn_addr`) rather than `* u8` because the
+>   seed compiler's struct-field assignment silently drops stores
+>   to `* u8` fields routed through a `* StructTy` pointer;
+>   `as i64` lowers to a clean `ptrtoint i8* … to i64` and a
+>   64-bit store, byte-equivalent to storing the raw pointer on
+>   every Sailfin platform. drop_fn **invocation** is deferred to
+>   M2.4/M2.6 per the issue's `Out:` — releases that hit zero
+>   call `free` directly until `sfn_drop_SfnString` /
+>   `sfn_drop_SfnArray` synthesis lands. The Sailfin module's
+>   `sfn_rc_sfn_*` infix coexists with the C runtime's
+>   pre-existing `sfn_rc_release` no-op stub
+>   (`runtime/native/src/sailfin_runtime.c:1885`, M1.5.2
+>   placeholder from #326) without a link collision. Pinned by
+>   `compiler/tests/e2e/test_runtime_memory_rc.sh` (typecheck +
+>   fmt + LLVM `define` shape per export + `atomicrmw add / sub
+>   seq_cst, align 8` IR-shape grep scoped to retain/release +
+>   bare-name collision regression + clang-linked functional
+>   roundtrip `alloc → retain → release → release` with an
+>   interposed `free` counter asserting exactly one `free`).
 > - **M0.5 arena-in-C — shipped, default-on** (`runtime/native/src/sailfin_arena.c`,
 >   PR #252 + Phase 5a mark/rewind PR #251).
 > - **Effect enforcement gate — shipped** (Phases A–F, PRs #241–#245). Effect
