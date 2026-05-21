@@ -80,27 +80,47 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                     if enum_info.tag_type == "i32" { tag_llvm_type = "i32"; }
                     if enum_info.tag_type == "i64" { tag_llvm_type = "i64"; }
 
-                    // 0.5.8+ boxed-struct ABI: subject_operand is %EnumT* (a
-                    // pointer, not a first-class aggregate). Use GEP to the
-                    // tag field (index 0) + load, not extractvalue.
-                    let tag_ptr_temp = format_temp_name(current_temp);
-                    current_temp += 1;
-                    current_lines.push("  " + tag_ptr_temp
-                        + " = getelementptr inbounds "
-                        + enum_info.llvm_name
-                        + ", "
-                        + subject_operand.llvm_type
-                        + " "
-                        + subject_operand.value
-                        + ", i32 0, i32 0");
-                    let tag_temp = format_temp_name(current_temp);
-                    current_temp += 1;
-                    current_lines.push("  " + tag_temp + " = load "
-                        + tag_llvm_type
-                        + ", "
-                        + tag_llvm_type
-                        + "* "
-                        + tag_ptr_temp);
+                    // 0.5.8+ boxed-struct ABI: subject_operand is usually
+                    // %EnumT* (a pointer) — GEP to the tag field (index 0)
+                    // + load. When the subject arrives as a by-value
+                    // %EnumT first-class aggregate (#704 failure B —
+                    // typical when the subject came from an array index
+                    // expression), `getelementptr <T>, <T> %v, ...` is
+                    // malformed (GEP base must be a pointer). Use
+                    // `extractvalue` against the value directly in that
+                    // case — the tag is field 0 of the aggregate.
+                    let mut tag_temp: string = "";
+                    if ends_with_pointer_suffix(subject_operand.llvm_type) {
+                        let tag_ptr_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        current_lines.push("  " + tag_ptr_temp
+                            + " = getelementptr inbounds "
+                            + enum_info.llvm_name
+                            + ", "
+                            + subject_operand.llvm_type
+                            + " "
+                            + subject_operand.value
+                            + ", i32 0, i32 0");
+                        let load_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        current_lines.push("  " + load_temp + " = load "
+                            + tag_llvm_type
+                            + ", "
+                            + tag_llvm_type
+                            + "* "
+                            + tag_ptr_temp);
+                        tag_temp = load_temp;
+                    } else {
+                        let extract_temp = format_temp_name(current_temp);
+                        current_temp += 1;
+                        current_lines.push("  " + extract_temp
+                            + " = extractvalue "
+                            + subject_operand.llvm_type
+                            + " "
+                            + subject_operand.value
+                            + ", 0");
+                        tag_temp = extract_temp;
+                    }
 
                     // Compare the extracted tag with the variant's tag
                     let tag_operand = LLVMOperand {
