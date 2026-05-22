@@ -47,13 +47,27 @@ fn _i64_operand(value: string) -> LLVMOperand {
     return LLVMOperand { llvm_type: "i64", value: value };
 }
 
-test "emit_runtime_call: string.concat renders SfnString-aggregate call to sfn_str_concat" ![io] {
+fn _ptr_operand(value: string) -> LLVMOperand {
+    return LLVMOperand { llvm_type: "ptr", value: value };
+}
+
+test "emit_runtime_call: string.concat renders SfnString-aggregate call to sfn_str_concat_arena" ![io] {
+    // M2.4b (#398): the descriptor now points at the arena-aware
+    // `sfn_str_concat_arena` entrypoint with a third `ptr` argument
+    // that fresh user emission populates with `ptr @sfn_default_arena`.
+    // The return type is the SfnString aggregate `{i8*, i64}`; the
+    // hardcoded call-site emitters follow the `call` with an
+    // `extractvalue` to recover the legacy `i8*` operand. This
+    // fixture pins the call shape itself; the extract step lives in
+    // the call-site emitters and is covered by the e2e test
+    // `test_runtime_string_allocating.sh`.
     let lhs = _sfn_string_operand("%a");
     let rhs = _sfn_string_operand("%b");
-    let operands: LLVMOperand[] = [lhs, rhs];
+    let arena = _ptr_operand("@sfn_default_arena");
+    let operands: LLVMOperand[] = [lhs, rhs, arena];
     let result = emit_runtime_call("string.concat", operands, empty_runtime_call_overrides(), 0, []);
     assert result.lines.length == 1;
-    assert result.lines[0] == "  %t0 = call i8* @sfn_str_concat({i8*, i64} %a, {i8*, i64} %b)";
+    assert result.lines[0] == "  %t0 = call {i8*, i64} @sfn_str_concat_arena({i8*, i64} %a, {i8*, i64} %b, ptr @sfn_default_arena)";
     assert result.temp_index == 1;
     assert result.operand != null;
     assert result.diagnostics.length == 0;

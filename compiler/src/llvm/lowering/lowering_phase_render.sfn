@@ -177,6 +177,17 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
 
     // Runtime global
     lines.push("@runtime = external global i8**");
+
+    // M2.4b (#398): the arena-aware string concat / append entrypoints
+    // (`@sfn_str_concat_arena` / `@sfn_str_append_arena`) take a third
+    // `ptr` argument that the call sites populate with
+    // `ptr @sfn_default_arena`. The slot is an `SfnArena *` defined in
+    // `runtime/native/src/sailfin_runtime.c` and primed at module load
+    // by a `__attribute__((constructor))` calling `sfn_arena_global()`.
+    // Declaring it here keeps every emitted module's IR self-consistent
+    // — even modules that never call concat carry the declare so
+    // linker behaviour is uniform.
+    lines.push("@sfn_default_arena = external global ptr");
     lines.push("");
 
     // ABI version globals (issue #392 / M1.C; issue #462). Every

@@ -133,25 +133,40 @@ test_no_array_consumer_pattern() {
     return 0
 }
 
-# A6 — `string.concat` declared with aggregate parameter shape and called
-# the same way. The new compiler routes through `sfn_str_concat` (the
-# canonical Sailfin-native name from the M1.2 registry flip, #461),
-# whose C trampoline forwards to `sailfin_runtime_string_concat_v2`
-# (SfnString-by-value). The legacy `sailfin_runtime_string_concat_v2`
-# symbol stays exported so seed-compiled IR keeps linking until the
-# floor seed bumps and both retire together.
+# A6 — `string.concat` declared with the arena-aware SfnString ABI
+# and called the same way. M2.4b (#398) flipped the call shape to
+#   call {i8*, i64} @sfn_str_concat_arena({i8*, i64}, {i8*, i64}, ptr @sfn_default_arena)
+# followed by an `extractvalue {i8*, i64} %t, 0` that recovers the
+# legacy `i8*` operand for the rest of the lowering pipeline. The
+# 2-arg `sfn_str_concat` trampoline stays exported so seed-compiled
+# IR keeps linking until the next seed bump retires both together;
+# fresh emission must not reach that trampoline directly nor the
+# legacy `sailfin_runtime_string_concat_v2` entrypoint.
 test_string_concat_uses_aggregate_abi() {
     emit_ir_once || return 1
     local declared
-    declared="$(grep -cE '^declare i8\* @sfn_str_concat\(\{i8\*, i64\}, \{i8\*, i64\}\)' "$LL" || true)"
+    declared="$(grep -cE '^declare \{i8\*, i64\} @sfn_str_concat_arena\(\{i8\*, i64\}, \{i8\*, i64\}, ptr\)' "$LL" || true)"
     if [ "${declared:-0}" -ne 1 ]; then
-        echo "[test]   expected exactly one aggregate-shape declare for sfn_str_concat, got ${declared:-0}"
+        echo "[test]   expected exactly one arena-shape declare for sfn_str_concat_arena, got ${declared:-0}"
         return 1
     fi
     local called
-    called="$(grep -cE 'call i8\* @sfn_str_concat\(\{i8\*, i64\} ' "$LL" || true)"
+    called="$(grep -cE 'call \{i8\*, i64\} @sfn_str_concat_arena\(\{i8\*, i64\} [^,]+, \{i8\*, i64\} [^,]+, ptr @sfn_default_arena\)' "$LL" || true)"
     if [ "${called:-0}" -lt 1 ]; then
-        echo "[test]   expected at least one aggregate-shape call to sfn_str_concat, got ${called:-0}"
+        echo "[test]   expected at least one arena-shape call to sfn_str_concat_arena, got ${called:-0}"
+        return 1
+    fi
+    # The result extract that gives downstream `i8*` consumers the data ptr.
+    local extracted
+    extracted="$(grep -cE '= extractvalue \{i8\*, i64\} %[A-Za-z_][A-Za-z0-9_]*, 0' "$LL" || true)"
+    if [ "${extracted:-0}" -lt 1 ]; then
+        echo "[test]   expected at least one extractvalue following the arena call, got ${extracted:-0}"
+        return 1
+    fi
+    local legacy_2arg_called
+    legacy_2arg_called="$(grep -cE 'call i8\* @sfn_str_concat\(' "$LL" || true)"
+    if [ "${legacy_2arg_called:-0}" -ne 0 ]; then
+        echo "[test]   regression: fresh emission still calls the 2-arg @sfn_str_concat shape"
         return 1
     fi
     local legacy_v2_called

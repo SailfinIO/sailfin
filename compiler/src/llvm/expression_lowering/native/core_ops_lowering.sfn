@@ -404,15 +404,28 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 };
             }
 
-            let concat_name = format_temp_name(current_temp);
+            // M2.4b (#398): arena-aware concat. The call returns
+            // the SfnString aggregate `{i8*, i64}`; an immediate
+            // `extractvalue` recovers the data pointer so the rest
+            // of the lowering pipeline (which still treats string
+            // operands as `i8*`) is unchanged. The third call
+            // argument is the address of the global pointer
+            // `@sfn_default_arena`, primed at module load by the
+            // C constructor in `runtime/native/src/sailfin_runtime.c`.
+            let agg_name = format_temp_name(current_temp);
             current_temp += 1;
-            current_lines.push("  " + concat_name
-                + " = call i8* @sfn_str_concat({i8*, i64} "
+            current_lines.push("  " + agg_name
+                + " = call {i8*, i64} @sfn_str_concat_arena({i8*, i64} "
                 + lhs_agg.operand.value
                 + ", {i8*, i64} "
                 + rhs_agg.operand.value
-                + ")");
-            let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
+                + ", ptr @sfn_default_arena)");
+            let data_name = format_temp_name(current_temp);
+            current_temp += 1;
+            current_lines.push("  " + data_name + " = extractvalue {i8*, i64} "
+                + agg_name
+                + ", 0");
+            let operand = LLVMOperand { llvm_type: "i8*", value: data_name };
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -621,18 +634,25 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     string_constants: string_constants
                 };
             }
-            let temp_name = format_temp_name(current_temp);
-            let line = "  " + temp_name
-                + " = call i8* @sfn_str_concat({i8*, i64} "
+            // M2.4b (#398): arena-aware concat (see the earlier
+            // call site in this file for the full migration note).
+            let agg_name = format_temp_name(current_temp);
+            let line = "  " + agg_name
+                + " = call {i8*, i64} @sfn_str_concat_arena({i8*, i64} "
                 + lhs_agg.operand.value
                 + ", {i8*, i64} "
                 + rhs_agg.operand.value
-                + ")";
+                + ", ptr @sfn_default_arena)";
             current_lines.push(line);
-            let operand = LLVMOperand { llvm_type: "i8*", value: temp_name };
+            let data_name = format_temp_name(current_temp + 1);
+            let extract_line = "  " + data_name + " = extractvalue {i8*, i64} "
+                + agg_name
+                + ", 0";
+            current_lines.push(extract_line);
+            let operand = LLVMOperand { llvm_type: "i8*", value: data_name };
             return ExpressionResult {
                 lines: current_lines,
-                temp_index: current_temp + 1,
+                temp_index: current_temp + 2,
                 operand: operand,
                 diagnostics: diagnostics,
                 string_constants: string_constants
