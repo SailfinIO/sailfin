@@ -108,7 +108,6 @@ fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_in
     let field_pointer = pointer_result.pointer;
 
     // M1.7.2b (#497): route get_field through descriptor dispatch.
-    let call_temp = format_temp_name(current_temp);
     let field_pointer_operand = LLVMOperand {
         llvm_type: "i8*",
         value: field_pointer
@@ -123,6 +122,14 @@ fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_in
     }
     current_lines = gf_result.lines;
     current_temp = gf_result.temp_index;
+    if gf_result.operand == null {
+        return make_expression_result(current_lines, current_temp, null, diagnostics, dynamic_string_constants);
+    }
+    // Take the actual call result rather than recomputing the SSA temp
+    // name — `emit_runtime_call` may have consumed temps for argument
+    // coercion before rendering the call, so the result temp index can
+    // drift from the pre-call `current_temp`.
+    let call_result_value = gf_result.operand.value;
 
     let mut _if70: boolean = false;
     if field == "align" { _if70 = true; }
@@ -137,7 +144,10 @@ fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_in
     if field == "length" { _if70 = true; }
     if _if70 {
         // M1.7.2b (#497): route string→number through descriptor dispatch.
-        let gf_operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
+        let gf_operand = LLVMOperand {
+            llvm_type: "i8*",
+            value: call_result_value
+        };
         let stn_operands: LLVMOperand[] = [gf_operand];
         let stn_result = emit_runtime_call("string.to_number", stn_operands, empty_runtime_call_overrides(), current_temp, current_lines);
         let mut _stn_di: int = 0;
@@ -151,7 +161,7 @@ fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_in
         return make_expression_result(current_lines, current_temp, stn_result.operand, diagnostics, dynamic_string_constants);
     }
 
-    let operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
+    let operand = LLVMOperand { llvm_type: "i8*", value: call_result_value };
     return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants);
 }
 
