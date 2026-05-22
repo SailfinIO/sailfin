@@ -1730,6 +1730,37 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         }
     }
 
+    // Pre-built process object — Sailfin-native `@sfn_process_run`
+    // definition added in M2.9 (issue #405). Mirrors the clock.o
+    // staging above: optional on a fresh checkout, hard fail once
+    // staged. Without this the installer link path resolves
+    // `@sfn_process_run` from nowhere on POSIX targets and any
+    // program calling `process.run(...)` fails at link time.
+    // (Windows installers don't need this — the `_WIN32` C wrapper
+    // in `sailfin_runtime.c` provides the symbol there.)
+    let process_a = "build/selfhost/native/obj/runtime/process.o";
+    let process_b = "build/native/obj/runtime/process.o";
+    let mut process_src: string = "";
+    if fs.exists(process_a) { process_src = process_a; } else {
+        if fs.exists(process_b) { process_src = process_b; }
+    }
+    if process_src.length > 0 {
+        let mk_obj_dir = process.run(["mkdir", "-p", staging_runtime_obj]);
+        if mk_obj_dir != 0 {
+            print("sfn package: failed to create runtime obj staging dir");
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
+        let cp_process = process.run(["cp", "-f", process_src, staging_runtime_obj
+            + "/process.o"]);
+        if cp_process != 0 {
+            print("sfn package: failed to stage process object from "
+                + process_src);
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
+    }
+
     // Staged import-context — only present after a self-host
     // build has run. Tools consuming the installer can survive
     // without it (they regenerate from the seed) but bundling

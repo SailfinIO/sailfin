@@ -8382,6 +8382,28 @@ double sailfin_runtime_process_run_v2(SfnArray *argv)
     return sailfin_runtime_process_run(&temp);
 }
 
+#if defined(_WIN32)
+/* M2.9 (#405): on Windows the Sailfin-native `sfn_process_run` in
+ * `runtime/sfn/process.sfn` cannot link — its body calls
+ * `posix_spawnp` + `waitpid`, neither of which mingw-w64 provides.
+ * The cross-windows Makefile path intentionally skips compiling
+ * `process.sfn`; this C wrapper provides the same symbol so the
+ * compiler's runtime-helper descriptor (which redirects
+ * `process.run` to `@sfn_process_run` via `native_signature`)
+ * still resolves on Windows. The wrapper forwards to the existing
+ * `_v2` entrypoint, which in turn dispatches to the legacy
+ * `CreateProcessA`-based body inside `sailfin_runtime_process_run`.
+ *
+ * Both Sailfin and C definitions cannot coexist on the same
+ * platform without a duplicate-symbol link error, hence the
+ * `#if defined(_WIN32)` guard — on POSIX the Sailfin file owns
+ * the symbol; on Windows the C wrapper does. */
+double sfn_process_run(SfnArray *argv)
+{
+    return sailfin_runtime_process_run_v2(argv);
+}
+#endif
+
 void sailfin_adapter_fs_write_lines_v2(void *path, SfnArray *lines)
 {
     /* Same shim strategy as `process_run_v2` — legacy body only reads
