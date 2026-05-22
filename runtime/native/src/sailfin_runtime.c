@@ -2082,6 +2082,21 @@ const char *sfn_str_from_cstr(const char *s)
     return s;
 }
 
+/* M2.9 (#405): expose the libc `environ` global to the
+ * Sailfin-native `sfn_process_run` in `runtime/sfn/process.sfn`.
+ * Sailfin has no `extern var` syntax — declaring `environ` as an
+ * `extern fn` would link the variable as if it were a function
+ * pointer and crash on call. This one-line bridge wraps the
+ * variable in a function-call ABI Sailfin can express. The
+ * pre-M2.9 C `sailfin_runtime_process_run` reached `environ`
+ * directly; this helper preserves child-env-inheritance semantics
+ * across the migration (pinned by
+ * `compiler/tests/e2e/test_subprocess_emit_clean_env.sh`). */
+char **sailfin_runtime_get_environ(void)
+{
+    return environ;
+}
+
 /* M1.2 (#461): SfnString migration trampoline for string concatenation.
  * Mirrors the M2.4a wave-1 trampolines above (`sfn_str_len`, `sfn_str_eq`,
  * `sfn_str_slice`). The compiler's runtime_helpers.sfn registry now
@@ -8366,6 +8381,28 @@ double sailfin_runtime_process_run_v2(SfnArray *argv)
     temp.len = argv->len;
     return sailfin_runtime_process_run(&temp);
 }
+
+#if defined(_WIN32)
+/* M2.9 (#405): on Windows the Sailfin-native `sfn_process_run` in
+ * `runtime/sfn/process.sfn` cannot link — its body calls
+ * `posix_spawnp` + `waitpid`, neither of which mingw-w64 provides.
+ * The cross-windows Makefile path intentionally skips compiling
+ * `process.sfn`; this C wrapper provides the same symbol so the
+ * compiler's runtime-helper descriptor (which redirects
+ * `process.run` to `@sfn_process_run` via `native_signature`)
+ * still resolves on Windows. The wrapper forwards to the existing
+ * `_v2` entrypoint, which in turn dispatches to the legacy
+ * `CreateProcessA`-based body inside `sailfin_runtime_process_run`.
+ *
+ * Both Sailfin and C definitions cannot coexist on the same
+ * platform without a duplicate-symbol link error, hence the
+ * `#if defined(_WIN32)` guard — on POSIX the Sailfin file owns
+ * the symbol; on Windows the C wrapper does. */
+double sfn_process_run(SfnArray *argv)
+{
+    return sailfin_runtime_process_run_v2(argv);
+}
+#endif
 
 void sailfin_adapter_fs_write_lines_v2(void *path, SfnArray *lines)
 {

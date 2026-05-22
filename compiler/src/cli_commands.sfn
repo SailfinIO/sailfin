@@ -180,6 +180,25 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
             }
             ci += 1;
         }
+        // M2.9 (issue #405): mirrors the clock staging above. The
+        // descriptor's `native_signature` for `process.run` now
+        // points at `@sfn_process_run`, defined in
+        // `runtime/sfn/process.sfn`. Tests that exercise
+        // `process.run(...)` resolve the symbol against this staged
+        // .o; integration tests that don't call `process.run` are
+        // unaffected (the .o just sits unreferenced in the link line).
+        let process_paths: string[] = ["build/selfhost/native/obj/runtime/process.o", "build/native/obj/runtime/process.o", "build/native/obj/process.o", runtime_root
+            + "/native/obj/runtime/process.o", runtime_root
+            + "/native/obj/process.o",];
+        let mut pri: int = 0;
+        loop {
+            if pri >= process_paths.length { break; }
+            if fs.exists(process_paths[pri]) {
+                args.push(process_paths[pri]);
+                break;
+            }
+            pri += 1;
+        }
     }
     args.push("-lm");
     args.push("-pthread");
@@ -1706,6 +1725,37 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
             + "/clock.o"]);
         if cp_clock != 0 {
             print("sfn package: failed to stage clock object from " + clock_src);
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
+    }
+
+    // Pre-built process object — Sailfin-native `@sfn_process_run`
+    // definition added in M2.9 (issue #405). Mirrors the clock.o
+    // staging above: optional on a fresh checkout, hard fail once
+    // staged. Without this the installer link path resolves
+    // `@sfn_process_run` from nowhere on POSIX targets and any
+    // program calling `process.run(...)` fails at link time.
+    // (Windows installers don't need this — the `_WIN32` C wrapper
+    // in `sailfin_runtime.c` provides the symbol there.)
+    let process_a = "build/selfhost/native/obj/runtime/process.o";
+    let process_b = "build/native/obj/runtime/process.o";
+    let mut process_src: string = "";
+    if fs.exists(process_a) { process_src = process_a; } else {
+        if fs.exists(process_b) { process_src = process_b; }
+    }
+    if process_src.length > 0 {
+        let mk_obj_dir = process.run(["mkdir", "-p", staging_runtime_obj]);
+        if mk_obj_dir != 0 {
+            print("sfn package: failed to create runtime obj staging dir");
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
+        let cp_process = process.run(["cp", "-f", process_src, staging_runtime_obj
+            + "/process.o"]);
+        if cp_process != 0 {
+            print("sfn package: failed to stage process object from "
+                + process_src);
             process.run(["rm", "-rf", staging]);
             return 1;
         }

@@ -1,0 +1,176 @@
+// runtime/sfn/process.sfn
+//
+// Sailfin-native process spawning (M2.9, #405). Replaces the C
+// trampoline `sailfin_runtime_process_run_v2` with a direct
+// `posix_spawnp` + `waitpid` pair routed through the platform
+// surface declared in `runtime/sfn/platform/posix.sfn`. Part of
+// M2 epic #389 — same migration shape as the M2.11 `sfn_sleep`
+// flip (`runtime/sfn/clock.sfn`).
+//
+// ABI: `compiler/src/llvm/runtime_helpers.sfn` flips the
+// `process.run` descriptor's `native_signature` to
+// `sfn_process_run`. The descriptor pins the call shape as
+// `double sfn_process_run({ i8**, i64, i64 }*)` — Sailfin's
+// `string[]` parameter lowers to that struct pointer, and
+// `float` lowers to LLVM `double`, matching the descriptor's
+// `c_abi_return_type: "double"` legacy ABI exactly. The
+// caller (`emit_runtime_call`) still emits an `fptosi` to the
+// `i64` Sailfin-visible return type at the call site, so user
+// code observes `process.run(args)` as `int` — the bridge is
+// invisible to the surface contract.
+//
+// Marshalling: `argv: string[]` arrives without a NULL
+// sentinel. The body allocates a `(len + 1) * 8`-byte buffer
+// via libc `malloc`, copies each `sfn_str_to_cstr(argv[i])`
+// pointer (no-op on today's NUL-terminated strings — see
+// `runtime/native/src/sailfin_runtime.c:2075` for the identity-
+// bridge rationale that this Sailfin module preserves at the
+// API boundary), and writes a NULL terminator past the last
+// element. `atomic_store` is the seed-supported pointer-slot
+// store primitive (the bare `slots[i] = x` form on a raw
+// `* i64` lowers to a no-op on the pinned seed — verified
+// 2026-05-22). `seq_cst` ordering is irrelevant on this code
+// path (marshalling runs single-threaded prior to the spawn)
+// but harmless.
+//
+// Status decoding: the POSIX `wait(2)` macros `WIFEXITED` /
+// `WEXITSTATUS` / `WIFSIGNALED` / `WTERMSIG` expand to bitwise
+// ops the seed's i32 lowering covers cleanly (issue #634).
+// Hex integer literals (`0x7f`, `0xff00`) silently fold to 0
+// on the pinned seed (verified 2026-05-22), so the decimal
+// masks `127` and `65280` are inlined for those constants.
+// The exit-code mapping mirrors
+// `sailfin_runtime_process_run` byte-for-byte:
+//
+//   - `WIFEXITED(status)` (low 7 bits == 0): return
+//     `WEXITSTATUS(status)` — the child's exit code (0..255).
+//   - `WIFSIGNALED(status)` (low 7 bits in 1..126): return
+//     `128 + WTERMSIG(status)` — the conventional shell
+//     encoding for signal-terminated children.
+//   - Otherwise (stopped / continued): return 127.
+//
+// Effects: `[io]`. The spawn drives the child's stdio FDs;
+// the wrapper carries the effect so callers must declare
+// `![io]` to invoke `process.run` (the descriptor at
+// `runtime_helpers.sfn` lists the same effect).
+//
+// Envp: the parent's `environ` is passed through, matching the
+// pre-M2.9 C `sailfin_runtime_process_run` exactly so children
+// continue to inherit the spawning process's environment.
+// Sailfin has no `extern var` syntax, so the libc `environ`
+// global cannot be referenced directly — the one-line bridge
+// `sailfin_runtime_get_environ` in
+// `runtime/native/src/sailfin_runtime.c` wraps it in an
+// `extern fn` ABI. Passing literal NULL instead gave the child
+// an empty environment on Linux glibc and broke env-inheritance
+// callers (caught by
+// `compiler/tests/e2e/test_subprocess_emit_clean_env.sh` —
+// regression repro during M2.9 development). Full environment
+// *marshalling* (user-supplied envp with explicit key=value
+// strings) remains out of scope for M2.9 per the issue's `Out:`
+// list and lands with `process.spawn_with_env` (issue #365 —
+// already shipped on the C side, separate Sailfin migration).
+//
+// Why inline the externs rather than `import { malloc, free }
+// from "./platform/libc"`? Same rationale as
+// `runtime/sfn/memory/arena.sfn` / `runtime/sfn/memory/rc.sfn`
+// / `runtime/sfn/string.sfn` / `runtime/sfn/array.sfn`: the
+// seed compiler reaches the cross-module extern resolver
+// through a path that issue #306 has not closed yet,
+// surfacing as `cannot resolve return type for call to …`
+// fatals during emission. Inlining the four declarations we
+// need keeps this module self-contained for every seed. Once
+// the cross-module path lands, a follow-up PR flips these to
+// imports without touching the body.
+//
+// Pinned by `compiler/tests/e2e/test_runtime_process.sh`
+// (typecheck + fmt + LLVM `define`/`call` shape over
+// `@posix_spawnp` + `@waitpid` + the `sailfin_runtime_process_run`
+// non-reference invariant from the issue's acceptance list).
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn posix_spawnp(pid: * i32, path: * u8, file_actions: * u8, attrp: * u8, argv: * * u8, envp: * * u8) -> i32;
+
+extern fn waitpid(pid: i32, status: * i32, options: i32) -> i32;
+
+extern fn sfn_str_to_cstr(s: * u8) -> * u8;
+
+extern fn sailfin_runtime_get_environ() -> * * u8;
+
+fn sfn_process_run(argv: string[]) -> float ![io] {
+    let len: i64 = argv.length;
+    if len <= 0 { return 127.0; }
+
+    // Allocate the NULL-terminated child argv buffer: `(len + 1)`
+    // 8-byte slots. Bail on OOM with the conventional 127 exit
+    // code rather than corrupting the spawn.
+    let buf_size: i64 = (len + 1) * 8;
+    let buf: * u8 = malloc(buf_size as usize);
+    if buf as i64 == 0 { return 127.0; }
+
+    // Marshal: copy each NUL-terminated string pointer into the
+    // buffer. The cast `buf as * i64` retypes the slot stride so
+    // `slots + i` advances 8 bytes per element. `atomic_store`
+    // is the seed-supported store primitive (see file header).
+    let slots: * i64 = buf as * i64;
+    let mut i: i64 = 0;
+    loop {
+        if i >= len { break; }
+        let element: string = argv[i];
+        let s_ptr: * u8 = sfn_str_to_cstr(element as * u8);
+        let slot_ptr: * i64 = slots + i;
+        let s_as_i64: i64 = s_ptr as i64;
+        atomic_store(slot_ptr, s_as_i64);
+        i = i + 1;
+    }
+    let null_slot: * i64 = slots + len;
+    let zero: i64 = 0;
+    atomic_store(null_slot, zero);
+
+    // Spawn. `path` is `argv[0]` adopted as a C string view via
+    // the identity-bridge `sfn_str_to_cstr`. `file_actions` /
+    // `attrp` are NULL; `envp` is the parent's `environ` (see
+    // the file header for the inheritance contract — passing
+    // NULL gave the child an empty environment on Linux glibc).
+    let mut pid: i32 = 0;
+    let pid_ptr: * i32 = & pid;
+    let first: string = argv[0];
+    let path: * u8 = sfn_str_to_cstr(first as * u8);
+    let envp: * * u8 = sailfin_runtime_get_environ();
+    let buf_pp: * * u8 = buf as * * u8;
+    let spawn_err: i32 = posix_spawnp(pid_ptr, path, null, null, buf_pp, envp);
+    if spawn_err != 0 {
+        free(buf);
+        return 127.0;
+    }
+
+    // Wait. `options = 0` blocks until the child terminates.
+    // `waitpid` returns the child PID on success or -1 on
+    // failure (the latter is treated as the conventional 127
+    // shell "could not execute" code).
+    let mut status: i32 = 0;
+    let status_ptr: * i32 = & status;
+    let wait_err: i32 = waitpid(pid, status_ptr, 0);
+
+    free(buf);
+    if wait_err < 0 { return 127.0; }
+
+    // Decode the wait status. The low 7 bits hold the
+    // terminating signal (0 means "exited normally") and the
+    // next byte holds the exit code on a normal exit.
+    let sig: i32 = status & 127;
+    if sig == 0 {
+        let masked: i32 = status & 65280;
+        let code: i32 = masked >> 8;
+        let result: float = code;
+        return result;
+    }
+    if sig != 127 {
+        let signaled: i32 = 128 + sig;
+        let result: float = signaled;
+        return result;
+    }
+    return 127.0;
+}

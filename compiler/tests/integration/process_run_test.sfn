@@ -1,0 +1,33 @@
+// Integration coverage for the Sailfin-native process spawn
+// (M2.9, #405). `runtime/sfn/process.sfn` replaced the C trampoline
+// `sailfin_runtime_process_run_v2` with `sfn_process_run`, a direct
+// `posix_spawnp` + `waitpid` pair. These tests exercise the exit-
+// code paths the C version preserved byte-for-byte: normal exit,
+// signal exit, missing executable, and empty-argv early return.
+// Skeleton-shape coverage (typecheck + fmt + LLVM define/call
+// shape) lives in `compiler/tests/e2e/test_runtime_process.sh`;
+// this file pins the runtime behavior.
+test "process_run: echo returns exit code 0" {
+    let rc = process.run(["echo", "hello"]);
+    assert rc == 0;
+}
+
+test "process_run: true returns exit code 0" {
+    let rc = process.run(["true"]);
+    assert rc == 0;
+}
+
+test "process_run: false returns exit code 1" {
+    let rc = process.run(["false"]);
+    assert rc == 1;
+}
+
+test "process_run: nonexistent command returns 127" {
+    let rc = process.run(["this_command_definitely_does_not_exist_405"]);
+    assert rc == 127;
+}
+
+test "process_run: empty argv returns 127" {
+    let rc = process.run([]);
+    assert rc == 127;
+}
