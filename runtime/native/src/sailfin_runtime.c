@@ -2082,6 +2082,21 @@ const char *sfn_str_from_cstr(const char *s)
     return s;
 }
 
+/* M2.9 (#405): expose the libc `environ` global to the
+ * Sailfin-native `sfn_process_run` in `runtime/sfn/process.sfn`.
+ * Sailfin has no `extern var` syntax — declaring `environ` as an
+ * `extern fn` would link the variable as if it were a function
+ * pointer and crash on call. This one-line bridge wraps the
+ * variable in a function-call ABI Sailfin can express. The
+ * pre-M2.9 C `sailfin_runtime_process_run` reached `environ`
+ * directly; this helper preserves child-env-inheritance semantics
+ * across the migration (pinned by
+ * `compiler/tests/e2e/test_subprocess_emit_clean_env.sh`). */
+char **sailfin_runtime_get_environ(void)
+{
+    return environ;
+}
+
 /* M1.2 (#461): SfnString migration trampoline for string concatenation.
  * Mirrors the M2.4a wave-1 trampolines above (`sfn_str_len`, `sfn_str_eq`,
  * `sfn_str_slice`). The compiler's runtime_helpers.sfn registry now

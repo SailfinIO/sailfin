@@ -792,6 +792,21 @@ rebuild:
 		echo "[rebuild] staging clock.o..."; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/clock.ll -o build/native/obj/runtime/clock.o; \
 	fi
+	@# Stage process.o (Sailfin-native `@sfn_process_run` from
+	@# runtime/sfn/process.sfn). Mirrors the clock.o staging above:
+	@# M2.9 (issue #405) flips `process.run`'s `native_signature` to
+	@# `sfn_process_run`, defined only in the Sailfin module. The
+	@# legacy link path resolves the symbol against this staged .o;
+	@# the runtime-capsule path reaches process.sfn through
+	@# `runtime/native/capsule.toml`'s `sfn-sources` array instead.
+	@if [ ! -f build/native/obj/runtime/process.ll ]; then \
+		echo "[rebuild] staging process.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/process.ll llvm runtime/sfn/process.sfn >/dev/null; \
+	fi
+	@if [ ! -f build/native/obj/runtime/process.o ]; then \
+		echo "[rebuild] staging process.o..."; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/process.ll -o build/native/obj/runtime/process.o; \
+	fi
 	@# Write build stamp (version + git hash for dev builds).
 	@# `version.sfn::resolve_compiler_version` reads this file
 	@# first, so without it the binary would report whatever stale

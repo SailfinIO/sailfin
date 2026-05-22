@@ -280,8 +280,18 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // cap directly (no hidden header). Legacy entrypoints stay
     // exported for seed-compiled IR; the registry only points the
     // new compiler at v2.
+    //
+    // M2.9 (#405): `process.run` flips its `native_signature` to the
+    // Sailfin-native `sfn_process_run` defined in
+    // `runtime/sfn/process.sfn` (linked via the runtime capsule's
+    // `sfn-sources`). The function preserves the `double` C-ABI
+    // return shape so the caller's `fptosi` to `i64` keeps working
+    // unchanged. The `_v2` C trampoline stays exported for seed-
+    // compiled IR but is now unreferenced in user emission per the
+    // issue's acceptance criterion (`sailfin_runtime_process_run`
+    // unreferenced).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "process.run", symbol: "sailfin_runtime_process_run_v2", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*"], effects: ["io"], native_signature: null, c_abi_return_type: "double"
+        target: "process.run", symbol: "sailfin_runtime_process_run_v2", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*"], effects: ["io"], native_signature: "sfn_process_run", c_abi_return_type: "double"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.exit", symbol: "sailfin_runtime_process_exit", return_type: "void", parameter_types: ["double"], effects: ["io"], native_signature: null, c_abi_return_type: null

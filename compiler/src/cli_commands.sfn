@@ -180,6 +180,25 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
             }
             ci += 1;
         }
+        // M2.9 (issue #405): mirrors the clock staging above. The
+        // descriptor's `native_signature` for `process.run` now
+        // points at `@sfn_process_run`, defined in
+        // `runtime/sfn/process.sfn`. Tests that exercise
+        // `process.run(...)` resolve the symbol against this staged
+        // .o; integration tests that don't call `process.run` are
+        // unaffected (the .o just sits unreferenced in the link line).
+        let process_paths: string[] = ["build/selfhost/native/obj/runtime/process.o", "build/native/obj/runtime/process.o", "build/native/obj/process.o", runtime_root
+            + "/native/obj/runtime/process.o", runtime_root
+            + "/native/obj/process.o",];
+        let mut pri: int = 0;
+        loop {
+            if pri >= process_paths.length { break; }
+            if fs.exists(process_paths[pri]) {
+                args.push(process_paths[pri]);
+                break;
+            }
+            pri += 1;
+        }
     }
     args.push("-lm");
     args.push("-pthread");
