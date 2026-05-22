@@ -30,11 +30,19 @@
 // raw pointer on every platform Sailfin currently targets (the
 // pointer width is 64 bits everywhere extern function pointers
 // are valid). The architecture spec's `drop_fn: fn(*u8) -> void`
-// shape is preserved at the public API boundary — only the
-// in-header storage type changes. The slot retypes to a proper
-// function pointer once the seed grows aggregate-field
-// assignment for raw pointers (tracked for M2.4/M2.6, where
-// `sfn_drop_SfnString` / `sfn_drop_SfnArray` callers light up).
+// shape degrades to `* u8` at the export boundary — same
+// convention as `runtime/sfn/platform/pthread.sfn`, where the
+// `sfn fmt` / `is_c_abi_function_pointer` interaction forces
+// every function-pointer parameter through a raw `* u8` slot
+// until the formatter learns to keep `fn(` tight (see the
+// pthread.sfn header for the same workaround). Only the slot
+// *width* survives, not the typed callsite — and the in-header
+// `drop_fn_addr: i64` reflects that storage truth honestly.
+// The slot retypes to a proper function pointer once both the
+// seed grows aggregate-field assignment for raw pointers AND
+// `is_c_abi_function_pointer` accepts the `fn (...)` form
+// (tracked for M2.4/M2.6, where `sfn_drop_SfnString` /
+// `sfn_drop_SfnArray` callers light up).
 //
 // drop_fn **invocation** lives in the issue's `Out:` list and
 // is deferred to M2.4/M2.6. M2.3 stores the address but never
@@ -85,10 +93,15 @@ struct RcHeader {
 // plus `size` payload bytes, initializes the refcount to 1,
 // stores `drop_fn` (as a raw 64-bit address) in the header
 // drop-fn slot, and returns the payload pointer. The header is
-// reachable from the payload via `payload - 16`. Architect spec:
-// §2.1.2 of `docs/runtime_architecture.md`.
+// reachable from the payload via `payload - 16`. Returns `null`
+// when libc `malloc` reports OOM — guarding the header
+// initialisation stores against a NULL deref. The C convention
+// (callers check the return) holds until `Result<T, E>` + `?`
+// ship (Phase 1 of the runtime prereqs in CLAUDE.md). Architect
+// spec: §2.1.2 of `docs/runtime_architecture.md`.
 fn sfn_rc_sfn_alloc(size: i64, drop_fn: * u8) -> * u8 {
     let header_ptr = malloc((size + 16) as usize);
+    if header_ptr as i64 == 0 { return header_ptr; }
     let header = header_ptr as * RcHeader;
     header.refcount = 1;
     header.drop_fn_addr = drop_fn as i64;

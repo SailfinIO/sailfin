@@ -96,16 +96,20 @@ test_emit_define_shape() {
     # site does not satisfy the assertion. Signatures are pinned
     # so a regression that mangles parameter types (e.g. i64→i32)
     # surfaces here instead of at link time.
-    if ! grep -qE "^define i8\* @sfn_rc_sfn_alloc\(i64 " "$ll"; then
-        echo "[test]   missing 'define i8* @sfn_rc_sfn_alloc(i64 ...)'"
+    # Full parameter lists are pinned: a regression that flips `size`
+    # from `i64` to `i32`, drops the `drop_fn` slot, or retypes
+    # `payload` from `i8*` to a struct-typed pointer surfaces here
+    # rather than at link time downstream.
+    if ! grep -qE "^define i8\* @sfn_rc_sfn_alloc\(i64 %size, i8\* %drop_fn\) " "$ll"; then
+        echo "[test]   missing 'define i8* @sfn_rc_sfn_alloc(i64 %size, i8* %drop_fn)'"
         missing=$((missing + 1))
     fi
-    if ! grep -qE "^define void @sfn_rc_sfn_retain\(i8\* " "$ll"; then
-        echo "[test]   missing 'define void @sfn_rc_sfn_retain(i8* ...)'"
+    if ! grep -qE "^define void @sfn_rc_sfn_retain\(i8\* %payload\) " "$ll"; then
+        echo "[test]   missing 'define void @sfn_rc_sfn_retain(i8* %payload)'"
         missing=$((missing + 1))
     fi
-    if ! grep -qE "^define void @sfn_rc_sfn_release\(i8\* " "$ll"; then
-        echo "[test]   missing 'define void @sfn_rc_sfn_release(i8* ...)'"
+    if ! grep -qE "^define void @sfn_rc_sfn_release\(i8\* %payload\) " "$ll"; then
+        echo "[test]   missing 'define void @sfn_rc_sfn_release(i8* %payload)'"
         missing=$((missing + 1))
     fi
     return "$missing"
@@ -140,19 +144,27 @@ test_atomicrmw_shape() {
     # Scope each assertion to its enclosing function via a `sed`
     # range so a stray `atomicrmw` elsewhere can't satisfy the
     # assertion (we own the file, but the scoped check stays honest
-    # if a future helper grows an atomic of its own).
+    # if a future helper grows an atomic of its own). Count is
+    # asserted as **exactly one** per function — an accidental
+    # second `atomicrmw` (e.g. a double-decrement regression) would
+    # silently pass a `grep -q` presence check, so `grep -c` with
+    # an `== 1` predicate guards that direction too.
     local missing=0
     local retain_block
     retain_block="$(sed -n '/^define void @sfn_rc_sfn_retain(/,/^}/p' "$ll")"
-    if ! echo "$retain_block" | grep -qE "atomicrmw add ptr .*, i64 1 seq_cst, align 8"; then
-        echo "[test]   sfn_rc_sfn_retain missing 'atomicrmw add ptr ... seq_cst, align 8':"
+    local retain_add_count
+    retain_add_count="$(echo "$retain_block" | grep -cE "atomicrmw add ptr .*, i64 1 seq_cst, align 8")"
+    if [ "$retain_add_count" -ne 1 ]; then
+        echo "[test]   sfn_rc_sfn_retain expected exactly 1 'atomicrmw add ptr ... seq_cst, align 8', got $retain_add_count:"
         echo "$retain_block"
         missing=$((missing + 1))
     fi
     local release_block
     release_block="$(sed -n '/^define void @sfn_rc_sfn_release(/,/^}/p' "$ll")"
-    if ! echo "$release_block" | grep -qE "atomicrmw sub ptr .*, i64 1 seq_cst, align 8"; then
-        echo "[test]   sfn_rc_sfn_release missing 'atomicrmw sub ptr ... seq_cst, align 8':"
+    local release_sub_count
+    release_sub_count="$(echo "$release_block" | grep -cE "atomicrmw sub ptr .*, i64 1 seq_cst, align 8")"
+    if [ "$release_sub_count" -ne 1 ]; then
+        echo "[test]   sfn_rc_sfn_release expected exactly 1 'atomicrmw sub ptr ... seq_cst, align 8', got $release_sub_count:"
         echo "$release_block"
         missing=$((missing + 1))
     fi
