@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "sailfin_arena.h"
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -107,6 +109,15 @@ extern "C"
     // transferred); suffix is borrowed. Only emitted by the compiler when buf
     // is a provably-unaliased intermediate from a prior concat/append.
     char *sailfin_runtime_string_append(char *buf, char *suffix);
+
+    // M2.4b (#398): arena-aware concat / append entrypoints. The
+    // compiler's fresh emission passes `ptr @sfn_default_arena`
+    // (the address of the global pointer declared below) so these
+    // signatures receive `SfnArena **` and dereference once. See
+    // sailfin_runtime.c for the full migration note.
+    SfnString sfn_str_concat_arena(SfnString a, SfnString b, SfnArena **arena_slot);
+    void sfn_str_append_arena(SfnString *dst, SfnString suffix, SfnArena **arena_slot);
+    extern SfnArena *sfn_default_arena;
     // Drop/free a runtime-owned string (no-op for non-owned/persistent values).
     void sailfin_runtime_string_drop(char *text);
     // Scope-exit drop helper for owned RC locals (M1.5.2 / issue #326).

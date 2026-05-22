@@ -58,6 +58,20 @@ extern fn strings_equal(a: * u8, b: * u8) -> bool;
 
 extern fn substring_unchecked(text: * u8, start: f64, end: f64) -> * u8;
 
+// M2.4b (#398): the C-side allocating ops. The Sailfin trampolines
+// below preserve the `sfn_str_sfn_*` infix pattern (proof-of-life
+// presence under the Sailfin namespace) while the canonical
+// `sfn_str_concat_arena` / `sfn_str_append_arena` symbols live on
+// the C side. The two `* u8` parameters mirror the wave-1a pattern
+// — today's Sailfin frontend can't pass / return the SfnString
+// aggregate by value, so the bodies bridge through the legacy
+// NUL-terminated concat. The user IR emission lands directly on
+// `@sfn_str_concat_arena` (the C entrypoint with the new arena-
+// aware ABI); these wrappers are not on the hot path.
+extern fn sailfin_runtime_string_concat(a: * u8, b: * u8) -> * u8;
+
+extern fn sailfin_runtime_string_append(buf: * u8, suffix: * u8) -> * u8;
+
 // `sfn_str_sfn_len(s)` — Sailfin-side length recovery for the
 // SfnString aggregate. Architect spec
 // (`runtime_architecture.md` §2.2): direct field access on the
@@ -107,3 +121,32 @@ fn sfn_str_sfn_to_cstr(s: * u8) -> * u8 { return s; }
 // `memchr` is declared above so the M2.4b body rewrite (over the
 // aggregate shape) doesn't need to add it then.
 fn sfn_str_sfn_from_cstr(s: * u8) -> * u8 { return s; }
+
+// `sfn_str_sfn_concat(a, b)` — proof-of-life Sailfin trampoline
+// for the M2.4b allocating wave. Architect spec
+// (`runtime_architecture.md` §2.2): bump `a.len + b.len` bytes
+// into the supplied arena, memcpy both payloads, return the
+// `SfnString` aggregate. Today's body delegates to the legacy
+// NUL-terminated `sailfin_runtime_string_concat` because the
+// Sailfin frontend can't take an SfnString aggregate by value
+// (M1.A.2 hasn't landed). The user-emission hot path bypasses
+// this wrapper entirely and lands on the C entrypoint
+// `sfn_str_concat_arena`, which has the real arena ABI.
+fn sfn_str_sfn_concat(a: * u8, b: * u8) -> * u8 {
+    return sailfin_runtime_string_concat(a, b);
+}
+
+// `sfn_str_sfn_append(buf, suffix)` — proof-of-life append
+// trampoline. Architect spec:
+// `(*SfnString, SfnString, *Arena) -> void`, using
+// `sfn_arena_realloc`'s grow-if-at-tip path for the chained-
+// concat fast lane. Today's body returns the new buffer (legacy
+// pointer convention) because the Sailfin frontend can't
+// declare a `*SfnString` out-parameter yet. The compiler
+// currently has no callers of `string.append` (the descriptor
+// row is metadata + symbol parking for the first caller), so
+// this trampoline is purely for symmetric namespace
+// presence — same as wave 1a's slice/from_cstr.
+fn sfn_str_sfn_append(buf: * u8, suffix: * u8) -> * u8 {
+    return sailfin_runtime_string_append(buf, suffix);
+}
