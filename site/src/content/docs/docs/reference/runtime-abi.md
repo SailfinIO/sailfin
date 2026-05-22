@@ -36,16 +36,16 @@ runtime's startup check.
 
 **Ownership.** `data` is owned by whichever side allocated it.
 String-literal materialization routes through
-[`sailfin_runtime_alloc_struct`](#allocation-helpers); arena-aware
-helpers (`sfn_str_concat_arena`, `sfn_str_append_arena`) allocate
-from the global arena when `SAILFIN_USE_ARENA=1` (today's default —
-[issue #324](https://github.com/SailfinIO/sailfin/issues/324)) and
-from libc `calloc` otherwise. Callers that need the bytes past
-arena rewind must copy them. The seed-built first-pass binary still
-emits some legacy `i8*`-shaped string locals during the M2.4
-cutover; call sites use `extractvalue` to recover the legacy `i8*`
-operand where the surrounding lowering still treats strings as raw
-pointers.
+[`sailfin_runtime_alloc_struct`](#allocation-helpers); the arena-
+aware helpers (`sfn_str_concat_arena`, `sfn_str_append_arena`) are
+**unconditionally** arena-backed by design — the `SAILFIN_USE_ARENA`
+opt-out applies only to the legacy `_rt_*` allocation paths and the
+2-arg `sailfin_runtime_string_concat` trampoline. Callers that need
+the bytes past arena rewind must copy them. The seed-built first-
+pass binary still emits some legacy `i8*`-shaped string locals
+during the M2.4 cutover; call sites use `extractvalue` to recover
+the legacy `i8*` operand where the surrounding lowering still
+treats strings as raw pointers.
 
 ### SfnArray — `{ T*, i64, i64 }`
 
@@ -182,12 +182,13 @@ async-context calloc/free pair in
 intentionally stays on raw `@calloc` / `@free` because both ends
 of the allocation are libc-resident regardless of arena state.
 
-**Default arena global.** Arena-aware string helpers take an explicit
-`SfnArena *` operand. Every emitted module declares the slot
+**Default arena global.** Arena-aware string helpers take a pointer
+to the arena slot — the C signature is `SfnArena **arena_slot` and
+the body dereferences once. Every emitted module declares the slot
 (`@sfn_default_arena = external global ptr`); a constructor in
 `sailfin_runtime.c` primes it from `sfn_arena_global()` at module
-load, and call sites pass `ptr @sfn_default_arena` as the arena
-operand.
+load, and call sites pass `ptr @sfn_default_arena` (the address of
+the global pointer) as the arena operand.
 
 ## Native Signature Registry
 
