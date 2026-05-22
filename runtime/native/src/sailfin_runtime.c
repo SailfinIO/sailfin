@@ -61,6 +61,7 @@ extern char **environ;
 static bool _env_enabled(const char *name);
 static int _env_int(const char *name, int fallback);
 static int64_t _clamp_to_i64(double v);
+static inline int _is_corrupted_string_ptr(const char *ptr);
 
 static void _print_line(FILE *stream, const char *prefix, const char *msg);
 
@@ -2116,8 +2117,64 @@ char *sfn_str_concat(SfnString a, SfnString b)
  * adopts the new ABI we can rename `sfn_str_concat_arena` back
  * to `sfn_str_concat` in a single rollback-safe PR (tracked as a
  * follow-up `seed-blocker` issue). */
+/* M2.4b (#398) — concat-limit / overflow gate shared between the
+ * arena-aware `sfn_str_concat_arena` and `sfn_str_append_arena`
+ * entrypoints. Mirrors the legacy `sailfin_runtime_string_concat`
+ * guard (around line 2725 of this file) so the new ABI path can't
+ * silently exhaust the arena with a runaway concatenation.
+ *
+ * Returns the validated total byte count, or raises ValueError
+ * (which aborts the process via `sailfin_runtime_raise_value_error`)
+ * on limit-exceeded / overflow. The legacy guard's exact env-var
+ * default (`SAILFIN_MAX_STRING_CONCAT=20000000`) and message
+ * format are preserved; the only difference is the diagnostic
+ * label, which the caller supplies so concat vs append shows up
+ * correctly in stderr. */
+static size_t _sfn_str_check_concat_limit(size_t alen, size_t blen, const char *label)
+{
+    static int concat_limit_init = 0;
+    static size_t concat_limit = 0;
+    if (!concat_limit_init)
+    {
+        concat_limit_init = 1;
+        int limit = _env_int("SAILFIN_MAX_STRING_CONCAT", 20000000);
+        if (limit < 0)
+        {
+            limit = 0;
+        }
+        concat_limit = (size_t)limit;
+    }
+    if (concat_limit > 0 && (alen + blen) > concat_limit)
+    {
+        fprintf(stderr,
+                "[stage2-native] %s limit exceeded (alen=%zu blen=%zu limit=%zu)\n",
+                label, alen, blen, concat_limit);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("string concat limit exceeded");
+    }
+    if (alen > SIZE_MAX - blen)
+    {
+        fprintf(stderr,
+                "[stage2-native] %s overflow (alen=%zu blen=%zu)\n",
+                label, alen, blen);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("string concat overflow");
+    }
+    return alen + blen;
+}
+
 SfnString sfn_str_concat_arena(SfnString a, SfnString b, SfnArena **arena_slot)
 {
+    /* Design note on `SAILFIN_USE_ARENA` opt-out: the arena-aware
+     * path is the M1 minimal-viable design per
+     * `docs/runtime_architecture.md` §2.1.1 ("the compiler emits a
+     * global `@sfn_default_arena` ... all string and array
+     * allocations route through this arena"). The env var stays
+     * meaningful for the LEGACY C entrypoints (`_rt_malloc` and the
+     * 2-arg `sailfin_runtime_string_concat`); fresh user emission
+     * targeting `@sfn_str_concat_arena` is unconditionally
+     * arena-backed by design. Documented as a deliberate scope
+     * delta in PR #714 (see Copilot review reply). */
     SfnArena *arena;
     if (arena_slot != NULL && *arena_slot != NULL)
     {
@@ -2171,7 +2228,15 @@ SfnString sfn_str_concat_arena(SfnString a, SfnString b, SfnArena **arena_slot)
         b_data = (const char *)b_imm_buf;
     }
 
-    int64_t total = a.len + b.len;
+    /* Apply the same limit/overflow gate the legacy
+     * `sailfin_runtime_string_concat` uses (Copilot review feedback
+     * on PR #714). Without this, a runaway concat would exhaust the
+     * arena's page chain instead of raising a ValueError. */
+    size_t alen = a.len < 0 ? 0 : (size_t)a.len;
+    size_t blen = b.len < 0 ? 0 : (size_t)b.len;
+    size_t total_sz = _sfn_str_check_concat_limit(alen, blen, "string_concat");
+    int64_t total = (int64_t)total_sz;
+
     /* +1 keeps the trailing NUL so legacy `i8*` callers (the
      * extractvalue at every call site discards the length but
      * passes the data pointer to code that may strlen it) stay
@@ -2226,6 +2291,25 @@ void sfn_str_append_arena(SfnString *dst, SfnString suffix, SfnArena **arena_slo
         return;
     }
 
+    /* Defensive: refuse to realloc through a corrupted or
+     * immediate-codepoint `dst->data` pointer (Copilot review
+     * feedback on PR #714). The legacy
+     * `sailfin_runtime_string_append` falls back to a fresh
+     * concat in this case rather than reallocating; we degrade to
+     * a no-op + leave `dst` untouched here because no caller
+     * currently routes through this entrypoint (the existing
+     * peephole still emits `@sailfin_runtime_string_append`). The
+     * first real caller — #717 — will replace this branch with
+     * the fresh-concat fallback. */
+    if (dst->data != NULL && _is_corrupted_string_ptr(dst->data))
+    {
+        return;
+    }
+    if (_is_immediate_codepoint_string(dst->data, NULL))
+    {
+        return;
+    }
+
     SfnArena *arena;
     if (arena_slot != NULL && *arena_slot != NULL)
     {
@@ -2253,8 +2337,14 @@ void sfn_str_append_arena(SfnString *dst, SfnString suffix, SfnArena **arena_slo
         suffix_data = (const char *)suffix_imm_buf;
     }
 
+    /* Apply the shared limit/overflow gate (same as
+     * `sfn_str_concat_arena` — Copilot review feedback on PR #714). */
+    size_t old_sz = dst->len < 0 ? 0 : (size_t)dst->len;
+    size_t suffix_sz = suffix.len < 0 ? 0 : (size_t)suffix.len;
+    size_t new_sz = _sfn_str_check_concat_limit(old_sz, suffix_sz, "string_append");
     int64_t old_len = dst->len;
-    int64_t new_len = old_len + suffix.len;
+    int64_t new_len = (int64_t)new_sz;
+
     /* +1 on both old_size / new_size keeps the trailing NUL. */
     char *grown = (char *)sfn_arena_realloc(arena,
                                             dst->data,
@@ -2290,6 +2380,19 @@ SfnArena *sfn_default_arena = NULL;
 
 __attribute__((constructor(101))) static void _sfn_default_arena_init(void)
 {
+    /* Skip the pre-fetch when the legacy `SAILFIN_USE_ARENA=0`
+     * opt-out is set so we don't force `sfn_arena_global()` to
+     * spin up the page chain at module load (Copilot review
+     * feedback on PR #714). The fallback in `sfn_str_concat_arena`
+     * / `sfn_str_append_arena` still hits `sfn_arena_global()`
+     * lazily on the first call, so this gate only saves the
+     * eager init; the new arena-aware path remains
+     * arena-backed by design (see the design note inside
+     * `sfn_str_concat_arena`). */
+    if (!sfn_arena_enabled())
+    {
+        return;
+    }
     sfn_default_arena = sfn_arena_global();
 }
 
