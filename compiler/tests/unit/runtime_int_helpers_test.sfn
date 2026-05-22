@@ -92,12 +92,17 @@ test "runtime int helper: runtime_char_code_fn emits call+round+fptosi to i64" !
 }
 
 test "runtime int helper: process.run emits call+round+fptosi to i64" ![io] {
+    // M2.9 (#405) flipped the descriptor's `native_signature` to
+    // `sfn_process_run` — the Sailfin-native definition in
+    // `runtime/sfn/process.sfn`. The C ABI (`double` return) is
+    // unchanged, so the `round` + `fptosi` coercion shape pinned
+    // by #639 stays bit-identical; only the called symbol moved.
     let argv = _argv_operand("%argv");
     let operands: LLVMOperand[] = [argv];
     let result = emit_runtime_call("process.run", operands, empty_runtime_call_overrides(), 0, []);
 
     assert result.lines.length == 3;
-    assert result.lines[0] == "  %t0 = call double @sailfin_runtime_process_run_v2({ i8**, i64, i64 }* %argv)";
+    assert result.lines[0] == "  %t0 = call double @sfn_process_run({ i8**, i64, i64 }* %argv)";
     assert result.lines[1] == "  %t1 = call double @round(double %t0)";
     assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
 
