@@ -51,6 +51,7 @@ import {
 import { lower_expression } from "./core";
 import { lower_inline_gep_field_access } from "./core_member_helpers";
 import { sanitize_symbol } from "./core_text";
+import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
 fn make_expression_result(lines: string[], temp_index: int, operand: LLVMOperand?, diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
     return ExpressionResult {
@@ -106,14 +107,22 @@ fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_in
     current_temp = pointer_result.temp_index;
     let field_pointer = pointer_result.pointer;
 
+    // M1.7.2b (#497): route get_field through descriptor dispatch.
     let call_temp = format_temp_name(current_temp);
-    current_lines.push("  " + call_temp
-        + " = call i8* @sailfin_runtime_get_field(i8* "
-        + base_operand.value
-        + ", i8* "
-        + field_pointer
-        + ")");
-    current_temp += 1;
+    let field_pointer_operand = LLVMOperand {
+        llvm_type: "i8*",
+        value: field_pointer
+    };
+    let gf_operands: LLVMOperand[] = [base_operand, field_pointer_operand];
+    let gf_result = emit_runtime_call("get_field", gf_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+    let mut _gf_di: int = 0;
+    loop {
+        if _gf_di >= gf_result.diagnostics.length { break; }
+        diagnostics.push(gf_result.diagnostics[_gf_di]);
+        _gf_di += 1;
+    }
+    current_lines = gf_result.lines;
+    current_temp = gf_result.temp_index;
 
     let mut _if70: boolean = false;
     if field == "align" { _if70 = true; }
@@ -127,14 +136,19 @@ fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_in
     if field == "len" { _if70 = true; }
     if field == "length" { _if70 = true; }
     if _if70 {
-        let double_temp = format_temp_name(current_temp);
-        current_lines.push("  " + double_temp
-            + " = call double @sailfin_runtime_string_to_number(i8* "
-            + call_temp
-            + ")");
-        current_temp += 1;
-        let operand = LLVMOperand { llvm_type: "double", value: double_temp };
-        return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants);
+        // M1.7.2b (#497): route string→number through descriptor dispatch.
+        let gf_operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
+        let stn_operands: LLVMOperand[] = [gf_operand];
+        let stn_result = emit_runtime_call("string.to_number", stn_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+        let mut _stn_di: int = 0;
+        loop {
+            if _stn_di >= stn_result.diagnostics.length { break; }
+            diagnostics.push(stn_result.diagnostics[_stn_di]);
+            _stn_di += 1;
+        }
+        current_lines = stn_result.lines;
+        current_temp = stn_result.temp_index;
+        return make_expression_result(current_lines, current_temp, stn_result.operand, diagnostics, dynamic_string_constants);
     }
 
     let operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
@@ -711,17 +725,25 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             // alongside it. M2.4b retires the trampoline and the
             // Sailfin export takes over the bare name. The aggregate
             // fast path above (extractvalue) is unchanged.
-            let length_temp = format_temp_name(current_temp);
-            current_lines.push("  " + length_temp
-                + " = call i64 @sfn_str_len(i8* "
-                + base_operand.value
-                + ")");
-            current_temp += 1;
-            let operand = LLVMOperand { llvm_type: "i64", value: length_temp };
+            //
+            // M1.7.2b (#497): route through descriptor dispatch. The
+            // `string.length` descriptor's `native_signature` field
+            // resolves the effective LLVM symbol to `sfn_str_len`,
+            // preserving the M2.4a swap byte-for-byte.
+            let sl_operands: LLVMOperand[] = [base_operand];
+            let sl_result = emit_runtime_call("string.length", sl_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+            let mut _sl_di: int = 0;
+            loop {
+                if _sl_di >= sl_result.diagnostics.length { break; }
+                diagnostics.push(sl_result.diagnostics[_sl_di]);
+                _sl_di += 1;
+            }
+            current_lines = sl_result.lines;
+            current_temp = sl_result.temp_index;
             return ExpressionResult {
                 lines: current_lines,
                 temp_index: current_temp,
-                operand: operand,
+                operand: sl_result.operand,
                 diagnostics: diagnostics,
                 string_constants: collected_string_constants
             };
