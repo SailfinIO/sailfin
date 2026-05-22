@@ -833,6 +833,76 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             };
         }
     }
+    // M2.8 (#401): numeric -> SfnString coercion chain. After the
+    // print/console descriptors flipped to the `{i8*, i64}`
+    // aggregate ABI, `print(42)` / `print(3.14)` no longer match
+    // the legacy `i64`/`double` -> `i8*` paths above. Stringify the
+    // numeric operand via `sailfin_runtime_number_to_string`, then
+    // build the aggregate the same way the `i8*` -> `{i8*, i64}`
+    // shim does (length recovery via `sfn_str_len`). Both branches
+    // produce a fresh NUL-terminated heap buffer whose byte length
+    // is recoverable, matching the SfnString invariant.
+    if target == "{i8*, i64}" {
+        if operand_type == "double" {
+            let as_string = format_temp_name(temp_index);
+            current_lines.push("  " + as_string
+                + " = call i8* @sailfin_runtime_number_to_string(double "
+                + operand.value
+                + ")");
+            let len_temp = format_temp_name(temp_index + 1);
+            current_lines.push("  " + len_temp + " = call i64 @sfn_str_len(i8* "
+                + as_string
+                + ")");
+            let agg0 = format_temp_name(temp_index + 2);
+            current_lines.push("  " + agg0
+                + " = insertvalue {i8*, i64} undef, i8* "
+                + as_string
+                + ", 0");
+            let agg1 = format_temp_name(temp_index + 3);
+            current_lines.push("  " + agg1 + " = insertvalue {i8*, i64} " + agg0
+                + ", i64 "
+                + len_temp
+                + ", 1");
+            let coerced = LLVMOperand { llvm_type: "{i8*, i64}", value: agg1 };
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 4,
+                operand: coerced,
+                diagnostics: diagnostics
+            };
+        }
+        if operand_type == "i64" {
+            let as_double = format_temp_name(temp_index);
+            current_lines.push("  " + as_double + " = sitofp i64 " + operand.value
+                + " to double");
+            let as_string = format_temp_name(temp_index + 1);
+            current_lines.push("  " + as_string
+                + " = call i8* @sailfin_runtime_number_to_string(double "
+                + as_double
+                + ")");
+            let len_temp = format_temp_name(temp_index + 2);
+            current_lines.push("  " + len_temp + " = call i64 @sfn_str_len(i8* "
+                + as_string
+                + ")");
+            let agg0 = format_temp_name(temp_index + 3);
+            current_lines.push("  " + agg0
+                + " = insertvalue {i8*, i64} undef, i8* "
+                + as_string
+                + ", 0");
+            let agg1 = format_temp_name(temp_index + 4);
+            current_lines.push("  " + agg1 + " = insertvalue {i8*, i64} " + agg0
+                + ", i64 "
+                + len_temp
+                + ", 1");
+            let coerced = LLVMOperand { llvm_type: "{i8*, i64}", value: agg1 };
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 5,
+                operand: coerced,
+                diagnostics: diagnostics
+            };
+        }
+    }
 
     if target == "i8*" {
         if operand_type != "i8*" {

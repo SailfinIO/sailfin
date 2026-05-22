@@ -84,12 +84,16 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     let mut descriptors: RuntimeHelperDescriptor[] = [];
     // Raw print: writes to stdout with no prefix, no decoration.
     // Used by the compiler itself for artifact output and CLI messages.
+    // M2.8 (#401): flipped to the Sailfin-native sfn_print symbol via
+    // native_signature, parameter_types bumped to the SfnString
+    // aggregate ABI. The C trampoline in sailfin_runtime.c unpacks the
+    // aggregate and forwards to sailfin_runtime_print_raw.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print", symbol: "sailfin_runtime_print_raw", return_type: "void", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "print", symbol: "sailfin_runtime_print_raw", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print", c_abi_return_type: null
     });
     // Raw stderr print: writes to stderr with no prefix, no decoration.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print.err", symbol: "sailfin_runtime_print_err", return_type: "void", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "print.err", symbol: "sailfin_runtime_print_err", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print_err", c_abi_return_type: null
     });
 
     // Prefixed print variants — print.err/print.warn/print.error write to
@@ -97,22 +101,22 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // Compiler diagnostics should use print.err() so they do not pollute
     // stdout (LLVM IR output, program output, etc.).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print.info", symbol: "sailfin_runtime_print_info", return_type: "void", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "print.info", symbol: "sailfin_runtime_print_info", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print_info", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print.error", symbol: "sailfin_runtime_print_error", return_type: "void", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "print.error", symbol: "sailfin_runtime_print_error", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print_error", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "print.warn", symbol: "sailfin_runtime_print_warn", return_type: "void", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "print.warn", symbol: "sailfin_runtime_print_warn", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print_warn", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "console.info", symbol: "sailfin_runtime_print_raw", return_type: "void", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "console.info", symbol: "sailfin_runtime_print_raw", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "console.log", symbol: "sailfin_runtime_print_raw", return_type: "void", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "console.log", symbol: "sailfin_runtime_print_raw", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "console.error", symbol: "sailfin_runtime_print_error", return_type: "void", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "console.error", symbol: "sailfin_runtime_print_error", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print_error", c_abi_return_type: null
     });
 
     // IO intrinsics
@@ -708,11 +712,16 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
 
     // Environment & path helpers
+    // M2.8 (#401): native_signature flipped to the Sailfin-native
+    // sfn_getenv / sfn_home_dir C trampolines. The legacy i8* ABI
+    // is preserved on parameter_types and return_type; the
+    // SfnString aggregate flip needs arena threading at the call
+    // site and waits on a follow-up wave.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "env.get", symbol: "sailfin_runtime_getenv", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "env.get", symbol: "sailfin_runtime_getenv", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_getenv", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "env.home", symbol: "sailfin_runtime_home_dir", return_type: "i8*", parameter_types: [], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "env.home", symbol: "sailfin_runtime_home_dir", return_type: "i8*", parameter_types: [], effects: ["io"], native_signature: "sfn_home_dir", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs.read_bytes", symbol: "sailfin_runtime_read_file_bytes", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
