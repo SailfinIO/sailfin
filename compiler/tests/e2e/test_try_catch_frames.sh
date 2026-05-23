@@ -141,6 +141,29 @@ test_push_frame_precedes_setjmp() {
         echo "[test]   push_frame (line=$push_line) must precede setjmp (line=$setjmp_line)"
         return 1
     fi
+    # Adjacency: AC #3 spells "immediately followed by" — the only
+    # statements allowed between push_frame and setjmp are non-`call`
+    # instructions (e.g. operand prep). Any intervening `call` line
+    # means an extra side-effecting runtime call snuck into the
+    # critical path, which would invalidate the architect's intent
+    # that setjmp lands directly after the chain mutation. The
+    # current emission inserts nothing between the two; this
+    # assertion guards a regression that splices a call between them.
+    # Skip the between-range check when setjmp is on the very next
+    # line (push_line + 1 == setjmp_line) — sed treats `N,M p` with
+    # M < N as "from N onwards", which would falsely include setjmp
+    # itself.
+    if [ "$setjmp_line" -gt "$((push_line + 1))" ]; then
+        local between
+        between="$(echo "$main_block" | sed -n "$((push_line + 1)),$((setjmp_line - 1))p")"
+        local intervening_calls
+        intervening_calls="$(echo "$between" | grep -cE '^\s*(%[a-zA-Z0-9_.]+ = )?call ' || true)"
+        if [ "${intervening_calls:-0}" -ne 0 ]; then
+            echo "[test]   push_frame must be immediately followed by setjmp; found $intervening_calls intervening 'call' line(s):"
+            echo "$between" | sed 's/^/[test]     /'
+            return 1
+        fi
+    fi
     return 0
 }
 
@@ -235,6 +258,104 @@ run_test "catch handler reads message via @sfn_take_exception(frame)" \
     test_catch_take_exception_frame
 run_test "runtime: try { throw \"boom\" } catch (e) { print(e) } prints boom, exit 0" \
     test_runtime_catch_behavior
+
+# ---- (7) runtime: try { throw "x" } catch + finally runs finally before merge ----
+test_runtime_try_catch_finally() {
+    # Mirrors the documented try/catch/finally guarantee: even when
+    # the try body throws, finally runs after the catch handler.
+    # The legacy TLS-polling emission honored this; the M2.7b
+    # frame-based emission preserves it by branching catch_body →
+    # finally → merge.
+    local fixture2="$SCRATCH/try_catch_finally.sfn"
+    cat > "$fixture2" <<'SFN'
+fn main() ![io] {
+    try {
+        throw "boom";
+    } catch (e) {
+        print("caught: " + e);
+    } finally {
+        print("cleanup");
+    }
+}
+SFN
+    local out_bin="$SCRATCH/try_catch_finally.out"
+    local build_log="$SCRATCH/tcf_build.log"
+    if ! "$BINARY" build -o "$out_bin" "$fixture2" > "$build_log" 2>&1; then
+        echo "[test]   sfn build failed for try/catch/finally fixture:"
+        cat "$build_log" | sed 's/^/[test]     /'
+        return 1
+    fi
+    local run_log="$SCRATCH/tcf_run.log"
+    local rc=0
+    "$out_bin" > "$run_log" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "[test]   try/catch/finally binary exited non-zero (rc=$rc):"
+        cat "$run_log" | sed 's/^/[test]     /'
+        return 1
+    fi
+    if ! grep -q "caught: boom" "$run_log"; then
+        echo "[test]   missing 'caught: boom' in stdout:"
+        cat "$run_log" | sed 's/^/[test]     /'
+        return 1
+    fi
+    if ! grep -q "cleanup" "$run_log"; then
+        echo "[test]   missing 'cleanup' from finally block in stdout:"
+        cat "$run_log" | sed 's/^/[test]     /'
+        return 1
+    fi
+    return 0
+}
+
+# ---- (8) runtime: try { throw "x" } finally (no catch) runs finally then propagates ----
+test_runtime_try_finally_no_catch() {
+    # Per the documented try/finally guarantee, the finally block
+    # runs even when the try body throws and there is no catch. The
+    # uncaught throw should then propagate to abort() (no outer
+    # frame in `main`). This guards the M2.7b regression flagged in
+    # PR #733 review: the catch landing pad must route through
+    # finally instead of rethrowing immediately.
+    local fixture3="$SCRATCH/try_finally_no_catch.sfn"
+    cat > "$fixture3" <<'SFN'
+fn main() ![io] {
+    try {
+        throw "boom";
+    } finally {
+        print("cleanup ran");
+    }
+}
+SFN
+    local out_bin="$SCRATCH/try_finally_no_catch.out"
+    local build_log="$SCRATCH/tfnc_build.log"
+    if ! "$BINARY" build -o "$out_bin" "$fixture3" > "$build_log" 2>&1; then
+        echo "[test]   sfn build failed for try/finally fixture:"
+        cat "$build_log" | sed 's/^/[test]     /'
+        return 1
+    fi
+    local run_log="$SCRATCH/tfnc_run.log"
+    local rc=0
+    "$out_bin" > "$run_log" 2>&1 || rc=$?
+    # We expect the binary to abort (sfn_throw with empty chain),
+    # which on Linux surfaces as a non-zero exit. The functional
+    # contract is that "cleanup ran" must appear in stdout BEFORE
+    # the process terminates — finally runs even though the
+    # exception is unhandled.
+    if ! grep -q "cleanup ran" "$run_log"; then
+        echo "[test]   finally block did not run before uncaught throw propagated (rc=$rc):"
+        cat "$run_log" | sed 's/^/[test]     /'
+        return 1
+    fi
+    if [ "$rc" -eq 0 ]; then
+        echo "[test]   expected non-zero exit from uncaught throw after finally, got rc=0:"
+        cat "$run_log" | sed 's/^/[test]     /'
+        return 1
+    fi
+    return 0
+}
+
+run_test "runtime: try { throw } catch + finally runs finally after catch" \
+    test_runtime_try_catch_finally
+run_test "runtime: try { throw } finally (no catch) runs finally before propagating" \
+    test_runtime_try_finally_no_catch
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

@@ -258,6 +258,23 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
     current_allocas.push("  " + frame_pointer + " = alloca [3 x i64]");
     current_allocas.push("  " + jmpbuf_pointer + " = alloca [32 x i64]");
 
+    // When the source includes a `finally` block, allocate a "pending
+    // exception" slot that the exception landing pad uses to defer
+    // rethrow until after the finally body runs. The legacy emission
+    // ran finally on both the normal and exceptional paths and then
+    // re-checked TLS state to decide whether to propagate; the
+    // frame-based emission gets the same effect by storing the message
+    // here when the exception is not caught and reading it back after
+    // finally completes. The slot is only needed when finally exists —
+    // without finally, the catch landing pad either consumes the
+    // exception (catch present) or rethrows immediately (no catch).
+    let mut pending_pointer: string = "";
+    if structure.finally_index != -1 {
+        pending_pointer = format_local_pointer_name(current_next_local);
+        current_next_local += 1;
+        current_allocas.push("  " + pending_pointer + " = alloca i8*");
+    }
+
     let try_label_alloc = allocate_block_label("try", current_block_counter);
     let try_label = try_label_alloc.label;
     current_block_counter = try_label_alloc.next_counter;
@@ -313,6 +330,13 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
         + frame_pointer
         + ", i64 0, i64 2");
     current_lines.push("  store i64 0, i64* " + msg_slot_ptr);
+
+    // Initialize the pending-exception slot to null on every try
+    // entry — the normal path leaves it null so the post-finally
+    // load returns null and falls through to merge.
+    if pending_pointer.length > 0 {
+        current_lines.push("  store i8* null, i8** " + pending_pointer);
+    }
 
     // Push the frame onto the chain head. Safe to call as a regular
     // function — only mutates the global chain head pointer, no
@@ -480,25 +504,37 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
             current_lines.push("  br label %" + target);
         }
     } else {
-        // No catch block — re-throw into the outer frame so the
-        // exception is not silently swallowed. The frame has already
-        // been popped by `sfn_throw`, so the outer frame is now the
-        // chain head and a second `sfn_throw` longjmps into it. If
-        // no outer frame exists `sfn_throw` calls abort().
-        let exception_operand: LLVMOperand = LLVMOperand {
-            llvm_type: "i8*",
-            value: exception_temp
-        };
-        let rethrow_call = emit_runtime_call("sfn_throw_frame", [exception_operand], empty_runtime_call_overrides(), current_temp, current_lines);
-        let mut _ci_rt: int = 0;
-        loop {
-            if _ci_rt >= rethrow_call.diagnostics.length { break; }
-            diagnostics.push(rethrow_call.diagnostics[_ci_rt]);
-            _ci_rt += 1;
+        // No catch block. The exception is not handled here, but if
+        // a `finally` block exists it must still run before the
+        // exception propagates — per the documented try/finally
+        // guarantee in `docs/error-handling.md` (cleanup runs even
+        // when the try body throws). Save the message into the
+        // pending slot and branch into `finally`; the finally tail
+        // loads the slot and routes a non-null value through
+        // `rethrow` (sfn_throw → longjmp to outer frame, or abort()
+        // if no outer frame exists). With no finally either, rethrow
+        // immediately from the landing pad — there is no cleanup to
+        // run, so deferral would just be dead code.
+        if structure.finally_index != -1 {
+            current_lines.push("  store i8* " + exception_temp + ", i8** "
+                + pending_pointer);
+            current_lines.push("  br label %" + finally_label);
+        } else {
+            let exception_operand: LLVMOperand = LLVMOperand {
+                llvm_type: "i8*",
+                value: exception_temp
+            };
+            let rethrow_call = emit_runtime_call("sfn_throw_frame", [exception_operand], empty_runtime_call_overrides(), current_temp, current_lines);
+            let mut _ci_rt: int = 0;
+            loop {
+                if _ci_rt >= rethrow_call.diagnostics.length { break; }
+                diagnostics.push(rethrow_call.diagnostics[_ci_rt]);
+                _ci_rt += 1;
+            }
+            current_lines = rethrow_call.lines;
+            current_temp = rethrow_call.temp_index;
+            current_lines.push("  unreachable");
         }
-        current_lines = rethrow_call.lines;
-        current_temp = rethrow_call.temp_index;
-        current_lines.push("  unreachable");
     }
 
     if structure.finally_index != -1 {
@@ -522,7 +558,46 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
         collected_string_constants = merge_string_constants(collected_string_constants, finally_result.string_constants);
 
         if !finally_result.terminated {
-            current_lines.push("  br label %" + merge_label);
+            // After the finally body runs, check the pending-exception
+            // slot. A null slot means the try/catch path completed
+            // normally (catch consumed any exception, or the try body
+            // finished without throwing) — fall through to merge. A
+            // non-null slot means the exception was uncaught (try +
+            // finally with no catch); rethrow it now so the next outer
+            // try frame (or abort()) sees it. The rethrow lives in its
+            // own basic block so finally's `br i1` has a single-
+            // statement successor matching the merge edge.
+            let rethrow_label_alloc = allocate_block_label("rethrow", current_block_counter);
+            let rethrow_label = rethrow_label_alloc.label;
+            current_block_counter = rethrow_label_alloc.next_counter;
+            let pending_load_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            current_lines.push("  " + pending_load_temp + " = load i8*, i8** "
+                + pending_pointer);
+            let is_null_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            current_lines.push("  " + is_null_temp + " = icmp eq i8* "
+                + pending_load_temp
+                + ", null");
+            current_lines.push("  br i1 " + is_null_temp + ", label %"
+                + merge_label
+                + ", label %"
+                + rethrow_label);
+            current_lines.push(rethrow_label + ":");
+            let pending_operand: LLVMOperand = LLVMOperand {
+                llvm_type: "i8*",
+                value: pending_load_temp
+            };
+            let rethrow_call = emit_runtime_call("sfn_throw_frame", [pending_operand], empty_runtime_call_overrides(), current_temp, current_lines);
+            let mut _ci_rrt: int = 0;
+            loop {
+                if _ci_rrt >= rethrow_call.diagnostics.length { break; }
+                diagnostics.push(rethrow_call.diagnostics[_ci_rrt]);
+                _ci_rrt += 1;
+            }
+            current_lines = rethrow_call.lines;
+            current_temp = rethrow_call.temp_index;
+            current_lines.push("  unreachable");
         }
     }
 
