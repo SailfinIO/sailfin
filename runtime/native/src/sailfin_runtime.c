@@ -1923,6 +1923,27 @@ void sailfin_runtime_print_info(char *msg) { _print_line(stdout, "[info] ", msg)
 void sailfin_runtime_print_warn(char *msg) { _print_line(stderr, "[warn] ", msg); }
 void sailfin_runtime_print_error(char *msg) { _print_line(stderr, "[error] ", msg); }
 
+/* M2.8 (#401): SfnString migration trampolines for the print
+ * family. Mirrors the M2.4a wave-1 trampolines above (`sfn_str_len`,
+ * `sfn_str_eq`, ...). The compiler's runtime_helpers.sfn registry
+ * carries `parameter_types: ["{i8*, i64}"]` + `native_signature:
+ * "sfn_print*"` on each descriptor, so fresh user emission produces
+ *   call void @sfn_print_info({i8*, i64} %s)
+ * with the SfnString aggregate passed by value. The bodies forward
+ * verbatim to the legacy `sailfin_runtime_print_*` entrypoints —
+ * today's SfnString.data is NUL-terminated end-to-end (literal
+ * lowering writes a trailing 0 past the byte payload, and the
+ * arena-routed concat in `sfn_str_concat_arena` preserves the +1
+ * NUL byte), so the legacy `char *`-consuming bodies remain
+ * correct without a second formatting strategy. Once M2.4b/M2.8
+ * length-aware print bodies arrive, the forwarding here retires
+ * in a single rollback-safe rename. */
+void sfn_print(SfnString s) { sailfin_runtime_print_raw(s.data); }
+void sfn_print_err(SfnString s) { sailfin_runtime_print_err(s.data); }
+void sfn_print_info(SfnString s) { sailfin_runtime_print_info(s.data); }
+void sfn_print_warn(SfnString s) { sailfin_runtime_print_warn(s.data); }
+void sfn_print_error(SfnString s) { sailfin_runtime_print_error(s.data); }
+
 // Debug: print a pointer value as hex to stderr
 void sailfin_runtime_debug_ptr(const char *label, const void *ptr)
 {
@@ -7743,6 +7764,17 @@ char *sailfin_runtime_home_dir(void)
         return NULL;
     return strdup(home);
 }
+
+/* M2.8 (#401): symbol-flip trampolines for `env.get` / `env.home`.
+ * The compiler's runtime_helpers.sfn registry carries
+ * `native_signature: "sfn_getenv"` / `"sfn_home_dir"` on the two
+ * descriptors, so fresh user emission lands on these symbols. The
+ * `parameter_types` / `return_type` stay at the legacy `i8*` shape
+ * (no SfnString aggregate flip yet — that wave needs arena
+ * threading, deferred under M2.8). Bodies forward verbatim. */
+char *sfn_getenv(const char *name) { return sailfin_runtime_getenv(name); }
+
+char *sfn_home_dir(void) { return sailfin_runtime_home_dir(); }
 
 char *sailfin_runtime_read_file_bytes(const char *path, int64_t *out_length)
 {

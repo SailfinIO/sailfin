@@ -193,6 +193,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
                 let msg = "  RUN  " + label;
                 let idx_s = number_to_string(test_idx);
                 let msg_arr_len = number_to_string(msg.length + 1);
+                let msg_byte_len = number_to_string(msg.length);
                 let escaped = escape_string_for_llvm(msg);
                 harness_globals = extend_string_lines(harness_globals, ["@.tname."
                     + idx_s
@@ -201,6 +202,11 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
                     + " x i8] c\""
                     + escaped
                     + "\\00\"",]);
+                // M2.8 (#401): the print.err descriptor flipped to
+                // `sfn_print_err` with the `{i8*, i64}` SfnString
+                // aggregate ABI, so the test harness builds the
+                // aggregate from the `i8*` GEP result (data pointer
+                // + byte length excluding NUL) before the call.
                 harness = extend_string_lines(harness, ["  %tn" + idx_s
                     + " = getelementptr ["
                     + msg_arr_len
@@ -208,9 +214,19 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
                     + msg_arr_len
                     + " x i8]* @.tname."
                     + idx_s
-                    + ", i64 0, i64 0", "  call void @sailfin_runtime_print_err(i8* %tn"
+                    + ", i64 0, i64 0", "  %tn"
                     + idx_s
-                    + ")", "  call void @"
+                    + ".agg0 = insertvalue {i8*, i64} undef, i8* %tn"
+                    + idx_s
+                    + ", 0", "  %tn"
+                    + idx_s
+                    + ".agg1 = insertvalue {i8*, i64} %tn"
+                    + idx_s
+                    + ".agg0, i64 "
+                    + msg_byte_len
+                    + ", 1", "  call void @sfn_print_err({i8*, i64} %tn"
+                    + idx_s
+                    + ".agg1)", "  call void @"
                     + sym
                     + "()",]);
                 test_idx += 1;
@@ -222,16 +238,22 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
         + " tests passed)";
     let pass_escaped = escape_string_for_llvm(pass_msg);
     let pass_len_s = number_to_string(pass_msg.length + 1);
+    let pass_byte_len = number_to_string(pass_msg.length);
     harness_globals = extend_string_lines(harness_globals, ["@.tpass = private unnamed_addr constant ["
         + pass_len_s
         + " x i8] c\""
         + pass_escaped
         + "\\00\"",]);
+    // M2.8 (#401): mirror the `@.tname` flip above — pack the
+    // `i8*` GEP result into a `{i8*, i64}` aggregate before
+    // calling the flipped `@sfn_print_err`.
     harness = extend_string_lines(harness, ["  %tp = getelementptr ["
         + pass_len_s
         + " x i8], ["
         + pass_len_s
-        + " x i8]* @.tpass, i64 0, i64 0", "  call void @sailfin_runtime_print_err(i8* %tp)", "  ret i32 0", "}",]);
+        + " x i8]* @.tpass, i64 0, i64 0", "  %tp.agg0 = insertvalue {i8*, i64} undef, i8* %tp, 0", "  %tp.agg1 = insertvalue {i8*, i64} %tp.agg0, i64 "
+        + pass_byte_len
+        + ", 1", "  call void @sfn_print_err({i8*, i64} %tp.agg1)", "  ret i32 0", "}",]);
 
     let mut updated = base;
     if updated.lines.length > 0 {

@@ -73,6 +73,23 @@ extern "C"
     void sailfin_runtime_print_warn(char *msg);
     void sailfin_runtime_print_error(char *msg);
 
+    /* M2.8 (#401): SfnString migration trampolines for the print
+     * family. Mirrors the M2.4a wave-1 trampolines (`sfn_str_len`,
+     * `sfn_str_eq`, ...). The compiler's runtime_helpers.sfn
+     * registry now carries `native_signature: "sfn_print*"` on the
+     * print/console descriptors, and fresh user emission lands on
+     * these symbols against the `{i8*, i64}` SfnString ABI. The
+     * bodies forward to the legacy `sailfin_runtime_print_*`
+     * entrypoints — today's SfnString.data is always NUL-terminated
+     * (literal lowering writes a trailing 0; arena-routed concat
+     * preserves the +1 byte), so the legacy `char*` consumers
+     * remain valid until the length-aware bodies arrive. */
+    void sfn_print(SfnString s);
+    void sfn_print_err(SfnString s);
+    void sfn_print_info(SfnString s);
+    void sfn_print_warn(SfnString s);
+    void sfn_print_error(SfnString s);
+
     /* `sailfin_runtime_sleep` and the `sfn_sleep` C trampoline were
      * deleted in PR 2 of the sleep migration (issue #397). The
      * `@sfn_sleep` symbol is now defined in Sailfin at
@@ -392,6 +409,12 @@ extern "C"
     // Environment & path helpers.
     char *sailfin_runtime_getenv(const char *name);
     char *sailfin_runtime_home_dir(void);
+    /* M2.8 (#401): symbol-flip trampolines for `env.get` / `env.home`.
+     * Same legacy `i8*` ABI as the entrypoints above — the aggregate
+     * `SfnString` flip on these waits for the arena-threading wave
+     * (a follow-up under M2.8). Bodies forward verbatim. */
+    char *sfn_getenv(const char *name);
+    char *sfn_home_dir(void);
     char *sailfin_runtime_read_file_bytes(const char *path, int64_t *out_length);
 
     // Misc stubs.

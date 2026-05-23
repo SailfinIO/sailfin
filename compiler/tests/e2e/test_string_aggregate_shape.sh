@@ -70,16 +70,20 @@ test_aggregate_type_appears() {
     return 0
 }
 
-# A2 — Each literal builds the aggregate via two `insertvalue` ops.
-# The fixture writes "hello".length, "world".length, "hello" + "world", and
-# `print.info(combined)` — four string literals total (.length on a literal
-# still constructs the aggregate, then extracts slot 1).
+# A2 — Each literal builds the aggregate via two `insertvalue` ops,
+# plus one `i8*`-to-aggregate coercion for the `combined` operand
+# passed into `print.info` after M2.8 (#401) flipped print to the
+# SfnString aggregate ABI. The fixture writes "hello".length,
+# "world".length, "hello" + "world", and `print.info(combined)`:
+#   - 4 string literals × 1 `undef, i8*` per literal = 4
+#   - 1 coercion shim (concat result is still legacy `i8*`,
+#     coerced to `{i8*, i64}` via `sfn_str_len` for the call) = 1
 test_literal_uses_insertvalue() {
     emit_ir_once || return 1
     local data_inserts
     data_inserts="$(grep -cE '= insertvalue \{i8\*, i64\} undef, i8\*' "$LL" || true)"
-    if [ "${data_inserts:-0}" -ne 4 ]; then
-        echo "[test]   expected 4 'insertvalue {i8*, i64} undef, i8*' lines, got ${data_inserts:-0}"
+    if [ "${data_inserts:-0}" -ne 5 ]; then
+        echo "[test]   expected 5 'insertvalue {i8*, i64} undef, i8*' lines, got ${data_inserts:-0}"
         return 1
     fi
     return 0

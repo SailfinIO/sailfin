@@ -56,26 +56,26 @@ test "abi_version: descriptor accepts native_signature: <string> (M2 flip)" {
 }
 
 // =============================================================================
-// Default descriptors — every shipped helper still uses the C ABI
+// Default descriptors — flipped helpers carry their sfn_* signature
 // =============================================================================
-// Until an M2.x sub-issue lands the per-helper flip, every default
-// descriptor `runtime_helper_descriptors()` returns must report
-// `native_signature == null`. These tests pin a representative sample
-// across the print / fs / net / clock effect classes so a regression
-// where someone accidentally drops the field-flip guard surfaces here
-// instead of on a subtle codegen miss downstream.
-test "abi_version: default `print` helper has native_signature == null" {
+// M2.8 (#401) flipped the print / console / env descriptors to
+// the Sailfin-native sfn_print* / sfn_getenv / sfn_home_dir
+// symbols. The pinned native_signature values below are the
+// migration unit — the underlying `symbol` field stays at the
+// legacy C entrypoint for archeology. Effect classes that have
+// not yet flipped (fs.* / net.* / etc.) still report null.
+test "abi_version: `print` helper carries native_signature sfn_print" {
     let helper = find_runtime_helper("print");
     assert helper != null;
     assert helper.symbol == "sailfin_runtime_print_raw";
-    assert helper.native_signature == null;
+    assert helper.native_signature == "sfn_print";
 }
 
-test "abi_version: default `print.err` helper has native_signature == null" {
+test "abi_version: `print.err` helper carries native_signature sfn_print_err" {
     let helper = find_runtime_helper("print.err");
     assert helper != null;
     assert helper.symbol == "sailfin_runtime_print_err";
-    assert helper.native_signature == null;
+    assert helper.native_signature == "sfn_print_err";
 }
 
 test "abi_version: default `fs.read` helper has native_signature == null" {
