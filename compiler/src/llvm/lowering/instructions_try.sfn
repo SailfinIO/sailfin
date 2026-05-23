@@ -7,7 +7,7 @@ import { lower_expression } from "../expression_lowering/native/core";
 import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
 import { emit_runtime_call, empty_runtime_call_overrides } from "../expression_lowering/native/runtime_call";
-import { default_return_literal, format_local_pointer_name, format_temp_name } from "../expressions_helpers";
+import { format_local_pointer_name, format_temp_name } from "../expressions_helpers";
 import { make_child_scope_id } from "../lifetime";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
@@ -177,24 +177,29 @@ fn lower_throw_instruction(function_name: string, instruction: NativeInstruction
         };
     }
 
-    // M1.7.3 (#499): route through descriptor-driven dispatch. The
-    // `set_exception` descriptor declares `["i8*"]` parameter types
-    // and a `void` return; the coerced operand already carries `i8*`,
-    // so emit_runtime_call renders byte-identically with the prior
-    // hand-spelled emission.
-    let set_exc_operands: LLVMOperand[] = [coerced.operand];
-    let set_exc_call = emit_runtime_call("set_exception", set_exc_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+    // M2.7b (#404): route the throw through the frame-based primitive
+    // `sfn_throw`, which writes the message into the top frame's
+    // message_addr slot, pops the chain head, then `longjmp`s back to
+    // the matching `setjmp` save point emitted at the user's try entry.
+    // Control transfers to the catch body in the dominator function;
+    // the `ret` that the legacy TLS-polling path emitted after
+    // `set_exception` would be dead anyway (longjmp does not return),
+    // so we follow with `unreachable` to make that explicit and to
+    // let LLVM's branch folding prune the trailing block. The legacy
+    // `sailfin_runtime_set_exception` symbol stays declared via the
+    // helper registry so seed-compiled call sites still link; M2.7c
+    // retires the C body once every emission site has cut over.
+    let throw_operands: LLVMOperand[] = [coerced.operand];
+    let throw_call = emit_runtime_call("sfn_throw_frame", throw_operands, empty_runtime_call_overrides(), current_temp, current_lines);
     let mut _ci_se: int = 0;
     loop {
-        if _ci_se >= set_exc_call.diagnostics.length { break; }
-        diagnostics.push(set_exc_call.diagnostics[_ci_se]);
+        if _ci_se >= throw_call.diagnostics.length { break; }
+        diagnostics.push(throw_call.diagnostics[_ci_se]);
         _ci_se += 1;
     }
-    current_lines = set_exc_call.lines;
-    current_temp = set_exc_call.temp_index;
-    if llvm_return == "void" { current_lines.push("  ret void"); } else {
-        current_lines.push("  ret " + llvm_return + " " + default_return_literal(llvm_return));
-    }
+    current_lines = throw_call.lines;
+    current_temp = throw_call.temp_index;
+    current_lines.push("  unreachable");
     return ThrowLoweringResult {
         lines: current_lines,
         temp_index: current_temp,
@@ -225,28 +230,42 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
     let mut lifetime_regions: LifetimeRegionMetadata[] = [];
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
-    // Reset exception state at start of try.
-    // M1.7.3 (#499): route through descriptor-driven dispatch.
-    let clear_exc_call = emit_runtime_call("clear_exception", [], empty_runtime_call_overrides(), current_temp, current_lines);
-    let mut _ci_ce: int = 0;
-    loop {
-        if _ci_ce >= clear_exc_call.diagnostics.length { break; }
-        diagnostics.push(clear_exc_call.diagnostics[_ci_ce]);
-        _ci_ce += 1;
-    }
-    current_lines = clear_exc_call.lines;
-    current_temp = clear_exc_call.temp_index;
+    // M2.7b (#404): frame-based exception emission. The legacy
+    // TLS-polling shape (`clear_exception` + try body + `has_exception`
+    // poll + `take_exception` in catch + post-merge propagate poll) is
+    // replaced by inline setjmp / push_frame / pop_frame primitives
+    // that bind the save point to the user function's own stack
+    // frame. The decomposed primitives in `runtime/sfn/exception.sfn`
+    // (`sfn_exception_push_frame`, `sfn_exception_pop_frame`,
+    // `sfn_take_exception`) are safe to call as regular functions —
+    // only `setjmp` itself must live inline in the user `define` so
+    // its save point stays live across the throw. See the UB caveat
+    // comment in the M2.7a module file header.
+    // Frame and jmp_buf are stack-allocated in the function prologue.
+    // SfnExceptionFrame layout `{ i64, i64, i64 }` (prev_addr,
+    // jmp_buf_addr, message_addr) is encoded as `[3 x i64]` so user
+    // modules don't need the named struct type — the call into
+    // `sfn_exception_push_frame` accepts an `i8*` and link-time
+    // opaque-pointer resolution lands on the `%SfnExceptionFrame*`
+    // define in exception.sfn. The jmp_buf is `[32 x i64]` = 256
+    // bytes, matching the literal in `sfn_exception_alloc_frame`
+    // (oversized for Linux x86_64 / macOS arm64 — see the JMPBUF_SIZE
+    // note in the M2.7a module header).
+    let frame_pointer = format_local_pointer_name(current_next_local);
+    current_next_local += 1;
+    let jmpbuf_pointer = format_local_pointer_name(current_next_local);
+    current_next_local += 1;
+    current_allocas.push("  " + frame_pointer + " = alloca [3 x i64]");
+    current_allocas.push("  " + jmpbuf_pointer + " = alloca [32 x i64]");
 
     let try_label_alloc = allocate_block_label("try", current_block_counter);
     let try_label = try_label_alloc.label;
     current_block_counter = try_label_alloc.next_counter;
 
     let mut catch_label: string = "";
-    if structure.catch_index != -1 {
-        let catch_label_alloc = allocate_block_label("catch", current_block_counter);
-        catch_label = catch_label_alloc.label;
-        current_block_counter = catch_label_alloc.next_counter;
-    }
+    let catch_label_alloc = allocate_block_label("catch", current_block_counter);
+    catch_label = catch_label_alloc.label;
+    current_block_counter = catch_label_alloc.next_counter;
 
     let mut finally_label: string = "";
     if structure.finally_index != -1 {
@@ -259,7 +278,84 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
     let merge_label = merge_label_alloc.label;
     current_block_counter = merge_label_alloc.next_counter;
 
-    current_lines.push("  br label %" + try_label);
+    // Cast frame and jmpbuf allocas to i8* for the runtime ABI.
+    let frame_i8 = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + frame_i8 + " = bitcast [3 x i64]* "
+        + frame_pointer
+        + " to i8*");
+    let jmpbuf_i8 = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + jmpbuf_i8 + " = bitcast [32 x i64]* "
+        + jmpbuf_pointer
+        + " to i8*");
+
+    // Initialize frame.jmp_buf_addr (slot index 1) with ptrtoint of
+    // jmpbuf. The chain-mutation primitive populates prev_addr; the
+    // message_addr slot (index 2) starts zero so `sfn_take_exception`
+    // observes "no message" until `sfn_throw` writes one.
+    let jmpbuf_slot_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + jmpbuf_slot_ptr
+        + " = getelementptr [3 x i64], [3 x i64]* "
+        + frame_pointer
+        + ", i64 0, i64 1");
+    let jmpbuf_addr_i64 = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + jmpbuf_addr_i64 + " = ptrtoint i8* " + jmpbuf_i8
+        + " to i64");
+    current_lines.push("  store i64 " + jmpbuf_addr_i64 + ", i64* "
+        + jmpbuf_slot_ptr);
+    let msg_slot_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + msg_slot_ptr
+        + " = getelementptr [3 x i64], [3 x i64]* "
+        + frame_pointer
+        + ", i64 0, i64 2");
+    current_lines.push("  store i64 0, i64* " + msg_slot_ptr);
+
+    // Push the frame onto the chain head. Safe to call as a regular
+    // function — only mutates the global chain head pointer, no
+    // setjmp state involved.
+    let frame_operand: LLVMOperand = LLVMOperand {
+        llvm_type: "i8*",
+        value: frame_i8
+    };
+    let push_call = emit_runtime_call("sfn_exception_push_frame", [frame_operand], empty_runtime_call_overrides(), current_temp, current_lines);
+    let mut _ci_push: int = 0;
+    loop {
+        if _ci_push >= push_call.diagnostics.length { break; }
+        diagnostics.push(push_call.diagnostics[_ci_push]);
+        _ci_push += 1;
+    }
+    current_lines = push_call.lines;
+    current_temp = push_call.temp_index;
+
+    // Inline `setjmp` — this is the load-bearing call site. The save
+    // point must live inside the user function's `define` so its
+    // stored stack pointer / register file stays valid until the
+    // matching `longjmp` from `sfn_throw` fires.
+    let setjmp_temp = format_temp_name(current_temp);
+    let jmpbuf_operand: LLVMOperand = LLVMOperand {
+        llvm_type: "i8*",
+        value: jmpbuf_i8
+    };
+    let setjmp_call = emit_runtime_call("setjmp", [jmpbuf_operand], empty_runtime_call_overrides(), current_temp, current_lines);
+    let mut _ci_sj: int = 0;
+    loop {
+        if _ci_sj >= setjmp_call.diagnostics.length { break; }
+        diagnostics.push(setjmp_call.diagnostics[_ci_sj]);
+        _ci_sj += 1;
+    }
+    current_lines = setjmp_call.lines;
+    current_temp = setjmp_call.temp_index;
+    let first_call_temp = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + first_call_temp + " = icmp eq i32 " + setjmp_temp
+        + ", 0");
+    current_lines.push("  br i1 " + first_call_temp + ", label %" + try_label
+        + ", label %"
+        + catch_label);
 
     // Try block
     current_lines.push(try_label + ":");
@@ -282,67 +378,68 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
     collected_string_constants = merge_string_constants(collected_string_constants, try_result.string_constants);
 
     if !try_result.terminated {
-        // M1.7.3 (#499): route through descriptor-driven dispatch.
-        // Capture the temp name first so the subsequent `br i1` keeps
-        // referencing the same SSA value emit_runtime_call binds at
-        // `current_temp`.
-        let has_exc = format_temp_name(current_temp);
-        let has_exc_call = emit_runtime_call("has_exception", [], empty_runtime_call_overrides(), current_temp, current_lines);
-        let mut _ci_he: int = 0;
+        // Normal try exit: pop the frame off the chain (longjmp did
+        // not fire) then branch to finally/merge.
+        let pop_call = emit_runtime_call("sfn_exception_pop_frame", [frame_operand], empty_runtime_call_overrides(), current_temp, current_lines);
+        let mut _ci_pop: int = 0;
         loop {
-            if _ci_he >= has_exc_call.diagnostics.length { break; }
-            diagnostics.push(has_exc_call.diagnostics[_ci_he]);
-            _ci_he += 1;
+            if _ci_pop >= pop_call.diagnostics.length { break; }
+            diagnostics.push(pop_call.diagnostics[_ci_pop]);
+            _ci_pop += 1;
         }
-        current_lines = has_exc_call.lines;
-        current_temp = has_exc_call.temp_index;
+        current_lines = pop_call.lines;
+        current_temp = pop_call.temp_index;
         let normal_target = merge_label;
         if structure.finally_index != -1 { normal_target = finally_label; }
-        if structure.catch_index != -1 {
-            current_lines.push("  br i1 " + has_exc + ", label %" + catch_label
-                + ", label %"
-                + normal_target);
-        } else {
-            // No catch: proceed to normal target; any pending exception will be propagated after finally/merge.
-            current_lines.push("  br label %" + normal_target);
-        }
+        current_lines.push("  br label %" + normal_target);
     }
 
+    // Catch / exception landing pad. setjmp returns non-zero here
+    // after `sfn_throw` longjmps back; the frame has already been
+    // popped by `sfn_throw` (architect §2.4.2: throw pops before
+    // longjmp). When the source has no `catch` block we still need
+    // the landing label so the setjmp branch has a valid target —
+    // the synthesized body re-throws into the outer frame so the
+    // exception is not silently swallowed.
+    current_lines.push(catch_label + ":");
+    let catch_scope_id = make_child_scope_id(scope_id, catch_label);
+
+    // Catch-entry guarded drops (M1.5.4, issue #328). For every
+    // owned rc local descended from the try scope, emit a
+    // sentinel-gated `call void @sfn_rc_release(i8* %t)` so locals
+    // that may have been initialized before the throw fired are
+    // still released. The walk uses `try_result.locals` (post-try-
+    // body lowering) so M1.5.5 escape-promotion flips to "rc" are
+    // visible here. When no rc-eligible bindings exist the helper
+    // emits zero lines and the catch label remains the active
+    // block; otherwise the helper terminates on a fresh `skipN`
+    // block which becomes the catch body's active label.
+    let _guarded = emit_guarded_scope_drops(try_result.locals, try_scope_id, current_temp, current_block_counter);
+    current_lines = extend_string_array(current_lines, _guarded.lines);
+    current_temp = _guarded.next_temp;
+    current_block_counter = _guarded.next_block_counter;
+    let mut catch_active_label: string = catch_label;
+    if _guarded.final_label.length > 0 {
+        catch_active_label = _guarded.final_label;
+    }
+
+    // After the M1.5.4 guarded drops fire, pull the exception
+    // message off the just-popped frame via `sfn_take_exception(frame)`
+    // (consumes the slot — see the architect §2.4.2 / legacy C
+    // `sailfin_runtime_take_exception` symmetry). The result is an
+    // `i8*` carrying the thrown string.
+    let exception_temp = format_temp_name(current_temp);
+    let take_call = emit_runtime_call("sfn_take_exception_frame", [frame_operand], empty_runtime_call_overrides(), current_temp, current_lines);
+    let mut _ci_te: int = 0;
+    loop {
+        if _ci_te >= take_call.diagnostics.length { break; }
+        diagnostics.push(take_call.diagnostics[_ci_te]);
+        _ci_te += 1;
+    }
+    current_lines = take_call.lines;
+    current_temp = take_call.temp_index;
+
     if structure.catch_index != -1 {
-        // Catch block
-        current_lines.push(catch_label + ":");
-        let catch_scope_id = make_child_scope_id(scope_id, catch_label);
-        // M1.7.3 (#499): route through descriptor-driven dispatch.
-        let exception_temp = format_temp_name(current_temp);
-        let take_exc_call = emit_runtime_call("take_exception", [], empty_runtime_call_overrides(), current_temp, current_lines);
-        let mut _ci_te: int = 0;
-        loop {
-            if _ci_te >= take_exc_call.diagnostics.length { break; }
-            diagnostics.push(take_exc_call.diagnostics[_ci_te]);
-            _ci_te += 1;
-        }
-        current_lines = take_exc_call.lines;
-        current_temp = take_exc_call.temp_index;
-
-        // Catch-entry guarded drops (M1.5.4, issue #328). For every
-        // owned rc local descended from the try scope, emit a
-        // sentinel-gated `call void @sfn_rc_release(i8* %t)` so locals
-        // that may have been initialized before the throw fired are
-        // still released. The walk uses `try_result.locals` (post-try-
-        // body lowering) so M1.5.5 escape-promotion flips to "rc" are
-        // visible here. When no rc-eligible bindings exist the helper
-        // emits zero lines and the catch label remains the active
-        // block; otherwise the helper terminates on a fresh `skipN`
-        // block which becomes the catch body's active label.
-        let _guarded = emit_guarded_scope_drops(try_result.locals, try_scope_id, current_temp, current_block_counter);
-        current_lines = extend_string_array(current_lines, _guarded.lines);
-        current_temp = _guarded.next_temp;
-        current_block_counter = _guarded.next_block_counter;
-        let mut catch_active_label: string = catch_label;
-        if _guarded.final_label.length > 0 {
-            catch_active_label = _guarded.final_label;
-        }
-
         let mut catch_locals: LocalBinding[] = current_locals;
         let trimmed_name = trim_text(structure.catch_name);
         if trimmed_name.length > 0 {
@@ -382,6 +479,26 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
             if structure.finally_index != -1 { target = finally_label; }
             current_lines.push("  br label %" + target);
         }
+    } else {
+        // No catch block — re-throw into the outer frame so the
+        // exception is not silently swallowed. The frame has already
+        // been popped by `sfn_throw`, so the outer frame is now the
+        // chain head and a second `sfn_throw` longjmps into it. If
+        // no outer frame exists `sfn_throw` calls abort().
+        let exception_operand: LLVMOperand = LLVMOperand {
+            llvm_type: "i8*",
+            value: exception_temp
+        };
+        let rethrow_call = emit_runtime_call("sfn_throw_frame", [exception_operand], empty_runtime_call_overrides(), current_temp, current_lines);
+        let mut _ci_rt: int = 0;
+        loop {
+            if _ci_rt >= rethrow_call.diagnostics.length { break; }
+            diagnostics.push(rethrow_call.diagnostics[_ci_rt]);
+            _ci_rt += 1;
+        }
+        current_lines = rethrow_call.lines;
+        current_temp = rethrow_call.temp_index;
+        current_lines.push("  unreachable");
     }
 
     if structure.finally_index != -1 {
@@ -411,34 +528,11 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
 
     current_lines.push(merge_label + ":");
 
-    // If an exception is still pending after try/catch/finally, propagate it.
-    // M1.7.3 (#499): route through descriptor-driven dispatch.
-    let has_exc_after = format_temp_name(current_temp);
-    let has_exc_after_call = emit_runtime_call("has_exception", [], empty_runtime_call_overrides(), current_temp, current_lines);
-    let mut _ci_ha: int = 0;
-    loop {
-        if _ci_ha >= has_exc_after_call.diagnostics.length { break; }
-        diagnostics.push(has_exc_after_call.diagnostics[_ci_ha]);
-        _ci_ha += 1;
-    }
-    current_lines = has_exc_after_call.lines;
-    current_temp = has_exc_after_call.temp_index;
-    let propagate_label_alloc = allocate_block_label("try.propagate", current_block_counter);
-    let propagate_label = propagate_label_alloc.label;
-    current_block_counter = propagate_label_alloc.next_counter;
-    let continue_label_alloc = allocate_block_label("try.continue", current_block_counter);
-    let continue_label = continue_label_alloc.label;
-    current_block_counter = continue_label_alloc.next_counter;
-    current_lines.push("  br i1 " + has_exc_after + ", label %"
-        + propagate_label
-        + ", label %"
-        + continue_label);
-    current_lines.push(propagate_label + ":");
-    if llvm_return == "void" { current_lines.push("  ret void"); } else {
-        current_lines.push("  ret " + llvm_return + " " + default_return_literal(llvm_return));
-    }
-    current_lines.push(continue_label + ":");
-
+    // No has_exception polling on the merge path — the longjmp-based
+    // throw transfers control directly to the catch_label so any
+    // exception that crossed the try body has already been handled
+    // (or re-thrown into the outer frame). M2.7c removes the call-site
+    // polling that used to detect exceptions across function returns.
     return BlockLoweringResult {
         lines: current_lines,
         allocas: current_allocas,

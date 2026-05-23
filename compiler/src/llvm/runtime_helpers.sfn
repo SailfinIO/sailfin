@@ -689,6 +689,36 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "take_exception", symbol: "sailfin_runtime_take_exception", return_type: "i8*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
     });
 
+    // M2.7b (#404): frame-based exception primitives from
+    // `runtime/sfn/exception.sfn`. `instructions_try.sfn` emits inline
+    // `sfn_exception_push_frame` + `setjmp` + `sfn_exception_pop_frame`
+    // at every user try block, and `sfn_throw` (longjmp) for every throw.
+    // Pointer params are typed `i8*` because user modules do not see the
+    // `%SfnExceptionFrame` named type — the opaque-pointer rule at link
+    // time resolves to the `%SfnExceptionFrame*` define in exception.sfn.
+    // Coexists with the legacy TLS-polling family above until M2.7c
+    // retires the C runtime symbols.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sfn_exception_push_frame", symbol: "sfn_exception_push_frame", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sfn_exception_pop_frame", symbol: "sfn_exception_pop_frame", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    // Distinct target key from the zero-arg legacy `take_exception` so
+    // both descriptors coexist in the registry.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sfn_take_exception_frame", symbol: "sfn_take_exception", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sfn_throw_frame", symbol: "sfn_throw", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    // libc setjmp — the inline setjmp call site lives in user code at
+    // each try entry. Declared via the helper registry so every emitting
+    // module carries a paired `declare i32 @setjmp(i8*)`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "setjmp", symbol: "setjmp", return_type: "i32", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+
     // ---- Package-manager primitives ----
     // SHA-256 hashing
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {

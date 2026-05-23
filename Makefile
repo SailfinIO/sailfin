@@ -807,6 +807,22 @@ rebuild:
 		echo "[rebuild] staging process.o..."; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/process.ll -o build/native/obj/runtime/process.o; \
 	fi
+	@# Stage exception.o (Sailfin-native frame primitives from
+	@# runtime/sfn/exception.sfn). M2.7b (issue #404) ships the
+	@# compiler-emission migration that inlines `sfn_exception_push_frame`
+	@# + `setjmp` + `sfn_exception_pop_frame` at every user try block;
+	@# the legacy link path (`_clang_compile_runtime_objects` in
+	@# `compiler/src/cli_main.sfn`) resolves those symbols against this
+	@# staged .o. The runtime-capsule path reaches exception.sfn through
+	@# `runtime/native/capsule.toml`'s `sfn-sources` array instead.
+	@if [ ! -f build/native/obj/runtime/exception.ll ]; then \
+		echo "[rebuild] staging exception.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/exception.ll llvm runtime/sfn/exception.sfn >/dev/null; \
+	fi
+	@if [ ! -f build/native/obj/runtime/exception.o ]; then \
+		echo "[rebuild] staging exception.o..."; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/exception.ll -o build/native/obj/runtime/exception.o; \
+	fi
 	@# Write build stamp (version + git hash for dev builds).
 	@# `version.sfn::resolve_compiler_version` reads this file
 	@# first, so without it the binary would report whatever stale
