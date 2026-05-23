@@ -58,13 +58,22 @@
 // the primitive with the effect, matching the §3.6 effect-on-
 // wrapper rule.
 //
-// Why inline the libc externs? The same reason `arena.sfn` /
-// `string.sfn` do: the released seed compiler snapshots
-// `runtime/sfn/platform/libc.sfn` at build time. Inlining keeps
-// this module self-contained for every seed, regardless of which
-// libc declarations have shipped. Once the seed catches up, a
-// follow-up PR can flip these to a cross-module import without
-// touching the bodies.
+// Extern declarations split across two surfaces:
+//
+//   - `write` from `runtime/sfn/platform/libc.sfn` (imported) —
+//     mirrors the pre-existing `sfn_write_fd` baseline. The seed
+//     compiler's libc snapshot has carried `write` since the
+//     `sfn_write_fd` proof-of-life shipped under M2.7 (#303), so
+//     the cross-module import resolves cleanly. Adapters that
+//     reach for new libc surfaces (e.g. `lseek` / `dup2`) that the
+//     seed snapshot may not yet declare should follow the
+//     `arena.sfn` / `string.sfn` discipline and inline locally.
+//
+//   - `sailfin_runtime_*` C runtime entrypoints (inlined below).
+//     These are *not* platform libc declarations — they're C
+//     trampolines defined in `runtime/native/src/sailfin_runtime.c`
+//     and not part of any `runtime/sfn/platform/*.sfn` skeleton.
+//     Inlining is the only declaration site available.
 import { write } from "./platform/libc";
 
 extern fn sailfin_runtime_print_raw(msg: * u8) -> void;
