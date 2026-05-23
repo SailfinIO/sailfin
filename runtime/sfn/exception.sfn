@@ -1,0 +1,332 @@
+// runtime/sfn/exception.sfn
+//
+// Sailfin-native exception frame primitives backed by libc
+// `setjmp`/`longjmp`. M2.7a per `docs/runtime_architecture.md`
+// §2.4 and issue #400 (epic #389). Part 1 of 3 of the M2.7
+// migration: primitives only. The compiler-emission migration
+// in `compiler/src/llvm/lowering/instructions_try.sfn` lands at
+// M2.7b; the legacy TLS-polling path (`sailfin_runtime_set/
+// has/clear/take_exception` in `runtime/native/src/
+// sailfin_runtime.c`) stays operational during the transition,
+// and M2.7c deletes it once every emission site has cut over.
+//
+// Status: pure-Sailfin frame management with direct
+// `call i32 @setjmp(...)` / `call void @longjmp(...)` IR. The
+// canonical API surface from architect §2.4.2 (`sfn_try_enter`,
+// `sfn_try_leave`, `sfn_throw`, `sfn_take_exception`) ships
+// here as Sailfin functions. The Sailfin module exports also
+// include `sfn_exception_alloc_frame` / `sfn_exception_free_frame`
+// (heap-owned frames during the M2.7a window — see "Frame
+// layout" below) and explicit chain-mutation primitives
+// (`sfn_exception_push_frame`, `sfn_exception_pop_frame`,
+// `sfn_exception_frame_head`) that M2.7b's compiler emission
+// inlines at the user code's try-block boundary.
+//
+// Frame layout deviation from the architect spec.
+//   The architect spells `SfnExceptionFrame` as
+//   `{ prev: *SfnExceptionFrame, jmp_buf: i8[JMPBUF_SIZE],
+//   message: SfnString }` — an inline byte array for the jmp_buf
+//   and the M1.A SfnString aggregate for the message. Today's
+//   Sailfin frontend doesn't yet support fixed-size array fields
+//   (the parser accepts only `T[]` dynamic arrays, and the
+//   layout pass drops pointer-typed struct fields under the seed
+//   compiler — see `compiler/src/llvm/type_mapping.sfn:392`).
+//   The M2.7a module therefore stores pointer-shaped values as
+//   `i64` slots (the same workaround `runtime/sfn/memory/rc.sfn`
+//   uses for its `drop_fn_addr` slot), with `jmp_buf` riding as a
+//   separately-malloc'd buffer pointed to by `jmp_buf_addr`.
+//   `message_addr` carries the message as a NUL-terminated
+//   `* u8` placeholder until the SfnString aggregate-by-value
+//   parameter flip lands (mirrors the workaround in
+//   `runtime/sfn/string.sfn`). The layout flips to the architect
+//   shape in lockstep with M1.A.2 and the parser's fixed-size-
+//   array extension — both deferred to M2.7b.
+//
+// JMPBUF_SIZE. The module allocates a 256-byte buffer per
+// frame, oversizing Linux x86_64 (200) and macOS arm64 (192).
+// 256 is a power of two that admits an Aarch64-32-byte
+// alignment cushion. A future per-platform constants module
+// (`runtime/sfn/platform/sizes_*.sfn` per arch doc Q5)
+// tightens this once a third platform appears.
+//
+// Naming. No `_sfn_` infix on the architect's canonical
+// `sfn_try_enter / sfn_try_leave / sfn_throw / sfn_take_exception`
+// because the C runtime exposes no `sfn_try_*` / `sfn_throw`
+// / `sfn_take_exception` symbols today (it uses the
+// `sailfin_runtime_*` family — see
+// `runtime/native/src/sailfin_runtime.c:223-296`). The
+// `sfn_exception_*` helpers carry the longer prefix so a future
+// `sfn_alloc_frame` user-facing helper does not collide with the
+// runtime namespace. The coexistence-regression assertion in
+// `test_runtime_exception_frames.sh` pins this — a future patch
+// that emits a symbol matching the C runtime's family fails the
+// test.
+//
+// Setjmp/longjmp safety. `setjmp` saves CPU registers and the
+// stack pointer; `longjmp` restores them. If the function that
+// called `setjmp` has returned before the matching `longjmp`
+// fires, the saved frame is dead — that pattern is C11 UB
+// (§7.13.2) and glibc's pointer-mangled `longjmp` silently
+// no-ops on it (verified with a `clang -O0` reproducer during
+// M2.7a bring-up). The `sfn_try_enter` function form below
+// therefore carries the canonical setjmp call site (IR-pinning
+// surface for the M2.7b migration) but is not safe to call as a
+// regular function across a frame boundary. The cross-frame
+// unwinding test in `test_runtime_exception_frames.sh` exercises
+// the architect's intent — inline `setjmp` (from
+// `runtime/sfn/platform/libc.sfn`) on a `SfnExceptionFrame.
+// jmp_buf` allocated by `sfn_exception_alloc_frame`, followed by
+// a Sailfin-side `sfn_throw` call from a deeper frame — and that
+// path works end-to-end on Linux x86_64.
+//
+// TLS. The architect spec calls for a thread-local
+// `current_frame` pointer. Sailfin lacks a `thread_local`
+// annotation today, so the chain head rides as a process-global
+// mutable `let mut sfn_exception_frame_head_addr` (i64 because
+// the seed compiler drops pointer-typed top-level mutables under
+// the same field-layout limitation as struct pointer fields).
+// The existing C runtime's try-stack is `_Thread_local`, but
+// Sailfin has no `spawn` yet, so the single-threaded reality
+// already applies. The TLS upgrade lands alongside scheduler /
+// concurrency work in M4 (#321).
+//
+// Effects. None. Exception primitives live below the I/O layer
+// (same discipline as `runtime/sfn/memory/arena.sfn` and
+// `runtime/sfn/memory/rc.sfn`). Adapters that surface caught
+// exceptions to user code carry their own `![io]` annotations.
+// libc primitives the bodies trampoline through. Inlined per the
+// seed-snapshot rationale that anchors every other Sailfin
+// runtime module (`runtime/sfn/memory/arena.sfn` line ~50,
+// `runtime/sfn/memory/rc.sfn` line ~76, `runtime/sfn/string.sfn`
+// line ~39): the seed compiler shipped with this PR predates the
+// updated `runtime/sfn/platform/libc.sfn` and rejects imports
+// referencing the new declarations during the bootstrap pass.
+// Once the seed catches up post-merge, a follow-up PR flips
+// these to a cross-module import without touching the bodies.
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+// `setjmp` / `longjmp` declared on `* u8` rather than the
+// architect-canonical `* JmpBuf` (which lives in
+// `runtime/sfn/platform/libc.sfn`). Both lower to
+// `declare i32 @setjmp(i8*)` / `declare void @longjmp(i8*, i32)`
+// at the LLVM level — the opaque-pointee rule
+// (`is_extern_opaque_pointee`) maps `* JmpBuf` to `i8*`, so the
+// two declarations bind to the same libc entrypoint. Using
+// `* u8` here keeps the body's pointer-arithmetic and cast-shim
+// chains uniform with the rest of this module.
+extern fn setjmp(env: * u8) -> i32;
+
+extern fn longjmp(env: * u8, val: i32) -> void;
+
+// `abort()` ends the process. Called by `sfn_throw` when the
+// chain is empty (uncaught exception) — matches the C runtime's
+// `sailfin_runtime_throw` abort-on-empty-chain semantics, minus
+// the stderr diagnostic (no stderr extern is wired up on this
+// module yet; the diagnostic surfaces from the legacy C path
+// while M2.7a coexists with TLS polling).
+extern fn abort() -> void;
+
+// `SfnExceptionFrame` lays out the per-`try` bookkeeping. Field
+// offsets are pinned by the IR-shape assertions in
+// `test_runtime_exception_frames.sh`. All slots are `i64` —
+// pointer-typed struct fields drop from the layout under the
+// seed compiler (see the `Frame layout deviation` note in the
+// file header). Callers cast to/from `* u8` / `* SfnExceptionFrame`
+// at use sites; the architect-shaped layout flips in at M2.7b.
+//
+//   - `prev_addr`: pointer to the previous frame in the chain
+//     (cast to/from `i64`). `0` means "this is the bottom".
+//   - `jmp_buf_addr`: pointer to the JMPBUF_SIZE-byte libc
+//     setjmp buffer. Owned by the frame; freed via
+//     `sfn_exception_free_frame`.
+//   - `message_addr`: pointer to a NUL-terminated exception
+//     message (set by `sfn_throw`; read by
+//     `sfn_take_exception`). `0` when no exception has fired.
+struct SfnExceptionFrame {
+    prev_addr: i64;
+    jmp_buf_addr: i64;
+    message_addr: i64;
+}
+
+// Chain head (process-global; see the file-header TLS note).
+// `0` means "no frame pending" — `sfn_throw` aborts in that
+// case rather than longjmp'ing to a stale buffer.
+let mut sfn_exception_frame_head_addr: i64 = 0;
+
+// `sfn_exception_alloc_frame()` allocates a fresh frame plus
+// its JMPBUF_SIZE buffer. Returns the frame pointer; caller
+// owns the allocation and must release it via
+// `sfn_exception_free_frame`. Returns the null pointer if libc
+// `malloc` reports OOM on either allocation — callers check
+// `frame as i64 == 0` until `Result<T, E>` + `?` ship (Phase 1
+// of the runtime prereqs in CLAUDE.md).
+//
+// `24` = three `i64` slots: prev_addr, jmp_buf_addr,
+// message_addr. The size literal stays in sync with the struct
+// layout — a regression that adds a fourth field but forgets to
+// bump the literal would corrupt subsequent allocations and the
+// IR-shape assertion in `test_runtime_exception_frames.sh`
+// catches it via `%SfnExceptionFrame = type { ... }` count.
+fn sfn_exception_alloc_frame() -> * SfnExceptionFrame {
+    let raw = malloc(24 as usize);
+    if raw as i64 == 0 { return raw as * SfnExceptionFrame; }
+    let frame = raw as * SfnExceptionFrame;
+    frame.prev_addr = 0;
+    let buf = malloc(256 as usize);
+    if buf as i64 == 0 {
+        free(raw);
+        return buf as * SfnExceptionFrame;
+    }
+    memset(buf, 0, 256 as usize);
+    frame.jmp_buf_addr = buf as i64;
+    frame.message_addr = 0;
+    return frame;
+}
+
+// `sfn_exception_free_frame(frame)` releases `frame` and its
+// owned jmp_buf. Safe to call with a null pointer (idempotent).
+fn sfn_exception_free_frame(frame: * SfnExceptionFrame) -> void {
+    if frame as i64 == 0 { return; }
+    free(frame.jmp_buf_addr as * u8);
+    free(frame as * u8);
+}
+
+// `sfn_exception_frame_head()` returns the current chain head
+// (or null if empty). Exposed as a function so the M2.7b
+// compiler emission and the cross-frame test harness reach the
+// global through a stable accessor — the underlying storage
+// becomes thread-local without touching callers.
+fn sfn_exception_frame_head() -> * SfnExceptionFrame {
+    return sfn_exception_frame_head_addr as * SfnExceptionFrame;
+}
+
+// `sfn_exception_push_frame(frame)` links `frame` onto the head
+// of the chain. Sets `frame.prev_addr` to the previous head and
+// updates `head` to `frame`. This is the chain-mutation half of
+// the architect's `try_enter` — split out as a callable function
+// so the cross-frame unwinding test (and the eventual M2.7b
+// inline-emission path) can push a frame whose `jmp_buf` was
+// `setjmp`'d inline at the caller's frame.
+fn sfn_exception_push_frame(frame: * SfnExceptionFrame) -> void {
+    frame.prev_addr = sfn_exception_frame_head_addr;
+    sfn_exception_frame_head_addr = frame as i64;
+}
+
+// `sfn_exception_pop_frame(frame)` unlinks `frame` from the
+// chain. The common case (frame is the current head) is
+// O(1); a mismatched leave (frame is deeper in the chain)
+// triggers a defensive linear unlink — mirrors the C runtime's
+// `sailfin_runtime_try_leave` behavior. Idempotent if `frame`
+// is not on the chain.
+fn sfn_exception_pop_frame(frame: * SfnExceptionFrame) -> void {
+    let frame_addr = frame as i64;
+    if sfn_exception_frame_head_addr == frame_addr {
+        sfn_exception_frame_head_addr = frame.prev_addr;
+        return;
+    }
+    let mut cur_addr = sfn_exception_frame_head_addr;
+    let mut prev_addr: i64 = 0;
+    loop {
+        if cur_addr == 0 { return; }
+        let cur = cur_addr as * SfnExceptionFrame;
+        if cur_addr == frame_addr {
+            if prev_addr == 0 {
+                sfn_exception_frame_head_addr = cur.prev_addr;
+            } else {
+                let prev = prev_addr as * SfnExceptionFrame;
+                prev.prev_addr = cur.prev_addr;
+            }
+            return;
+        }
+        prev_addr = cur_addr;
+        cur_addr = cur.prev_addr;
+    }
+}
+
+// `sfn_try_enter(frame)` is the architect's composite primitive
+// (§2.4.2): push `frame` onto the chain head, then `setjmp` on
+// `frame.jmp_buf`. Returns 0 on first call, non-zero when a
+// matching `longjmp` (via `sfn_throw`) restores the save point.
+//
+// IR pinning. The body contains exactly one
+// `call i32 @setjmp(...)`. This is the surface the M2.7b
+// `instructions_try.sfn` migration will inline at user code's
+// try-block entry, replacing the
+// `sailfin_runtime_try_enter`-then-`has_exception`-polling
+// emission with direct frame setup + setjmp + branch. Tests
+// pin the IR shape here so a regression that retargets the
+// inlining onto a different runtime symbol surfaces here
+// instead of at link time.
+//
+// Setjmp lifetime note. Calling `sfn_try_enter` as a regular
+// function from another function is C11 UB once the
+// `sfn_try_enter` frame returns — the saved save-point becomes
+// stale (see the file-header "Setjmp/longjmp safety" note). The
+// architect's intent is that the M2.7b emission INLINES this
+// function at the user's try-block-containing function, where
+// the setjmp save point stays live across the throw. Until that
+// migration lands, real cross-frame unwinding uses the inline
+// `setjmp` extern from `runtime/sfn/platform/libc.sfn` directly
+// — exercised by `test_runtime_exception_frames.sh`.
+fn sfn_try_enter(frame: * SfnExceptionFrame) -> i32 {
+    sfn_exception_push_frame(frame);
+    return setjmp(frame.jmp_buf_addr as * u8);
+}
+
+// `sfn_try_leave(frame)` pops `frame` off the chain. Thin
+// alias over `sfn_exception_pop_frame` — preserves the
+// architect's canonical name for symmetry with `sfn_try_enter`
+// and so the M2.7b emission has a single composite primitive
+// per architect §2.4.2 to bind to. The function form is safe to
+// call across frame boundaries — it only mutates the chain
+// global, no setjmp/longjmp state involved.
+fn sfn_try_leave(frame: * SfnExceptionFrame) -> void {
+    sfn_exception_pop_frame(frame);
+}
+
+// `sfn_throw(message)` writes `message` into the top frame's
+// `message_addr` slot, then `longjmp`s back to the matching
+// `setjmp` save point. The save point may live on the current
+// stack (the inline-setjmp pattern) or in a returned frame
+// (UB; see the file-header note). With an empty chain, this is
+// an uncaught exception: the body calls `abort()` to terminate
+// — mirrors the C runtime's `sailfin_runtime_throw` semantics.
+//
+// IR pinning. The body contains exactly one
+// `call void @longjmp(...)`. The matching IR-pinning assertion
+// in `test_runtime_exception_frames.sh` pins this — a
+// regression that re-routes through a runtime call surfaces
+// here instead of at link time. The `ret void` after the
+// longjmp is dead code (longjmp does not return); LLVM keeps
+// it because Sailfin's frontend does not yet emit
+// `unreachable` after `noreturn` extern calls. M2.7b
+// (compiler-emission migration) flips the trailing block to
+// `unreachable` once the noreturn metadata propagates through
+// the extern surface.
+fn sfn_throw(message: * u8) -> void {
+    if sfn_exception_frame_head_addr == 0 {
+        abort();
+        return;
+    }
+    let head = sfn_exception_frame_head_addr as * SfnExceptionFrame;
+    head.message_addr = message as i64;
+    longjmp(head.jmp_buf_addr as * u8, 1);
+}
+
+// `sfn_take_exception(frame)` returns the message pointer
+// stashed on `frame` by a prior `sfn_throw`. Returns null if
+// no exception fired against this frame. The pointer remains
+// owned by whatever allocated the message (typically a Sailfin
+// string literal in user code, lowered to a persistent global
+// — see `compiler/src/llvm/expression_lowering/native/
+// core_strings.sfn::lower_string_literal`). Until the M1.A
+// SfnString aggregate parameter flip lands, the return type is
+// the raw `* u8` placeholder; M2.7b retypes this to
+// `SfnString` without touching call sites.
+fn sfn_take_exception(frame: * SfnExceptionFrame) -> * u8 {
+    return frame.message_addr as * u8;
+}
