@@ -175,8 +175,9 @@ test_catch_entry_emission_path_present() {
     # `emit_guarded_scope_drops(try_result.locals, try_scope_id, ...)`
     # unconditionally. When the helper emits no lines (no rc-eligible
     # bindings), the IR is unchanged from M1.5.3. When it emits lines,
-    # they appear between the take-exception call and the catch
-    # variable's store.
+    # they appear between the catch-entry guarded drops and the
+    # take-exception call (M2.7b #404: catch-entry order is now
+    # guarded_drops → sfn_take_exception → bind).
     #
     # Today no fixture produces an rc + non-consumed try-body local
     # (`return ident` promotes-and-consumes; nothing else flips
@@ -184,8 +185,8 @@ test_catch_entry_emission_path_present() {
     # contains no guarded drops. The unit test
     # `compiler/tests/unit/emit_guarded_scope_drops_test.sfn` exhausts
     # the IR-shape variants; here we just verify the catch handler
-    # itself is still well-formed (one take-exception + one
-    # exception-store inside `catch1:`).
+    # itself is still well-formed (one frame-based take-exception +
+    # one exception-store inside `catch1:`).
     local ll="$SCRATCH/try_catch_machinery.ll"
     if ! emit_ir "$ll"; then
         echo "[test]   sfn emit llvm failed (machinery case)"
@@ -195,8 +196,11 @@ test_catch_entry_emission_path_present() {
     rc_block="$(awk '/^define i8\* @try_with_rc/{flag=1} flag{print} /^\}/{if(flag){flag=0}}' "$ll")"
     local catch_body
     catch_body="$(echo "$rc_block" | awk '/^catch[0-9]+:/{flag=1; next} /^[a-zA-Z0-9._]+:/{flag=0} flag{print}')"
-    if ! echo "$catch_body" | grep -qE 'call i8\* @sailfin_runtime_take_exception'; then
-        echo "[test]   catch handler missing take_exception call"
+    # M2.7b (#404): the frame-based emission calls @sfn_take_exception
+    # with the per-try frame pointer as its single i8* argument; the
+    # legacy zero-arg @sailfin_runtime_take_exception is gone.
+    if ! echo "$catch_body" | grep -qE 'call i8\* @sfn_take_exception\(i8\* %t[0-9]+\)'; then
+        echo "[test]   catch handler missing frame-based take_exception call"
         return 1
     fi
     if ! echo "$catch_body" | grep -qE 'store i8\* %t[0-9]+, i8\*\* %l[0-9]+'; then

@@ -801,5 +801,18 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "process.handle_read_stderr");
     helpers = append_unique_effect(helpers, "process.handle_wait");
     helpers = append_unique_effect(helpers, "is_decimal_digit");
+    // M2.7b (#404): frame-based exception primitives emitted inline at
+    // every user try-block entry / leave / catch and at every throw.
+    // Declared unconditionally so the user IR carries paired
+    // `declare void @sfn_exception_push_frame(i8*)` etc. — without
+    // these the inline `setjmp` and frame-management calls would link
+    // through an undeclared symbol path the way the legacy
+    // `sailfin_runtime_*` exception family does. Coexists with the
+    // legacy entries until M2.7c retires them.
+    helpers = append_unique_effect(helpers, "sfn_exception_push_frame");
+    helpers = append_unique_effect(helpers, "sfn_exception_pop_frame");
+    helpers = append_unique_effect(helpers, "sfn_take_exception_frame");
+    helpers = append_unique_effect(helpers, "sfn_throw_frame");
+    helpers = append_unique_effect(helpers, "setjmp");
     return helpers;
 }

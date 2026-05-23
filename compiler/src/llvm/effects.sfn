@@ -547,9 +547,18 @@ fn collect_instruction_runtime_helper_targets(instruction: NativeInstruction) ->
         return helpers;
     }
     if instruction.variant == "Try" {
-        return ["clear_exception", "has_exception", "take_exception"];
+        // M2.7b (#404): emit declares for the new frame primitives alongside
+        // the legacy TLS-polling family so both APIs coexist during the
+        // transition. M2.7c retires the legacy entries once every emission
+        // site has cut over.
+        return ["clear_exception", "has_exception", "take_exception", "sfn_exception_push_frame", "sfn_exception_pop_frame", "sfn_take_exception_frame", "setjmp"];
     }
-    if instruction.variant == "Throw" { return ["set_exception"]; }
+    if instruction.variant == "Throw" {
+        // M2.7b (#404): `lower_throw_instruction` emits `call void
+        // @sfn_throw` (longjmp); declare the legacy `set_exception` symbol
+        // too so seed-compiled call sites that still call it link cleanly.
+        return ["set_exception", "sfn_throw_frame"];
+    }
     return [];
 }
 
