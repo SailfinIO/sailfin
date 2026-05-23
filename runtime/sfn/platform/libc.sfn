@@ -88,3 +88,41 @@ extern fn fwrite(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
 // table — adapters must copy before storing. Adapters are gated
 // by `![io]` per the §3.6 effect-on-wrapper rule.
 extern fn getenv(name: * u8) -> * u8;
+
+// ── Exception unwinding ───────────────────────────────────────
+// `setjmp` saves the current stack/CPU state into the buffer and
+// returns 0 on first call; `longjmp` restores that state, causing
+// the matching `setjmp` to return `val` (libc replaces `val == 0`
+// with `1` per C11 §7.13.2). Sailfin's exception primitives
+// (`runtime/sfn/exception.sfn`) wrap these into a frame-chain
+// push/pop API. The buffer is opaque to Sailfin — sizes vary per
+// platform (200 bytes Linux x86_64, 192 bytes macOS arm64; see
+// `docs/runtime_architecture.md` §2.4 and §2.9 Q5 for the
+// per-platform consolidation plan once a third platform appears).
+// The exception module allocates the buffer via libc `malloc`
+// today; a future `runtime/sfn/platform/sizes_*.sfn` constants
+// module ships the platform-specific JMPBUF_SIZE once a third
+// platform forks.
+//
+// Calling convention caveat: setjmp/longjmp are notoriously
+// fragile when the function holding setjmp returns before the
+// matching longjmp fires — that pattern is C11 UB and glibc's
+// pointer-mangled longjmp silently no-ops on it. The architect's
+// `sfn_try_enter` function in `runtime/sfn/exception.sfn` carries
+// the canonical setjmp call site (and the matching IR-pinning
+// test); the M2.7b compiler-lowering migration moves emission
+// inline at the user code's try-block boundary so the setjmp save
+// point stays live across the throw. Until then, the
+// `sfn_try_enter` function form is "API surface + IR pinning" —
+// real cross-frame unwinding tests use inline `setjmp` (declared
+// here) on a `SfnExceptionFrame.jmp_buf` allocated by
+// `sfn_exception_alloc_frame`.
+//
+// `JmpBuf` follows the opaque-pointee convention (uppercase
+// identifier ⇒ accepted by `is_extern_opaque_pointee` without a
+// struct definition; lowers to `i8*`). Adapters that allocate
+// the buffer use `runtime/sfn/exception.sfn`'s allocator helpers
+// rather than malloc-with-magic-number directly.
+extern fn setjmp(env: * JmpBuf) -> i32;
+
+extern fn longjmp(env: * JmpBuf, val: i32) -> void;
