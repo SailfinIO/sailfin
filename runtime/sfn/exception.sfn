@@ -221,9 +221,13 @@ fn sfn_exception_push_frame(frame: * SfnExceptionFrame) -> void {
 // O(1); a mismatched leave (frame is deeper in the chain)
 // triggers a defensive linear unlink — mirrors the C runtime's
 // `sailfin_runtime_try_leave` behavior. Idempotent if `frame`
-// is not on the chain.
+// is not on the chain. Null `frame` is also a no-op (matches
+// the C `sailfin_runtime_try_leave` null-handle behavior) so
+// callers can pass through partially-initialized state without
+// a separate null check.
 fn sfn_exception_pop_frame(frame: * SfnExceptionFrame) -> void {
     let frame_addr = frame as i64;
+    if frame_addr == 0 { return; }
     if sfn_exception_frame_head_addr == frame_addr {
         sfn_exception_frame_head_addr = frame.prev_addr;
         return;
@@ -289,12 +293,20 @@ fn sfn_try_leave(frame: * SfnExceptionFrame) -> void {
 }
 
 // `sfn_throw(message)` writes `message` into the top frame's
-// `message_addr` slot, then `longjmp`s back to the matching
-// `setjmp` save point. The save point may live on the current
-// stack (the inline-setjmp pattern) or in a returned frame
-// (UB; see the file-header note). With an empty chain, this is
-// an uncaught exception: the body calls `abort()` to terminate
-// — mirrors the C runtime's `sailfin_runtime_throw` semantics.
+// `message_addr` slot, pops that frame off the chain, then
+// `longjmp`s back to the matching `setjmp` save point. Popping
+// before the longjmp matches architect §2.4.2 ("write message,
+// pop it, longjmp back") — a rethrow from inside the catch
+// handler then targets the *next* outer frame rather than the
+// one we just unwound. The catch handler still receives the
+// frame pointer it allocated, so `sfn_take_exception(frame)`
+// reads the message off the just-popped frame; the chain head
+// reflects the logically-unwound state immediately. The save
+// point may live on the current stack (the inline-setjmp
+// pattern) or in a returned frame (UB; see the file-header
+// note). With an empty chain, this is an uncaught exception:
+// the body calls `abort()` to terminate — mirrors the C
+// runtime's `sailfin_runtime_throw` semantics.
 //
 // IR pinning. The body contains exactly one
 // `call void @longjmp(...)`. The matching IR-pinning assertion
@@ -314,19 +326,30 @@ fn sfn_throw(message: * u8) -> void {
     }
     let head = sfn_exception_frame_head_addr as * SfnExceptionFrame;
     head.message_addr = message as i64;
-    longjmp(head.jmp_buf_addr as * u8, 1);
+    let buf = head.jmp_buf_addr as * u8;
+    sfn_exception_frame_head_addr = head.prev_addr;
+    longjmp(buf, 1);
 }
 
 // `sfn_take_exception(frame)` returns the message pointer
-// stashed on `frame` by a prior `sfn_throw`. Returns null if
-// no exception fired against this frame. The pointer remains
-// owned by whatever allocated the message (typically a Sailfin
-// string literal in user code, lowered to a persistent global
-// — see `compiler/src/llvm/expression_lowering/native/
-// core_strings.sfn::lower_string_literal`). Until the M1.A
-// SfnString aggregate parameter flip lands, the return type is
-// the raw `* u8` placeholder; M2.7b retypes this to
-// `SfnString` without touching call sites.
+// stashed on `frame` by a prior `sfn_throw` and clears the
+// frame's message slot — the name "take" matches the legacy
+// C runtime's `sailfin_runtime_take_exception`, which also
+// consumed the message on read. A second call against the same
+// frame (or a re-use of the frame for another try block)
+// observes null rather than a stale pointer from a prior throw.
+// Returns null if no exception has fired against this frame.
+// The pointer remains owned by whatever allocated the message
+// (typically a Sailfin string literal in user code, lowered to
+// a persistent global — see `compiler/src/llvm/expression_
+// lowering/native/core_strings.sfn::lower_string_literal`); the
+// clear-on-take only resets the slot pointer, not the
+// allocation. Until the M1.A SfnString aggregate parameter
+// flip lands, the return type is the raw `* u8` placeholder;
+// M2.7b retypes this to `SfnString` without touching call
+// sites.
 fn sfn_take_exception(frame: * SfnExceptionFrame) -> * u8 {
-    return frame.message_addr as * u8;
+    let msg = frame.message_addr as * u8;
+    frame.message_addr = 0;
+    return msg;
 }

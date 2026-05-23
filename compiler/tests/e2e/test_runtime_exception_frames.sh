@@ -264,6 +264,76 @@ test_longjmp_shape() {
         echo "$throw_block"
         return 1
     fi
+    # Architect §2.4.2: throw must pop the frame BEFORE longjmp so
+    # a rethrow from inside the catch handler targets the next
+    # outer frame, not the one we just unwound. The body must
+    # write a fresh value into @global.sfn_exception_frame_head_addr
+    # before the longjmp call. Pin both the store and the relative
+    # ordering — without the ordering check, a buggy emission that
+    # stored AFTER longjmp (dead code) would still pass.
+    if ! echo "$throw_block" | grep -qE "store i64 .*, i64\* @global\.sfn_exception_frame_head_addr"; then
+        echo "[test]   sfn_throw missing pop-before-longjmp 'store i64 ..., i64* @global.sfn_exception_frame_head_addr':"
+        echo "$throw_block"
+        return 1
+    fi
+    local pop_line longjmp_line
+    pop_line="$(echo "$throw_block" | grep -n "store i64 .*@global\.sfn_exception_frame_head_addr" | tail -1 | cut -d: -f1)"
+    longjmp_line="$(echo "$throw_block" | grep -n "call void @longjmp" | head -1 | cut -d: -f1)"
+    if [ -z "$pop_line" ] || [ -z "$longjmp_line" ] || [ "$pop_line" -ge "$longjmp_line" ]; then
+        echo "[test]   sfn_throw must pop frame head BEFORE longjmp (pop=$pop_line, longjmp=$longjmp_line)"
+        echo "$throw_block"
+        return 1
+    fi
+    return 0
+}
+
+test_take_clears_slot() {
+    local ll="$SCRATCH/exception.ll"
+    if [ ! -f "$ll" ]; then
+        echo "[test]   $ll missing — test_emit_define_shape must run first"
+        return 1
+    fi
+    # Architect §2.4.2 (matched by legacy C
+    # sailfin_runtime_take_exception): "take" consumes the message
+    # — a subsequent take on the same frame reads null. Pin the
+    # store-zero to the message_addr slot (field index 2 of
+    # SfnExceptionFrame).
+    local take_block
+    take_block="$(sed -n '/^define i8\* @sfn_take_exception(/,/^}/p' "$ll")"
+    if ! echo "$take_block" | grep -qE "store i64 0, i64\* %t[0-9]+$"; then
+        echo "[test]   sfn_take_exception missing 'store i64 0, i64* %tN' clear-on-take:"
+        echo "$take_block"
+        return 1
+    fi
+    # The clear must target the message_addr slot — getelementptr
+    # with field index `i32 2` (third field of SfnExceptionFrame).
+    # Anchor on the GEP→store sequence so a regression that
+    # accidentally clears prev_addr or jmp_buf_addr fails here.
+    if ! echo "$take_block" | grep -qE "getelementptr %SfnExceptionFrame, %SfnExceptionFrame\* %frame, i32 0, i32 2"; then
+        echo "[test]   sfn_take_exception missing 'getelementptr ... i32 0, i32 2' to message_addr:"
+        echo "$take_block"
+        return 1
+    fi
+    return 0
+}
+
+test_pop_frame_null_safe() {
+    local ll="$SCRATCH/exception.ll"
+    if [ ! -f "$ll" ]; then
+        echo "[test]   $ll missing — test_emit_define_shape must run first"
+        return 1
+    fi
+    # Architect: sfn_exception_pop_frame must be idempotent on a
+    # null frame (mirrors C sailfin_runtime_try_leave). The body
+    # must compare the frame_addr to 0 and early-return without
+    # dereferencing.
+    local pop_block
+    pop_block="$(sed -n '/^define void @sfn_exception_pop_frame(/,/^}/p' "$ll")"
+    if ! echo "$pop_block" | grep -qE "icmp eq i64 %t[0-9]+, 0"; then
+        echo "[test]   sfn_exception_pop_frame missing 'icmp eq i64 %tN, 0' null guard:"
+        echo "$pop_block"
+        return 1
+    fi
     return 0
 }
 
@@ -359,6 +429,7 @@ struct SfnExceptionFrame {
 
 extern struct SfnExceptionFrame *sfn_exception_alloc_frame(void);
 extern void sfn_exception_free_frame(struct SfnExceptionFrame *frame);
+extern struct SfnExceptionFrame *sfn_exception_frame_head(void);
 extern void sfn_exception_push_frame(struct SfnExceptionFrame *frame);
 extern void sfn_exception_pop_frame(struct SfnExceptionFrame *frame);
 extern void sfn_throw(const char *message);
@@ -379,12 +450,25 @@ static void provoke(const char *msg) {
 }
 
 int main(void) {
+    /* Pre-flight: null-safe pop on an empty chain should be a
+     * no-op (Architect: idempotent; matches C sailfin_runtime_
+     * try_leave null-handle behavior). */
+    sfn_exception_pop_frame(NULL);
+    if (sfn_exception_frame_head() != NULL) {
+        fprintf(stderr, "pop_frame(NULL) on empty chain corrupted head\n");
+        return 1;
+    }
+
     struct SfnExceptionFrame *frame = sfn_exception_alloc_frame();
     if (!frame) {
         fprintf(stderr, "alloc_frame returned NULL\n");
-        return 1;
+        return 2;
     }
     sfn_exception_push_frame(frame);
+    if (sfn_exception_frame_head() != frame) {
+        fprintf(stderr, "push_frame did not update head\n");
+        return 3;
+    }
 
     /* Inline setjmp on the frame's jmp_buf. Equivalent to the
      * M2.7b compiler-inline emission of sfn_try_enter. */
@@ -393,24 +477,43 @@ int main(void) {
         /* First-call branch: throw across a deeper frame. */
         provoke("boom");
         fprintf(stderr, "UNREACHABLE: provoke returned without longjmp\n");
-        return 2;
+        return 4;
     }
 
     /* Longjmp returned here. Verify the message round-tripped. */
-    char *msg = sfn_take_exception(frame);
-    if (!msg) {
-        fprintf(stderr, "take_exception returned NULL after throw\n");
-        return 3;
-    }
-    if (strcmp(msg, "boom") != 0) {
-        fprintf(stderr, "take_exception returned '%s', expected 'boom'\n", msg);
-        return 4;
-    }
     if (rc != 1) {
         fprintf(stderr, "setjmp returned %d on longjmp, expected 1\n", rc);
         return 5;
     }
 
+    /* Architect §2.4.2: throw pops the frame before longjmp. The
+     * chain head must reflect the unwound state. */
+    if (sfn_exception_frame_head() != NULL) {
+        fprintf(stderr, "sfn_throw did not pop frame before longjmp (head=%p, expected NULL)\n",
+                (void *)sfn_exception_frame_head());
+        return 6;
+    }
+
+    char *msg = sfn_take_exception(frame);
+    if (!msg) {
+        fprintf(stderr, "take_exception returned NULL after throw\n");
+        return 7;
+    }
+    if (strcmp(msg, "boom") != 0) {
+        fprintf(stderr, "take_exception returned '%s', expected 'boom'\n", msg);
+        return 8;
+    }
+
+    /* Architect (matches legacy C sailfin_runtime_take_exception):
+     * "take" consumes the message — a second call must return
+     * NULL, not the stale pointer. */
+    char *msg2 = sfn_take_exception(frame);
+    if (msg2 != NULL) {
+        fprintf(stderr, "second take_exception returned non-NULL '%s' (slot not cleared)\n", msg2);
+        return 9;
+    }
+
+    /* Idempotent: pop a frame that is no longer on the chain. */
     sfn_exception_pop_frame(frame);
     sfn_exception_free_frame(frame);
     return 0;
@@ -451,7 +554,9 @@ run_test "sfn emit llvm produces define for every export" test_emit_define_shape
 run_test "sfn emit llvm declares libc malloc/free/memset/setjmp/longjmp/abort" test_emit_libc_declares
 run_test "sfn emit llvm pins SfnExceptionFrame layout" test_struct_layout
 run_test "sfn emit llvm pins setjmp call in sfn_try_enter after push_frame" test_setjmp_shape
-run_test "sfn emit llvm pins longjmp + empty-chain abort in sfn_throw" test_longjmp_shape
+run_test "sfn emit llvm pins longjmp + empty-chain abort + pop-before-longjmp in sfn_throw" test_longjmp_shape
+run_test "sfn emit llvm pins clear-on-take in sfn_take_exception" test_take_clears_slot
+run_test "sfn emit llvm pins null guard in sfn_exception_pop_frame" test_pop_frame_null_safe
 run_test "sfn emit llvm pins frame-head global storage" test_frame_head_global
 run_test "sfn emit llvm does not collide with C runtime exception family" test_no_runtime_symbol_collision
 run_test "cross-frame unwind: inline setjmp + sfn_throw round-trips message" test_cross_frame_roundtrip
