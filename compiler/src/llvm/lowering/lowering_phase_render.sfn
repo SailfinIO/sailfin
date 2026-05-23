@@ -20,6 +20,7 @@ import {
     render_vtable_constants,
     render_vtable_type_definitions
 } from "../rendering_helpers";
+import { async_runtime_declare_lines } from "../runtime_helpers";
 import { TraitMetadata, TypeContext } from "../types";
 import { number_to_string, starts_with } from "../utils";
 import { sfn_abi_hash_decimal } from "./abi_hash";
@@ -98,8 +99,17 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
         lines.push("");
     }
 
-    // Async/future runtime types
-    lines = extend_string_lines(lines, ["%SailfinFutureNumber = type opaque", "%SailfinFutureInt = type opaque", "%SailfinFutureBool = type opaque", "%SailfinFuturePtr = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", "", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)", "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)", "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)", "declare %SailfinFutureInt* @sailfin_runtime_spawn_int(i64 ()*)", "declare %SailfinFutureInt* @sailfin_runtime_spawn_int_ctx(i64 (i8*)*, i8*)", "declare i64 @sailfin_runtime_await_int(%SailfinFutureInt*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)", "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)", "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)", "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr(i8* ()*)", "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_ptr(%SailfinFuturePtr*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)", "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)", "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)", "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)", "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)", "", "; Enum tag reader for seedcheck - reads i32 tag from NativeInstruction array", "declare double @sailfin_enum_tag_from_instruction_array(i8*, double)", "",]);
+    // Async/future runtime types. Opaque-type defs and the seedcheck
+    // enum-tag reader declare stay inline — they are not function
+    // declares the descriptor dispatch handles (#500 / M1.7.4 scope
+    // `Out:`). The 18 spawn/await `declare` lines are sourced from the
+    // runtime helper registry via `async_runtime_declare_lines`, which
+    // walks the descriptors in registration order so the emitted IR
+    // stays byte-for-byte stable as the M4 concurrency work later
+    // extends or replaces the typed variants.
+    lines = extend_string_lines(lines, ["%SailfinFutureNumber = type opaque", "%SailfinFutureInt = type opaque", "%SailfinFutureBool = type opaque", "%SailfinFuturePtr = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", ""]);
+    lines = extend_string_lines(lines, async_runtime_declare_lines());
+    lines = extend_string_lines(lines, ["", "; Enum tag reader for seedcheck - reads i32 tag from NativeInstruction array", "declare double @sailfin_enum_tag_from_instruction_array(i8*, double)", ""]);
 
     // Vtable type definitions
     let vtable_type_lines = render_vtable_type_definitions(type_context);
