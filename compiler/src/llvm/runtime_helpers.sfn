@@ -351,8 +351,17 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_serve_fn", symbol: "sailfin_runtime_serve", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io", "net"], native_signature: null, c_abi_return_type: null
     });
+    // M2.5 (#403): `native_signature` flipped to `sfn_str_codepoint`,
+    // the canonical wave-2 trampoline. C-ABI return type stays
+    // `double` because the wave-2 C body forwards through
+    // `sailfin_runtime_char_code` whose ABI is `double`-returning;
+    // the post-call coercion in `emit_runtime_call` (issue #638)
+    // bridges that back to the user-visible `i64`. Once the
+    // `sfn_str_codepoint` body retires the trampoline and returns
+    // `i64` natively (architect §2.2.2), `c_abi_return_type` drops
+    // to `null` in the same PR that drops the C trampoline.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_char_code_fn", symbol: "sailfin_runtime_char_code", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: "double"
+        target: "runtime_char_code_fn", symbol: "sailfin_runtime_char_code", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: "sfn_str_codepoint", c_abi_return_type: "double"
     });
 
     // Process helpers
@@ -602,11 +611,16 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "rc.release", symbol: "sfn_rc_release", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    // M2.5 (#403): `number.to_string` / `string.to_number` flip to
+    // the wave-2 trampolines (`sfn_number_to_str`, `sfn_str_to_number`).
+    // C-ABI shape stays identical — the trampoline bodies are pure
+    // renames over the legacy entrypoints — so no `c_abi_return_type`
+    // override is needed.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "number.to_string", symbol: "sailfin_runtime_number_to_string", return_type: "i8*", parameter_types: ["double"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "number.to_string", symbol: "sailfin_runtime_number_to_string", return_type: "i8*", parameter_types: ["double"], effects: [], native_signature: "sfn_number_to_str", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.to_number", symbol: "sailfin_runtime_string_to_number", return_type: "double", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "string.to_number", symbol: "sailfin_runtime_string_to_number", return_type: "double", parameter_types: ["i8*"], effects: [], native_signature: "sfn_str_to_number", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "strings_equal", symbol: "strings_equal", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_str_eq", c_abi_return_type: null
@@ -614,17 +628,32 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "char_code", symbol: "char_code", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    // M2.5 (#403): the bare `number_to_string` C trampoline (a one-line
+    // wrapper around `sailfin_runtime_number_to_string`) becomes
+    // unreferenced once this descriptor targets the wave-2
+    // `sfn_number_to_str` name. The `symbol` field stays pinned at
+    // `number_to_string` as archeology — `effective_symbol` resolution
+    // prefers `native_signature` whenever it is set.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "number_to_string", symbol: "number_to_string", return_type: "i8*", parameter_types: ["double"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "number_to_string", symbol: "number_to_string", return_type: "i8*", parameter_types: ["double"], effects: [], native_signature: "sfn_number_to_str", c_abi_return_type: null
+    });
+    // M2.5 (#403): grapheme descriptors flip to the wave-2 trampolines
+    // (`sfn_str_grapheme_count`, `sfn_str_grapheme_at`). Both
+    // trampolines preserve the legacy `double` C-ABI return shape so
+    // the #639 `c_abi_return_type: "double"` coercion stays
+    // bit-identical at every existing call site — only the called
+    // symbol moves. Both `grapheme_at` (bare) and
+    // `runtime_grapheme_at_fn` (prelude wrapper) point at the same
+    // canonical symbol so freshly-emitted IR has zero references to
+    // the legacy `sailfin_runtime_grapheme_*` names.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_grapheme_count_fn", symbol: "sailfin_runtime_grapheme_count", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: "sfn_str_grapheme_count", c_abi_return_type: "double"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_grapheme_count_fn", symbol: "sailfin_runtime_grapheme_count", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: "double"
+        target: "runtime_grapheme_at_fn", symbol: "sailfin_runtime_grapheme_at", return_type: "i8*", parameter_types: ["i8*", "double"], effects: [], native_signature: "sfn_str_grapheme_at", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_grapheme_at_fn", symbol: "sailfin_runtime_grapheme_at", return_type: "i8*", parameter_types: ["i8*", "double"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "grapheme_at", symbol: "sailfin_runtime_grapheme_at", return_type: "i8*", parameter_types: ["i8*", "double"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "grapheme_at", symbol: "sailfin_runtime_grapheme_at", return_type: "i8*", parameter_types: ["i8*", "double"], effects: [], native_signature: "sfn_str_grapheme_at", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "is_whitespace_char", symbol: "sailfin_runtime_is_whitespace_char", return_type: "i1", parameter_types: ["i8"], effects: [], native_signature: null, c_abi_return_type: null

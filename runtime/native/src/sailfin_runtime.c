@@ -2103,6 +2103,218 @@ const char *sfn_str_from_cstr(const char *s)
     return s;
 }
 
+/* M2.5 (#403): wave-2 trampolines for the canonical sfn_str_* / sfn_*_to_str
+ * names. Mirror the M2.4a wave-1 pattern: the compiler's runtime_helpers.sfn
+ * registry flips `native_signature` on the matching descriptors so fresh
+ * user emission targets these bare canonical names; the bodies forward to
+ * the legacy `sailfin_runtime_*` entrypoints until the M2.A.2 type-mapping
+ * flip lets the bodies move into Sailfin and consume the SfnString
+ * aggregate / arena directly. Per acceptance criterion #1, the legacy
+ * `sailfin_runtime_grapheme_count / _grapheme_at / _byte_at /
+ * _find_byte_index / _char_code / _string_to_number / _number_to_string`
+ * symbols become unreferenced in user emission once the seven descriptors
+ * flip; the C bodies stay exported so seed-built IR keeps linking
+ * (parallel to the wave-1 `strings_equal` / `sailfin_runtime_string_length`
+ * coexistence). */
+double sailfin_runtime_grapheme_count(char *text);
+char *sailfin_runtime_grapheme_at(char *text, double index);
+double sailfin_runtime_char_code(char *text);
+double sailfin_runtime_string_to_number(char *text);
+char *sailfin_runtime_number_to_string(double value);
+
+/* Returns `double` to match the legacy C ABI's register class —
+ * `sailfin_runtime_grapheme_count` returns `double` (the post-#639
+ * descriptor exposes it to Sailfin as `i64` and `emit_runtime_call`
+ * splices a `round + fptosi` coercion at every call site). The
+ * trampoline preserves that ABI so the M2.5 flip doesn't disturb
+ * the coercion machinery; the eventual Sailfin body retires the
+ * double-return convention alongside the wider `int`/`float`
+ * landing. */
+double sfn_str_grapheme_count(const char *s)
+{
+    return sailfin_runtime_grapheme_count((char *)s);
+}
+
+char *sfn_str_grapheme_at(const char *s, double idx)
+{
+    return sailfin_runtime_grapheme_at((char *)s, idx);
+}
+
+/* Legacy `sailfin_runtime_byte_at` returns `double`; the architect spec
+ * is `(SfnString, i64) -> i64` (§2.2.2). No compiler emission site calls
+ * the legacy entrypoint today — `sailfin_runtime_byte_at` is an orphan
+ * from a prior design. This trampoline ships the architect-spec ABI
+ * (int64 return, int64 index) so the first caller routes through the
+ * canonical shape from the outset. */
+int64_t sfn_str_byte_at(const char *s, int64_t idx)
+{
+    if (!s || idx < 0)
+    {
+        return -1;
+    }
+    unsigned char byte = (unsigned char)s[idx];
+    return (int64_t)byte;
+}
+
+/* memchr-backed first-occurrence scan. Architect spec
+ * (`(SfnString, i64, i64) -> i64`, §2.2.2). No compiler emission site
+ * targets `sailfin_runtime_find_byte_index` today — same orphan story
+ * as `_byte_at`. The trampoline takes int64s end-to-end so callers
+ * never round-trip through `double`. */
+int64_t sfn_str_find_byte(const char *s, int64_t byte_value, int64_t start_index)
+{
+    if (!s)
+    {
+        return -1;
+    }
+    int64_t start = start_index < 0 ? 0 : start_index;
+    bool truncated = false;
+    int64_t len = (int64_t)_safe_strlen_asan((char *)s, &truncated);
+    if (start >= len)
+    {
+        return -1;
+    }
+    unsigned char target = (unsigned char)(byte_value & 0xff);
+    char *found = (char *)memchr(s + start, target, (size_t)(len - start));
+    if (!found)
+    {
+        return -1;
+    }
+    return (int64_t)(found - s);
+}
+
+/* First-codepoint reader. The legacy `sailfin_runtime_char_code` carries
+ * the immediate-codepoint pseudo-string fast path and reads the first byte
+ * of a NUL-terminated UTF-8 buffer; the architect spec name is
+ * `sfn_str_codepoint` (§2.2.2). Returns `double` to match the legacy
+ * register class — same rationale as `sfn_str_grapheme_count` above. */
+double sfn_str_codepoint(const char *s)
+{
+    return sailfin_runtime_char_code((char *)s);
+}
+
+/* 1-4 byte UTF-8 encode. Architect spec
+ * (`(i64, Arena*) -> SfnString`, §2.2.2). Today's proof-of-life trampoline
+ * shape drops the arena (no `Arena*` is threaded through the Sailfin
+ * call surface yet) and returns a freshly `malloc`-ed NUL-terminated
+ * buffer so the boundary stays compatible with the legacy `* u8` ABI.
+ * Invalid codepoints (negative or > U+10FFFF) produce an empty string.
+ * UTF-16 surrogate range (U+D800..U+DFFF) is rejected with empty too
+ * — those are reserved for UTF-16 encoding and never appear in valid
+ * UTF-8. */
+char *sfn_str_from_codepoint(int64_t cp)
+{
+    unsigned char buf[5];
+    size_t len = 0;
+    if (cp >= 0 && cp < 0x80)
+    {
+        buf[0] = (unsigned char)cp;
+        len = 1;
+    }
+    else if (cp >= 0x80 && cp < 0x800)
+    {
+        buf[0] = (unsigned char)(0xC0u | ((uint32_t)cp >> 6));
+        buf[1] = (unsigned char)(0x80u | ((uint32_t)cp & 0x3Fu));
+        len = 2;
+    }
+    else if (cp >= 0x800 && cp < 0x10000 && (cp < 0xD800 || cp > 0xDFFF))
+    {
+        buf[0] = (unsigned char)(0xE0u | ((uint32_t)cp >> 12));
+        buf[1] = (unsigned char)(0x80u | (((uint32_t)cp >> 6) & 0x3Fu));
+        buf[2] = (unsigned char)(0x80u | ((uint32_t)cp & 0x3Fu));
+        len = 3;
+    }
+    else if (cp >= 0x10000 && cp <= 0x10FFFF)
+    {
+        buf[0] = (unsigned char)(0xF0u | ((uint32_t)cp >> 18));
+        buf[1] = (unsigned char)(0x80u | (((uint32_t)cp >> 12) & 0x3Fu));
+        buf[2] = (unsigned char)(0x80u | (((uint32_t)cp >> 6) & 0x3Fu));
+        buf[3] = (unsigned char)(0x80u | ((uint32_t)cp & 0x3Fu));
+        len = 4;
+    }
+    else
+    {
+        len = 0;
+    }
+    char *out = (char *)_rt_malloc(len + 1);
+    if (!out)
+    {
+        return NULL;
+    }
+    if (len > 0)
+    {
+        memcpy(out, buf, len);
+    }
+    out[len] = '\0';
+    _track_owned_string(out);
+    return out;
+}
+
+double sfn_str_to_number(const char *s)
+{
+    return sailfin_runtime_string_to_number((char *)s);
+}
+
+char *sfn_number_to_str(double v)
+{
+    return sailfin_runtime_number_to_string(v);
+}
+
+/* Hand-rolled int-to-string. Architect §2.2.2 calls for hand-rolling
+ * (~100 LOC each per Rust `std::fmt` precedent) rather than reaching
+ * for variadic snprintf in v0. Writes into a 21-byte stack buffer
+ * (the worst-case INT64_MIN decimal width is 20 digits + sign + NUL),
+ * copies into a heap buffer, and returns the NUL-terminated result.
+ * The arena threading lives in the eventual Sailfin body; this
+ * trampoline keeps the legacy `* u8` return ABI so the descriptor
+ * flip doesn't need to thread `@sfn_default_arena` through the call
+ * site. */
+char *sfn_int_to_str(int64_t v)
+{
+    char buf[21];
+    size_t pos = sizeof(buf);
+    buf[--pos] = '\0';
+    bool negative = false;
+    uint64_t magnitude;
+    if (v < 0)
+    {
+        negative = true;
+        /* INT64_MIN has no positive int64 representation; widen through
+         * the unsigned domain before negating. */
+        magnitude = (uint64_t)(-(v + 1)) + 1u;
+    }
+    else
+    {
+        magnitude = (uint64_t)v;
+    }
+    if (magnitude == 0)
+    {
+        buf[--pos] = '0';
+    }
+    else
+    {
+        while (magnitude > 0 && pos > 0)
+        {
+            buf[--pos] = (char)('0' + (magnitude % 10u));
+            magnitude /= 10u;
+        }
+    }
+    if (negative && pos > 0)
+    {
+        buf[--pos] = '-';
+    }
+    size_t len = sizeof(buf) - 1 - pos;
+    char *out = (char *)_rt_malloc(len + 1);
+    if (!out)
+    {
+        return NULL;
+    }
+    memcpy(out, buf + pos, len);
+    out[len] = '\0';
+    _track_owned_string(out);
+    return out;
+}
+
 /* M2.9 (#405): expose the libc `environ` global to the
  * Sailfin-native `sfn_process_run` in `runtime/sfn/process.sfn`.
  * Sailfin has no `extern var` syntax — declaring `environ` as an
