@@ -513,16 +513,21 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     if debug_lowering { print.err("emit-llvm: phase=context_functions"); }
 
     // ── Effect analysis ─────────────────────────────────────────────
-    // Helper collection is currently gated off. Flipping this flag to
-    // `false` re-enables `collect_runtime_helper_targets` so the dynamic
-    // walker discovers per-module runtime-helper declares (unblocking
-    // #501 / #414). Blocked on a determinism bug surfaced when the
-    // walker runs on `compiler/src/parser/expressions.sfn`: the 20x
-    // emit-sweep e2e test under `make check` reliably observes a
-    // character/mangling-suffix drop in an extracted function name
-    // (see #737 for the diagnosis). Track the bug fix separately;
-    // this flag exists so the flip is a one-line change once resolved.
-    let skip_helper_collection = true;
+    // Helper collection is now ON (#740 closed the duplicate-declare
+    // failure that previously gated this). `collect_runtime_helper_targets`
+    // walks every function in `local_functions`, extracting call targets
+    // and surfacing per-module runtime-helper declares so the linker
+    // resolves them without relying on the conservative
+    // `seed_default_runtime_helpers` baseline alone (unblocking #501 / #414).
+    //
+    // The walker can discover targets that are already declared inline
+    // by `render_llvm_preamble` (the typed spawn/await family from
+    // `async_runtime_declare_lines` and the seedcheck enum-tag reader);
+    // `render_runtime_helper_declarations` filters those out so the
+    // emitted IR never carries duplicate `declare` lines. See the
+    // matching skip block in `compiler/src/llvm/rendering.sfn` if a
+    // future preamble-inlined declare needs the same treatment.
+    let skip_helper_collection = false;
     // Bootstrap guard (commit 65b065ad, "make check completes binary not
     // valid"): effect analysis currently introduces instability in
     // selfhost/native lowering for some modules. Keep disabled by default.
