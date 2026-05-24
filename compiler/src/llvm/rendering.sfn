@@ -9,7 +9,11 @@ import {
     extract_struct_type_from_llvm,
     render_interface_signature
 } from "./rendering_helpers";
-import { effective_helper_declare_return_type, runtime_helper_descriptors } from "./runtime_helpers";
+import {
+    effective_helper_declare_return_type,
+    is_async_runtime_target,
+    runtime_helper_descriptors
+} from "./runtime_helpers";
 import { map_parameter_type, map_return_type } from "./type_mapping";
 import { RuntimeHelperDescriptor, TraitMetadata, TypeContext } from "./types";
 import {
@@ -137,6 +141,41 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
         if index >= descriptors.length { break; }
         let descriptor = descriptors[index];
         if string_array_contains(used_targets, descriptor.target) {
+            // Issue #740: skip helpers that are unconditionally declared
+            // inline by `render_llvm_preamble` (in
+            // `lowering_phase_render.sfn`). When the dynamic helper-
+            // collection walker (`collect_runtime_helper_targets`) is
+            // enabled it discovers these targets and adds them to
+            // `used_targets`; without this filter the loop below would
+            // emit a duplicate `declare` line that llvm-as rejects with
+            // "invalid redefinition of function" — silently breaking the
+            // `--work-dir` parallel-emit retry cascade and the
+            // 20× emit-sweep determinism gate.
+            //
+            // Two preamble-inlined declare sets must be excluded:
+            //   1. The typed spawn/await runtime family
+            //      (`async_runtime_declare_lines()` walks every
+            //      descriptor where `is_async_runtime_target` is true
+            //      and emits its declare directly into the preamble).
+            //   2. `sailfin_enum_tag_from_instruction_array` — the
+            //      seedcheck enum-tag reader has its declare hardcoded
+            //      in the preamble for separate-compilation visibility.
+            //
+            // Both sets are emitted by the preamble even when the walker
+            // is off (see `lowering_phase_render.sfn:110-112`), so
+            // skipping them here never strips a declare the module
+            // actually needs.
+            let mut _preamble_inlined: boolean = false;
+            if is_async_runtime_target(descriptor.target) {
+                _preamble_inlined = true;
+            }
+            if descriptor.target == "sailfin_enum_tag_from_instruction_array" {
+                _preamble_inlined = true;
+            }
+            if _preamble_inlined {
+                index += 1;
+                continue;
+            }
             // M1.C / M2.4a: when `native_signature` is populated the
             // call-emission path (`coerce_and_emit_call` in
             // `core_call_emission.sfn`) routes the call to that symbol
