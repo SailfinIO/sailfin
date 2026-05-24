@@ -63,7 +63,7 @@ EOF
     # the runtime's @add(double, double) helper that ships in every
     # IR file).
     local main_body
-    main_body="$(sed -n "/define void @sailfin_user_main/,/^}/p" "$ll")"
+    main_body="$(sed -n "/define \(internal \)\{0,1\}void @sailfin_user_main/,/^}/p" "$ll")"
     if ! echo "$main_body" | grep -qE "^[[:space:]]*%[a-zA-Z0-9_]+ = add i64 "; then
         echo "[test]   missing 'add i64' in user main"
         echo "$main_body" | head -20
@@ -95,7 +95,7 @@ EOF
     # lowering (i8* alloca + sailfin_runtime_string_concat). Assert
     # NEITHER appears in the float main.
     local main_body
-    main_body="$(sed -n "/define void @sailfin_user_main/,/^}/p" "$ll")"
+    main_body="$(sed -n "/define \(internal \)\{0,1\}void @sailfin_user_main/,/^}/p" "$ll")"
     if echo "$main_body" | grep -q "alloca i8\*"; then
         echo "[test]   pre-fix regression: float local lowered as i8* (string)"
         echo "$main_body" | head -20

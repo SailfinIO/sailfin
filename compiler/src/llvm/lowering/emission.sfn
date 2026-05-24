@@ -52,7 +52,6 @@ import { emit_async_function } from "./emission_async";
 import { build_define_header_line } from "./emission_header";
 import { lower_instruction_range } from "./instructions";
 import { emit_scope_drops } from "./instructions_helpers";
-import { module_user_main_symbol } from "./module_globals";
 
 fn is_safe_llvm_type_text(value: string) -> boolean {
     if value == null { return false; }
@@ -319,9 +318,14 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
 
     if !fn_is_extern {
         if fn_name == "main" {
-            // Emit the Sailfin-level main under a stable internal symbol and provide
-            // a C-compatible `main(argc, argv)` wrapper.
-            sanitized = module_user_main_symbol(module_name);
+            // M5.3 (#471): emit the user's `fn main` body under an internal
+            // `alwaysinline` symbol and synthesize a real `@main(i32 %argc,
+            // i8** %argv)` wrapper below. The wrapper converts argv, sets up
+            // a top-level exception frame, calls into the user body, and
+            // returns the user's value (or 1 on uncaught throw). LLVM inlines
+            // the internal body at -O2 link, so no `sailfin_user_main_*`
+            // symbol appears in the final binary's symbol table.
+            sanitized = "sailfin_user_main__" + sanitize_symbol(module_name);
             emit_main_wrapper = true;
         }
     }
@@ -370,6 +374,13 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     let mut linkage: string = "";
     let internalize = should_internalize_function(function, entry_points, exported_symbols, imported_functions);
     if internalize { linkage = "internal "; }
+    // M5.3 (#471): the user's `fn main` body is emitted under a synthesized
+    // internal symbol so the `@main(argc, argv)` wrapper below can call it.
+    // Force `internal` linkage so it's eligible for DCE after the wrapper
+    // inlines the body at -O2 link — the `alwaysinline` attribute applied
+    // to the header further down forces the inliner to honor this even
+    // before later optimization passes.
+    if emit_main_wrapper { linkage = "internal "; }
     if debug_lowering {
         let mut internalize_text = "false";
         if internalize { internalize_text = "true"; }
@@ -378,7 +389,17 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
             + internalize_text);
         print.err("emit-llvm: emit_fn phase=define_header name=" + fn_name);
     }
-    let define_header: string = build_define_header_line(linkage, llvm_return, sanitized, signature);
+    let mut define_header: string = build_define_header_line(linkage, llvm_return, sanitized, signature);
+    // M5.3 (#471): attach `alwaysinline` to the user-main body so the
+    // C-ABI `@main` wrapper folds it in at link time, eliminating the
+    // `sailfin_user_main__*` symbol from the final binary.
+    if emit_main_wrapper {
+        let header_len = define_header.length;
+        if header_len > 2 {
+            let header_prefix = substring(define_header, 0, header_len - 2);
+            define_header = header_prefix + " alwaysinline {";
+        }
+    }
     lines = append_string(lines, define_header);
     let entry_line: string = entry_label + ":";
     lines = append_string(lines, entry_line);
@@ -539,10 +560,112 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     lines = append_string(lines, "}");
 
     if emit_main_wrapper {
-        // C ABI wrapper. Always returns 0 (success) after invoking the Sailfin main.
-        lines = extend_string_array(lines, ["", "define i32 @main(i32 %argc, i8** %argv) {", "entry:", "  call void @"
-            + sanitized
-            + "()", "  ret i32 0", "}",]);
+        // M5.3 (#471): synthesize a C-ABI `@main(i32 %argc, i8** %argv)`
+        // that converts argv into a Sailfin `string[]`, installs a top-
+        // level exception frame (uncaught throws → exit code 1), invokes
+        // the user-supplied body emitted above as
+        // `@sailfin_user_main__<module>`, and forwards its return value
+        // (or 0 for void) as the process exit code.
+        //
+        // The wrapper hand-rolls its LLVM IR rather than going through
+        // the runtime-call dispatch because it lives outside the
+        // Sailfin AST — the body lowering already finished above. All
+        // declares emitted here use the canonical signatures from
+        // `runtime_helpers.sfn`, so duplicate `declare`s elsewhere in
+        // the module link cleanly.
+        let user_param_count = function.parameters.length;
+        // `string[]` lowers to `{ i8**, i64, i64 }*` (SfnArray of char*).
+        // The runtime helper returns the value as `i8*`; we bitcast at
+        // the call boundary.
+        let argv_llvm_type: string = "{ i8**, i64, i64 }*";
+        let mut wrapper_lines: string[] = [];
+        wrapper_lines.push("");
+        // Module-scope declares for the C runtime symbols the wrapper
+        // calls. `sfn_exception_push_frame` / `_pop_frame` /
+        // `sfn_take_exception` / `setjmp` are emitted by the existing
+        // `render_runtime_helper_declarations` pass (added via
+        // `seed_default_runtime_helpers`) and skipped when the symbol
+        // is defined locally — declaring them again here would clash
+        // with the runtime/sfn/exception.sfn defines in concatenated
+        // builds. The two C-only entrypoints below have no Sailfin
+        // define anywhere, so we always declare them inline.
+        wrapper_lines.push("declare i8* @sailfin_runtime_argv_to_string_array(i32, i8**)");
+        wrapper_lines.push("declare void @sailfin_runtime_panic_emit(i8*)");
+        wrapper_lines.push("");
+        wrapper_lines.push("define i32 @main(i32 %argc, i8** %argv) {");
+        wrapper_lines.push("entry:");
+        // Convert argv to SfnArray<string>*. The runtime helper returns
+        // the new SfnArray as `i8*`; bitcast to the typed pointer the
+        // user body expects when it declares `argv: string[]`.
+        wrapper_lines.push("  %argv_arr_i8 = call i8* @sailfin_runtime_argv_to_string_array(i32 %argc, i8** %argv)");
+        if user_param_count > 0 {
+            wrapper_lines.push("  %argv_arr = bitcast i8* %argv_arr_i8 to "
+                + argv_llvm_type);
+        }
+        // Exception frame setup mirrors `instructions_try.sfn` (the
+        // canonical `[3 x i64]` frame + `[32 x i64]` jmpbuf layout
+        // documented in `runtime/sfn/exception.sfn` §2.4.2).
+        wrapper_lines.push("  %frame = alloca [3 x i64]");
+        wrapper_lines.push("  %jmpbuf = alloca [32 x i64]");
+        wrapper_lines.push("  %frame_i8 = bitcast [3 x i64]* %frame to i8*");
+        wrapper_lines.push("  %jmpbuf_i8 = bitcast [32 x i64]* %jmpbuf to i8*");
+        wrapper_lines.push("  %jmpbuf_slot = getelementptr [3 x i64], [3 x i64]* %frame, i64 0, i64 1");
+        wrapper_lines.push("  %jmpbuf_addr = ptrtoint i8* %jmpbuf_i8 to i64");
+        wrapper_lines.push("  store i64 %jmpbuf_addr, i64* %jmpbuf_slot");
+        wrapper_lines.push("  %msg_slot = getelementptr [3 x i64], [3 x i64]* %frame, i64 0, i64 2");
+        wrapper_lines.push("  store i64 0, i64* %msg_slot");
+        wrapper_lines.push("  call void @sfn_exception_push_frame(i8* %frame_i8)");
+        wrapper_lines.push("  %sj = call i32 @setjmp(i8* %jmpbuf_i8)");
+        wrapper_lines.push("  %is_first = icmp eq i32 %sj, 0");
+        wrapper_lines.push("  br i1 %is_first, label %main.try, label %main.catch");
+        // Try block: call the user's body, pop the frame on success,
+        // forward the user's return value as the process exit code.
+        wrapper_lines.push("main.try:");
+        let mut call_args_text: string = "";
+        if user_param_count > 0 {
+            call_args_text = argv_llvm_type + " %argv_arr";
+        }
+        let mut try_ret_line: string = "  ret i32 0";
+        if llvm_return == "void" {
+            wrapper_lines.push("  call void @" + sanitized + "("
+                + call_args_text
+                + ")");
+        } else {
+            wrapper_lines.push("  %user_rv = call " + llvm_return + " @"
+                + sanitized
+                + "("
+                + call_args_text
+                + ")");
+            // Cast the user's return type to the C ABI's i32 exit code.
+            // `number` (→ double) takes `fptosi`; integer widths use
+            // `trunc`; unknown types fall through to `ret i32 0` so a
+            // verifier error never escapes the wrapper.
+            if llvm_return == "double" {
+                wrapper_lines.push("  %exit_code = fptosi double %user_rv to i32");
+                try_ret_line = "  ret i32 %exit_code";
+            } else if llvm_return == "i64" {
+                wrapper_lines.push("  %exit_code = trunc i64 %user_rv to i32");
+                try_ret_line = "  ret i32 %exit_code";
+            } else if llvm_return == "i32" {
+                try_ret_line = "  ret i32 %user_rv";
+            } else if llvm_return == "i16" {
+                wrapper_lines.push("  %exit_code = sext i16 %user_rv to i32");
+                try_ret_line = "  ret i32 %exit_code";
+            } else if llvm_return == "i8" {
+                wrapper_lines.push("  %exit_code = sext i8 %user_rv to i32");
+                try_ret_line = "  ret i32 %exit_code";
+            }
+        }
+        wrapper_lines.push("  call void @sfn_exception_pop_frame(i8* %frame_i8)");
+        wrapper_lines.push(try_ret_line);
+        // Catch block: uncaught throw landed here via setjmp. Print the
+        // message that `sfn_throw` stashed on the frame, then exit 1.
+        wrapper_lines.push("main.catch:");
+        wrapper_lines.push("  %msg = call i8* @sfn_take_exception(i8* %frame_i8)");
+        wrapper_lines.push("  call void @sailfin_runtime_panic_emit(i8* %msg)");
+        wrapper_lines.push("  ret i32 1");
+        wrapper_lines.push("}");
+        lines = extend_string_array(lines, wrapper_lines);
     }
 
     let merged_constants = merge_string_constants(_eb_string_constants, decorator_string_constants);

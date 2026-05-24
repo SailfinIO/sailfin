@@ -1803,6 +1803,34 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
     return 2;
 }
 
+// M5.3 (#471): direct-params facade over `sailfin_cli_main`. M5.4's
+// retirement of `native_driver.c` flips the entry-point lowering to
+// call this helper from the synthesized `@main(argc, argv)` prologue,
+// passing `runtime_root` and `binary_dir` as resolved strings instead
+// of as `--runtime-root` / `--binary-dir` argv-flag injection. Today
+// it reconstructs the legacy argv shape and delegates so the 700-line
+// dispatch in `sailfin_cli_main` remains a single source of truth;
+// a follow-up PR can flip the direction (move the body here, leave
+// `sailfin_cli_main` as a back-compat shim) once M5.4 lands.
+fn sailfin_cli_main_with_paths(argv: string[], runtime_root: string, binary_dir: string) -> int ![io, clock] {
+    let mut composed: string[] = [];
+    if runtime_root.length > 0 {
+        composed.push("--runtime-root");
+        composed.push(runtime_root);
+    }
+    if binary_dir.length > 0 {
+        composed.push("--binary-dir");
+        composed.push(binary_dir);
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= argv.length { break; }
+        composed.push(argv[i]);
+        i += 1;
+    }
+    return sailfin_cli_main(composed);
+}
+
 // Exported entrypoint for the native argv shim.
 // Mirrors `sailfin_cli_main` at the C ABI boundary.
 fn native_cli_main(argv: string[]) -> int ![io] {

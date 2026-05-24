@@ -188,6 +188,20 @@ extern "C"
     SfnArray *sailfin_runtime_concat_v2(SfnArray *a, SfnArray *b);
     SfnArray *sailfin_runtime_append_string_v2(SfnArray *a, char *text);
 
+    // M5.3 (#471): convert C `(argc, argv)` into the SfnArray ABI shape
+    // that user `fn main(argv: string[])` expects. The emitted `@main`
+    // wrapper calls this from its prologue; argv[0] is preserved so
+    // user code observes the C convention (argv[0] = program name).
+    SfnArray *sailfin_runtime_argv_to_string_array(int argc, char **argv);
+
+    // M5.3 (#471): emit an uncaught-panic message + newline to stderr.
+    // Lives behind a distinct symbol from the user-facing `sfn_print_*`
+    // family so the IO-flip pin in
+    // `compiler/tests/e2e/test_runtime_io_extended.sh` (which forbids
+    // `sailfin_runtime_print_*` references in user IR) doesn't snag
+    // the wrapper's catch-pad emission.
+    void sailfin_runtime_panic_emit(char *msg);
+
     // Generic (byte-wise) array push for non-pointer element types.
     // Mutates the backing buffer to ensure capacity and returns a pointer to the
     // newly appended slot (caller writes the element bytes there).

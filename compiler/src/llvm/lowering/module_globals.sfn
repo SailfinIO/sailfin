@@ -31,10 +31,6 @@ fn module_init_symbol(module_name: string) -> string {
     return "@sailfin_module_init__" + sanitize_symbol(module_name);
 }
 
-fn module_user_main_symbol(module_name: string) -> string {
-    return "sailfin_user_main__" + sanitize_symbol(module_name);
-}
-
 // Strip surrounding quotes from a string literal (e.g., `"hello"` -> `hello`).
 fn _strip_string_quotes(s: string) -> string {
     if s.length < 2 { return s; }
