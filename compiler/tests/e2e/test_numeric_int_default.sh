@@ -59,7 +59,7 @@ emit_ir() {
 # synthesised helper uses fadd". Returns the function body via stdout.
 extract_main_body() {
     local ll="$1"
-    awk '/^define void @sailfin_user_main__/{flag=1; next} /^}/{if(flag){print; exit}} flag' "$ll"
+    awk '/^define (internal )?void @sailfin_user_main__/{flag=1; next} /^}/{if(flag){print; exit}} flag' "$ll"
 }
 
 # Acceptance criterion 1: `let a = 1; let b = a + 2` lowers to

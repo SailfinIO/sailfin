@@ -81,7 +81,7 @@ test_push_frame_in_user_function() {
         return 1
     fi
     local main_block
-    main_block="$(awk '/^define void @sailfin_user_main/{flag=1} flag{print} /^\}/{if(flag){flag=0; exit}}' "$ll")"
+    main_block="$(awk '/^define (internal )?void @sailfin_user_main/{flag=1} flag{print} /^\}/{if(flag){flag=0; exit}}' "$ll")"
     local push_count
     push_count="$(echo "$main_block" | grep -cE 'call void @sfn_exception_push_frame\(i8\* %t[0-9]+\)' || true)"
     if [ "${push_count:-0}" -ne 1 ]; then
@@ -101,7 +101,7 @@ test_setjmp_inline_branch() {
         return 1
     fi
     local main_block
-    main_block="$(awk '/^define void @sailfin_user_main/{flag=1} flag{print} /^\}/{if(flag){flag=0; exit}}' "$ll")"
+    main_block="$(awk '/^define (internal )?void @sailfin_user_main/{flag=1} flag{print} /^\}/{if(flag){flag=0; exit}}' "$ll")"
     # Exactly one inline setjmp call.
     local setjmp_count
     setjmp_count="$(echo "$main_block" | grep -cE 'call i32 @setjmp\(i8\* %t[0-9]+\)' || true)"
@@ -129,7 +129,7 @@ test_push_frame_precedes_setjmp() {
         return 1
     fi
     local main_block
-    main_block="$(awk '/^define void @sailfin_user_main/{flag=1} flag{print} /^\}/{if(flag){flag=0; exit}}' "$ll")"
+    main_block="$(awk '/^define (internal )?void @sailfin_user_main/{flag=1} flag{print} /^\}/{if(flag){flag=0; exit}}' "$ll")"
     local push_line setjmp_line
     push_line="$(echo "$main_block" | grep -nE 'call void @sfn_exception_push_frame' | head -1 | cut -d: -f1)"
     setjmp_line="$(echo "$main_block" | grep -nE 'call i32 @setjmp' | head -1 | cut -d: -f1)"
@@ -180,7 +180,7 @@ test_no_sfn_try_enter_call_site() {
     # defined in `runtime/sfn/exception.sfn` for ABI completeness; we
     # just must not call it from generated user code.
     local main_block
-    main_block="$(awk '/^define void @sailfin_user_main/{flag=1} flag{print} /^\}/{if(flag){flag=0; exit}}' "$ll")"
+    main_block="$(awk '/^define (internal )?void @sailfin_user_main/{flag=1} flag{print} /^\}/{if(flag){flag=0; exit}}' "$ll")"
     local count
     count="$(echo "$main_block" | grep -cE 'call i32 @sfn_try_enter\(' || true)"
     if [ "${count:-0}" -ne 0 ]; then
@@ -198,7 +198,7 @@ test_catch_take_exception_frame() {
         return 1
     fi
     local main_block
-    main_block="$(awk '/^define void @sailfin_user_main/{flag=1} flag{print} /^\}/{if(flag){flag=0; exit}}' "$ll")"
+    main_block="$(awk '/^define (internal )?void @sailfin_user_main/{flag=1} flag{print} /^\}/{if(flag){flag=0; exit}}' "$ll")"
     local catch_body
     catch_body="$(echo "$main_block" | awk '/^catch[0-9]+:/{flag=1; next} /^[a-zA-Z0-9._]+:/{flag=0} flag{print}')"
     if ! echo "$catch_body" | grep -qE 'call i8\* @sfn_take_exception\(i8\* %t[0-9]+\)'; then

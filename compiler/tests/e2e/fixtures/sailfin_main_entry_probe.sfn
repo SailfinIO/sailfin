@@ -1,0 +1,16 @@
+// Fixture for compiler/tests/e2e/test_sailfin_main_entry.sh (#471).
+//
+// Exercises the M5.3 `@main(argc, argv)` lowering's argv conversion:
+// the synthesized prologue calls
+// `sailfin_runtime_argv_to_string_array(argc, argv)` to build a
+// Sailfin `string[]` and binds it to the user's `argv` parameter.
+// The fixture echoes `argv[1]` so the shell wrapper can confirm
+// the value round-trips intact.
+fn main(argv: string[]) -> number ![io] {
+    if argv.length < 2 {
+        print("missing-arg");
+        return 2;
+    }
+    print(argv[1]);
+    return 0;
+}

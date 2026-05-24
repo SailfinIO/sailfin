@@ -93,10 +93,15 @@ ll-sources = ["ir/runtime_globals.ll"]
 # time: the prelude always emits a call to `@sfn_sleep` via the
 # `sleep(ms)` wrapper, and without `clock.sfn` listed here the
 # synthetic build fails with "undefined reference to sfn_sleep".
-# The list still leads with `test_marker.sfn` so the "consumer
-# fires for sfn-sources" assertions below remain pointed at the
-# marker file.
-sfn-sources = ["../sfn/test_marker.sfn", "../sfn/clock.sfn"]
+# M5.3 (#471) added a synthesized `@main` wrapper that installs a
+# top-level setjmp/longjmp exception frame around the user body,
+# so the link now also requires `exception.sfn`'s
+# `sfn_exception_push_frame` / `_pop_frame` / `sfn_take_exception`
+# defines — without them the synthetic build fails with
+# "undefined reference to sfn_exception_*". The list still leads
+# with `test_marker.sfn` so the "consumer fires for sfn-sources"
+# assertions below remain pointed at the marker file.
+sfn-sources = ["../sfn/test_marker.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm"]
 prelude-entry = "../prelude.sfn"
@@ -113,13 +118,15 @@ EOF
     # Mirror prelude.sfn (the runtime capsule's prelude-entry).
     ln -s "$REPO_ROOT/runtime/prelude.sfn" "$ws/runtime/prelude.sfn"
 
-    # Mirror the real clock.sfn + posix.sfn (its dep) — the synthetic
-    # capsule's `sfn-sources` list above references them by relative
-    # path under `runtime/sfn/`, so they have to exist on disk for
-    # `_compile_runtime_sfn_sources` to find them.
+    # Mirror the real clock.sfn + posix.sfn (its dep) and exception.sfn
+    # (#471 dep) — the synthetic capsule's `sfn-sources` list above
+    # references them by relative path under `runtime/sfn/`, so they
+    # have to exist on disk for `_compile_runtime_sfn_sources` to find
+    # them.
     mkdir -p "$ws/runtime/sfn/platform"
     ln -s "$REPO_ROOT/runtime/sfn/clock.sfn" "$ws/runtime/sfn/clock.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/platform/posix.sfn" "$ws/runtime/sfn/platform/posix.sfn"
+    ln -s "$REPO_ROOT/runtime/sfn/exception.sfn" "$ws/runtime/sfn/exception.sfn"
 
     # The sfn-source under test. Tiny self-contained module.
     cat > "$ws/runtime/sfn/test_marker.sfn" <<'EOF'
