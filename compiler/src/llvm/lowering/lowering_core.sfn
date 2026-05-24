@@ -513,23 +513,29 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     if debug_lowering { print.err("emit-llvm: phase=context_functions"); }
 
     // ── Effect analysis ─────────────────────────────────────────────
-    let skip_effects = true;
+    // Helper collection runs by default. Flag exists as an emergency
+    // back-off if a future module destabilizes the dynamic walker.
+    let skip_helper_collection = false;
+    // Bootstrap guard (commit 65b065ad, "make check completes binary not
+    // valid"): effect analysis currently introduces instability in
+    // selfhost/native lowering for some modules. Keep disabled by default.
+    let skip_effect_propagation = true;
     let mut runtime_helpers: string[] = [];
     let mut _if255: boolean = false;
     if !is_test_module {
-        if !skip_effects { _if255 = true; }
+        if !skip_helper_collection { _if255 = true; }
     }
     if _if255 {
         if debug_lowering { print.err("emit-llvm: phase=helpers_start"); }
         runtime_helpers = collect_runtime_helper_targets(local_functions);
         if debug_lowering { print.err("emit-llvm: phase=helpers_done"); }
     } else if trace {
-        print.err("test llvm: skipping runtime helper collection for inlined tests");
+        print.err("test llvm: skipping runtime helper collection for test module");
     }
     runtime_helpers = seed_default_runtime_helpers(runtime_helpers);
     let mut direct_effects: FunctionEffectEntry[] = [];
     let mut aggregated_effects: FunctionEffectEntry[] = [];
-    if !skip_effects {
+    if !skip_effect_propagation {
         if debug_lowering { print.err("emit-llvm: phase=direct_effects"); }
         direct_effects = collect_direct_function_effects(context_functions);
         aggregated_effects = direct_effects;
