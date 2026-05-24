@@ -547,21 +547,17 @@ fn collect_instruction_runtime_helper_targets(instruction: NativeInstruction) ->
         return helpers;
     }
     if instruction.variant == "Try" {
-        // M2.7c retirement (#737): legacy TLS-polling family
-        // (`clear_exception`, `has_exception`, `take_exception`) removed —
-        // they have no live emission sites in `compiler/src/` or
-        // `runtime/` (only the descriptor table in `runtime_helpers.sfn`
-        // still references them), so the M2.7b coexistence is a no-op in
-        // practice. Frame primitives are the only family the walker
-        // needs to declare for try-blocks.
-        return ["sfn_exception_push_frame", "sfn_exception_pop_frame", "sfn_take_exception_frame", "setjmp"];
+        // M2.7b (#404): emit declares for the new frame primitives alongside
+        // the legacy TLS-polling family so both APIs coexist during the
+        // transition. M2.7c retires the legacy entries once every emission
+        // site has cut over.
+        return ["clear_exception", "has_exception", "take_exception", "sfn_exception_push_frame", "sfn_exception_pop_frame", "sfn_take_exception_frame", "setjmp"];
     }
     if instruction.variant == "Throw" {
-        // M2.7c retirement (#737): legacy `set_exception` symbol removed
-        // alongside its Try-side counterparts above.
-        // `lower_throw_instruction` emits `call void @sfn_throw_frame`
-        // (longjmp); no live call sites reference the legacy name.
-        return ["sfn_throw_frame"];
+        // M2.7b (#404): `lower_throw_instruction` emits `call void
+        // @sfn_throw` (longjmp); declare the legacy `set_exception` symbol
+        // too so seed-compiled call sites that still call it link cleanly.
+        return ["set_exception", "sfn_throw_frame"];
     }
     return [];
 }
