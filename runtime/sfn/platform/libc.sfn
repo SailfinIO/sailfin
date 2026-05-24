@@ -59,6 +59,24 @@ extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
 // — the `c` arg is `int` so callers pass `0..255` as `i32`.
 extern fn memchr(s: * u8, c: i32, n: usize) -> * u8;
 
+// `memset(dst, byte, n)` writes the low 8 bits of `byte` into the
+// first `n` bytes of `dst`, returning `dst`. Used by adapters that
+// zero-initialize buffers (`runtime/sfn/exception.sfn` zeros its
+// JMPBUF) or write a single NUL terminator into a freshly
+// allocated string buffer (`runtime/sfn/platform/exec.sfn`'s
+// dirname computation). The libc prototype is `void *memset(void
+// *s, int c, size_t n)` — the `c` arg is `int` so callers pass
+// `0..255` as `i32`.
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+// `strrchr(s, c)` scans the NUL-terminated string `s` for the
+// last occurrence of the byte `c` (passed as i32 per the libc
+// prototype `char *strrchr(const char *s, int c)`), returning a
+// pointer into `s` at the match or `* u8` null when not found.
+// `runtime/sfn/platform/exec.sfn::binary_dir` uses this to locate
+// the trailing path separator without writing a manual scan loop.
+extern fn strrchr(s: * u8, c: i32) -> * u8;
+
 // ── Raw I/O (file-descriptor based) ───────────────────────────
 // `write`/`read` are POSIX, returning ssize_t (i64 on every
 // platform Sailfin currently targets). Negative returns signal
@@ -82,6 +100,30 @@ extern fn fclose(f: * File) -> i32;
 extern fn fread(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
 
 extern fn fwrite(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
+
+// `readlink(path, buf, bufsize)` reads the contents of the
+// symbolic link `path` into `buf` (up to `bufsize` bytes,
+// without NUL-terminating). Returns the byte count on success
+// or -1 on error. POSIX prototype `ssize_t readlink(const char
+// *path, char *buf, size_t bufsize)`; ssize_t lowers to i64 on
+// every Sailfin target (mirrors the `write`/`read` convention
+// above). `runtime/sfn/platform/exec.sfn` uses this against
+// `"/proc/self/exe"` to recover the running binary's absolute
+// path on Linux without consulting `argv[0]` (which is
+// `$PATH`-relative when the user typed a bare command name).
+extern fn readlink(path: * u8, buf: * u8, bufsize: usize) -> i64;
+
+// `realpath(path, resolved)` returns the canonical absolute form
+// of `path`. When `resolved` is non-null, the result is written
+// there and the same pointer is returned (truncated to
+// `PATH_MAX` per POSIX). When `resolved` is null, libc allocates
+// the result with `malloc` and the caller must `free` it.
+// Returns null and sets `errno` on failure. POSIX prototype:
+// `char *realpath(const char *path, char *resolved_path)`.
+// `runtime/sfn/platform/exec.sfn` uses this to canonicalize the
+// runtime-root candidates the dir-walk produces so dev-tree and
+// installed-bin layouts both surface the same path string.
+extern fn realpath(path: * u8, resolved: * u8) -> * u8;
 
 // ── Environment ───────────────────────────────────────────────
 // Returns a NUL-terminated C string owned by the libc environ
@@ -126,3 +168,43 @@ extern fn getenv(name: * u8) -> * u8;
 extern fn setjmp(env: * JmpBuf) -> i32;
 
 extern fn longjmp(env: * JmpBuf, val: i32) -> void;
+
+// ── Platform-specific executable-path APIs ────────────────────
+// The next two declarations live in libc.sfn for discoverability
+// alongside `readlink` / `realpath` (the cross-platform exe-path
+// trio). They are **declarations only** in this PR — the body of
+// `runtime/sfn/platform/exec.sfn::exe_path` calls only the
+// POSIX-portable `readlink("/proc/self/exe")` path today, because
+// Sailfin has no `cfg(target_os)` story (issue #468 `Out:` scope)
+// and a static link against an unresolved macOS / Windows symbol
+// from a Linux build would fail at link time.
+//
+// Why declare them anyway: criterion 4 of #468 pins the
+// "declarations parse cleanly on Linux even though they're never
+// called there" contract, and shipping them now lets a follow-up
+// macOS-validation issue start from "wire the call site" rather
+// than "extend libc.sfn". Unused `declare` lines do not trigger a
+// link error in clang/ld; only an actual `call` to an unresolved
+// symbol would. The follow-up issue that wires macOS support
+// will either land a per-OS stub library (the architect's likely
+// answer once the C runtime retires under M3) or extend Sailfin
+// with weak-symbol attributes / `cfg(target_os)`.
+//
+// Type-discipline notes for the accept-list (see file header):
+//   - `_NSGetExecutablePath`'s second arg is `uint32_t *bufsize`
+//     in `<mach-o/dyld.h>`. `u32` / `* u32` are not in the
+//     accept-list yet; `* i32` lowers to the same `i32*` LLVM
+//     pointer and matches the C call shape bit-for-bit (the
+//     pointee width is 32 bits regardless of sign). Sign only
+//     matters for arithmetic, not pointer-to-pointer.
+//   - `GetModuleFileNameA`'s `size` arg and return value are
+//     Windows `DWORD` (`u32`); same `i32` substitution applies.
+//   - Windows `HMODULE handle` is an opaque pointer; `* u8` is
+//     the canonical Sailfin spelling for an opaque byte-pointer
+//     handle (the opaque-pointee rule on uppercase identifiers
+//     would also work via `* HMODULE`, but using `* u8` keeps the
+//     declaration self-contained — exec.sfn callers pass `null`
+//     to mean "the current process" per the Win32 docs).
+extern fn _NSGetExecutablePath(buf: * u8, bufsize: * i32) -> i32;
+
+extern fn GetModuleFileNameA(handle: * u8, buf: * u8, size: i32) -> i32;

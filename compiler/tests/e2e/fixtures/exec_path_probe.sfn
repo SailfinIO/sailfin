@@ -1,0 +1,37 @@
+// Fixture for compiler/tests/e2e/test_runtime_exec_path.sh.
+//
+// Prints the result of `exe_path()` from `runtime/sfn/platform/
+// exec.sfn` so the shell wrapper can compare it against the
+// fixture binary's own canonicalized path. The fixture lives in
+// `compiler/tests/e2e/fixtures/` and the shell test compiles it
+// into a scratch dir, runs it, and checks the printed path
+// resolves back to the just-built binary.
+//
+// `extern fn` rather than an `import` because the seed compiler's
+// cross-module signature resolver (issue #306) does not yet hand
+// back return-type info for runtime/sfn modules — same reason the
+// unit test at `compiler/tests/unit/runtime_exec_path_test.sfn`
+// uses an extern shim. The Sailfin function's `string` return
+// lowers to `i8*` at the LLVM level (the seed has not yet
+// flipped `string` -> `{i8*, i64}` for parameters; see the
+// M1.A.2 note in `runtime/sfn/string.sfn`), so the `* u8`-typed
+// extern binds bit-for-bit to the same symbol.
+extern fn exe_path() -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+fn main() -> int ![io] {
+    let path: * u8 = exe_path();
+    if path as i64 == 0 {
+        print("[exec_path_probe] exe_path returned NULL");
+        return 1;
+    }
+    let len: usize = strlen(path);
+    if len as i64 == 0 {
+        print("[exec_path_probe] exe_path returned empty string");
+        return 1;
+    }
+    let path_str: string = path as string;
+    print(path_str);
+    return 0;
+}

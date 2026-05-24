@@ -1,0 +1,77 @@
+// compiler/tests/unit/runtime_exec_path_test.sfn
+//
+// Unit coverage for `runtime/sfn/platform/exec.sfn::binary_dir`
+// — the pure dirname helper shipped under issue #468 as part of
+// the M5.3 entry-point migration (epic #451).
+//
+// `binary_dir` is the algorithmic core of `exe_path` /
+// `resolve_runtime_root`: the entry-point lowering computes the
+// running binary's path, then asks `binary_dir` for the
+// directory prefix, then asks `resolve_runtime_root` to walk
+// upward looking for a runtime bundle. Of those three steps
+// only `binary_dir` is pure (no syscalls, no env reads, no fs
+// probes), so it's the only one cheap to test in unit form.
+// The other two land coverage in
+// `compiler/tests/e2e/test_runtime_exec_path.sh`, which builds
+// a fixture binary that calls `exe_path` and verifies the
+// printed path resolves back to the fixture.
+//
+// Why an `extern fn` re-declaration instead of an `import`?
+//   The seed compiler's cross-module signature resolver (issue
+//   #306) does not yet hand back the return-type info needed to
+//   call into `runtime/sfn/platform/exec.sfn` directly from a
+//   compiler/tests/unit/ test file. Every other unit test that
+//   exercises a runtime/sfn module uses the same workaround
+//   (compare the inlined-extern pattern in
+//   `runtime/sfn/process.sfn` and friends — same #306 cause).
+//   Once #306 closes a follow-up flips this to:
+//     `import { binary_dir } from "../../../runtime/sfn/platform/exec";`
+//   without touching the test bodies. The Sailfin function's
+//   `string`-typed signature lowers to `i8* @binary_dir(i8*)`
+//   at the LLVM level (the seed has not yet flipped
+//   `string` -> `{i8*, i64}` for parameters; see the M1.A.2
+//   note in `runtime/sfn/string.sfn`), so the `* u8`-typed
+//   extern below binds to the same symbol bit-for-bit.
+//
+// Why `strcmp` rather than `==`?
+//   The new compiler lowers `string` to a `{i8*, i64}`
+//   aggregate at the call site, but `binary_dir`'s `* u8`
+//   return preserves only the pointer — no length field is
+//   populated when we cast `* u8 as string`. `==` on strings
+//   compares lengths first, so the literal `"foo"` (length 3)
+//   never equals the returned pointer cast (length 0).
+//   `strcmp(a, b) == 0` reads NUL-terminated bytes, which both
+//   sides preserve. When the `string`-aggregate flip lands
+//   (M1.A.2), this helper can move back to `==`. The issue
+//   spec writes the assertions as `==` for readability; the
+//   `strcmp` wrapper preserves the semantics.
+extern fn binary_dir(exe: * u8) -> * u8;
+
+extern fn strcmp(a: * u8, b: * u8) -> i32;
+
+fn equal_cstr(a: * u8, b: * u8) -> bool { return strcmp(a, b) == 0; }
+
+test "binary_dir: empty input passes through" {
+    let r: * u8 = binary_dir("" as * u8);
+    assert equal_cstr(r, "" as * u8);
+}
+
+test "binary_dir: bare filename returns dot" {
+    let r: * u8 = binary_dir("sailfin" as * u8);
+    assert equal_cstr(r, "." as * u8);
+}
+
+test "binary_dir: slashed path returns dirname" {
+    let r: * u8 = binary_dir("/foo/bar/sailfin" as * u8);
+    assert equal_cstr(r, "/foo/bar" as * u8);
+}
+
+test "binary_dir: root-relative single segment returns slash" {
+    let r: * u8 = binary_dir("/sailfin" as * u8);
+    assert equal_cstr(r, "/" as * u8);
+}
+
+test "binary_dir: single-component relative path returns dot" {
+    let r: * u8 = binary_dir("hello.sfn" as * u8);
+    assert equal_cstr(r, "." as * u8);
+}
