@@ -188,16 +188,23 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_sleep_fn", symbol: "sfn_sleep", return_type: "void", parameter_types: ["double"], effects: ["clock"], native_signature: null, c_abi_return_type: null
     });
-    // Per-symbol signature for libc `nanosleep`, called from
-    // `runtime/sfn/clock.sfn::sfn_sleep`. Without this descriptor
-    // the call lowering falls into the cross-module extern path
-    // (issue #306 Phase B is still open), which can't resolve the
-    // `i32` return type and emits a `[fatal]` diagnostic — the
-    // wrapper body then ships missing its `nanosleep` call and
-    // `sleep()` becomes a no-op (PR #692 CI repro). The pointee
-    // type lowers to `i8*` through the opaque-pointee rule, so the
-    // descriptor describes the C-ABI shape rather than the
-    // `%Timespec*` Sailfin sees at the call site.
+    // Per-symbol fallback signature for libc `nanosleep`, called from
+    // `runtime/sfn/clock.sfn::sfn_sleep`. In the common path the
+    // staged `build/native/import-context/runtime/sfn/platform/posix.sfn-asm`
+    // artifact makes the imported function entry win at call resolution
+    // (issue #633 — `core_call_resolution.sfn` prefers the function
+    // entry over the descriptor and clears `result_helper`), and the
+    // `declare` is emitted by `render_imported_function_declarations`
+    // with the `%Timespec*` source-level signature; meanwhile
+    // `render_runtime_helper_declarations` skips the descriptor via the
+    // `target == symbol` shadow check in `rendering.sfn`. The descriptor
+    // is retained as the legacy fallback for emits run against a build
+    // tree without staged platform artifacts (e.g. a partial seedcheck
+    // sandbox), where the call-site lowering falls back to the descriptor
+    // signature and the `declare` lands as `i32 @nanosleep(i8*, i8*)`
+    // through the opaque-pointee rule. Retires together with the
+    // fallback path once cross-module extern resolution lands (#306
+    // Phase B).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "nanosleep", symbol: "nanosleep", return_type: "i32", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
