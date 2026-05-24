@@ -864,12 +864,22 @@ rebuild:
 	@# does the same when `_cr_extract_layout_manifest` finds no
 	@# `.layout` lines in the emitted asm.
 	@mkdir -p build/native/import-context/runtime/sfn/platform
-	@for mod in libc posix pthread net; do \
+	@set -e; \
+	for mod in libc posix pthread net; do \
 		asm_path="build/native/import-context/runtime/sfn/platform/$$mod.sfn-asm"; \
 		manifest_path="build/native/import-context/runtime/sfn/platform/$$mod.layout-manifest"; \
 		if [ ! -f "$$asm_path" ]; then \
 			echo "[rebuild] staging runtime/sfn/platform/$$mod.sfn-asm..."; \
-			$(NATIVE_OUT) emit --module-name "runtime/sfn/platform/$$mod" -o "$$asm_path" native "runtime/sfn/platform/$$mod.sfn" >/dev/null; \
+			if ! $(NATIVE_OUT) emit --module-name "runtime/sfn/platform/$$mod" -o "$$asm_path" native "runtime/sfn/platform/$$mod.sfn" >/dev/null; then \
+				echo "[rebuild][error] emit native failed for runtime/sfn/platform/$$mod.sfn" >&2; \
+				rm -f "$$asm_path"; \
+				exit 1; \
+			fi; \
+			if [ ! -s "$$asm_path" ]; then \
+				echo "[rebuild][error] emit native produced empty $$asm_path" >&2; \
+				rm -f "$$asm_path"; \
+				exit 1; \
+			fi; \
 		fi; \
 		if [ ! -f "$$manifest_path" ]; then \
 			grep '^\.layout' "$$asm_path" > "$$manifest_path" 2>/dev/null || :; \
