@@ -189,15 +189,14 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "runtime_sleep_fn", symbol: "sfn_sleep", return_type: "void", parameter_types: ["double"], effects: ["clock"], native_signature: null, c_abi_return_type: null
     });
     // Per-symbol signature for libc `nanosleep`, called from
-    // `runtime/sfn/clock.sfn::sfn_sleep`. Without this descriptor
-    // the call lowering falls into the cross-module extern path
-    // (issue #306 Phase B is still open), which can't resolve the
-    // `i32` return type and emits a `[fatal]` diagnostic — the
-    // wrapper body then ships missing its `nanosleep` call and
-    // `sleep()` becomes a no-op (PR #692 CI repro). The pointee
-    // type lowers to `i8*` through the opaque-pointee rule, so the
-    // descriptor describes the C-ABI shape rather than the
-    // `%Timespec*` Sailfin sees at the call site.
+    // `runtime/sfn/clock.sfn::sfn_sleep`. Provides the typed
+    // C-ABI signature for the call-site lowering even though the
+    // `declare` line itself is now contributed by the import path
+    // (`build/native/import-context/runtime/sfn/platform/posix.sfn-asm`,
+    // staged by `make compile`). The pointee type lowers to `i8*`
+    // through the opaque-pointee rule, so the descriptor describes
+    // the C-ABI shape rather than the `%Timespec*` Sailfin sees at
+    // the call site.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "nanosleep", symbol: "nanosleep", return_type: "i32", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });

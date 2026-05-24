@@ -845,6 +845,37 @@ rebuild:
 		echo "[rebuild] staging exec.o..."; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/exec.ll -o build/native/obj/runtime/exec.o; \
 	fi
+	@# Stage import-context for `runtime/sfn/platform/*.sfn` extern-fn
+	@# modules. `runtime/sfn/clock.sfn` imports `nanosleep` from
+	@# `./platform/posix`, and `runtime/sfn/io.sfn` imports `write`
+	@# from `./platform/libc`; without these `.sfn-asm` artifacts on
+	@# disk, `collect_imported_module_context_for_module`
+	@# (compiler/src/llvm/imports.sfn) falls back to empty native text
+	@# and `render_imported_function_declarations` cannot emit the
+	@# extern's source-of-truth signature. Today's fallback is the
+	@# `seed_default_runtime_helpers` workaround (a forced `nanosleep`
+	@# entry in the helper preamble emits `declare i32 @nanosleep(i8*,
+	@# i8*)` with opaque-pointee types); staging here lets the import
+	@# path emit the proper `declare i32 @nanosleep(%Timespec*,
+	@# %Timespec*)` from posix.sfn instead. Issue #414 closes that
+	@# arc; the workaround entry retires in the same PR. Layout
+	@# manifests are extern-fn-only (no structs/enums), so the
+	@# companion file is intentionally empty — stage_capsule_imports
+	@# does the same when `_cr_extract_layout_manifest` finds no
+	@# `.layout` lines in the emitted asm.
+	@mkdir -p build/native/import-context/runtime/sfn/platform
+	@for mod in libc posix pthread net; do \
+		asm_path="build/native/import-context/runtime/sfn/platform/$$mod.sfn-asm"; \
+		manifest_path="build/native/import-context/runtime/sfn/platform/$$mod.layout-manifest"; \
+		if [ ! -f "$$asm_path" ]; then \
+			echo "[rebuild] staging runtime/sfn/platform/$$mod.sfn-asm..."; \
+			$(NATIVE_OUT) emit --module-name "runtime/sfn/platform/$$mod" -o "$$asm_path" native "runtime/sfn/platform/$$mod.sfn" >/dev/null; \
+		fi; \
+		if [ ! -f "$$manifest_path" ]; then \
+			grep '^\.layout' "$$asm_path" > "$$manifest_path" 2>/dev/null || :; \
+			[ -f "$$manifest_path" ] || touch "$$manifest_path"; \
+		fi; \
+	done
 	@# Write build stamp (version + git hash for dev builds).
 	@# `version.sfn::resolve_compiler_version` reads this file
 	@# first, so without it the binary would report whatever stale
