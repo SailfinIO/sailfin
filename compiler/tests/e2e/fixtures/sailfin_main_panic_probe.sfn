@@ -3,7 +3,7 @@
 // Exercises the M5.3 `@main` wrapper's top-level exception frame:
 // the synthesized prologue installs a setjmp/longjmp landing pad
 // around the user body, and an uncaught throw lands there, prints
-// the message via `sailfin_runtime_print_err`, and returns exit
+// the message via `sailfin_runtime_panic_emit`, and returns exit
 // code 1 — instead of bubbling out to `sfn_throw`'s abort() path
 // (which would exit with SIGABRT, not 1).
 fn main() -> number {

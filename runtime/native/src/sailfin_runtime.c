@@ -8205,7 +8205,12 @@ void sailfin_runtime_panic_emit(char *msg)
  * (M5.4 caller) will strip it if it wants the bare argument list. */
 SfnArray *sailfin_runtime_argv_to_string_array(int argc, char **argv)
 {
-    if (argc < 0)
+    /* Defensive: a NULL argv with argc > 0 would leave the resulting
+     * SfnArray with `len = argc` and NULL element pointers, which the
+     * user's `argv[i]` deref would then segfault on. Clamp argc to 0
+     * when argv is NULL so callers always observe a consistent
+     * (empty) array instead. */
+    if (argc < 0 || argv == NULL)
     {
         argc = 0;
     }

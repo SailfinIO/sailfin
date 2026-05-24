@@ -594,21 +594,31 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
         wrapper_lines.push("");
         wrapper_lines.push("define i32 @main(i32 %argc, i8** %argv) {");
         wrapper_lines.push("entry:");
-        // Convert argv to SfnArray<string>*. The runtime helper returns
-        // the new SfnArray as `i8*`; bitcast to the typed pointer the
-        // user body expects when it declares `argv: string[]`.
-        wrapper_lines.push("  %argv_arr_i8 = call i8* @sailfin_runtime_argv_to_string_array(i32 %argc, i8** %argv)");
+        // Allocas live in the entry block so LLVM treats them as static
+        // frame slots (the conventional idiom).
+        wrapper_lines.push("  %frame = alloca [3 x i64]");
+        wrapper_lines.push("  %jmpbuf = alloca [32 x i64]");
+        wrapper_lines.push("  %frame_i8 = bitcast [3 x i64]* %frame to i8*");
+        wrapper_lines.push("  %jmpbuf_i8 = bitcast [32 x i64]* %jmpbuf to i8*");
+        // Convert argv to SfnArray<string>* only when the user body
+        // actually declares an argv parameter — `fn main()` (no params)
+        // doesn't need it and skipping the call avoids a startup heap
+        // alloc. When the conversion is required, NULL-check the result
+        // and exit with code 1 on OOM rather than passing NULL into
+        // user code where `argv.length` would crash on the first deref.
         if user_param_count > 0 {
+            wrapper_lines.push("  %argv_arr_i8 = call i8* @sailfin_runtime_argv_to_string_array(i32 %argc, i8** %argv)");
+            wrapper_lines.push("  %argv_is_null = icmp eq i8* %argv_arr_i8, null");
+            wrapper_lines.push("  br i1 %argv_is_null, label %main.argv_oom, label %main.argv_ok");
+            wrapper_lines.push("main.argv_oom:");
+            wrapper_lines.push("  ret i32 1");
+            wrapper_lines.push("main.argv_ok:");
             wrapper_lines.push("  %argv_arr = bitcast i8* %argv_arr_i8 to "
                 + argv_llvm_type);
         }
         // Exception frame setup mirrors `instructions_try.sfn` (the
         // canonical `[3 x i64]` frame + `[32 x i64]` jmpbuf layout
         // documented in `runtime/sfn/exception.sfn` §2.4.2).
-        wrapper_lines.push("  %frame = alloca [3 x i64]");
-        wrapper_lines.push("  %jmpbuf = alloca [32 x i64]");
-        wrapper_lines.push("  %frame_i8 = bitcast [3 x i64]* %frame to i8*");
-        wrapper_lines.push("  %jmpbuf_i8 = bitcast [32 x i64]* %jmpbuf to i8*");
         wrapper_lines.push("  %jmpbuf_slot = getelementptr [3 x i64], [3 x i64]* %frame, i64 0, i64 1");
         wrapper_lines.push("  %jmpbuf_addr = ptrtoint i8* %jmpbuf_i8 to i64");
         wrapper_lines.push("  store i64 %jmpbuf_addr, i64* %jmpbuf_slot");
