@@ -36,6 +36,7 @@ import {
 import { substring } from "../../string_utils";
 import { test_runner_active, test_runner_trace } from "../../test_runner_state";
 import {
+    append_unique_effect,
     collect_direct_function_effects,
     collect_function_call_graph,
     collect_runtime_helper_targets,
@@ -66,6 +67,7 @@ import {
 } from "../utils";
 import {
     collect_defined_function_symbols,
+    collect_runtime_helper_targets_from_lines,
     extend_native_enums,
     extend_native_interfaces,
     extend_native_structs,
@@ -513,20 +515,39 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     if debug_lowering { print.err("emit-llvm: phase=context_functions"); }
 
     // ── Effect analysis ─────────────────────────────────────────────
-    // Helper collection is now ON (#740 closed the duplicate-declare
-    // failure that previously gated this). `collect_runtime_helper_targets`
-    // walks every function in `local_functions`, extracting call targets
-    // and surfacing per-module runtime-helper declares so the linker
-    // resolves them without relying on the conservative
-    // `seed_default_runtime_helpers` baseline alone (unblocking #501 / #414).
+    // Helper collection runs in two phases now (M1.7.5a / #501):
     //
-    // The walker can discover targets that are already declared inline
-    // by `render_llvm_preamble` (the typed spawn/await family from
-    // `async_runtime_declare_lines` and the seedcheck enum-tag reader);
-    // `render_runtime_helper_declarations` filters those out so the
-    // emitted IR never carries duplicate `declare` lines. See the
-    // matching skip block in `compiler/src/llvm/rendering.sfn` if a
-    // future preamble-inlined declare needs the same treatment.
+    //   * Pre-lowering: `collect_runtime_helper_targets(local_functions)`
+    //     walks every function in `local_functions`, extracting call
+    //     targets from `NativeInstruction` text. Catches user-source
+    //     call sites — `print(x)`, `string.length`, `string.to_number`
+    //     etc. — that surface as identifier text in instruction fields.
+    //
+    //   * Post-lowering: `collect_runtime_helper_targets_from_lines`
+    //     (called after the module bodies are lowered, just below)
+    //     scans every emitted LLVM IR line for `call <type> @<symbol>(`
+    //     and maps each symbol back to a descriptor target. Catches
+    //     helpers emitted by `emit_runtime_call` and by raw
+    //     `wrapper_lines.push("  call ...")` lines (panic-wrapper inlines
+    //     around every user `main`, post-coercion calls inserted by
+    //     `expression_lowering/native/core_operands.sfn`, etc.) that
+    //     the pre-lowering walker is structurally blind to.
+    //
+    // The two phases together let the preamble's helper declares track
+    // actual per-module usage; `seed_default_runtime_helpers` is now
+    // a top-up only for genuinely undiscoverable cases — prelude
+    // module-level `let` bindings, `extern fn` shims, and `fs.*` /
+    // `process.*` direct-emit paths that never route through either
+    // descriptor-driven walker.
+    //
+    // Either walker can discover targets that are already declared
+    // inline by `render_llvm_preamble` (the typed spawn/await family
+    // from `async_runtime_declare_lines`, the seedcheck enum-tag
+    // reader, the arena allocation/free helpers, the rc-release
+    // helper); `render_runtime_helper_declarations` filters those out
+    // so the emitted IR never carries duplicate `declare` lines. See
+    // the matching skip block in `compiler/src/llvm/rendering.sfn` if
+    // a future preamble-inlined declare needs the same treatment.
     let skip_helper_collection = false;
     // Bootstrap guard (commit 65b065ad, "make check completes binary not
     // valid"): effect analysis currently introduces instability in
@@ -544,7 +565,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     } else if trace {
         print.err("test llvm: skipping runtime helper collection for test module");
     }
-    runtime_helpers = seed_default_runtime_helpers(runtime_helpers);
     let mut direct_effects: FunctionEffectEntry[] = [];
     let mut aggregated_effects: FunctionEffectEntry[] = [];
     if !skip_effect_propagation {
@@ -564,10 +584,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     }
     if debug_lowering { print.err("emit-llvm: phase=effects"); }
 
-    // ── Phase 4: Render LLVM IR preamble ────────────────────────────
-    let mut lines = render_llvm_preamble(native_module.module_name, type_context, trait_metadata, context_functions, local_functions, imported_functions, runtime_helpers, debug_lowering);
-
-    // ── Module globals ──────────────────────────────────────────────
+    // ── Module globals (lowered before preamble so that any helper
+    // calls emitted by initializer expressions land in the body lines
+    // we hand to `collect_runtime_helper_targets_from_lines` below).
     if debug_lowering {
         print.err("emit-llvm: phase=module_globals");
         print.err("emit-llvm: module bindings count=" + number_to_string(safe_bindings.length));
@@ -598,23 +617,45 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
             diagnostics = extend_string_lines_checked(diagnostics, _mg.diagnostics, "module globals");
         }
     }
-    if module_preamble_lines.length > 0 {
-        lines = extend_string_lines(lines, module_preamble_lines);
-        lines = extend_string_lines(lines, [""]);
-    }
-    if module_init_lines.length > 0 {
-        lines = extend_string_lines(lines, module_init_lines);
-        lines = extend_string_lines(lines, [""]);
-    }
     if trace { print.err("test llvm: module globals lowered"); }
     if timing {
         print.err("test llvm: phase=globals ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
-    // ── Phase 5: Lower all functions ────────────────────────────────
+    // ── Lower all functions (also pre-preamble; the emitted call
+    // lines feed the post-lowering helper scan that closes the gap
+    // for `emit_runtime_call` and panic-wrapper inline calls).
     let function_result = lower_all_functions(local_functions, context_functions, aggregated_effects, type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call, module_string_constants, trace, debug_lowering);
-    lines = extend_string_lines(lines, function_result.lines);
     diagnostics = extend_string_lines_checked(diagnostics, function_result.diagnostics, "function lowering");
+
+    // ── Assemble the body before rendering the preamble so the
+    // helper-target scan covers every `call @<sym>(` emitted by the
+    // module-globals initializer, the function bodies, and the
+    // panic-wrapper inlines.
+    let mut body_lines: string[] = [];
+    if module_preamble_lines.length > 0 {
+        body_lines = extend_string_lines(body_lines, module_preamble_lines);
+        body_lines = extend_string_lines(body_lines, [""]);
+    }
+    if module_init_lines.length > 0 {
+        body_lines = extend_string_lines(body_lines, module_init_lines);
+        body_lines = extend_string_lines(body_lines, [""]);
+    }
+    body_lines = extend_string_lines(body_lines, function_result.lines);
+
+    // ── Phase 4: Augment helpers with post-lowering observations and
+    // render the preamble.
+    let post_lowering_targets = collect_runtime_helper_targets_from_lines(body_lines);
+    let mut tmp_helpers = runtime_helpers;
+    let mut _pli: int = 0;
+    loop {
+        if _pli >= post_lowering_targets.length { break; }
+        tmp_helpers = append_unique_effect(tmp_helpers, post_lowering_targets[_pli]);
+        _pli += 1;
+    }
+    runtime_helpers = seed_default_runtime_helpers(tmp_helpers);
+    let mut lines = render_llvm_preamble(native_module.module_name, type_context, trait_metadata, context_functions, local_functions, imported_functions, runtime_helpers, debug_lowering);
+    lines = extend_string_lines(lines, body_lines);
 
     // Capturing-lambda env type decls (#687). The lambda-site
     // env_alloc marker and the lifted-function prologue marker each

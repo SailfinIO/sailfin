@@ -31,6 +31,7 @@ import { char_code, substring } from "../../string_utils";
 import { append_unique_effect } from "../effects";
 import { resolve_import_artifact_slug, resolve_import_module_slug_for_module } from "../imports";
 import { find_function_by_name, should_internalize_function } from "../rendering";
+import { runtime_helper_descriptors } from "../runtime_helpers";
 import {
     CapabilityManifest,
     EnumTypeInfo,
@@ -669,42 +670,208 @@ fn insert_before_llvm_footer(lines: string[], inserted: string[]) -> string[] {
     return out;
 }
 
+// Append every `@<symbol>(` call target observed in `line` to `acc`.
+// Word-boundary check before `call ` rejects mid-word matches like
+// `recall` or `; install`. Only adds when the `@<symbol>` is
+// immediately followed by `(`, matching the LLVM call shape:
+//
+//     [%lhs = ] [tail | musttail | notail] call <ret-type> @<sym>(...)
+//
+// Indirect calls (`call <ret-type> %fnptr(...)`) and intrinsic calls
+// with metadata attributes are tolerated — both either omit the `@`
+// or land on the `( before @` exit path.
+fn merge_call_symbols_from_line(acc: string[], line: string) -> string[] {
+    let mut out = acc;
+    let len = line.length;
+    if len < 6 { return out; }
+    if index_of(line, "@") < 0 { return out; }
+    let mut start: int = 0;
+    loop {
+        if start >= len { break; }
+        let suffix_start = start;
+        let suffix = substring(line, suffix_start, len);
+        let local = index_of(suffix, "call ");
+        if local < 0 { break; }
+        let call_pos = suffix_start + local;
+        // Word-boundary check: the byte before `call` must be whitespace
+        // or the start of the line. Rejects identifiers like `recall`,
+        // `nocall`, etc. that happen to contain the substring.
+        let mut is_boundary: boolean = true;
+        if call_pos > 0 {
+            let prev = substring(line, call_pos - 1, call_pos);
+            if prev != " " {
+                if prev != "\t" { is_boundary = false; }
+            }
+        }
+        if !is_boundary {
+            start = call_pos + 1;
+            continue;
+        }
+        // Advance past "call " and locate the `@` (skipping the type).
+        let mut pos = call_pos + 5;
+        let mut at_pos: int = -1;
+        loop {
+            if pos >= len { break; }
+            let ch = substring(line, pos, pos + 1);
+            if ch == "@" {
+                at_pos = pos;
+                break;
+            }
+            // `(` before `@` means an indirect call: bail.
+            if ch == "(" { break; }
+            pos += 1;
+        }
+        if at_pos < 0 {
+            start = call_pos + 5;
+            continue;
+        }
+        // Extract the symbol after `@` up to the first non-symbol char.
+        let sym_start = at_pos + 1;
+        let mut sym_end = sym_start;
+        loop {
+            if sym_end >= len { break; }
+            let ch = substring(line, sym_end, sym_end + 1);
+            if is_llvm_symbol_char(ch) {
+                sym_end += 1;
+                continue;
+            }
+            break;
+        }
+        // Confirm the next non-symbol char is `(` — the call shape.
+        if sym_end < len {
+            if substring(line, sym_end, sym_end + 1) == "(" {
+                if sym_end > sym_start {
+                    let symbol = substring(line, sym_start, sym_end);
+                    out = append_unique_effect(out, symbol);
+                }
+            }
+        }
+        let next_start = sym_end + 1;
+        if next_start <= call_pos { start = call_pos + 5; } else {
+            start = next_start;
+        }
+    }
+    return out;
+}
+
+// Scan emitted LLVM IR lines for `call <type> @<symbol>(` patterns and
+// return runtime-helper descriptor *targets* whose `symbol` or
+// `native_signature` matches an emitted call site. Complements
+// `collect_runtime_helper_targets` (which walks `NativeInstruction`
+// text and only sees user-source-level call shapes) by capturing
+// helpers emitted at LLVM-lowering time — namely the raw
+// `wrapper_lines.push("  call ...")` lines from
+// `compiler/src/llvm/lowering/emission.sfn` (panic-wrapper inline
+// `setjmp` / `sfn_exception_*` calls around every user `main`) and
+// the `emit_runtime_call` sites scattered through
+// `compiler/src/llvm/expression_lowering/native/*` (e.g.
+// `sailfin_runtime_number_to_string` / `sailfin_runtime_bounds_check`
+// inserted by `core_operands.sfn` / `core_index_lowering.sfn` during
+// operand coercion and bounds-check insertion). Both classes are
+// downstream of the NativeInstruction layer the original walker
+// traverses and so were previously invisible to it — covered only by
+// the conservative carve-outs in `seed_default_runtime_helpers`,
+// which this scan retires.
+fn collect_runtime_helper_targets_from_lines(lines: string[]) -> string[] {
+    let mut called: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        called = merge_call_symbols_from_line(called, lines[i]);
+        i += 1;
+    }
+    let descriptors = runtime_helper_descriptors();
+    let mut targets: string[] = [];
+    let mut d: int = 0;
+    loop {
+        if d >= descriptors.length { break; }
+        let descriptor = descriptors[d];
+        let mut matched: boolean = false;
+        if string_array_contains(called, descriptor.symbol) { matched = true; }
+        let native: string? = descriptor.native_signature;
+        if !matched {
+            if native != null {
+                if native.length > 0 {
+                    if string_array_contains(called, native) { matched = true; }
+                }
+            }
+        }
+        if matched {
+            targets = append_unique_effect(targets, descriptor.target);
+        }
+        d += 1;
+    }
+    return targets;
+}
+
 // Seed an accumulator with the default set of runtime-helper targets the
-// compiler must always declare.  Extracted from lowering_core.sfn's
-// orchestrator to shrink the orchestrator's function body (was 80+
-// sequential append_unique_effect calls).  Preserves source order — the
-// seed emits declarations in this order, and rendering_helpers downstream
-// depends on stable ordering for byte-identical IR across builds.  Each
-// entry is deduped via append_unique_effect, so passing a pre-populated
-// initial list (e.g. from collect_runtime_helper_targets) only appends
-// entries not already present.
+// compiler must always declare.  Each entry that remains in this list
+// after M1.7.5a (#501) is genuinely *undiscoverable* by both walkers:
+//
+//   * `collect_runtime_helper_targets` walks `NativeInstruction` text in
+//     `local_functions` and so can only see helpers whose call site
+//     appears as user-source identifier text (e.g. `print(x)`).
+//   * `collect_runtime_helper_targets_from_lines` scans every emitted
+//     LLVM IR line for `call <type> @<symbol>(` and so picks up helpers
+//     emitted by `emit_runtime_call` or by raw `wrapper_lines.push`
+//     during lowering (panic-wrapper inlines, post-coercion calls).
+//
+// What the scans CANNOT see — and what therefore remains seeded:
+//
+//   1. `extern fn` shims in user source (`@logExecution` decorators,
+//      manual `extern fn` declarations against C entrypoints, the
+//      `sailfin_intrinsic_runtime_arena_*` callers in the prelude that
+//      route through `extern fn` because the 0.5.9 seed predates the
+//      descriptors).
+//   2. Module-level let bindings in `runtime/prelude.sfn` such as
+//      `let runtime_array_filter_fn = runtime.array_filter;` — the
+//      function-pointer is captured at module-init time, never appears
+//      in a `call @X(` instruction in the consumer's IR.
+//   3. C runtime adapters reachable only through `fs.*` / `process.*`
+//      direct-emit paths in `compiler/src/llvm/expression_lowering/*`
+//      that bypass `emit_runtime_call` and so don't surface in the
+//      LLVM IR line scan either (the emit happens via raw
+//      `lines.push("...")` outside any descriptor-driven path).
+//
+// Preserves source order — the seed emits declarations in this order,
+// and rendering_helpers downstream depends on stable ordering for
+// byte-identical IR across builds. Each entry is deduped via
+// append_unique_effect, so passing a pre-populated initial list (from
+// the walker + line scan) only appends entries not already present.
+//
+// 14 entries previously seeded here were removed by M1.7.5a (#501) once
+// the LLVM-line scan went live:
+// `copy_bytes`, `get_field`, `grapheme_at`, `mark_persistent`,
+// `number.to_string`, `runtime.bounds_check`, `runtime_log_execution_fn`,
+// `setjmp`, `sfn_exception_pop_frame`, `sfn_exception_push_frame`,
+// `sfn_take_exception_frame`, `sfn_throw_frame`, `string.length`,
+// `string.to_number`. All are emitted by post-`NativeInstruction`
+// lowering paths the scan picks up; modules that never call them no
+// longer carry their dead declares.
 fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     let mut helpers = initial;
-    // Core string / memory / collection helpers
-    helpers = append_unique_effect(helpers, "copy_bytes");
+    // Core string / memory / collection helpers — emitted from prelude
+    // module-level let bindings or from `extern fn` shims in user code
+    // (e.g. `array_push_slot` is captured as the literal-array push hook
+    // in `runtime/prelude.sfn`; `print` and the `print.*` family ride
+    // through compiler-emitted preamble for the test harness).
     helpers = append_unique_effect(helpers, "array_push_slot");
     helpers = append_unique_effect(helpers, "append_string");
-    helpers = append_unique_effect(helpers, "get_field");
     helpers = append_unique_effect(helpers, "concat");
     helpers = append_unique_effect(helpers, "print");
     helpers = append_unique_effect(helpers, "print.err");
     helpers = append_unique_effect(helpers, "print.info");
     helpers = append_unique_effect(helpers, "print.warn");
     helpers = append_unique_effect(helpers, "print.error");
-    helpers = append_unique_effect(helpers, "string.length");
     helpers = append_unique_effect(helpers, "substring");
     helpers = append_unique_effect(helpers, "substring_unchecked");
     helpers = append_unique_effect(helpers, "string.concat");
     helpers = append_unique_effect(helpers, "string.append");
-    helpers = append_unique_effect(helpers, "string.to_number");
-    helpers = append_unique_effect(helpers, "grapheme_at");
-    helpers = append_unique_effect(helpers, "number.to_string");
     helpers = append_unique_effect(helpers, "number_to_string");
     helpers = append_unique_effect(helpers, "strings_equal");
     helpers = append_unique_effect(helpers, "char_code");
     helpers = append_unique_effect(helpers, "runtime_raise_value_error_fn");
     helpers = append_unique_effect(helpers, "runtime_assert_fail_fn");
-    helpers = append_unique_effect(helpers, "runtime.bounds_check");
     // Phase 5a: arena mark/rewind for in-process multi-module tools.
     // No-op when SAILFIN_USE_ARENA is unset; declared unconditionally
     // so the linker resolves the symbol whether or not the arena is
@@ -715,11 +882,15 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     // become the canonical lookup path.
     helpers = append_unique_effect(helpers, "sailfin_intrinsic_runtime_arena_mark");
     helpers = append_unique_effect(helpers, "sailfin_intrinsic_runtime_arena_rewind");
-    helpers = append_unique_effect(helpers, "mark_persistent");
     // Runtime prelude helpers — module-level let bindings
     // (e.g. `let runtime_array_filter_fn = runtime.array_filter;`) whose
-    // call targets are not discovered by the (currently skipped) dynamic
-    // helper collection.  Declare them unconditionally so the linker can
+    // call targets are not in any `NativeInstruction.expression` text
+    // (so `collect_runtime_helper_targets` cannot find them) and never
+    // surface as `call @runtime_array_filter_fn(` lines in the lowered
+    // IR (so `collect_runtime_helper_targets_from_lines` doesn't pick
+    // them up either — the prelude module-init captures the function
+    // pointer once and consumer modules dereference through a closure
+    // env field). Declare them unconditionally so the linker can
     // resolve them against the C runtime.
     helpers = append_unique_effect(helpers, "runtime_array_map_fn");
     helpers = append_unique_effect(helpers, "runtime_array_filter_fn");
@@ -734,7 +905,6 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "runtime_is_number_fn");
     helpers = append_unique_effect(helpers, "runtime_is_string_fn");
     helpers = append_unique_effect(helpers, "runtime_is_void_fn");
-    helpers = append_unique_effect(helpers, "runtime_log_execution_fn");
     helpers = append_unique_effect(helpers, "runtime_monotonic_millis_fn");
     helpers = append_unique_effect(helpers, "runtime_resolve_runtime_type_fn");
     helpers = append_unique_effect(helpers, "runtime_serve_fn");
@@ -790,18 +960,5 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "process.handle_read_stderr");
     helpers = append_unique_effect(helpers, "process.handle_wait");
     helpers = append_unique_effect(helpers, "is_decimal_digit");
-    // M2.7b (#404): frame-based exception primitives emitted inline at
-    // every user try-block entry / leave / catch and at every throw.
-    // Declared unconditionally so the user IR carries paired
-    // `declare void @sfn_exception_push_frame(i8*)` etc. — without
-    // these the inline `setjmp` and frame-management calls would link
-    // through an undeclared symbol path the way the legacy
-    // `sailfin_runtime_*` exception family does. Coexists with the
-    // legacy entries until M2.7c retires them.
-    helpers = append_unique_effect(helpers, "sfn_exception_push_frame");
-    helpers = append_unique_effect(helpers, "sfn_exception_pop_frame");
-    helpers = append_unique_effect(helpers, "sfn_take_exception_frame");
-    helpers = append_unique_effect(helpers, "sfn_throw_frame");
-    helpers = append_unique_effect(helpers, "setjmp");
     return helpers;
 }
