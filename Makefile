@@ -823,6 +823,28 @@ rebuild:
 		echo "[rebuild] staging exception.o..."; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/exception.ll -o build/native/obj/runtime/exception.o; \
 	fi
+	@# Stage exec.o (Sailfin-native executable-path + runtime-root
+	@# resolution from runtime/sfn/platform/exec.sfn). Issue #468
+	@# (epic #451 M5.3 prerequisite) ships `@exe_path` /
+	@# `@binary_dir` / `@resolve_runtime_root` as the pure-Sailfin
+	@# replacement for the `_resolve_runtime_root(argv0)` block in
+	@# `runtime/native/src/native_driver.c`. The legacy link path
+	@# (`_clang_compile_runtime_objects` in `compiler/src/cli_main.sfn`)
+	@# resolves those symbols against this staged .o; the runtime-
+	@# capsule path reaches exec.sfn through `runtime/native/
+	@# capsule.toml`'s `sfn-sources` array instead. Empty staging
+	@# today is benign — no user surface dispatches through this
+	@# module — but M5.3's `@main` lowering will be the first
+	@# internal caller and a missing staged artifact then surfaces
+	@# at link time as "undefined reference to `exe_path`".
+	@if [ ! -f build/native/obj/runtime/exec.ll ]; then \
+		echo "[rebuild] staging exec.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/exec.ll llvm runtime/sfn/platform/exec.sfn >/dev/null; \
+	fi
+	@if [ ! -f build/native/obj/runtime/exec.o ]; then \
+		echo "[rebuild] staging exec.o..."; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/exec.ll -o build/native/obj/runtime/exec.o; \
+	fi
 	@# Write build stamp (version + git hash for dev builds).
 	@# `version.sfn::resolve_compiler_version` reads this file
 	@# first, so without it the binary would report whatever stale

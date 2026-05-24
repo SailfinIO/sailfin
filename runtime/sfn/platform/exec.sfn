@@ -1,0 +1,326 @@
+// runtime/sfn/platform/exec.sfn
+//
+// Sailfin-native executable-path + runtime-root resolution
+// (M5.3 prerequisite per epic #451; issue #468). Provides the
+// pure-Sailfin equivalents of `_resolve_runtime_root(argv0)` and
+// the per-OS executable-path resolution block currently in
+// `runtime/native/src/native_driver.c:396-557`. When the
+// `@main` lowering (M5.3) replaces `native_driver.c`'s entry
+// point, this module is what the lowered `main` calls before
+// delegating to `sailfin_cli_main_with_paths`.
+//
+// Module surface
+//   - `exe_path() -> string ![io]` — absolute path of the
+//     currently-running binary. Uses `readlink("/proc/self/exe")`
+//     on Linux. Returns `""` when the lookup fails (callers
+//     layer their own fallback, typically `realpath(argv[0])`).
+//   - `binary_dir(exe: string) -> string` — pure dirname: the
+//     prefix of `exe` up to (but excluding) the final `/`.
+//     Returns `""` for empty input, `"."` for a bare filename,
+//     `"/"` for a root-relative single-component path. Matches
+//     `_dirname_dup` in native_driver.c byte-for-byte.
+//   - `resolve_runtime_root(exe_path: string) -> string ![io]`
+//     — honors `$SAILFIN_RUNTIME_ROOT` first, then walks
+//     `<dir>/runtime`, `<dir>/../runtime`,
+//     `<dir>/../../runtime` in that exact order. Returns the
+//     first existing canonicalized path or `""`. Order
+//     preserves dev-tree (`build/native/`), installed-tree
+//     (`~/.local/bin/sailfin` next to `~/.local/runtime/`), and
+//     packaged-bundle layouts — `_resolve_runtime_root` in
+//     native_driver.c documents the same walk.
+//
+// Platform coverage
+//   Linux is the only platform validated end-to-end in this PR.
+//   The macOS path requires `_NSGetExecutablePath` (declared in
+//   `runtime/sfn/platform/libc.sfn` as criterion 4 of #468 but
+//   not called from this body) and the Windows path requires
+//   `GetModuleFileNameA` (same disposition). Sailfin lacks
+//   `cfg(target_os)` (issue #468 `Out:` scope) and a static link
+//   against an unresolved macOS / Windows symbol from a Linux
+//   build fails immediately, so adding the call here would break
+//   the Linux CI link. A follow-up issue wires macOS support
+//   once one of three things lands: (1) a per-OS C stub library
+//   that resolves the missing symbols to noop returns on the
+//   other platform, (2) Sailfin weak-symbol attributes, or
+//   (3) `cfg(target_os)`. macOS users in the interim set
+//   `SAILFIN_RUNTIME_ROOT` explicitly — `resolve_runtime_root`
+//   honors the override before walking, so the runtime resolves
+//   without `exe_path`.
+//
+// Naming
+//   No `_sfn_` infix on the canonical `exe_path` / `binary_dir`
+//   / `resolve_runtime_root` exports because the C runtime
+//   currently exposes them as static helpers inside
+//   `native_driver.c` (no external symbol). There is therefore
+//   no link-time namespace collision to dodge — unlike the
+//   `sfn_arena_sfn_*` / `sfn_str_sfn_*` workarounds in
+//   `runtime/sfn/memory/arena.sfn` and `runtime/sfn/string.sfn`,
+//   which had to coexist with already-shipping C symbols of the
+//   same name.
+//
+// Effects
+//   `exe_path` and `resolve_runtime_root` carry `![io]` (they
+//   read process state and filesystem). `binary_dir` is pure —
+//   no syscalls, no allocations beyond `malloc` for the result
+//   buffer (`malloc` itself is not effect-gated per the §3.6
+//   effect-on-wrapper rule, mirroring `runtime/sfn/string.sfn`
+//   which malloc's freely).
+//
+// Why inline the externs rather than import from `./libc`?
+//   Same rationale as `runtime/sfn/memory/arena.sfn` /
+//   `runtime/sfn/memory/rc.sfn` / `runtime/sfn/string.sfn` /
+//   `runtime/sfn/process.sfn` / `runtime/sfn/exception.sfn`:
+//   the seed compiler reaches the cross-module extern resolver
+//   through a path that issue #306 has not closed yet,
+//   surfacing as `cannot resolve return type for call to …`
+//   fatals during emission. Inlining the declarations keeps
+//   this module self-contained for every seed. Once #306
+//   closes, a follow-up PR flips these to imports without
+//   touching the bodies. The same declarations also live in
+//   `runtime/sfn/platform/libc.sfn` for discoverability and
+//   for the eventual cross-module-import flip.
+//
+// Seed-compiler cast quirk
+//   The pinned seed (0.7.0-alpha.2) mis-lowers
+//   `<string_literal> as * u8` / `<string_literal> as string`:
+//   the IR materializes the `{i8*, i64}` aggregate but then
+//   emits `ret i8* null` / `store i8* null` for the cast
+//   result, silently zeroing the pointer. Pass literals
+//   directly to extern args instead (e.g. `readlink("/proc/
+//   self/exe", buf, n)`), or assign to a `string`-typed local
+//   first and then cast the local (`let s: string = "..."; let
+//   p: * u8 = s as * u8;` works because the load extracts the
+//   data pointer through the alloca slot). Return-position
+//   string literals work without the cast (the function's
+//   declared `string` return type triggers the correct
+//   extractvalue). Every place this file departs from the
+//   "obvious" cast pattern is following this rule — the
+//   workaround unblocks the M5.3 prereq without needing a
+//   seed bump.
+//
+// Pinned by
+//   - `compiler/tests/unit/runtime_exec_path_test.sfn`
+//     (binary_dir semantics — empty, bare, slashed, root cases)
+//   - `compiler/tests/e2e/test_runtime_exec_path.sh` (full
+//     `exe_path` round-trip via a fixture binary that prints
+//     its own path and asserts the printed path resolves)
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+extern fn strrchr(s: * u8, c: i32) -> * u8;
+
+extern fn getenv(name: * u8) -> * u8;
+
+extern fn readlink(path: * u8, buf: * u8, bufsize: usize) -> i64;
+
+extern fn realpath(path: * u8, resolved: * u8) -> * u8;
+
+// `sailfin_intrinsic_fs_exists` is the existing C runtime helper
+// that backs the prelude's `fs.exists` surface (stat-based; true
+// for files and directories alike). M3.1 replaces this with a
+// pure-Sailfin `sfn_fs_exists` via `runtime/sfn/adapters/
+// filesystem.sfn`; until then this is the canonical "does this
+// path exist on disk" probe and is what the issue's `Context`
+// section explicitly recommends.
+extern fn sailfin_intrinsic_fs_exists(path: * u8) -> bool;
+
+// `sailfin_runtime_string_concat` is the C runtime's
+// NUL-terminated concat. Used to build the
+// `<exe_dir>/runtime` / `<exe_dir>/../runtime` / ...
+// candidate strings without rolling a manual concat loop here.
+// M2.4b's pure-Sailfin concat is keyed on the M1.A.2
+// aggregate-by-value parameter flip; until that lands, this C
+// trampoline is the only way to produce a fresh NUL-terminated
+// buffer from two `* u8` inputs.
+extern fn sailfin_runtime_string_concat(a: * u8, b: * u8) -> * u8;
+
+// `memcmp` is needed for the empty-string check in
+// `resolve_runtime_root`'s `$SAILFIN_RUNTIME_ROOT` override
+// branch — the C original treats an empty env value as "not
+// set" (`override && override[0] != '\0'`). Sailfin lacks a
+// `*ptr` deref syntax for reading a single byte, so the
+// canonical equivalent is `memcmp(override, "", 1) != 0`,
+// which compares one byte against a NUL-only literal. The
+// libc prototype lives in `runtime/sfn/platform/libc.sfn`;
+// inlining is the same #306 workaround as the rest of this
+// file's externs.
+extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
+
+// `binary_dir(exe)` returns the directory component of `exe` —
+// the prefix up to (but excluding) the trailing `/`. Pure
+// (no syscalls). Mirrors `_dirname_dup` in native_driver.c:
+//   - `""`             -> `""`     (empty input passes through)
+//   - `"sailfin"`      -> `"."`    (no slash)
+//   - `"/x"`           -> `"/"`    (slash is the first byte)
+//   - `"/foo/bar/x"`   -> `"/foo/bar"`
+//
+// Allocation: a fresh `malloc`'d NUL-terminated buffer for the
+// slashed and rooted cases. The non-slashed and empty cases
+// return literal pointers (`"."` and `""`) — those live in the
+// `.rodata` section and need no free. Callers that care about
+// the allocation distinction should `strdup`-on-write rather
+// than freeing unconditionally.
+//
+// `47` is the ASCII code for `/`. The seed compiler does not
+// yet accept char literals (`'/'`), so the byte value is inlined
+// directly — same convention as the `127` / `65280` masks in
+// `runtime/sfn/process.sfn`'s wait-status decoder.
+fn binary_dir(exe: string) -> string {
+    // Going through a `string`-typed local first sidesteps the
+    // seed's `<literal> as * u8` cast bug — `exe as * u8` works
+    // here because `exe` is an alloca-backed parameter, not a
+    // raw literal expression. See the cast-quirk note in the
+    // module header.
+    let p: * u8 = exe as * u8;
+    if p as i64 == 0 { return ""; }
+    let slash: * u8 = strrchr(p, 47);
+    if slash as i64 == 0 { return "."; }
+    if slash as i64 == p as i64 { return "/"; }
+    let len: i64 = (slash as i64) - (p as i64);
+    let buf: * u8 = malloc((len + 1) as usize);
+    if buf as i64 == 0 { return ""; }
+    memcpy(buf, p, len as usize);
+    let term: * u8 = buf + len;
+    memset(term, 0, 1 as usize);
+    // `buf as string` lowers correctly — the seed's cast bug is
+    // specific to the *literal* path; pointer-to-string casts on
+    // alloca-backed `* u8` slots extract via load and pass
+    // through unmodified.
+    return buf as string;
+}
+
+// `exe_path()` returns the absolute path of the currently
+// running binary, or `""` if the lookup fails. Today's body
+// uses Linux's `/proc/self/exe` symlink — the most reliable
+// source on Linux because it works even when `argv[0]` is a
+// bare `$PATH` name (the user typed `sailfin` rather than
+// `./sailfin` or `/usr/local/bin/sailfin`).
+//
+// macOS / Windows: see the module header. Both platforms have
+// their externs declared in `runtime/sfn/platform/libc.sfn` for
+// the follow-up wire-up; this body returns `""` on those
+// platforms today and callers fall back to
+// `SAILFIN_RUNTIME_ROOT` (honored by `resolve_runtime_root`).
+//
+// Buffer sizing: 4096 covers Linux's `PATH_MAX`. macOS uses
+// `PATH_MAX = 1024` but the larger Linux constant subsumes it
+// and the few extra kilobytes are negligible at the single
+// call site (program startup). The buffer is zero-initialized
+// so the returned `* u8 as string` views a properly
+// NUL-terminated byte sequence regardless of how many bytes
+// `readlink` actually wrote.
+fn exe_path() -> string ![io] {
+    let buf_size: usize = 4096 as usize;
+    let buf: * u8 = malloc(buf_size);
+    if buf as i64 == 0 { return ""; }
+    memset(buf, 0, buf_size);
+    // The seed mis-lowers `let proc_self_exe: * u8 = "/proc/self/
+    // exe" as * u8;` to `store i8* null` (the literal aggregate
+    // is built but the cast then zeros the pointer). Passing
+    // the literal directly to `readlink` triggers the correct
+    // `extractvalue` lowering at the call site — see the cast-
+    // quirk note in the module header.
+    let s_proc: string = "/proc/self/exe";
+    let n: i64 = readlink(s_proc as * u8, buf, buf_size);
+    if n > 0 { return buf as string; }
+    free(buf);
+    return "";
+}
+
+// `resolve_runtime_root(exe_path)` finds the runtime bundle for
+// the running binary. Honors `$SAILFIN_RUNTIME_ROOT` first
+// (operator override for unusual install layouts and CI
+// scratch dirs); otherwise walks three candidates relative to
+// `binary_dir(exe_path)` in this exact order:
+//
+//   1. `<exe_dir>/runtime`         — dev-tree (the binary at
+//                                     `build/native/sailfin`
+//                                     sits next to
+//                                     `build/native/runtime/`).
+//   2. `<exe_dir>/../runtime`      — installed tree (binary at
+//                                     `~/.local/bin/sailfin`
+//                                     sits next to
+//                                     `~/.local/runtime/`).
+//   3. `<exe_dir>/../../runtime`   — packaged-bundle layout
+//                                     (binary nested two
+//                                     levels deep under a
+//                                     distribution prefix).
+//
+// Each candidate is `fs.exists`-probed; the first hit is
+// canonicalized via `realpath` and returned. Returns `""`
+// when none of the three exist — callers that need a
+// hard-fail diagnostic (e.g. `sfn build` linking against a
+// missing prelude) layer that themselves; the contract here
+// is purely "first existing path or empty".
+//
+// `realpath(candidate, null)` instructs libc to allocate the
+// resolved buffer with `malloc` and return ownership to us;
+// the caller (`runtime/sfn/cli/entry.sfn` once M5.3 lands)
+// holds the pointer for the lifetime of the process and never
+// frees it (the buffer is leaked, matching the C runtime's
+// `_canonicalize_existing_path` behavior). If `realpath`
+// fails, the un-canonicalized concat is returned — the caller
+// gets a valid string either way.
+fn resolve_runtime_root(exe_path: string) -> string ![io] {
+    // Per the cast-quirk note in the module header, route every
+    // string literal through a `string`-typed local first so the
+    // `as * u8` cast picks up the alloca-backed slot rather than
+    // the broken literal-cast path.
+    let s_env: string = "SAILFIN_RUNTIME_ROOT";
+    let override_val: * u8 = getenv(s_env as * u8);
+    if override_val as i64 != 0 {
+        // Mirror the C original (`override && override[0] != '\0'`):
+        // empty env value is treated as "not set" and falls through
+        // to the dir-walk. `memcmp(override, "", 1)` compares the
+        // first byte against NUL — non-zero means a real string.
+        let s_empty: string = "";
+        if memcmp(override_val, s_empty as * u8, 1 as usize) != 0 {
+            return override_val as string;
+        }
+    }
+    let exe_dir_str: string = binary_dir(exe_path);
+    let exe_dir: * u8 = exe_dir_str as * u8;
+    let mut idx: i32 = 0;
+    loop {
+        if idx >= 3 { break; }
+        let suffix: * u8 = _candidate_suffix(idx);
+        let candidate: * u8 = sailfin_runtime_string_concat(exe_dir, suffix);
+        if sailfin_intrinsic_fs_exists(candidate) {
+            let canon: * u8 = realpath(candidate, null);
+            if canon as i64 != 0 { return canon as string; }
+            return candidate as string;
+        }
+        idx = idx + 1;
+    }
+    return "";
+}
+
+// Path-suffix lookup table for `resolve_runtime_root`'s walk.
+// Indexes 0..2 produce the dev-tree, installed-tree, and
+// packaged-bundle suffixes in the documented order. Pulled
+// out as a separate function so the dir-walk loop can index
+// without materializing a top-level `string[]` literal — the
+// seed compiler does not yet handle literal arrays of slash-
+// prefixed strings at module scope (verified during M2.7a
+// bring-up), and a switch-on-index dispatch is the cheapest
+// workaround until that bug closes.
+fn _candidate_suffix(idx: i32) -> * u8 {
+    // Route through `string`-typed locals to dodge the seed's
+    // `<literal> as * u8` cast bug — see the cast-quirk note in
+    // the module header. The slot-load makes the cast safe.
+    if idx == 0 {
+        let s0: string = "/runtime";
+        return s0 as * u8;
+    }
+    if idx == 1 {
+        let s1: string = "/../runtime";
+        return s1 as * u8;
+    }
+    let s2: string = "/../../runtime";
+    return s2 as * u8;
+}

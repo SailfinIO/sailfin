@@ -386,6 +386,40 @@ fn _runtime_exception_path(root: string) -> string ![io] {
     return "";
 }
 
+// Issue #468 (M5.3 prerequisite per epic #451) ships the Sailfin
+// equivalents of `_resolve_runtime_root(argv0)` and the per-OS
+// executable-path block in `runtime/native/src/native_driver.c`.
+// The new module `runtime/sfn/platform/exec.sfn` exports
+// `@binary_dir`, `@exe_path`, and `@resolve_runtime_root`; the
+// legacy `sfn run` / `sfn build` link path (this function's
+// caller, `_clang_compile_runtime_objects`) needs the staged `.o`
+// to resolve them once any user program (or the M5.3 entry-point
+// lowering once it lands) reaches the symbols. The runtime-
+// capsule path reaches exec.sfn through `runtime/native/
+// capsule.toml`'s `sfn-sources` array instead. Search order
+// mirrors `_runtime_clock_path` so bundled installs and in-tree
+// dev builds both find the staged object. Empty return is benign
+// today (no user surface dispatches through this module yet) but
+// becomes fail-loud once M5.3 wires `@main` to call `@exe_path` —
+// the linker then reports "undefined reference to `exe_path`"
+// and the missing staged artifact surfaces immediately.
+fn _runtime_exec_path(root: string) -> string ![io] {
+    let bundled = _path_join(root, "native/obj/exec.o");
+    if fs.exists(bundled) { return bundled; }
+    let bundled_nested = _path_join(root, "native/obj/runtime/exec.o");
+    if fs.exists(bundled_nested) { return bundled_nested; }
+    let parent = _dirname(root);
+    let fallback = _path_join(parent, "build/native/obj/exec.o");
+    if fs.exists(fallback) { return fallback; }
+    let fallback_nested = _path_join(parent, "build/native/obj/runtime/exec.o");
+    if fs.exists(fallback_nested) { return fallback_nested; }
+    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/exec.o");
+    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
+    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/exec.o");
+    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
+    return "";
+}
+
 // Last `/`-separated segment of a path. Returns the input itself
 // when there's no slash. Used for naming runtime obj outputs after
 // their source basename, matching the legacy `_clang_compile_runtime_objects`
@@ -715,24 +749,26 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     // Build (or reuse) cached runtime object files so repeated `test` invocations
     // don't recompile the runtime C sources per test file.
     //
-    // Return shape: `[runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj]`.
+    // Return shape: `[runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj]`.
     // The trailing `clock_obj` slot is the PR 2 (#397) addition for the
     // Sailfin-native `@sfn_sleep` definition; `process_obj` is the M2.9
     // (#405) addition for `@sfn_process_run`; `exception_obj` is the
     // M2.7b (#404) addition for the frame-based exception primitives
     // (`sfn_exception_push_frame` / `sfn_exception_pop_frame` /
-    // `sfn_take_exception` / `sfn_throw`). Empty `clock_obj` /
-    // `process_obj` / `exception_obj` entries are tolerated when the
+    // `sfn_take_exception` / `sfn_throw`); `exec_obj` is the #468
+    // addition for `@exe_path` / `@binary_dir` / `@resolve_runtime_root`
+    // (M5.3 prerequisite). Empty `clock_obj` / `process_obj` /
+    // `exception_obj` / `exec_obj` entries are tolerated when the
     // corresponding `runtime/sfn/*.sfn` module has not yet been staged
     // into the runtime bundle — callers skip empty entries when
     // assembling the link line. Any of the first four going empty
     // signals a failed runtime compile and propagates back to the
     // caller as a hard fail.
     if runtime_root.length == 0 {
-        return ["", "", "", "", "", "", ""];
+        return ["", "", "", "", "", "", "", ""];
     }
     if !_runtime_bundle_exists(runtime_root) {
-        return ["", "", "", "", "", ""];
+        return ["", "", "", "", "", "", "", ""];
     }
 
     let include_dir = _path_join(runtime_root, "native/include");
@@ -743,6 +779,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     let clock_obj = _runtime_clock_path(runtime_root);
     let process_obj = _runtime_process_path(runtime_root);
     let exception_obj = _runtime_exception_path(runtime_root);
+    let exec_obj = _runtime_exec_path(runtime_root);
 
     let runtime_obj = _path_join(out_dir, "sailfin_runtime" + opt_flag + ".o");
     let arena_obj = _path_join(out_dir, "sailfin_arena" + opt_flag + ".o");
@@ -752,7 +789,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
         let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
             + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
         if rc != 0 {
-            return ["", "", "", "", "", "", ""];
+            return ["", "", "", "", "", "", "", ""];
         }
     }
 
@@ -760,18 +797,18 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
         let rc_arena = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
             + include_dir, "-c", arena_src, "-o", arena_obj,]);
         if rc_arena != 0 {
-            return ["", "", "", "", "", "", ""];
+            return ["", "", "", "", "", "", "", ""];
         }
     }
 
     if !fs.exists(globals_obj) {
         let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", runtime_ir, "-o", globals_obj,]);
         if rc2 != 0 {
-            return ["", "", "", "", "", "", ""];
+            return ["", "", "", "", "", "", "", ""];
         }
     }
 
-    return [runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj];
+    return [runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj];
 }
 
 fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> int ![io] {
@@ -884,6 +921,18 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         // reference to `sfn_exception_push_frame`" so the missing
         // staged artifact surfaces immediately.
         let exception_obj = cached[6];
+        // #468 (M5.3 prereq): `exec_obj` carries the Sailfin-native
+        // `@exe_path` / `@binary_dir` / `@resolve_runtime_root`
+        // helpers. Same empty-string fallback contract as
+        // `clock_obj` / `process_obj` / `exception_obj` — user
+        // programs that don't `extern fn exe_path()` (today, that
+        // is every user program; M5.3's lowered `@main` will be the
+        // first internal caller) don't reach the symbols and the
+        // link succeeds either way. Once M5.3 lands, the symbols
+        // become unconditionally referenced and a missing staged
+        // artifact surfaces immediately as "undefined reference to
+        // `exe_path`".
+        let exec_obj = cached[7];
         let mut _missing: boolean = false;
         if runtime_obj.length == 0 { _missing = true; }
         if arena_obj.length == 0 { _missing = true; }
@@ -900,6 +949,7 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         if clock_obj.length > 0 { runtime_objs.push(clock_obj); }
         if process_obj.length > 0 { runtime_objs.push(process_obj); }
         if exception_obj.length > 0 { runtime_objs.push(exception_obj); }
+        if exec_obj.length > 0 { runtime_objs.push(exec_obj); }
         runtime_link_libs.push("-lm");
     }
 
