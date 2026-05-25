@@ -79,6 +79,27 @@ int64_t readlink(const char *path, char *buf, size_t bufsize)
     (void)bufsize;
     return -1;
 }
+
+/* mingw-w64 ships `realpath` declarations in `<stdlib.h>` but the
+ * resolved symbol is not always present in the static link surface
+ * (depends on which CRT variant the cross-compiler bundles). The
+ * retired C driver dodged this by `#define realpath(p, r) _fullpath(...)`
+ * inside its own translation unit — exec.sfn's compiled .ll cannot
+ * apply that macro, so provide a weak forwarder that delegates to
+ * `_fullpath`. Matches the macro semantics of the C driver:
+ * `_fullpath(resolved, path, MAX_PATH)`. Declared weak so any
+ * future mingw release providing its own `realpath` in libc wins. */
+#include <windows.h>
+#include <stdlib.h>
+__attribute__((weak))
+char *realpath(const char *path, char *resolved)
+{
+    /* Pass a NULL `resolved` if the caller did not allocate one;
+     * `_fullpath` will malloc a buffer of size MAX_PATH. The Sailfin
+     * caller in `exec.sfn::resolve_runtime_root` passes NULL exactly
+     * for this reason (so libc owns the return). */
+    return _fullpath(resolved, path, MAX_PATH);
+}
 #endif
 
 static bool _env_enabled(const char *name);
