@@ -87,11 +87,18 @@ extern fn sailfin_runtime_string_append(buf: * u8, suffix: * u8) -> * u8;
 // PR's compiler-side flip — the C bodies stay exported (seed-built
 // IR continues to link through them) but every fresh user emission
 // targets the bare `sfn_str_*` / `sfn_number_to_str` names instead.
-extern fn sailfin_runtime_grapheme_count(s: * u8) -> i64;
+//
+// Return types match the C ABI exactly. `sailfin_runtime_grapheme_count`
+// and `sailfin_runtime_char_code` return `double` in C (System V x86_64
+// returns floats in `%xmm0` vs integers in `%rax` — declaring them
+// `-> i64` here would emit `call i64 ... %xmm0`, reading garbage from
+// the wrong register class). The Sailfin proof-of-life trampolines
+// below cast `f64 -> i64` at the language layer.
+extern fn sailfin_runtime_grapheme_count(s: * u8) -> f64;
 
 extern fn sailfin_runtime_grapheme_at(s: * u8, idx: f64) -> * u8;
 
-extern fn sailfin_runtime_char_code(s: * u8) -> i64;
+extern fn sailfin_runtime_char_code(s: * u8) -> f64;
 
 extern fn sailfin_runtime_string_to_number(s: * u8) -> f64;
 
@@ -224,9 +231,11 @@ fn sfn_str_sfn_append(buf: * u8, suffix: * u8) -> * u8 {
 // as a grapheme" simplification the C body documents). The
 // proof-of-life shape pins the migration symbol; the real walker
 // lands when the body moves into Sailfin against the SfnString
-// aggregate.
+// aggregate. The legacy C entrypoint returns `f64` (see extern
+// declaration above) so the body casts down at the Sailfin layer
+// to preserve the architect-spec `i64` return.
 fn sfn_str_sfn_grapheme_count(s: * u8) -> i64 {
-    return sailfin_runtime_grapheme_count(s);
+    return sailfin_runtime_grapheme_count(s) as i64;
 }
 
 // `sfn_str_sfn_grapheme_at(s, idx)` — N-th grapheme of `s`.
@@ -269,9 +278,11 @@ fn sfn_str_sfn_find_byte(s: * u8, byte_value: i64, start_index: i64) -> i64 {
 // body delegates to the legacy C reader which returns the first
 // byte for multi-byte sequences (matches the documented bootstrap
 // simplification). Full UTF-8 decode moves into Sailfin alongside
-// the SfnString aggregate flip.
+// the SfnString aggregate flip. The legacy C entrypoint returns
+// `f64` (see extern declaration above) so the body casts down at
+// the Sailfin layer to preserve the architect-spec `i64` return.
 fn sfn_str_sfn_codepoint(s: * u8) -> i64 {
-    return sailfin_runtime_char_code(s);
+    return sailfin_runtime_char_code(s) as i64;
 }
 
 // `sfn_str_sfn_from_codepoint(cp)` — 1-4 byte UTF-8 encode of

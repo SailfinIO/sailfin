@@ -2152,6 +2152,19 @@ int64_t sfn_str_byte_at(const char *s, int64_t idx)
     {
         return -1;
     }
+    /* Upper-bound check via the same `_safe_strlen_asan` length probe
+     * `sfn_str_find_byte` uses, so out-of-range indexes return -1
+     * instead of dereferencing past the buffer (Copilot review on
+     * PR #747). The architect's eventual `(SfnString, i64) -> i64`
+     * body reads `s.len` directly off the aggregate and skips the
+     * scan; until that lands the proof-of-life trampoline must
+     * defend the legacy `* u8` boundary itself. */
+    bool truncated = false;
+    int64_t len = (int64_t)_safe_strlen_asan((char *)s, &truncated);
+    if (idx >= len)
+    {
+        return -1;
+    }
     unsigned char byte = (unsigned char)s[idx];
     return (int64_t)byte;
 }
