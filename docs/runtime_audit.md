@@ -65,13 +65,21 @@
 >     is explicit. Dormant — manifest population + C trampoline
 >     removal happen in PR B of the sleep migration.
 > - **`kind = "runtime"` capsules' `sfn-sources` schema is now
->   live (M2.1+M2.2, issue #394, 2026-05-07).** The active
+>   live (M2.1 issue #394 2026-05-07; M2.2 real page-chain bump
+>   allocator issue #477 2026-05-25).** The active
 >   `runtime/native/capsule.toml` populates `sfn-sources =
->   ["../sfn/memory/arena.sfn"]` — the first proof-of-life entry.
->   `_compile_runtime_sfn_sources` (the consumer shipped dormant
->   in #308) fires on every `sfn build -p compiler` invocation,
->   producing `build/sailfin/sfn__runtime-native__arena.sfn-O2.o`
->   and threading it into the final link. The Sailfin module
+>   ["../sfn/memory/arena.sfn", …]` — the first proof-of-life
+>   entry. `_compile_runtime_sfn_sources` (the consumer shipped
+>   dormant in #308) fires on every `sfn build -p compiler`
+>   invocation, producing
+>   `build/sailfin/sfn__runtime-native__arena.sfn-O2.o` and
+>   threading it into the final link. M2.1 stubbed the five
+>   `sfn_arena_sfn_*` exports as libc-wrapper trampolines to
+>   prove the link path; M2.2 replaces the bodies with the real
+>   page-chain bump allocator per
+>   `docs/runtime_architecture.md` §2.1.1 — 24-byte `Arena`
+>   handle, 32-byte `ArenaPage` headers, grow-if-at-tip realloc,
+>   downstream-chain reuse after reset. The Sailfin module
 >   exports `sfn_arena_sfn_*` symbols that coexist with the C
 >   arena's `sfn_arena_*` exports — both link side-by-side until
 >   M3 retires `runtime/native/src/sailfin_arena.c`.
