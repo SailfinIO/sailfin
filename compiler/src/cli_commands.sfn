@@ -199,6 +199,28 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
             }
             pri += 1;
         }
+        // M2.10 (issue #402): mirrors the clock / process staging
+        // above. Every module's `@__sfn_module_type_init__*` ctor
+        // calls `@sfn_type_register`, defined in
+        // `runtime/sfn/type_meta.sfn`. Without this `.o` on the link
+        // line the test binaries fail at link with "undefined
+        // reference to `sfn_type_register`". The same `.o` also
+        // satisfies the seven `native_signature` flips in
+        // `runtime_helpers.sfn` (`sfn_is_*`, `sfn_resolve_type`,
+        // `sfn_instance_of`) for tests that route through the
+        // prelude's `check_type_descriptor` path.
+        let type_meta_paths: string[] = ["build/selfhost/native/obj/runtime/type_meta.o", "build/native/obj/runtime/type_meta.o", "build/native/obj/type_meta.o", runtime_root
+            + "/native/obj/runtime/type_meta.o", runtime_root
+            + "/native/obj/type_meta.o",];
+        let mut tmi: int = 0;
+        loop {
+            if tmi >= type_meta_paths.length { break; }
+            if fs.exists(type_meta_paths[tmi]) {
+                args.push(type_meta_paths[tmi]);
+                break;
+            }
+            tmi += 1;
+        }
     }
     args.push("-lm");
     args.push("-pthread");

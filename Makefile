@@ -823,6 +823,25 @@ rebuild:
 		echo "[rebuild] staging exception.o..."; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/exception.ll -o build/native/obj/runtime/exception.o; \
 	fi
+	@# Stage type_meta.o (Sailfin-native type-metadata registry from
+	@# runtime/sfn/type_meta.sfn). M2.10 (issue #402) flips seven
+	@# `runtime_helpers.sfn` descriptors to `sfn_*` `native_signature`
+	@# entries (`sfn_is_string` / `_resolve_type` / `_instance_of`,
+	@# etc.) and emits a `@__sfn_module_type_init__*` constructor per
+	@# module that calls `@sfn_type_register`. The legacy link path
+	@# (`_clang_compile_runtime_objects` in `compiler/src/cli_main.sfn`)
+	@# resolves the symbol against this staged .o; without it, every
+	@# `sfn test` invocation fails at link with "undefined reference
+	@# to `sfn_type_register`" the moment a test's compiled IR carries
+	@# a single named struct/enum/interface descriptor.
+	@if [ ! -f build/native/obj/runtime/type_meta.ll ]; then \
+		echo "[rebuild] staging type_meta.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/type_meta.ll llvm runtime/sfn/type_meta.sfn >/dev/null; \
+	fi
+	@if [ ! -f build/native/obj/runtime/type_meta.o ]; then \
+		echo "[rebuild] staging type_meta.o..."; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/type_meta.ll -o build/native/obj/runtime/type_meta.o; \
+	fi
 	@# Stage exec.o (Sailfin-native executable-path + runtime-root
 	@# resolution from runtime/sfn/platform/exec.sfn). Issue #468
 	@# (epic #451 M5.3 prerequisite) ships `@exe_path` /

@@ -60,7 +60,7 @@ fn sfn_abi_locked_layout_string() -> string {
 // reads as `uint64_t`).
 fn sfn_abi_hash_decimal() -> string {
     let limbs = fnv1a_64_hash(sfn_abi_locked_layout_string());
-    return _limbs_to_unsigned_decimal(limbs);
+    return limbs_to_unsigned_decimal(limbs);
 }
 
 // FNV-1a 64-bit over the input bytes.
@@ -201,7 +201,7 @@ fn _split_low_bit(value: int) -> _AbiBitSplit {
 // string suitable for LLVM IR `i64 <value>`. LLVM accepts any decimal
 // in [0, 2^64) for an i64 constant; the bit pattern is preserved when
 // the runtime reads the symbol as `uint64_t`.
-fn _limbs_to_unsigned_decimal(limbs: AbiHashLimbs) -> string {
+fn limbs_to_unsigned_decimal(limbs: AbiHashLimbs) -> string {
     let mut zero: boolean = true;
     if limbs.h0 != 0 { zero = false; }
     if limbs.h1 != 0 { zero = false; }
@@ -313,5 +313,6 @@ export {
     AbiHashLimbs,
     sfn_abi_locked_layout_string,
     sfn_abi_hash_decimal,
-    fnv1a_64_hash
+    fnv1a_64_hash,
+    limbs_to_unsigned_decimal
 };

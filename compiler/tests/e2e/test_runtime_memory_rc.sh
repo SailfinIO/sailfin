@@ -307,9 +307,21 @@ CHARNESS
     # through `round(double)` + `fptosi`, leaving libm references
     # in the emitted `.ll` (verified in /tmp during M2.3 bring-up).
     # Once the literal-coercion path moves to direct `i64` constants
-    # the libm dependency retires.
+    # the libm dependency retires. `type_meta.o` because M2.10 (#402)
+    # emits an `@__sfn_module_type_init__*` constructor in every
+    # module with named structs/enums/interfaces — rc.sfn defines
+    # `RcHeader`, so the constructor calls `@sfn_type_register` and
+    # the unresolved reference fails link unless the staged
+    # `runtime/sfn/type_meta.sfn` object rides along. Skip if absent
+    # (the IR-shape assertions still pin the contract; this round-
+    # trip is a smoke test on top).
     local bin="$SCRATCH/roundtrip"
-    if ! "$clang_bin" -Wno-override-module "$harness" "$ll" -o "$bin" -lm 2>"$SCRATCH/clang.log"; then
+    local type_meta_o="$REPO_ROOT/build/native/obj/runtime/type_meta.o"
+    local extra_o=()
+    if [ -f "$type_meta_o" ]; then
+        extra_o+=("$type_meta_o")
+    fi
+    if ! "$clang_bin" -Wno-override-module "$harness" "$ll" "${extra_o[@]}" -o "$bin" -lm 2>"$SCRATCH/clang.log"; then
         echo "[test]   clang failed to link roundtrip harness:"
         cat "$SCRATCH/clang.log"
         return 1

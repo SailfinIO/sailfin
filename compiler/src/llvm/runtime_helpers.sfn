@@ -321,14 +321,29 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_assert_fail_fn", symbol: "runtime_assert_fail_fn", return_type: "void", parameter_types: ["i8*", "double", "double", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    // M2.10 (#402): the seven type-meta descriptors flip their
+    // `native_signature` to the Sailfin-native `sfn_*` entrypoints
+    // defined in `runtime/sfn/type_meta.sfn`. The legacy
+    // `sailfin_runtime_is_*` / `_resolve_type` / `_instance_of` C
+    // stubs (all returning false / null) stay exported so seed-
+    // built IR continues to link, but every fresh user emission
+    // now routes through the Sailfin module.
+    //
+    // `sfn_is_*` keep the v0 stub semantics (return false) until
+    // value-side type tagging lands — flipping early would change
+    // behaviour for callers that already gate on false. The
+    // material flip is `sfn_resolve_type` / `sfn_instance_of`,
+    // which gain real registry-backed bodies via the descriptor
+    // globals emitted by
+    // `compiler/src/llvm/lowering/type_descriptors.sfn`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_is_string_fn", symbol: "sailfin_runtime_is_string", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "runtime_is_string_fn", symbol: "sailfin_runtime_is_string", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: "sfn_is_string", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_is_number_fn", symbol: "sailfin_runtime_is_number", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "runtime_is_number_fn", symbol: "sailfin_runtime_is_number", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: "sfn_is_number", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_is_boolean_fn", symbol: "sailfin_runtime_is_boolean", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "runtime_is_boolean_fn", symbol: "sailfin_runtime_is_boolean", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: "sfn_is_boolean", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_is_void_fn", symbol: "sailfin_runtime_is_void", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
@@ -337,16 +352,16 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "runtime.bounds_check", symbol: "sailfin_runtime_bounds_check", return_type: "void", parameter_types: ["i64", "i64"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_is_array_fn", symbol: "sailfin_runtime_is_array", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "runtime_is_array_fn", symbol: "sailfin_runtime_is_array", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: "sfn_is_array", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_is_callable_fn", symbol: "sailfin_runtime_is_callable", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "runtime_is_callable_fn", symbol: "sailfin_runtime_is_callable", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: "sfn_is_callable", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_resolve_runtime_type_fn", symbol: "sailfin_runtime_resolve_type", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "runtime_resolve_runtime_type_fn", symbol: "sailfin_runtime_resolve_type", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: "sfn_resolve_type", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_instance_of_fn", symbol: "sailfin_runtime_instance_of", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "runtime_instance_of_fn", symbol: "sailfin_runtime_instance_of", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_instance_of", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_serve_fn", symbol: "sailfin_runtime_serve", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io", "net"], native_signature: null, c_abi_return_type: null

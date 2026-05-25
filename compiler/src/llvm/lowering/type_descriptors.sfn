@@ -1,0 +1,376 @@
+// compiler/src/llvm/lowering/type_descriptors.sfn
+//
+// M2.10 (#402): emit one `@__sfn_type_desc.<sanitized_name>` global
+// per named struct / enum / interface in the module plus a
+// `@__sfn_module_type_init__<module>` constructor that calls
+// `sfn_type_register(&desc)` for each. The constructor is wired
+// through `@llvm.global_ctors` so the registry is populated before
+// `main` runs (and before any reflection caller queries it).
+//
+// Wire layout. Matches `struct SfnTypeDescriptor` in
+// `runtime/sfn/type_meta.sfn` byte-for-byte:
+//
+//   { i64 id, i64 name_ptr, i32 kind }
+//
+// `id` is the FNV-1a 64-bit hash of the type's bare name —
+// deterministic and stable across modules so two modules that
+// import the same `struct Foo` agree on the descriptor's `id`.
+// `name_ptr` is `ptrtoint` of a private NUL-terminated name
+// global (`@__sfn_type_desc_name.<name>`). `kind` is one of the
+// six tags defined at architect §2.5.1 (PRIMITIVE..FUNCTION).
+//
+// Linkage. Both the descriptor and the name string are
+// `linkonce_odr` so multiple modules emitting the same type
+// (the common case for imported types) coalesce at link time
+// without errors. The constructor is `internal` so two modules
+// each emit their own ctor with unique `module_name` suffixes.
+//
+// Skip rules.
+//   - Modules with zero named types emit nothing (no empty ctor,
+//     no `@llvm.global_ctors` entry, no descriptor preamble).
+//   - The runtime module `runtime/sfn/type_meta.sfn` itself
+//     defines `sfn_type_register`; emitting a ctor here that
+//     calls into it would create a recursive load-order
+//     dependency. Modules whose name starts with
+//     `runtime/sfn/type_meta` are excluded from ctor emission
+//     (descriptors for their types still emit so other modules'
+//     ctors find them via `sfn_resolve_type`).
+//
+// Pinned by `compiler/tests/e2e/test_runtime_type_meta.sh`.
+import {
+    EnumTypeInfo,
+    InterfaceTypeInfo,
+    StructTypeInfo,
+    TypeContext
+} from "../types";
+import { number_to_string, sanitize_symbol } from "../utils";
+import { fnv1a_64_hash, limbs_to_unsigned_decimal } from "./abi_hash";
+
+// Tag constants — must match `runtime/sfn/type_meta.sfn` header
+// comment block and architect §2.5.1.
+fn _kind_struct() -> int { return 1; }
+
+fn _kind_enum() -> int { return 2; }
+
+fn _kind_interface() -> int { return 3; }
+
+// Aggregated emission result. `preamble_lines` go after the
+// existing struct/enum/interface type definitions; `body_lines`
+// (constructor + `@llvm.global_ctors`) trail the user function
+// bodies.
+struct TypeDescriptorEmission {
+    preamble_lines: string[];
+    body_lines: string[];
+    has_descriptors: boolean;
+}
+
+fn _empty_emission() -> TypeDescriptorEmission {
+    return TypeDescriptorEmission {
+        preamble_lines: [],
+        body_lines: [],
+        has_descriptors: false
+    };
+}
+
+// FNV-1a 64-bit hash of the bare type name, formatted as an
+// unsigned decimal LLVM `i64` constant. Identical to
+// `sfn_abi_hash_decimal` style — bit pattern preserved as
+// `uint64_t` on the runtime side.
+fn _type_id_decimal(name: string) -> string {
+    let limbs = fnv1a_64_hash(name);
+    return limbs_to_unsigned_decimal(limbs);
+}
+
+// Constructor symbol stem for `module_name`. The full LLVM symbol
+// gets `@` prefixed at the use site.
+fn _module_init_symbol(module_name: string) -> string {
+    return "__sfn_module_type_init__" + sanitize_symbol(module_name);
+}
+
+// Descriptor global symbol stem. Used by both the descriptor
+// global itself and the matching name-string global, so
+// `linkonce_odr` deduplicates them in lockstep across modules.
+fn _descriptor_global_stem(type_name: string) -> string {
+    return sanitize_symbol(type_name);
+}
+
+// Escape a Sailfin type name for use inside an LLVM `c"..."`
+// constant. The names this emitter sees are all
+// `sanitize_symbol`-friendly (ASCII letters / digits / `_`), so
+// no real escaping is needed beyond emitting the bytes verbatim;
+// the trailing NUL is appended at the call site.
+fn _escape_for_llvm_cstring(name: string) -> string {
+    // Identifier-shape names contain no `"` / `\` / control bytes
+    // (verified by the parser earlier in the pipeline), so a
+    // straight passthrough is byte-correct. A future caller that
+    // surfaces arbitrary text here will need to grow the escape
+    // table; for v0 the constraint holds.
+    return name;
+}
+
+// Emit the descriptor + name-string globals for a single named
+// type plus the in-constructor `call void @sfn_type_register(...)`
+// line that registers it.
+struct _OneTypeLines {
+    preamble: string[];
+    ctor_call: string;
+}
+
+fn _emit_one_type(name: string, kind: int) -> _OneTypeLines {
+    let stem = _descriptor_global_stem(name);
+    let name_sym = "@__sfn_type_desc_name." + stem;
+    let desc_sym = "@__sfn_type_desc." + stem;
+    let id_text = _type_id_decimal(name);
+    let kind_text = number_to_string(kind);
+
+    // NUL-terminated name buffer length = name byte count + 1.
+    let name_len: int = name.length + 1;
+    let name_len_text = number_to_string(name_len);
+    let escaped = _escape_for_llvm_cstring(name);
+
+    let mut lines: string[] = [];
+    lines.push(name_sym + " = linkonce_odr unnamed_addr constant ["
+        + name_len_text
+        + " x i8] c\""
+        + escaped
+        + "\\00\"");
+    // The descriptor's `name_ptr` slot is `ptrtoint` of the name
+    // global. `align 8` matches the natural alignment of the
+    // i64 lead field; LLVM would infer it but we pin it here so
+    // the runtime can rely on aligned 8-byte loads.
+    lines.push(desc_sym + " = linkonce_odr constant { i64, i64, i32 } { i64 "
+        + id_text
+        + ", i64 ptrtoint (["
+        + name_len_text
+        + " x i8]* "
+        + name_sym
+        + " to i64), i32 "
+        + kind_text
+        + " }, align 8");
+
+    let ctor_call = "  call void @sfn_type_register(i8* bitcast ({ i64, i64, i32 }* "
+        + desc_sym
+        + " to i8*))";
+
+    return _OneTypeLines { preamble: lines, ctor_call: ctor_call };
+}
+
+// True when `module_name` defines `sfn_type_register` itself —
+// emitting a ctor for it would create a load-order cycle. The
+// runtime module's named types (`SfnTypeDescriptor`,
+// `SfnTypeRegistryHeader`) still emit descriptor globals so other
+// modules' `sfn_resolve_type("SfnTypeDescriptor")` calls find
+// them; only the constructor + `@llvm.global_ctors` entry is
+// suppressed.
+fn _module_owns_register(module_name: string) -> boolean {
+    if module_name == null { return false; }
+    if module_name.length == 0 { return false; }
+    // Both the on-disk path and the canonical module name are
+    // checked since cross-module driver paths surface either form.
+    if module_name == "runtime/sfn/type_meta" { return true; }
+    if module_name == "runtime/sfn/type_meta.sfn" { return true; }
+    if module_name == "type_meta" { return true; }
+    return false;
+}
+
+// True when the emitted descriptor for `type_name` would collide
+// with an internal compiler-only synthetic type that should not
+// participate in the type-meta registry. Today the filter is
+// empty — every named type in the type_context is a user-visible
+// struct/enum/interface (synthetic types like
+// `%sfn_closure_env_<N>` are emitted as anonymous inline types
+// elsewhere and never reach `TypeContext`). Reserved for the
+// follow-up that adds compiler-emitted async-future named types
+// (issue #687 follow-up).
+fn _is_synthetic_name(name: string) -> boolean {
+    if name == null { return false; }
+    if name.length == 0 { return true; }
+    // Existing convention: identifiers starting with two
+    // underscores are compiler-internal (matches the LLVM
+    // `__sfn_*` naming the rest of this file emits).
+    if name.length >= 2 {
+        let c0 = name[0];
+        let c1 = name[1];
+        if c0 == "_" {
+            if c1 == "_" { return true; }
+        }
+    }
+    return false;
+}
+
+// True iff `name` already appears in `seen`. Linear scan; the
+// per-module type-context size keeps this O(N^2) in the worst
+// case at < 200 entries, which is below the dedup threshold for
+// every observed compile.
+fn _already_seen(seen: string[], name: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= seen.length { return false; }
+        if seen[i] == name { return true; }
+        i += 1;
+    }
+}
+
+// Main entry point. `module_name` is the module's logical name
+// (used to derive the constructor symbol). `type_context` carries
+// the named structs/enums/interfaces collected during phase
+// `type_context`. Returns a `TypeDescriptorEmission` whose
+// `has_descriptors` is false when nothing was emitted (the
+// caller skips the inject step entirely in that case).
+//
+// Dedup. `combined_structs` / `_enums` / `_interfaces` accumulate
+// imported types from every dependency the module pulls in (the
+// test-runner concatenation path surfaces duplicates the most
+// readily — a single `test.ll` carrying two copies of
+// `@__sfn_type_desc.LocalBinding` from two import roots fails
+// llvm-as with `redefinition of global`). The `linkonce_odr`
+// linkage handles cross-module duplicates at link time but
+// llvm-as still rejects within-module duplicates. We dedupe by
+// type name before emission so the IR is always self-consistent.
+fn emit_type_descriptors(type_context: TypeContext, module_name: string) -> TypeDescriptorEmission {
+    if type_context == null { return _empty_emission(); }
+
+    let mut preamble_lines: string[] = [];
+    let mut ctor_calls: string[] = [];
+    let mut seen_names: string[] = [];
+
+    // Structs.
+    let mut si: int = 0;
+    let structs = type_context.structs;
+    if structs != null {
+        loop {
+            if si >= structs.length { break; }
+            let info: StructTypeInfo = structs[si];
+            si += 1;
+            if info == null { continue; }
+            let nm = info.name;
+            if nm == null { continue; }
+            if nm.length == 0 { continue; }
+            if _is_synthetic_name(nm) { continue; }
+            if _already_seen(seen_names, nm) { continue; }
+            seen_names.push(nm);
+            let one = _emit_one_type(nm, _kind_struct());
+            let mut pi: int = 0;
+            loop {
+                if pi >= one.preamble.length { break; }
+                preamble_lines.push(one.preamble[pi]);
+                pi += 1;
+            }
+            ctor_calls.push(one.ctor_call);
+        }
+    }
+
+    // Enums.
+    let mut ei: int = 0;
+    let enums = type_context.enums;
+    if enums != null {
+        loop {
+            if ei >= enums.length { break; }
+            let einfo: EnumTypeInfo = enums[ei];
+            ei += 1;
+            if einfo == null { continue; }
+            let enm = einfo.name;
+            if enm == null { continue; }
+            if enm.length == 0 { continue; }
+            if _is_synthetic_name(enm) { continue; }
+            if _already_seen(seen_names, enm) { continue; }
+            seen_names.push(enm);
+            let one = _emit_one_type(enm, _kind_enum());
+            let mut pi: int = 0;
+            loop {
+                if pi >= one.preamble.length { break; }
+                preamble_lines.push(one.preamble[pi]);
+                pi += 1;
+            }
+            ctor_calls.push(one.ctor_call);
+        }
+    }
+
+    // Interfaces.
+    let mut ii: int = 0;
+    let interfaces = type_context.interfaces;
+    if interfaces != null {
+        loop {
+            if ii >= interfaces.length { break; }
+            let iinfo: InterfaceTypeInfo = interfaces[ii];
+            ii += 1;
+            if iinfo == null { continue; }
+            let inm = iinfo.name;
+            if inm == null { continue; }
+            if inm.length == 0 { continue; }
+            if _is_synthetic_name(inm) { continue; }
+            if _already_seen(seen_names, inm) { continue; }
+            seen_names.push(inm);
+            let one = _emit_one_type(inm, _kind_interface());
+            let mut pi: int = 0;
+            loop {
+                if pi >= one.preamble.length { break; }
+                preamble_lines.push(one.preamble[pi]);
+                pi += 1;
+            }
+            ctor_calls.push(one.ctor_call);
+        }
+    }
+
+    if preamble_lines.length == 0 { return _empty_emission(); }
+
+    // Lead the preamble with a banner so the IR is grep-friendly.
+    // The runtime declare needed by the constructor body comes
+    // next — but ONLY when the module does not define
+    // `sfn_type_register` itself. LLVM rejects modules that
+    // carry both `declare` and `define` for the same function
+    // (`invalid redefinition`), and the type_meta module is the
+    // sole definition site.
+    let owns_register = _module_owns_register(module_name);
+    let mut full_preamble: string[] = [];
+    full_preamble.push("; M2.10 (#402): type-metadata descriptors");
+    if !owns_register {
+        full_preamble.push("declare void @sfn_type_register(i8*)");
+    }
+    let mut bi: int = 0;
+    loop {
+        if bi >= preamble_lines.length { break; }
+        full_preamble.push(preamble_lines[bi]);
+        bi += 1;
+    }
+    full_preamble.push("");
+
+    // The runtime module that defines `sfn_type_register` skips
+    // the ctor + `@llvm.global_ctors` entry to avoid a recursive
+    // load-order dependency; its descriptor globals still ship
+    // so other modules' `sfn_resolve_type("SfnTypeDescriptor")`
+    // calls find them.
+    if owns_register {
+        return TypeDescriptorEmission {
+            preamble_lines: full_preamble,
+            body_lines: [],
+            has_descriptors: true
+        };
+    }
+
+    let init_sym = _module_init_symbol(module_name);
+    let mut body: string[] = [];
+    body.push("define internal void @" + init_sym + "() {");
+    body.push("entry:");
+    let mut ci: int = 0;
+    loop {
+        if ci >= ctor_calls.length { break; }
+        body.push(ctor_calls[ci]);
+        ci += 1;
+    }
+    body.push("  ret void");
+    body.push("}");
+    body.push("");
+    body.push("@llvm.global_ctors = appending global [1 x { i32, void ()*, i8* }] [{ i32, void ()*, i8* } { i32 65535, void ()* @"
+        + init_sym
+        + ", i8* null }]");
+    body.push("");
+
+    return TypeDescriptorEmission {
+        preamble_lines: full_preamble,
+        body_lines: body,
+        has_descriptors: true
+    };
+}
+
+export { TypeDescriptorEmission, emit_type_descriptors };
