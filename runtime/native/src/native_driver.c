@@ -24,12 +24,11 @@
 #include "sailfin_arena.h"
 #include "sailfin_runtime.h"
 
-// Entry point exported by the native compiler IR.
-extern char *compile_to_sailfin(char *source);
-extern char *compile_to_llvm(char *source);
-// NOTE: `native_cli_main` has historically varied in symbol spelling across
+// `native_cli_main` has historically varied in symbol spelling across
 // compiler versions (plain vs module-suffixed). Call the stable mangled symbol
-// for the underlying CLI implementation instead.
+// for the underlying CLI implementation instead. The Sailfin CLI is the sole
+// entry point — the legacy C-side `--emit MODE file.sfn` fallback retired in
+// M5.4 (#472); see `compiler/src/cli_main.sfn` for the dispatch.
 extern int64_t sailfin_cli_main__cli_main(SailfinPtrArray *argv);
 
 // Optional process-exit arena telemetry. Gated on SAILFIN_DUMP_ARENA_STATS=1
@@ -257,47 +256,6 @@ static void _trace_ptr_array(const char *label, const SailfinPtrArray *argv)
     }
 }
 
-static void _print_usage(FILE *stream)
-{
-    fprintf(stream, "usage: sailfin [--emit sailfin|llvm] <file.sfn>\n");
-}
-
-static char *_read_file(const char *path)
-{
-    FILE *f = fopen(path, "rb");
-    if (!f)
-    {
-        return NULL;
-    }
-    if (fseek(f, 0, SEEK_END) != 0)
-    {
-        fclose(f);
-        return NULL;
-    }
-    long n = ftell(f);
-    if (n < 0)
-    {
-        fclose(f);
-        return NULL;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0)
-    {
-        fclose(f);
-        return NULL;
-    }
-
-    char *buf = (char *)malloc((size_t)n + 1);
-    if (!buf)
-    {
-        fclose(f);
-        return NULL;
-    }
-    size_t read_n = fread(buf, 1, (size_t)n, f);
-    fclose(f);
-    buf[read_n] = '\0';
-    return buf;
-}
-
 static int _write_file(const char *path, const char *contents)
 {
     if (!path)
@@ -480,183 +438,98 @@ int main(int argc, char **argv)
         _arena_stats_capture_label(argc, argv);
         atexit(_arena_stats_atexit);
     }
-    // If invoked with an explicit subcommand/flag, delegate to the Sailfin-native CLI.
-    // Otherwise, preserve the legacy interface: `sailfin [--emit MODE] file.sfn`.
-    if (argc >= 2)
+
+    // Every invocation delegates to the Sailfin CLI. Bare-file
+    // `sailfin file.sfn` is handled by the CLI's catch-all positional
+    // dispatch (compiles and runs the file); the legacy C-side
+    // `--emit MODE file.sfn` fallback retired in M5.4 (#472).
+    char *runtime_root = _resolve_runtime_root(argv[0]);
+
+    // Resolve the binary's own directory so the Sailfin CLI can
+    // look for .build-stamp / capsule.toml relative to the binary
+    // rather than the current working directory.
+    char *binary_dir = NULL;
     {
-        const char *first = argv[1];
-        bool is_cli = false;
-
-        if (strcmp(first, "emit") == 0 || strcmp(first, "emit-llvm-file") == 0 || strcmp(first, "build") == 0 || strcmp(first, "run") == 0 || strcmp(first, "test") == 0 || strcmp(first, "check") == 0 || strcmp(first, "version") == 0 || strcmp(first, "init") == 0 || strcmp(first, "publish") == 0 || strcmp(first, "package") == 0 || strcmp(first, "add") == 0 || strcmp(first, "login") == 0 || strcmp(first, "config") == 0 || strcmp(first, "guillermo") == 0 || strcmp(first, "fmt") == 0)
-        {
-            is_cli = true;
-        }
-        else if (strcmp(first, "-h") == 0 || strcmp(first, "--help") == 0)
-        {
-            is_cli = true;
-        }
-        else if (strcmp(first, "--version") == 0 || strcmp(first, "-V") == 0)
-        {
-            is_cli = true;
-        }
-        else if (strcmp(first, "--emit") == 0)
-        {
-            // Support `sailfin --emit llvm file.sfn` through the Sailfin CLI layer as well.
-            is_cli = true;
-        }
-
-        if (is_cli)
-        {
-            char *runtime_root = _resolve_runtime_root(argv[0]);
-
-            // Resolve the binary's own directory so the Sailfin CLI can
-            // look for .build-stamp / capsule.toml relative to the binary
-            // rather than the current working directory.
-            char *binary_dir = NULL;
-            {
-                char resolved_exe[PATH_MAX];
-                int got_exe = 0;
+        char resolved_exe[PATH_MAX];
+        int got_exe = 0;
 #if defined(__linux__)
-                // /proc/self/exe is the most reliable source on Linux —
-                // works even when argv[0] is a bare name from $PATH.
-                ssize_t len = readlink("/proc/self/exe", resolved_exe, PATH_MAX - 1);
-                if (len > 0)
-                {
-                    resolved_exe[len] = '\0';
-                    got_exe = 1;
-                }
-#elif defined(__APPLE__)
-                uint32_t bufsize = PATH_MAX;
-                if (_NSGetExecutablePath(resolved_exe, &bufsize) == 0)
-                {
-                    // _NSGetExecutablePath may return a relative path; canonicalize.
-                    char canonical[PATH_MAX];
-                    if (realpath(resolved_exe, canonical))
-                    {
-                        memcpy(resolved_exe, canonical, strlen(canonical) + 1);
-                    }
-                    got_exe = 1;
-                }
-#elif defined(_WIN32)
-                DWORD len = GetModuleFileNameA(NULL, resolved_exe, PATH_MAX);
-                if (len > 0 && len < PATH_MAX)
-                {
-                    got_exe = 1;
-                }
-#endif
-                // Fallback: try realpath(argv[0]) — works when argv[0] is
-                // an absolute or relative path, but NOT a bare $PATH name.
-                if (!got_exe && argv[0] && realpath(argv[0], resolved_exe))
-                {
-                    got_exe = 1;
-                }
-                if (got_exe)
-                {
-                    binary_dir = _dirname_dup(resolved_exe);
-                }
-            }
-
-            SailfinPtrArray args;
-            int64_t extra = (runtime_root ? 2 : 0) + (binary_dir ? 2 : 0);
-            char **argv_copy = (char **)malloc(
-                sizeof(char *) * (size_t)(argc - 1 + extra + 1));
-            if (!argv_copy)
-            {
-                fprintf(stderr, "out of memory building native argv\n");
-                free(runtime_root);
-                free(binary_dir);
-                return 1;
-            }
-
-            int64_t out_index = 0;
-            if (runtime_root)
-            {
-                argv_copy[out_index++] = "--runtime-root";
-                argv_copy[out_index++] = runtime_root;
-            }
-            if (binary_dir)
-            {
-                argv_copy[out_index++] = "--binary-dir";
-                argv_copy[out_index++] = binary_dir;
-            }
-            for (int i = 1; i < argc; i++)
-            {
-                argv_copy[out_index++] = argv[i];
-            }
-            argv_copy[out_index] = NULL;
-
-            args.data = argv_copy;
-            args.len = out_index;
-
-            _trace_ptr_array("native-cli", &args);
-
-            int64_t rc = sailfin_cli_main__cli_main(&args);
-            free(argv_copy);
-            free(runtime_root);
-            free(binary_dir);
-            return (int)rc;
-        }
-    }
-
-    const char *emit = "sailfin";
-    const char *path = NULL;
-
-    if (argc == 2)
-    {
-        if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)
+        // /proc/self/exe is the most reliable source on Linux —
+        // works even when argv[0] is a bare name from $PATH.
+        ssize_t len = readlink("/proc/self/exe", resolved_exe, PATH_MAX - 1);
+        if (len > 0)
         {
-            _print_usage(stdout);
-            return 0;
+            resolved_exe[len] = '\0';
+            got_exe = 1;
         }
-        path = argv[1];
-    }
-    else if (argc == 4 && strcmp(argv[1], "--emit") == 0)
-    {
-        emit = argv[2];
-        path = argv[3];
-    }
-    else
-    {
-        _print_usage(stderr);
-        return 2;
-    }
-
-    if (strcmp(emit, "sailfin") != 0 && strcmp(emit, "llvm") != 0)
-    {
-        fprintf(stderr, "unknown --emit mode: %s\n", emit);
-        _print_usage(stderr);
-        return 2;
-    }
-
-    char *source = _read_file(path);
-    if (!source)
-    {
-        fprintf(stderr, "failed to read: %s\n", path);
-        return 3;
-    }
-
-    char *out = NULL;
-    if (strcmp(emit, "llvm") == 0)
-    {
-        out = compile_to_llvm(source);
-    }
-    else
-    {
-        out = compile_to_sailfin(source);
-    }
-    if (!out)
-    {
-        fprintf(stderr, "compiler returned NULL\n");
-        free(source);
-        return 4;
+#elif defined(__APPLE__)
+        uint32_t bufsize = PATH_MAX;
+        if (_NSGetExecutablePath(resolved_exe, &bufsize) == 0)
+        {
+            // _NSGetExecutablePath may return a relative path; canonicalize.
+            char canonical[PATH_MAX];
+            if (realpath(resolved_exe, canonical))
+            {
+                memcpy(resolved_exe, canonical, strlen(canonical) + 1);
+            }
+            got_exe = 1;
+        }
+#elif defined(_WIN32)
+        DWORD len = GetModuleFileNameA(NULL, resolved_exe, PATH_MAX);
+        if (len > 0 && len < PATH_MAX)
+        {
+            got_exe = 1;
+        }
+#endif
+        // Fallback: try realpath(argv[0]) — works when argv[0] is
+        // an absolute or relative path, but NOT a bare $PATH name.
+        if (!got_exe && argv[0] && realpath(argv[0], resolved_exe))
+        {
+            got_exe = 1;
+        }
+        if (got_exe)
+        {
+            binary_dir = _dirname_dup(resolved_exe);
+        }
     }
 
-    fputs(out, stdout);
-    if (out[0] && out[strlen(out) - 1] != '\n')
+    SailfinPtrArray args;
+    int64_t extra = (runtime_root ? 2 : 0) + (binary_dir ? 2 : 0);
+    int64_t passthrough = argc > 1 ? (int64_t)(argc - 1) : 0;
+    char **argv_copy = (char **)malloc(
+        sizeof(char *) * (size_t)(passthrough + extra + 1));
+    if (!argv_copy)
     {
-        fputc('\n', stdout);
+        fprintf(stderr, "out of memory building native argv\n");
+        free(runtime_root);
+        free(binary_dir);
+        return 1;
     }
 
-    free(source);
-    return 0;
+    int64_t out_index = 0;
+    if (runtime_root)
+    {
+        argv_copy[out_index++] = "--runtime-root";
+        argv_copy[out_index++] = runtime_root;
+    }
+    if (binary_dir)
+    {
+        argv_copy[out_index++] = "--binary-dir";
+        argv_copy[out_index++] = binary_dir;
+    }
+    for (int i = 1; i < argc; i++)
+    {
+        argv_copy[out_index++] = argv[i];
+    }
+    argv_copy[out_index] = NULL;
+
+    args.data = argv_copy;
+    args.len = out_index;
+
+    _trace_ptr_array("native-cli", &args);
+
+    int64_t rc = sailfin_cli_main__cli_main(&args);
+    free(argv_copy);
+    free(runtime_root);
+    free(binary_dir);
+    return (int)rc;
 }
