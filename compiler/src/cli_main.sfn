@@ -9,6 +9,7 @@ import {
     resolve_build_cache_config
 } from "./build_cache";
 import { BuildReport, build_report_to_json, empty_build_report } from "./build_report";
+import { emit_compiler_build_stamp_if_applicable } from "./build_stamp";
 import {
     CapsuleArtifactManifest,
     CapsuleArtifactModule,
@@ -1731,6 +1732,12 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
             // Stage C2a: per-capsule artifact sidecar for `-p` builds.
             // No-op for positional builds (cap_capsule_name == "").
             _emit_capsule_artifact_sidecar(cap_capsule_name, cap_version, "library", cap_entry_relative, out_path, capsule_result);
+            // Epic #513 Phase 0.3 / issue #516: the compiler
+            // self-stamps `build/native/.build-stamp` here so the
+            // Makefile can stop shelling out to git. Gated on
+            // `[capsule].name == "sailfin"` inside the helper,
+            // so foreign capsule builds are a no-op.
+            emit_compiler_build_stamp_if_applicable(cap_capsule_name, cap_version, work_dir);
             return 0;
         }
 
@@ -1758,6 +1765,11 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
         // Stage C2a: per-capsule artifact sidecar for `-p` builds.
         // No-op for positional builds (cap_capsule_name == "").
         _emit_capsule_artifact_sidecar(cap_capsule_name, cap_version, "binary", cap_entry_relative, exe_path, capsule_result);
+        // Epic #513 Phase 0.3 / issue #516: the compiler self-stamps
+        // `build/native/.build-stamp` here so the Makefile can stop
+        // shelling out to git. Gated on `[capsule].name == "sailfin"`
+        // inside the helper, so foreign capsule builds are a no-op.
+        emit_compiler_build_stamp_if_applicable(cap_capsule_name, cap_version, work_dir);
         return 0;
     }
 
