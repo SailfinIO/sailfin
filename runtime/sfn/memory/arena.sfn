@@ -60,16 +60,21 @@
 // attach to adapters that wrap these primitives, never to the
 // primitives themselves.
 //
-// Why inline `extern fn malloc / free / realloc / memcpy` rather
-// than `import { malloc, free, realloc, memcpy } from
-// "../platform/libc"`? The same reason `runtime/sfn/memory/rc.sfn`,
-// `runtime/sfn/string.sfn`, and `runtime/sfn/array.sfn` inline their
-// externs: cross-module extern resolution through the seed compiler
-// hits the `cannot resolve return type for call to …` fatal that
-// issue #306 has not closed yet, surfacing during emission. Inlining
-// the four declarations we need keeps this module self-contained for
-// every seed. Once the cross-module path lands, a follow-up PR flips
-// these to imports without touching the bodies.
+// Why inline `extern fn malloc / free / memcpy` rather than
+// `import { malloc, free, memcpy } from "../platform/libc"`? The
+// same reason `runtime/sfn/memory/rc.sfn`, `runtime/sfn/string.sfn`,
+// and `runtime/sfn/array.sfn` inline their externs: cross-module
+// extern resolution through the seed compiler hits the `cannot
+// resolve return type for call to …` fatal that issue #306 has not
+// closed yet, surfacing during emission. Inlining the three
+// declarations we need keeps this module self-contained for every
+// seed. Once the cross-module path lands, a follow-up PR flips
+// these to imports without touching the bodies. Note that libc
+// `realloc` is deliberately NOT declared here — the arena's
+// `realloc` body uses fresh-alloc + `memcpy` for the not-at-tip
+// path (the old buffer "leaks" into the arena and is reclaimed at
+// reset/destroy per `runtime_architecture.md` §2.1.1), so no
+// libc-realloc call survives the lowering.
 //
 // Null handling. The C arena returns `NULL` on OOM and treats
 // `arena == NULL` / `size == 0` as no-ops returning `NULL`. The
@@ -81,14 +86,15 @@
 //
 // Pinned by `compiler/tests/e2e/test_runtime_memory_arena.sh`:
 // typecheck + fmt + LLVM `define` shape over the five exports +
-// `declare`s for the libc externs + a clang-linked roundtrip harness
-// that exercises create → alloc → realloc → reset → destroy and
-// asserts the malloc/free book balances.
+// `declare`s for the libc externs (`malloc` / `free` / `memcpy`) +
+// a clang-linked roundtrip harness that exercises create → alloc →
+// realloc-grow-in-place → realloc-copy-on-overflow → page-overflow
+// → reset → re-alloc → destroy and asserts the destroy free-count
+// equals the page-chain length (2 pages × header+data + arena
+// handle = 5 frees).
 extern fn malloc(size: usize) -> * u8;
 
 extern fn free(ptr: * u8) -> void;
-
-extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
 
 extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
 

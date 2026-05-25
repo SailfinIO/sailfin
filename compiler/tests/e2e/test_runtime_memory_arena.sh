@@ -129,11 +129,15 @@ test_emit_libc_declares() {
         echo "[test]   $ll missing — test_emit_define_shape must run first"
         return 1
     fi
-    # The libc primitives the stubs trampoline through must each
+    # The libc primitives the arena bodies route through must each
     # produce a `declare` line. Anchored at line start so a `call`
-    # site does not satisfy the assertion.
+    # site does not satisfy the assertion. `memcpy` rides because
+    # the realloc copy-on-overflow path uses it; libc `realloc` is
+    # deliberately NOT in this set — the arena's `realloc` body
+    # falls back to fresh-alloc + memcpy and never calls libc
+    # realloc (see the arena.sfn file header for rationale).
     local missing=0
-    for sym in malloc free realloc; do
+    for sym in malloc free memcpy; do
         if ! grep -qE "^declare .* @${sym}\(" "$ll"; then
             echo "[test]   missing 'declare ... @${sym}(' in arena.ll"
             missing=$((missing + 1))
@@ -224,6 +228,20 @@ extern void *sfn_arena_sfn_realloc(void *arena, void *ptr, size_t old_size,
  * stub for everything else the IR references. */
 void sailfin_runtime_mark_persistent(void *ptr) {
     (void)ptr;
+}
+
+/* Stub `sfn_type_register` so the harness is self-contained.
+ * `runtime/sfn/memory/arena.sfn` defines named structs (`ArenaPage`,
+ * `Arena`), which makes the compiler emit a
+ * `@__sfn_module_type_init__*` constructor that calls
+ * `@sfn_type_register` via `@llvm.global_ctors`. The full
+ * implementation lives in `runtime/sfn/type_meta.sfn`, but linking
+ * the harness against `type_meta.o` would require a built compiler
+ * tree — a no-op stub here lets the roundtrip link cleanly against
+ * the bare emitted `.ll` regardless of whether `type_meta.o` is
+ * staged. */
+void sfn_type_register(void *desc) {
+    (void)desc;
 }
 
 int main(void) {
@@ -409,20 +427,13 @@ CHARNESS
     # clang's default (see Makefile.CLANG_WARN_SUPPRESS).
     # `-lm` because the seed compiler lowers integer literals through
     # `round(double)` + `fptosi`, leaving libm references in the
-    # emitted `.ll`.
-    # `type_meta.o` because arena.sfn defines named structs
-    # (`ArenaPage`, `Arena`) so the compiler emits a
-    # `@__sfn_module_type_init__*` constructor that calls
-    # `@sfn_type_register`. Skip if the staged object is absent (the
-    # IR-shape assertions still pin the contract; the roundtrip is a
-    # smoke test on top).
+    # emitted `.ll`. The harness stubs `sfn_type_register` directly
+    # so the link is self-contained — no dependency on a staged
+    # `build/native/obj/runtime/type_meta.o` (which would tie this
+    # test to having a built compiler tree on hand, breaking
+    # invocation against an installed binary).
     local bin="$SCRATCH/roundtrip"
-    local type_meta_o="$REPO_ROOT/build/native/obj/runtime/type_meta.o"
-    local extra_o=()
-    if [ -f "$type_meta_o" ]; then
-        extra_o+=("$type_meta_o")
-    fi
-    if ! "$clang_bin" -Wno-override-module "$harness" "$ll" "${extra_o[@]}" -o "$bin" -lm 2>"$SCRATCH/clang.log"; then
+    if ! "$clang_bin" -Wno-override-module "$harness" "$ll" -o "$bin" -lm 2>"$SCRATCH/clang.log"; then
         echo "[test]   clang failed to link lifecycle harness:"
         cat "$SCRATCH/clang.log"
         return 1
@@ -438,7 +449,7 @@ CHARNESS
 run_test "sfn check runtime/sfn/memory/arena.sfn passes" test_check_clean
 run_test "sfn fmt --check runtime/sfn/memory/arena.sfn is canonical" test_fmt_clean
 run_test "sfn emit llvm produces define for every sfn_arena_sfn_* export" test_emit_define_shape
-run_test "sfn emit llvm declares libc malloc/free/realloc trampolines" test_emit_libc_declares
+run_test "sfn emit llvm declares libc malloc/free/memcpy trampolines" test_emit_libc_declares
 run_test "sfn emit llvm does not collide with C arena's sfn_arena_* exports" test_no_bare_sfn_arena_define
 run_test "create → alloc → realloc → reset → destroy exercises every entry point" test_lifecycle_roundtrip
 
