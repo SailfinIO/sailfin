@@ -1,112 +1,352 @@
 // runtime/sfn/memory/arena.sfn
 //
-// First Sailfin-native runtime module shipped into the
-// `build/native/sailfin` binary alongside the C arena. M2.1
-// proof-of-life per `docs/runtime_architecture.md` §2.1.1 and
-// issue #394 (epic #389).
+// Sailfin-native bump allocator backed by a linked list of pages.
+// First fully-implemented runtime module in the M2 rewrite — ships
+// alongside the C arena (`runtime/native/src/sailfin_arena.c`) so
+// downstream callers stay on the production allocator until M3
+// flips the C namesakes to `static` and retires the C source. M2.2
+// per `docs/runtime_architecture.md` §2.1.1 and issue #477 (epic
+// #389 M2 — Core Runtime in Sailfin).
 //
-// Status: stub bodies that delegate to libc `malloc` / `free` /
-// `realloc`. M3 replaces the bodies with a real page-chain bump
-// allocator (architect plan in #389 M2.2 / `runtime_architecture.md`
-// §2.1.1). Until then this module exists to prove the new
-// runtime/sfn/* link path:
+// API surface (mirrors the C arena's five core entry points):
 //
-//   - `runtime/sfn/memory/arena.sfn` compiles to a `.o` and
-//     links into the compiler binary via
-//     `_compile_runtime_sfn_sources` in
-//     `compiler/src/cli_main.sfn:521`. Historically (before
-//     Stage E PR7 / #383) the prior `scripts/build.sh`'s
-//     `RUNTIME_SFN_ALLOW` allowlist was a second source of truth
-//     kept in lockstep with `runtime/native/capsule.toml`'s
-//     `sfn-sources`; with build.sh retired, the manifest is the
-//     sole list.
-//   - The Sailfin-emitted `sfn_arena_sfn_*` symbol family
-//     coexists with the C arena's matching `sfn_arena_*` exports
-//     (no link-time collision). Both arenas are linked into
-//     every compiler binary; the C arena remains the production
-//     allocator until M3 retires `runtime/native/src/sailfin_arena.c`.
+//   sfn_arena_sfn_create(default_page_size)  → arena handle
+//   sfn_arena_sfn_alloc(arena, size, align)  → payload pointer
+//   sfn_arena_sfn_reset(arena)               → zero every page's used
+//   sfn_arena_sfn_destroy(arena)             → free pages + arena
+//   sfn_arena_sfn_realloc(arena, ptr, old, new, align) → grow-if-at-tip
 //
-// Naming: the `_sfn_` infix distinguishes this module's exports
-// from the C arena's API (`sfn_arena_create` vs.
-// `sfn_arena_sfn_create`). Both name families share the
-// `sfn_arena*` prefix so the issue's `nm | grep sfn_arena`
-// audit matches both, while `nm | grep sfn_arena_sfn_` is
-// the specific marker that proves THIS module shipped (and is
-// the assertion in `compiler/tests/e2e/test_runtime_sfn_sources_active.sh`).
+// Layout. `Arena` is a 24-byte (three i64 slot) handle that owns a
+// chain of `ArenaPage` records. Each `ArenaPage` is a 32-byte (four
+// i64 slot) header followed by a separately-malloc'd byte buffer.
+// Pointer-typed fields ride as `i64` slots — same workaround as
+// `runtime/sfn/memory/rc.sfn` and `runtime/sfn/exception.sfn` because
+// the seed compiler silently drops stores to `* T` struct fields
+// routed through a `* StructTy` pointer (verified during M2.3
+// development). The `_addr` suffix on every storage field reflects
+// that storage truth: the bytes are a 64-bit address, not a typed
+// pointer.
 //
-// At M3 the cutover plan flips the C arena's `sfn_arena_*`
-// symbols to `static` (file-local) and replaces the bodies here
-// with the real page-chain implementation; a thin C trampoline
-// then bridges legacy callers. That migration is one PR with a
-// single rollback path because the namespace is already stable.
+// Bump discipline. Allocations round the page's `used` cursor up to
+// the request's alignment, advance it by `size`, and return the byte
+// at the rounded offset. When the current page can't fit the
+// request, the allocator walks the `next_addr` chain looking for a
+// downstream page with room (the chain stays intact across resets so
+// the next burst can reuse pages), then falls back to allocating a
+// fresh page sized `max(default_page_size, size + align)`. The new
+// page splices in after the current page so any pages strictly after
+// the current one survive for reuse.
 //
-// Effects: none. Memory primitives live below the I/O layer
-// (same discipline as `runtime/sfn/platform/libc.sfn`). The
-// `![io]` / `![clock]` annotations attach to *adapters* that
-// wrap these primitives, never to the primitives themselves.
+// Grow-if-at-tip realloc. When `ptr + old_size` lands exactly at the
+// current page's bump tip and the page has room for `new_size -
+// old_size`, the bump cursor extends in place — no copy. Otherwise
+// the allocator falls back to fresh-alloc + memcpy. The old buffer
+// is "leaked" into the arena (reclaimed at the next reset/destroy),
+// matching the C arena's contract documented in
+// `runtime_architecture.md` §2.1.1.
 //
-// Why not `import { malloc, free, realloc } from
-// "../platform/libc"`? The seed compiler shipped with this PR
-// (0.5.10-alpha.8) predates the typechecker's `float` accept-
-// list relaxation (HEAD's `compiler/src/typecheck_types.sfn:618`)
-// and rejects `runtime/sfn/platform/libc.sfn`'s
-// `sailfin_runtime_sleep(milliseconds: float)` declaration with
-// E0805 the moment any module imports from that file. Inlining
-// the three libc declarations we need keeps this module
-// self-contained for the seed's typechecker. Once the seed
-// catches up post-merge, a follow-up PR can flip these to a
-// cross-module import without touching the bodies.
+// Coexistence with the C arena. Sailfin exports use the `sfn_arena_sfn_*`
+// infix; the C arena exports the bare `sfn_arena_*` names. Both
+// families ship in every compiler binary today — the production
+// runtime keeps calling the C entry points. M3 retires the C arena
+// (flip the C namesakes to `static`, rename the Sailfin exports to
+// the bare form, and route every caller through the Sailfin module
+// in a single rollback-safe PR). Until then the dual-arena layout is
+// the proof-of-life for the M2 runtime/sfn link path.
+//
+// Effects: none. Memory primitives sit below the I/O layer (same
+// discipline as `runtime/sfn/memory/rc.sfn` and the other
+// `runtime/sfn/*` modules). The `![io]` / `![clock]` annotations
+// attach to adapters that wrap these primitives, never to the
+// primitives themselves.
+//
+// Why inline `extern fn malloc / free / realloc / memcpy` rather
+// than `import { malloc, free, realloc, memcpy } from
+// "../platform/libc"`? The same reason `runtime/sfn/memory/rc.sfn`,
+// `runtime/sfn/string.sfn`, and `runtime/sfn/array.sfn` inline their
+// externs: cross-module extern resolution through the seed compiler
+// hits the `cannot resolve return type for call to …` fatal that
+// issue #306 has not closed yet, surfacing during emission. Inlining
+// the four declarations we need keeps this module self-contained for
+// every seed. Once the cross-module path lands, a follow-up PR flips
+// these to imports without touching the bodies.
+//
+// Null handling. The C arena returns `NULL` on OOM and treats
+// `arena == NULL` / `size == 0` as no-ops returning `NULL`. The
+// Sailfin port preserves the same contract — callers compare the
+// returned `* u8` against `null` (or equivalently against `as i64 ==
+// 0`) until `Result<T, E>` + `?` ship (Phase 1 of the runtime
+// prereqs in CLAUDE.md). The destroy path treats null arenas as a
+// no-op so the cleanup loop is safe at any state.
+//
+// Pinned by `compiler/tests/e2e/test_runtime_memory_arena.sh`:
+// typecheck + fmt + LLVM `define` shape over the five exports +
+// `declare`s for the libc externs + a clang-linked roundtrip harness
+// that exercises create → alloc → realloc → reset → destroy and
+// asserts the malloc/free book balances.
 extern fn malloc(size: usize) -> * u8;
 
 extern fn free(ptr: * u8) -> void;
 
 extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
 
-// `sfn_arena_sfn_create(default_page_size)` returns an opaque
-// arena handle. M2.1 stub allocates a single libc heap block of
-// the requested size; M3 replaces this with a real ArenaPage
-// chain per `runtime_architecture.md` §2.1.1.
-//
-// `default_page_size = 0` is documented in §2.1.1 as "use the
-// implementation default" — the M0.5 C arena picks 1 MiB. The
-// stub forwards the literal request to `malloc`; ISO C lets
-// `malloc(0)` return either `NULL` or a unique pointer that
-// `free` will accept, so callers must treat a `0`-byte request
-// as undefined-payload (the proof-of-life probe never reads
-// from the returned pointer). The size policy is irrelevant
-// until M3 lands the real allocator.
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+// `ArenaPage` is the per-page bookkeeping header (32 bytes, four
+// i64 slots). `data_addr` points at the page's backing byte buffer
+// (malloc'd separately from this header). `capacity` is the buffer
+// size in bytes, `used` is the bump offset into the buffer, and
+// `next_addr` links to the next page in the chain (`0` = null = end
+// of chain). Layout pinned by the IR-shape assertions in
+// `test_runtime_memory_arena.sh`.
+struct ArenaPage {
+    data_addr: i64;
+    capacity: i64;
+    used: i64;
+    next_addr: i64;
+}
+
+// `Arena` is the public handle (24 bytes, three i64 slots).
+// `current_addr` is the page that satisfies the next bump; `first_addr`
+// is the chain head (for reset and destroy walks); `default_page_size`
+// is the size of fresh pages spawned when the chain overflows.
+struct Arena {
+    current_addr: i64;
+    first_addr: i64;
+    default_page_size: i64;
+}
+
+// `_sfn_arena_align_up(value, align)` rounds `value` up to the next
+// multiple of `align`. Integer-division form so the body avoids `%`
+// and bitwise NOT (both unverified in the seed compiler at the time
+// this module was written). For `align == 8` and `value == 0` this
+// returns `0`; for `value == 9` it returns `16`. Behavior matches the
+// C arena's `_align_up` (`runtime/native/src/sailfin_arena.c:19`)
+// bit-for-bit on every power-of-two `align`.
+fn _sfn_arena_align_up(value: i64, align: i64) -> i64 {
+    let stepped: i64 = (value + align - 1) / align;
+    return stepped * align;
+}
+
+// `_sfn_arena_page_create(capacity)` allocates a fresh page header
+// plus a `capacity`-byte backing buffer. Returns the page address as
+// a raw `* u8` (the caller casts to `* ArenaPage` to touch fields).
+// On OOM either step bails — when the header allocation succeeds but
+// the buffer alloc fails the header is freed before returning null so
+// no orphaned allocation leaks into the chain.
+fn _sfn_arena_page_create(capacity: i64) -> * u8 {
+    let header_ptr: * u8 = malloc(32 as usize);
+    if header_ptr as i64 == 0 { return header_ptr; }
+    let data_ptr: * u8 = malloc(capacity as usize);
+    if data_ptr as i64 == 0 {
+        free(header_ptr);
+        return data_ptr;
+    }
+    let page: * ArenaPage = header_ptr as * ArenaPage;
+    page.data_addr = data_ptr as i64;
+    page.capacity = capacity;
+    page.used = 0;
+    page.next_addr = 0;
+    return header_ptr;
+}
+
+// `_sfn_arena_page_destroy(page_addr)` releases a single page (its
+// backing buffer and its header). Null-safe: a `0` address is a
+// no-op. The C arena's matching helper sits at
+// `runtime/native/src/sailfin_arena.c:44`.
+fn _sfn_arena_page_destroy(page_addr: i64) -> void {
+    if page_addr == 0 { return; }
+    let page: * ArenaPage = page_addr as * ArenaPage;
+    let data_addr: i64 = page.data_addr;
+    if data_addr != 0 { free(data_addr as * u8); }
+    free(page_addr as * u8);
+}
+
+// `sfn_arena_sfn_create(default_page_size)` allocates an arena
+// handle plus a single seed page sized `default_page_size`. A
+// request of `0` selects the C arena's 1 MiB compiler default
+// (`sailfin_arena.c:59`). On OOM either step bails and returns null;
+// the partial allocation is freed before returning so no leak
+// escapes. Returns the arena handle as `* u8` — callers re-cast to
+// `* Arena` only inside this module.
 fn sfn_arena_sfn_create(default_page_size: usize) -> * u8 {
-    return malloc(default_page_size);
+    let mut page_size: i64 = default_page_size as i64;
+    if page_size == 0 { page_size = 1048576; }
+
+    let arena_ptr: * u8 = malloc(24 as usize);
+    if arena_ptr as i64 == 0 { return arena_ptr; }
+
+    let first_ptr: * u8 = _sfn_arena_page_create(page_size);
+    if first_ptr as i64 == 0 {
+        free(arena_ptr);
+        return first_ptr;
+    }
+
+    let arena: * Arena = arena_ptr as * Arena;
+    arena.current_addr = first_ptr as i64;
+    arena.first_addr = first_ptr as i64;
+    arena.default_page_size = page_size;
+    return arena_ptr;
 }
 
-// `sfn_arena_sfn_alloc(arena, size, align)` is the bump
-// allocation primitive. M2.1 stub forwards `size` to `malloc`
-// and ignores `arena` / `align` — the real page-chain version
-// (M3) honors `align` via the `_align_up` helper from
-// `runtime/native/src/sailfin_arena.c:19`. Per the v0 C-ABI
-// accept-list, `align` rides as `usize`.
+// `sfn_arena_sfn_alloc(arena, size, align)` bumps `size` bytes
+// (aligned to `align`, defaulting to 8 when the caller passes 0) out
+// of the current page. When the current page can't fit, walks the
+// downstream chain (pages strictly after `current` survived a prior
+// reset and may still have room), then falls back to a fresh page
+// sized `max(default_page_size, size + align)` spliced in after the
+// current page. Null arena, zero size, or OOM on the fresh-page path
+// returns null.
 fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
-    return malloc(size);
+    if arena as i64 == 0 { return null; }
+    let size_i: i64 = size as i64;
+    if size_i == 0 { return null; }
+    let mut align_i: i64 = align as i64;
+    if align_i == 0 { align_i = 8; }
+
+    let a: * Arena = arena as * Arena;
+    let cur_addr: i64 = a.current_addr;
+    if cur_addr == 0 { return null; }
+    let page: * ArenaPage = cur_addr as * ArenaPage;
+
+    let offset: i64 = _sfn_arena_align_up(page.used, align_i);
+    let cap: i64 = page.capacity;
+    if offset <= cap {
+        let space: i64 = cap - offset;
+        if size_i <= space {
+            page.used = offset + size_i;
+            let result_addr: i64 = page.data_addr + offset;
+            return result_addr as * u8;
+        }
+    }
+
+    // Walk forward through pages spliced in after the current page.
+    // `sfn_arena_sfn_reset` leaves zeroed pages attached so the next
+    // burst can refill them without growing the chain — same
+    // discipline as the C arena's mark/rewind path
+    // (`sailfin_arena.c:172`). The walk is bounded by post-reset
+    // pages; in steady state it's usually one hop.
+    let mut candidate_addr: i64 = page.next_addr;
+    loop {
+        if candidate_addr == 0 { break; }
+        let candidate: * ArenaPage = candidate_addr as * ArenaPage;
+        let cand_cap: i64 = candidate.capacity;
+        let cand_offset: i64 = _sfn_arena_align_up(candidate.used, align_i);
+        if cand_offset <= cand_cap {
+            let cand_space: i64 = cand_cap - cand_offset;
+            if size_i <= cand_space {
+                candidate.used = cand_offset + size_i;
+                a.current_addr = candidate_addr;
+                let cand_result_addr: i64 = candidate.data_addr + cand_offset;
+                return cand_result_addr as * u8;
+            }
+        }
+        candidate_addr = candidate.next_addr;
+    }
+
+    // No reusable downstream page — allocate a fresh one sized for
+    // the request (worst-case alignment padding included).
+    let mut new_page_size: i64 = a.default_page_size;
+    let needed: i64 = size_i + align_i;
+    if needed > new_page_size { new_page_size = needed; }
+
+    let new_page_ptr: * u8 = _sfn_arena_page_create(new_page_size);
+    if new_page_ptr as i64 == 0 { return new_page_ptr; }
+
+    // Splice the new page in after the current page so any pages
+    // already downstream of `current` (carried over from a prior
+    // reset) remain reachable for the next burst.
+    let new_page: * ArenaPage = new_page_ptr as * ArenaPage;
+    new_page.next_addr = page.next_addr;
+    page.next_addr = new_page_ptr as i64;
+    a.current_addr = new_page_ptr as i64;
+
+    let new_offset: i64 = _sfn_arena_align_up(new_page.used, align_i);
+    new_page.used = new_offset + size_i;
+    let new_result_addr: i64 = new_page.data_addr + new_offset;
+    return new_result_addr as * u8;
 }
 
-// `sfn_arena_sfn_reset(arena)` resets all pages to `used = 0`
-// without freeing backing memory. M2.1 stub is a no-op because
-// the libc-backed allocator owns no per-allocation metadata to
-// reset. M3 walks the page list per `sailfin_arena.c:80`.
-fn sfn_arena_sfn_reset(arena: * u8) -> void { }
+// `sfn_arena_sfn_reset(arena)` zeroes the `used` cursor on every
+// page in the chain and parks the bump target on the first page.
+// Pages keep their backing buffers — the chain stays intact so the
+// next burst reuses memory rather than re-malloc'ing pages. Null
+// arena is a no-op.
+fn sfn_arena_sfn_reset(arena: * u8) -> void {
+    if arena as i64 == 0 { return; }
+    let a: * Arena = arena as * Arena;
+    let first_addr: i64 = a.first_addr;
+    let mut walker: i64 = first_addr;
+    loop {
+        if walker == 0 { break; }
+        let p: * ArenaPage = walker as * ArenaPage;
+        p.used = 0;
+        walker = p.next_addr;
+    }
+    a.current_addr = first_addr;
+}
 
-// `sfn_arena_sfn_destroy(arena)` releases the arena and every
-// backing page. M2.1 stub forwards to libc `free`; M3 walks the
-// page list and frees each page before the arena struct itself
-// (`sailfin_arena.c:126`).
-fn sfn_arena_sfn_destroy(arena: * u8) -> void { free(arena); }
+// `sfn_arena_sfn_destroy(arena)` frees every page in the chain and
+// the arena handle itself. Null arena is a no-op so cleanup paths
+// can call destroy unconditionally.
+fn sfn_arena_sfn_destroy(arena: * u8) -> void {
+    if arena as i64 == 0 { return; }
+    let a: * Arena = arena as * Arena;
+    let mut walker: i64 = a.first_addr;
+    loop {
+        if walker == 0 { break; }
+        let page: * ArenaPage = walker as * ArenaPage;
+        let next_addr: i64 = page.next_addr;
+        _sfn_arena_page_destroy(walker);
+        walker = next_addr;
+    }
+    free(arena);
+}
 
 // `sfn_arena_sfn_realloc(arena, ptr, old_size, new_size, align)`
-// is the grow-if-at-tip realloc optimized for the
-// `string_append` hot path (`runtime_architecture.md` §2.1.1).
-// M2.1 stub delegates to libc `realloc` — `old_size` and
-// `align` are unused at this stage. M3 implements the real
-// tip-grow logic (`sailfin_arena.c:208`).
+// implements the grow-if-at-tip optimization the `string_append` hot
+// path depends on. When `ptr + old_size` is exactly the current
+// page's bump tip and the page has room for the delta, extend the
+// bump cursor in place — no copy. Otherwise fresh-alloc + memcpy and
+// "leak" the old buffer into the arena (reclaimed at the next
+// reset/destroy). Behaviour matches `sailfin_arena.c:208` exactly.
+// Special cases: null arena returns null; null `ptr` forwards to
+// `sfn_arena_sfn_alloc`; `new_size <= old_size` returns `ptr`
+// unchanged.
 fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, align: usize) -> * u8 {
-    return realloc(ptr, new_size);
+    if arena as i64 == 0 { return null; }
+    if ptr as i64 == 0 {
+        return sfn_arena_sfn_alloc(arena, new_size, align);
+    }
+
+    let old_size_i: i64 = old_size as i64;
+    let new_size_i: i64 = new_size as i64;
+    if new_size_i <= old_size_i { return ptr; }
+
+    let a: * Arena = arena as * Arena;
+    let cur_addr: i64 = a.current_addr;
+    if cur_addr == 0 { return null; }
+    let page: * ArenaPage = cur_addr as * ArenaPage;
+
+    let data_addr: i64 = page.data_addr;
+    let used: i64 = page.used;
+    let tip_addr: i64 = data_addr + used;
+    let ptr_addr: i64 = ptr as i64;
+    let extra: i64 = new_size_i - old_size_i;
+
+    // Grow-if-at-tip: `ptr` was the last allocation on this page AND
+    // the page can fit `extra` more bytes.
+    if ptr_addr + old_size_i == tip_addr {
+        if used + extra <= page.capacity {
+            page.used = used + extra;
+            return ptr;
+        }
+    }
+
+    // Otherwise: fresh allocation + memcpy. The old buffer stays
+    // resident in the arena (reclaimed at reset/destroy).
+    let new_ptr: * u8 = sfn_arena_sfn_alloc(arena, new_size, align);
+    if new_ptr as i64 == 0 { return new_ptr; }
+    memcpy(new_ptr, ptr, old_size_i as usize);
+    return new_ptr;
 }
