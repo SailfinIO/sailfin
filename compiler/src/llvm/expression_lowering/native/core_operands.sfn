@@ -838,7 +838,11 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             // byte-for-byte. Operand pre-coerced to `i8*` (matched in
             // the outer `operand_type == "i8*"` guard);
             // `emit_runtime_call`'s argument-coercion walk is a
-            // no-op here.
+            // no-op here. The result temp name is pre-computed
+            // (matching the `alloc_struct` pattern at line 1018)
+            // so the aggregate build can reference it without
+            // unwrapping `sl_result.operand`.
+            let len_temp = format_temp_name(temp_index);
             let sl_operands: LLVMOperand[] = [operand];
             let sl_result = emit_runtime_call("string.length", sl_operands, empty_runtime_call_overrides(), temp_index, current_lines);
             let mut _sl_di: int = 0;
@@ -848,7 +852,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 _sl_di += 1;
             }
             current_lines = sl_result.lines;
-            let len_value = sl_result.operand.value;
             let agg0 = format_temp_name(sl_result.temp_index);
             current_lines.push("  " + agg0
                 + " = insertvalue {i8*, i64} undef, i8* "
@@ -857,7 +860,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             let agg1 = format_temp_name(sl_result.temp_index + 1);
             current_lines.push("  " + agg1 + " = insertvalue {i8*, i64} " + agg0
                 + ", i64 "
-                + len_value
+                + len_temp
                 + ", 1");
             let coerced = LLVMOperand { llvm_type: "{i8*, i64}", value: agg1 };
             return CoercionResult {
@@ -889,7 +892,12 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             // byte-for-byte. Both call sites are pre-coerced to their
             // descriptor parameter types (`double` here, `i8*` for the
             // length recovery), so `emit_runtime_call`'s
-            // argument-coercion walk is a no-op at each step.
+            // argument-coercion walk is a no-op at each step. Result
+            // temp names are pre-computed (matching the `alloc_struct`
+            // pattern at line 1018) so the aggregate build can
+            // reference them without unwrapping nullable operands.
+            let as_string = format_temp_name(temp_index);
+            let len_temp = format_temp_name(temp_index + 1);
             let nts_operands: LLVMOperand[] = [operand];
             let nts_result = emit_runtime_call("number.to_string", nts_operands, empty_runtime_call_overrides(), temp_index, current_lines);
             let mut _nts_di: int = 0;
@@ -899,7 +907,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 _nts_di += 1;
             }
             current_lines = nts_result.lines;
-            let as_string = nts_result.operand.value;
             let sl_operand = LLVMOperand {
                 llvm_type: "i8*",
                 value: as_string
@@ -913,7 +920,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 _sl_di += 1;
             }
             current_lines = sl_result.lines;
-            let len_value = sl_result.operand.value;
             let agg0 = format_temp_name(sl_result.temp_index);
             current_lines.push("  " + agg0
                 + " = insertvalue {i8*, i64} undef, i8* "
@@ -922,7 +928,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             let agg1 = format_temp_name(sl_result.temp_index + 1);
             current_lines.push("  " + agg1 + " = insertvalue {i8*, i64} " + agg0
                 + ", i64 "
-                + len_value
+                + len_temp
                 + ", 1");
             let coerced = LLVMOperand { llvm_type: "{i8*, i64}", value: agg1 };
             return CoercionResult {
@@ -940,8 +946,13 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             // argument-coercion walk is a no-op for both the
             // `number.to_string` and `string.length` descriptors.
             // `native_signature` resolves to `sfn_number_to_str` /
-            // `sfn_str_len` byte-for-byte.
+            // `sfn_str_len` byte-for-byte. Result temp names are
+            // pre-computed (matching the `alloc_struct` pattern at
+            // line 1018) so the aggregate build can reference them
+            // without unwrapping nullable operands.
             let as_double = format_temp_name(temp_index);
+            let as_string = format_temp_name(temp_index + 1);
+            let len_temp = format_temp_name(temp_index + 2);
             current_lines.push("  " + as_double + " = sitofp i64 " + operand.value
                 + " to double");
             let cast_operand = LLVMOperand {
@@ -958,7 +969,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 _nts_di += 1;
             }
             current_lines = nts_result.lines;
-            let as_string = nts_result.operand.value;
             let sl_operand = LLVMOperand {
                 llvm_type: "i8*",
                 value: as_string
@@ -972,7 +982,6 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 _sl_di += 1;
             }
             current_lines = sl_result.lines;
-            let len_value = sl_result.operand.value;
             let agg0 = format_temp_name(sl_result.temp_index);
             current_lines.push("  " + agg0
                 + " = insertvalue {i8*, i64} undef, i8* "
@@ -981,7 +990,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             let agg1 = format_temp_name(sl_result.temp_index + 1);
             current_lines.push("  " + agg1 + " = insertvalue {i8*, i64} " + agg0
                 + ", i64 "
-                + len_value
+                + len_temp
                 + ", 1");
             let coerced = LLVMOperand { llvm_type: "{i8*, i64}", value: agg1 };
             return CoercionResult {
