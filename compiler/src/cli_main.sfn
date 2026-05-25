@@ -2018,9 +2018,24 @@ fn main(argv: string[]) -> int ![io, clock] {
     // (`_runtime_bundle_exists`, the argv-flag re-parse in
     // `sailfin_cli_main`) reads NUL-terminated bytes off the
     // pointer, so the missing length field is benign here.
-    let exe: * u8 = exe_path();
-    let bin_dir: * u8 = binary_dir(exe);
-    let runtime_root: * u8 = resolve_runtime_root(exe);
+    //
+    // `exe_path()` only resolves `/proc/self/exe` (Linux). On macOS
+    // and Windows it returns `""` until `runtime/sfn/platform/exec.sfn`
+    // gains `_NSGetExecutablePath` / `GetModuleFileNameA` bodies (a
+    // follow-up to #468 / #473). The retired C driver covered those
+    // platforms via `realpath(argv[0], ...)` as a fallback; mirror
+    // that here so the runtime-root walk still has a directory to
+    // start from. argv[0] is not guaranteed to be canonical (a bare
+    // `$PATH` name fails the walk on its own), but `_runtime_bundle_exists`
+    // in `sailfin_cli_main` provides the final CWD-relative
+    // `runtime` fallback either way.
+    let exe_raw: * u8 = exe_path();
+    let mut exe_str: string = exe_raw as string;
+    if exe_str.length == 0 {
+        if argv.length > 0 { exe_str = argv[0]; }
+    }
+    let bin_dir: * u8 = binary_dir(exe_str as * u8);
+    let runtime_root: * u8 = resolve_runtime_root(exe_str as * u8);
     // `sailfin_runtime_argv_to_string_array(argc, argv)` (the @main
     // wrapper synthesized by emission.sfn) preserves argv[0] — the
     // binary path — at index 0. The CLI dispatch reads positional

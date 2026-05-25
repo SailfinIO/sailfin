@@ -960,6 +960,7 @@ ci-cross-windows:
 	PRELUDE_LL="build/native/obj/runtime/prelude.ll"; \
 	CLOCK_LL="build/native/obj/runtime/clock.ll"; \
 	TYPE_META_LL="build/native/obj/runtime/type_meta.ll"; \
+	EXEC_LL="build/native/obj/runtime/exec.ll"; \
 	if [ ! -d "$$SAVED_DIR" ] || [ ! -f "$$SAVED_DIR/program.ll" ]; then \
 		echo "[cross-windows][error] missing $$SAVED_DIR/*.ll + program.ll — run 'make rebuild' first" >&2; \
 		exit 1; \
@@ -974,6 +975,10 @@ ci-cross-windows:
 	fi; \
 	if [ ! -f "$$TYPE_META_LL" ]; then \
 		echo "[cross-windows][error] missing $$TYPE_META_LL — 'make rebuild' should have emitted it (M2.10, #402)" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$$EXEC_LL" ]; then \
+		echo "[cross-windows][error] missing $$EXEC_LL — 'make rebuild' should have emitted it (M5.5, #473)" >&2; \
 		exit 1; \
 	fi; \
 	echo "[cross-windows] using saved sfn build IR layout ($$SAVED_DIR)"; \
@@ -1030,6 +1035,10 @@ ci-cross-windows:
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
 		-c "$$TYPE_META_LL" -o "$$WIN_OBJ/runtime/type_meta.o"; \
 	\
+	echo "[cross-windows] compiling exec (Sailfin-native executable-path resolver, M5.5 #473)..."; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+		-c "$$EXEC_LL" -o "$$WIN_OBJ/runtime/exec.o"; \
+	\
 	echo "[cross-windows] compiling C runtime..."; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_arena.c \
 		-o "$$WIN_OBJ/sailfin_arena.o"; \
@@ -1062,6 +1071,7 @@ ci-cross-windows:
 		"$$WIN_OBJ/runtime/prelude.o" \
 		"$$WIN_OBJ/runtime/clock.o" \
 		"$$WIN_OBJ/runtime/type_meta.o" \
+		"$$WIN_OBJ/runtime/exec.o" \
 		$$SHIM_O \
 		-lm -lpthread; \
 	\
@@ -1088,6 +1098,10 @@ ci-cross-windows:
 	if [ -f "$$WIN_OBJ/runtime/type_meta.o" ]; then \
 		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
 		cp -f "$$WIN_OBJ/runtime/type_meta.o" "$$INSTALLER_DIR/runtime/native/obj/type_meta.o"; \
+	fi; \
+	if [ -f "$$WIN_OBJ/runtime/exec.o" ]; then \
+		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+		cp -f "$$WIN_OBJ/runtime/exec.o" "$$INSTALLER_DIR/runtime/native/obj/exec.o"; \
 	fi; \
 	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
 	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"
