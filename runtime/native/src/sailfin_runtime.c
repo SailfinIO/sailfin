@@ -888,15 +888,16 @@ static void _print_alloc_stats(void)
 // `test_arena_default_on.sh` pins the contract.
 //
 // The C-driver entry point used to register the atexit hook directly;
-// post-#473, Sailfin's `fn main` (`compiler/src/cli_main.sfn`) calls
-// `sailfin_runtime_install_arena_telemetry(argc, argv)` once at
-// startup. The hook itself stays in C because there is no
-// Sailfin-level `atexit` primitive yet.
+// post-#473, Sailfin's `fn main` (`compiler/src/cli_main.sfn`) walks
+// argv on the Sailfin side, picks the label, and calls
+// `sailfin_runtime_install_arena_telemetry(label)` once at startup.
+// The hook itself stays in C because there is no Sailfin-level
+// `atexit` primitive yet.
 //
 // `_arena_stats_label` is sized for typical CLI invocations
 // (`sfn run examples/basics/hello-world.sfn`); paths longer than
-// 255 bytes are truncated for the label only — the underlying
-// argv data is unaffected.
+// 255 bytes are truncated for the label only — the caller-owned
+// label string is unaffected.
 static char _arena_stats_label[256] = "<unknown>";
 static int _arena_stats_installed = 0;
 

@@ -74,10 +74,16 @@ import { resolve_compiler_version } from "./version";
 // Sailfin-native helpers in `runtime/sfn/platform/exec.sfn` — the
 // pure-Sailfin replacement for the executable-path resolver in the
 // retired C driver. The runtime capsule's `sfn-sources` array links
-// `exec.sfn`'s object into every compiler build; runtime modules are
-// kept symbol-unmangled per `should_keep_unmangled_abi_symbol`, so
-// the bare `@exe_path` / `@binary_dir` / `@resolve_runtime_root`
-// references resolve at link time.
+// `exec.sfn`'s object into every compiler build; the
+// `apply_module_symbol_mangling` pass in
+// `compiler/src/llvm/lowering/lowering_helpers_mangling.sfn`
+// short-circuits when `current_module_slug` starts with `runtime/`
+// and skips mangling entirely for those modules, so the bare
+// `@exe_path` / `@binary_dir` / `@resolve_runtime_root` symbols
+// resolve at link time. (The companion
+// `should_keep_unmangled_abi_symbol` predicate handles per-symbol
+// ABI carve-outs like `main` and `native_cli_main`, not the
+// module-level runtime-bundle exports.)
 //
 // Declared as `extern fn` rather than imported because the seed's
 // cross-module signature resolver does not yet hand back
@@ -2022,12 +2028,19 @@ fn main(argv: string[]) -> int ![io, clock] {
     // The extern declarations above expose the helpers with `* u8`
     // surface; cast back to `string` at the boundary so the
     // `sailfin_cli_main_with_paths` argv-flag injection sees Sailfin
-    // string values. See the cast-quirk note in
-    // `runtime/sfn/platform/exec.sfn` — the `* u8 as string` cast
-    // preserves only the pointer, but every downstream consumer
-    // (`_runtime_bundle_exists`, the argv-flag re-parse in
-    // `sailfin_cli_main`) reads NUL-terminated bytes off the
-    // pointer, so the missing length field is benign here.
+    // string values. In the current compiler `string` lowers to
+    // `i8*` (a bare pointer — see
+    // `compiler/src/llvm/type_mapping.sfn:659` and
+    // `compiler/src/llvm/expression_lowering/native/core_type_mapping.sfn:70`),
+    // so `* u8` and `string` are bit-compatible across the boundary
+    // and the `as` casts are no-ops at the LLVM level. The
+    // future-ABI flip to `{i8*, i64}` (M1.A.2 — see the
+    // `runtime/sfn/platform/exec.sfn` module header) is what the
+    // "cast-quirk" note in that file anticipates; downstream
+    // consumers (`_runtime_bundle_exists`, the argv-flag re-parse in
+    // `sailfin_cli_main`) read NUL-terminated bytes off the pointer
+    // either way, so the pinned semantics here survive the future
+    // shape change without source edits.
     //
     // `exe_path()` only resolves `/proc/self/exe` (Linux). On macOS
     // and Windows it returns `""` until `runtime/sfn/platform/exec.sfn`
