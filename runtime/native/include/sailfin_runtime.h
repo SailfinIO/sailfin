@@ -202,6 +202,18 @@ extern "C"
     // the wrapper's catch-pad emission.
     void sailfin_runtime_panic_emit(char *msg);
 
+    // M5.5 (#473): install the arena-allocator process-exit telemetry
+    // hook ported from the retired C driver. Called once from the
+    // compiler's Sailfin `fn main` prologue with a label string
+    // (typically argv[0] — the binary path); idempotent for embedders
+    // that may invoke it more than once. No-op unless
+    // `SAILFIN_DUMP_ARENA_STATS` is set to a truthy value. The label
+    // selection (last non-flag positional, value-flag-aware) that the
+    // retired C driver performed in pre-main now happens in
+    // `compiler/src/cli_main.sfn::main`. Pinned by
+    // `compiler/tests/e2e/test_arena_default_on.sh`.
+    void sailfin_runtime_install_arena_telemetry(char *label);
+
     // Generic (byte-wise) array push for non-pointer element types.
     // Mutates the backing buffer to ensure capacity and returns a pointer to the
     // newly appended slot (caller writes the element bytes there).

@@ -138,9 +138,7 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
             loop {
                 if i >= entries.length { break; }
                 if _ends_with_cmd(entries[i], ".c") {
-                    if entries[i] != "native_driver.c" {
-                        args.push(src_dir + "/" + entries[i]);
-                    }
+                    args.push(src_dir + "/" + entries[i]);
                 }
                 i += 1;
             }

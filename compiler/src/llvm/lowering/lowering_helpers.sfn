@@ -178,9 +178,19 @@ fn sanitize_module_suffix(module_name: string) -> string {
 }
 
 fn should_keep_unmangled_abi_symbol(symbol: string) -> boolean {
+    // `native_cli_main` is the legacy C-ABI shim still exported from
+    // `compiler/src/cli_main.sfn` for embedder compatibility — kept
+    // unmangled so any out-of-tree linker that referenced the symbol
+    // by name still resolves it. `main` is the C-ABI entry point.
+    //
+    // The historical entries `compile_to_sailfin` / `compile_to_llvm`
+    // existed solely to satisfy the retired C driver's legacy
+    // `--emit MODE file.sfn` extern declarations. M5.4 (#472) retired
+    // that dispatch and M5.5 (#473) deleted the C driver, so both
+    // symbols now reach the live CLI `--emit` path via the standard
+    // Sailfin import in `cli_main.sfn` — they no longer require an
+    // unmangled C-ABI alias.
     if symbol == "native_cli_main" { return true; }
-    if symbol == "compile_to_sailfin" { return true; }
-    if symbol == "compile_to_llvm" { return true; }
     if symbol == "main" { return true; }
     return false;
 }

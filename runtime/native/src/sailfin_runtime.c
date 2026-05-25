@@ -833,6 +833,80 @@ static void _print_alloc_stats(void)
     fflush(stderr);
 }
 
+// =============================================================================
+// Arena allocator process-exit telemetry (debug)
+// =============================================================================
+//
+// Ported from the retired C driver in M5.5
+// (#473). Gated on `SAILFIN_DUMP_ARENA_STATS=1`; emits a single
+// `[sailfin-arena] label=... pages=... capacity=... ...` line on
+// process exit when the arena is on, or `stats=disabled` when an
+// explicit `SAILFIN_USE_ARENA={0,'',false}` opt-out is in effect.
+// `test_arena_default_on.sh` pins the contract.
+//
+// The C-driver entry point used to register the atexit hook directly;
+// post-#473, Sailfin's `fn main` (`compiler/src/cli_main.sfn`) calls
+// `sailfin_runtime_install_arena_telemetry(argc, argv)` once at
+// startup. The hook itself stays in C because there is no
+// Sailfin-level `atexit` primitive yet.
+//
+// `_arena_stats_label` is sized for typical CLI invocations
+// (`sfn run examples/basics/hello-world.sfn`); paths longer than
+// 255 bytes are truncated for the label only — the underlying
+// argv data is unaffected.
+static char _arena_stats_label[256] = "<unknown>";
+static int _arena_stats_installed = 0;
+
+static int _arena_stats_telemetry_enabled(void)
+{
+    const char *flag = getenv("SAILFIN_DUMP_ARENA_STATS");
+    return flag && flag[0] != '\0' && flag[0] != '0';
+}
+
+static void _arena_stats_atexit(void)
+{
+    if (!_arena_stats_telemetry_enabled())
+    {
+        return;
+    }
+    if (!sfn_arena_enabled())
+    {
+        // Explicit opt-out (`SAILFIN_USE_ARENA={0,'',false}`); surface
+        // the value so the log line is self-explanatory.
+        const char *opt_out = getenv("SAILFIN_USE_ARENA");
+        fprintf(stderr,
+                "[sailfin-arena] label=%s stats=disabled "
+                "(SAILFIN_USE_ARENA=\"%s\" opt-out)\n",
+                _arena_stats_label,
+                opt_out ? opt_out : "");
+        return;
+    }
+    fprintf(stderr, "[sailfin-arena] label=%s ", _arena_stats_label);
+    sfn_arena_print_stats(sfn_arena_global());
+}
+
+void sailfin_runtime_install_arena_telemetry(char *label)
+{
+    // Idempotent: multiple Sailfin `fn main` invocations (e.g. when a
+    // test fixture re-enters via dlopen + dlsym) must not register
+    // the hook twice.
+    if (_arena_stats_installed)
+    {
+        return;
+    }
+    if (!_arena_stats_telemetry_enabled())
+    {
+        return;
+    }
+    if (label && label[0] != '\0')
+    {
+        strncpy(_arena_stats_label, label, sizeof(_arena_stats_label) - 1);
+        _arena_stats_label[sizeof(_arena_stats_label) - 1] = '\0';
+    }
+    atexit(_arena_stats_atexit);
+    _arena_stats_installed = 1;
+}
+
 // Debugging: track a specific LLVM module header string pointer once seen.
 // If later array ops drop it, that strongly implicates array length/ABI bugs.
 static pthread_mutex_t _sailfin_trace_header_lock = PTHREAD_MUTEX_INITIALIZER;

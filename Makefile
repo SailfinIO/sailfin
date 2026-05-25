@@ -846,15 +846,14 @@ rebuild:
 	@# resolution from runtime/sfn/platform/exec.sfn). Issue #468
 	@# (epic #451 M5.3 prerequisite) ships `@exe_path` /
 	@# `@binary_dir` / `@resolve_runtime_root` as the pure-Sailfin
-	@# replacement for the `_resolve_runtime_root(argv0)` block in
-	@# `runtime/native/src/native_driver.c`. The legacy link path
+	@# replacement for the C-driver's executable-path resolver,
+	@# retired in M5.5 / #473. The legacy link path
 	@# (`_clang_compile_runtime_objects` in `compiler/src/cli_main.sfn`)
 	@# resolves those symbols against this staged .o; the runtime-
 	@# capsule path reaches exec.sfn through `runtime/native/
-	@# capsule.toml`'s `sfn-sources` array instead. Empty staging
-	@# today is benign — no user surface dispatches through this
-	@# module — but M5.3's `@main` lowering will be the first
-	@# internal caller and a missing staged artifact then surfaces
+	@# capsule.toml`'s `sfn-sources` array instead. The compiler's
+	@# `fn main` in `compiler/src/cli_main.sfn` is the load-bearing
+	@# internal caller after #473; a missing staged artifact surfaces
 	@# at link time as "undefined reference to `exe_path`".
 	@if [ ! -f build/native/obj/runtime/exec.ll ]; then \
 		echo "[rebuild] staging exec.ll..."; \
@@ -1040,8 +1039,6 @@ ci-cross-windows:
 		-o "$$WIN_OBJ/sailfin_sha256.o"; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_base64.c \
 		-o "$$WIN_OBJ/sailfin_base64.o"; \
-	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/native_driver.c \
-		-o "$$WIN_OBJ/native_driver.o"; \
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/native/ir/runtime_globals.ll \
 		-o "$$WIN_OBJ/runtime_globals.o"; \
 	\
@@ -1060,7 +1057,6 @@ ci-cross-windows:
 		"$$WIN_OBJ/sailfin_runtime.o" \
 		"$$WIN_OBJ/sailfin_sha256.o" \
 		"$$WIN_OBJ/sailfin_base64.o" \
-		"$$WIN_OBJ/native_driver.o" \
 		"$$WIN_OBJ/runtime_globals.o" \
 		"$$WIN_OBJ/native.linked.o" \
 		"$$WIN_OBJ/runtime/prelude.o" \
