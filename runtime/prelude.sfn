@@ -3,6 +3,28 @@
 // Runtime facade for Sailfin programs emitted by the self-hosted compiler.
 // These helpers delegate to the bootstrap runtime so Sailfin sources can run
 // without bespoke Python shims once the compiler self-hosts.
+//
+// M2.12a (#407): the facade is pivoting off the magic `runtime.*` namespace
+// onto direct imports from the Sailfin-native `runtime/sfn/*.sfn` modules.
+// This PR is mechanical alias replacement only — bindings whose Sailfin-side
+// signature already matches the new `sfn_*` entry points flip to the
+// imported symbol; everything else continues to resolve through the
+// `runtime.X` registry until M2.12b audits each caller. The `runtime`
+// namespace continues to resolve for any path not yet migrated.
+import { sfn_array_sfn_map } from "./sfn/array";
+import { sfn_sleep } from "./sfn/clock";
+import { sfn_throw } from "./sfn/exception";
+import { sfn_print_sfn } from "./sfn/io";
+import { sfn_process_run } from "./sfn/process";
+import { sfn_str_sfn_concat } from "./sfn/string";
+import {
+    sfn_is_array,
+    sfn_is_boolean,
+    sfn_is_callable,
+    sfn_is_number,
+    sfn_is_string
+} from "./sfn/type_meta";
+
 let console = runtime.console;
 let fs = runtime.fs;
 let http = runtime.http;
@@ -11,7 +33,7 @@ let websocket = runtime.websocket;
 let runtime_create_capability_grant = runtime.create_capability_grant;
 let runtime_create_filesystem_bridge = runtime.create_filesystem_bridge;
 let runtime_create_http_bridge = runtime.create_http_bridge;
-let runtime_sleep_fn = runtime.sleep;
+let runtime_sleep_fn = sfn_sleep;
 let runtime_monotonic_millis_fn = runtime.monotonic_millis;
 let runtime_log_execution_fn = runtime.logExecution;
 let runtime_to_debug_string_fn = runtime.to_debug_string;
