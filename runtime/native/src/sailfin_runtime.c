@@ -59,19 +59,34 @@ extern char **environ;
 #endif
 
 #if defined(_WIN32)
-/* MinGW does not ship POSIX `readlink`, but `runtime/sfn/platform/exec.sfn`
- * unconditionally declares and calls it (the Sailfin module lacks a
- * `cfg(target_os)` to gate the body). Provide a Windows stub that always
- * returns -1 so the runtime's `exe_path()` resolves to "" — the
- * `compiler/src/cli_main.sfn::main` fallback then uses argv[0]. Replaces
- * the platform conditional in the retired C driver (which used
- * `GetModuleFileNameA` directly from pre-main). A follow-up to #468 /
- * #473 wires `GetModuleFileNameA` into `exec.sfn` properly and removes
- * this stub. The return type is `int64_t` to match the LLVM `i64`
+/* MinGW does not ship POSIX `readlink` / `realpath`, but
+ * `runtime/sfn/platform/exec.sfn` declares and calls them
+ * unconditionally (the Sailfin module lacks a `cfg(target_os)` to
+ * gate the body). Provide Windows definitions so the cross-compile
+ * link succeeds. The retired C driver covered the same gap via
+ * platform-conditional `#define` macros inside its translation unit;
+ * exec.sfn's compiled .ll cannot apply those, so the definitions
+ * live here instead.
+ *
+ * `readlink` always returns -1 — exec.sfn's `exe_path()` treats that
+ * as a lookup failure and returns "", which the
+ * `compiler/src/cli_main.sfn::main` argv[0] fallback handles.
+ *
+ * `realpath` forwards to `_fullpath` (matching the C driver's
+ * macro). The Sailfin caller in `resolve_runtime_root` passes
+ * NULL for `resolved`, so `_fullpath` mallocs the buffer.
+ *
+ * Return type for `readlink` is `int64_t` to match the LLVM `i64`
  * declaration exec.sfn emits — POSIX `ssize_t` would be 64-bit on
  * mingw-w64/x86_64 too but pinning the width sidesteps any future
- * 32-bit cross-compile surprise. */
-__attribute__((weak))
+ * 32-bit cross-compile surprise. Symbols are *not* declared weak:
+ * MinGW's COFF linker treats weak external symbols inconsistently
+ * with ELF, and we know the mingw CRT does not provide either
+ * name. A follow-up to #468 / #473 wires `GetModuleFileNameA` into
+ * `exec.sfn` properly and retires these stubs. */
+#include <windows.h>
+#include <stdlib.h>
+
 int64_t readlink(const char *path, char *buf, size_t bufsize)
 {
     (void)path;
@@ -80,24 +95,8 @@ int64_t readlink(const char *path, char *buf, size_t bufsize)
     return -1;
 }
 
-/* mingw-w64 ships `realpath` declarations in `<stdlib.h>` but the
- * resolved symbol is not always present in the static link surface
- * (depends on which CRT variant the cross-compiler bundles). The
- * retired C driver dodged this by `#define realpath(p, r) _fullpath(...)`
- * inside its own translation unit — exec.sfn's compiled .ll cannot
- * apply that macro, so provide a weak forwarder that delegates to
- * `_fullpath`. Matches the macro semantics of the C driver:
- * `_fullpath(resolved, path, MAX_PATH)`. Declared weak so any
- * future mingw release providing its own `realpath` in libc wins. */
-#include <windows.h>
-#include <stdlib.h>
-__attribute__((weak))
 char *realpath(const char *path, char *resolved)
 {
-    /* Pass a NULL `resolved` if the caller did not allocate one;
-     * `_fullpath` will malloc a buffer of size MAX_PATH. The Sailfin
-     * caller in `exec.sfn::resolve_runtime_root` passes NULL exactly
-     * for this reason (so libc owns the return). */
     return _fullpath(resolved, path, MAX_PATH);
 }
 #endif
