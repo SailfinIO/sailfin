@@ -415,7 +415,7 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
         if operand_type == "i8*" {
             let temp_name = format_temp_name(temp_index);
             current_lines.push("  " + temp_name
-                + " = call double @sailfin_runtime_string_to_number(i8* "
+                + " = call double @sfn_str_to_number(i8* "
                 + operand.value
                 + ")");
             let coerced = LLVMOperand {
@@ -691,7 +691,7 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
         if operand_type == "double" {
             let temp_name = format_temp_name(temp_index);
             current_lines.push("  " + temp_name
-                + " = call i8* @sailfin_runtime_number_to_string(double "
+                + " = call i8* @sfn_number_to_str(double "
                 + operand.value
                 + ")");
             let coerced = LLVMOperand { llvm_type: "i8*", value: temp_name };
@@ -710,7 +710,7 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
             current_lines.push("  " + as_double + " = sitofp i64 " + operand.value
                 + " to double");
             current_lines.push("  " + as_string
-                + " = call i8* @sailfin_runtime_number_to_string(double "
+                + " = call i8* @sfn_number_to_str(double "
                 + as_double
                 + ")");
             let coerced = LLVMOperand { llvm_type: "i8*", value: as_string };
@@ -837,7 +837,9 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
     // print/console descriptors flipped to the `{i8*, i64}`
     // aggregate ABI, `print(42)` / `print(3.14)` no longer match
     // the legacy `i64`/`double` -> `i8*` paths above. Stringify the
-    // numeric operand via `sailfin_runtime_number_to_string`, then
+    // numeric operand via `sfn_number_to_str` (M2.5 / #403 wave-2;
+    // the trampoline forwards to `sailfin_runtime_number_to_string`
+    // today and moves into Sailfin once arena threading lands), then
     // build the aggregate the same way the `i8*` -> `{i8*, i64}`
     // shim does (length recovery via `sfn_str_len`). Both branches
     // produce a fresh NUL-terminated heap buffer whose byte length
@@ -846,7 +848,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
         if operand_type == "double" {
             let as_string = format_temp_name(temp_index);
             current_lines.push("  " + as_string
-                + " = call i8* @sailfin_runtime_number_to_string(double "
+                + " = call i8* @sfn_number_to_str(double "
                 + operand.value
                 + ")");
             let len_temp = format_temp_name(temp_index + 1);
@@ -877,7 +879,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 + " to double");
             let as_string = format_temp_name(temp_index + 1);
             current_lines.push("  " + as_string
-                + " = call i8* @sailfin_runtime_number_to_string(double "
+                + " = call i8* @sfn_number_to_str(double "
                 + as_double
                 + ")");
             let len_temp = format_temp_name(temp_index + 2);

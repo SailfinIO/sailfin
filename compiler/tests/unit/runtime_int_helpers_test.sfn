@@ -75,12 +75,17 @@ test "runtime int helper: runtime_monotonic_millis_fn alias matches monotonic_mi
 }
 
 test "runtime int helper: runtime_char_code_fn emits call+round+fptosi to i64" ![io] {
+    // M2.5 (#403) flipped this descriptor's `native_signature` to
+    // `sfn_str_codepoint` — the Sailfin-native wave-2 trampoline. The
+    // C ABI (`double` return) is preserved on the trampoline body so
+    // the #639 `round + fptosi` coercion shape stays bit-identical;
+    // only the called symbol moved.
     let s = _i8ptr_operand("%s");
     let operands: LLVMOperand[] = [s];
     let result = emit_runtime_call("runtime_char_code_fn", operands, empty_runtime_call_overrides(), 0, []);
 
     assert result.lines.length == 3;
-    assert result.lines[0] == "  %t0 = call double @sailfin_runtime_char_code(i8* %s)";
+    assert result.lines[0] == "  %t0 = call double @sfn_str_codepoint(i8* %s)";
     assert result.lines[1] == "  %t1 = call double @round(double %t0)";
     assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
 
@@ -114,12 +119,17 @@ test "runtime int helper: process.run emits call+round+fptosi to i64" ![io] {
 }
 
 test "runtime int helper: runtime_grapheme_count_fn emits call+round+fptosi to i64" ![io] {
+    // M2.5 (#403) flipped this descriptor's `native_signature` to
+    // `sfn_str_grapheme_count` — the Sailfin-native wave-2 trampoline.
+    // The C ABI (`double` return) is preserved on the trampoline body
+    // so the #639 `round + fptosi` coercion shape stays bit-identical;
+    // only the called symbol moved.
     let s = _i8ptr_operand("%s");
     let operands: LLVMOperand[] = [s];
     let result = emit_runtime_call("runtime_grapheme_count_fn", operands, empty_runtime_call_overrides(), 0, []);
 
     assert result.lines.length == 3;
-    assert result.lines[0] == "  %t0 = call double @sailfin_runtime_grapheme_count(i8* %s)";
+    assert result.lines[0] == "  %t0 = call double @sfn_str_grapheme_count(i8* %s)";
     assert result.lines[1] == "  %t1 = call double @round(double %t0)";
     assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
 

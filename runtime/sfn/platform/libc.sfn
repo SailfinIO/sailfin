@@ -17,12 +17,12 @@
 // v0 C-ABI accept-list. The validator is `check_extern_signature`
 // in `compiler/src/typecheck_types.sfn` and rejects non-conforming
 // signatures with diagnostics E0801–E0805. Accepted forms are i8 /
-// i32 / i64 / u8 / usize / bool, raw pointers (`* u8`, `* const T`,
-// `* OpaqueStruct`), and `void` (return only). Wider integer/float
-// types (i16, u32, f64, isize, …) are intentionally absent until
-// the LLVM type mapper learns to lower them. Adding declarations
-// here that step outside the accept-list would surface as E0805
-// the moment this file is imported.
+// i16 / i32 / i64 / u8 / u16 / u32 / u64 / usize / isize / bool, raw
+// pointers (`* u8`, `* const T`, `* OpaqueStruct`), `f32` / `f64`
+// (Slice C 2026-05-02 admitted these after teaching
+// `map_primitive_type`), and `void` (return only). Adding declarations
+// here that step outside the accept-list would surface as E0805 the
+// moment this file is imported.
 //
 // `unsafe` keyword: omitted on every declaration. The architect's
 // design doc (§3.6) calls out `unsafe` as a documentation marker
@@ -76,6 +76,21 @@ extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
 // `runtime/sfn/platform/exec.sfn::binary_dir` uses this to locate
 // the trailing path separator without writing a manual scan loop.
 extern fn strrchr(s: * u8, c: i32) -> * u8;
+
+// `strtod(nptr, endptr)` parses a decimal floating-point literal
+// from the NUL-terminated `nptr` and returns the parsed value as
+// `f64`. When `endptr` is non-null it writes the address of the
+// first unparsed byte through it; passing `null` discards that
+// information. C prototype: `double strtod(const char *nptr, char
+// **endptr)`. M2.5 (#403): the planned architect-spec body of
+// `runtime/sfn/string.sfn::sfn_str_to_number` (renamed once the
+// C trampolines retire) marshals an SfnString into a stack-buffered
+// NUL-terminated copy and calls this — keeping the C runtime out
+// of the numeric-parse hot path. Today's proof-of-life body in
+// `string.sfn` calls `strtod` directly against the already-
+// NUL-terminated `* u8` payload, demonstrating the migration unit
+// at the Sailfin layer.
+extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
 
 // ── Raw I/O (file-descriptor based) ───────────────────────────
 // `write`/`read` are POSIX, returning ssize_t (i64 on every
