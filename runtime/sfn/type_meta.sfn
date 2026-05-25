@@ -208,10 +208,15 @@ fn _descriptor_name(desc: * u8) -> * u8 {
 // `sfn_type_register(desc)` adds the descriptor to the registry.
 // The compiler-emitted `@__sfn_module_type_init__*` constructors
 // call this once per named type at module-load time (via
-// `@llvm.global_ctors`). Idempotent on pointer identity — a
-// duplicate registration (e.g. the same descriptor reached
-// through two compilation units) leaves the descriptor
-// reachable via either entry.
+// `@llvm.global_ctors`). Duplicate registrations are tolerated
+// (the same descriptor pointer can appear multiple times when
+// multiple constructors register it) — the registry just grows
+// a second entry. `sfn_resolve_type` returns the first match,
+// which is identical to any duplicate, so resolution stays
+// correct. A duplicate-suppressing scan would cost O(N) per
+// register; v0 prefers the cheaper append and lets the linear-
+// scan resolver absorb the extra entries. Dedup moves into the
+// architect's open-addressing hash when scaling matters.
 fn sfn_type_register(desc: * u8) -> void { _registry_append(desc); }
 
 // `sfn_resolve_type(name)` returns the descriptor whose name

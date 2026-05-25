@@ -1783,6 +1783,38 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         }
     }
 
+    // Pre-built type-meta object — Sailfin-native type-metadata
+    // registry added in M2.10 (issue #402). Mirrors the clock.o /
+    // process.o staging above: optional on a fresh checkout, hard
+    // fail once staged. Without this the installer link path
+    // resolves `@sfn_type_register` from nowhere, and every program
+    // compiled by the installed binary fails at link time the moment
+    // any module ships a named struct/enum/interface (the new
+    // compiler's per-module `@__sfn_module_type_init__*` constructor
+    // is unconditional).
+    let type_meta_a = "build/selfhost/native/obj/runtime/type_meta.o";
+    let type_meta_b = "build/native/obj/runtime/type_meta.o";
+    let mut type_meta_src: string = "";
+    if fs.exists(type_meta_a) { type_meta_src = type_meta_a; } else {
+        if fs.exists(type_meta_b) { type_meta_src = type_meta_b; }
+    }
+    if type_meta_src.length > 0 {
+        let mk_obj_dir = process.run(["mkdir", "-p", staging_runtime_obj]);
+        if mk_obj_dir != 0 {
+            print("sfn package: failed to create runtime obj staging dir");
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
+        let cp_type_meta = process.run(["cp", "-f", type_meta_src, staging_runtime_obj
+            + "/type_meta.o"]);
+        if cp_type_meta != 0 {
+            print("sfn package: failed to stage type_meta object from "
+                + type_meta_src);
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
+    }
+
     // Staged import-context — only present after a self-host
     // build has run. Tools consuming the installer can survive
     // without it (they regenerate from the seed) but bundling
