@@ -97,6 +97,16 @@ extern fn binary_dir(exe: * u8) -> * u8;
 
 extern fn resolve_runtime_root(exe: * u8) -> * u8;
 
+// `realpath(path, null)` — libc allocates the resolved buffer; used
+// by `fn main` to canonicalize argv[0] on platforms where
+// `exe_path()` cannot read the binary's own path (macOS / Windows).
+// The C driver's `_resolve_runtime_root` performed the same
+// canonicalization step via `realpath`; mirroring it here ensures
+// the runtime-root walk follows symlinks to the real binary
+// directory, matching `compiler/tests/e2e/test_runtime_sfn_sources_link_consumer.sh`'s
+// "self-path resolution works through binary symlink" pin.
+extern fn realpath(path: * u8, resolved: * u8) -> * u8;
+
 // M5.5 (#473): registers the arena-stats process-exit hook ported
 // from the retired C driver into `runtime/native/src/sailfin_runtime.c`.
 // `fn main` invokes this once before delegating to the CLI dispatch;
@@ -2032,7 +2042,22 @@ fn main(argv: string[]) -> int ![io, clock] {
     let exe_raw: * u8 = exe_path();
     let mut exe_str: string = exe_raw as string;
     if exe_str.length == 0 {
-        if argv.length > 0 { exe_str = argv[0]; }
+        if argv.length > 0 {
+            // Canonicalize argv[0] so symlinked invocations
+            // (`/tmp/wrapped/sailfin -> /opt/sailfin/bin/sailfin`)
+            // resolve to the real binary directory before the
+            // runtime-root walk reads it. The retired C driver did
+            // this via `realpath(argv[0], resolved)`; mirror that.
+            // Pinned by `test_runtime_sfn_sources_link_consumer.sh`'s
+            // "self-path resolution works through binary symlink"
+            // case, which on macOS would otherwise see argv[0] =
+            // the symlinked path and walk parent dirs that have no
+            // `runtime/` sibling.
+            let canon: * u8 = realpath(argv[0] as * u8, null);
+            if canon as i64 != 0 { exe_str = canon as string; } else {
+                exe_str = argv[0];
+            }
+        }
     }
     let bin_dir: * u8 = binary_dir(exe_str as * u8);
     let runtime_root: * u8 = resolve_runtime_root(exe_str as * u8);
