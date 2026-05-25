@@ -3,10 +3,9 @@
 // Sailfin-native executable-path + runtime-root resolution
 // (M5.3 prerequisite per epic #451; issue #468). Provides the
 // pure-Sailfin equivalents of `_resolve_runtime_root(argv0)` and
-// the per-OS executable-path resolution block currently in
-// `runtime/native/src/native_driver.c:396-557`. When the
-// `@main` lowering (M5.3) replaces `native_driver.c`'s entry
-// point, this module is what the lowered `main` calls before
+// the per-OS executable-path resolution helpers from the C driver
+// retired in M5.5 / #473. The compiler's `fn main`
+// (`compiler/src/cli_main.sfn`) calls these helpers before
 // delegating to `sailfin_cli_main_with_paths`.
 //
 // Module surface
@@ -18,7 +17,7 @@
 //     prefix of `exe` up to (but excluding) the final `/`.
 //     Returns `""` for empty input, `"."` for a bare filename,
 //     `"/"` for a root-relative single-component path. Matches
-//     `_dirname_dup` in native_driver.c byte-for-byte.
+//     `_dirname_dup` in the retired C driver byte-for-byte.
 //   - `resolve_runtime_root(exe_path: string) -> string ![io]`
 //     — honors `$SAILFIN_RUNTIME_ROOT` first, then walks
 //     `<dir>/runtime`, `<dir>/../runtime`,
@@ -26,8 +25,8 @@
 //     first existing canonicalized path or `""`. Order
 //     preserves dev-tree (`build/native/`), installed-tree
 //     (`~/.local/bin/sailfin` next to `~/.local/runtime/`), and
-//     packaged-bundle layouts — `_resolve_runtime_root` in
-//     native_driver.c documents the same walk.
+//     packaged-bundle layouts — `_resolve_runtime_root` in the
+//     retired C driver documented the same walk.
 //
 // Platform coverage
 //   Linux is the only platform validated end-to-end in this PR.
@@ -49,11 +48,10 @@
 //
 // Naming
 //   No `_sfn_` infix on the canonical `exe_path` / `binary_dir`
-//   / `resolve_runtime_root` exports because the C runtime
-//   currently exposes them as static helpers inside
-//   `native_driver.c` (no external symbol). There is therefore
-//   no link-time namespace collision to dodge — unlike the
-//   `sfn_arena_sfn_*` / `sfn_str_sfn_*` workarounds in
+//   / `resolve_runtime_root` exports because the retired C driver
+//   exposed them as static helpers (no external symbol). There is
+//   therefore no link-time namespace collision to dodge — unlike
+//   the `sfn_arena_sfn_*` / `sfn_str_sfn_*` workarounds in
 //   `runtime/sfn/memory/arena.sfn` and `runtime/sfn/string.sfn`,
 //   which had to coexist with already-shipping C symbols of the
 //   same name.
@@ -153,7 +151,7 @@ extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
 
 // `binary_dir(exe)` returns the directory component of `exe` —
 // the prefix up to (but excluding) the trailing `/`. Pure
-// (no syscalls). Mirrors `_dirname_dup` in native_driver.c:
+// (no syscalls). Mirrors `_dirname_dup` from the retired C driver:
 //   - `""`             -> `""`     (empty input passes through)
 //   - `"sailfin"`      -> `"."`    (no slash)
 //   - `"/x"`           -> `"/"`    (slash is the first byte)

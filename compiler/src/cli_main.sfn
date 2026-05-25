@@ -69,6 +69,57 @@ import {
 } from "./toml_parser";
 import { resolve_compiler_version } from "./version";
 
+// M5.5 (#473) entry-point dependencies. `fn main` below resolves the
+// running binary's path and the runtime bundle root directly via the
+// Sailfin-native helpers in `runtime/sfn/platform/exec.sfn` — the
+// pure-Sailfin replacement for the executable-path resolver in the
+// retired C driver. The runtime capsule's `sfn-sources` array links
+// `exec.sfn`'s object into every compiler build; the
+// `apply_module_symbol_mangling` pass in
+// `compiler/src/llvm/lowering/lowering_helpers_mangling.sfn`
+// short-circuits when `current_module_slug` starts with `runtime/`
+// and skips mangling entirely for those modules, so the bare
+// `@exe_path` / `@binary_dir` / `@resolve_runtime_root` symbols
+// resolve at link time. (The companion
+// `should_keep_unmangled_abi_symbol` predicate handles per-symbol
+// ABI carve-outs like `main` and `native_cli_main`, not the
+// module-level runtime-bundle exports.)
+//
+// Declared as `extern fn` rather than imported because the seed's
+// cross-module signature resolver does not yet hand back
+// runtime-capsule `.sfn` signatures to compiler-side consumers
+// (mirrors the #306 workaround used by
+// `compiler/tests/unit/runtime_exec_path_test.sfn`'s `binary_dir`
+// declaration). The signatures match `runtime/sfn/platform/exec.sfn`
+// bit-for-bit at the LLVM level: `string` lowers to `i8*` like
+// `* u8`, so the symbols bind regardless of which surface the
+// declaration uses. Effects on the underlying definitions are
+// `![io]` for `exe_path` / `resolve_runtime_root` and pure for
+// `binary_dir`; the transitive caller (`fn main`) declares the
+// envelope explicitly.
+extern fn exe_path() -> * u8;
+
+extern fn binary_dir(exe: * u8) -> * u8;
+
+extern fn resolve_runtime_root(exe: * u8) -> * u8;
+
+// `realpath(path, null)` — libc allocates the resolved buffer; used
+// by `fn main` to canonicalize argv[0] on platforms where
+// `exe_path()` cannot read the binary's own path (macOS / Windows).
+// The C driver's `_resolve_runtime_root` performed the same
+// canonicalization step via `realpath`; mirroring it here ensures
+// the runtime-root walk follows symlinks to the real binary
+// directory, matching `compiler/tests/e2e/test_runtime_sfn_sources_link_consumer.sh`'s
+// "self-path resolution works through binary symlink" pin.
+extern fn realpath(path: * u8, resolved: * u8) -> * u8;
+
+// M5.5 (#473): registers the arena-stats process-exit hook ported
+// from the retired C driver into `runtime/native/src/sailfin_runtime.c`.
+// `fn main` invokes this once before delegating to the CLI dispatch;
+// the call is a no-op unless `SAILFIN_DUMP_ARENA_STATS` is truthy.
+// Pinned by `compiler/tests/e2e/test_arena_default_on.sh`.
+extern fn sailfin_runtime_install_arena_telemetry(label: * u8);
+
 fn _usage() -> string {
     let mut out: string = "usage: sfn <command> [options]\n";
     out = out + "\n";
@@ -387,22 +438,20 @@ fn _runtime_exception_path(root: string) -> string ![io] {
 }
 
 // Issue #468 (M5.3 prerequisite per epic #451) ships the Sailfin
-// equivalents of `_resolve_runtime_root(argv0)` and the per-OS
-// executable-path block in `runtime/native/src/native_driver.c`.
-// The new module `runtime/sfn/platform/exec.sfn` exports
-// `@binary_dir`, `@exe_path`, and `@resolve_runtime_root`; the
-// legacy `sfn run` / `sfn build` link path (this function's
-// caller, `_clang_compile_runtime_objects`) needs the staged `.o`
-// to resolve them once any user program (or the M5.3 entry-point
-// lowering once it lands) reaches the symbols. The runtime-
-// capsule path reaches exec.sfn through `runtime/native/
-// capsule.toml`'s `sfn-sources` array instead. Search order
-// mirrors `_runtime_clock_path` so bundled installs and in-tree
-// dev builds both find the staged object. Empty return is benign
-// today (no user surface dispatches through this module yet) but
-// becomes fail-loud once M5.3 wires `@main` to call `@exe_path` —
-// the linker then reports "undefined reference to `exe_path`"
-// and the missing staged artifact surfaces immediately.
+// equivalents of the C-driver's `_resolve_runtime_root(argv0)` and
+// per-OS executable-path helpers, retired in M5.5 / #473. The
+// module `runtime/sfn/platform/exec.sfn` exports `@binary_dir`,
+// `@exe_path`, and `@resolve_runtime_root`; the legacy `sfn run` /
+// `sfn build` link path (this function's caller,
+// `_clang_compile_runtime_objects`) needs the staged `.o` to
+// resolve them once any user program reaches the symbols. The
+// runtime-capsule path reaches exec.sfn through `runtime/native/
+// capsule.toml`'s `sfn-sources` array instead. The compiler's own
+// `fn main` (`cli_main.sfn`) is the load-bearing internal caller
+// after #473 — a missing staged artifact surfaces at link time as
+// "undefined reference to `exe_path`". Search order mirrors
+// `_runtime_clock_path` so bundled installs and in-tree dev builds
+// both find the staged object.
 fn _runtime_exec_path(root: string) -> string ![io] {
     let bundled = _path_join(root, "native/obj/exec.o");
     if fs.exists(bundled) { return bundled; }
@@ -1133,9 +1182,12 @@ fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
     return spec;
 }
 
-// C ABI boundary — `runtime/native/src/native_driver.c` calls
-// `sailfin_cli_main__cli_main` declared as returning `int64_t`. The C-side
-// declaration must be updated in lockstep with this signature.
+// Historical C ABI boundary — the now-retired C driver called
+// `sailfin_cli_main__cli_main` with an `int64_t` return type.
+// After M5.5 (#473) the only caller is `sailfin_cli_main_with_paths`
+// (driven from `fn main` in this module); the `int` return type
+// keeps the ABI shape stable in case any embedder still binds the
+// symbol externally.
 fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
     let trace_argv = _env_flag("SAILFIN_TRACE_ARGV") || _legacy_flag_file("build/sailfin/.trace_argv");
     if trace_argv {
@@ -1848,9 +1900,9 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
 
     // Bare-file dispatch: `sailfin <file.sfn>` (no subcommand) compiles
     // and runs the file, matching the convention `python script.py` /
-    // `node script.js` set. Replaces the legacy C-driver fallback in
-    // `runtime/native/src/native_driver.c` that called
-    // `compile_to_sailfin` / `compile_to_llvm` directly (retired in M5.4 / #472).
+    // `node script.js` set. Replaces the legacy C-driver fallback that
+    // called `compile_to_sailfin` / `compile_to_llvm` directly
+    // (retired in M5.4 / #472).
     if args.length == 1 && _ends_with(cmd, ".sfn") {
         return sailfin_cli_main_with_paths(["run", cmd], runtime_root, binary_dir);
     }
@@ -1861,15 +1913,18 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
     return 2;
 }
 
-// M5.3 (#471): direct-params facade over `sailfin_cli_main`. M5.4's
-// retirement of `native_driver.c` flips the entry-point lowering to
-// call this helper from the synthesized `@main(argc, argv)` prologue,
-// passing `runtime_root` and `binary_dir` as resolved strings instead
-// of as `--runtime-root` / `--binary-dir` argv-flag injection. Today
-// it reconstructs the legacy argv shape and delegates so the 700-line
-// dispatch in `sailfin_cli_main` remains a single source of truth;
-// a follow-up PR can flip the direction (move the body here, leave
-// `sailfin_cli_main` as a back-compat shim) once M5.4 lands.
+// M5.3 (#471): direct-params facade over `sailfin_cli_main`. After
+// M5.5 (#473) retired the C driver, this helper is the route from
+// the synthesized `@main(argc, argv)` prologue (`fn main` below)
+// into the legacy `sailfin_cli_main` dispatch — runtime_root and
+// binary_dir are resolved as Sailfin strings via
+// `runtime/sfn/platform/exec.sfn` rather than injected as
+// `--runtime-root` / `--binary-dir` argv flags by the prior C
+// driver.
+// Today it reconstructs the legacy argv shape and delegates so the
+// 700-line dispatch in `sailfin_cli_main` remains a single source of
+// truth; a follow-up PR can flip the direction (move the body here,
+// leave `sailfin_cli_main` as a back-compat shim).
 fn sailfin_cli_main_with_paths(argv: string[], runtime_root: string, binary_dir: string) -> int ![io, clock] {
     let mut composed: string[] = [];
     if runtime_root.length > 0 {
@@ -1889,8 +1944,148 @@ fn sailfin_cli_main_with_paths(argv: string[], runtime_root: string, binary_dir:
     return sailfin_cli_main(composed);
 }
 
-// Exported entrypoint for the native argv shim.
-// Mirrors `sailfin_cli_main` at the C ABI boundary.
+// Exported entrypoint for the native argv shim (legacy C-ABI
+// boundary). With the C driver retired in M5.5 (#473) it has no
+// remaining external caller; left in place defensively so any
+// embedder still wiring up the seed's symbol table can resolve it.
 fn native_cli_main(argv: string[]) -> int ![io] {
     return sailfin_cli_main(argv);
+}
+
+// M5.5 (#473): the compiler binary's C-ABI entry point. The LLVM
+// lowering pass at `compiler/src/llvm/lowering/emission.sfn` detects
+// `fn main` and synthesizes the `@main(i32 %argc, i8** %argv)`
+// wrapper (M5.3 / #471), which converts argv into a Sailfin
+// `string[]` and forwards control here. Before #473, `@main` came
+// from the C driver under `runtime/native/src/`; with that file
+// deleted, this is the sole entry point.
+//
+// The body mirrors what the retired C driver used to do, in pure
+// Sailfin: resolve the binary's path, derive the binary directory,
+// walk upward for a runtime bundle, then hand control to
+// `sailfin_cli_main_with_paths`. The legacy `--runtime-root` /
+// `--binary-dir` argv-flag injection is preserved through that
+// helper so the existing argv-parsing branch in `sailfin_cli_main`
+// stays the single source of truth — flipping the direction (move
+// the body into `sailfin_cli_main_with_paths`, leave
+// `sailfin_cli_main` as a shim) is a separate cleanup.
+//
+// Platform coverage tracks `runtime/sfn/platform/exec.sfn`:
+//   - Linux x86_64: full coverage (readlink /proc/self/exe).
+//   - macOS / Windows: `exe_path()` currently returns "" — callers
+//     fall back to `$SAILFIN_RUNTIME_ROOT` via `resolve_runtime_root`.
+//     A follow-up wires `_NSGetExecutablePath` / `GetModuleFileNameA`.
+fn _arena_telemetry_value_flag(arg: string) -> boolean {
+    // Whitelist of CLI flags that take a value; mirrors the C-side
+    // `_arena_stats_value_flag` byte-for-byte. Conservative
+    // overshoot only mis-skips a positional during label selection
+    // (telemetry-only impact).
+    if arg.length == 0 { return false; }
+    if substring(arg, 0, 1) != "-" { return false; }
+    if arg == "-o" { return true; }
+    if arg == "--out" { return true; }
+    if arg == "--emit" { return true; }
+    if arg == "--seed" { return true; }
+    if arg == "--clang" { return true; }
+    if arg == "--timeout" { return true; }
+    if arg == "--max-total" { return true; }
+    if arg == "--work-dir" { return true; }
+    if arg == "--jobs" { return true; }
+    if arg == "--opt" { return true; }
+    if arg == "--runtime-root" { return true; }
+    if arg == "--binary-dir" { return true; }
+    return false;
+}
+
+fn _arena_telemetry_label(argv: string[]) -> string {
+    // Walk argv from the back for the first non-flag positional that
+    // is not the value of a known value-taking flag. Falls back to
+    // argv[0]. Mirrors the C-driver's `_arena_stats_capture_label`.
+    if argv.length == 0 { return ""; }
+    let mut i: int = argv.length - 1;
+    loop {
+        if i < 0 { break; }
+        let a = argv[i];
+        if a.length > 0 {
+            if substring(a, 0, 1) != "-" {
+                if i == 0 { return a; }
+                if !_arena_telemetry_value_flag(argv[i - 1]) { return a; }
+            }
+        }
+        i -= 1;
+    }
+    return argv[0];
+}
+
+fn main(argv: string[]) -> int ![io, clock] {
+    // Arena-stats process-exit telemetry — formerly registered by
+    // the C driver's pre-main. The C-side function is a no-op
+    // unless `SAILFIN_DUMP_ARENA_STATS` is truthy; we always call
+    // it so the gate stays in one place.
+    let label = _arena_telemetry_label(argv);
+    sailfin_runtime_install_arena_telemetry(label as * u8);
+
+    // The extern declarations above expose the helpers with `* u8`
+    // surface; cast back to `string` at the boundary so the
+    // `sailfin_cli_main_with_paths` argv-flag injection sees Sailfin
+    // string values. In the current compiler `string` lowers to
+    // `i8*` (a bare pointer — see
+    // `compiler/src/llvm/type_mapping.sfn:659` and
+    // `compiler/src/llvm/expression_lowering/native/core_type_mapping.sfn:70`),
+    // so `* u8` and `string` are bit-compatible across the boundary
+    // and the `as` casts are no-ops at the LLVM level. The
+    // future-ABI flip to `{i8*, i64}` (M1.A.2 — see the
+    // `runtime/sfn/platform/exec.sfn` module header) is what the
+    // "cast-quirk" note in that file anticipates; downstream
+    // consumers (`_runtime_bundle_exists`, the argv-flag re-parse in
+    // `sailfin_cli_main`) read NUL-terminated bytes off the pointer
+    // either way, so the pinned semantics here survive the future
+    // shape change without source edits.
+    //
+    // `exe_path()` only resolves `/proc/self/exe` (Linux). On macOS
+    // and Windows it returns `""` until `runtime/sfn/platform/exec.sfn`
+    // gains `_NSGetExecutablePath` / `GetModuleFileNameA` bodies (a
+    // follow-up to #468 / #473). The retired C driver covered those
+    // platforms via `realpath(argv[0], ...)` as a fallback; mirror
+    // that here so the runtime-root walk still has a directory to
+    // start from. argv[0] is not guaranteed to be canonical (a bare
+    // `$PATH` name fails the walk on its own), but `_runtime_bundle_exists`
+    // in `sailfin_cli_main` provides the final CWD-relative
+    // `runtime` fallback either way.
+    let exe_raw: * u8 = exe_path();
+    let mut exe_str: string = exe_raw as string;
+    if exe_str.length == 0 {
+        if argv.length > 0 {
+            // Canonicalize argv[0] so symlinked invocations
+            // (`/tmp/wrapped/sailfin -> /opt/sailfin/bin/sailfin`)
+            // resolve to the real binary directory before the
+            // runtime-root walk reads it. The retired C driver did
+            // this via `realpath(argv[0], resolved)`; mirror that.
+            // Pinned by `test_runtime_sfn_sources_link_consumer.sh`'s
+            // "self-path resolution works through binary symlink"
+            // case, which on macOS would otherwise see argv[0] =
+            // the symlinked path and walk parent dirs that have no
+            // `runtime/` sibling.
+            let canon: * u8 = realpath(argv[0] as * u8, null);
+            if canon as i64 != 0 { exe_str = canon as string; } else {
+                exe_str = argv[0];
+            }
+        }
+    }
+    let bin_dir: * u8 = binary_dir(exe_str as * u8);
+    let runtime_root: * u8 = resolve_runtime_root(exe_str as * u8);
+    // `sailfin_runtime_argv_to_string_array(argc, argv)` (the @main
+    // wrapper synthesized by emission.sfn) preserves argv[0] — the
+    // binary path — at index 0. The CLI dispatch reads positional
+    // arguments starting at index 0, so drop argv[0] before
+    // delegating. Mirrors the `for (int i = 1; i < argc; i++)`
+    // loop in the retired C driver.
+    let mut tail: string[] = [];
+    let mut i: int = 1;
+    loop {
+        if i >= argv.length { break; }
+        tail.push(argv[i]);
+        i += 1;
+    }
+    return sailfin_cli_main_with_paths(tail, runtime_root as string, bin_dir as string);
 }

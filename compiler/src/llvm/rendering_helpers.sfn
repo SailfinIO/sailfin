@@ -451,15 +451,18 @@ fn should_internalize_function(function: NativeFunction, entry_points: string[],
     if is_exported_symbol(exported_symbols, function.name) { return false; }
 
     // Preserve native driver API surface expected by selfhost/release linking.
+    //
+    // The historical entries for `compile_to_llvm` / `compile_to_sailfin`
+    // were needed to keep the symbols externally visible for the
+    // C driver's legacy `--emit MODE file.sfn` extern declarations.
+    // M5.4 (#472) retired that dispatch and M5.5 (#473) deleted the
+    // C driver, so both functions reach their sole remaining caller
+    // (the CLI `--emit` dispatch in `cli_main.sfn`) through the
+    // Sailfin import system, which generates module-mangled call
+    // sites that match the mangled definition. The default
+    // `return false` at the bottom of this function keeps them
+    // externally linked across the seedcheck cross-module link.
     let sanitized = sanitize_symbol(function.name);
-    let mut _if289: boolean = false;
-    if function.name == "compile_to_llvm" { _if289 = true; }
-    if sanitized == "compile_to_llvm" { _if289 = true; }
-    if _if289 { return false; }
-    let mut _if290: boolean = false;
-    if function.name == "compile_to_sailfin" { _if290 = true; }
-    if sanitized == "compile_to_sailfin" { _if290 = true; }
-    if _if290 { return false; }
     let mut _if291: boolean = false;
     if function.name == "cli_main" { _if291 = true; }
     if sanitized == "sailfin_cli_main__cli_main" { _if291 = true; }
