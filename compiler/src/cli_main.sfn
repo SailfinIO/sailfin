@@ -1846,6 +1846,15 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
 
     if strings_equal(cmd, "guillermo") { return handle_guillermo_command(); }
 
+    // Bare-file dispatch: `sailfin <file.sfn>` (no subcommand) compiles
+    // and runs the file, matching the convention `python script.py` /
+    // `node script.js` set. Replaces the legacy C-driver fallback in
+    // `runtime/native/src/native_driver.c` that called
+    // `compile_to_sailfin` / `compile_to_llvm` directly (retired in M5.4 / #472).
+    if args.length == 1 && _ends_with(cmd, ".sfn") {
+        return sailfin_cli_main_with_paths(["run", cmd], runtime_root, binary_dir);
+    }
+
     print("unknown command: " + cmd);
     print(_usage());
 
