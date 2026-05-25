@@ -823,6 +823,25 @@ rebuild:
 		echo "[rebuild] staging exception.o..."; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/exception.ll -o build/native/obj/runtime/exception.o; \
 	fi
+	@# Stage type_meta.o (Sailfin-native type-metadata registry from
+	@# runtime/sfn/type_meta.sfn). M2.10 (issue #402) flips seven
+	@# `runtime_helpers.sfn` descriptors to `sfn_*` `native_signature`
+	@# entries (`sfn_is_string` / `_resolve_type` / `_instance_of`,
+	@# etc.) and emits a `@__sfn_module_type_init__*` constructor per
+	@# module that calls `@sfn_type_register`. The legacy link path
+	@# (`_clang_compile_runtime_objects` in `compiler/src/cli_main.sfn`)
+	@# resolves the symbol against this staged .o; without it, every
+	@# `sfn test` invocation fails at link with "undefined reference
+	@# to `sfn_type_register`" the moment a test's compiled IR carries
+	@# a single named struct/enum/interface descriptor.
+	@if [ ! -f build/native/obj/runtime/type_meta.ll ]; then \
+		echo "[rebuild] staging type_meta.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/type_meta.ll llvm runtime/sfn/type_meta.sfn >/dev/null; \
+	fi
+	@if [ ! -f build/native/obj/runtime/type_meta.o ]; then \
+		echo "[rebuild] staging type_meta.o..."; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/type_meta.ll -o build/native/obj/runtime/type_meta.o; \
+	fi
 	@# Stage exec.o (Sailfin-native executable-path + runtime-root
 	@# resolution from runtime/sfn/platform/exec.sfn). Issue #468
 	@# (epic #451 M5.3 prerequisite) ships `@exe_path` /
@@ -941,6 +960,7 @@ ci-cross-windows:
 	SAVED_DIR="build/native/raw"; \
 	PRELUDE_LL="build/native/obj/runtime/prelude.ll"; \
 	CLOCK_LL="build/native/obj/runtime/clock.ll"; \
+	TYPE_META_LL="build/native/obj/runtime/type_meta.ll"; \
 	if [ ! -d "$$SAVED_DIR" ] || [ ! -f "$$SAVED_DIR/program.ll" ]; then \
 		echo "[cross-windows][error] missing $$SAVED_DIR/*.ll + program.ll — run 'make rebuild' first" >&2; \
 		exit 1; \
@@ -951,6 +971,10 @@ ci-cross-windows:
 	fi; \
 	if [ ! -f "$$CLOCK_LL" ]; then \
 		echo "[cross-windows][error] missing $$CLOCK_LL — 'make rebuild' should have emitted it (sleep migration PR 2, #397)" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$$TYPE_META_LL" ]; then \
+		echo "[cross-windows][error] missing $$TYPE_META_LL — 'make rebuild' should have emitted it (M2.10, #402)" >&2; \
 		exit 1; \
 	fi; \
 	echo "[cross-windows] using saved sfn build IR layout ($$SAVED_DIR)"; \
@@ -1003,6 +1027,10 @@ ci-cross-windows:
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
 		-c "$$CLOCK_LL" -o "$$WIN_OBJ/runtime/clock.o"; \
 	\
+	echo "[cross-windows] compiling type_meta (Sailfin-native type-metadata registry, M2.10 #402)..."; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+		-c "$$TYPE_META_LL" -o "$$WIN_OBJ/runtime/type_meta.o"; \
+	\
 	echo "[cross-windows] compiling C runtime..."; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_arena.c \
 		-o "$$WIN_OBJ/sailfin_arena.o"; \
@@ -1037,6 +1065,7 @@ ci-cross-windows:
 		"$$WIN_OBJ/native.linked.o" \
 		"$$WIN_OBJ/runtime/prelude.o" \
 		"$$WIN_OBJ/runtime/clock.o" \
+		"$$WIN_OBJ/runtime/type_meta.o" \
 		$$SHIM_O \
 		-lm -lpthread; \
 	\
@@ -1059,6 +1088,10 @@ ci-cross-windows:
 	if [ -f "$$WIN_OBJ/runtime/clock.o" ]; then \
 		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
 		cp -f "$$WIN_OBJ/runtime/clock.o" "$$INSTALLER_DIR/runtime/native/obj/clock.o"; \
+	fi; \
+	if [ -f "$$WIN_OBJ/runtime/type_meta.o" ]; then \
+		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+		cp -f "$$WIN_OBJ/runtime/type_meta.o" "$$INSTALLER_DIR/runtime/native/obj/type_meta.o"; \
 	fi; \
 	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
 	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"

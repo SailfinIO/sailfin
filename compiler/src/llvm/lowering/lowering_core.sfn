@@ -113,6 +113,7 @@ import { build_type_context_with_recovery } from "./lowering_phase_types";
 import { recover_functions_for_lowering } from "./lowering_recovery";
 import { _parse_lowered_fn_string_constants, split_lines_local } from "./lowering_text_utils";
 import { lower_module_bindings_to_globals } from "./module_globals";
+import { emit_type_descriptors } from "./type_descriptors";
 
 fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult {
     let mut native_text_for_recovery: string = "";
@@ -628,6 +629,13 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     let function_result = lower_all_functions(local_functions, context_functions, aggregated_effects, type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call, module_string_constants, trace, debug_lowering);
     diagnostics = extend_string_lines_checked(diagnostics, function_result.diagnostics, "function lowering");
 
+    // ── M2.10 (#402): type-metadata descriptors. Emitted before
+    // the body assembly so the constructor's `call @sfn_type_register`
+    // lines participate in the post-lowering helper scan and the
+    // descriptor globals + name strings ride along in the preamble
+    // section we hand to the renderer below.
+    let type_descriptor_emission = emit_type_descriptors(type_context, native_module.module_name);
+
     // ── Assemble the body before rendering the preamble so the
     // helper-target scan covers every `call @<sym>(` emitted by the
     // module-globals initializer, the function bodies, and the
@@ -642,6 +650,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         body_lines = extend_string_lines(body_lines, [""]);
     }
     body_lines = extend_string_lines(body_lines, function_result.lines);
+    if type_descriptor_emission.has_descriptors {
+        body_lines = extend_string_lines(body_lines, [""]);
+        body_lines = extend_string_lines(body_lines, type_descriptor_emission.body_lines);
+    }
 
     // ── Phase 4: Augment helpers with post-lowering observations and
     // render the preamble.
@@ -655,6 +667,14 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     }
     runtime_helpers = seed_default_runtime_helpers(tmp_helpers);
     let mut lines = render_llvm_preamble(native_module.module_name, type_context, trait_metadata, context_functions, local_functions, imported_functions, runtime_helpers, debug_lowering);
+    // M2.10 (#402): inject `@__sfn_type_desc.*` globals and the
+    // `declare void @sfn_type_register(i8*)` into the preamble.
+    // Constructor + `@llvm.global_ctors` lines were appended to
+    // `body_lines` above so the post-lowering helper scan saw
+    // them.
+    if type_descriptor_emission.has_descriptors {
+        lines = extend_string_lines(lines, type_descriptor_emission.preamble_lines);
+    }
     lines = extend_string_lines(lines, body_lines);
 
     // Capturing-lambda env type decls (#687). The lambda-site

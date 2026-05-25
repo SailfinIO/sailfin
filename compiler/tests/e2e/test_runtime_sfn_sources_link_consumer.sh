@@ -101,7 +101,7 @@ ll-sources = ["ir/runtime_globals.ll"]
 # "undefined reference to sfn_exception_*". The list still leads
 # with `test_marker.sfn` so the "consumer fires for sfn-sources"
 # assertions below remain pointed at the marker file.
-sfn-sources = ["../sfn/test_marker.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn"]
+sfn-sources = ["../sfn/test_marker.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm"]
 prelude-entry = "../prelude.sfn"
@@ -127,6 +127,12 @@ EOF
     ln -s "$REPO_ROOT/runtime/sfn/clock.sfn" "$ws/runtime/sfn/clock.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/platform/posix.sfn" "$ws/runtime/sfn/platform/posix.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/exception.sfn" "$ws/runtime/sfn/exception.sfn"
+    # M2.10 (#402) dep — clock.sfn / exception.sfn define structs
+    # that trigger `@__sfn_module_type_init__*` ctors calling
+    # `@sfn_type_register`; without `type_meta.sfn` on the synthetic
+    # sfn-sources list the synthetic build fails at link with
+    # "undefined reference to `sfn_type_register`".
+    ln -s "$REPO_ROOT/runtime/sfn/type_meta.sfn" "$ws/runtime/sfn/type_meta.sfn"
 
     # The sfn-source under test. Tiny self-contained module.
     cat > "$ws/runtime/sfn/test_marker.sfn" <<'EOF'
