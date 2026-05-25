@@ -58,6 +58,29 @@ extern char **_environ;
 extern char **environ;
 #endif
 
+#if defined(_WIN32)
+/* MinGW does not ship POSIX `readlink`, but `runtime/sfn/platform/exec.sfn`
+ * unconditionally declares and calls it (the Sailfin module lacks a
+ * `cfg(target_os)` to gate the body). Provide a Windows stub that always
+ * returns -1 so the runtime's `exe_path()` resolves to "" — the
+ * `compiler/src/cli_main.sfn::main` fallback then uses argv[0]. Replaces
+ * the platform conditional in the retired C driver (which used
+ * `GetModuleFileNameA` directly from pre-main). A follow-up to #468 /
+ * #473 wires `GetModuleFileNameA` into `exec.sfn` properly and removes
+ * this stub. The return type is `int64_t` to match the LLVM `i64`
+ * declaration exec.sfn emits — POSIX `ssize_t` would be 64-bit on
+ * mingw-w64/x86_64 too but pinning the width sidesteps any future
+ * 32-bit cross-compile surprise. */
+__attribute__((weak))
+int64_t readlink(const char *path, char *buf, size_t bufsize)
+{
+    (void)path;
+    (void)buf;
+    (void)bufsize;
+    return -1;
+}
+#endif
+
 static bool _env_enabled(const char *name);
 static int _env_int(const char *name, int fallback);
 static int64_t _clamp_to_i64(double v);
