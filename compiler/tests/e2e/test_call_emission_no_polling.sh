@@ -62,7 +62,20 @@ run_test() {
 emit_llvm() {
     local source="$1"
     local out="$2"
-    "$BINARY" emit -o "$out" llvm "$source" > /dev/null 2>&1
+    local log="$3"
+    "$BINARY" emit -o "$out" llvm "$source" > "$log" 2>&1
+}
+
+# Dump a captured emit log to the test output stream, prefixed for
+# readability. Called from each test on emit failure so CI logs show
+# the compiler diagnostic without needing a local rerun.
+dump_emit_log() {
+    local log="$1"
+    if [ -s "$log" ]; then
+        sed 's/^/[test]     /' "$log"
+    else
+        echo "[test]     (emit produced no stderr/stdout)"
+    fi
 }
 
 # Count `call` instructions targeting a symbol. Matches the LLVM
@@ -76,21 +89,39 @@ emit_llvm() {
 # spaces) immediately preceding the symbol mention — `declare` lines
 # don't contain that token, but every call site does.
 #
-# `grep -c` exits non-zero on zero matches (and prints `0`), so we
-# swallow the exit status with `|| true` and trust `grep -c`'s own
-# count output.
+# Exits the script (non-zero) when the IR file is missing or grep
+# reports an error other than "no matches" (exit 1). Returning an
+# empty string here would let the caller's `[ "$count" -ne 0 ]`
+# comparison silently pass on a missing file, masking the very
+# regression this test guards against. `grep -c` exit codes:
+#   0 — at least one match (count > 0)
+#   1 — no matches (count == 0)
+#   2 — file I/O or pattern error — propagate as a hard failure
 count_call_sites() {
     local ll="$1"
     local symbol="$2"
-    grep -cE "[[:space:]]call[[:space:]].*@${symbol}\b" "$ll" 2>/dev/null || true
+    if [ ! -r "$ll" ]; then
+        echo "[count_call_sites] IR file missing or unreadable: $ll" >&2
+        exit 1
+    fi
+    local count
+    local rc=0
+    count="$(grep -cE "[[:space:]]call[[:space:]].*@${symbol}\b" "$ll")" || rc=$?
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 1 ]; then
+        echo "[count_call_sites] grep failed (exit $rc) on $ll" >&2
+        exit 1
+    fi
+    printf '%s' "${count:-0}"
 }
 
 # ---- (1) heavy compiler module: lowering_core.sfn ----
 test_lowering_core_no_polling() {
     local source="$REPO_ROOT/compiler/src/llvm/lowering/lowering_core.sfn"
     local ll="$SCRATCH/lowering_core.ll"
-    if ! emit_llvm "$source" "$ll"; then
+    local log="$SCRATCH/lowering_core.emit.log"
+    if ! emit_llvm "$source" "$ll" "$log"; then
         echo "[test]   sfn emit llvm failed for lowering_core.sfn"
+        dump_emit_log "$log"
         return 1
     fi
     local count
@@ -108,8 +139,10 @@ test_lowering_core_no_polling() {
 test_instructions_try_no_polling() {
     local source="$REPO_ROOT/compiler/src/llvm/lowering/instructions_try.sfn"
     local ll="$SCRATCH/instructions_try.ll"
-    if ! emit_llvm "$source" "$ll"; then
+    local log="$SCRATCH/instructions_try.emit.log"
+    if ! emit_llvm "$source" "$ll" "$log"; then
         echo "[test]   sfn emit llvm failed for instructions_try.sfn"
+        dump_emit_log "$log"
         return 1
     fi
     local count
@@ -142,8 +175,10 @@ fn main() ![io] {
 }
 SFN
     local ll="$SCRATCH/try_catch.ll"
-    if ! emit_llvm "$fixture" "$ll"; then
+    local log="$SCRATCH/try_catch.emit.log"
+    if ! emit_llvm "$fixture" "$ll" "$log"; then
         echo "[test]   sfn emit llvm failed for try/catch fixture"
+        dump_emit_log "$log"
         return 1
     fi
     local count
@@ -183,8 +218,10 @@ fn main() ![io] {
 }
 SFN
     local ll="$SCRATCH/pure_calls.ll"
-    if ! emit_llvm "$fixture" "$ll"; then
+    local log="$SCRATCH/pure_calls.emit.log"
+    if ! emit_llvm "$fixture" "$ll" "$log"; then
         echo "[test]   sfn emit llvm failed for pure-calls fixture"
+        dump_emit_log "$log"
         return 1
     fi
     local count
