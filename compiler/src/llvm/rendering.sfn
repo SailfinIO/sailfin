@@ -266,56 +266,18 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
                 + ")";
             lines.push(line);
             declared_symbols.push(effective_symbol);
-            // Also declare the target name if it differs from the effective
-            // symbol. This only satisfies IR validation (clang frontend);
-            // actual linking requires a runtime-side wrapper/alias for the
-            // target name.
-            //
-            // M2.4a (#396): when `native_signature` flipped the
-            // effective symbol, the descriptor's `symbol` field IS
-            // the legacy target name (e.g. `strings_equal`) — its
-            // only role now is to record what the C body used to be
-            // called for archeology. Emitting a `declare` for it
-            // would re-introduce the very dead reference the
-            // migration is trying to clear (acceptance criterion
-            // "the C symbols become unreferenced"). Skip the alias
-            // path whenever the symbol was flipped.
-            let mut emit_target_alias: boolean = true;
-            if effective_symbol != descriptor.symbol {
-                emit_target_alias = false;
-            }
-            if emit_target_alias {
-                if descriptor.target != effective_symbol {
-                    let sanitized_target = sanitize_symbol(descriptor.target);
-                    if sanitized_target != effective_symbol {
-                        // Issue #633: when an imported user function
-                        // already supplies a declare for the alias name
-                        // (e.g. `is_decimal_digit` exported from the
-                        // parser utilities, `monotonic_millis` exported
-                        // from the prelude wrapper), the imported declare
-                        // carries the source-level signature and would
-                        // otherwise be duplicated by this alias line.
-                        // The main `effective_symbol` declare above stays
-                        // intact so the C entrypoint (`sailfin_runtime_*`)
-                        // is still resolved for the wrapper's internal
-                        // call.
-                        if !string_array_contains(imported_symbols, sanitized_target) {
-                            if !string_array_contains(declared_symbols, sanitized_target) {
-                                if !string_array_contains(local_symbols, sanitized_target) {
-                                    let alias_line = "declare " + declare_return
-                                        + " @"
-                                        + sanitized_target
-                                        + "("
-                                        + parameter_text
-                                        + ")";
-                                    lines.push(alias_line);
-                                    declared_symbols.push(sanitized_target);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            // M1.7.5b (#502): the per-target alias `declare` branch was
+            // retired here. It only mattered during the M2.4a coexistence
+            // period, when descriptor `target` names sometimes differed
+            // from the effective symbol the lowering actually emitted a
+            // `call` against. With the two-walker model live (M1.7.5a /
+            // #501 — `collect_runtime_helper_targets` plus the post-
+            // lowering `collect_runtime_helper_targets_from_lines` scan
+            // in `lowering_helpers.sfn`), every real call site is
+            // observed against its actual emitted symbol, so the alias
+            // declare became redundant. See
+            // `docs/conventions/runtime-helpers.md` for the descriptor-
+            // only contract that supersedes it.
         }
         index += 1;
     }

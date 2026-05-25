@@ -3,6 +3,12 @@
 // Runtime helper descriptor definitions for LLVM lowering. These describe
 // the external C runtime functions that Sailfin code can call.
 //
+// New helpers must follow the descriptor-only contract documented in
+// `docs/conventions/runtime-helpers.md`: populate `native_signature`,
+// register the call site through `emit_runtime_call`, and add a
+// C trampoline only when a legitimate parameter-shape bridge is
+// required — never as the migration vehicle.
+//
 // =============================================================================
 // `native_signature` Rollout Plan (issue #461 / Epic #450 — M1)
 // =============================================================================
