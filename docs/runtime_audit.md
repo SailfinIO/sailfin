@@ -22,16 +22,26 @@
 >   `make rebuild` additionally stages `build/native/obj/runtime/clock.o`
 >   for the legacy `sfn run` / `sfn build` link path
 >   (`_clang_compile_runtime_objects` in `compiler/src/cli_main.sfn`).
->   EINTR-resume via `rem` is deferred: the current Sailfin pointer-
->   semantics don't let a user-level body read back the kernel's writes
->   to a struct passed by pointer, so the body calls `nanosleep` once
->   with `rem = null`. A future PR re-introduces the EINTR loop once
->   pointer-write semantics ship (sibling adapter PR for `clock_gettime`
->   carries the prerequisite). Pinned by
->   `compiler/tests/e2e/test_runtime_clock_skeleton.sh` (updated to
->   assert `call i32 @nanosleep` and no residual `@sailfin_runtime_sleep`
->   references) and `test_sleep_unit_semantics.sh` (#307 — still
->   bracketed against `sleep(75) ≈ 75 ms`).
+>   EINTR-resume landed via bounded retry loop (issue #693,
+>   2026-05-26): `sfn_sleep` now wraps the `nanosleep` call in a
+>   `loop`-with-`break` capped at 32 iterations that exits on
+>   `ret == 0`. The shortcut trusts the return value alone — no
+>   `errno` read — because the body's `tv_nsec` clamp + non-negative
+>   `tv_sec` + stack-allocated `req` make `EINVAL` and `EFAULT`
+>   unreachable in this usage, so a non-zero return is definitionally
+>   `EINTR`. Re-passing the same `req` slightly over-sleeps under a
+>   signal but preserves the wall-clock-≥-requested contract.
+>   Precise remainder tracking (read `rem` back, subtract the
+>   consumed portion) and the strict-errno path are tracked in epic
+>   [#763](https://github.com/SailfinIO/sailfin/issues/763) alongside
+>   the `clock_gettime` migration — both need pointer-read intrinsics
+>   that don't ship yet. Pinned by
+>   `compiler/tests/e2e/test_runtime_clock_skeleton.sh` (asserts the
+>   `call i32 @nanosleep` plus a `br i1` back-edge after it),
+>   `test_sleep_unit_semantics.sh` (#307 — still brackets
+>   `sleep(75) ≈ 75 ms`), and `test_sleep_eintr_resume.sh` (#693 —
+>   asserts `sleep(500)` survives a mid-flight `SIGURG` and returns
+>   after ≥ 450 ms).
 >
 > - **Sleep call-site routing shipped 2026-05-04 (PR 1 of the sleep
 >   migration).** Compiled user `sleep(N)` and `runtime.sleep(N)` calls
