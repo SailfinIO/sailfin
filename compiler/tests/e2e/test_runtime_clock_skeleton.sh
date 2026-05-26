@@ -139,17 +139,28 @@ test_emit_eintr_loop_shape() {
     # lowers to one. A straight-line body (the pre-#693 shape with
     # a single nanosleep call) has no `br i1` between the call and
     # the function epilogue.
-    local call_line br_line
-    call_line="$(grep -nE 'call i32 @nanosleep\(' "$ll" | head -n 1 | cut -d: -f1)"
-    if [ -z "$call_line" ]; then
-        echo "[test]   no call to @nanosleep found — wrapper shape test must run first"
+    #
+    # Scope the search to the `@sfn_sleep` body — otherwise a `br
+    # i1` in some other function later in the module (a ctor, a
+    # different exported wrapper) would yield a false positive
+    # against a straight-line `@sfn_sleep` body.
+    local body_file="$SCRATCH/sfn_sleep.body"
+    awk '/^define void @sfn_sleep\(/,/^}/' "$ll" > "$body_file"
+    if [ ! -s "$body_file" ]; then
+        echo "[test]   could not extract @sfn_sleep body from $ll"
         return 1
     fi
-    br_line="$(awk -v start="$call_line" 'NR > start && /br i1/ { print NR; exit }' "$ll")"
+    local call_line br_line
+    call_line="$(grep -nE 'call i32 @nanosleep\(' "$body_file" | head -n 1 | cut -d: -f1)"
+    if [ -z "$call_line" ]; then
+        echo "[test]   no call to @nanosleep found inside @sfn_sleep body"
+        return 1
+    fi
+    br_line="$(awk -v start="$call_line" 'NR > start && /br i1/ { print NR; exit }' "$body_file")"
     if [ -z "$br_line" ]; then
-        echo "[test]   no 'br i1' conditional branch after call to @nanosleep — EINTR loop missing"
-        echo "[test]   --- @sfn_sleep body excerpt ---"
-        awk '/^define void @sfn_sleep\(/,/^}/' "$ll"
+        echo "[test]   no 'br i1' conditional branch after call to @nanosleep in @sfn_sleep body — EINTR loop missing"
+        echo "[test]   --- @sfn_sleep body ---"
+        cat "$body_file"
         return 1
     fi
     return 0

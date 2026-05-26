@@ -14,7 +14,7 @@
 # wall-clock must therefore stay ≥ the requested duration (with a
 # small jitter tolerance) even when the sleep is signalled mid-flight.
 #
-# Why an LD_PRELOAD shim:
+# Why a preload-shim:
 #   POSIX `nanosleep` only returns `EINTR` if a signal is *delivered*
 #   to a *handler*. Signals whose disposition is `SIG_DFL`-ignore
 #   (e.g. `SIGURG`, `SIGWINCH`, `SIGCHLD`) are discarded by the
@@ -24,10 +24,22 @@
 #   runtime installs handlers only for `SIGSEGV` / `SIGABRT`, and
 #   Sailfin source code has no `signal()` / `sigaction()` surface yet,
 #   so the only way to install a handler in the test program from
-#   outside is `LD_PRELOAD`: a tiny `.so` with a constructor calls
-#   `sigaction(SIGURG, noop, ...)` before `main` runs, and a
-#   subsequent `kill -URG` from the harness then interrupts the
-#   in-flight `nanosleep`.
+#   outside is via a preloaded shared library: a tiny shim whose
+#   constructor calls `sigaction(SIGURG, noop, ...)` before `main`
+#   runs and forks a child that sends `SIGURG` to the parent after
+#   `SIGNAL_DELAY_MS`. The kernel then EINTR's the in-flight
+#   `nanosleep` and the loop body re-issues the call.
+#
+#   Cross-platform shim build/load:
+#     Linux  — `cc -shared -fPIC -o eintr_shim.so …`
+#              run with `LD_PRELOAD=eintr_shim.so`
+#     Darwin — `cc -dynamiclib -o eintr_shim.dylib …`
+#              run with `DYLD_INSERT_LIBRARIES=eintr_shim.dylib`
+#              and `DYLD_FORCE_FLAT_NAMESPACE=1`
+#   Other platforms skip with a clear `SKIP:` line so silent
+#   no-injection runs (which would pass vacuously because the
+#   sleep completes without interruption) don't masquerade as
+#   genuine EINTR-resume coverage.
 #
 # Pre-#693 verification: a stat-only verification of this shim
 # without any compiler change against `build/native/sailfin` shows
@@ -137,7 +149,28 @@ static void _install_handler_and_arm(void) {
     }
 }
 EOF
-    if ! cc -shared -fPIC -O0 -o "$SCRATCH/eintr_shim.so" "$SCRATCH/eintr_shim.c" 2> "$SCRATCH/cc.log"; then
+    local cc_flags
+    case "$(uname -s)" in
+        Linux)
+            SHIM_PATH="$SCRATCH/eintr_shim.so"
+            cc_flags="-shared -fPIC"
+            ;;
+        Darwin)
+            # macOS uses Mach-O bundles loaded via DYLD_INSERT_LIBRARIES;
+            # `-dynamiclib` is the canonical clang flag (Apple's `-shared`
+            # silently produces a bundle, which works but the explicit
+            # flag is clearer about intent).
+            SHIM_PATH="$SCRATCH/eintr_shim.dylib"
+            cc_flags="-dynamiclib"
+            ;;
+        *)
+            return 2
+            ;;
+    esac
+    # `-O0` keeps the constructor body intact (some compilers strip
+    # observably-unused branches at higher optimization levels). The
+    # shim is microscopic so the size cost is irrelevant.
+    if ! cc $cc_flags -O0 -o "$SHIM_PATH" "$SCRATCH/eintr_shim.c" 2> "$SCRATCH/cc.log"; then
         echo "[test]   failed to build eintr shim:" >&2
         cat "$SCRATCH/cc.log" >&2
         return 1
@@ -146,7 +179,19 @@ EOF
 }
 
 test_sleep_resumes_after_signal() {
-    if ! build_eintr_shim; then
+    SHIM_PATH=""
+    local build_rc
+    build_eintr_shim
+    build_rc=$?
+    if [ "$build_rc" -eq 2 ]; then
+        echo "[test] SKIP: sleep(N) resumes after EINTR (issue #693) — unsupported OS: $(uname -s)"
+        echo "[test]   the test needs a preloaded shared library to install a SIGURG handler"
+        echo "[test]   in the Sailfin process; only Linux (LD_PRELOAD) and Darwin"
+        echo "[test]   (DYLD_INSERT_LIBRARIES) are supported. Skipping rather than"
+        echo "[test]   running vacuously (no-injection passes against any sleep impl)."
+        return 0
+    fi
+    if [ "$build_rc" -ne 0 ]; then
         return 1
     fi
 
@@ -172,7 +217,24 @@ EOF
     fi
 
     local log="$SCRATCH/run.log"
-    if ! LD_PRELOAD="$SCRATCH/eintr_shim.so" "$exe" > "$log" 2>&1; then
+    local -a preload_env
+    case "$(uname -s)" in
+        Linux)
+            preload_env=("LD_PRELOAD=$SHIM_PATH")
+            ;;
+        Darwin)
+            # DYLD_FORCE_FLAT_NAMESPACE=1 is required to let the
+            # shim's constructor run reliably under macOS's two-level
+            # namespace; without it, dyld may decline to load the
+            # bundle into binaries that weren't built with
+            # `-flat_namespace`.
+            preload_env=(
+                "DYLD_INSERT_LIBRARIES=$SHIM_PATH"
+                "DYLD_FORCE_FLAT_NAMESPACE=1"
+            )
+            ;;
+    esac
+    if ! env "${preload_env[@]}" "$exe" > "$log" 2>&1; then
         echo "[test]   sleep_eintr binary exited non-zero (shim may have killed it):" >&2
         cat "$log" >&2
         return 1
