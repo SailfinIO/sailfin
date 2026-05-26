@@ -945,6 +945,18 @@ rebuild:
 			echo "[rebuild] build stamp (transition bridge): $$build_version"; \
 		fi; \
 	fi
+	@# Cache invalidation companion to the bridge above: the seed
+	@# (pre-#757) populated `build/cache/` while resolving
+	@# `compiler_version` from `compiler/capsule.toml` (no stamp file
+	@# existed yet — we deleted it at the top of `rebuild`). With
+	@# the bridge now writing the stamp, downstream `sfn build -p
+	@# compiler` invocations (e.g. `test_work_dir_parity.sh`) resolve
+	@# the SAME version string and hit the seed's cached `cli_main.o`
+	@# — which carries the unmangled-symbol miscompilation tracked
+	@# by #758. Wiping the cache forces those downstream callers to
+	@# re-compile through the freshly-built (correct) compiler.
+	@# Delete with the rest of the bridge once #757 + #758 close.
+	@rm -rf build/cache
 	@echo "[rebuild] built $(NATIVE_OUT)"
 
 # =============================================================================
