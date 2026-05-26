@@ -8,6 +8,46 @@
 > **Status delta since 2026-04-15** (keep this list short; once an item is
 > fully shipped fold it into the body and remove the bullet here):
 >
+> - **M2 closed — prelude facade audit shipped 2026-05-26 (M2.12b,
+>   issue #408).** Closes the M2 milestone. `runtime/prelude.sfn` no
+>   longer goes through the magic `runtime.X` namespace for the M2.10
+>   type-meta cluster: the seven aliases `runtime_is_string_fn` /
+>   `_is_number_fn` / `_is_boolean_fn` / `_is_array_fn` /
+>   `_is_callable_fn` / `_resolve_runtime_type_fn` /
+>   `_instance_of_fn` now bind to imports from
+>   `runtime/sfn/type_meta.sfn` (`sfn_is_string` / `sfn_is_number` /
+>   `sfn_is_boolean` / `sfn_is_array` / `sfn_is_callable` /
+>   `sfn_resolve_type` / `sfn_instance_of`). The descriptor
+>   registry's `native_signature` rows for these targets (PR #749 /
+>   M2.10 #402) already routed compiled IR to the same `@sfn_*`
+>   symbols, so emitted user code is byte-identical; the M2.12b
+>   flip closes the audit at the Sailfin-source layer.
+>
+>   The remaining `runtime.X` references in `runtime/prelude.sfn`
+>   are scoped to M3 and explicitly tracked in the per-symbol table
+>   below: capability bridges (`console`, `fs`, `http`, `websocket`,
+>   `create_capability_grant`, `create_filesystem_bridge`,
+>   `create_http_bridge`), clock (`monotonic_millis`), decorator
+>   (`logExecution`), debug (`to_debug_string`), exception (TLS-
+>   based `raise_value_error` — semantically distinct from
+>   `sfn_throw`'s setjmp/longjmp path), assertion (`assert_fail`),
+>   HTTP `serve`, `is_void` (no `sfn_is_void` export), and string/
+>   array helpers whose signatures need a follow-up boundary cast
+>   (`char_code`, `array_map`, `array_filter`, `array_reduce`,
+>   `grapheme_count`, `grapheme_at`). The helper registry's
+>   `native_signature` routes emitted IR to a Sailfin-native
+>   trampoline where one ships (e.g. `runtime.char_code` →
+>   `@sfn_str_codepoint`, `runtime.grapheme_at` →
+>   `@sfn_str_grapheme_at`), so the audit invariant "every
+>   M2-replaced symbol's emitted call lands on a Sailfin-native
+>   definition" holds; only the Sailfin-source spelling of these
+>   delegates still uses the magic namespace pending M3.
+>
+>   With M2.12b merged, `runtime/native/src/sailfin_runtime.c` is
+>   dead code awaiting M3 deletion. Pinned by the standard
+>   `make compile` + `make test` self-host gate; the determinism
+>   sweep on `compiler/src/llvm/lowering/lowering_core.sfn`
+>   continues to produce byte-identical IR across 20 iterations.
 > - **Sleep migration PR 2 shipped (issue #397).** `runtime/sfn/clock.sfn`
 >   is now the sole definition site for `@sfn_sleep`; its body calls
 >   `nanosleep` directly via `runtime/sfn/platform/posix.sfn`. The C
