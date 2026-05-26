@@ -700,6 +700,13 @@ rebuild:
 	@# recipe line. The `&&` chain ensures every diagnostic
 	@# message reaches the user before we exit.
 	@rm -f build/sailfin/program build/sailfin/program.ll
+	@# Invalidate any stale stamp from a prior rebuild so the
+	@# helper (post-#757) or the transition bridge below
+	@# always writes a fresh stamp reflecting the current git
+	@# HEAD + dirty state. Without this, `make rebuild` after a
+	@# new commit would leave the previous hash on disk and
+	@# `sfn --version` would report the wrong provenance.
+	@rm -f build/native/.build-stamp
 	@seed=$$(cat build/.seed-resolved); \
 	echo "[rebuild] running sfn build -p compiler (seed=$$seed)..."; \
 	build_rc=0; \
@@ -910,7 +917,10 @@ rebuild:
 	@# block below is a transition bridge — once `/pin-seed` advances
 	@# past #516 (tracked by #757) the helper writes the stamp during
 	@# `sfn build -p compiler` and the `[ ! -f ... ]` guard makes
-	@# this whole block a no-op. Delete after #757 closes.
+	@# this whole block a no-op. Delete only after BOTH #757 closes
+	@# (seed has the helper) AND #758 closes (self-host miscompilation
+	@# when `build/native/.build-stamp` is absent) — the bridge masks
+	@# #758 by guaranteeing the stamp always exists.
 	@if [ ! -f build/native/.build-stamp ]; then \
 		cap_version=$$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' compiler/capsule.toml); \
 		if [ -z "$$cap_version" ]; then \

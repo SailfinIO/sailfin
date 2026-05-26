@@ -3,12 +3,16 @@
 // Build-stamp generation for `sfn build -p compiler`. Phase 0.3 of
 // epic #513 (Makefile slim-down): moves the assembly of the
 // `<capsule_version>+dev.<short_hash>[.dirty]` string out of the
-// Makefile shell shim (Makefile:907-932, now deleted) and into the
-// compiler driver itself.
+// Makefile shell shim and into the compiler driver itself. The
+// original shim is preserved in `Makefile`'s rebuild target as a
+// guarded transition bridge (no-op once the stamp file exists)
+// until #757 (`/pin-seed` past this PR, so the seed contains the
+// helper below) and #758 (self-host miscompilation when the
+// stamp is absent) both close.
 //
 // `version.sfn::resolve_compiler_version` consults
 // `<binary_dir>/.build-stamp` first when reporting `sfn --version`,
-// so the four cases below match the deleted Makefile shim
+// so the four cases below match the prior Makefile shim
 // byte-for-byte:
 //   - tag at HEAD               → "<version>"
 //   - clean commit              → "<version>+dev.<short_hash>"
@@ -76,9 +80,13 @@ fn compiler_stamp_path(work_dir: string) -> string {
 }
 
 // Write the stamp string to `stamp_path` (with a trailing newline,
-// matching the deleted Makefile shim's `echo` behaviour). Returns
-// `true` on a successful write, `false` when either argument is
-// empty.
+// matching the prior Makefile shim's `echo` behaviour). Returns
+// `false` for the empty-input guards (no stamp_path, no version,
+// or `compose_build_stamp` declined). Returns `true` once
+// `fs.writeFile` has been invoked — that helper is void-returning
+// across the codebase and is treated as fire-and-forget; an
+// underlying disk error surfaces through the runtime, not the
+// return value.
 fn write_build_stamp(stamp_path: string, capsule_version: string) -> boolean ![io] {
     if stamp_path.length == 0 { return false; }
     if capsule_version.length == 0 { return false; }
