@@ -17,14 +17,26 @@
 //     unifies the two exception APIs.
 //   * `runtime_monotonic_millis_fn`, `runtime_log_execution_fn`,
 //     `runtime_to_debug_string_fn`, `runtime_assert_fail_fn`,
-//     `runtime_serve_fn`, `runtime_array_*_fn` — no `sfn_*` body yet
-//     (M3 ports them in parallel with the rest of the C runtime).
+//     `runtime_serve_fn` — no `sfn_*` definition yet (M3 ports them
+//     alongside the rest of the C runtime).
+//   * `runtime_array_map_fn`, `runtime_array_filter_fn`,
+//     `runtime_array_reduce_fn` — `runtime/sfn/array.sfn` already
+//     exports stub `sfn_array_sfn_map/filter/reduce` (placeholders
+//     returning the input), but the helper registry's descriptors
+//     still have `native_signature: null` and emit calls to the
+//     legacy `sailfin_runtime_array_*` C bodies. The flip is gated
+//     on closures-with-capture (M3 prerequisite) before the stubs
+//     can be replaced with real implementations.
 //   * `runtime_char_code_fn`, `runtime_grapheme_count_fn`,
 //     `runtime_grapheme_at_fn` — the helper registry's
-//     `native_signature` already routes these to `sfn_str_*`
-//     trampolines, but the prelude-side signature seam needs a
-//     follow-up boundary cast (string ↔ `* u8`, int ↔ `f64`) deferred
-//     per the issue's audit-only `In:` list.
+//     `native_signature` already routes the emitted IR call to the
+//     `sfn_str_*` symbol name, but those symbols are still C
+//     trampolines in `runtime/native/src/sailfin_runtime.c` (the
+//     Sailfin module exports `sfn_str_sfn_*` with the `_sfn_`
+//     infix; M3 retires the C trampolines and renames the Sailfin
+//     exports to the bare form). The prelude-side flip also needs
+//     a follow-up boundary cast (string ↔ `* u8`, int ↔ `float`)
+//     deferred per the issue's audit-only `In:` list.
 //   * `console`, `fs`, `http`, `websocket`,
 //     `runtime_create_capability_grant`,
 //     `runtime_create_filesystem_bridge`,
@@ -32,11 +44,18 @@
 //     no Sailfin-native definitions today; M3 ships them alongside the
 //     filesystem / HTTP adapter rewrites.
 // With M2.12b shipped, the audit invariant "every M2-replaced symbol's
-// emitted call lands on a Sailfin-native definition" holds end-to-end:
-// the helper registry's `native_signature` routes IR-level calls for
-// every M2-shipped surface (sleep / process / type-meta / print /
-// string / array), and the Sailfin-source spelling for the type-meta
-// surface now matches via direct sfn import. See
+// emitted call lands on the canonical `sfn_*` symbol name" holds via
+// either direct sfn import (the type-meta cluster) or the helper
+// registry's `native_signature` routing (`sleep` / `process.run` /
+// `print*` / `sfn_str_codepoint` / `sfn_str_grapheme_*`). Several of
+// those `sfn_*` symbols are still C trampolines in
+// `runtime/native/src/sailfin_runtime.c` and stay live until M3 lifts
+// each body into a Sailfin module (`runtime/sfn/io.sfn` for print,
+// `runtime/sfn/string.sfn` for the str helpers, …). The
+// `sailfin_runtime_*` legacy bodies (e.g.
+// `sailfin_runtime_print_raw`, `sailfin_runtime_string_concat`) are
+// the truly dead-after-M2 portion — they're still linked for seed
+// compat but no fresh user emission references them. See
 // `docs/runtime_audit.md`'s "M2 closed" status delta for the complete
 // per-symbol table.
 import { sfn_array_sfn_map } from "./sfn/array";
