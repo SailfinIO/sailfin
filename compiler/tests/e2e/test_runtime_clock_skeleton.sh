@@ -12,6 +12,10 @@
 #   5. no sailfin_runtime_sleep — the pre-PR2 C trampoline is gone;
 #                     neither the import declaration nor the call
 #                     site may resurface.
+#   6. eintr loop  — the body wraps `call i32 @nanosleep` in a
+#                     bounded retry loop (issue #693). The
+#                     conditional back-edge appears as a `br i1`
+#                     somewhere after the call to nanosleep.
 
 set -euo pipefail
 
@@ -122,11 +126,52 @@ test_no_sailfin_runtime_sleep() {
     return 0
 }
 
+test_emit_eintr_loop_shape() {
+    local ll="$SCRATCH/clock.ll"
+    if [ ! -f "$ll" ]; then
+        echo "[test]   $ll missing — test_emit_wrapper_shape must run first to produce it"
+        return 1
+    fi
+    # Issue #693: `sfn_sleep` calls `@nanosleep` inside a bounded
+    # retry loop. The loop produces a conditional branch (`br i1`)
+    # somewhere after the `call i32 @nanosleep` instruction —
+    # either the `ret == 0` early-break or the iteration cap test
+    # lowers to one. A straight-line body (the pre-#693 shape with
+    # a single nanosleep call) has no `br i1` between the call and
+    # the function epilogue.
+    #
+    # Scope the search to the `@sfn_sleep` body — otherwise a `br
+    # i1` in some other function later in the module (a ctor, a
+    # different exported wrapper) would yield a false positive
+    # against a straight-line `@sfn_sleep` body.
+    local body_file="$SCRATCH/sfn_sleep.body"
+    awk '/^define void @sfn_sleep\(/,/^}/' "$ll" > "$body_file"
+    if [ ! -s "$body_file" ]; then
+        echo "[test]   could not extract @sfn_sleep body from $ll"
+        return 1
+    fi
+    local call_line br_line
+    call_line="$(grep -nE 'call i32 @nanosleep\(' "$body_file" | head -n 1 | cut -d: -f1)"
+    if [ -z "$call_line" ]; then
+        echo "[test]   no call to @nanosleep found inside @sfn_sleep body"
+        return 1
+    fi
+    br_line="$(awk -v start="$call_line" 'NR > start && /br i1/ { print NR; exit }' "$body_file")"
+    if [ -z "$br_line" ]; then
+        echo "[test]   no 'br i1' conditional branch after call to @nanosleep in @sfn_sleep body — EINTR loop missing"
+        echo "[test]   --- @sfn_sleep body ---"
+        cat "$body_file"
+        return 1
+    fi
+    return 0
+}
+
 run_test "sfn check runtime/sfn/clock.sfn passes" test_check_clean
 run_test "sfn fmt --check runtime/sfn/clock.sfn is canonical" test_fmt_clean
 run_test "sfn emit llvm produces sfn_sleep wrapper over @nanosleep" test_emit_wrapper_shape
 run_test "sfn emit llvm declares the nanosleep import" test_emit_declare_shape
 run_test "sailfin_runtime_sleep is fully retired from clock.sfn emission" test_no_sailfin_runtime_sleep
+run_test "sfn_sleep wraps @nanosleep in a bounded EINTR retry loop (#693)" test_emit_eintr_loop_shape
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

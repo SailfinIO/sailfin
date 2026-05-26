@@ -29,17 +29,23 @@
 // sizing for 32-bit `time_t` targets is out of scope per the
 // architecture doc §2.9 Q7 and this issue's `Out:` scope.
 //
-// EINTR handling: nanosleep is called once with a null `rem`
-// pointer. Signal-driven interruption of the call therefore
-// short-circuits the sleep without remainder tracking — an
-// acceptable v0 limitation because (a) the compiler binary has
-// no installed signal handlers that would interrupt sleep, and
-// (b) full EINTR-resume requires either `errno` access or
-// pointer-write semantics on the `rem` field that Sailfin does
-// not yet expose to user code (the alloca-cache model defeats
-// in-place struct mutation through a C-side pointer write).
-// A proper EINTR loop lands once those primitives ship, alongside
-// the `clock_gettime` migration (sibling adapter PR).
+// EINTR handling: nanosleep is called in a bounded retry loop
+// (cap = 32 iterations) that breaks on `ret == 0`. The shortcut
+// trusts the return value alone — no `errno` read — because in
+// our usage `EINVAL` and `EFAULT` are unreachable: `tv_nsec` is
+// clamped to `[0, 999_999_999]` below, `tv_sec` is non-negative
+// (the `<= 0.0` early return guards it), and `req` is a stack
+// struct so the kernel cannot fault on the pointer. POSIX
+// `nanosleep` only returns non-zero on `EINTR`, `EINVAL`, or
+// `EFAULT`; with those two ruled out, a non-zero return is
+// definitionally `EINTR` in this function's usage. The loop
+// re-passes the same `req` each iteration — that slightly over-
+// sleeps after a signal (we lose the consumed portion) but
+// preserves the wall-clock-≥-requested correctness contract.
+// Precise remainder tracking (read `rem` back, subtract the
+// consumed portion) and the strict-errno path are tracked in
+// epic #763 (pointer-read intrinsics + errno surface for
+// syscall adapters) alongside the `clock_gettime` migration.
 //
 // Pinned by `compiler/tests/e2e/test_runtime_clock_skeleton.sh`
 // (typecheck + fmt + LLVM `define`/`call` shape over `@nanosleep`)
@@ -75,5 +81,17 @@ fn sfn_sleep(milliseconds: float) -> void ![clock] {
     if nanos >= 1000000000 { nanos = 999999999; }
 
     let req: Timespec = Timespec { tv_sec: secs, tv_nsec: nanos };
-    nanosleep(req, null);
+
+    // Bounded EINTR-resume loop. See the file header for why
+    // trusting the return value alone is correct here. Cap of 32
+    // bounds worst-case wasted syscalls under a pathological
+    // signal storm; an unsignalled call breaks on the first
+    // iteration.
+    let mut attempts: i64 = 0;
+    loop {
+        if attempts >= 32 { break; }
+        let ret: i32 = nanosleep(req, null);
+        if ret == 0 { break; }
+        attempts = attempts + 1;
+    }
 }
