@@ -1,0 +1,111 @@
+// compiler/src/build_stamp.sfn
+//
+// Build-stamp generation for `sfn build -p compiler`. Phase 0.3 of
+// epic #513 (Makefile slim-down): moves the assembly of the
+// `<capsule_version>+dev.<short_hash>[.dirty]` string out of the
+// Makefile shell shim and into the compiler driver itself. The
+// original shim is preserved in `Makefile`'s rebuild target as a
+// guarded transition bridge (no-op once the stamp file exists)
+// until #757 (`/pin-seed` past this PR, so the seed contains the
+// helper below) and #758 (self-host miscompilation when the
+// stamp is absent) both close.
+//
+// `version.sfn::resolve_compiler_version` consults
+// `<binary_dir>/.build-stamp` first when reporting `sfn --version`,
+// so the four cases below match the prior Makefile shim
+// byte-for-byte:
+//   - tag at HEAD               → "<version>"
+//   - clean commit              → "<version>+dev.<short_hash>"
+//   - dirty working tree        → "<version>+dev.<short_hash>.dirty"
+//   - no git available at all   → "<version>+dev"
+//
+// Only the compiler capsule (`[capsule].name == "sailfin"`)
+// self-stamps; foreign capsule builds via `sfn build -p <other>`
+// never touch `.build-stamp`. The capsule-name gate is enforced
+// by `emit_compiler_build_stamp_if_applicable` below — the
+// other entry points (`compose_build_stamp_from`,
+// `compose_build_stamp`, `write_build_stamp`) are gate-agnostic
+// so tests can pin the four-case truth table without spawning a
+// build.
+import { _shell_read_cmd } from "./cli_commands_utils";
+
+// Pure formatter — the four-case truth table. Tests drive every
+// branch through this function so they don't depend on the
+// ambient git state of the checkout.
+fn compose_build_stamp_from(capsule_version: string, git_tag: string, git_hash: string, git_dirty: boolean) -> string {
+    if capsule_version.length == 0 { return ""; }
+    if git_tag.length > 0 { return capsule_version; }
+    if git_hash.length == 0 { return capsule_version + "+dev"; }
+    let mut suffix: string = "";
+    if git_dirty { suffix = ".dirty"; }
+    return capsule_version + "+dev." + git_hash + suffix;
+}
+
+// IO wrapper: shells out to read the tag, short-hash, and dirty
+// state, then funnels through the pure formatter. The git probes
+// all redirect stderr to /dev/null so a missing-`.git` checkout
+// (or an unborn HEAD) collapses cleanly to `<version>+dev`.
+fn compose_build_stamp(capsule_version: string) -> string ![io] {
+    if capsule_version.length == 0 { return ""; }
+    let git_tag = _shell_read_cmd("git describe --exact-match --tags HEAD 2>/dev/null");
+    let mut git_hash: string = "";
+    let mut git_dirty: boolean = false;
+    if git_tag.length == 0 {
+        git_hash = _shell_read_cmd("git rev-parse --short HEAD 2>/dev/null");
+        if git_hash.length > 0 {
+            // `git diff --quiet HEAD --` exits 0 on clean, non-zero
+            // on dirty. We wrap in `sh -c` and redirect both
+            // streams so the dirty probe never leaks output into
+            // the build log.
+            let dirty_rc = process.run(["sh", "-c", "git diff --quiet HEAD -- >/dev/null 2>&1"]);
+            if dirty_rc != 0 { git_dirty = true; }
+        }
+    }
+    return compose_build_stamp_from(capsule_version, git_tag, git_hash, git_dirty);
+}
+
+// Compose the canonical stamp path. Mirrors `sfn build --work-dir`:
+// an empty `work_dir` keeps the legacy in-tree
+// `build/native/.build-stamp` path; a non-empty value virtualizes
+// the stamp under `<work_dir>/native/.build-stamp`. The path stays
+// in lockstep with `version.sfn::resolve_compiler_version`'s
+// `<binary_dir>/.build-stamp` lookup (binary_dir is `build/native/`
+// in a repo checkout).
+fn compiler_stamp_path(work_dir: string) -> string {
+    if work_dir.length == 0 { return "build/native/.build-stamp"; }
+    if work_dir[work_dir.length - 1] == "/" {
+        return work_dir + "native/.build-stamp";
+    }
+    return work_dir + "/native/.build-stamp";
+}
+
+// Write the stamp string to `stamp_path` (with a trailing newline,
+// matching the prior Makefile shim's `echo` behaviour). Returns
+// `false` for the empty-input guards (no stamp_path, no version,
+// or `compose_build_stamp` declined). Returns `true` once
+// `fs.writeFile` has been invoked — that helper is void-returning
+// across the codebase and is treated as fire-and-forget; an
+// underlying disk error surfaces through the runtime, not the
+// return value.
+fn write_build_stamp(stamp_path: string, capsule_version: string) -> boolean ![io] {
+    if stamp_path.length == 0 { return false; }
+    if capsule_version.length == 0 { return false; }
+    let stamp = compose_build_stamp(capsule_version);
+    if stamp.length == 0 { return false; }
+    fs.writeFile(stamp_path, stamp + "\n");
+    return true;
+}
+
+// Driver-side entry point. Gates on `[capsule].name == "sailfin"`
+// so only the compiler's own `sfn build -p compiler` writes a
+// stamp; foreign capsule builds never touch `.build-stamp`. Called
+// once per successful build from `cli_main.sfn`'s `is_build`
+// branch (both the library and the binary post-link paths) after
+// `_emit_capsule_artifact_sidecar`. Best-effort: a failed write
+// surfaces inside `fs.writeFile` itself and does not poison the
+// build, which has already produced the artifact.
+fn emit_compiler_build_stamp_if_applicable(cap_capsule_name: string, capsule_version: string, work_dir: string) ![io] {
+    if !strings_equal(cap_capsule_name, "sailfin") { return; }
+    let stamp_path = compiler_stamp_path(work_dir);
+    write_build_stamp(stamp_path, capsule_version);
+}

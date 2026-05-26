@@ -1,0 +1,135 @@
+// compiler/tests/integration/build_stamp_test.sfn
+//
+// Pins the four-case truth table for `compiler/src/build_stamp.sfn`
+// (epic #513 Phase 0.3 / issue #516). The pure formatter
+// `compose_build_stamp_from` is exercised directly so the test
+// doesn't depend on the ambient git state of the checkout; the
+// IO surface (`compose_build_stamp`, `write_build_stamp`,
+// `compiler_stamp_path`, `emit_compiler_build_stamp_if_applicable`)
+// is pinned by separate behavioural cases that only assert
+// state-independent invariants.
+import {
+    compiler_stamp_path,
+    compose_build_stamp,
+    compose_build_stamp_from,
+    emit_compiler_build_stamp_if_applicable,
+    write_build_stamp
+} from "../../src/build_stamp";
+
+// ---------------------------------------------------------------------------
+// (a) tag at HEAD → bare "<version>"
+// ---------------------------------------------------------------------------
+test "build_stamp: tag at HEAD yields bare version" {
+    let s = compose_build_stamp_from("0.5.10-alpha.11", "v0.5.10-alpha.11", "abc1234", false);
+    assert s == "0.5.10-alpha.11";
+}
+
+test "build_stamp: tag wins even when hash + dirty would otherwise apply" {
+    // A tag at HEAD is the canonical release shape; the dirty
+    // flag and short-hash must NOT bleed into a tagged build.
+    let s = compose_build_stamp_from("1.2.3", "v1.2.3", "deadbee", true);
+    assert s == "1.2.3";
+}
+
+// ---------------------------------------------------------------------------
+// (b) clean commit → "<version>+dev.<hash>"
+// ---------------------------------------------------------------------------
+test "build_stamp: clean commit appends +dev.<hash>" {
+    let s = compose_build_stamp_from("0.5.10-alpha.11", "", "abc1234", false);
+    assert s == "0.5.10-alpha.11+dev.abc1234";
+}
+
+// ---------------------------------------------------------------------------
+// (c) dirty commit → "<version>+dev.<hash>.dirty"
+// ---------------------------------------------------------------------------
+test "build_stamp: dirty commit appends +dev.<hash>.dirty" {
+    let s = compose_build_stamp_from("0.5.10-alpha.11", "", "abc1234", true);
+    assert s == "0.5.10-alpha.11+dev.abc1234.dirty";
+}
+
+// ---------------------------------------------------------------------------
+// (d) no git available → bare "<version>+dev"
+// ---------------------------------------------------------------------------
+test "build_stamp: empty tag + empty hash yields +dev only" {
+    let s = compose_build_stamp_from("0.5.10-alpha.11", "", "", false);
+    assert s == "0.5.10-alpha.11+dev";
+}
+
+test "build_stamp: empty hash with dirty=true still yields bare +dev" {
+    // `dirty` can only be true when a hash was successfully read;
+    // belt-and-braces: an inconsistent input must NOT produce
+    // `+dev..dirty` or any other malformed shape.
+    let s = compose_build_stamp_from("0.5.10-alpha.11", "", "", true);
+    assert s == "0.5.10-alpha.11+dev";
+}
+
+// ---------------------------------------------------------------------------
+// Empty-input guards
+// ---------------------------------------------------------------------------
+test "build_stamp: empty capsule_version returns empty string" {
+    assert compose_build_stamp_from("", "v1.0.0", "abc1234", false) == "";
+    assert compose_build_stamp_from("", "", "", false) == "";
+}
+
+test "build_stamp: write_build_stamp rejects empty stamp_path" ![io] {
+    let wrote = write_build_stamp("", "0.5.10-alpha.11");
+    assert wrote == false;
+}
+
+test "build_stamp: write_build_stamp rejects empty capsule_version" ![io] {
+    let wrote = write_build_stamp("build/sailfin/.build_stamp_test_unused", "");
+    assert wrote == false;
+}
+
+// ---------------------------------------------------------------------------
+// compiler_stamp_path: work_dir routing
+// ---------------------------------------------------------------------------
+test "build_stamp: empty work_dir maps to legacy in-tree path" {
+    assert compiler_stamp_path("") == "build/native/.build-stamp";
+}
+
+test "build_stamp: explicit work_dir virtualizes the stamp under <work_dir>/native/" {
+    assert compiler_stamp_path("/tmp/seedcheck") == "/tmp/seedcheck/native/.build-stamp";
+}
+
+test "build_stamp: trailing-slash work_dir does not double the separator" {
+    assert compiler_stamp_path("/tmp/seedcheck/") == "/tmp/seedcheck/native/.build-stamp";
+}
+
+// ---------------------------------------------------------------------------
+// Behavioural pins for the IO surface
+// ---------------------------------------------------------------------------
+test "build_stamp: compose_build_stamp guards empty capsule_version" ![io] {
+    // Regardless of git state, an empty version must not produce
+    // a stamp string. (Pinning the IO wrapper too because the
+    // pure formatter is also exercised on this branch.)
+    assert compose_build_stamp("") == "";
+}
+
+test "build_stamp: compose_build_stamp output starts with the capsule version" ![io] {
+    // Whatever git state the checkout is in, the output must
+    // begin with the version we passed in. The four shapes are
+    // pinned by the pure-formatter tests above; this pin guards
+    // against the IO wrapper accidentally swallowing or
+    // re-ordering its inputs.
+    let s = compose_build_stamp("1.2.3");
+    assert s.length >= 5;
+    assert substring(s, 0, 5) == "1.2.3";
+}
+
+test "build_stamp: emit_compiler_build_stamp_if_applicable is a no-op for foreign capsules" ![io] {
+    // The capsule-name gate is the only thing keeping
+    // end-user `sfn build -p someother/cap` from clobbering
+    // `build/native/.build-stamp`. Pin the gate here: writing
+    // with a non-`sailfin` name to a path that does not exist
+    // must NOT create the file.
+    // The gate check happens before any path composition, so the
+    // canonical assertion is that the would-be path is never
+    // written. Compose that path the same way the helper would
+    // (see `compiler_stamp_path("build/sailfin/.build_stamp_test_workdir")`)
+    // and confirm it's absent both before and after the call.
+    let would_be = "build/sailfin/.build_stamp_test_workdir/native/.build-stamp";
+    if fs.exists(would_be) { fs.deleteFile(would_be); }
+    emit_compiler_build_stamp_if_applicable("someother/capsule", "9.9.9", "build/sailfin/.build_stamp_test_workdir");
+    assert fs.exists(would_be) == false;
+}

@@ -700,6 +700,13 @@ rebuild:
 	@# recipe line. The `&&` chain ensures every diagnostic
 	@# message reaches the user before we exit.
 	@rm -f build/sailfin/program build/sailfin/program.ll
+	@# Invalidate any stale stamp from a prior rebuild so the
+	@# helper (post-#757) or the transition bridge below
+	@# always writes a fresh stamp reflecting the current git
+	@# HEAD + dirty state. Without this, `make rebuild` after a
+	@# new commit would leave the previous hash on disk and
+	@# `sfn --version` would report the wrong provenance.
+	@rm -f build/native/.build-stamp
 	@seed=$$(cat build/.seed-resolved); \
 	echo "[rebuild] running sfn build -p compiler (seed=$$seed)..."; \
 	build_rc=0; \
@@ -904,31 +911,39 @@ rebuild:
 			[ -f "$$manifest_path" ] || touch "$$manifest_path"; \
 		fi; \
 	done
-	@# Write build stamp (version + git hash for dev builds).
-	@# `version.sfn::resolve_compiler_version` reads this file
-	@# first, so without it the binary would report whatever stale
-	@# stamp the previous build left on disk.
-	@cap_version=$$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' compiler/capsule.toml); \
-	if [ -z "$$cap_version" ]; then \
-		echo "[rebuild][warn] could not extract version from compiler/capsule.toml; skipping build stamp" >&2; \
-	else \
-		git_tag=$$(git describe --exact-match --tags HEAD 2>/dev/null || true); \
-		if [ -n "$$git_tag" ]; then \
-			build_version="$$cap_version"; \
+	@# Build stamp: epic #513 phase 0.3 / issue #516 moved this into
+	@# `compiler/src/build_stamp.sfn::emit_compiler_build_stamp_if_applicable`,
+	@# called from `cli_main.sfn`'s `is_build` post-link path. The
+	@# block below is a transition bridge — once `/pin-seed` advances
+	@# past #516 (tracked by #757) the helper writes the stamp during
+	@# `sfn build -p compiler` and the `[ ! -f ... ]` guard makes
+	@# this whole block a no-op. Delete only after BOTH #757 closes
+	@# (seed has the helper) AND #758 closes (self-host miscompilation
+	@# when `build/native/.build-stamp` is absent) — the bridge masks
+	@# #758 by guaranteeing the stamp always exists.
+	@if [ ! -f build/native/.build-stamp ]; then \
+		cap_version=$$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' compiler/capsule.toml); \
+		if [ -z "$$cap_version" ]; then \
+			echo "[rebuild][warn] could not extract version from compiler/capsule.toml; skipping build stamp" >&2; \
 		else \
-			git_hash=$$(git rev-parse --short HEAD 2>/dev/null || true); \
-			git_dirty=""; \
-			if [ -n "$$git_hash" ]; then \
-				if ! git diff --quiet HEAD -- 2>/dev/null; then \
-					git_dirty=".dirty"; \
-				fi; \
-				build_version="$${cap_version}+dev.$${git_hash}$${git_dirty}"; \
+			git_tag=$$(git describe --exact-match --tags HEAD 2>/dev/null || true); \
+			if [ -n "$$git_tag" ]; then \
+				build_version="$$cap_version"; \
 			else \
-				build_version="$${cap_version}+dev"; \
+				git_hash=$$(git rev-parse --short HEAD 2>/dev/null || true); \
+				git_dirty=""; \
+				if [ -n "$$git_hash" ]; then \
+					if ! git diff --quiet HEAD -- 2>/dev/null; then \
+						git_dirty=".dirty"; \
+					fi; \
+					build_version="$${cap_version}+dev.$${git_hash}$${git_dirty}"; \
+				else \
+					build_version="$${cap_version}+dev"; \
+				fi; \
 			fi; \
+			echo "$$build_version" > build/native/.build-stamp; \
+			echo "[rebuild] build stamp (transition bridge): $$build_version"; \
 		fi; \
-		echo "$$build_version" > build/native/.build-stamp; \
-		echo "[rebuild] build stamp: $$build_version"; \
 	fi
 	@echo "[rebuild] built $(NATIVE_OUT)"
 
