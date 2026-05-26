@@ -8,6 +8,79 @@
 > **Status delta since 2026-04-15** (keep this list short; once an item is
 > fully shipped fold it into the body and remove the bullet here):
 >
+> - **M2 closed — prelude facade audit shipped 2026-05-26 (M2.12b,
+>   issue #408).** Closes the M2 milestone. `runtime/prelude.sfn` no
+>   longer goes through the magic `runtime.X` namespace for the M2.10
+>   type-meta cluster: the seven aliases `runtime_is_string_fn` /
+>   `_is_number_fn` / `_is_boolean_fn` / `_is_array_fn` /
+>   `_is_callable_fn` / `_resolve_runtime_type_fn` /
+>   `_instance_of_fn` now bind to imports from
+>   `runtime/sfn/type_meta.sfn` (`sfn_is_string` / `sfn_is_number` /
+>   `sfn_is_boolean` / `sfn_is_array` / `sfn_is_callable` /
+>   `sfn_resolve_type` / `sfn_instance_of`). The descriptor
+>   registry's `native_signature` rows for these targets (PR #749 /
+>   M2.10 #402) already routed compiled IR to the same `@sfn_*`
+>   symbols, so emitted user code is byte-identical; the M2.12b
+>   flip closes the audit at the Sailfin-source layer.
+>
+>   The remaining `runtime.X` references in `runtime/prelude.sfn`
+>   are scoped to M3, grouped by why the flip is deferred:
+>     1. **No `sfn_*` definition anywhere yet** (M3 ports the body
+>        alongside the rest of the C runtime): capability bridges
+>        (`console`, `fs`, `http`, `websocket`,
+>        `create_capability_grant`, `create_filesystem_bridge`,
+>        `create_http_bridge`), `monotonic_millis`, `logExecution`,
+>        `to_debug_string`, `assert_fail`, `serve`, and `is_void` (no
+>        `sfn_is_void` export in `runtime/sfn/type_meta.sfn`).
+>     2. **`sfn_*` body exists as a placeholder but not wired**:
+>        `array_map`, `array_filter`, `array_reduce`. The Sailfin
+>        module exports `sfn_array_sfn_map/filter/reduce` (stubs
+>        returning the input), but the helper registry's
+>        `runtime_array_*_fn` descriptors still have
+>        `native_signature: null` and emit calls to the legacy
+>        `sailfin_runtime_array_*` C bodies. Real implementations
+>        depend on closures-with-capture, an M3 prerequisite.
+>     3. **TLS / setjmp API split**: `raise_value_error` — the
+>        TLS-message-slot C entrypoint the compiler lowering
+>        actively consumes is semantically distinct from
+>        `sfn_throw`'s setjmp/longjmp path; M3 unifies them.
+>     4. **`native_signature` routes to a `sfn_*` C trampoline,
+>        prelude needs a boundary cast**: `char_code`,
+>        `grapheme_count`, `grapheme_at`. The helper registry's
+>        `native_signature` routes the emitted IR call to the
+>        canonical `sfn_str_codepoint` / `sfn_str_grapheme_count` /
+>        `sfn_str_grapheme_at` symbol names, but those symbols are
+>        still defined as C trampolines in
+>        `runtime/native/src/sailfin_runtime.c` that forward to the
+>        legacy `sailfin_runtime_*` bodies (the Sailfin module
+>        exports `sfn_str_sfn_*` with the `_sfn_` infix; M3 retires
+>        the C trampolines and renames the Sailfin exports to the
+>        bare form). The prelude-side `runtime.X` → import flip
+>        additionally needs a `string` ↔ `* u8` / `int` ↔ `float`
+>        boundary cast that's out of scope per the issue's
+>        audit-only `In:` list.
+>
+>   The audit invariant the M2.12b flip targets is **"every
+>   M2-replaced symbol's emitted call lands on the canonical `sfn_*`
+>   symbol name"** — that holds end-to-end via either direct sfn
+>   import (the type-meta cluster) or the helper registry's
+>   `native_signature` routing (`sleep`, `process.run`, the `print*`
+>   family, `sfn_str_codepoint`, `sfn_str_grapheme_*`). Several of
+>   those `sfn_*` symbols are still C trampolines in
+>   `runtime/native/src/sailfin_runtime.c` and stay live until M3
+>   lifts each body into a Sailfin module (`runtime/sfn/io.sfn` for
+>   `print*`, `runtime/sfn/string.sfn` for the str helpers, …); only
+>   `sfn_sleep`, `sfn_process_run`, the `sfn_arena_sfn_*` /
+>   `sfn_rc_sfn_*` families, and the M2.10 type-meta surface are
+>   defined in Sailfin today. The `sailfin_runtime_*` legacy bodies
+>   (e.g. `sailfin_runtime_print_raw`, `sailfin_runtime_string_concat`)
+>   are the truly dead-after-M2 portion — still linked for seed
+>   compat, but no fresh user emission references them.
+>
+>   Pinned by the standard `make compile` + `make test` self-host
+>   gate; the determinism sweep on
+>   `compiler/src/llvm/lowering/lowering_core.sfn` continues to
+>   produce byte-identical IR across 20 iterations.
 > - **Sleep migration PR 2 shipped (issue #397).** `runtime/sfn/clock.sfn`
 >   is now the sole definition site for `@sfn_sleep`; its body calls
 >   `nanosleep` directly via `runtime/sfn/platform/posix.sfn`. The C
