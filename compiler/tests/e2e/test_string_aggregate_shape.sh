@@ -6,13 +6,13 @@
 #   - Literals lower to `{i8*, i64}` aggregates (data ptr + byte length).
 #   - `s.length` resolves to a direct `extractvalue ..., 1` (no
 #     `sailfin_runtime_string_length` call).
-#   - `+` on strings emits
-#     `call i8* @sfn_str_concat({i8*, i64} ..., {i8*, i64} ...)`.
-#     The `sfn_str_concat` C trampoline forwards to
-#     `sailfin_runtime_string_concat_v2` (kept link-stable for seed-
-#     compiled IR until the floor seed bumps); the legacy
-#     `sailfin_runtime_string_concat(char*, char*)` entrypoint stays
-#     exported so seed-compiled IR with the legacy ABI links too.
+#   - `+` on strings emits the arena-aware aggregate call shape
+#     (renamed in #715 to the bare canonical symbol):
+#       call {i8*, i64} @sfn_str_concat({i8*, i64}, {i8*, i64}, ptr @sfn_default_arena)
+#     followed by an `extractvalue {i8*, i64} %t, 0` that recovers
+#     the legacy `i8*` operand. The C-side `sfn_str_concat_arena`
+#     forwarder still exports (so seed-built IR keeps linking) but
+#     fresh emission must reach the bare symbol.
 #   - No consumer re-extracts a literal as `[N x i8]` (regression guard
 #     against the legacy `bitcast i8* to [N x i8]*` consumer pattern).
 #
@@ -138,26 +138,30 @@ test_no_array_consumer_pattern() {
 }
 
 # A6 — `string.concat` declared with the arena-aware SfnString ABI
-# and called the same way. M2.4b (#398) flipped the call shape to
+# and called the same way. M2.4b (#398) introduced the call shape
 #   call {i8*, i64} @sfn_str_concat_arena({i8*, i64}, {i8*, i64}, ptr @sfn_default_arena)
 # followed by an `extractvalue {i8*, i64} %t, 0` that recovers the
-# legacy `i8*` operand for the rest of the lowering pipeline. The
-# 2-arg `sfn_str_concat` trampoline stays exported so seed-compiled
-# IR keeps linking until the next seed bump retires both together;
-# fresh emission must not reach that trampoline directly nor the
-# legacy `sailfin_runtime_string_concat_v2` entrypoint.
+# legacy `i8*` operand for the rest of the lowering pipeline. #715
+# retired the legacy 2-arg `sfn_str_concat` trampoline and promoted
+# the arena-aware function to the bare canonical name, so the
+# emitted shape is now
+#   call {i8*, i64} @sfn_str_concat({i8*, i64}, {i8*, i64}, ptr @sfn_default_arena)
+# Fresh emission must reach the bare `@sfn_str_concat` symbol — not
+# the `_arena`-suffixed transitional forwarder, not the (now-deleted)
+# 2-arg shape, and not the legacy `sailfin_runtime_string_concat_v2`
+# entrypoint.
 test_string_concat_uses_aggregate_abi() {
     emit_ir_once || return 1
     local declared
-    declared="$(grep -cE '^declare \{i8\*, i64\} @sfn_str_concat_arena\(\{i8\*, i64\}, \{i8\*, i64\}, ptr\)' "$LL" || true)"
+    declared="$(grep -cE '^declare \{i8\*, i64\} @sfn_str_concat\(\{i8\*, i64\}, \{i8\*, i64\}, ptr\)' "$LL" || true)"
     if [ "${declared:-0}" -ne 1 ]; then
-        echo "[test]   expected exactly one arena-shape declare for sfn_str_concat_arena, got ${declared:-0}"
+        echo "[test]   expected exactly one arena-shape declare for sfn_str_concat, got ${declared:-0}"
         return 1
     fi
     local called
-    called="$(grep -cE 'call \{i8\*, i64\} @sfn_str_concat_arena\(\{i8\*, i64\} [^,]+, \{i8\*, i64\} [^,]+, ptr @sfn_default_arena\)' "$LL" || true)"
+    called="$(grep -cE 'call \{i8\*, i64\} @sfn_str_concat\(\{i8\*, i64\} [^,]+, \{i8\*, i64\} [^,]+, ptr @sfn_default_arena\)' "$LL" || true)"
     if [ "${called:-0}" -lt 1 ]; then
-        echo "[test]   expected at least one arena-shape call to sfn_str_concat_arena, got ${called:-0}"
+        echo "[test]   expected at least one arena-shape call to sfn_str_concat, got ${called:-0}"
         return 1
     fi
     # The result extract that gives downstream `i8*` consumers the data ptr.
@@ -171,6 +175,15 @@ test_string_concat_uses_aggregate_abi() {
     legacy_2arg_called="$(grep -cE 'call i8\* @sfn_str_concat\(' "$LL" || true)"
     if [ "${legacy_2arg_called:-0}" -ne 0 ]; then
         echo "[test]   regression: fresh emission still calls the 2-arg @sfn_str_concat shape"
+        return 1
+    fi
+    # Anchor on the literal `(` for portability; `\b` is GNU-only and
+    # the BSD/macOS `grep -E` would treat it as a backspace (see
+    # `test_runtime_libc_skeleton.sh` lines 95-102).
+    local legacy_arena_called
+    legacy_arena_called="$(grep -cE '@sfn_str_concat_arena\(' "$LL" || true)"
+    if [ "${legacy_arena_called:-0}" -ne 0 ]; then
+        echo "[test]   regression: fresh emission still references @sfn_str_concat_arena (post-#715 transitional name)"
         return 1
     fi
     local legacy_v2_called

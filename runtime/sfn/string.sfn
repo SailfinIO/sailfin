@@ -67,16 +67,18 @@ extern fn strings_equal(a: * u8, b: * u8) -> bool;
 
 extern fn substring_unchecked(text: * u8, start: f64, end: f64) -> * u8;
 
-// M2.4b (#398): the C-side allocating ops. The Sailfin trampolines
-// below preserve the `sfn_str_sfn_*` infix pattern (proof-of-life
-// presence under the Sailfin namespace) while the canonical
-// `sfn_str_concat_arena` / `sfn_str_append_arena` symbols live on
-// the C side. The two `* u8` parameters mirror the wave-1a pattern
-// — today's Sailfin frontend can't pass / return the SfnString
-// aggregate by value, so the bodies bridge through the legacy
-// NUL-terminated concat. The user IR emission lands directly on
-// `@sfn_str_concat_arena` (the C entrypoint with the new arena-
-// aware ABI); these wrappers are not on the hot path.
+// M2.4b (#398) + #715: the C-side allocating ops. The Sailfin
+// trampolines below preserve the `sfn_str_sfn_*` infix pattern
+// (proof-of-life presence under the Sailfin namespace) while the
+// canonical `sfn_str_concat` / `sfn_str_append` symbols live on
+// the C side (#715 promoted these from their interim `_arena`
+// suffix to the bare canonical names). The two `* u8` parameters
+// mirror the wave-1a pattern — today's Sailfin frontend can't
+// pass / return the SfnString aggregate by value, so the bodies
+// bridge through the legacy NUL-terminated concat. The user IR
+// emission lands directly on `@sfn_str_concat` (the C entrypoint
+// with the new arena-aware ABI); these wrappers are not on the
+// hot path.
 extern fn sailfin_runtime_string_concat(a: * u8, b: * u8) -> * u8;
 
 extern fn sailfin_runtime_string_append(buf: * u8, suffix: * u8) -> * u8;
@@ -177,7 +179,7 @@ fn sfn_str_sfn_from_cstr(s: * u8) -> * u8 { return s; }
 // Sailfin frontend can't take an SfnString aggregate by value
 // (M1.A.2 hasn't landed). The user-emission hot path bypasses
 // this wrapper entirely and lands on the C entrypoint
-// `sfn_str_concat_arena`, which has the real arena ABI.
+// `sfn_str_concat`, which has the real arena ABI.
 fn sfn_str_sfn_concat(a: * u8, b: * u8) -> * u8 {
     return sailfin_runtime_string_concat(a, b);
 }

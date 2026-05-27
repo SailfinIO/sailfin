@@ -156,7 +156,7 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
     // is the global pointer slot primed at module load.
     let agg_name = format_temp_name(right_aligned.temp_index);
     let line = "  " + agg_name
-        + " = call {i8*, i64} @sfn_str_concat_arena({i8*, i64} "
+        + " = call {i8*, i64} @sfn_str_concat({i8*, i64} "
         + left_aligned.operand.value
         + ", {i8*, i64} "
         + right_aligned.operand.value

@@ -578,13 +578,15 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "string.length", symbol: "sailfin_runtime_string_length", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: "sfn_str_len", c_abi_return_type: null
     });
     // M1.A — string.concat parameters lock to the SfnString aggregate
-    // ABI. The seed's call sites still emit
-    // `call i8* @sfn_str_concat({i8*, i64}, {i8*, i64})`, which keeps
-    // linking through the 2-arg C trampoline `sfn_str_concat`.
+    // ABI. Wave 1 pre-#714 emitted
+    // `call i8* @sfn_str_concat({i8*, i64}, {i8*, i64})` against a
+    // 2-arg C trampoline; #714 (M2.4b) introduced the 3-arg arena-
+    // aware ABI under the `_arena` suffix to coexist with the seed's
+    // 2-arg emission; #715 retired the 2-arg trampoline and promoted
+    // the arena-aware function to the bare canonical name.
     //
-    // M2.4b (#398): the descriptor now points at the arena-aware
-    // entrypoint `sfn_str_concat_arena`. The full call shape is
-    //   call {i8*, i64} @sfn_str_concat_arena({i8*, i64}, {i8*, i64}, ptr)
+    // The call shape is now
+    //   call {i8*, i64} @sfn_str_concat({i8*, i64}, {i8*, i64}, ptr)
     // where the third operand is `ptr @sfn_default_arena` (a global
     // pointer slot defined in `runtime/native/src/sailfin_runtime.c`,
     // primed at module load by a `__attribute__((constructor))`).
@@ -594,19 +596,16 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // recover the legacy `i8*` operand so the rest of the lowering
     // pipeline (which still treats string locals as `i8*`) is unchanged.
     //
-    // We deliberately do NOT reuse the bare `sfn_str_concat` symbol —
-    // the seed-built first-pass binary's IR still emits 2-arg calls
-    // against that name, and the C trampoline at that symbol keeps the
-    // 2-arg shape so the self-host link stays green. Once a future
-    // seed cut adopts the new ABI, a follow-up `seed-blocker` issue
-    // renames `sfn_str_concat_arena` back to the bare canonical name
-    // in a single rollback-safe PR.
+    // The C runtime keeps a thin `sfn_str_concat_arena` trampoline
+    // alive for one more release cycle so seed v0.7.0-alpha.7 (which
+    // still emits the `_arena` suffix in IR) links cleanly; the next
+    // seed bump retires that forwarder in a follow-up PR.
     //
     // `native_signature` is left equal to `symbol` so the declare /
-    // call paths uniformly use the arena-aware name with no special-
+    // call paths uniformly use the canonical name with no special-
     // casing in `rendering.sfn` / `emit_runtime_call`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.concat", symbol: "sfn_str_concat_arena", return_type: "{i8*, i64}", parameter_types: ["{i8*, i64}", "{i8*, i64}", "ptr"], effects: [], native_signature: "sfn_str_concat_arena", c_abi_return_type: null
+        target: "string.concat", symbol: "sfn_str_concat", return_type: "{i8*, i64}", parameter_types: ["{i8*, i64}", "{i8*, i64}", "ptr"], effects: [], native_signature: "sfn_str_concat", c_abi_return_type: null
     });
     // M2.4b (#398): `string.append` descriptor parked at the arena-
     // aware shape. No compiler emission site calls it today (the
@@ -614,12 +613,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // against `sailfin_runtime_string_append`, not via this descriptor),
     // so `native_signature` stays null — leaving the row as metadata
     // until the first caller wires through. The C symbol
-    // `sfn_str_append_arena` is defined alongside `sfn_str_concat_arena`
-    // for surface-area completeness. First parameter is `ptr` (opaque)
-    // so the eventual caller can decide whether it's an `i8**` legacy
-    // pointer or a real `{i8*, i64}*` once the SfnString flip lands.
+    // `sfn_str_append` (renamed from `sfn_str_append_arena` in #715) is
+    // defined alongside `sfn_str_concat` for surface-area completeness.
+    // First parameter is `ptr` (opaque) so the eventual caller can decide
+    // whether it's an `i8**` legacy pointer or a real `{i8*, i64}*` once
+    // the SfnString flip lands.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.append", symbol: "sfn_str_append_arena", return_type: "void", parameter_types: ["ptr", "{i8*, i64}", "ptr"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "string.append", symbol: "sfn_str_append", return_type: "void", parameter_types: ["ptr", "{i8*, i64}", "ptr"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "string.drop", symbol: "sailfin_runtime_string_drop", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
