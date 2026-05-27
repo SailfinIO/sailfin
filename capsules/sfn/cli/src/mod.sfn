@@ -28,19 +28,24 @@
 //
 // Internal layout — this barrel re-exports the public surface. Sources
 // live in:
-//   - types.sfn       Arg, Flag, Command, Matches, ParseError, ParseResult
+//   - types.sfn       Arg, Flag, Command, Matches, ParseError,
+//                     ParseResult, Style
 //   - builder.sfn     arg, arg_optional, flag*, command, with_*
 //   - parser.sfn      parse() (pure, non-exiting), run() (exiting wrapper) + private parser helpers
 //   - matches.sfn     get, get_or, has_flag, has, subcommand, positionals
 //   - help.sfn        help, print_help, _format_help, width helpers
-//   - style.sfn       bold, dim, color helpers, _esc, _ansi_wrap
+//   - style.sfn       bold, dim, color helpers, no_color_active,
+//                     style_for_stream, style_with_mode,
+//                     style_resolve, paint, paint_* helpers,
+//                     _esc, _ansi_wrap, _no_color_from_value
 //   - print.sfn       print_error, print_warn, print_success, print_hint
 //   - exit_codes.sfn  EXIT_OK, EXIT_BUILD_FAIL, EXIT_USAGE,
 //                     EXIT_NOT_FOUND, EXIT_INTERNAL
 //
 // Visibility: underscore-prefixed names (`_format_help`, `_pad`, `_esc`,
 // `_ansi_wrap`, `_starts_with`, `_find_flag_long`, `_find_flag_short`,
-// `_resolve_active`, `_help_hint`, `_flag_label`, `_max_*_width`) are
+// `_resolve_active`, `_help_hint`, `_flag_label`, `_max_*_width`,
+// `_no_color_from_value`, `_style_disabled`, `_style_enabled`) are
 // private capsule helpers by convention and are intentionally NOT
 // re-exported from `mod.sfn`. The pre-split `mod.sfn` had no explicit
 // `export {}` block, so Sailfin's default "export everything" rule made
@@ -56,7 +61,8 @@ export {
     Command,
     Matches,
     ParseError,
-    ParseResult
+    ParseResult,
+    Style
 } from "./types";
 
 // ---- Builders ----
@@ -101,7 +107,22 @@ export {
     blue,
     magenta,
     cyan,
-    gray
+    gray,
+    no_color_active,
+    style_for_stream,
+    style_with_mode,
+    style_resolve,
+    paint,
+    paint_bold,
+    paint_dim,
+    paint_underline,
+    paint_red,
+    paint_green,
+    paint_yellow,
+    paint_blue,
+    paint_magenta,
+    paint_cyan,
+    paint_gray
 } from "./style";
 
 // ---- Styled diagnostic helpers ----

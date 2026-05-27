@@ -4,6 +4,16 @@
 // unescaper does not support \xHH escapes, so these functions degrade
 // gracefully to plain text. Once \xHH or char_from_code() support lands,
 // swap the _esc() helper to return the real ESC character.
+//
+// Style policy (issue #792 / 1.3) lives alongside the wrap helpers:
+// `Style` is constructed via `style_for_stream`, `style_with_mode`, or
+// `style_resolve`, and the `paint*` family consults `Style.enabled`
+// to decide whether to apply ANSI codes. The legacy single-arg
+// helpers (`bold`, `red`, …) stay in place — they unconditionally
+// emit plain text today via `_esc()` returning "" — so existing
+// callers keep working while new code threads a `Style` through.
+import { Style } from "./types";
+
 fn _esc() -> string {
     // Returns the ANSI escape prefix. Currently returns empty string
     // because the bootstrap compiler does not support \xHH escapes.
@@ -45,3 +55,122 @@ fn magenta(text: string) -> string { return _ansi_wrap("35", text); }
 fn cyan(text: string) -> string { return _ansi_wrap("36", text); }
 
 fn gray(text: string) -> string { return _ansi_wrap("90", text); }
+
+// ── NO_COLOR / TTY-aware Style (issue #792, proposal §7 Issue 1.3) ────
+//
+// `Style` policy resolution. The current implementation gates colored
+// output on the `NO_COLOR` env var (see https://no-color.org/) and
+// caller-supplied `--color=auto|always|never` modes. TTY detection
+// will join the `"auto"` gate once Sailfin exposes an `isatty`
+// primitive; until then, `"auto"` returns enabled iff `NO_COLOR` is
+// not set in the environment.
+//
+// All policy helpers are pure with respect to their arguments except
+// for the env-var read in `no_color_active`, `style_for_stream`, and
+// `style_with_mode`. `style_resolve` is the fully-pure variant for
+// tests and callers that already have the `NO_COLOR` value from
+// another channel.
+fn _no_color_from_value(raw: string) -> boolean {
+    // Per https://no-color.org/: any non-empty value disables color.
+    return raw.length > 0;
+}
+
+fn no_color_active() -> boolean ![io] {
+    // True iff the `NO_COLOR` environment variable is set to any
+    // non-empty value, per the no-color.org convention.
+    let raw = env.get("NO_COLOR");
+    return _no_color_from_value(raw);
+}
+
+fn _style_disabled(stream: string, mode: string) -> Style {
+    return Style { enabled: false, mode: mode, stream: stream };
+}
+
+fn _style_enabled(stream: string, mode: string) -> Style {
+    return Style { enabled: true, mode: mode, stream: stream };
+}
+
+fn style_for_stream(stream: string) -> Style ![io] {
+    // Build an "auto"-mode Style for the named stream. Disabled when
+    // `NO_COLOR` is set in the environment. The `stream` value is
+    // carried on the result so downstream helpers (e.g. `print_diag`
+    // in issue 1.4) can pick the right output handle.
+    if no_color_active() { return _style_disabled(stream, "auto"); }
+    return _style_enabled(stream, "auto");
+}
+
+fn style_with_mode(stream: string, mode: string) -> Style ![io] {
+    // Build a Style from an explicit `--color=auto|always|never` mode.
+    // `"always"` and `"never"` are honored verbatim; any other value
+    // (including the canonical `"auto"`) falls through to
+    // `style_for_stream`'s environment-aware detection.
+    if mode == "always" { return _style_enabled(stream, "always"); }
+    if mode == "never" { return _style_disabled(stream, "never"); }
+    return style_for_stream(stream);
+}
+
+fn style_resolve(stream: string, mode: string, no_color_value: string) -> Style {
+    // Fully-pure variant of `style_with_mode`. Useful for tests and
+    // for callers that have already resolved `NO_COLOR` through their
+    // own channel (e.g. a wrapper that snapshots env vars at startup).
+    // `no_color_value` is the raw env-var value — an empty string
+    // means "NO_COLOR unset", per the no-color.org convention.
+    if mode == "always" { return _style_enabled(stream, "always"); }
+    if mode == "never" { return _style_disabled(stream, "never"); }
+    if _no_color_from_value(no_color_value) {
+        return _style_disabled(stream, "auto");
+    }
+    return _style_enabled(stream, "auto");
+}
+
+// ── Style-aware wrap helpers ──────────────────────────────────────
+//
+// `paint(s, code, text)` is the building block: when `s.enabled` is
+// false it returns the text unmodified; otherwise it applies the
+// ANSI sequence for `code`. Named convenience helpers below cover
+// the colors that diagnostic rendering (issue 1.4) will use; rarer
+// codes can be reached through `paint` directly.
+fn paint(s: Style, code: string, text: string) -> string {
+    if !s.enabled { return text; }
+    return _ansi_wrap(code, text);
+}
+
+fn paint_bold(s: Style, text: string) -> string {
+    return paint(s, "1", text);
+}
+
+fn paint_dim(s: Style, text: string) -> string {
+    return paint(s, "2", text);
+}
+
+fn paint_underline(s: Style, text: string) -> string {
+    return paint(s, "4", text);
+}
+
+fn paint_red(s: Style, text: string) -> string {
+    return paint(s, "31", text);
+}
+
+fn paint_green(s: Style, text: string) -> string {
+    return paint(s, "32", text);
+}
+
+fn paint_yellow(s: Style, text: string) -> string {
+    return paint(s, "33", text);
+}
+
+fn paint_blue(s: Style, text: string) -> string {
+    return paint(s, "34", text);
+}
+
+fn paint_magenta(s: Style, text: string) -> string {
+    return paint(s, "35", text);
+}
+
+fn paint_cyan(s: Style, text: string) -> string {
+    return paint(s, "36", text);
+}
+
+fn paint_gray(s: Style, text: string) -> string {
+    return paint(s, "90", text);
+}
