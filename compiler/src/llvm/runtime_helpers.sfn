@@ -64,6 +64,18 @@
 // follow-up PRs slot underneath this comment as additional waves
 // land. Each wave should:
 //   * Pick a small batch (5–10 helpers, single domain).
+//   * **Before flipping `native_signature`**, grep both
+//     `compiler/src/llvm/lowering/` and
+//     `compiler/src/llvm/expression_lowering/native/` for hardcoded
+//     `@sailfin_runtime_<symbol>` call strings — these bypass the
+//     descriptor's `effective_symbol` resolution and must be updated
+//     in lockstep with the flip, or the wave PR will link-fail
+//     against the old symbol (see #727 and the M2.8 print.err
+//     wrapper post-mortem). The audit is mechanised by
+//     `compiler/tests/e2e/test_lowering_no_bare_runtime_emissions.sh`;
+//     any new hardcoded emission must either route through the
+//     registry or land in the test's allowlist with a
+//     `// Registry bypass: …` source comment.
 //   * For each helper that has hardcoded LLVM call sites in
 //     `compiler/src/llvm/expression_lowering/native/*`, mirror
 //     the M2.4a / M2.6 pattern: add a C trampoline in

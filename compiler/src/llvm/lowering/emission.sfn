@@ -607,6 +607,12 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
         // and exit with code 1 on OOM rather than passing NULL into
         // user code where `argv.length` would crash on the first deref.
         if user_param_count > 0 {
+            // Registry bypass: the `_start`/main wrapper is one-shot IR
+            // with a bespoke (i32, i8**) → i8* shape that doesn't fit
+            // `emit_runtime_call`'s descriptor model. If a descriptor is
+            // ever registered for `argv_to_string_array`, update this
+            // emission AND the test_lowering_no_bare_runtime_emissions
+            // allowlist in lockstep — see #727.
             wrapper_lines.push("  %argv_arr_i8 = call i8* @sailfin_runtime_argv_to_string_array(i32 %argc, i8** %argv)");
             wrapper_lines.push("  %argv_is_null = icmp eq i8* %argv_arr_i8, null");
             wrapper_lines.push("  br i1 %argv_is_null, label %main.argv_oom, label %main.argv_ok");
@@ -672,6 +678,12 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
         // message that `sfn_throw` stashed on the frame, then exit 1.
         wrapper_lines.push("main.catch:");
         wrapper_lines.push("  %msg = call i8* @sfn_take_exception(i8* %frame_i8)");
+        // Registry bypass: the catch tail of the `_start`/main wrapper
+        // is one-shot IR; the descriptor registry's call-site dispatch
+        // doesn't model the wrapper-only `(i8*) -> void` panic path.
+        // If a descriptor is registered for `panic_emit`, update this
+        // emission AND the test_lowering_no_bare_runtime_emissions
+        // allowlist in lockstep — see #727.
         wrapper_lines.push("  call void @sailfin_runtime_panic_emit(i8* %msg)");
         wrapper_lines.push("  ret i32 1");
         wrapper_lines.push("}");
