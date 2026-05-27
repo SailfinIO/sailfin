@@ -421,7 +421,7 @@ These environment variables influence the behavior of `sfn` and the Makefile bui
 
 | Variable | Scope | Description |
 |---|---|---|
-| `SAILFIN_RUNTIME_ROOT` | `sfn` binary | Override the directory where `sfn` looks for the bundled C runtime. By default, the runtime is resolved relative to the executable. |
+| `SAILFIN_RUNTIME_ROOT` | `sfn` binary | Override the directory where `sfn` looks for the bundled runtime. By default, the runtime is resolved relative to the executable. |
 | `SFN_REGISTRY` | `sfn add` / `sfn publish` | Override the package registry base URL for this shell. Takes precedence over `~/.sfn/config.toml`. See [`sfn config`](#sfn-config-getsetunsetlist-key-value). |
 | `SFN_TOKEN` | `sfn publish` | Bearer token used when uploading a capsule. Takes precedence over `~/.sfn/credentials` written by `sfn login`. |
 | `PREFIX` | Makefile | Installation prefix. Defaults to `$HOME/.local`. The binary is installed to `$(PREFIX)/bin`. |

@@ -52,7 +52,8 @@ sailfin/
 │  └─ *.py                       # legacy bootstrap sources (emergency only)
 ├─ runtime/
 │  ├─ prelude.sfn                # Sailfin-visible runtime surface
-│  ├─ native/                    # C runtime implementation
+│  ├─ native/                    # Supporting C runtime helpers (entry point is Sailfin; M3 retires the rest)
+│  └─ sfn/                       # Sailfin-native runtime modules (clock, memory, process, type_meta, …)
 │  └─ (no Python shims)          # Python runtime shims removed pre-1.0
 ├─ docs/
 ├─ examples/

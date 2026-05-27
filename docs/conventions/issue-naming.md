@@ -404,7 +404,7 @@ of their parent epic via the GitHub parent/child link.
 | `M2: Runtime in Sailfin` | `M2` | Replace C runtime with pure Sailfin (arena, string, array, io, exception, …) |
 | `M3: Structured Concurrency` | `M3` | `routine`/`await`/`channel`/`spawn` plus atomic intrinsics |
 | `Effect System Hardening` | `EFF` | Compile-gate enforcement, hierarchical effects, transitive call-graph checking — runs in parallel with runtime work |
-| `1.0 — General Availability` | `T7` | Pure Sailfin toolchain, no C runtime, all enforcement gates active |
+| `1.0 — General Availability` | `T7` | Pure Sailfin toolchain (M5 retired `native_driver.c`; M3 retires the rest), all enforcement gates active |
 
 ---
 
@@ -462,7 +462,7 @@ Reserved track IDs (extend by editing the roadmap, then this list):
 | `M1`  | Phase 1 systems primitives (extern fn, integer types, raw pointers) |
 | `M1.5`| Drop emission |
 | `M2`  | Core runtime in Sailfin |
-| `M3`  | Capability adapters + delete C runtime |
+| `M3`  | Capability adapters (filesystem, HTTP, model) + port remaining C helpers to Sailfin |
 | `T1`  | Per-module memory budget under 800 MB |
 | `T2`  | Build performance — pipeline parallelism |
 | `T3`  | Build performance — IR caching |

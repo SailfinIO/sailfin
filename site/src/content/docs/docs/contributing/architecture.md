@@ -37,10 +37,11 @@ Source (.sfn)
 
 ## Runtime
 
-The runtime currently ships as C under `runtime/native/` and is planned to migrate to Sailfin before 1.0.
+The binary's entry point is the Sailfin-emitted `@main` (M5, #451; shipped 2026-05-25) — no C code participates in startup. Supporting helpers under `runtime/native/src/` remain in C until M3 ports them into Sailfin.
 
 - `runtime/prelude.sfn` — Sailfin-native prelude (collections, strings, type checks)
-- `runtime/native/` — C runtime implementation
+- `runtime/sfn/` — Sailfin-native runtime modules (`clock.sfn`, `memory/arena.sfn`, `memory/rc.sfn`, `process.sfn`, `type_meta.sfn`, …)
+- `runtime/native/` — Supporting C helpers pending M3 (strings, arrays, exceptions, crypto)
 
 ## Self-Hosting
 

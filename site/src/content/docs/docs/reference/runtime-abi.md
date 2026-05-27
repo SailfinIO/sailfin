@@ -94,6 +94,37 @@ union for `any`/`dynamic` interop boundaries; its 16-byte payload
 inlines an `SfnString` or a 64-bit scalar, and out-of-line values
 store their pointer in the first 8 bytes.
 
+## Entry Point
+
+Since M5 ([#451](https://github.com/SailfinIO/sailfin/issues/451),
+shipped 2026-05-25) the binary's entry point is the
+Sailfin-emitted `@main` — no C driver participates in startup.
+The compiler emits exactly one definition matching the platform
+contract:
+
+```llvm
+define i32 @main(i32 %argc, i8** %argv) {
+  ; resolve runtime root (walks up from argv[0] looking for a
+  ; sibling `runtime/` directory, honouring SAILFIN_RUNTIME_ROOT)
+  ; marshal argv into SfnArray<SfnString>
+  ; call into the Sailfin CLI: sailfin_cli_main__cli_main
+  ; return i32 exit status
+}
+```
+
+`nm build/native/sailfin | grep -E ' T main$'` shows exactly one
+`@main` definition, sourced from `compiler/src/llvm/lowering/`
+(see `runtime_audit.md` for the pipeline trace).
+`SAILFIN_TRACE_ARGV` prints the argv vector observed by
+`sailfin_cli_main` for entry-point debugging.
+
+The previous C entry point (`runtime/native/src/native_driver.c`)
+and its Windows MinGW cross-compile rules were deleted as part of
+M5; the symbols its `extern` decls referenced
+(`compile_to_sailfin` / `compile_to_llvm`, `_resolve_runtime_root`,
+`SailfinPtrArray` construction helpers) are now reached entirely
+through Sailfin code paths.
+
 ## ABI Versioning
 
 Every emitted Sailfin LLVM module defines two global symbols with

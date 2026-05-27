@@ -8,6 +8,14 @@
 > **Status delta since 2026-04-15** (keep this list short; once an item is
 > fully shipped fold it into the body and remove the bullet here):
 >
+> - **M5 shipped — Sailfin-native entry point (2026-05-25, epic #451).**
+>   `runtime/native/src/native_driver.c` and its build-system references
+>   are gone. The compiler emits the `@main(i32, i8**)` entry directly,
+>   resolves the runtime root in Sailfin, and dispatches the CLI through
+>   `sailfin_cli_main__cli_main`. No C code participates in startup. The
+>   remaining C helpers under `runtime/native/src/` (strings, arrays,
+>   exceptions, crypto) remain pending M3.
+>
 > - **M2 closed — prelude facade audit shipped 2026-05-26 (M2.12b,
 >   issue #408).** Closes the M2 milestone. `runtime/prelude.sfn` no
 >   longer goes through the magic `runtime.X` namespace for the M2.10
@@ -286,8 +294,9 @@ requests in `compiler/src/llvm/runtime_helpers.sfn`.
 ## Executive Summary
 
 - The C runtime is **~6,000 lines** (`runtime/native/src/sailfin_runtime.c`)
-  plus a ~500-line C driver (`native_driver.c`) and small crypto helpers for
-  SHA-256 and base64.
+  plus small crypto helpers for SHA-256 and base64. The ~500-line C driver
+  `native_driver.c` was retired in M5 (#451, 2026-05-25) — the binary's
+  entry point is now the Sailfin-emitted `@main`.
 - Core surfaces (print, sleep, strings, arrays, process spawn, filesystem,
   exceptions, futures-via-pthreads) are **implemented and working**.
 - Effect-capability adapters (`sailfin_adapter_*`), reflection
@@ -312,9 +321,10 @@ requests in `compiler/src/llvm/runtime_helpers.sfn`.
 
 - Primary toolchain: the self-hosted native compiler. `make compile` produces
   `build/native/sailfin` (statically links the C runtime).
-- Runtime root: discovered by `native_driver.c:_resolve_runtime_root()` — walks
-  up from `argv[0]` looking for a sibling `runtime/` directory, or honors
-  `SAILFIN_RUNTIME_ROOT`.
+- Runtime root: discovered by the Sailfin-emitted entry-point prologue
+  (previously `native_driver.c:_resolve_runtime_root()`; retired in M5,
+  #451) — walks up from `argv[0]` looking for a sibling `runtime/`
+  directory, or honors `SAILFIN_RUNTIME_ROOT`.
 - Python runtime shims were removed from the repository pre-1.0.
 - Legacy Python compiler artifacts (`compiler/build/**`) remain only for
   emergency recovery and must be removed before 1.0.
@@ -528,9 +538,10 @@ Fixing the compiler to emit typed, ownership-aware IR retires them wholesale.
   `compiler/src/llvm/expression_lowering/native/core_strings.sfn`).
 - Exception lowering uses the `set_exception`/`has_exception`/`take_exception`
   trio, not the `try_enter`/`throw` setjmp path.
-- The C `native_driver` resolves the runtime root, detects CLI-subcommand
-  invocation vs legacy `sailfin file.sfn` usage, and calls into the Sailfin-
-  native CLI (`sailfin_cli_main__cli_main`) built from `compiler/src/`.
+- The Sailfin-emitted `@main` (M5, #451; previously `native_driver.c`)
+  resolves the runtime root, detects CLI-subcommand invocation vs legacy
+  `sailfin file.sfn` usage, and calls into the Sailfin-native CLI
+  (`sailfin_cli_main__cli_main`) built from `compiler/src/`.
 
 ## The Memory Management Crisis (Blocks Perf, Not Just Rewrite)
 
@@ -717,7 +728,7 @@ Entrypoints that are C-based today and must be gone by 1.0:
 
 - `runtime/native/src/sailfin_runtime.c` (~6,015 lines)
 - `runtime/native/include/sailfin_runtime.h`
-- `runtime/native/src/native_driver.c` (~504 lines)
+- `runtime/native/src/native_driver.c` — **REMOVED 2026-05-25 in M5 (#451)**. The binary's entry point is now the Sailfin-emitted `@main`.
 - `runtime/native/src/sailfin_sha256.c` + `.h`
 - `runtime/native/src/sailfin_base64.c` + `.h`
 - `runtime/native/ir/runtime_globals.ll` (small LLVM stub file)
@@ -738,7 +749,7 @@ Entrypoints that are C-based today and must be gone by 1.0:
       integration tests covering the concurrency roadmap items.
 - [ ] Reflection and type metadata (`is_*`, `resolve_type`, `instance_of`,
       `get_field`) are implemented against a real runtime type registry.
-- [ ] Sailfin-native CLI replaces `native_driver.c`.
+- [x] Sailfin-native CLI replaces `native_driver.c`. **Shipped 2026-05-25 in M5 (#451).** The compiler emits `@main` directly; `native_driver.c` is deleted.
 - [ ] Memory management is a first-class runtime primitive (arena, RC, or
       hybrid — decision documented in `runtime_abi.md`). `string_drop` and an
       equivalent `array_drop` (or their native-ABI equivalents) are enabled
@@ -782,8 +793,11 @@ Reordered from the previous audit to reflect the April 2026 reality.
 - **M4 — Scheduler and concurrency in Sailfin.** `spawn`, `channel`,
   `parallel`, `serve`. Integrates with the (by-then-shipped) `routine`/`await`
   language features.
-- **M5 — Native CLI and driver.** Replace `native_driver.c` with a Sailfin-
-  native entrypoint; remove `runtime/native/` entirely.
+- **M5 — Native CLI and driver.** **Shipped 2026-05-25 (#451).** Replaced
+  `native_driver.c` with a Sailfin-native `@main` entry point emitted
+  directly by the compiler. Removing `runtime/native/` entirely is folded
+  into M3 once the remaining C support helpers (`sailfin_runtime.c`,
+  crypto, includes) port to Sailfin.
 
 Decoupling M0 from M1-M5 is intentional: M0 is language-level work that has
 value even if the runtime rewrite slips. Everything downstream compounds on
