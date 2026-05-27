@@ -15,7 +15,6 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "./ast";
-import { starts_with } from "./string_utils";
 import { Token, TokenKind } from "./token";
 import {
     Diagnostic,
