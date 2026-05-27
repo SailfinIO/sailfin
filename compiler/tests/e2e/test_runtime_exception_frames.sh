@@ -24,13 +24,13 @@
 #                    runtime's `sailfin_runtime_throw` abort-on-empty
 #                    semantics).
 #   7. global pin — `@global.sfn_exception_frame_head_addr = internal
-#                   thread_local global i64 0` pins the per-thread
-#                   chain-head storage shape (#730). The `thread_local`
-#                   keyword in `runtime/sfn/exception.sfn` is the one-line
-#                   audit-able diff that flipped this from `internal
-#                   global`; this assertion catches a regression that
-#                   drops the TLS prefix, relocates the storage, or
-#                   drops the zero initializer.
+#                   global i64 0` pins the chain-head storage shape.
+#                   The TLS upgrade (compiler-side parser in #825;
+#                   runtime-side flip queued as a follow-up gated on the
+#                   next seed pin) replaces `internal global` with
+#                   `internal thread_local global` without touching
+#                   callers; this assertion catches a regression that
+#                   relocates the storage or drops the zero initializer.
 #   8. coexistence — the Sailfin-emitted symbols use canonical
 #                    architect names (`sfn_try_enter`, `sfn_throw`,
 #                    `sfn_take_exception`, …) which deliberately do NOT
@@ -345,14 +345,13 @@ test_frame_head_global() {
         echo "[test]   $ll missing — test_emit_define_shape must run first"
         return 1
     fi
-    # #730 flipped `internal global` to `internal thread_local global`
-    # via the `thread_local` storage-class annotation on the source
-    # `let mut` in `runtime/sfn/exception.sfn`. Pin the TLS shape so
-    # a regression that drops the prefix surfaces here instead of
-    # corrupting frames across spawn boundaries once the scheduler
-    # ships (M4 #321).
-    if ! grep -qE "^@global\.sfn_exception_frame_head_addr = internal thread_local global i64 0$" "$ll"; then
-        echo "[test]   missing '@global.sfn_exception_frame_head_addr = internal thread_local global i64 0':"
+    # The TLS upgrade (compiler-side parser in #825; runtime-side flip
+    # queued as a follow-up gated on the next seed pin) replaces
+    # `internal global` with `internal thread_local global` without
+    # touching callers. Pin the current shape so the follow-up is the
+    # advertised one-line audit-able diff.
+    if ! grep -qE "^@global\.sfn_exception_frame_head_addr = internal global i64 0$" "$ll"; then
+        echo "[test]   missing '@global.sfn_exception_frame_head_addr = internal global i64 0':"
         grep -E "^@global\." "$ll" || true
         return 1
     fi

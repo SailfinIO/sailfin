@@ -40,3 +40,21 @@ fn record_temperature(value: float) -> float {
     temperature = value;
     return temperature;
 }
+
+// Helpers driven from the pthread C harness. Each pthread runs
+// `bump_n(N)` to increment the thread-local `head` N times; with
+// TLS isolation the return value equals N exactly, regardless of
+// what the sibling thread is doing. Without TLS the sibling
+// thread's increments leak in and the return value exceeds N on
+// at least one thread.
+fn bump_n(count: i64) -> i64 {
+    let mut i: i64 = 0;
+    loop {
+        if i >= count { break; }
+        head = head + 1;
+        i = i + 1;
+    }
+    return head;
+}
+
+fn read_head() -> i64 { return head; }
