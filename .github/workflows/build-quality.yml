@@ -71,11 +71,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     # `gate_name` is the stable suffix consumed by `notify-failure` to
-    # dedup regression issues. Empty string means "no gate failure was
-    # identifiable" (e.g. the job failed during seed setup or `make
-    # compile`); the failure-mode job treats that as a generic
-    # `build-setup` regression rather than letting the failure pass
-    # without a tracking issue.
+    # dedup regression issues. The `Identify failed gate` step always
+    # writes one of `determinism`, `cache-hit-rate`, or `build-setup`
+    # (the catch-all for failures upstream of the gates — seed setup,
+    # `make compile`, first pass) so main-branch breakage of the gate
+    # workflow itself still surfaces as a tracked regression rather
+    # than passing without one.
     outputs:
       gate_name: ${{ steps.identify_failed_gate.outputs.name }}
     steps:
@@ -214,11 +215,11 @@ jobs:
       # has to happen in the gate job (only it can see per-step
       # `conclusion`), and the result is exported as a job output so the
       # downstream `notify-failure` job can open or append the right
-      # dedup'd regression issue. Empty `name` means the failure
-      # happened upstream of the gates (seed fetch, `make compile`,
-      # first pass) — `notify-failure` treats that as `build-setup` so
-      # main-branch breakage of the gate workflow itself still surfaces
-      # as a tracked regression.
+      # dedup'd regression issue. When neither gate step ran (the
+      # failure happened upstream — seed fetch, `make compile`, first
+      # pass) the catch-all `build-setup` suffix is emitted so
+      # main-branch breakage of the workflow itself still surfaces as
+      # a tracked regression.
       - name: Identify failed gate
         id: identify_failed_gate
         if: failure()
@@ -305,7 +306,10 @@ jobs:
           excerpt_file="excerpt.md"
           : > "$excerpt_file"
           gate="${GATE_NAME:-build-setup}"
-          pass1="build-quality-passes/pass1.json"
+          # Only pass2.json contributes to the embedded excerpt
+          # (determinism diff lives there, and so does the BuildReport
+          # the hit-rate gate reads from). pass1.json is still
+          # uploaded as a workflow artifact for offline triage.
           pass2="build-quality-passes/pass2.json"
           case "$gate" in
             determinism)
