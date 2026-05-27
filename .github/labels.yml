@@ -163,6 +163,9 @@ labels:
   - name: seed-blocker
     color: "b60205"
     description: "Must close before the next seed binary is cut"
+  - name: build-quality-regression
+    color: "b60205"
+    description: "Auto-filed by build-quality.yml on gate failure; dedup anchor"
 
   # --- Release gating --------------------------------------------------
   # Intent labels consumed by `/release`. The single uncurated combo is

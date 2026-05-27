@@ -70,6 +70,14 @@ jobs:
     name: Build quality (linux-x86_64)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    # `gate_name` is the stable suffix consumed by `notify-failure` to
+    # dedup regression issues. Empty string means "no gate failure was
+    # identifiable" (e.g. the job failed during seed setup or `make
+    # compile`); the failure-mode job treats that as a generic
+    # `build-setup` regression rather than letting the failure pass
+    # without a tracking issue.
+    outputs:
+      gate_name: ${{ steps.identify_failed_gate.outputs.name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -145,6 +153,7 @@ jobs:
           jq -s '.[0].cache' pass1.json
 
       - name: Determinism gate (sfn build --check-determinism)
+        id: determinism_gate
         shell: bash
         run: |
           set -euo pipefail
@@ -182,6 +191,7 @@ jobs:
           jq -s '.[] | select(.check == "determinism")' pass2.json
 
       - name: Cache hit-rate gate (>= 0.95 on warm second pass)
+        id: hit_rate_gate
         shell: bash
         run: |
           set -euo pipefail
@@ -199,3 +209,223 @@ jobs:
             exit 1
           fi
           echo "[hit-rate] gate passed"
+
+      # Failure-mode wiring (issue #782). Identifying which gate failed
+      # has to happen in the gate job (only it can see per-step
+      # `conclusion`), and the result is exported as a job output so the
+      # downstream `notify-failure` job can open or append the right
+      # dedup'd regression issue. Empty `name` means the failure
+      # happened upstream of the gates (seed fetch, `make compile`,
+      # first pass) — `notify-failure` treats that as `build-setup` so
+      # main-branch breakage of the gate workflow itself still surfaces
+      # as a tracked regression.
+      - name: Identify failed gate
+        id: identify_failed_gate
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.determinism_gate.conclusion }}" = "failure" ]; then
+            echo "name=determinism" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.hit_rate_gate.conclusion }}" = "failure" ]; then
+            echo "name=cache-hit-rate" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=build-setup" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Upload both pass artifacts on failure so `notify-failure` can
+      # embed a diff excerpt in the regression-issue body. The action
+      # tolerates missing files (e.g. failure before pass1 ran) via
+      # `if-no-files-found: warn`.
+      - name: Upload pass artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-quality-passes
+          path: |
+            pass1.json
+            pass2.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # Failure-mode job (issue #782). Runs only when `build-quality` fails.
+  # Elevated permissions are scoped to this job alone so the gate job
+  # itself stays `contents: read` (architect verdict on #339 Q4).
+  #
+  # Responsibilities:
+  #   1. Open or append a dedup'd regression issue tagged
+  #      `priority:critical`, `area:architecture`, and the stable marker
+  #      `build-quality-regression`. Title prefix
+  #      `build-quality regression:` + gate-name suffix lets later runs
+  #      append a comment rather than open a duplicate.
+  #   2. On `push: main` only, look up the merging PR (`/commits/{sha}/
+  #      pulls`) and post a comment linking the regression issue + the
+  #      failing run. `schedule:` and `workflow_dispatch:` runs are not
+  #      tied to a single merging PR, so they skip the PR side-effect.
+  #
+  # Triage runbook lives at `docs/runbooks/build-quality.md`.
+  notify-failure:
+    name: Open regression issue + PR comment on failure
+    needs: build-quality
+    if: failure() && needs.build-quality.result == 'failure'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    env:
+      GATE_NAME: ${{ needs.build-quality.outputs.gate_name }}
+      FAIL_SHA: ${{ github.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      EVENT_NAME: ${{ github.event_name }}
+      REF: ${{ github.ref }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download pass artifacts (best-effort)
+        uses: actions/download-artifact@v4
+        with:
+          name: build-quality-passes
+          path: build-quality-passes
+        continue-on-error: true
+
+      - name: Build diff excerpt
+        id: excerpt
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Cap the embedded diff at ~50 lines per issue scope. The full
+          # JSON is preserved as the workflow artifact (14-day retention),
+          # so triage can pull the rest from there. Markers below let the
+          # next run's dedup-append step trim or re-render the excerpt.
+          excerpt_file="excerpt.md"
+          : > "$excerpt_file"
+          gate="${GATE_NAME:-build-setup}"
+          pass1="build-quality-passes/pass1.json"
+          pass2="build-quality-passes/pass2.json"
+          case "$gate" in
+            determinism)
+              echo "<!-- gate:determinism -->" >> "$excerpt_file"
+              echo '```json' >> "$excerpt_file"
+              if [ -f "$pass2" ]; then
+                # The determinism object is the second JSON value in
+                # pass2.json (the first is the outer BuildReport).
+                jq -s '.[] | select(.check == "determinism")' "$pass2" \
+                  | head -n 50 >> "$excerpt_file" || true
+              else
+                echo "(pass2.json artifact missing — see job log)" >> "$excerpt_file"
+              fi
+              echo '```' >> "$excerpt_file"
+              ;;
+            cache-hit-rate)
+              echo "<!-- gate:cache-hit-rate -->" >> "$excerpt_file"
+              echo '```json' >> "$excerpt_file"
+              if [ -f "$pass2" ]; then
+                jq -s '.[0].cache' "$pass2" | head -n 50 >> "$excerpt_file" || true
+              else
+                echo "(pass2.json artifact missing — see job log)" >> "$excerpt_file"
+              fi
+              echo '```' >> "$excerpt_file"
+              ;;
+            *)
+              echo "<!-- gate:build-setup -->" >> "$excerpt_file"
+              echo "_No gate-level diff captured: the failure occurred before either gate ran (seed fetch, \`make compile\`, or first-pass build)._" >> "$excerpt_file"
+              ;;
+          esac
+          echo "file=$excerpt_file" >> "$GITHUB_OUTPUT"
+          echo "gate=$gate" >> "$GITHUB_OUTPUT"
+
+      - name: Open or append regression issue
+        id: regression_issue
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate="${{ steps.excerpt.outputs.gate }}"
+          title="build-quality regression: ${gate}"
+          excerpt="$(cat "${{ steps.excerpt.outputs.file }}")"
+
+          # Dedup anchor is the `build-quality-regression` label plus
+          # exact title equality. List all open issues with the marker
+          # label and filter by title in jq — that avoids both gh's
+          # quoting quirks around `--search "in:title ..."` and the
+          # risk of a substring match shadowing a sibling gate's issue.
+          existing="$(gh issue list \
+            --repo "$REPO" \
+            --state open \
+            --label build-quality-regression \
+            --limit 100 \
+            --json number,title \
+            --jq "[.[] | select(.title == \"${title}\")] | .[0].number // empty")"
+
+          {
+            echo "**Failure run:** ${RUN_URL}"
+            echo "**Commit:** \`${FAIL_SHA}\`"
+            echo "**Event:** \`${EVENT_NAME}\` on \`${REF}\`"
+            echo "**Gate:** \`${gate}\`"
+            echo ""
+            echo "${excerpt}"
+          } > regression-body.md
+
+          if [ -n "$existing" ]; then
+            echo "[notify] appending comment to existing regression issue #${existing}"
+            gh issue comment "$existing" --repo "$REPO" --body-file regression-body.md
+            echo "number=$existing" >> "$GITHUB_OUTPUT"
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          else
+            # New issue: full body starts with the human-readable
+            # description, then the per-failure block above.
+            {
+              echo "# build-quality regression: ${gate}"
+              echo ""
+              echo "The \`build-quality.yml\` gate failed on \`${gate}\`. This issue tracks the regression and aggregates additional failures via comments — see \`docs/runbooks/build-quality.md\` for the triage runbook (reproduce locally, bisect, file a \`seed-blocker\`-labeled fix issue)."
+              echo ""
+              echo "## Latest failure"
+              echo ""
+              cat regression-body.md
+            } > regression-new-body.md
+            new_number="$(gh issue create \
+              --repo "$REPO" \
+              --title "$title" \
+              --label "priority:critical" \
+              --label "area:architecture" \
+              --label "build-quality-regression" \
+              --body-file regression-new-body.md \
+              | awk -F/ '/^https:/{print $NF}')"
+            echo "[notify] opened new regression issue #${new_number}"
+            echo "number=$new_number" >> "$GITHUB_OUTPUT"
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Per scope: PR comment only on `push: main` events. Schedule and
+      # manual dispatches aren't tied to a single merging PR.
+      - name: Comment on merging PR
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_number="${{ steps.regression_issue.outputs.number }}"
+          # `/commits/{sha}/pulls` returns every PR the commit appears
+          # in; for a merge to main the first entry is the merging PR.
+          # gh exits 0 even when the array is empty, so guard against
+          # missing data instead of relying on exit codes.
+          pr_number="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPO}/commits/${FAIL_SHA}/pulls" \
+            --jq '.[0].number // empty')"
+          if [ -z "$pr_number" ]; then
+            echo "[notify] no merging PR found for ${FAIL_SHA}; skipping PR comment"
+            exit 0
+          fi
+          echo "[notify] commenting on merging PR #${pr_number}"
+          {
+            echo "build-quality gate failed on this merge: \`${GATE_NAME:-build-setup}\`."
+            echo ""
+            echo "- Tracking issue: #${issue_number}"
+            echo "- Failing run: ${RUN_URL}"
+            echo "- Runbook: \`docs/runbooks/build-quality.md\`"
+          } > pr-comment.md
+          gh pr comment "$pr_number" --repo "$REPO" --body-file pr-comment.md
