@@ -441,9 +441,7 @@ These variables enable verbose runtime diagnostics. They are intended for compil
 
 | Variable | Description |
 |---|---|
-| `SAILFIN_TRACE_ARGV` | Print the argument vector received by the native driver on startup. |
-| `SAILFIN_TRACE_EMIT_LLVM` | Trace LLVM IR emission. |
-| `SAILFIN_TRACE_EMIT_LLVM_PATH` | Write emitted LLVM IR to the given file path. |
+| `SAILFIN_TRACE_ARGV` | Print the argument vector received by `sailfin_cli_main` on startup (honored by the Sailfin entry point in `compiler/src/cli_main.sfn`). |
 | `SAILFIN_TRACE_CRASH` | Enable extended crash diagnostics. |
 | `SAILFIN_TRACE_ALLOC_STATS` | Print allocation statistics on exit. |
 | `SAILFIN_TRACE_LARGE_ARRAY_BACKTRACE` | Capture backtraces for unusually large array allocations. |
