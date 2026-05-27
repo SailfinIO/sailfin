@@ -1,0 +1,23 @@
+# Hardcoded `@sailfin_runtime_*` call-site emissions that bypass the
+# runtime descriptor registry in `compiler/src/llvm/runtime_helpers.sfn`.
+#
+# Issue #727 pins this allowlist so any future descriptor flip that
+# changes a `native_signature` for one of these symbols will fail
+# `test_lowering_no_bare_runtime_emissions.sh` until the bypass is
+# updated in lockstep. Line numbers are intentionally pinned — a
+# moved call site forces the author to re-justify the bypass.
+#
+# Each entry: `<repo-relative path>:<line>:<full source line>`.
+# Every allowlist entry must carry a one-line `// Registry bypass: …`
+# comment immediately above the call site in the source. If you remove
+# an entry, also delete the bypass comment.
+#
+# To remove an entry from the allowlist:
+#   1. Register the helper in `runtime_helpers.sfn` (add a descriptor).
+#   2. Either route the emission through `emit_runtime_call` (the M1.7
+#      dispatch path) or read `effective_symbol` off the descriptor
+#      (see `rendering.sfn` / `core_call_emission.sfn`).
+#   3. Delete the bypass comment AND the allowlist line in the same PR.
+
+compiler/src/llvm/lowering/emission.sfn:616:            wrapper_lines.push("  %argv_arr_i8 = call i8* @sailfin_runtime_argv_to_string_array(i32 %argc, i8** %argv)");
+compiler/src/llvm/lowering/emission.sfn:687:        wrapper_lines.push("  call void @sailfin_runtime_panic_emit(i8* %msg)");
