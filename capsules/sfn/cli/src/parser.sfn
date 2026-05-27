@@ -1,21 +1,33 @@
-// sfn/cli — argv parser (exiting variant).
+// sfn/cli — argv parser.
 //
-// `run()` walks `argv` against a `Command` definition, returning a
-// populated `Matches`. Built-in `--help`/`-h` and `--version`/`-V`
-// are recognised and trigger `process.exit(0)`. Unknown flags,
-// missing values, and missing required positionals print to stderr
-// and `process.exit(2)`.
+// `parse()` is the pure, non-exiting workhorse: it walks `argv`
+// against a `Command` definition and returns a `ParseResult` for
+// every input. It never calls `process.exit()` and never prints. Help
+// and version requests are reported as `ParseError.kind ==
+// "help_requested"` / `"version_requested"`; parse failures are
+// reported as `"unknown_flag"`, `"missing_value"`,
+// `"unexpected_positional"`, or `"missing_required"`.
 //
-// A non-exiting `parse()` variant is planned for Phase 1 (Issue 1.1).
+// `run()` is the historical exiting variant kept for binary entry
+// points. It now delegates to `parse()` and applies the print +
+// `process.exit()` policy:
+//   * `--help`/`-h` -> print help, exit 0
+//   * `--version`/`-V` -> print version, exit 0
+//   * parse failures -> print to stderr, exit 2
+// Its observable behavior (stderr text, exit codes) is byte-identical
+// to the pre-`parse()` implementation.
 import { _format_help } from "./help";
-import { Command, Flag, Matches } from "./types";
+import {
+    Command,
+    Flag,
+    Matches,
+    ParseError,
+    ParseResult
+} from "./types";
 
-fn run(cmd: Command, argv: string[]) -> Matches ![io] {
-    // Parse command-line arguments against the command definition.
-    // Prints help/version and exits when --help/-h or --version/-V is given.
-    // Prints an error and exits with code 2 on invalid input.
-    // Note: this function calls process.exit() directly and cannot be
-    // wrapped in try/catch for error recovery.
+fn parse(cmd: Command, argv: string[]) -> ParseResult {
+    // Pure, non-exiting argv parser. Returns a ParseResult that
+    // describes either successful matches or a structured error.
     let mut pos_names: string[] = [];
     let mut pos_values: string[] = [];
     let mut fl_names: string[] = [];
@@ -43,38 +55,20 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
         }
     }
 
-    // Resolve which command definition to parse against.
     let active = _resolve_active(cmd, subcmd_name);
 
-    // Build the help hint command string.
-    let help_cmd = _help_hint(cmd.name, subcmd_name);
-
-    // Parse remaining args.
     let mut pos_idx: int = 0;
     loop {
         if idx >= argv.length { break; }
         let token = argv[idx];
 
-        // Check built-in flags.
+        // Built-in flags surface as non-ok results so the caller can
+        // decide how to render help/version.
         if strings_equal(token, "--help") || strings_equal(token, "-h") {
-            if subcmd_name.length > 0 {
-                print(_format_help(active, cmd.name + " " + subcmd_name));
-            } else { print(_format_help(cmd, cmd.name)); }
-            process.exit(0);
+            return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "help_requested", "", "", "");
         }
         if strings_equal(token, "--version") || strings_equal(token, "-V") {
-            if subcmd_name.length > 0 {
-                if active.version.length > 0 {
-                    print(cmd.name + " " + subcmd_name + " " + active.version);
-                } else if cmd.version.length > 0 {
-                    print(cmd.name + " " + subcmd_name + " " + cmd.version);
-                } else { print(cmd.name + " " + subcmd_name); }
-            } else {
-                if cmd.version.length > 0 {
-                    print(cmd.name + " " + cmd.version);
-                } else { print(cmd.name); }
-            }
-            process.exit(0);
+            return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "version_requested", "", "", "");
         }
 
         if _starts_with(token, "--") {
@@ -82,17 +76,17 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
             let flag_name = substring(token, 2, token.length);
             let f = _find_flag_long(active, flag_name);
             if f.long_name.length == 0 {
-                print.err("error: unknown flag --" + flag_name);
-                print.err("run '" + help_cmd + "' for usage");
-                process.exit(2);
+                return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_flag", "error: unknown flag --"
+                    + flag_name, flag_name, "");
             }
             fl_names.push(f.long_name);
             fl_present.push(true);
             if f.takes_value {
                 idx += 1;
                 if idx >= argv.length {
-                    print.err("error: flag --" + flag_name + " requires a value");
-                    process.exit(2);
+                    return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_value", "error: flag --"
+                        + flag_name
+                        + " requires a value", flag_name, "");
                 }
                 fl_values.push(argv[idx]);
             } else { fl_values.push("true"); }
@@ -101,17 +95,17 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
             let short = substring(token, 1, token.length);
             let f = _find_flag_short(active, short);
             if f.long_name.length == 0 {
-                print.err("error: unknown flag -" + short);
-                print.err("run '" + help_cmd + "' for usage");
-                process.exit(2);
+                return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_flag", "error: unknown flag -"
+                    + short, short, "");
             }
             fl_names.push(f.long_name);
             fl_present.push(true);
             if f.takes_value {
                 idx += 1;
                 if idx >= argv.length {
-                    print.err("error: flag -" + short + " requires a value");
-                    process.exit(2);
+                    return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_value", "error: flag -"
+                        + short
+                        + " requires a value", short, "");
                 }
                 fl_values.push(argv[idx]);
             } else { fl_values.push("true"); }
@@ -122,15 +116,15 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
                 pos_values.push(token);
                 pos_idx += 1;
             } else {
-                print.err("error: unexpected argument '" + token + "'");
-                print.err("run '" + help_cmd + "' for usage");
-                process.exit(2);
+                return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "unexpected_positional", "error: unexpected argument '"
+                    + token
+                    + "'", "", token);
             }
         }
         idx += 1;
     }
 
-    // Validate required positional arguments.
+    // Validate required positional arguments and fill optional defaults.
     loop {
         if pos_idx >= active.args.length { break; }
         let a = active.args[pos_idx];
@@ -138,14 +132,14 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
             pos_names.push(a.name);
             pos_values.push(a.default_value);
         } else {
-            print.err("error: missing required argument <" + a.name + ">");
-            print.err("run '" + help_cmd + "' for usage");
-            process.exit(2);
+            return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_required", "error: missing required argument <"
+                + a.name
+                + ">", "", a.name);
         }
         pos_idx += 1;
     }
 
-    return Matches {
+    let matches = Matches {
         command_name: cmd.name,
         subcommand_name: subcmd_name,
         positional_names: pos_names,
@@ -153,6 +147,83 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
         flag_names: fl_names,
         flag_values: fl_values,
         flag_present: fl_present
+    };
+    return ParseResult { ok: true, matches: matches, error: _ok_error() };
+}
+
+fn run(cmd: Command, argv: string[]) -> Matches ![io] {
+    // Exiting wrapper around `parse()`. Prints help/version and exits
+    // when --help/-h or --version/-V is given. Prints an error and
+    // exits with code 2 on invalid input. Cannot be wrapped in
+    // try/catch for error recovery — use `parse()` for that.
+    let result = parse(cmd, argv);
+    if result.ok { return result.matches; }
+
+    let subcmd_name = result.matches.subcommand_name;
+    let active = _resolve_active(cmd, subcmd_name);
+    let help_cmd = _help_hint(cmd.name, subcmd_name);
+    let kind = result.error.kind;
+
+    if strings_equal(kind, "help_requested") {
+        if subcmd_name.length > 0 {
+            print(_format_help(active, cmd.name + " " + subcmd_name));
+        } else { print(_format_help(cmd, cmd.name)); }
+        process.exit(0);
+    }
+    if strings_equal(kind, "version_requested") {
+        if subcmd_name.length > 0 {
+            if active.version.length > 0 {
+                print(cmd.name + " " + subcmd_name + " " + active.version);
+            } else if cmd.version.length > 0 {
+                print(cmd.name + " " + subcmd_name + " " + cmd.version);
+            } else { print(cmd.name + " " + subcmd_name); }
+        } else {
+            if cmd.version.length > 0 {
+                print(cmd.name + " " + cmd.version);
+            } else { print(cmd.name); }
+        }
+        process.exit(0);
+    }
+
+    // Parse failure: print the structured error message, then a help
+    // hint for everything except missing_value (which historically
+    // omitted the hint).
+    print.err(result.error.message);
+    if !strings_equal(kind, "missing_value") {
+        print.err("run '" + help_cmd + "' for usage");
+    }
+    process.exit(2);
+    return result.matches;
+}
+
+fn _ok_error() -> ParseError {
+    return ParseError {
+        kind: "ok",
+        message: "",
+        flag_name: "",
+        arg_name: ""
+    };
+}
+
+fn _err_result(command_name: string, subcommand_name: string, pos_names: string[], pos_values: string[], fl_names: string[], fl_values: string[], fl_present: boolean[], kind: string, message: string, flag_name: string, arg_name: string) -> ParseResult {
+    let matches = Matches {
+        command_name: command_name,
+        subcommand_name: subcommand_name,
+        positional_names: pos_names,
+        positional_values: pos_values,
+        flag_names: fl_names,
+        flag_values: fl_values,
+        flag_present: fl_present
+    };
+    return ParseResult {
+        ok: false,
+        matches: matches,
+        error: ParseError {
+            kind: kind,
+            message: message,
+            flag_name: flag_name,
+            arg_name: arg_name
+        }
     };
 }
 

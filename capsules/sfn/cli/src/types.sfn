@@ -34,3 +34,35 @@ struct Matches {
     flag_values: string[];
     flag_present: boolean[];
 }
+
+// ParseError describes why `parse()` did not return successful matches.
+//
+// `kind` is one of: "ok", "help_requested", "version_requested",
+// "unknown_flag", "missing_value", "unexpected_positional",
+// "missing_required". String discriminants are used until proper sum
+// types land post-1.0.
+//
+// `message` carries the human-readable text that `run()` would print
+// to stderr (empty for "help_requested" / "version_requested", where
+// `run()` formats the help/version output itself).
+//
+// `flag_name` / `arg_name` carry the offending name when applicable,
+// otherwise empty.
+struct ParseError {
+    kind: string;
+    message: string;
+    flag_name: string;
+    arg_name: string;
+}
+
+// ParseResult is the non-exiting return shape of `parse()`. On success
+// `ok` is true and `matches` is the parsed `Matches`; on any other
+// outcome (including help/version requests) `ok` is false and `error`
+// describes what happened. `matches` still reflects whatever was
+// accumulated before the early exit so callers can inspect partial
+// state.
+struct ParseResult {
+    ok: boolean;
+    matches: Matches;
+    error: ParseError;
+}
