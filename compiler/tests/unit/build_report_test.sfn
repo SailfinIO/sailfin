@@ -112,6 +112,107 @@ test "build_report_to_json: cache_enabled false serializes literally" {
     assert _contains(json, "\"enabled\":false");
 }
 
+// --------------------------------------------------------------
+// cache.hit_rate — additive derived field (#780)
+// --------------------------------------------------------------
+// JSON gains a `cache.hit_rate` numeric so CI gates can do
+// `jq '.cache.hit_rate >= 0.80'` without recomputing from
+// counters. Schema stays at "1" because the field is purely
+// additive (RFC 8259 "unknown trailing fields ignored").
+test "build_report_to_json: cache.hit_rate populated for typical mix" {
+    let mut r = empty_build_report();
+    // 78% hit rate — picked so the four-digit format is unambiguous.
+    r.cache = CacheStats {
+        hits: 78,
+        misses: 22,
+        stores: 22,
+        invalid_keys: 0,
+        copy_failures: 0
+    };
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"hit_rate\":0.7800");
+}
+
+test "build_report_to_json: cache.hit_rate zero denominator emits 0.0000" {
+    // No cache activity at all — denominator is zero. Field must
+    // be a JSON number (not null) and must not raise a division
+    // error. Acceptance criterion from the issue body.
+    let json = build_report_to_json(empty_build_report());
+    assert _contains(json, "\"hit_rate\":0.0000");
+}
+
+test "build_report_to_json: cache.hit_rate saturated cache emits 1.0000" {
+    let mut r = empty_build_report();
+    r.cache = CacheStats {
+        hits: 7,
+        misses: 0,
+        stores: 0,
+        invalid_keys: 0,
+        copy_failures: 0
+    };
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"hit_rate\":1.0000");
+}
+
+test "build_report_to_json: cache.hit_rate all-misses emits 0.0000" {
+    let mut r = empty_build_report();
+    r.cache = CacheStats {
+        hits: 0,
+        misses: 5,
+        stores: 0,
+        invalid_keys: 0,
+        copy_failures: 0
+    };
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"hit_rate\":0.0000");
+}
+
+test "build_report_to_json: cache.hit_rate pads small fractions to four digits" {
+    let mut r = empty_build_report();
+    // 1/1000 = 0.001 — exercises the leading-zero padding path.
+    r.cache = CacheStats {
+        hits: 1,
+        misses: 999,
+        stores: 0,
+        invalid_keys: 0,
+        copy_failures: 0
+    };
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"hit_rate\":0.0010");
+}
+
+test "build_report_to_json: cache.hit_rate truncates toward zero" {
+    let mut r = empty_build_report();
+    // 2/3 = 0.6666… — truncation (not rounding) matches the floor
+    // semantics CI gates use when comparing against a threshold.
+    r.cache = CacheStats {
+        hits: 2,
+        misses: 1,
+        stores: 0,
+        invalid_keys: 0,
+        copy_failures: 0
+    };
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"hit_rate\":0.6666");
+}
+
+test "build_report_to_json: schema_version stays at '1' after hit_rate addition" {
+    // Acceptance criterion: schema_version must remain "1" because
+    // adding a field is not a breaking change. Lock it in so a
+    // future edit that bumps the version trips this test.
+    let mut r = empty_build_report();
+    r.cache = CacheStats {
+        hits: 3,
+        misses: 1,
+        stores: 1,
+        invalid_keys: 0,
+        copy_failures: 0
+    };
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"schema_version\":\"1\"");
+    assert _contains(json, "\"hit_rate\":0.7500");
+}
+
 test "build_report_to_json: deps.count matches array length" {
     let mut r = empty_build_report();
     r.dep_ll_paths = ["a.ll", "b.ll", "c.ll"];

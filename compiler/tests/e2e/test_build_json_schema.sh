@@ -115,6 +115,19 @@ test_cold_cache_stats() {
 }
 run_test "cold build cache stats: hits=0 misses=1 stores=1 enabled=true" test_cold_cache_stats
 
+# ---- Test 4b: cold build hit_rate is numeric (0 / 1 = 0.0) ----
+# Issue #780: jq must read .cache.hit_rate as a number, never null
+# and never a division error. Cold build has misses=1 hits=0, so
+# the rate is exactly 0.0.
+test_cold_hit_rate_numeric() {
+    local raw
+    raw=$(jq -r .cache.hit_rate "$SCRATCH/cold.json")
+    [ "$raw" != "null" ] || return 1
+    # `jq -r number` canonicalises 0.0000 → 0; assert it parses as 0.
+    [ "$(jq -r '.cache.hit_rate == 0' "$SCRATCH/cold.json")" = "true" ]
+}
+run_test "cold build .cache.hit_rate is numeric and equal to 0" test_cold_hit_rate_numeric
+
 # ---- Test 5: deps.count matches deps.ll_paths.length ----
 test_deps_consistency() {
     local count
@@ -179,8 +192,10 @@ test_warm_cache_hit() {
     jq . "$SCRATCH/warm.json" > /dev/null 2>&1 || return 1
     [ "$(jq -r .cache.hits "$SCRATCH/warm.json")" = "1" ] || return 1
     [ "$(jq -r .cache.misses "$SCRATCH/warm.json")" = "0" ] || return 1
+    # #780: warm cache is fully saturated (1 hit, 0 misses) → 1.0.
+    [ "$(jq -r '.cache.hit_rate == 1' "$SCRATCH/warm.json")" = "true" ] || return 1
 }
-run_test "warm build cache.hits=1 misses=0" test_warm_cache_hit
+run_test "warm build cache.hits=1 misses=0 hit_rate=1.0" test_warm_cache_hit
 
 # ---- Test 9: --no-cache + --json composes ----
 test_json_with_no_cache() {
@@ -199,8 +214,13 @@ test_json_with_no_cache() {
     [ "$(jq -r .cache.misses "$SCRATCH/no_cache.json")" = "0" ] || return 1
     [ "$(jq -r .cache.stores "$SCRATCH/no_cache.json")" = "0" ] || return 1
     [ "$(jq -r .cache.enabled "$SCRATCH/no_cache.json")" = "false" ] || return 1
+    # #780: zero-denominator path must emit a numeric 0.0, not null.
+    local rate
+    rate=$(jq -r .cache.hit_rate "$SCRATCH/no_cache.json")
+    [ "$rate" != "null" ] || return 1
+    [ "$(jq -r '.cache.hit_rate == 0' "$SCRATCH/no_cache.json")" = "true" ] || return 1
 }
-run_test "sfn build --json --no-cache: counters all zero, enabled=false" test_json_with_no_cache
+run_test "sfn build --json --no-cache: counters all zero, enabled=false, hit_rate=0.0" test_json_with_no_cache
 
 # ---- Summary ----
 echo ""

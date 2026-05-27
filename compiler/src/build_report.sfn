@@ -43,7 +43,8 @@ import { substring } from "./string_utils";
 //     "invalid_keys": 0,
 //     "copy_failures": 0,
 //     "root": "build/cache/v1",
-//     "enabled": true
+//     "enabled": true,
+//     "hit_rate": 0.7500
 //   },
 //   "deps": {
 //     "count": 1,
@@ -64,6 +65,17 @@ import { substring } from "./string_utils";
 // produce legacy paths in this field. Field shape is unchanged
 // (string array of file paths); a *shape* change (entries become
 // objects, etc.) would require a v2.
+//
+// `cache.hit_rate` is a derived field computed as
+// `hits / (hits + misses)`, formatted with four fractional
+// digits (e.g. `0.9783`). Emitted last inside the cache
+// object so the addition is purely additive — consumers
+// reading by name keep working, and the field appears after
+// every counter so jq predicates like `.cache.hit_rate` work
+// without schema-version coordination. Zero-denominator case
+// (no lookups attempted) renders as `0.0000`, never `null`
+// and never a division error. `schema_version` stays at "1"
+// since the surface gains a field rather than reshaping one.
 //
 // `diagnostics` is reserved for future structured link errors
 // (proposal §4.11). Empty array today; consumers should treat
@@ -202,6 +214,34 @@ fn _br_json_string_array(values: string[]) -> string {
     return out + "]";
 }
 
+// Format `hits / (hits + misses)` as a JSON-number literal with
+// four fractional digits. Pure integer arithmetic: the compiler's
+// `+ string` concat path doesn't auto-stringify floats, and a
+// hand-rolled `%.15g` here would diverge from the per-build
+// determinism contract (#779). Truncates toward zero rather
+// than rounding — matches the floor semantics CI gates use when
+// comparing against a threshold like `>= 0.80`.
+//
+// Zero denominator (no lookups attempted) emits `0.0000`, not
+// `null` and not `nan`. Saturated cache (only hits, no misses)
+// emits `1.0000`.
+fn _br_format_hit_rate(hits: int, misses: int) -> string {
+    let denom: int = hits + misses;
+    if denom == 0 { return "0.0000"; }
+    // `int / int` widens to float in Sailfin; `as int` truncates
+    // back so the scaled value is a clean 0..10000 integer.
+    let scaled_float: float = (hits * 10000) / denom;
+    let mut scaled: int = scaled_float as int;
+    if scaled >= 10000 { return "1.0000"; }
+    if scaled < 0 { scaled = 0; }
+    let mut frac = _br_number_to_string(scaled);
+    loop {
+        if frac.length >= 4 { break; }
+        frac = "0" + frac;
+    }
+    return "0." + frac;
+}
+
 fn _br_json_cache_object(stats: CacheStats, root: string, enabled: boolean) -> string {
     return "{" + _br_json_number_field("hits", stats.hits) + ","
         + _br_json_number_field("misses", stats.misses)
@@ -215,6 +255,8 @@ fn _br_json_cache_object(stats: CacheStats, root: string, enabled: boolean) -> s
         + _br_json_string_field("root", root)
         + ","
         + _br_json_bool_field("enabled", enabled)
+        + ","
+        + _br_json_field("hit_rate", _br_format_hit_rate(stats.hits, stats.misses))
         + "}";
 }
 
