@@ -6,6 +6,7 @@
 import {
     Block,
     EnumVariant,
+    Expression,
     FieldDeclaration,
     FunctionSignature,
     MethodDeclaration,
@@ -181,7 +182,12 @@ fn check_program_scopes(program: Program, interfaces: Statement[]) -> Diagnostic
 // level and recursive same-frame callers pass it through unchanged.
 fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: Statement[], scope_start: int) -> ScopeResult {
     if statement.variant == "VariableDeclaration" {
-        return register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start);
+        let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start);
+        let walk_diags = walk_expression(statement.initializer, bindings);
+        return ScopeResult {
+            bindings: registration.bindings,
+            diagnostics: registration.diagnostics.concat(walk_diags)
+        };
     }
     if statement.variant == "FunctionDeclaration" {
         let registration = register_local_symbol(bindings, statement.signature.name, "function", statement.signature.name_span, scope_start);
@@ -342,9 +348,11 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         };
     }
     if statement.variant == "ForStatement" {
+        let iter_diags = walk_expression(statement.clause.iterable, bindings);
+        let body_diags = check_block(statement.body, bindings, interfaces);
         return ScopeResult {
             bindings: bindings,
-            diagnostics: check_block(statement.body, bindings, interfaces)
+            diagnostics: iter_diags.concat(body_diags)
         };
     }
     if statement.variant == "MatchStatement" {
@@ -353,6 +361,8 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         loop {
             if index >= statement.cases.length { break; }
             let case = statement.cases[index];
+            diagnostics = diagnostics.concat(walk_expression(case.pattern, bindings));
+            diagnostics = diagnostics.concat(walk_expression(case.guard, bindings));
             let _blk_diags = check_block(case.body, bindings, interfaces);
             let mut _ci: int = 0;
             loop {
@@ -365,7 +375,8 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         return ScopeResult { bindings: bindings, diagnostics: diagnostics };
     }
     if statement.variant == "IfStatement" {
-        let mut diagnostics = check_block(statement.then_block, bindings, interfaces);
+        let mut diagnostics = walk_expression(statement.condition, bindings);
+        diagnostics = diagnostics.concat(check_block(statement.then_block, bindings, interfaces));
         if statement.else_branch != null {
             let branch = statement.else_branch;
             if branch.body != null {
@@ -408,6 +419,18 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         return ScopeResult {
             bindings: registration.bindings,
             diagnostics: diagnostics
+        };
+    }
+    if statement.variant == "ExpressionStatement" {
+        return ScopeResult {
+            bindings: bindings,
+            diagnostics: walk_expression(statement.expression, bindings)
+        };
+    }
+    if statement.variant == "ReturnStatement" {
+        return ScopeResult {
+            bindings: bindings,
+            diagnostics: walk_expression(statement.expression, bindings)
         };
     }
     if statement.variant == "Unknown" {
@@ -601,4 +624,172 @@ fn type_text_compatible(expected: string, got: string) -> boolean {
         if starts_with(expected, "fn(") { return true; }
     }
     return false;
+}
+
+// Expression walker — issue #809 (#616 sub-issue 1).
+//
+// The typechecker historically only visited statements; expression
+// positions (call arguments, return values, let-initializers, match
+// patterns, …) were invisible to it. This walker mirrors the structure
+// of `collect_effects_from_expression` in `effect_checker.sfn` so the
+// resolution pass in issue D can hook diagnostics onto the same
+// traversal points without touching the recursion shape.
+//
+// The walker is intentionally non-emitting in this issue: every variant
+// returns `[]`. Wiring it into `check_statement` here ensures the
+// pre-enforcement traversal is exercised by `make check`, so issue D
+// only adds the diagnostic logic and not the plumbing.
+fn walk_expression(expression: Expression?, bindings: SymbolEntry[]) -> Diagnostic[] {
+    if expression == null { return []; }
+    if expression.variant == "Call" {
+        let mut diagnostics = walk_expression(expression.callee, bindings);
+        let mut index: int = 0;
+        loop {
+            if index >= expression.arguments.length { break; }
+            diagnostics = diagnostics.concat(walk_expression(expression.arguments[index], bindings));
+            index += 1;
+        }
+        return diagnostics;
+    }
+    if expression.variant == "Binary" {
+        let mut diagnostics = walk_expression(expression.left, bindings);
+        diagnostics = diagnostics.concat(walk_expression(expression.right, bindings));
+        return diagnostics;
+    }
+    if expression.variant == "Unary" {
+        return walk_expression(expression.operand, bindings);
+    }
+    if expression.variant == "Member" {
+        return walk_expression(expression.object, bindings);
+    }
+    if expression.variant == "Index" {
+        let mut diagnostics = walk_expression(expression.sequence, bindings);
+        diagnostics = diagnostics.concat(walk_expression(expression.index, bindings));
+        return diagnostics;
+    }
+    if expression.variant == "Array" {
+        let mut diagnostics: Diagnostic[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= expression.elements.length { break; }
+            diagnostics = diagnostics.concat(walk_expression(expression.elements[index], bindings));
+            index += 1;
+        }
+        return diagnostics;
+    }
+    if expression.variant == "Object" {
+        let mut diagnostics: Diagnostic[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= expression.fields.length { break; }
+            diagnostics = diagnostics.concat(walk_expression(expression.fields[index].value, bindings));
+            index += 1;
+        }
+        return diagnostics;
+    }
+    if expression.variant == "Struct" {
+        let mut diagnostics: Diagnostic[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= expression.fields.length { break; }
+            diagnostics = diagnostics.concat(walk_expression(expression.fields[index].value, bindings));
+            index += 1;
+        }
+        return diagnostics;
+    }
+    if expression.variant == "Lambda" {
+        return walk_block_expressions(expression.body, bindings);
+    }
+    if expression.variant == "Range" {
+        let mut diagnostics = walk_expression(expression.start, bindings);
+        diagnostics = diagnostics.concat(walk_expression(expression.end, bindings));
+        return diagnostics;
+    }
+    if expression.variant == "Cast" {
+        return walk_expression(expression.operand, bindings);
+    }
+    return [];
+}
+
+// Walks expressions inside a block — used by `walk_expression`'s Lambda
+// branch so expression positions inside lambda bodies are visited too.
+// Top-level statement traversal still flows through `check_block` →
+// `check_statement`; this helper is only the expression-positions
+// recursion for lambda bodies (which `check_block` never descends into).
+fn walk_block_expressions(block: Block, bindings: SymbolEntry[]) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        diagnostics = diagnostics.concat(walk_statement_expressions(block.statements[index], bindings));
+        index += 1;
+    }
+    return diagnostics;
+}
+
+fn walk_statement_expressions(statement: Statement, bindings: SymbolEntry[]) -> Diagnostic[] {
+    if statement.variant == "ExpressionStatement" {
+        return walk_expression(statement.expression, bindings);
+    }
+    if statement.variant == "ReturnStatement" {
+        return walk_expression(statement.expression, bindings);
+    }
+    if statement.variant == "ThrowStatement" {
+        return walk_expression(statement.expression, bindings);
+    }
+    if statement.variant == "VariableDeclaration" {
+        return walk_expression(statement.initializer, bindings);
+    }
+    if statement.variant == "IfStatement" {
+        let mut diagnostics = walk_expression(statement.condition, bindings);
+        diagnostics = diagnostics.concat(walk_block_expressions(statement.then_block, bindings));
+        if statement.else_branch != null {
+            let branch = statement.else_branch;
+            if branch.body != null {
+                diagnostics = diagnostics.concat(walk_block_expressions(branch.body, bindings));
+            }
+            if branch.statement != null {
+                diagnostics = diagnostics.concat(walk_statement_expressions(branch.statement, bindings));
+            }
+        }
+        return diagnostics;
+    }
+    if statement.variant == "ForStatement" {
+        let mut diagnostics = walk_expression(statement.clause.iterable, bindings);
+        diagnostics = diagnostics.concat(walk_block_expressions(statement.body, bindings));
+        return diagnostics;
+    }
+    if statement.variant == "MatchStatement" {
+        let mut diagnostics: Diagnostic[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= statement.cases.length { break; }
+            let case = statement.cases[index];
+            diagnostics = diagnostics.concat(walk_expression(case.pattern, bindings));
+            diagnostics = diagnostics.concat(walk_expression(case.guard, bindings));
+            diagnostics = diagnostics.concat(walk_block_expressions(case.body, bindings));
+            index += 1;
+        }
+        return diagnostics;
+    }
+    if statement.variant == "WithStatement" {
+        return walk_block_expressions(statement.body, bindings);
+    }
+    if statement.variant == "LoopStatement" {
+        return walk_block_expressions(statement.body, bindings);
+    }
+    if statement.variant == "BlockStatement" {
+        return walk_block_expressions(statement.body, bindings);
+    }
+    if statement.variant == "TryStatement" {
+        let mut diagnostics = walk_block_expressions(statement.try_block, bindings);
+        if statement.catch_block != null {
+            diagnostics = diagnostics.concat(walk_block_expressions(statement.catch_block, bindings));
+        }
+        if statement.finally_block != null {
+            diagnostics = diagnostics.concat(walk_block_expressions(statement.finally_block, bindings));
+        }
+        return diagnostics;
+    }
+    return [];
 }

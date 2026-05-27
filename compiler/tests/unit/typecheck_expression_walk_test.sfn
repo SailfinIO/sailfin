@@ -1,0 +1,71 @@
+// Unit tests for the typecheck expression walker (issue #809).
+//
+// Issue #809 adds an `ExpressionStatement` branch to `check_statement`
+// and a `walk_expression` recursive visitor. The walker is intentionally
+// non-emitting in this issue — issue D (#616 sub-issue 4) will flip on
+// resolution diagnostics. These tests pin the pre-enforcement state:
+//
+//   * Walking is reached for expression-statement, return-value, and
+//     let-initializer positions (the walker no longer falls through to
+//     the silent no-op return at typecheck.sfn:430).
+//   * `typecheck_diagnostics` still reports zero unknown-identifier
+//     diagnostics for calls to names that don't resolve in scope, so
+//     the seed compiler's compile output is unchanged.
+//
+// When issue D lands these assertions are updated to expect the
+// resolution diagnostic (E0xxx, code TBD by issue D).
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _count_all(diagnostics: Diagnostic[]) -> int { return diagnostics.length; }
+
+test "typecheck walker: bare call expression statement emits no diagnostics" {
+    // `notarealfunction` is unbound; the walker reaches it but issue D
+    // hasn't enabled resolution yet, so this must still typecheck clean.
+    let source = "fn main() { notarealfunction(\"hi\"); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _count_all(diagnostics) == 0;
+}
+
+test "typecheck walker: call inside return value emits no diagnostics" {
+    let source = "fn main() -> number { return notarealfunction(); }";  // alias-coverage: legacy `-> number` retained until §3 reform lands
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _count_all(diagnostics) == 0;
+}
+
+test "typecheck walker: call in let initializer emits no diagnostics" {
+    let source = "fn main() { let x = notarealfunction(\"hi\"); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _count_all(diagnostics) == 0;
+}
+
+test "typecheck walker: nested call in argument emits no diagnostics" {
+    // Exercises walker recursion into `Call.arguments` — the walker
+    // visits both the outer call and the inner call, but neither emits.
+    let source = "fn main() { outer(inner(\"hi\")); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _count_all(diagnostics) == 0;
+}
+
+test "typecheck walker: call inside if condition emits no diagnostics" {
+    // Exercises the IfStatement branch addition that walks `condition`.
+    let source = "fn main() { if notarealfunction() { } }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _count_all(diagnostics) == 0;
+}
+
+test "typecheck walker: call inside lambda body emits no diagnostics" {
+    // Exercises the Lambda branch which descends into `body` via
+    // `walk_block_expressions`. The lambda body's ExpressionStatement
+    // must be reached by the walker.
+    let source = "fn main() { let f = () => { notarealfunction(); }; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _count_all(diagnostics) == 0;
+}
