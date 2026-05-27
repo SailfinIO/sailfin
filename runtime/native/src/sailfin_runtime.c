@@ -2051,7 +2051,7 @@ void sailfin_runtime_print_error(char *msg) { _print_line(stderr, "[error] ", ms
  * verbatim to the legacy `sailfin_runtime_print_*` entrypoints —
  * today's SfnString.data is NUL-terminated end-to-end (literal
  * lowering writes a trailing 0 past the byte payload, and the
- * arena-routed concat in `sfn_str_concat_arena` preserves the +1
+ * arena-routed concat in `sfn_str_concat` preserves the +1
  * NUL byte), so the legacy `char *`-consuming bodies remain
  * correct without a second formatting strategy. Once M2.4b/M2.8
  * length-aware print bodies arrive, the forwarding here retires
@@ -2461,24 +2461,10 @@ char **sailfin_runtime_get_environ(void)
     return environ;
 }
 
-/* M1.2 (#461): SfnString migration trampoline for string concatenation.
- * Mirrors the M2.4a wave-1 trampolines above (`sfn_str_len`, `sfn_str_eq`,
- * `sfn_str_slice`). The compiler's runtime_helpers.sfn registry now
- * carries `native_signature: "sfn_str_concat"` for `string.concat`, and
- * the hardcoded direct-emission sites in
- * `expression_lowering/native/{core_ops_lowering,core_strings}.sfn`
- * call `@sfn_str_concat` for fresh emission. Seed-built IR that still
- * targets `@sailfin_runtime_string_concat_v2` keeps linking through
- * the legacy entrypoint defined later in this file. */
-char *sfn_str_concat(SfnString a, SfnString b)
-{
-    return sailfin_runtime_string_concat_v2(a, b);
-}
-
 /* M2.4b (#398): arena-aware concat. The new compiler emits
- *   %t = call {i8*, i64} @sfn_str_concat_arena({i8*, i64} a,
- *                                              {i8*, i64} b,
- *                                              ptr @sfn_default_arena)
+ *   %t = call {i8*, i64} @sfn_str_concat({i8*, i64} a,
+ *                                        {i8*, i64} b,
+ *                                        ptr @sfn_default_arena)
  *   %p = extractvalue {i8*, i64} %t, 0
  * at every `let s = a + b` site. The third argument is the
  * address of the global pointer `sfn_default_arena` (declared
@@ -2491,11 +2477,15 @@ char *sfn_str_concat(SfnString a, SfnString b)
  * the result as a C string), memcpy both payloads, write the
  * trailing NUL, and return the aggregate `{data, a.len + b.len}`.
  *
- * The 2-arg `sfn_str_concat` trampoline above stays for seed-
- * built IR that already emits the old shape; once the next seed
- * adopts the new ABI we can rename `sfn_str_concat_arena` back
- * to `sfn_str_concat` in a single rollback-safe PR (tracked as a
- * follow-up `seed-blocker` issue). */
+ * History: #714 (M2.4b) introduced this entrypoint under the
+ * `_arena` suffix and kept a legacy 2-arg `sfn_str_concat`
+ * trampoline alive so the pre-arena seed could still link.
+ * #715 retires that legacy 2-arg trampoline and promotes the
+ * arena-aware function to the bare canonical name; the
+ * `sfn_str_concat_arena` forwarder below survives one more
+ * release cycle so seed v0.7.0-alpha.7 — which still emits
+ * `@sfn_str_concat_arena` IR — keeps linking. The next seed
+ * bump retires that forwarder in a follow-up PR. */
 /* M2.4b (#398) — concat-limit / overflow gate shared between the
  * arena-aware `sfn_str_concat_arena` and `sfn_str_append_arena`
  * entrypoints. Mirrors the legacy `sailfin_runtime_string_concat`
@@ -2542,7 +2532,7 @@ static size_t _sfn_str_check_concat_limit(size_t alen, size_t blen, const char *
     return alen + blen;
 }
 
-SfnString sfn_str_concat_arena(SfnString a, SfnString b, SfnArena **arena_slot)
+SfnString sfn_str_concat(SfnString a, SfnString b, SfnArena **arena_slot)
 {
     /* Design note on `SAILFIN_USE_ARENA` opt-out: the arena-aware
      * path is the M1 minimal-viable design per
@@ -2551,8 +2541,8 @@ SfnString sfn_str_concat_arena(SfnString a, SfnString b, SfnArena **arena_slot)
      * allocations route through this arena"). The env var stays
      * meaningful for the LEGACY C entrypoints (`_rt_malloc` and the
      * 2-arg `sailfin_runtime_string_concat`); fresh user emission
-     * targeting `@sfn_str_concat_arena` is unconditionally
-     * arena-backed by design. Documented as a deliberate scope
+     * targeting `@sfn_str_concat` (post-#715 rename) is
+     * unconditionally arena-backed by design. Documented as a deliberate scope
      * delta in PR #714 (see Copilot review reply). */
     SfnArena *arena;
     if (arena_slot != NULL && *arena_slot != NULL)
@@ -2659,7 +2649,7 @@ SfnString sfn_str_concat_arena(SfnString a, SfnString b, SfnArena **arena_slot)
  * `string` locals become aggregates and the peephole moves into
  * `core_ops_lowering`). Shipping the body now closes the wave 1b
  * surface area so the migration is mechanically complete. */
-void sfn_str_append_arena(SfnString *dst, SfnString suffix, SfnArena **arena_slot)
+void sfn_str_append(SfnString *dst, SfnString suffix, SfnArena **arena_slot)
 {
     if (dst == NULL)
     {
@@ -2704,7 +2694,7 @@ void sfn_str_append_arena(SfnString *dst, SfnString suffix, SfnArena **arena_slo
     }
 
     /* Decode tagged immediate codepoint encoding for the suffix
-     * (same rationale as `sfn_str_concat_arena` above — the
+     * (same rationale as `sfn_str_concat` above — the
      * pre-M1.A.2 frontend can present `b.data` as a tagged
      * pointer when the source value is a 1-codepoint literal). */
     unsigned char suffix_imm_buf[5] = {0};
@@ -2717,7 +2707,7 @@ void sfn_str_append_arena(SfnString *dst, SfnString suffix, SfnArena **arena_slo
     }
 
     /* Apply the shared limit/overflow gate (same as
-     * `sfn_str_concat_arena` — Copilot review feedback on PR #714). */
+     * `sfn_str_concat` — Copilot review feedback on PR #714). */
     size_t old_sz = dst->len < 0 ? 0 : (size_t)dst->len;
     size_t suffix_sz = suffix.len < 0 ? 0 : (size_t)suffix.len;
     size_t new_sz = _sfn_str_check_concat_limit(old_sz, suffix_sz, "string_append");
@@ -2741,9 +2731,28 @@ void sfn_str_append_arena(SfnString *dst, SfnString suffix, SfnArena **arena_slo
     dst->len = new_len;
 }
 
+/* #715: transitional `_arena`-suffixed forwarders. Seed
+ * v0.7.0-alpha.7 still emits `@sfn_str_concat_arena` /
+ * `@sfn_str_append_arena` IR (its baked-in
+ * runtime_helpers descriptor predates the bare-name rename).
+ * Until the next seed bump pins a binary that emits the bare
+ * symbols, the seed-built first-pass binary needs these symbols
+ * to resolve at link time. The bodies are one-line forwards to
+ * the canonical entrypoints; both forwarders retire in a
+ * follow-up PR once `.seed-version` advances. */
+SfnString sfn_str_concat_arena(SfnString a, SfnString b, SfnArena **arena_slot)
+{
+    return sfn_str_concat(a, b, arena_slot);
+}
+
+void sfn_str_append_arena(SfnString *dst, SfnString suffix, SfnArena **arena_slot)
+{
+    sfn_str_append(dst, suffix, arena_slot);
+}
+
 /* `@sfn_default_arena` — the IR-visible global pointer that
- * every fresh `sfn_str_concat_arena` / `sfn_str_append_arena`
- * call site passes as the arena argument. The declaration in
+ * every fresh `sfn_str_concat` / `sfn_str_append` call site
+ * passes as the arena argument. The declaration in
  * `compiler/src/llvm/lowering/lowering_phase_render.sfn` is
  * `@sfn_default_arena = external global ptr`; the storage is
  * 8 bytes on 64-bit (a single `SfnArena *`). The constructor
@@ -2762,12 +2771,12 @@ __attribute__((constructor(101))) static void _sfn_default_arena_init(void)
     /* Skip the pre-fetch when the legacy `SAILFIN_USE_ARENA=0`
      * opt-out is set so we don't force `sfn_arena_global()` to
      * spin up the page chain at module load (Copilot review
-     * feedback on PR #714). The fallback in `sfn_str_concat_arena`
-     * / `sfn_str_append_arena` still hits `sfn_arena_global()`
+     * feedback on PR #714). The fallback in `sfn_str_concat`
+     * / `sfn_str_append` still hits `sfn_arena_global()`
      * lazily on the first call, so this gate only saves the
      * eager init; the new arena-aware path remains
      * arena-backed by design (see the design note inside
-     * `sfn_str_concat_arena`). */
+     * `sfn_str_concat`). */
     if (!sfn_arena_enabled())
     {
         return;

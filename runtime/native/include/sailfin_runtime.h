@@ -132,6 +132,15 @@ extern "C"
     // (the address of the global pointer declared below) so these
     // signatures receive `SfnArena **` and dereference once. See
     // sailfin_runtime.c for the full migration note.
+    //
+    // #715 (post-#714 rename): the canonical names are the bare
+    // `sfn_str_concat` / `sfn_str_append`. The `_arena`-suffixed
+    // declarations are transitional trampolines kept until the
+    // seed cut after #715 lands — seed v0.7.0-alpha.7 still emits
+    // `@sfn_str_concat_arena` IR against this entrypoint. The next
+    // seed bump retires both `_arena` declarations in a follow-up.
+    SfnString sfn_str_concat(SfnString a, SfnString b, SfnArena **arena_slot);
+    void sfn_str_append(SfnString *dst, SfnString suffix, SfnArena **arena_slot);
     SfnString sfn_str_concat_arena(SfnString a, SfnString b, SfnArena **arena_slot);
     void sfn_str_append_arena(SfnString *dst, SfnString suffix, SfnArena **arena_slot);
     extern SfnArena *sfn_default_arena;
