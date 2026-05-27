@@ -148,20 +148,32 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
             string_constants: empty_string_constant_set()
         };
     }
-    // M2.4b (#398): arena-aware concat. Returns the SfnString
-    // aggregate `{i8*, i64}`; the immediate `extractvalue`
-    // recovers the data pointer for the rest of the lowering
-    // pipeline (string operands stay typed as `i8*` until the
-    // M1.A.2 flip lands). The third operand `ptr @sfn_default_arena`
-    // is the global pointer slot primed at module load.
+    // M1.7.2d (#721): route through descriptor-driven dispatch.
+    // The `string.concat` descriptor (runtime_helpers.sfn) pins the
+    // three parameter types (`{i8*, i64}`, `{i8*, i64}`, `ptr`) and
+    // resolves the symbol via `native_signature`; the call site
+    // contributes the operands, including the third
+    // `ptr @sfn_default_arena` — the global pointer slot primed at
+    // module load by the C constructor in
+    // `runtime/native/src/sailfin_runtime.c`. The downstream
+    // `extractvalue` (still owned by this lowering, not by the
+    // descriptor) recovers the data pointer so the rest of the
+    // pipeline keeps treating string operands as `i8*` until the
+    // M1.A.2 flip lands.
+    let arena_operand = LLVMOperand {
+        llvm_type: "ptr",
+        value: "@sfn_default_arena"
+    };
+    let concat_operands: LLVMOperand[] = [left_aligned.operand, right_aligned.operand, arena_operand];
+    let concat_result = emit_runtime_call("string.concat", concat_operands, empty_runtime_call_overrides(), right_aligned.temp_index, right_aligned.lines);
+    let mut _concat_di: int = 0;
+    loop {
+        if _concat_di >= concat_result.diagnostics.length { break; }
+        diagnostics.push(concat_result.diagnostics[_concat_di]);
+        _concat_di += 1;
+    }
     let agg_name = format_temp_name(right_aligned.temp_index);
-    let line = "  " + agg_name
-        + " = call {i8*, i64} @sfn_str_concat({i8*, i64} "
-        + left_aligned.operand.value
-        + ", {i8*, i64} "
-        + right_aligned.operand.value
-        + ", ptr @sfn_default_arena)";
-    let mut out_lines = append_string(right_aligned.lines, line);
+    let mut out_lines = concat_result.lines;
     let data_name = format_temp_name(right_aligned.temp_index + 1);
     let extract_line = "  " + data_name + " = extractvalue {i8*, i64} "
         + agg_name

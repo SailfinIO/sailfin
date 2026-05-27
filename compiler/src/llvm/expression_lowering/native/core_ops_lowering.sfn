@@ -39,6 +39,7 @@ import {
     harmonise_operands
 } from "./core_operands";
 import { lines_end_with_terminator, strip_enclosing_parentheses } from "./core_operators";
+import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
 fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: int, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
     let coerced = coerce_operand_to_type(operand, "i1", temp_index, lines, true, null);
@@ -404,22 +405,25 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 };
             }
 
-            // M2.4b (#398): arena-aware concat. The call returns
-            // the SfnString aggregate `{i8*, i64}`; an immediate
-            // `extractvalue` recovers the data pointer so the rest
-            // of the lowering pipeline (which still treats string
-            // operands as `i8*`) is unchanged. The third call
-            // argument is the address of the global pointer
-            // `@sfn_default_arena`, primed at module load by the
-            // C constructor in `runtime/native/src/sailfin_runtime.c`.
+            // M1.7.2d (#721): route through descriptor-driven dispatch.
+            // The `string.concat` descriptor pins the three parameter
+            // types (`{i8*, i64}`, `{i8*, i64}`, `ptr`); the third
+            // operand `ptr @sfn_default_arena` is the global pointer
+            // slot primed at module load by the C constructor in
+            // `runtime/native/src/sailfin_runtime.c`. The downstream
+            // `extractvalue` (still owned by this lowering, not by
+            // the descriptor) recovers the data pointer so the rest
+            // of the pipeline keeps treating string operands as `i8*`.
+            let arena_operand = LLVMOperand {
+                llvm_type: "ptr",
+                value: "@sfn_default_arena"
+            };
+            let concat_operands: LLVMOperand[] = [lhs_agg.operand, rhs_agg.operand, arena_operand];
+            let concat_result = emit_runtime_call("string.concat", concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+            diagnostics = extend_string_array(diagnostics, concat_result.diagnostics);
+            current_lines = concat_result.lines;
             let agg_name = format_temp_name(current_temp);
             current_temp += 1;
-            current_lines.push("  " + agg_name
-                + " = call {i8*, i64} @sfn_str_concat({i8*, i64} "
-                + lhs_agg.operand.value
-                + ", {i8*, i64} "
-                + rhs_agg.operand.value
-                + ", ptr @sfn_default_arena)");
             let data_name = format_temp_name(current_temp);
             current_temp += 1;
             current_lines.push("  " + data_name + " = extractvalue {i8*, i64} "
@@ -634,16 +638,18 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     string_constants: string_constants
                 };
             }
-            // M2.4b (#398): arena-aware concat (see the earlier
-            // call site in this file for the full migration note).
+            // M1.7.2d (#721): route through descriptor-driven dispatch
+            // (see the earlier call site in this file for the full
+            // migration note).
+            let arena_operand = LLVMOperand {
+                llvm_type: "ptr",
+                value: "@sfn_default_arena"
+            };
+            let concat_operands: LLVMOperand[] = [lhs_agg.operand, rhs_agg.operand, arena_operand];
+            let concat_result = emit_runtime_call("string.concat", concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+            diagnostics = extend_string_array(diagnostics, concat_result.diagnostics);
+            current_lines = concat_result.lines;
             let agg_name = format_temp_name(current_temp);
-            let line = "  " + agg_name
-                + " = call {i8*, i64} @sfn_str_concat({i8*, i64} "
-                + lhs_agg.operand.value
-                + ", {i8*, i64} "
-                + rhs_agg.operand.value
-                + ", ptr @sfn_default_arena)";
-            current_lines.push(line);
             let data_name = format_temp_name(current_temp + 1);
             let extract_line = "  " + data_name + " = extractvalue {i8*, i64} "
                 + agg_name
