@@ -545,7 +545,7 @@ and developer workflow"):
 4. Tooling and developer workflow
    - [x] Remove Python runtime shims
    - [ ] Replace sfn shell wrapper with Sailfin-native CLI binary
-   - [ ] Replace C native_driver with Sailfin-native CLI entrypoint
+   - [x] Replace C native_driver with Sailfin-native CLI entrypoint (M5, #451, 2026-05-25)
    --- NEW (this proposal) ---
    - [ ] Enhance Diagnostic struct (severity, secondary spans, suggestions)
    - [ ] Implement `sfn fmt` (token-stream formatter, no config)

@@ -12,7 +12,7 @@ Sailfin is a systems language with compile-time capability enforcement. The repo
 
 Note: the codebase may still contain historical `stage2` names in internal paths; prefer “native compiler” terminology.
 
-The runtime currently ships as C under `runtime/native/` and is planned to move into Sailfin for the 1.0 release.
+The binary's entry point is the Sailfin-emitted `@main` (M5, #451) — no C code participates in startup. Supporting C runtime helpers (strings, arrays, exceptions, the C arena, crypto) still live under `runtime/native/src/`; M3 will port them into Sailfin and delete the directory before 1.0.
 
 **Language pillars:** (1) effect types (`![io, net, model, clock]`) for compile-time capability enforcement, (2) capability-based security via capsule manifests and dependency auditing, (3) structured concurrency (planned). AI integration is a library-level concern (`sfn/ai` capsule, post-1.0) gated by the `![model]` effect — not language-level syntax.
 
@@ -60,7 +60,7 @@ The compiler (`compiler/src/`) follows this flow:
 - `compiler/src/ast.sfn` — Canonical AST node definitions
 - `compiler/src/native_ir.sfn` — `.sfn-asm` intermediate representation
 - `runtime/prelude.sfn` — Sailfin-native runtime (collections, strings, type checks)
-- `runtime/native/` — Current C runtime implementation (planned to move into Sailfin pre-1.0)
+- `runtime/native/` — Supporting C runtime helpers (M3 will port the remainder into Sailfin; the entry point already lives in Sailfin)
 
 ### Effect System
 
@@ -89,7 +89,7 @@ Do not market or document ownership/borrowing as a shipped feature. Sailfin's sa
 
 ### Runtime Bridges
 
-The runtime currently ships as C under `runtime/native/`.
+Startup is Sailfin-native: the compiler emits `@main` directly (M5, #451). Supporting helpers under `runtime/native/src/` (strings, arrays, exceptions, the C arena, crypto) remain in C until M3 ports them.
 
 ### Testing Philosophy
 
@@ -311,7 +311,7 @@ make test-e2e
 
 - `compiler/src/llvm/` — LLVM IR generation (lowering, rendering, runtime helpers)
 - `compiler/tests/` — Sailfin-native unit/integration/e2e suites
-- `runtime/native/` — C runtime linked into the native compiler
+- `runtime/native/` — Supporting C helpers linked into the native compiler (entry point already in Sailfin; M3 will retire the rest)
 
 ### Running Examples
 
@@ -396,8 +396,7 @@ rewrite can begin. This is the critical path to 1.0:
 
 **Phase 3 — Runtime migration (depends on Phase 1 + 2):**
 - Port ~90 runtime ABI functions from C to Sailfin (strings, arrays, I/O, exceptions, crypto)
-- Replace `native_driver.c` with a Sailfin entry point
-- Remove `runtime/native/` entirely
+- Remove `runtime/native/` entirely (the C entry point `native_driver.c` was already replaced by the Sailfin-emitted `@main` in M5, #451)
 
 **Phase 4 — Structured concurrency (depends on Phase 1-2 + atomics):**
 - Atomic intrinsics (`atomic_add`, `atomic_cas`, fences)

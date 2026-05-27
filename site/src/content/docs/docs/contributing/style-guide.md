@@ -22,7 +22,8 @@ compiler/          # The self-hosted compiler
   tests/           # Unit, integration, and e2e tests
 runtime/           # Runtime libraries
   prelude.sfn      # Sailfin-native prelude
-  native/          # C runtime (pre-1.0)
+  sfn/             # Sailfin-native runtime modules (clock, memory, process, type_meta, …)
+  native/          # Supporting C helpers (entry point already in Sailfin; M3 retires the rest)
 docs/              # Language documentation
 examples/          # Example programs
 scripts/           # Build and release tooling
