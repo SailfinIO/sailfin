@@ -26,11 +26,16 @@
 # gate ships safely ahead of that work.
 #
 # Linux x86_64 only for now. macOS arm64 coverage is deferred until
-# #613 (exit-code corruption on Mach-O linker UUIDs) closes; the
-# Fixed-point rebuild check in `.github/workflows/ci.yml` already
-# documents why byte-equality isn't a stable determinism signal on
-# Mach-O. File a one-line follow-up once #613 closes to add the
-# `macos-arm64` matrix entry.
+# #613 closes — that epic tracks the exit-code corruption on macOS
+# arm64 (suspected Bool/int ABI hazard across module boundaries) that
+# would let this gate's `--check-determinism` failure paths exit 0 and
+# silently pass. There is also a separate, independent macOS issue: the
+# Mach-O linker embeds a per-link UUID (LC_UUID), so byte-for-byte
+# binary equality isn't a stable determinism signal on macOS — see the
+# `Fixed-point rebuild check` step in `.github/workflows/ci.yml` for
+# the precedent (smoke-test instead of byte-cmp). When #613 closes,
+# adding the `macos-arm64` matrix entry also needs an analogous
+# byte-equality workaround for the determinism step.
 
 name: Build Quality (determinism + cache hit-rate)
 
