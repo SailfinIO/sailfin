@@ -147,6 +147,20 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
         pos_idx += 1;
     }
 
+    // Validate required flags. The kind `"missing_required"` is reused
+    // (per Issue #797 contract); callers disambiguate via `flag_name`
+    // (set for flag failures) vs `arg_name` (set for positional ones).
+    let mut rfi: int = 0;
+    loop {
+        if rfi >= active.flags.length { break; }
+        let rf = active.flags[rfi];
+        if rf.required && !_flag_seen(fl_names, rf.long_name) {
+            return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_required", _with_hint(cmd.name, subcmd_name, "error: missing required flag --"
+                + rf.long_name), rf.long_name, "");
+        }
+        rfi += 1;
+    }
+
     let matches = Matches {
         command_name: cmd.name,
         subcommand_name: subcmd_name,
@@ -255,7 +269,8 @@ fn _find_flag_long(cmd: Command, name: string) -> Flag {
         long_name: "",
         short_name: "",
         description: "",
-        takes_value: false
+        takes_value: false,
+        required: false
     };
 }
 
@@ -272,7 +287,8 @@ fn _find_flag_short(cmd: Command, name: string) -> Flag {
         long_name: "",
         short_name: "",
         description: "",
-        takes_value: false
+        takes_value: false,
+        required: false
     };
 }
 
@@ -288,6 +304,16 @@ fn _resolve_active(cmd: Command, subcmd_name: string) -> Command {
         i += 1;
     }
     return cmd;
+}
+
+fn _flag_seen(fl_names: string[], long_name: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= fl_names.length { break; }
+        if strings_equal(fl_names[i], long_name) { return true; }
+        i += 1;
+    }
+    return false;
 }
 
 fn _help_hint(root_name: string, subcmd_name: string) -> string {

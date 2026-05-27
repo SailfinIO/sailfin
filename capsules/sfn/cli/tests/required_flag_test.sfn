@@ -1,0 +1,145 @@
+// Tests for `flag_required` — Issue #797 (Phase 1 of the CLI
+// Modularization Epic, #351).
+//
+// Covers the chainable `flag_required` marker, the parser's
+// `missing_required` diagnostic for absent required flags, and the
+// `(required)` annotation in rendered help output.
+import {
+    command,
+    flag,
+    flag_required,
+    flag_short,
+    flag_value,
+    flag_value_short,
+    get_or,
+    has_flag,
+    help,
+    parse,
+    with_flag
+} from "../src/mod";
+
+fn _contains(text: string, needle: string) -> boolean {
+    if needle.length > text.length { return false; }
+    let limit = text.length - needle.length;
+    let mut i: int = 0;
+    loop {
+        if i > limit { break; }
+        if strings_equal(substring(text, i, i + needle.length), needle) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// ---- Builder ----
+test "flag_required: marker sets required and preserves other fields" {
+    let f = flag_required(flag_short("verbose", "v", "Verbose output"));
+    assert strings_equal(f.long_name, "verbose");
+    assert strings_equal(f.short_name, "v");
+    assert strings_equal(f.description, "Verbose output");
+    assert f.takes_value == false;
+    assert f.required == true;
+}
+
+test "flag_required: default-constructed flags are not required" {
+    let f = flag("verbose", "Verbose output");
+    assert f.required == false;
+}
+
+test "flag_required: chainable on flag_value" {
+    let f = flag_required(flag_value("output", "Output path"));
+    assert strings_equal(f.long_name, "output");
+    assert f.takes_value == true;
+    assert f.required == true;
+}
+
+test "flag_required: chainable on flag_value_short" {
+    let f = flag_required(flag_value_short("output", "o", "Output path"));
+    assert strings_equal(f.short_name, "o");
+    assert f.takes_value == true;
+    assert f.required == true;
+}
+
+// ---- Parser: present ----
+test "parse: required boolean flag present yields ok" {
+    let cmd = with_flag(command("app", "desc"), flag_required(flag("force", "Force")));
+    let argv: string[] = ["app", "--force"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert strings_equal(r.error.kind, "ok");
+    assert has_flag(r.matches, "force") == true;
+}
+
+test "parse: required value flag present yields ok" {
+    let cmd = with_flag(command("app", "desc"), flag_required(flag_value("output", "Output")));
+    let argv: string[] = ["app", "--output", "out.txt"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert strings_equal(r.error.kind, "ok");
+}
+
+// ---- Parser: absent ----
+test "parse: required flag absent yields missing_required with flag_name" {
+    let cmd = with_flag(command("app", "desc"), flag_required(flag("force", "Force")));
+    let argv: string[] = ["app"];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "missing_required");
+    assert strings_equal(r.error.flag_name, "force");
+    assert strings_equal(r.error.arg_name, "");
+    assert strings_equal(r.error.message, "error: missing required flag --force\nrun 'app --help' for usage");
+}
+
+test "parse: required value flag absent yields missing_required" {
+    let cmd = with_flag(command("app", "desc"), flag_required(flag_value("output", "Output")));
+    let argv: string[] = ["app"];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "missing_required");
+    assert strings_equal(r.error.flag_name, "output");
+}
+
+test "parse: non-required flag absent stays ok" {
+    let cmd = with_flag(command("app", "desc"), flag("verbose", "Verbose"));
+    let argv: string[] = ["app"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+}
+
+test "parse: required flag absent — get_or default does NOT satisfy required" {
+    // Even though `get_or` would return the caller's default value for
+    // an absent flag, `parse()` rejects the input before any accessor
+    // runs. The default never gets a chance to satisfy `required`.
+    let cmd = with_flag(command("app", "desc"), flag_required(flag_value("output", "Output")));
+    let argv: string[] = ["app"];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "missing_required");
+    // The partial matches do not contain the flag, so `get_or` would
+    // fall back to its default — but the caller never reaches that
+    // codepath because `ok` is false.
+    let fallback = get_or(r.matches, "output", "out.txt");
+    assert strings_equal(fallback, "out.txt");
+}
+
+// ---- Help annotation ----
+test "help: required flag is annotated with (required)" {
+    let cmd = with_flag(command("app", "desc"), flag_required(flag_short("force", "f", "Force the operation")));
+    let rendered = help(cmd);
+    assert _contains(rendered, "Force the operation (required)") == true;
+}
+
+test "help: non-required flag has no (required) suffix" {
+    let cmd = with_flag(command("app", "desc"), flag_short("verbose", "v", "Verbose output"));
+    let rendered = help(cmd);
+    assert _contains(rendered, "Verbose output (required)") == false;
+    assert _contains(rendered, "Verbose output") == true;
+}
+
+test "help: mixed required and non-required flags annotate only the required ones" {
+    let cmd = with_flag(with_flag(command("app", "desc"), flag_required(flag("force", "Force"))), flag("verbose", "Verbose"));
+    let rendered = help(cmd);
+    assert _contains(rendered, "Force (required)") == true;
+    assert _contains(rendered, "Verbose (required)") == false;
+}

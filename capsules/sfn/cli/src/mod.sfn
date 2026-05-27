@@ -67,6 +67,7 @@ export {
     flag_value,
     flag_short,
     flag_value_short,
+    flag_required,
     command,
     with_version,
     with_arg,
