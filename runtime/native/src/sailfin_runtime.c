@@ -8150,6 +8150,23 @@ SfnString sfn_getenv(SfnString name, SfnArena **arena_slot)
         }
     }
 
+    /* Decode pre-M1.A.2 tagged immediate-codepoint inputs into a
+     * stack buffer before the memcpy, mirroring `sfn_str_concat`'s
+     * handling: single-codepoint "strings" (e.g. literal `"X"`) are
+     * lowered to `((uint64_t)codepoint << 32)` rather than a real
+     * pointer; dereferencing `name.data` directly would segfault.
+     * `_utf8_encode` writes 1-4 UTF-8 bytes for the codepoint and
+     * the byte length matches what `sfn_str_len` returned at the
+     * call site. */
+    unsigned char name_imm_buf[5] = {0};
+    const char *name_data = name.data;
+    uint32_t name_cp = 0;
+    if (_is_immediate_codepoint_string(name.data, &name_cp))
+    {
+        _utf8_encode(name_cp, name_imm_buf);
+        name_data = (const char *)name_imm_buf;
+    }
+
     /* NUL-marshal `name` into the arena so getenv() sees a clean C
      * string regardless of the aggregate's NUL invariant. Today's
      * SfnString.data is NUL-terminated (literal lowering writes a
@@ -8161,7 +8178,7 @@ SfnString sfn_getenv(SfnString name, SfnArena **arena_slot)
     if (cname == NULL)
         return result;
     if (nlen > 0)
-        memcpy(cname, name.data, nlen);
+        memcpy(cname, name_data, nlen);
     cname[nlen] = '\0';
 
     const char *val = getenv(cname);
