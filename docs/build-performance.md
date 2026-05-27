@@ -418,6 +418,14 @@ macOS gets a smaller win because the heuristic picks `BUILD_JOBS=1` to fit the 7
 
 ---
 
+## CI Quality Gates
+
+### Build Quality workflow (determinism + cache hit-rate, issue #781)
+
+`.github/workflows/build-quality.yml` runs on every `push` to `main` plus a nightly cron (05:00 UTC) and asserts the two structural contracts the cache + emit pipeline must uphold. After self-hosting the compiler from the pinned seed (`make compile`), it runs a cold first pass into `build/det-pass1` to warm `build/cache/v1`, then a second pass into `build/det-pass2` with `sfn build --check-determinism` (issue #779) — the flag internally re-invokes the compiler against a sibling work-dir, sha256s both linked binaries, and diffs the per-capsule manifest sidecars. The same JSON output carries the warm-cache BuildReport, whose `cache.hit_rate` field (issue #780) is asserted `>= 0.95` as a follow-on step. Linux x86_64 only for now; macOS arm64 is deferred until #613 (exit-code corruption on macOS arm64 — suspected Bool/int ABI hazard) closes, and even after that lands the gate will need a Mach-O byte-equality workaround analogous to the smoke-test in `ci.yml`'s `Fixed-point rebuild check` (Mach-O linker UUIDs make byte-cmp an unstable determinism signal on macOS — independent of #613). To triage a failure locally, run the same command the workflow does: `ulimit -v 8388608 && build/native/sailfin build -p compiler --check-determinism --work-dir build/det-pass2 --json | tee pass2.json` — the diff names the offending module slugs and prints `binary_sha256_a` / `binary_sha256_b` for the linked binaries, and `jq -s '.[0].cache' pass2.json` shows the cache counters. The architect verdict on #339 (locked decision Q4, 2026-05-06) bundled the original per-PR gates (#341 + #342) into this single on-merge + nightly workflow to keep PR wall-times out of the loop. The failure-mode wiring (issue creation, PR comments) lands separately in #782.
+
+---
+
 ## Completed Work
 
 ### String Concat Allocation Reduction (April 11)
