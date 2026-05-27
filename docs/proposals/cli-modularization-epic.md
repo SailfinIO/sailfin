@@ -557,7 +557,15 @@ Every issue below uses the contract from
 - **Acceptance:** all tests pass; `_arg`/`_flag`/etc. private
   helpers removed; coverage is the same set of cases.
 - **Size:** S. **Type:** refactor. **Depends on:** 0.5.1 (and any
-  fix issue it spawns).
+  fix issue it spawns), and Issue 1.1 (non-exiting `parse()` is
+  required so the parser-error tests and the `_help_hint`-driven
+  tests can be re-expressed against the public surface without
+  triggering `process.exit()` mid-test). The original ordering
+  (0.5.2 before 1.1) assumed cross-capsule imports would be the
+  load-bearing blocker; #508/PR #523 closed that, and the actual
+  load-bearing blocker turned out to be coverage of error paths
+  that `run()` services via `process.exit()`. Swapping the
+  dependency keeps "no coverage regression" honest.
 
 ### Phase 1 — capsule API expansion
 
@@ -577,7 +585,13 @@ Every issue below uses the contract from
   4. New `tests/parser_test.sfn` covers each `error.kind`.
 - **Files:** `capsules/sfn/cli/src/{parser,types,mod}.sfn`,
   `capsules/sfn/cli/tests/parser_test.sfn` (new).
-- **Size:** M. **Type:** feature. **Depends on:** 0.5.2.
+- **Size:** M. **Type:** feature. **Depends on:** 0.5.1. (Originally
+  listed as depending on 0.5.2; the dependency was inverted after
+  the cross-capsule import gap closed in #508 and the actual blocker
+  for 0.5.2 was found to be the absence of a non-exiting parse
+  variant. `parse()` itself is additive and can ship against the
+  existing inlined-helper test file — 0.5.2 rewrites that file
+  afterwards.)
 
 #### Issue 1.2 — Exit code constants
 - **Goal:** Define `EXIT_OK = 0`, `EXIT_BUILD_FAIL = 1`,
