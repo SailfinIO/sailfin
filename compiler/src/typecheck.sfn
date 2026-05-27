@@ -578,27 +578,3 @@ fn _trim_main_type_text(text: string) -> string {
     }
     return result;
 }
-
-// Type-text compatibility predicate. Returns true when a value whose
-// inferred type-text is `got` can flow into a binding whose annotated
-// type-text is `expected` without a typecheck error.
-//
-// Today the only non-trivial rule is the `__closure__` ⇔ fn-pointer
-// equivalence: lambdas (after #686 lifts them) carry the internal
-// `__closure__` sentinel as their type-text; any `fn(...) -> R`-typed
-// binding accepts that sentinel because the runtime closure ABI is
-// uniform. Arity / return-type checking against the lifted signature
-// is intentionally deferred to a post-M1.5 follow-up — wire #689
-// (call-site dispatch) will need the structured form anyway.
-//
-// Callers (today: none; #689 will be the first consumer) should fall
-// back to a plain text-equality check for any other pair; the
-// preemptive rule lives here so the sentinel doesn't bleed past the
-// type-text layer into diagnostics or downstream emission.
-fn type_text_compatible(expected: string, got: string) -> boolean {
-    if strings_equal(expected, got) { return true; }
-    if strings_equal(got, "__closure__") {
-        if starts_with(expected, "fn(") { return true; }
-    }
-    return false;
-}

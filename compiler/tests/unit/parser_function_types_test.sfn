@@ -8,17 +8,8 @@
 // four spellings called out in the issue's acceptance criteria so a
 // later refactor (or any change to whitespace handling in
 // `tokens_to_text`) cannot silently drop the annotation.
-//
-// The companion compat rule in `compiler/src/typecheck.sfn`
-// (`type_text_compatible`) recognises `__closure__` (the sentinel
-// #686 will attach to lifted lambdas) as a subtype of any
-// `fn(...) -> R`-typed binding. The test below pins that predicate
-// directly — there is no caller yet (call-site dispatch is #689)
-// but the helper is the load-bearing piece that lets #689 enforce
-// assignment compat without re-litigating the closure ABI.
 import { Block, Program, Statement } from "../../src/ast";
 import { parse_program } from "../../src/parser/mod";
-import { type_text_compatible } from "../../src/typecheck";
 
 // -------------------------------------------------------------------
 // Helpers
@@ -124,40 +115,4 @@ test "fn-types: zero-arg fn() -> int annotation parses" {
     let decl = _first_variable_decl(body);
     assert decl.type_annotation != null;
     assert strings_equal(decl.type_annotation.text, "fn() -> int");
-}
-
-// -------------------------------------------------------------------
-// Compat-rule pin: `__closure__` ⇔ `fn(...) -> R`. The helper is
-// preemptive — no caller wires it through assignment-compat today
-// (#689 will be the first consumer) — but the predicate itself
-// must be correct so the sentinel can flow cleanly into any
-// fn-pointer binding once dispatch lands.
-// -------------------------------------------------------------------
-test "fn-types compat: __closure__ flows into fn(int) -> int" {
-    assert type_text_compatible("fn(int) -> int", "__closure__");
-}
-
-test "fn-types compat: __closure__ flows into fn() -> int (zero-arg)" {
-    assert type_text_compatible("fn() -> int", "__closure__");
-}
-
-test "fn-types compat: identical type texts are compatible" {
-    assert type_text_compatible("fn(int) -> int", "fn(int) -> int");
-    assert type_text_compatible("int", "int");
-}
-
-test "fn-types compat: __closure__ does NOT flow into a non-fn-type" {
-    // The sentinel is wildcard-like only for fn-pointer expected
-    // types. A binding annotated with, say, `int` must reject a
-    // closure-typed value — otherwise lambda values would silently
-    // flow into integer slots once an assignment-compat caller wires
-    // through.
-    assert ! type_text_compatible("int", "__closure__");
-    assert ! type_text_compatible("string", "__closure__");
-}
-
-test "fn-types compat: distinct concrete types are NOT compatible" {
-    // Negative anchor — the helper must not collapse to "always true."
-    assert ! type_text_compatible("int", "string");
-    assert ! type_text_compatible("fn(int) -> int", "fn(int) -> string");
 }
