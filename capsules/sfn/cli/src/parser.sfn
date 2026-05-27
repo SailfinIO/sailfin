@@ -8,12 +8,19 @@
 // reported as `"unknown_flag"`, `"missing_value"`,
 // `"unexpected_positional"`, or `"missing_required"`.
 //
+// For every non-`missing_value` failure, `error.message` is the full
+// two-line stderr text `run()` would print — the diagnostic line plus
+// the `run '<prog> --help' for usage` hint, joined with a newline. This
+// lets callers of `parse()` assert on the help-hint format without
+// reaching for the private `_help_hint` helper. `missing_value`
+// historically suppressed the hint and continues to do so.
+//
 // `run()` is the historical exiting variant kept for binary entry
 // points. It now delegates to `parse()` and applies the print +
 // `process.exit()` policy:
 //   * `--help`/`-h` -> print help, exit 0
 //   * `--version`/`-V` -> print version, exit 0
-//   * parse failures -> print to stderr, exit 2
+//   * parse failures -> print `error.message` to stderr, exit 2
 // Its observable behavior (stderr text, exit codes) is byte-identical
 // to the pre-`parse()` implementation.
 import { _format_help } from "./help";
@@ -76,8 +83,8 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
             let flag_name = substring(token, 2, token.length);
             let f = _find_flag_long(active, flag_name);
             if f.long_name.length == 0 {
-                return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_flag", "error: unknown flag --"
-                    + flag_name, flag_name, "");
+                return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_flag", _with_hint(cmd.name, subcmd_name, "error: unknown flag --"
+                    + flag_name), flag_name, "");
             }
             fl_names.push(f.long_name);
             fl_present.push(true);
@@ -95,8 +102,8 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
             let short = substring(token, 1, token.length);
             let f = _find_flag_short(active, short);
             if f.long_name.length == 0 {
-                return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_flag", "error: unknown flag -"
-                    + short, short, "");
+                return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_flag", _with_hint(cmd.name, subcmd_name, "error: unknown flag -"
+                    + short), short, "");
             }
             fl_names.push(f.long_name);
             fl_present.push(true);
@@ -116,9 +123,9 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
                 pos_values.push(token);
                 pos_idx += 1;
             } else {
-                return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "unexpected_positional", "error: unexpected argument '"
+                return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "unexpected_positional", _with_hint(cmd.name, subcmd_name, "error: unexpected argument '"
                     + token
-                    + "'", "", token);
+                    + "'"), "", token);
             }
         }
         idx += 1;
@@ -132,9 +139,9 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
             pos_names.push(a.name);
             pos_values.push(a.default_value);
         } else {
-            return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_required", "error: missing required argument <"
+            return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_required", _with_hint(cmd.name, subcmd_name, "error: missing required argument <"
                 + a.name
-                + ">", "", a.name);
+                + ">"), "", a.name);
         }
         pos_idx += 1;
     }
@@ -161,7 +168,6 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
 
     let subcmd_name = result.matches.subcommand_name;
     let active = _resolve_active(cmd, subcmd_name);
-    let help_cmd = _help_hint(cmd.name, subcmd_name);
     let kind = result.error.kind;
 
     if strings_equal(kind, "help_requested") {
@@ -185,15 +191,18 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
         process.exit(0);
     }
 
-    // Parse failure: print the structured error message, then a help
-    // hint for everything except missing_value (which historically
-    // omitted the hint).
+    // Parse failure: `error.message` already contains the help-hint
+    // suffix for every kind except `missing_value` (which historically
+    // omits the hint), so a single stderr write reproduces the
+    // pre-parse() stderr exactly.
     print.err(result.error.message);
-    if !strings_equal(kind, "missing_value") {
-        print.err("run '" + help_cmd + "' for usage");
-    }
     process.exit(2);
     return result.matches;
+}
+
+fn _with_hint(cmd_name: string, subcmd_name: string, first_line: string) -> string {
+    return first_line + "\nrun '" + _help_hint(cmd_name, subcmd_name)
+        + "' for usage";
 }
 
 fn _ok_error() -> ParseError {
