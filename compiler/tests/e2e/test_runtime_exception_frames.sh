@@ -25,7 +25,9 @@
 #                    semantics).
 #   7. global pin — `@global.sfn_exception_frame_head_addr = internal
 #                   global i64 0` pins the chain-head storage shape.
-#                   M2.7c's TLS upgrade flips `internal global` to
+#                   The TLS upgrade (compiler-side parser in #825;
+#                   runtime-side flip queued as a follow-up gated on the
+#                   next seed pin) replaces `internal global` with
 #                   `internal thread_local global` without touching
 #                   callers; this assertion catches a regression that
 #                   relocates the storage or drops the zero initializer.
@@ -343,9 +345,11 @@ test_frame_head_global() {
         echo "[test]   $ll missing — test_emit_define_shape must run first"
         return 1
     fi
-    # M2.7c flips `internal global` to `internal thread_local global`
-    # once Sailfin grows a thread_local annotation; pin the current
-    # shape so the upgrade is a one-line audit-able diff.
+    # The TLS upgrade (compiler-side parser in #825; runtime-side flip
+    # queued as a follow-up gated on the next seed pin) replaces
+    # `internal global` with `internal thread_local global` without
+    # touching callers. Pin the current shape so the follow-up is the
+    # advertised one-line audit-able diff.
     if ! grep -qE "^@global\.sfn_exception_frame_head_addr = internal global i64 0$" "$ll"; then
         echo "[test]   missing '@global.sfn_exception_frame_head_addr = internal global i64 0':"
         grep -E "^@global\." "$ll" || true

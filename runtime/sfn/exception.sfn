@@ -80,15 +80,24 @@
 // path works end-to-end on Linux x86_64.
 //
 // TLS. The architect spec calls for a thread-local
-// `current_frame` pointer. Sailfin lacks a `thread_local`
-// annotation today, so the chain head rides as a process-global
-// mutable `let mut sfn_exception_frame_head_addr` (i64 because
-// the seed compiler drops pointer-typed top-level mutables under
-// the same field-layout limitation as struct pointer fields).
-// The existing C runtime's try-stack is `_Thread_local`, but
-// Sailfin has no `spawn` yet, so the single-threaded reality
-// already applies. The TLS upgrade lands alongside scheduler /
-// concurrency work in M4 (#321).
+// `current_frame` pointer. The `thread_local` storage-class
+// annotation ships in the compiler in #825, but the pinned seed
+// for this PR predates the keyword and can't parse it in this
+// runtime file (the seed compiles every entry in
+// `runtime/native/capsule.toml`'s `sfn-sources` as part of
+// `sfn build -p compiler`). The chain head therefore still rides
+// as a process-global mutable `let mut sfn_exception_frame_head_addr`
+// (i64 because the seed compiler drops pointer-typed top-level
+// mutables under the same field-layout limitation as struct
+// pointer fields). The flip to `thread_local let mut` is a
+// one-line follow-up PR that lands after the next seed pin —
+// the audit-able diff the M2.7a module header originally
+// promised. Tracking issue: #730 follow-up; depends on a seed
+// release that includes the #825 parser change. The existing C
+// runtime's try-stack is `_Thread_local`, but Sailfin has no
+// `spawn` yet, so the single-threaded reality already applies.
+// The TLS upgrade lands alongside scheduler / concurrency work
+// in M4 (#321).
 //
 // Effects. None. Exception primitives live below the I/O layer
 // (same discipline as `runtime/sfn/memory/arena.sfn` and

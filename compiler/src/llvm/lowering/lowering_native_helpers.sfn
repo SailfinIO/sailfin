@@ -241,6 +241,7 @@ fn get_instruction_tag(instructions: NativeInstruction[], idx: int) -> int {
         NativeInstruction.Let {
             name,
             mutable,
+            is_thread_local,
             type_annotation,
             value,
             span,

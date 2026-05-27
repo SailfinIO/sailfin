@@ -96,6 +96,14 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
     let mut preamble_lines: string[] = [];
     let mut needs_init: boolean = false;
 
+    // `thread_local let mut` → `internal thread_local global` (#730).
+    // The TLS model defaults to `initial-exec` on LLVM, which is the
+    // ELF-TLS shape Linux x86_64 and macOS arm64 both link cleanly.
+    let mut global_qualifier: string = "internal global";
+    if binding.is_thread_local {
+        global_qualifier = "internal thread_local global";
+    }
+
     if llvm_type == "i8*" {
         let mut string_handled: boolean = false;
         if binding.value != null {
@@ -109,8 +117,8 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
                     + " x i8] c\""
                     + str_content
                     + "\\00\"";
-                let line2 = global_name
-                    + " = internal global i8* getelementptr (["
+                let line2 = global_name + " = " + global_qualifier
+                    + " i8* getelementptr (["
                     + number_to_string(str_len)
                     + " x i8], ["
                     + number_to_string(str_len)
@@ -123,7 +131,8 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
             }
         }
         if !string_handled {
-            preamble_lines.push(global_name + " = internal global i8* null");
+            preamble_lines.push(global_name + " = " + global_qualifier
+                + " i8* null");
             if binding.value != null { needs_init = true; }
         }
     } else {
@@ -160,7 +169,8 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
             }
             if !is_const { needs_init = true; }
         }
-        preamble_lines.push(global_name + " = internal global " + llvm_type
+        preamble_lines.push(global_name + " = " + global_qualifier + " "
+            + llvm_type
             + " "
             + initializer_text);
     }

@@ -94,6 +94,21 @@ results.push("new item");
 
 ---
 
+### `thread_local`
+
+**Status: Implemented**
+
+Storage-class prefix for top-level `let mut` declarations. Flips the backing storage from a process-global to per-thread (ELF TLS): the binding lowers to `@global.<name> = internal thread_local global <T> <init>` instead of `internal global`. Reads and writes against the binding use the same `@global.<name>` symbol, so the prefix is invisible to call sites.
+
+```sfn
+// Per-thread counter — each thread's storage starts at 0
+thread_local let mut request_counter: i64 = 0;
+```
+
+`thread_local` is rejected on function-local `let` (an `alloca` is already stack-local and cannot be TLS) and on immutable bindings (`thread_local let x` reports `E0807` — an immutable thread-local is a contradiction). The prefix exists ahead of the M4 scheduler (#321) so per-thread runtime state ships before any concurrency primitive lands.
+
+---
+
 ### `struct`
 
 **Status: Implemented**

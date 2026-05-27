@@ -439,6 +439,7 @@ fn binding_from_instruction(instruction: NativeInstruction) -> NativeBinding {
     return NativeBinding {
         name: instruction.name,
         mutable: instruction.mutable,
+        is_thread_local: instruction.is_thread_local,
         type_annotation: instruction.type_annotation,
         value: instruction.value
     };

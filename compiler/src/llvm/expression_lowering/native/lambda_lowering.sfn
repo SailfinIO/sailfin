@@ -835,6 +835,7 @@ fn _rewrite_variable(ctx: LiftContext, statement: Statement) -> StatementRewrite
         statement: Statement.VariableDeclaration {
             name: statement.name,
             mutable: statement.mutable,
+            is_thread_local: statement.is_thread_local,
             type_annotation: new_annotation,
             initializer: result.expression,
             span: statement.span,

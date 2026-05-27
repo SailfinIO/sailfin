@@ -1149,6 +1149,27 @@ fn detect_unsupported_statement_keyword(text: string) -> string {
     return "while";
 }
 
+// `thread_local` is the storage-class annotation that flips a top-level
+// `let mut` from `internal global` to `internal thread_local global` at
+// LLVM lowering (#730). Immutable thread-local globals are useless — the
+// whole point of TLS is per-thread mutation — so a `thread_local let x`
+// (without `mut`) is rejected with E0807.
+fn make_thread_local_requires_mut_diagnostic(name: string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0807",
+        severity: "error",
+        message: "`thread_local let " + name
+            + "` is missing `mut`; thread-local globals are per-thread"
+            + " mutable storage, so an immutable thread-local is a"
+            + " contradiction. Write `thread_local let mut "
+            + name
+            + ": <type> = <init>;` or drop the `thread_local` prefix.",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
 fn make_unsupported_statement_keyword_diagnostic(keyword: string) -> Diagnostic {
     let mut message: string = "`" + keyword
         + "` is reserved but not implemented;";
