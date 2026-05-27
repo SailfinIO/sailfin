@@ -11,7 +11,6 @@ set -euo pipefail
 
 COMPILER="$1"
 TEST_FILE="$2"
-BASENAME="$(basename "$TEST_FILE")"
 
 # Per-invocation scratch dir, exported via `SAILFIN_TEST_SCRATCH` so
 # the test command + capsule resolver write `test.ll`, the linked
@@ -107,67 +106,24 @@ else
     TIMEOUT_CMD=""
 fi
 
-_run_once() {
-    if [ -n "$TIMEOUT_CMD" ]; then
-        output=$("$TIMEOUT_CMD" "$TIMEOUT" "$COMPILER" test "$TEST_FILE" 2>&1) && RC_INNER=0 || RC_INNER=$?
-    else
-        output=$("$COMPILER" test "$TEST_FILE" 2>&1) && RC_INNER=0 || RC_INNER=$?
-    fi
-}
-
-_run_once
-
-# Retry policy. Issue #364 deleted the regex-classified retry that
-# matched on stdout patterns like "no such file or directory" /
-# "link failed" — those patterns are now redundant because the
-# structured assert-fail record (see
-# `runtime/native/src/sailfin_runtime.c:sailfin_assert_fail` and
-# `compiler/src/cli_commands.sfn:_consume_assert_failure_record`)
-# gives the runner an exit-code-driven failure path with typed
-# attribution; transient I/O flakes still surface as a non-zero
-# exit, but masking them via `case "$output"` regexes was hiding
-# real compile failures and producing flake-like behavior.
+# Issue #845 (parent epic #840 phase 1.1): the per-test pass/fail
+# policy (signal-kill retry, FAIL/PASS banner, exit code) was ported
+# from this wrapper into `handle_test_command` in
+# `compiler/src/cli_commands.sfn`. The compiler now emits the
+# `[test] PASS: <basename>` / `[test] FAIL: <basename> (exit code N)`
+# banners directly, honours `SAILFIN_TEST_RETRY=0`, and retries
+# 137/139 in-process; the prior `grep -nE ... <<< "$output"`
+# diagnostic excerpt is superseded by the compiler's structured
+# `test runner: compile failed`, `link failed`, and `test failed:`
+# lines, which carry the per-stage attribution the grep heuristic
+# was reconstructing post-hoc.
 #
-# What stays: signal-kill retry (137 OOM, 139 segfault). These are
-# transient under sustained CI memory pressure during the
-# seedcheck phase of `make check`, and they don't depend on stdout
-# inspection. Override with SAILFIN_TEST_RETRY=0 to disable
-# retries entirely (useful when diagnosing flake vs real failure
-# during perf work).
-if [ "${SAILFIN_TEST_RETRY:-1}" != "0" ]; then
-    if [ $RC_INNER -eq 137 ] || [ $RC_INNER -eq 139 ]; then
-        echo "[test] RETRY: $BASENAME (exit code $RC_INNER, retrying once)"
-        _run_once
-    fi
+# What this wrapper still owns: scratch-dir setup with on-failure
+# preservation (lines above), and the outer `timeout` wall-clock
+# cap. The whole script is scheduled for deletion in phase 1.7
+# after the Makefile loop collapse in 1.2.
+if [ -n "$TIMEOUT_CMD" ]; then
+    "$TIMEOUT_CMD" "$TIMEOUT" "$COMPILER" test "$TEST_FILE"
+else
+    "$COMPILER" test "$TEST_FILE"
 fi
-
-if [ $RC_INNER -ne 0 ]; then
-    echo "[test] FAIL: $BASENAME (exit code $RC_INNER, timeout=$TIMEOUT)"
-    # When a test fails, the error of interest is rarely in the last 10 lines
-    # — link errors land 100+ lines back, behind a wall of clang's
-    # `-Woverride-module` warnings. Surface every line that smells like an
-    # error or signal-shaped cause (clang/ld diagnostics, resolver retries,
-    # missing files, OOM/abort), bounded to keep the CI log readable. The
-    # tail of the output still prints last so failure summaries that rely
-    # on the final lines (e.g. assertion messages) are not lost.
-    diag="$(grep -nE '^(clang(-[0-9]+)?|sh|/usr/bin/ld|ld)\.?: |error:|undefined reference| no such file|Killed|Aborted|abort\(\)|munmap_chunk|capsule-resolver:|\[emit retry\]|\[cache (copy-failed|store-failed|invalid-key)\]|test runner: compile failed|link failed|test failed:' <<< "$output" | head -40)"
-    if [ -n "$diag" ]; then
-        echo "[test] -- diagnostic excerpt --"
-        echo "$diag"
-        echo "[test] -- /diagnostic excerpt --"
-    fi
-    echo "[test] -- last 10 lines of output --"
-    echo "$output" | tail -10
-    exit 1
-fi
-
-# Issue #364: pass/fail is decided by exit code alone. The previous
-# "grep stdout for fail|panic|error" heuristic produced false
-# positives whenever a test legitimately printed those words (e.g. a
-# test that prints the literal word "panic" as part of its
-# assertions about diagnostic output). The compiler now writes a
-# structured AssertFailure record on `assert false`, and the test
-# runner inside `compiler/src/cli_commands.sfn` reads it before
-# returning a non-zero exit code — so a clean exit IS a clean test.
-echo "[test] PASS: $BASENAME"
-exit 0
