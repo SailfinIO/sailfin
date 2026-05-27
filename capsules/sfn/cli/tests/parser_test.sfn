@@ -106,7 +106,7 @@ test "parse: unknown long flag yields unknown_flag" {
     let r = parse(cmd, argv);
     assert r.ok == false;
     assert strings_equal(r.error.kind, "unknown_flag");
-    assert strings_equal(r.error.message, "error: unknown flag --bogus");
+    assert strings_equal(r.error.message, "error: unknown flag --bogus\nrun 'app --help' for usage");
     assert strings_equal(r.error.flag_name, "bogus");
     assert strings_equal(r.error.arg_name, "");
 }
@@ -117,11 +117,12 @@ test "parse: unknown short flag yields unknown_flag" {
     let r = parse(cmd, argv);
     assert r.ok == false;
     assert strings_equal(r.error.kind, "unknown_flag");
-    assert strings_equal(r.error.message, "error: unknown flag -x");
+    assert strings_equal(r.error.message, "error: unknown flag -x\nrun 'app --help' for usage");
     assert strings_equal(r.error.flag_name, "x");
 }
 
 // ---- "missing_value" ----
+// `missing_value` historically omits the help-hint suffix — single-line.
 test "parse: long flag missing value yields missing_value" {
     let cmd = with_flag(command("app", "desc"), flag_value("output", "Output path"));
     let argv: string[] = ["app", "--output"];
@@ -149,7 +150,7 @@ test "parse: extra positional yields unexpected_positional" {
     let r = parse(cmd, argv);
     assert r.ok == false;
     assert strings_equal(r.error.kind, "unexpected_positional");
-    assert strings_equal(r.error.message, "error: unexpected argument 'extra'");
+    assert strings_equal(r.error.message, "error: unexpected argument 'extra'\nrun 'app --help' for usage");
     assert strings_equal(r.error.arg_name, "extra");
     assert strings_equal(r.error.flag_name, "");
 }
@@ -161,7 +162,7 @@ test "parse: omitted required positional yields missing_required" {
     let r = parse(cmd, argv);
     assert r.ok == false;
     assert strings_equal(r.error.kind, "missing_required");
-    assert strings_equal(r.error.message, "error: missing required argument <file>");
+    assert strings_equal(r.error.message, "error: missing required argument <file>\nrun 'app --help' for usage");
     assert strings_equal(r.error.arg_name, "file");
 }
 
