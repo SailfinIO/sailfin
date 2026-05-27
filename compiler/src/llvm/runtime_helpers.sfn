@@ -83,6 +83,37 @@
 import { RuntimeHelperDescriptor } from "./types";
 import { join_with_separator, trim_text } from "./utils";
 
+// Synthetic descriptor constructors for array `concat()` and `push()`
+// dispatch. Unlike the ~115 registry entries below (which each carry a
+// distinct symbol/effect/parameter shape), these two methods are
+// resolved at call lowering time against the receiver's element type
+// and produce a fresh descriptor per call site. Hoisting their struct
+// shape here keeps future `RuntimeHelperDescriptor` field additions
+// confined to a single location per kind (see issue #642).
+fn make_concat_descriptor(return_type: string, params: string[]) -> RuntimeHelperDescriptor {
+    return RuntimeHelperDescriptor {
+        target: "concat",
+        symbol: "",
+        return_type: return_type,
+        parameter_types: params,
+        effects: [],
+        native_signature: null,
+        c_abi_return_type: null
+    };
+}
+
+fn make_push_descriptor(return_type: string, params: string[]) -> RuntimeHelperDescriptor {
+    return RuntimeHelperDescriptor {
+        target: "push",
+        symbol: "",
+        return_type: return_type,
+        parameter_types: params,
+        effects: [],
+        native_signature: null,
+        c_abi_return_type: null
+    };
+}
+
 // =============================================================================
 // Runtime Helper Registry
 // =============================================================================

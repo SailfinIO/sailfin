@@ -7,7 +7,7 @@ import { find_last_index_of_char, index_of, substring } from "../../../string_ut
 import { is_atomic_builtin, lower_atomic_builtin } from "../../atomics";
 import { is_simple_identifier } from "../../expressions_helpers";
 import { find_function_by_name, find_function_by_name_or_import } from "../../rendering_helpers";
-import { find_runtime_helper } from "../../runtime_helpers";
+import { find_runtime_helper, make_concat_descriptor, make_push_descriptor } from "../../runtime_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import {
     find_interface_info_by_name,
@@ -410,15 +410,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                             array_concat_element_type = element_type;
 
                             if !ends_with_pointer_suffix(element_type) {
-                                helper_descriptor = RuntimeHelperDescriptor {
-                                    target: "concat",
-                                    symbol: "",
-                                    return_type: receiver_operand.llvm_type,
-                                    parameter_types: [receiver_operand.llvm_type, receiver_operand.llvm_type],
-                                    effects: [],
-                                    native_signature: null,
-                                    c_abi_return_type: null
-                                };
+                                helper_descriptor = make_concat_descriptor(receiver_operand.llvm_type, [receiver_operand.llvm_type, receiver_operand.llvm_type]);
                             }
                         }
                     }
@@ -576,15 +568,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                             is_array_concat = true;
                                             array_concat_element_type = _pre_am_elem;
                                             if !ends_with_pointer_suffix(_pre_am_elem) {
-                                                helper_descriptor = RuntimeHelperDescriptor {
-                                                    target: "concat",
-                                                    symbol: "",
-                                                    return_type: _pre_am_type,
-                                                    parameter_types: [_pre_am_type, _pre_am_type],
-                                                    effects: [],
-                                                    native_signature: null,
-                                                    c_abi_return_type: null
-                                                };
+                                                helper_descriptor = make_concat_descriptor(_pre_am_type, [_pre_am_type, _pre_am_type]);
                                             }
                                         }
                                     }
@@ -724,15 +708,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_is_array_concat = true;
 
                         if !ends_with_pointer_suffix(array_element_type) {
-                            r_helper_descriptor = RuntimeHelperDescriptor {
-                                target: "concat",
-                                symbol: "",
-                                return_type: base_operand.llvm_type,
-                                parameter_types: [base_operand.llvm_type, base_operand.llvm_type],
-                                effects: [],
-                                native_signature: null,
-                                c_abi_return_type: null
-                            };
+                            r_helper_descriptor = make_concat_descriptor(base_operand.llvm_type, [base_operand.llvm_type, base_operand.llvm_type]);
                         }
                     } else {
                         r_method_operand = base_operand;
@@ -740,15 +716,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_injected_count = 1;
                         r_array_push_element_type = array_element_type;
                         r_is_array_push = true;
-                        r_helper_descriptor = RuntimeHelperDescriptor {
-                            target: "push",
-                            symbol: "",
-                            return_type: base_operand.llvm_type,
-                            parameter_types: [base_operand.llvm_type, array_element_type],
-                            effects: [],
-                            native_signature: null,
-                            c_abi_return_type: null
-                        };
+                        r_helper_descriptor = make_push_descriptor(base_operand.llvm_type, [base_operand.llvm_type, array_element_type]);
                     }
                 }
             }
@@ -1000,15 +968,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             r_is_array_concat = true;
 
                             if !ends_with_pointer_suffix(array_element_type) {
-                                r_helper_descriptor = RuntimeHelperDescriptor {
-                                    target: "concat",
-                                    symbol: "",
-                                    return_type: base_operand.llvm_type,
-                                    parameter_types: [base_operand.llvm_type, base_operand.llvm_type],
-                                    effects: [],
-                                    native_signature: null,
-                                    c_abi_return_type: null
-                                };
+                                r_helper_descriptor = make_concat_descriptor(base_operand.llvm_type, [base_operand.llvm_type, base_operand.llvm_type]);
                             }
                         } else {
                             let mut _elif61: boolean = false;
@@ -1024,15 +984,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                 r_array_push_element_type = array_element_type;
                                 r_is_array_push = true;
 
-                                r_helper_descriptor = RuntimeHelperDescriptor {
-                                    target: "push",
-                                    symbol: "",
-                                    return_type: base_operand.llvm_type,
-                                    parameter_types: [base_operand.llvm_type, array_element_type],
-                                    effects: [],
-                                    native_signature: null,
-                                    c_abi_return_type: null
-                                };
+                                r_helper_descriptor = make_push_descriptor(base_operand.llvm_type, [base_operand.llvm_type, array_element_type]);
                             }
                         }
                     }

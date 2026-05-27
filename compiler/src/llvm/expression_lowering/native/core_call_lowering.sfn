@@ -6,7 +6,7 @@ import { index_of, substring } from "../../../string_utils";
 import { format_temp_name } from "../../expressions_helpers";
 import { is_simple_identifier } from "../../expressions_helpers";
 import { trace_call_lowering } from "../../lowering_debug_state";
-import { find_runtime_helper } from "../../runtime_helpers";
+import { find_runtime_helper, make_concat_descriptor } from "../../runtime_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import { resolve_enum_info_for_literal, resolve_enum_variant_info } from "../../type_context_queries";
 import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
@@ -16,7 +16,6 @@ import {
     LLVMOperand,
     LocalBinding,
     ParameterBinding,
-    RuntimeHelperDescriptor,
     StringConstant,
     StructLiteralField,
     TypeContext
@@ -196,15 +195,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                 if !ends_with_pointer_suffix(element_type) {
                     llvm_return = receiver_type;
                     expected_params = [receiver_type, receiver_type];
-                    helper_descriptor = RuntimeHelperDescriptor {
-                        target: "concat",
-                        symbol: "",
-                        return_type: receiver_type,
-                        parameter_types: expected_params,
-                        effects: [],
-                        native_signature: null,
-                        c_abi_return_type: null
-                    };
+                    helper_descriptor = make_concat_descriptor(receiver_type, expected_params);
                     function_entry = null;
                 }
             }
@@ -281,15 +272,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                 if !ends_with_pointer_suffix(inferred_element_type) {
                     llvm_return = operands[0].llvm_type;
                     expected_params = [operands[0].llvm_type, operands[0].llvm_type];
-                    helper_descriptor = RuntimeHelperDescriptor {
-                        target: "concat",
-                        symbol: "",
-                        return_type: operands[0].llvm_type,
-                        parameter_types: expected_params,
-                        effects: [],
-                        native_signature: null,
-                        c_abi_return_type: null
-                    };
+                    helper_descriptor = make_concat_descriptor(operands[0].llvm_type, expected_params);
                 }
             }
         }
