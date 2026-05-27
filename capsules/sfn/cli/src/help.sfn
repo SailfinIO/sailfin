@@ -82,7 +82,9 @@ fn _format_help(cmd: Command, program: string) -> string {
         if fi >= cmd.flags.length { break; }
         let f = cmd.flags[fi];
         let label = _flag_label(f);
-        out = out + "  " + _pad(label, flag_width) + f.description + "\n";
+        out = out + "  " + _pad(label, flag_width) + f.description;
+        if f.required { out = out + " (required)"; }
+        out = out + "\n";
         fi += 1;
     }
     // Built-in flags.

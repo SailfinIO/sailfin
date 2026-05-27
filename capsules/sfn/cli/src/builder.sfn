@@ -35,7 +35,8 @@ fn flag(long_name: string, description: string) -> Flag {
         long_name: long_name,
         short_name: "",
         description: description,
-        takes_value: false
+        takes_value: false,
+        required: false
     };
 }
 
@@ -45,7 +46,8 @@ fn flag_value(long_name: string, description: string) -> Flag {
         long_name: long_name,
         short_name: "",
         description: description,
-        takes_value: true
+        takes_value: true,
+        required: false
     };
 }
 
@@ -55,7 +57,8 @@ fn flag_short(long_name: string, short_name: string, description: string) -> Fla
         long_name: long_name,
         short_name: short_name,
         description: description,
-        takes_value: false
+        takes_value: false,
+        required: false
     };
 }
 
@@ -65,7 +68,22 @@ fn flag_value_short(long_name: string, short_name: string, description: string) 
         long_name: long_name,
         short_name: short_name,
         description: description,
-        takes_value: true
+        takes_value: true,
+        required: false
+    };
+}
+
+fn flag_required(f: Flag) -> Flag {
+    // Mark a flag as required. When the flag is absent from argv,
+    // `parse()` returns `ParseError { kind: "missing_required",
+    // flag_name: f.long_name }`. Help output annotates the flag as
+    // `(required)`. Chainable on any flag constructor.
+    return Flag {
+        long_name: f.long_name,
+        short_name: f.short_name,
+        description: f.description,
+        takes_value: f.takes_value,
+        required: true
     };
 }
 

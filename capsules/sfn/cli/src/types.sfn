@@ -14,6 +14,7 @@ struct Flag {
     short_name: string;
     description: string;
     takes_value: boolean;
+    required: boolean;
 }
 
 struct Command {
@@ -47,7 +48,9 @@ struct Matches {
 // `run()` formats the help/version output itself).
 //
 // `flag_name` / `arg_name` carry the offending name when applicable,
-// otherwise empty.
+// otherwise empty. `"missing_required"` is reused for both omitted
+// required positionals (with `arg_name` set) and omitted required
+// flags marked via `flag_required` (with `flag_name` set).
 struct ParseError {
     kind: string;
     message: string;
