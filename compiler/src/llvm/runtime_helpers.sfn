@@ -898,13 +898,6 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "string_starts_with", symbol: "string_starts_with", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
-    // Enum tag reader — reads the i32 tag from a NativeInstruction array element.
-    // Used by get_instruction_tag in lowering_native_helpers.sfn for the seedcheck
-    // binary which cannot use match or the fixup pass to read enum tags.
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_enum_tag_from_instruction_array", symbol: "sailfin_enum_tag_from_instruction_array", return_type: "i64", parameter_types: ["i8*", "double"], effects: [], native_signature: null, c_abi_return_type: "double"
-    });
-
     return descriptors;
 }
 

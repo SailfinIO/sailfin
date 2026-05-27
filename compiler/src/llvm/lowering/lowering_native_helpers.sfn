@@ -234,10 +234,39 @@ fn get_enum_name_at(enums: NativeEnum[], idx: int) -> string {
 
 // ── NativeInstruction field accessors ────────────────────────────────
 fn get_instruction_tag(instructions: NativeInstruction[], idx: int) -> int {
-    // Delegates to a C runtime helper that reads the i32 tag directly from
-    // the array element's memory. Cleaning up this last C delegate is
-    // tracked separately (see #620 epic / #620d).
-    return sailfin_enum_tag_from_instruction_array(instructions, idx);
+    let instr = instructions[idx];
+    match instr {
+        NativeInstruction.Return { expression, span } => return 0,
+        NativeInstruction.Expression { expression, span } => return 1,
+        NativeInstruction.Let {
+            name,
+            mutable,
+            type_annotation,
+            value,
+            span,
+            value_span
+        } => return 2,
+        NativeInstruction.If { condition } => return 3,
+        NativeInstruction.Else => return 4,
+        NativeInstruction.EndIf => return 5,
+        NativeInstruction.For { target, iterable } => return 6,
+        NativeInstruction.EndFor => return 7,
+        NativeInstruction.Loop => return 8,
+        NativeInstruction.EndLoop => return 9,
+        NativeInstruction.Break => return 10,
+        NativeInstruction.Continue => return 11,
+        NativeInstruction.Match { expression } => return 12,
+        NativeInstruction.Case { pattern, guard } => return 13,
+        NativeInstruction.EndMatch => return 14,
+        NativeInstruction.Try => return 15,
+        NativeInstruction.Catch { name } => return 16,
+        NativeInstruction.Finally => return 17,
+        NativeInstruction.EndTry => return 18,
+        NativeInstruction.Throw { expression, span } => return 19,
+        NativeInstruction.Noop => return 20,
+        NativeInstruction.Unknown { text } => return 21
+    }
+    return 21;
 }
 
 fn get_instruction_let_name(instructions: NativeInstruction[], idx: int) -> string {
