@@ -719,9 +719,9 @@ The following capsules ship as part of the Sailfin standard library under
 - The binary's entry point is the Sailfin-emitted `@main` (M5, #451;
   shipped 2026-05-25); the compiler-emitted prologue resolves the runtime
   root and dispatches the CLI. Supporting helpers — strings, arrays,
-  exceptions, crypto, the `sfn_*` C trampolines listed under the M2.12
-  audit below — still live under `runtime/native/src/` as C and are
-  linked into the native compiler binary; M3 ports the rest.
+  exceptions, the C arena, crypto, the `sfn_*` C trampolines listed under
+  the M2.12 audit below — still live under `runtime/native/src/` as C and
+  are linked into the native compiler binary; M3 ports the rest.
 - The native CLI locates a bundled runtime next to the executable (override with
   `SAILFIN_RUNTIME_ROOT`).
 - Legacy Python runtime shims have been removed; the toolchain does not rely on

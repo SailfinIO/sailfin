@@ -293,10 +293,11 @@ requests in `compiler/src/llvm/runtime_helpers.sfn`.
 
 ## Executive Summary
 
-- The C runtime is **~6,000 lines** (`runtime/native/src/sailfin_runtime.c`)
-  plus small crypto helpers for SHA-256 and base64. The ~500-line C driver
-  `native_driver.c` was retired in M5 (#451, 2026-05-25) — the binary's
-  entry point is now the Sailfin-emitted `@main`.
+- The C runtime is **~9,000 lines** (`runtime/native/src/sailfin_runtime.c`),
+  the M0.5 disposable C arena (`sailfin_arena.c`), and small crypto helpers
+  for SHA-256 and base64. The ~500-line C driver `native_driver.c` was
+  retired in M5 (#451, 2026-05-25) — the binary's entry point is now the
+  Sailfin-emitted `@main`.
 - Core surfaces (print, sleep, strings, arrays, process spawn, filesystem,
   exceptions, futures-via-pthreads) are **implemented and working**.
 - Effect-capability adapters (`sailfin_adapter_*`), reflection
@@ -726,7 +727,8 @@ prerequisites ship should confirm or reject it.
 
 Entrypoints that are C-based today and must be gone by 1.0:
 
-- `runtime/native/src/sailfin_runtime.c` (~6,015 lines)
+- `runtime/native/src/sailfin_runtime.c` (~9,000 lines)
+- `runtime/native/src/sailfin_arena.c` (M0.5 disposable C arena — deleted at M3 once the Sailfin `runtime/sfn/memory/arena.sfn` subsumes every caller)
 - `runtime/native/include/sailfin_runtime.h`
 - `runtime/native/src/native_driver.c` — **REMOVED 2026-05-25 in M5 (#451)**. The binary's entry point is now the Sailfin-emitted `@main`.
 - `runtime/native/src/sailfin_sha256.c` + `.h`

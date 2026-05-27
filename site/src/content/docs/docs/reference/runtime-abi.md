@@ -112,9 +112,11 @@ define i32 @main(i32 %argc, i8** %argv) {
 }
 ```
 
-`nm build/native/sailfin | grep -E ' T main$'` shows exactly one
-`@main` definition, sourced from `compiler/src/llvm/lowering/`
-(see `runtime_audit.md` for the pipeline trace).
+In LLVM IR the entry symbol is spelled `@main`; after linking, tools
+like `nm` show it without the `@` sigil. `nm build/native/sailfin |
+grep -E ' T main$'` shows exactly one `T main` row, sourced from the
+Sailfin-emitted definition in `compiler/src/llvm/lowering/` (see
+`runtime_audit.md` for the pipeline trace).
 `SAILFIN_TRACE_ARGV` prints the argv vector observed by
 `sailfin_cli_main` for entry-point debugging.
 

@@ -404,7 +404,7 @@ of their parent epic via the GitHub parent/child link.
 | `M2: Runtime in Sailfin` | `M2` | Replace C runtime with pure Sailfin (arena, string, array, io, exception, …) |
 | `M3: Structured Concurrency` | `M3` | `routine`/`await`/`channel`/`spawn` plus atomic intrinsics |
 | `Effect System Hardening` | `EFF` | Compile-gate enforcement, hierarchical effects, transitive call-graph checking — runs in parallel with runtime work |
-| `1.0 — General Availability` | `T7` | Pure Sailfin toolchain (M5 retired `native_driver.c`; M3 retires the rest), all enforcement gates active |
+| `1.0 — General Availability` | `T7` | Pure Sailfin toolchain (M5 retired `native_driver.c`; remaining C helpers retire pre-1.0), all enforcement gates active |
 
 ---
 

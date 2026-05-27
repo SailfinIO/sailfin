@@ -41,7 +41,7 @@ The binary's entry point is the Sailfin-emitted `@main` (M5, #451; shipped 2026-
 
 - `runtime/prelude.sfn` — Sailfin-native prelude (collections, strings, type checks)
 - `runtime/sfn/` — Sailfin-native runtime modules (`clock.sfn`, `memory/arena.sfn`, `memory/rc.sfn`, `process.sfn`, `type_meta.sfn`, …)
-- `runtime/native/` — Supporting C helpers pending M3 (strings, arrays, exceptions, crypto)
+- `runtime/native/` — Supporting C helpers pending M3 (strings, arrays, exceptions, the C arena, crypto)
 
 ## Self-Hosting
 

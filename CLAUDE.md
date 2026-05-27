@@ -12,7 +12,7 @@ Sailfin is a systems language with compile-time capability enforcement. The repo
 
 Note: the codebase may still contain historical `stage2` names in internal paths; prefer “native compiler” terminology.
 
-The binary's entry point is the Sailfin-emitted `@main` (M5, #451) — no C code participates in startup. Supporting C runtime helpers (strings, arrays, exceptions, crypto) still live under `runtime/native/src/`; M3 will port them into Sailfin and delete the directory before 1.0.
+The binary's entry point is the Sailfin-emitted `@main` (M5, #451) — no C code participates in startup. Supporting C runtime helpers (strings, arrays, exceptions, the C arena, crypto) still live under `runtime/native/src/`; M3 will port them into Sailfin and delete the directory before 1.0.
 
 **Language pillars:** (1) effect types (`![io, net, model, clock]`) for compile-time capability enforcement, (2) capability-based security via capsule manifests and dependency auditing, (3) structured concurrency (planned). AI integration is a library-level concern (`sfn/ai` capsule, post-1.0) gated by the `![model]` effect — not language-level syntax.
 
@@ -89,7 +89,7 @@ Do not market or document ownership/borrowing as a shipped feature. Sailfin's sa
 
 ### Runtime Bridges
 
-Startup is Sailfin-native: the compiler emits `@main` directly (M5, #451). Supporting helpers under `runtime/native/src/` (strings, arrays, exceptions, crypto) remain in C until M3 ports them.
+Startup is Sailfin-native: the compiler emits `@main` directly (M5, #451). Supporting helpers under `runtime/native/src/` (strings, arrays, exceptions, the C arena, crypto) remain in C until M3 ports them.
 
 ### Testing Philosophy
 
