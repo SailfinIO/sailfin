@@ -1,0 +1,196 @@
+# Build Quality gate (issue #781).
+#
+# Asserts the two structural contracts the cache + emit pipeline must
+# uphold but which PR-time CI doesn't check directly:
+#
+#   1. Determinism. A second `sfn build -p compiler` pass against a
+#      sibling work-dir must produce byte-identical artifacts and an
+#      identical per-module `cache_key` set (via `--check-determinism`
+#      from #779). The first-pass binary is the self-hosted compiler
+#      produced by `make compile` earlier in the job, so any cache
+#      regression that lands the same day surfaces here even before a
+#      seed bump.
+#   2. Cache effectiveness. The second pass runs WITH cache. A clean
+#      no-source-change rerun must keep `cache.hit_rate` at or above
+#      0.95 (via the `cache.hit_rate` field from #780). A drop below
+#      that gate is the canonical signal for cache-key drift caused by
+#      a non-canonical-artifact regression.
+#
+# Both gates were originally scoped as per-PR gates in #341 + #342; the
+# architect verdict on #339 (locked decision Q4, 2026-05-06) bundled
+# them into a single workflow that runs on `push: branches: [main]` plus
+# a nightly cron — see #339 for the rationale (per-PR wall-time budget
+# vs. signal-to-noise tradeoff). The failure-mode wiring (issue
+# creation, PR comments) lands separately in #782; this workflow's
+# permissions block is deliberately scoped to `contents: read` so the
+# gate ships safely ahead of that work.
+#
+# Linux x86_64 only for now. macOS arm64 coverage is deferred until
+# #613 (exit-code corruption on Mach-O linker UUIDs) closes; the
+# Fixed-point rebuild check in `.github/workflows/ci.yml` already
+# documents why byte-equality isn't a stable determinism signal on
+# Mach-O. File a one-line follow-up once #613 closes to add the
+# `macos-arm64` matrix entry.
+
+name: Build Quality (determinism + cache hit-rate)
+
+env:
+  # Mirrors `.github/workflows/ci.yml`. Belt-and-suspenders pin so a
+  # future change to the runtime default — or a caller that scrubs
+  # env — can't silently regress this gate onto the malloc path.
+  # See docs/build-performance.md → "Arena Allocator Default-On".
+  SAILFIN_USE_ARENA: "1"
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Nightly at 05:00 UTC. Picks a slot before the existing
+    # nightly-selfhost cron at 07:00 UTC so we don't double-tax the
+    # runner pool, and keeps the two signals on independent schedules
+    # for easier triage.
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+    inputs: {}
+
+concurrency:
+  group: build-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-quality:
+    name: Build quality (linux-x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Resolve seed version from .seed-version
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f .seed-version ]; then
+            echo "[seed-pin] .seed-version is missing from checkout" >&2
+            exit 1
+          fi
+          pin="$(tr -d '[:space:]' < .seed-version)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] .seed-version is empty" >&2
+            exit 1
+          fi
+          echo "[seed-pin] using seed $pin"
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install clang + llvm + jq
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang-18 llvm-18 jq
+          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+
+      - name: Fetch released seed compiler
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
+        run: |
+          set -euo pipefail
+          make fetch-seed SEED_VERSION="$SEED_VERSION"
+          build/seed/bin/sailfin version
+
+      - name: Self-host the compiler (make compile)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Memory cap matches .claude/rules/compiler-safety.md. Per
+          # the rules: 8GB ceiling on any compiler invocation, so a
+          # runaway compile can't take down the runner before the
+          # job timeout fires.
+          ulimit -v 8388608
+          make compile \
+            CLANG="${CLANG:-clang-18}" \
+            SEED_NATIVE="build/seed/bin/sailfin"
+          build/native/sailfin version
+
+      - name: First pass (warm the cache)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ulimit -v 8388608
+          # Cold build into a dedicated work-dir. Populates
+          # `build/cache/v1` with every content-addressed entry the
+          # determinism pass needs in step 4. The BuildReport JSON is
+          # captured but unused — the gate assertions read pass2.json,
+          # which contains the warm-cache run plus the determinism
+          # diff. Keeping pass1.json on disk makes failures easier to
+          # bisect after the fact (the diff of pass1.cache vs.
+          # pass2.cache is the smoking gun for cache-key drift).
+          build/native/sailfin build -p compiler \
+            --work-dir build/det-pass1 --json | tee pass1.json
+          echo ""
+          echo "[pass1] cache summary:"
+          jq -s '.[0].cache' pass1.json
+
+      - name: Determinism gate (sfn build --check-determinism)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ulimit -v 8388608
+          # Second pass against a sibling `--work-dir`. The
+          # `--check-determinism` flag internally re-invokes this
+          # compiler against a sibling-of-the-sibling work-dir, snapshots
+          # the per-capsule manifest sidecars, sha256s both linked
+          # binaries, and emits a structured diff on stdout
+          # (cli_main.sfn::_do_determinism_check + build_report.sfn::
+          # determinism_diff_to_json).
+          #
+          # In --json mode the inner pass's output is silenced so this
+          # stream contains exactly two JSON objects on its own lines:
+          # the outer BuildReport (used by the next step for hit-rate
+          # assertion) and the determinism diff (printed for triage).
+          # Non-zero exit on mismatch — `set -o pipefail` (already on
+          # via `set -euo pipefail`) makes tee propagate the failure
+          # even though tee itself always returns 0.
+          #
+          # Caveat: the compiler self-host's `[capsule].name = "sailfin"`
+          # is single-segment, so `_emit_capsule_artifact_sidecar`
+          # skips sidecar emission and the determinism check degrades
+          # to a binary-sha256 comparison only (cli_main.sfn:343-350).
+          # Mismatches still fail the gate, but `module_diffs` will be
+          # empty — triage via the printed `binary_sha256_{a,b}` and
+          # `binary_path_{a,b}` instead. Foreign `-p` builds with
+          # scope/name form get full per-module diffs.
+          build/native/sailfin build -p compiler \
+            --check-determinism \
+            --work-dir build/det-pass2 \
+            --json | tee pass2.json
+          echo ""
+          echo "[determinism] diff summary:"
+          jq -s '.[] | select(.check == "determinism")' pass2.json
+
+      - name: Cache hit-rate gate (>= 0.95 on warm second pass)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # pass2.json contains the outer-pass BuildReport followed by
+          # the determinism-diff object. The BuildReport is the only
+          # one with `cache.hit_rate`; `jq -s` slurps both objects into
+          # an array, `.[0]` picks the BuildReport.
+          observed=$(jq -s '.[0].cache.hit_rate' pass2.json)
+          echo "[hit-rate] observed cache.hit_rate: ${observed} (threshold: 0.95)"
+          ok=$(jq -s '.[0].cache.hit_rate >= 0.95' pass2.json)
+          if [ "$ok" != "true" ]; then
+            echo "[hit-rate][error] cache hit rate below threshold (${observed} < 0.95)" >&2
+            echo "[hit-rate][error] full cache stats:" >&2
+            jq -s '.[0].cache' pass2.json >&2
+            exit 1
+          fi
+          echo "[hit-rate] gate passed"
