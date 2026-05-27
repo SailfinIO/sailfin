@@ -115,9 +115,13 @@ SAILFIN_EOF
     fi
     # The full call shape must appear verbatim — the `, ptr @sfn_default_arena)`
     # tail is the discriminator that catches a regression to the 2-arg form.
-    # `\b` anchors the symbol so a regression to the `_arena`-suffixed
-    # transitional name (#715) also fails this grep.
-    if ! grep -qE 'call \{i8\*, i64\} @sfn_str_concat\b\(\{i8\*, i64\} [^,]+, \{i8\*, i64\} [^,]+, ptr @sfn_default_arena\)' "$ll"; then
+    # We anchor the symbol on the literal `\(` rather than a `\b` word
+    # boundary: BSD/macOS `grep -E` treats `\b` as a backspace (see
+    # `test_runtime_libc_skeleton.sh` lines 95-102), and the `(` that
+    # follows the symbol is unambiguous in LLVM call lines — a regression
+    # to `@sfn_str_concat_arena(` cannot collide because the `_arena`
+    # bytes appear before the `(`, not after `@sfn_str_concat`.
+    if ! grep -qE 'call \{i8\*, i64\} @sfn_str_concat\(\{i8\*, i64\} [^,]+, \{i8\*, i64\} [^,]+, ptr @sfn_default_arena\)' "$ll"; then
         echo "[test]   expected 'call {i8*, i64} @sfn_str_concat(..., ptr @sfn_default_arena)' in emitted IR:"
         grep -nE 'call .* @sfn_str_concat' "$ll" | head -5
         return 1
@@ -139,9 +143,12 @@ SAILFIN_EOF
         grep -nE '= call i8\* @sfn_str_concat\(' "$ll" | head -3
         return 1
     fi
-    if grep -qE '@sfn_str_concat_arena\b' "$ll"; then
+    # Anchor on the literal `(` for portability; `\b` is GNU-only and
+    # the BSD/macOS `grep -E` would treat it as a backspace (see
+    # `test_runtime_libc_skeleton.sh` lines 95-102).
+    if grep -qE '@sfn_str_concat_arena\(' "$ll"; then
         echo "[test]   regressed: fresh emission still uses the transitional @sfn_str_concat_arena name"
-        grep -nE '@sfn_str_concat_arena' "$ll" | head -3
+        grep -nE '@sfn_str_concat_arena\(' "$ll" | head -3
         return 1
     fi
     if grep -qE '@sailfin_runtime_string_concat' "$ll"; then

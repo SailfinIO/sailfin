@@ -177,8 +177,11 @@ test_string_concat_uses_aggregate_abi() {
         echo "[test]   regression: fresh emission still calls the 2-arg @sfn_str_concat shape"
         return 1
     fi
+    # Anchor on the literal `(` for portability; `\b` is GNU-only and
+    # the BSD/macOS `grep -E` would treat it as a backspace (see
+    # `test_runtime_libc_skeleton.sh` lines 95-102).
     local legacy_arena_called
-    legacy_arena_called="$(grep -cE '@sfn_str_concat_arena\b' "$LL" || true)"
+    legacy_arena_called="$(grep -cE '@sfn_str_concat_arena\(' "$LL" || true)"
     if [ "${legacy_arena_called:-0}" -ne 0 ]; then
         echo "[test]   regression: fresh emission still references @sfn_str_concat_arena (post-#715 transitional name)"
         return 1
