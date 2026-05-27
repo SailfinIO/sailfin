@@ -1,5 +1,37 @@
 // sfn/cli — exit code constants.
 //
-// Reserved for Phase 1 (Issue 1.2). Will host `EXIT_OK`,
-// `EXIT_BUILD_FAIL`, `EXIT_USAGE`, `EXIT_NOT_FOUND`, and `EXIT_INTERNAL`
-// once typed flags and the non-exiting `parse()` variant land.
+// Stable named constants for `process.exit()` codes used by the CLI
+// capsule and (eventually) the Sailfin compiler driver. Codes follow
+// the loose tooling convention shared by Rust/Cargo and POSIX
+// `sysexits.h`:
+//
+//   * `EXIT_OK`         — success.
+//   * `EXIT_BUILD_FAIL` — generic "operation failed" (compile error,
+//                         test failure, etc.).
+//   * `EXIT_USAGE`      — invalid CLI usage: unknown flag, missing
+//                         required argument, unexpected positional.
+//   * `EXIT_NOT_FOUND`  — the requested input (file, capsule,
+//                         subcommand) does not exist. Lets CI scripts
+//                         distinguish missing-input from a real build
+//                         failure without parsing stderr.
+//   * `EXIT_INTERNAL`   — internal compiler/CLI bug. Matches sysexits.h
+//                         `EX_SOFTWARE` so monitoring tools that already
+//                         understand 70 keep working.
+//
+// Phase 1 (Issue #791): `parser.run()` adopts `EXIT_OK` and `EXIT_USAGE`
+// in place of the literals it already emits. The remaining constants
+// are declared here so downstream callers and the compiler-side
+// adoption (Phase 2/3) have a single source of truth.
+let EXIT_OK: int = 0;
+let EXIT_BUILD_FAIL: int = 1;
+let EXIT_USAGE: int = 2;
+let EXIT_NOT_FOUND: int = 3;
+let EXIT_INTERNAL: int = 70;
+
+export {
+    EXIT_OK,
+    EXIT_BUILD_FAIL,
+    EXIT_USAGE,
+    EXIT_NOT_FOUND,
+    EXIT_INTERNAL
+};
