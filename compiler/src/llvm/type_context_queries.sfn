@@ -238,6 +238,20 @@ fn resolve_struct_info_for_method_target(base: string, bindings: ParameterBindin
     let trimmed = trim_text(base);
     if trimmed.length == 0 { return null; }
     if is_simple_identifier(trimmed) {
+        // Locals before parameters so a `let` that shadows a parameter
+        // resolves to the local's type (#697).
+        let local = find_local_binding(locals, trimmed);
+        if local != null {
+            let info = resolve_struct_info_from_llvm_type(context, local.llvm_type);
+            if info != null { return info; }
+            // Fallback: check source type_annotation when llvm_type is i8*.
+            if local.type_annotation != null {
+                if local.type_annotation.length > 0 {
+                    let by_annotation = find_struct_info_by_name(context, local.type_annotation);
+                    if by_annotation != null { return by_annotation; }
+                }
+            }
+        }
         let parameter = find_parameter_binding(bindings, trimmed);
         if parameter != null {
             let info = resolve_struct_info_from_llvm_type(context, parameter.llvm_type);
@@ -247,18 +261,6 @@ fn resolve_struct_info_for_method_target(base: string, bindings: ParameterBindin
             if parameter.type_annotation != null {
                 if parameter.type_annotation.length > 0 {
                     let by_annotation = find_struct_info_by_name(context, parameter.type_annotation);
-                    if by_annotation != null { return by_annotation; }
-                }
-            }
-        }
-        let local = find_local_binding(locals, trimmed);
-        if local != null {
-            let info = resolve_struct_info_from_llvm_type(context, local.llvm_type);
-            if info != null { return info; }
-            // Fallback: check source type_annotation when llvm_type is i8*.
-            if local.type_annotation != null {
-                if local.type_annotation.length > 0 {
-                    let by_annotation = find_struct_info_by_name(context, local.type_annotation);
                     if by_annotation != null { return by_annotation; }
                 }
             }
@@ -274,9 +276,11 @@ fn resolve_interface_info_for_method_target(base: string, bindings: ParameterBin
     let trimmed = trim_text(base);
     if trimmed.length == 0 { return null; }
     if is_simple_identifier(trimmed) {
-        let parameter = find_parameter_binding(bindings, trimmed);
-        if parameter != null {
-            let mut type_name = parameter.llvm_type;
+        // Locals before parameters so a `let` that shadows a parameter
+        // resolves to the local's interface type (#697).
+        let local = find_local_binding(locals, trimmed);
+        if local != null {
+            let mut type_name = local.llvm_type;
             if substring(type_name, 0, 7) == "%trait." {
                 let interface_name = substring(type_name, 7, type_name.length);
                 let info = find_interface_info_by_name(context, interface_name);
@@ -285,9 +289,9 @@ fn resolve_interface_info_for_method_target(base: string, bindings: ParameterBin
             let info = find_interface_info_by_name(context, type_name);
             if info != null { return info; }
         }
-        let local = find_local_binding(locals, trimmed);
-        if local != null {
-            let mut type_name = local.llvm_type;
+        let parameter = find_parameter_binding(bindings, trimmed);
+        if parameter != null {
+            let mut type_name = parameter.llvm_type;
             if substring(type_name, 0, 7) == "%trait." {
                 let interface_name = substring(type_name, 7, type_name.length);
                 let info = find_interface_info_by_name(context, interface_name);

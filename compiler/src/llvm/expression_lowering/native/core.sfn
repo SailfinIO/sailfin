@@ -1447,6 +1447,28 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         return lower_member_access(member_parse, bindings, locals, temp_index, lines, functions, context, expected_type);
     }
 
+    // Locals are checked before parameters so a `let` that shadows a
+    // parameter with the same name resolves to the local (#697).
+    // `find_local_binding` walks the locals list newest-first, which
+    // matches lexical-scope expectations.
+    let local = find_local_binding(locals, stripped);
+    if local != null {
+        let load_result = load_local_operand(local, temp_index, lines);
+        let mut _ci5: int = 0;
+        loop {
+            if _ci5 >= load_result.diagnostics.length { break; }
+            diagnostics.push(load_result.diagnostics[_ci5]);
+            _ci5 += 1;
+        }
+        return ExpressionResult {
+            lines: load_result.lines,
+            temp_index: load_result.temp_index,
+            operand: load_result.operand,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
     let parameter = find_parameter_binding(bindings, stripped);
     if dbg_expr {
         let mut param_found = "null";
@@ -1467,24 +1489,6 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             lines: lines,
             temp_index: temp_index,
             operand: operand,
-            diagnostics: diagnostics,
-            string_constants: empty_constants
-        };
-    }
-
-    let local = find_local_binding(locals, stripped);
-    if local != null {
-        let load_result = load_local_operand(local, temp_index, lines);
-        let mut _ci5: int = 0;
-        loop {
-            if _ci5 >= load_result.diagnostics.length { break; }
-            diagnostics.push(load_result.diagnostics[_ci5]);
-            _ci5 += 1;
-        }
-        return ExpressionResult {
-            lines: load_result.lines,
-            temp_index: load_result.temp_index,
-            operand: load_result.operand,
             diagnostics: diagnostics,
             string_constants: empty_constants
         };
