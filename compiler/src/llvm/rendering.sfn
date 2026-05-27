@@ -157,10 +157,7 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             //      (`async_runtime_declare_lines()` walks every
             //      descriptor where `is_async_runtime_target` is true
             //      and emits its declare directly into the preamble).
-            //   2. `sailfin_enum_tag_from_instruction_array` — the
-            //      seedcheck enum-tag reader has its declare hardcoded
-            //      in the preamble for separate-compilation visibility.
-            //   3. Arena-allocation primitives + the rc-release helper
+            //   2. Arena-allocation primitives + the rc-release helper
             //      (`alloc_struct` / `runtime.free` / `rc.release`).
             //      `render_llvm_preamble` (`lowering_phase_render.sfn:
             //      173-185`) writes their declares inline so the
@@ -179,9 +176,6 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             // actually needs.
             let mut _preamble_inlined: boolean = false;
             if is_async_runtime_target(descriptor.target) {
-                _preamble_inlined = true;
-            }
-            if descriptor.target == "sailfin_enum_tag_from_instruction_array" {
                 _preamble_inlined = true;
             }
             if descriptor.target == "alloc_struct" { _preamble_inlined = true; }

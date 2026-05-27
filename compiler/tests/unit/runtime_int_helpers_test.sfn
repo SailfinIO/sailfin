@@ -140,28 +140,6 @@ test "runtime int helper: runtime_grapheme_count_fn emits call+round+fptosi to i
     assert result.diagnostics.length == 0;
 }
 
-test "runtime int helper: sailfin_enum_tag_from_instruction_array emits call+round+fptosi to i64" ![io] {
-    // Two-argument helper; param_types `["i8*", "double"]` are
-    // intentionally unchanged (the second argument is a numeric
-    // index that already flows through the legacy double path —
-    // out of scope per #639).
-    let buf = _i8ptr_operand("%buf");
-    let idx = _double_operand("%idx");
-    let operands: LLVMOperand[] = [buf, idx];
-    let result = emit_runtime_call("sailfin_enum_tag_from_instruction_array", operands, empty_runtime_call_overrides(), 0, []);
-
-    assert result.lines.length == 3;
-    assert result.lines[0] == "  %t0 = call double @sailfin_enum_tag_from_instruction_array(i8* %buf, double %idx)";
-    assert result.lines[1] == "  %t1 = call double @round(double %t0)";
-    assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
-
-    assert result.operand != null;
-    assert result.operand.llvm_type == "i64";
-    assert result.operand.value == "%t2";
-    assert result.temp_index == 3;
-    assert result.diagnostics.length == 0;
-}
-
 test "runtime int helper: sailfin_intrinsic_runtime_arena_mark emits call+round+fptosi to i64" ![io] {
     let operands: LLVMOperand[] = [];
     let result = emit_runtime_call("sailfin_intrinsic_runtime_arena_mark", operands, empty_runtime_call_overrides(), 0, []);

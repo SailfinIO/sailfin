@@ -99,17 +99,16 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
         lines.push("");
     }
 
-    // Async/future runtime types. Opaque-type defs and the seedcheck
-    // enum-tag reader declare stay inline — they are not function
-    // declares the descriptor dispatch handles (#500 / M1.7.4 scope
-    // `Out:`). The 18 spawn/await `declare` lines are sourced from the
-    // runtime helper registry via `async_runtime_declare_lines`, which
-    // walks the descriptors in registration order so the emitted IR
-    // stays byte-for-byte stable as the M4 concurrency work later
-    // extends or replaces the typed variants.
+    // Async/future runtime types. Opaque-type defs stay inline — they
+    // are not function declares the descriptor dispatch handles
+    // (#500 / M1.7.4 scope `Out:`). The 18 spawn/await `declare` lines
+    // are sourced from the runtime helper registry via
+    // `async_runtime_declare_lines`, which walks the descriptors in
+    // registration order so the emitted IR stays byte-for-byte stable
+    // as the M4 concurrency work later extends or replaces the typed
+    // variants.
     lines = extend_string_lines(lines, ["%SailfinFutureNumber = type opaque", "%SailfinFutureInt = type opaque", "%SailfinFutureBool = type opaque", "%SailfinFuturePtr = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", ""]);
     lines = extend_string_lines(lines, async_runtime_declare_lines());
-    lines = extend_string_lines(lines, ["", "; Enum tag reader for seedcheck - reads i32 tag from NativeInstruction array", "declare double @sailfin_enum_tag_from_instruction_array(i8*, double)", ""]);
 
     // Vtable type definitions
     let vtable_type_lines = render_vtable_type_definitions(type_context);
