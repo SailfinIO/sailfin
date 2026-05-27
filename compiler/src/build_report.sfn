@@ -215,23 +215,27 @@ fn _br_json_string_array(values: string[]) -> string {
 }
 
 // Format `hits / (hits + misses)` as a JSON-number literal with
-// four fractional digits. Pure integer arithmetic: the compiler's
-// `+ string` concat path doesn't auto-stringify floats, and a
-// hand-rolled `%.15g` here would diverge from the per-build
-// determinism contract (#779). Truncates toward zero rather
-// than rounding — matches the floor semantics CI gates use when
-// comparing against a threshold like `>= 0.80`.
+// four fractional digits.
 //
-// Zero denominator (no lookups attempted) emits `0.0000`, not
-// `null` and not `nan`. Saturated cache (only hits, no misses)
-// emits `1.0000`.
+// Sailfin's `/` on `int` operands widens to float (see the note
+// above `_br_number_to_string` — `7 / 10` evaluates to `0.7`,
+// not `0`). We exploit that: `(hits * 10000) / denom` is a float
+// divide whose result lands in `[0.0, 10000.0]`, and `as int`
+// truncates back to a 4-digit integer the existing integer-only
+// `_br_number_to_string` can then stringify with manual
+// leading-zero padding. f64's 53-bit mantissa keeps the scaling
+// exact for any realistic counter — `hits * 10000` only loses
+// precision above ~9e14, far past anything a real build produces.
+//
+// Zero denominator (no lookups attempted) emits `0.0000`, never
+// `null` and never `nan`. Saturated cache (only hits, no misses)
+// emits `1.0000`. Truncates toward zero rather than rounding —
+// matches the floor semantics CI gates use when comparing
+// against a threshold like `>= 0.80`.
 fn _br_format_hit_rate(hits: int, misses: int) -> string {
     let denom: int = hits + misses;
     if denom == 0 { return "0.0000"; }
-    // `int / int` widens to float in Sailfin; `as int` truncates
-    // back so the scaled value is a clean 0..10000 integer.
-    let scaled_float: float = (hits * 10000) / denom;
-    let mut scaled: int = scaled_float as int;
+    let mut scaled: int = ((hits * 10000) / denom) as int;
     if scaled >= 10000 { return "1.0000"; }
     if scaled < 0 { scaled = 0; }
     let mut frac = _br_number_to_string(scaled);
