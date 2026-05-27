@@ -171,10 +171,12 @@ and a pure Sailfin runtime. The critical path:
   annotations.
 - **Capability auditing (`sfn audit`)** — recursive capability analysis of
   a dependency tree before deployment.
-- **Sailfin-native runtime** — the current C runtime under `runtime/native/`
-  is being replaced module-by-module with Sailfin (`runtime/sfn/`). The
-  first module (`memory/arena.sfn`) is already linked into the compiler;
-  the full rewrite (~90 ABI functions) is a hard 1.0 prerequisite.
+- **Sailfin-native runtime** — the binary's entry point is now the
+  Sailfin-emitted `@main` (M5, #451); the remaining C helpers under
+  `runtime/native/src/` are being replaced module-by-module with
+  Sailfin (`runtime/sfn/`). `memory/arena.sfn`, `memory/rc.sfn`, and
+  `clock.sfn` are already linked into the compiler; the full rewrite
+  (~90 ABI functions) is a hard 1.0 prerequisite.
 
 After 1.0, focus shifts to ecosystem growth: an `sfn/ai` capsule for
 model invocation gated by `![model]`, taint types (`Secret<T>`, `PII<T>`)
