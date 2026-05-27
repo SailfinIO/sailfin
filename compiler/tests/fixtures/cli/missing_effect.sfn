@@ -1,0 +1,15 @@
+// Fixture for the CI effect-gate exit-code smoke step (#807).
+//
+// `main()` calls `print.info(...)` without declaring the required
+// `![io]` effect. The compiler must reject this with diagnostic
+// `E0400` and exit with a non-zero status code. This locks in the
+// fix for the macOS arm64 Bool/int ABI corruption originally
+// reported in #615 (see #638/#641/#639 and commits 027735d9,
+// a476bf4b).
+//
+// Keep this file deliberately small — the CI step greps for an
+// exact summary line ("checked 1 files: 1 error"), so the input
+// must produce exactly one diagnostic.
+fn main() {
+    print.info("missing effect declaration");
+}

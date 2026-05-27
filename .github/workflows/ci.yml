@@ -110,6 +110,73 @@ jobs:
           (file build/native/sailfin || true)
           build/native/sailfin version || build/native/sailfin --version || true
 
+      # Regression guard for #615 / #807: assert the effect gate
+      # actually fails the build (non-zero exit + correct summary
+      # integers) on both Linux x86_64 and macOS arm64. The
+      # original report saw `error[E0400]` printed but the process
+      # exited 0 and the summary line printed garbage integers
+      # like "checked 22884130224 files: 22884131104 error",
+      # caused by a Bool/int ABI hazard since fixed by the i64
+      # C-ABI coercion family (#638/#641/#639) and the arm64 ABI
+      # fixes in 027735d9 / a476bf4b. The clean-file control
+      # ensures the gate is not just rejecting every input.
+      - name: Effect-gate exit-code smoke (#615 / #807)
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          BAD=compiler/tests/fixtures/cli/missing_effect.sfn
+          OK=compiler/tests/fixtures/cli/clean_effect.sfn
+          fail=0
+
+          # --- Missing-effect input must fail `sailfin check`. ---
+          if out="$(build/native/sailfin check "$BAD" 2>&1)"; then
+            echo "[effect-gate] FAIL: sailfin check on $BAD exited 0 (expected non-zero)."
+            echo "$out"
+            fail=$((fail + 1))
+          else
+            echo "[effect-gate] ok: sailfin check on $BAD exited non-zero."
+          fi
+          if ! echo "$out" | grep -q 'error\[E0400\]'; then
+            echo "[effect-gate] FAIL: missing E0400 diagnostic in output:"
+            echo "$out"
+            fail=$((fail + 1))
+          fi
+          if ! echo "$out" | grep -qE '^checked 1 files: 1 error$'; then
+            echo "[effect-gate] FAIL: summary line not 'checked 1 files: 1 error'."
+            echo "[effect-gate] (likely Bool/int ABI corruption — see #615 / #638 / #641)"
+            echo "$out" | grep -E '^checked ' || true
+            fail=$((fail + 1))
+          fi
+
+          # --- Missing-effect input must also fail `sailfin emit llvm`. ---
+          if build/native/sailfin emit llvm "$BAD" >/dev/null 2>&1; then
+            echo "[effect-gate] FAIL: sailfin emit llvm on $BAD exited 0 (expected non-zero)."
+            fail=$((fail + 1))
+          else
+            echo "[effect-gate] ok: sailfin emit llvm on $BAD exited non-zero."
+          fi
+
+          # --- Clean-file control must succeed. ---
+          if ! ok_out="$(build/native/sailfin check "$OK" 2>&1)"; then
+            echo "[effect-gate] FAIL: sailfin check on $OK exited non-zero (expected 0)."
+            echo "$ok_out"
+            fail=$((fail + 1))
+          else
+            echo "[effect-gate] ok: sailfin check on $OK exited 0."
+          fi
+          if ! echo "$ok_out" | grep -qE '^checked 1 files: ok$'; then
+            echo "[effect-gate] FAIL: clean-file summary not 'checked 1 files: ok'."
+            echo "$ok_out" | grep -E '^checked ' || true
+            fail=$((fail + 1))
+          fi
+
+          if [ "$fail" -gt 0 ]; then
+            echo ""
+            echo "[effect-gate] $fail assertion(s) failed. The effect gate is broken."
+            exit 1
+          fi
+          echo "[effect-gate] all assertions passed"
+
       - name: Check formatting (sfn fmt --check)
         shell: bash {0}
         run: |
