@@ -440,6 +440,25 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         }
     }
 
+    // M2.8b (#726): splice `ptr @sfn_default_arena` as the trailing
+    // arg for env.get / env.home so the SfnString aggregate trampolines
+    // can NUL-marshal the name and wrap the result. Mirrors the
+    // `sfn_str_concat` arena-threading pattern from #714. The
+    // descriptors carry `parameter_types` with the trailing `ptr` slot;
+    // the user-facing source still passes only `name` / `()`, so the
+    // operand-count gate above sees the pre-injection list and only
+    // post-gate emission sees the spliced operand.
+    let mut _env_target_match: boolean = false;
+    if trimmed_target == "env.get" { _env_target_match = true; }
+    if trimmed_target == "env.home" { _env_target_match = true; }
+    if _env_target_match {
+        let arena_operand = LLVMOperand {
+            llvm_type: "ptr",
+            value: "@sfn_default_arena"
+        };
+        operands.push(arena_operand);
+    }
+
     // Phase 4: Coerce operands and emit the call (delegated to core_call_emission)
     return coerce_and_emit_call(trimmed_target, operands, expected_params, llvm_return, is_trait_dispatch, is_closure_dispatch, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type, method_operand, helper_descriptor, function_entry, current_temp, current_lines, diagnostics, collected_string_constants, bindings, locals, context);
 }

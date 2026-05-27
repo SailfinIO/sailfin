@@ -193,6 +193,21 @@ PROBE
             found=$((found + 1))
         fi
     done
+    # M2.8b (#726): env.get / env.home must lower against the
+    # SfnString aggregate ABI with the trailing arena slot. Pin the
+    # exact call shape so a regression that drops the arena thread or
+    # reverts the aggregate flip is caught at the IR layer rather
+    # than as a downstream segfault.
+    if ! grep -qE 'call \{i8\*, i64\} @sfn_getenv\(\{i8\*, i64\} .+, ptr @sfn_default_arena\)' "$ll"; then
+        echo "[test]   io_probe.sfn does not lower env.get to call {i8*, i64} @sfn_getenv({i8*, i64} ..., ptr @sfn_default_arena)"
+        grep -nE '@sfn_getenv\b' "$ll" | head -3
+        found=$((found + 1))
+    fi
+    if ! grep -qE 'call \{i8\*, i64\} @sfn_home_dir\(ptr @sfn_default_arena\)' "$ll"; then
+        echo "[test]   io_probe.sfn does not lower env.home to call {i8*, i64} @sfn_home_dir(ptr @sfn_default_arena)"
+        grep -nE '@sfn_home_dir\b' "$ll" | head -3
+        found=$((found + 1))
+    fi
     return "$((missing + found))"
 }
 

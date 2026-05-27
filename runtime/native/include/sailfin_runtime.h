@@ -444,12 +444,16 @@ extern "C"
     // Environment & path helpers.
     char *sailfin_runtime_getenv(const char *name);
     char *sailfin_runtime_home_dir(void);
-    /* M2.8 (#401): symbol-flip trampolines for `env.get` / `env.home`.
-     * Same legacy `i8*` ABI as the entrypoints above — the aggregate
-     * `SfnString` flip on these waits for the arena-threading wave
-     * (a follow-up under M2.8). Bodies forward verbatim. */
-    char *sfn_getenv(const char *name);
-    char *sfn_home_dir(void);
+    /* M2.8b (#726): SfnString aggregate ABI for `env.get` / `env.home`.
+     * The compiler's runtime_helpers.sfn descriptors carry
+     * `parameter_types: ["{i8*, i64}", "ptr"]` / `["ptr"]` and
+     * `return_type: "{i8*, i64}"`; the call-site dispatch in
+     * `core_call_lowering.sfn` splices `ptr @sfn_default_arena` as
+     * the trailing arg (mirrors `sfn_str_concat` from #714). Bodies
+     * NUL-marshal the name through the arena, call `getenv`, and
+     * wrap the libc result via `sfn_str_from_cstr` + `sfn_str_len`. */
+    SfnString sfn_getenv(SfnString name, SfnArena **arena_slot);
+    SfnString sfn_home_dir(SfnArena **arena_slot);
     char *sailfin_runtime_read_file_bytes(const char *path, int64_t *out_length);
 
     // Misc stubs.

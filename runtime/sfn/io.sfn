@@ -121,15 +121,23 @@ fn sfn_print_error_sfn(msg: * u8) -> void ![io] {
 }
 
 // `sfn_getenv_sfn(name)` — environment-variable read. Architect
-// spec marshals `name` to a NUL-terminated buffer in an arena and
-// wraps the result through `sfn_str_from_cstr`; today's body
-// passes the NUL-terminated legacy pointer through directly since
-// SfnString.data already carries a trailing NUL (literal lowering
-// + arena-routed concat preserve it).
+// spec: `(SfnString, *Arena) -> SfnString` — NUL-marshal name into
+// the arena, call `extern fn getenv`, wrap result via
+// `sfn_str_from_cstr`. M2.8b (#726) shipped the aggregate ABI on
+// the bare C trampoline (`sfn_getenv` in `sailfin_runtime.c`); the
+// `_sfn_` infix proof-of-life body below keeps the legacy `* u8`
+// shape because the Sailfin frontend can't take SfnString
+// aggregate parameters or a `*SfnArena` slot today (M1.A.2). The
+// user-emission hot path bypasses this wrapper entirely and lands
+// on `@sfn_getenv` against the real aggregate ABI.
 fn sfn_getenv_sfn(name: * u8) -> * u8 ![io] {
     return sailfin_runtime_getenv(name);
 }
 
 // `sfn_home_dir_sfn()` — `getenv("HOME")` (or `USERPROFILE` on
-// Windows; the C trampoline handles the platform fork).
+// Windows; the C trampoline handles the platform fork). Architect
+// spec: `(*Arena) -> SfnString` — `sfn_getenv("HOME", arena)`. Same
+// proof-of-life constraint as `sfn_getenv_sfn`: the bare
+// `sfn_home_dir` trampoline carries the aggregate ABI; this body
+// stays a `* u8` forwarder until M1.A.2.
 fn sfn_home_dir_sfn() -> * u8 ![io] { return sailfin_runtime_home_dir(); }

@@ -2212,6 +2212,8 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 | `sailfin_runtime_sha256_hex` | `sfn/crypto` capsule | M3 |
 | `sailfin_runtime_base64_encode` | `sfn/crypto` capsule | M3 |
 | `sailfin_runtime_http_get/post_json/download` | `sfn_http_get/post` | M3 |
+| `sailfin_runtime_getenv` | `sfn_getenv` | **M2.8b (#726) shipped SfnString aggregate ABI + arena-threaded marshalling; legacy `i8*` entrypoint retained for seed compatibility.** |
+| `sailfin_runtime_home_dir` | `sfn_home_dir` | **M2.8b (#726) shipped SfnString aggregate ABI + arena-threaded marshalling; legacy `i8*` entrypoint retained for seed compatibility.** |
 
 ## Appendix B: Compiler Files Affected by Milestone
 

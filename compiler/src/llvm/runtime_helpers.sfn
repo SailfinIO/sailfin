@@ -869,16 +869,20 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
 
     // Environment & path helpers
-    // M2.8 (#401): native_signature flipped to the Sailfin-native
-    // sfn_getenv / sfn_home_dir C trampolines. The legacy i8* ABI
-    // is preserved on parameter_types and return_type; the
-    // SfnString aggregate flip needs arena threading at the call
-    // site and waits on a follow-up wave.
+    // M2.8b (#726): SfnString aggregate ABI flip for env.get / env.home.
+    // `parameter_types` carries the `{i8*, i64}` aggregate (name) plus
+    // the trailing `ptr` slot threaded as `ptr @sfn_default_arena` by
+    // the call-site dispatch in `core_call_lowering.sfn` (mirrors the
+    // `sfn_str_concat` arena-threading pattern from #714).
+    // `return_type` returns the SfnString aggregate; downstream
+    // consumers fall back to the existing `{i8*, i64} → i8*`
+    // extractvalue coercion in `coerce_pointer_or_struct` for the
+    // legacy `i8*` string-typed locals.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "env.get", symbol: "sailfin_runtime_getenv", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_getenv", c_abi_return_type: null
+        target: "env.get", symbol: "sailfin_runtime_getenv", return_type: "{i8*, i64}", parameter_types: ["{i8*, i64}", "ptr"], effects: ["io"], native_signature: "sfn_getenv", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "env.home", symbol: "sailfin_runtime_home_dir", return_type: "i8*", parameter_types: [], effects: ["io"], native_signature: "sfn_home_dir", c_abi_return_type: null
+        target: "env.home", symbol: "sailfin_runtime_home_dir", return_type: "{i8*, i64}", parameter_types: ["ptr"], effects: ["io"], native_signature: "sfn_home_dir", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs.read_bytes", symbol: "sailfin_runtime_read_file_bytes", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
