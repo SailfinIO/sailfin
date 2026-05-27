@@ -238,24 +238,34 @@ test "cli: unknown token treated as positional when no args defined" {
 }
 
 // ---- Match accessor tests ----
+// These tests assert that accessors handle absent names correctly. An
+// `r.ok` precheck guards against parse() regressing to returning empty
+// matches alongside an error — which would silently satisfy assertions
+// like `get(..., "missing") == ""`.
 test "cli: get returns empty string for missing name" {
     let cmd = with_arg(command("app", "desc"), arg("file", "Source"));
     let argv: string[] = ["app", "test.sfn"];
-    let m = parse(cmd, argv).matches;
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    let m = r.matches;
     assert strings_equal(get(m, "nonexistent"), "");
 }
 
 test "cli: get_or returns default for missing name" {
     let cmd = with_arg(command("app", "desc"), arg("file", "Source"));
     let argv: string[] = ["app", "test.sfn"];
-    let m = parse(cmd, argv).matches;
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    let m = r.matches;
     assert strings_equal(get_or(m, "missing", "fallback"), "fallback");
 }
 
 test "cli: get_or returns actual value when present" {
     let cmd = with_arg(command("app", "desc"), arg("file", "Source"));
     let argv: string[] = ["app", "test.sfn"];
-    let m = parse(cmd, argv).matches;
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    let m = r.matches;
     assert strings_equal(get_or(m, "file", "fallback"), "test.sfn");
 }
 
@@ -282,28 +292,36 @@ test "cli: get_or returns empty string when explicitly provided as empty" {
 test "cli: has_flag returns false for missing flag" {
     let cmd = with_flag(command("app", "desc"), flag("verbose", "V"));
     let argv: string[] = ["app"];
-    let m = parse(cmd, argv).matches;
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    let m = r.matches;
     assert has_flag(m, "verbose") == false;
 }
 
 test "cli: has returns true for present positional" {
     let cmd = with_arg(command("app", "desc"), arg("file", "Source"));
     let argv: string[] = ["app", "main.sfn"];
-    let m = parse(cmd, argv).matches;
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    let m = r.matches;
     assert has(m, "file") == true;
 }
 
 test "cli: has returns true for present flag" {
     let cmd = with_flag(command("app", "desc"), flag("verbose", "V"));
     let argv: string[] = ["app", "--verbose"];
-    let m = parse(cmd, argv).matches;
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    let m = r.matches;
     assert has(m, "verbose") == true;
 }
 
 test "cli: has returns false for missing name" {
     let cmd = command("app", "desc");
     let argv: string[] = ["app"];
-    let m = parse(cmd, argv).matches;
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    let m = r.matches;
     assert has(m, "anything") == false;
 }
 
