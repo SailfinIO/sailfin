@@ -703,6 +703,14 @@ fn build_export_specifiers(values: NamedSpecifier[]) -> ExportSpecifier[] {
 // Variable Declaration
 // ============================================================================
 fn parse_variable(initial_parser: Parser) -> StatementParseResult {
+    return parse_variable_with_storage(initial_parser, false);
+}
+
+// Top-level `thread_local let mut` declarations dispatch through this entry
+// point. The `thread_local` keyword is consumed by the caller; `is_thread_local`
+// flips the AST flag so module-global lowering can emit
+// `internal thread_local global` instead of `internal global`.
+fn parse_variable_with_storage(initial_parser: Parser, is_thread_local: boolean) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     let mut statement_tokens: Token[] = [];
@@ -779,6 +787,7 @@ fn parse_variable(initial_parser: Parser) -> StatementParseResult {
     let statement = Statement.VariableDeclaration {
         name: name,
         mutable: mutable_flag,
+        is_thread_local: is_thread_local,
         type_annotation: type_annotation,
         initializer: initializer,
         span: span,

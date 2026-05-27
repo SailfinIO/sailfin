@@ -1,0 +1,42 @@
+// Fixture for compiler/tests/e2e/test_thread_local_lowering.sh.
+//
+// Pins the storage-class round-trip for `thread_local let mut`
+// (#730). The fixture exercises three shapes that exercise the
+// distinct lowering branches in
+// `compiler/src/llvm/lowering/module_globals.sfn`:
+//
+//   - `head: i64` → `internal thread_local global i64 0`
+//     (non-string, integer initializer branch)
+//   - `flag: boolean = true` → `internal thread_local global i1 1`
+//     (boolean branch)
+//   - `temperature: float = 0.0` → `internal thread_local global
+//     double 0.0` (double branch)
+//
+// The surrounding `bump` / `take` functions also pin that
+// load/store sites against a thread-local global use the same
+// `@global.<name>` symbol as ordinary globals — `thread_local`
+// only changes the declaration line, not the use sites. The
+// scheduler (M4 #321) relies on this invariant so emit-side
+// reads/writes against TLS globals don't need any per-thread
+// indirection in the compiler.
+thread_local let mut head: i64 = 0;
+
+thread_local let mut flag: boolean = true;
+
+thread_local let mut temperature: float = 0.0;
+
+fn bump() -> i64 {
+    head = head + 1;
+    return head;
+}
+
+fn take_flag() -> boolean {
+    let captured = flag;
+    flag = false;
+    return captured;
+}
+
+fn record_temperature(value: float) -> float {
+    temperature = value;
+    return temperature;
+}

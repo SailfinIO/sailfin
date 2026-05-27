@@ -20,6 +20,24 @@ Type annotations are optional; the compiler infers types where possible.
 Uninitialized bindings default to `null`. Variables, parameters, and struct
 fields use `:` for type annotations; only function return types use `->`.
 
+##### §3.1.1 Thread-local storage class
+
+Top-level `let mut` bindings accept a `thread_local` prefix that flips the
+backing storage from process-global to per-thread:
+
+```sfn
+thread_local let mut frame_head: i64 = 0;   // per-thread storage
+```
+
+`thread_local` is a storage-class annotation, not a type. It is only valid
+in front of a top-level `let mut` declaration — function-local `thread_local`
+is rejected (an `alloca` is already stack-local and cannot be TLS), and
+`thread_local let x` without `mut` is rejected with `E0807` (an immutable
+thread-local is a contradiction). At LLVM lowering the declaration emits
+`@global.<name> = internal thread_local global <T> <init>` instead of the
+default `internal global` form; reads and writes against the binding use the
+same `@global.<name>` symbol they would for an ordinary global.
+
 #### §3.2 Functions
 
 ```sfn

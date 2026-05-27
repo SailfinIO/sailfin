@@ -15,6 +15,7 @@ enum NativeInstruction {
     Let {
         name: string;
         mutable: boolean;
+        is_thread_local: boolean;
         type_annotation: string;
         value: string?;
         span: NativeSourceSpan?;
@@ -170,6 +171,7 @@ struct NativeEnum {
 struct NativeBinding {
     name: string;
     mutable: boolean;
+    is_thread_local: boolean;
     type_annotation: string;
     value: string?;
 }

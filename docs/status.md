@@ -631,6 +631,7 @@ feature availability.
 | Feature | Status | Notes |
 |---|---|---|
 | `let` / `let mut` variables | Shipped | Type annotations optional; limited inference |
+| `thread_local let mut` (storage class) | Shipped | Top-level only; lowers to `internal thread_local global` (ELF TLS). Immutable `thread_local let` rejected with `E0807`. Unblocks per-thread runtime state for #321 (M4 scheduler) and #730's `runtime/sfn/exception.sfn` frame-head migration |
 | Functions (`fn`) | Shipped | Including generics, default params, decorators |
 | `async fn` | Parsed | `await` is **not** parsed; async is structural only |
 | Structs | Shipped | Including generic params, `implements` clause |

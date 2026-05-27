@@ -80,15 +80,17 @@
 // path works end-to-end on Linux x86_64.
 //
 // TLS. The architect spec calls for a thread-local
-// `current_frame` pointer. Sailfin lacks a `thread_local`
-// annotation today, so the chain head rides as a process-global
-// mutable `let mut sfn_exception_frame_head_addr` (i64 because
-// the seed compiler drops pointer-typed top-level mutables under
-// the same field-layout limitation as struct pointer fields).
-// The existing C runtime's try-stack is `_Thread_local`, but
-// Sailfin has no `spawn` yet, so the single-threaded reality
-// already applies. The TLS upgrade lands alongside scheduler /
-// concurrency work in M4 (#321).
+// `current_frame` pointer. The `thread_local` storage-class
+// annotation (#730) flips the chain head onto ELF TLS:
+// `thread_local let mut sfn_exception_frame_head_addr: i64 = 0`
+// lowers to `@global.sfn_exception_frame_head_addr = internal
+// thread_local global i64 0`. The i64 slot stays for the same
+// pointer-field-layout reason that pins the rest of this module;
+// the cast at `sfn_exception_frame_head` lifts it back to
+// `* SfnExceptionFrame` at use sites. Sailfin has no `spawn`
+// yet, so the single-threaded reality already applies — but the
+// storage is now per-thread by construction, so the M4 (#321)
+// scheduler work no longer needs to revisit this file.
 //
 // Effects. None. Exception primitives live below the I/O layer
 // (same discipline as `runtime/sfn/memory/arena.sfn` and
@@ -152,10 +154,10 @@ struct SfnExceptionFrame {
     message_addr: i64;
 }
 
-// Chain head (process-global; see the file-header TLS note).
+// Chain head (per-thread; see the file-header TLS note).
 // `0` means "no frame pending" — `sfn_throw` aborts in that
 // case rather than longjmp'ing to a stale buffer.
-let mut sfn_exception_frame_head_addr: i64 = 0;
+thread_local let mut sfn_exception_frame_head_addr: i64 = 0;
 
 // `sfn_exception_alloc_frame()` allocates a fresh frame plus
 // its JMPBUF_SIZE buffer. Returns the frame pointer; caller

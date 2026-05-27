@@ -403,6 +403,7 @@ fn emit_variable(state: NativeState, statement: Statement) -> NativeState {
     current = emit_initializer_span_if_present(current, statement.initializer_span);
 
     let mut line: string = ".let ";
+    if statement.is_thread_local { line = line + "thread_local "; }
     if statement.mutable { line = line + "mut "; }
     line = line + statement.name;
     line = append_optional_type_annotation(line, statement.type_annotation);

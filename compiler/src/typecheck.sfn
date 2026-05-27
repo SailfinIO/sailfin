@@ -36,6 +36,7 @@ import {
     make_main_signature_param_count_diagnostic,
     make_main_signature_param_type_diagnostic,
     make_removed_keyword_diagnostic,
+    make_thread_local_requires_mut_diagnostic,
     make_unsupported_statement_keyword_diagnostic,
     register_local_symbol,
     register_symbol
@@ -151,7 +152,18 @@ fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> S
         return register_symbol(statement.name, "type", statement.name_span, existing);
     }
     if statement.variant == "VariableDeclaration" {
-        return register_symbol(statement.name, "variable", statement.span, existing);
+        let registration = register_symbol(statement.name, "variable", statement.span, existing);
+        if statement.is_thread_local {
+            if !statement.mutable {
+                let mut diagnostics = registration.diagnostics;
+                diagnostics.push(make_thread_local_requires_mut_diagnostic(statement.name));
+                return SymbolCollectionResult {
+                    symbols: registration.symbols,
+                    diagnostics: diagnostics
+                };
+            }
+        }
+        return registration;
     }
     return SymbolCollectionResult { symbols: existing, diagnostics: [] };
 }

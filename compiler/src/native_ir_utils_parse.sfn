@@ -695,8 +695,16 @@ fn parse_struct_field_line(text: string) -> NativeStructField? {
 
 fn parse_let_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSourceSpan?) -> NativeInstruction {
     let body = trim_text(strip_prefix(line, ".let "));
+    let mut is_thread_local: boolean = false;
     let mut is_mutable: boolean = false;
     let mut remainder: string = body;
+    // `.let thread_local mut name -> type = init` — the storage-class prefix
+    // (when present) precedes `mut`, mirroring the source-level keyword
+    // ordering accepted by `parse_variable_with_storage`.
+    if starts_with(remainder, "thread_local ") {
+        is_thread_local = true;
+        remainder = trim_text(strip_prefix(remainder, "thread_local "));
+    }
     if starts_with(remainder, "mut ") {
         is_mutable = true;
         remainder = trim_text(strip_prefix(remainder, "mut "));
@@ -705,6 +713,7 @@ fn parse_let_instruction(line: string, span: NativeSourceSpan?, value_span: Nati
     return NativeInstruction.Let {
         name: parsed.name,
         mutable: is_mutable,
+        is_thread_local: is_thread_local,
         type_annotation: parsed.type_annotation,
         value: parsed.value,
         span: span,

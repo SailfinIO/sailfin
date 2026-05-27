@@ -1,0 +1,112 @@
+// Regression coverage for the `thread_local` storage-class annotation
+// on top-level `let mut` declarations (#730).
+//
+// `thread_local let mut x: T = init;` is the audit-able one-line knob
+// that flips a module global from `internal global` to
+// `internal thread_local global` at LLVM lowering. The driver is
+// `runtime/sfn/exception.sfn` — the M2.7a frame-head chain pointer
+// is process-global today and needs to flip to per-thread before
+// any concurrency primitive (`spawn`, M4 #321) can land without
+// corrupting frames across thread boundaries.
+//
+// These tests pin the parser/AST round-trip surface:
+//   - The keyword parses at the top level and sets `is_thread_local`
+//   - The keyword is rejected without `let` following it
+//   - `is_thread_local` defaults to `false` for ordinary `let` /
+//     `let mut`
+//   - The `mutable` flag is preserved alongside the storage class
+//
+// The LLVM-shape pin (`internal thread_local global`) lives in
+// `compiler/tests/e2e/test_thread_local_lowering.sh` — that test
+// runs the whole compiler pipeline against a fixture, which this
+// unit test deliberately does not, to keep parser regressions
+// independent of LLVM lowering.
+import { Program, Statement } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+fn _find_variable(program: Program, name: string) -> Statement {
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "VariableDeclaration" {
+            if stmt.name == name { return stmt; }
+        }
+        index += 1;
+    }
+    return program.statements[0];
+}
+
+fn _has_variable(program: Program, name: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "VariableDeclaration" {
+            if stmt.name == name { return true; }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+test "parser thread_local: top-level `thread_local let mut` sets is_thread_local" {
+    let source = "thread_local let mut frame_head: i64 = 0;";
+    let program = parse_program(source);
+    assert _has_variable(program, "frame_head");
+    let decl = _find_variable(program, "frame_head");
+    assert decl.is_thread_local == true;
+    assert decl.mutable == true;
+    assert decl.name == "frame_head";
+}
+
+test "parser thread_local: ordinary `let mut` leaves is_thread_local false" {
+    // Anchor the default — every existing module global today still
+    // lowers to `internal global`, not `internal thread_local global`.
+    let source = "let mut counter: i64 = 0;";
+    let program = parse_program(source);
+    let decl = _find_variable(program, "counter");
+    assert decl.is_thread_local == false;
+    assert decl.mutable == true;
+}
+
+test "parser thread_local: ordinary immutable `let` leaves is_thread_local false" {
+    let source = "let pi: float = 3.14;";
+    let program = parse_program(source);
+    let decl = _find_variable(program, "pi");
+    assert decl.is_thread_local == false;
+    assert decl.mutable == false;
+}
+
+test "parser thread_local: preserves type annotation through the prefix" {
+    // The keyword must not consume tokens that belong to the type
+    // annotation — i.e. `thread_local` is a pure prefix, not a
+    // pseudo-type wrapper.
+    let source = "thread_local let mut head: i64 = 0;";
+    let program = parse_program(source);
+    let decl = _find_variable(program, "head");
+    assert decl.is_thread_local == true;
+    assert decl.type_annotation != null;
+    assert decl.type_annotation.text == "i64";
+}
+
+test "parser thread_local: rejects bare `thread_local` without `let`" {
+    // `thread_local fn ...` (and any other non-`let` follower) must
+    // not silently turn into a VariableDeclaration. Today the
+    // dispatcher falls through to `parse_unknown`, which yields a
+    // Statement.Unknown rather than a structured declaration — the
+    // typecheck pass surfaces this as an error at compile time.
+    let source = "thread_local fn boom() {}";
+    let program = parse_program(source);
+    // No VariableDeclaration should have been produced.
+    let mut found_var: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        if program.statements[index].variant == "VariableDeclaration" {
+            found_var = true;
+        }
+        index += 1;
+    }
+    assert found_var == false;
+}

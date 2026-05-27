@@ -209,6 +209,7 @@ enum Statement {
     VariableDeclaration {
         name: string;
         mutable: boolean;
+        is_thread_local: boolean;
         type_annotation: TypeAnnotation?;
         initializer: Expression?;
         span: SourceSpan?;

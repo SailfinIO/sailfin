@@ -25,7 +25,8 @@ import {
     parse_test,
     parse_type_alias,
     parse_unknown,
-    parse_variable
+    parse_variable,
+    parse_variable_with_storage
 } from "./declarations";
 import {
     identifier_matches,
@@ -111,6 +112,20 @@ fn parse_statement(initial_parser: Parser) -> StatementParseResult {
     if identifier_matches(token, "let") {
         if decorators.length > 0 { return parse_unknown(original); }
         return parse_variable(parser);
+    }
+    // `thread_local let mut <name>: <type> = <init>;` — top-level storage
+    // class for module globals. Function-local `thread_local` is unsupported
+    // (allocas can't be TLS at the LLVM level), so only the top-level
+    // dispatcher recognizes this prefix; inside a block the keyword falls
+    // through to `parse_unknown` and surfaces as a normal parse error.
+    if identifier_matches(token, "thread_local") {
+        if decorators.length > 0 { return parse_unknown(original); }
+        let after_keyword = skip_trivia(parser_advance_raw(parser));
+        let next = parser_peek_raw(after_keyword);
+        if identifier_matches(next, "let") {
+            return parse_variable_with_storage(after_keyword, true);
+        }
+        return parse_unknown(original);
     }
     if identifier_matches(token, "test") {
         if decorators.length > 0 { return parse_unknown(original); }
@@ -408,6 +423,7 @@ export {
 
     // Variable declaration
     parse_variable,
+    parse_variable_with_storage,
 
     // Function declaration
     parse_function,
