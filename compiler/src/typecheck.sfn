@@ -347,15 +347,16 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         };
     }
     if statement.variant == "ForStatement" {
+        let target_diags = walk_expression(statement.clause.target, bindings);
         let iter_diags = walk_expression(statement.clause.iterable, bindings);
         let body_diags = check_block(statement.body, bindings, interfaces);
         return ScopeResult {
             bindings: bindings,
-            diagnostics: iter_diags.concat(body_diags)
+            diagnostics: target_diags.concat(iter_diags).concat(body_diags)
         };
     }
     if statement.variant == "MatchStatement" {
-        let mut diagnostics: Diagnostic[] = [];
+        let mut diagnostics = walk_expression(statement.expression, bindings);
         let mut index: int = 0;
         loop {
             if index >= statement.cases.length { break; }
@@ -730,12 +731,13 @@ fn walk_statement_expressions(statement: Statement, bindings: SymbolEntry[]) -> 
         return diagnostics;
     }
     if statement.variant == "ForStatement" {
-        let mut diagnostics = walk_expression(statement.clause.iterable, bindings);
+        let mut diagnostics = walk_expression(statement.clause.target, bindings);
+        diagnostics = diagnostics.concat(walk_expression(statement.clause.iterable, bindings));
         diagnostics = diagnostics.concat(walk_block_expressions(statement.body, bindings));
         return diagnostics;
     }
     if statement.variant == "MatchStatement" {
-        let mut diagnostics: Diagnostic[] = [];
+        let mut diagnostics = walk_expression(statement.expression, bindings);
         let mut index: int = 0;
         loop {
             if index >= statement.cases.length { break; }
@@ -748,7 +750,15 @@ fn walk_statement_expressions(statement: Statement, bindings: SymbolEntry[]) -> 
         return diagnostics;
     }
     if statement.variant == "WithStatement" {
-        return walk_block_expressions(statement.body, bindings);
+        let mut diagnostics: Diagnostic[] = [];
+        let mut clause_index: int = 0;
+        loop {
+            if clause_index >= statement.clauses.length { break; }
+            diagnostics = diagnostics.concat(walk_expression(statement.clauses[clause_index].expression, bindings));
+            clause_index += 1;
+        }
+        diagnostics = diagnostics.concat(walk_block_expressions(statement.body, bindings));
+        return diagnostics;
     }
     if statement.variant == "LoopStatement" {
         return walk_block_expressions(statement.body, bindings);

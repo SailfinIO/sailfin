@@ -7,7 +7,7 @@
 //
 //   * Walking is reached for expression-statement, return-value, and
 //     let-initializer positions (the walker no longer falls through to
-//     the silent no-op return at typecheck.sfn:430).
+//     the silent no-op return at the end of `check_statement`).
 //   * `typecheck_diagnostics` still reports zero unknown-identifier
 //     diagnostics for calls to names that don't resolve in scope, so
 //     the seed compiler's compile output is unchanged.
@@ -55,6 +55,24 @@ test "typecheck walker: nested call in argument emits no diagnostics" {
 test "typecheck walker: call inside if condition emits no diagnostics" {
     // Exercises the IfStatement branch addition that walks `condition`.
     let source = "fn main() { if notarealfunction() { } }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _count_all(diagnostics) == 0;
+}
+
+test "typecheck walker: call inside match scrutinee emits no diagnostics" {
+    // Pins coverage of `MatchStatement.expression` (the scrutinee) —
+    // the position effect_checker.collect_effects_from_statement walks
+    // but the original #809 PR forgot. Restated here so Issue D doesn't
+    // need to re-add the branch.
+    let source = "fn main() { match notarealfunction() { _ => {} } }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _count_all(diagnostics) == 0;
+}
+
+test "typecheck walker: call inside for-iterable emits no diagnostics" {
+    let source = "fn main() { for x in notarealfunction() { } }";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     assert _count_all(diagnostics) == 0;
