@@ -40,8 +40,15 @@
 
 set -euo pipefail
 
-# Argument is accepted for harness uniformity; not used.
-: "${1:-}"
+# Argument required for harness uniformity (every e2e shell test
+# takes the compiler binary as $1, even when unused — keeps
+# accidental mis-invocations like `bash …test.sh` from silently
+# passing).
+BINARY="${1:?usage: test_lowering_no_bare_runtime_emissions.sh <compiler-binary>}"
+if [ ! -e "$BINARY" ]; then
+    echo "[test] FAIL: compiler binary not found at $BINARY"
+    exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
@@ -66,28 +73,63 @@ ACTUAL="$(cd "$REPO_ROOT" && \
 
 EXPECTED="$(grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" | sort)"
 
-if [ "$ACTUAL" = "$EXPECTED" ]; then
-    matches="$(printf '%s\n' "$ACTUAL" | grep -c '.' || true)"
-    echo "[test] PASS: $matches allowlisted runtime emission(s) match audit"
-    exit 0
+if [ "$ACTUAL" != "$EXPECTED" ]; then
+    echo "[test] FAIL: runtime emission audit drift"
+    echo "[test]   Allowlist: $ALLOWLIST"
+    echo "[test]   Audit:     grep -rnE 'call [^\"]*@sailfin_runtime_' \\"
+    echo "[test]                compiler/src/llvm/lowering/ \\"
+    echo "[test]                compiler/src/llvm/expression_lowering/native/"
+    echo "[test]"
+    echo "[test]   Diff (expected vs actual):"
+    diff <(printf '%s\n' "$EXPECTED") <(printf '%s\n' "$ACTUAL") \
+        | sed 's/^/[test]     /' || true
+    echo "[test]"
+    echo "[test]   To fix:"
+    echo "[test]     - New emission?  Route it through the descriptor"
+    echo "[test]       registry (emit_runtime_call / effective_symbol)"
+    echo "[test]       or add the verbatim grep line to the allowlist"
+    echo "[test]       with a '// Registry bypass: …' source comment."
+    echo "[test]     - Moved line?    Re-justify the bypass and update"
+    echo "[test]       the allowlist's pinned line number."
+    echo "[test]     - Removed?       Delete the allowlist entry too."
+    exit 1
 fi
 
-echo "[test] FAIL: runtime emission audit drift"
-echo "[test]   Allowlist: $ALLOWLIST"
-echo "[test]   Audit:     grep -rnE 'call [^\"]*@sailfin_runtime_' \\"
-echo "[test]                compiler/src/llvm/lowering/ \\"
-echo "[test]                compiler/src/llvm/expression_lowering/native/"
-echo "[test]"
-echo "[test]   Diff (expected vs actual):"
-diff <(printf '%s\n' "$EXPECTED") <(printf '%s\n' "$ACTUAL") \
-    | sed 's/^/[test]     /' || true
-echo "[test]"
-echo "[test]   To fix:"
-echo "[test]     - New emission?  Route it through the descriptor"
-echo "[test]       registry (emit_runtime_call / effective_symbol)"
-echo "[test]       or add the verbatim grep line to the allowlist"
-echo "[test]       with a '// Registry bypass: …' source comment."
-echo "[test]     - Moved line?    Re-justify the bypass and update"
-echo "[test]       the allowlist's pinned line number."
-echo "[test]     - Removed?       Delete the allowlist entry too."
-exit 1
+# Bypass-comment invariant: every allowlisted entry must carry a
+# `// Registry bypass:` justification within the 10 lines immediately
+# preceding the call site. The fixture file documents this invariant
+# (`Every allowlist entry must carry a one-line // Registry bypass: …
+# comment immediately above the call site`); enforcing it here keeps
+# the docs honest and the audit's signal/noise ratio high.
+missing_marker=""
+while IFS= read -r entry; do
+    [ -z "$entry" ] && continue
+    file="${entry%%:*}"
+    rest="${entry#*:}"
+    line_no="${rest%%:*}"
+    if [ -z "$file" ] || [ -z "$line_no" ]; then continue; fi
+    start=$(( line_no - 10 ))
+    if [ "$start" -lt 1 ]; then start=1; fi
+    end=$(( line_no - 1 ))
+    if [ "$end" -lt 1 ]; then end=1; fi
+    if ! sed -n "${start},${end}p" "$REPO_ROOT/$file" \
+            | grep -qE '//[[:space:]]*Registry bypass:'; then
+        missing_marker="${missing_marker}${file}:${line_no}\n"
+    fi
+done <<EOF
+$EXPECTED
+EOF
+
+if [ -n "$missing_marker" ]; then
+    echo "[test] FAIL: allowlist invariant violated — missing bypass comment"
+    echo "[test]   The fixture file requires each allowlisted call site to"
+    echo "[test]   carry a '// Registry bypass: …' comment within the 10"
+    echo "[test]   lines immediately above the call. These entries are"
+    echo "[test]   missing it:"
+    printf '%b' "$missing_marker" | sed 's/^/[test]     - /'
+    exit 1
+fi
+
+matches="$(printf '%s\n' "$ACTUAL" | grep -c '.' || true)"
+echo "[test] PASS: $matches allowlisted runtime emission(s) match audit"
+exit 0
