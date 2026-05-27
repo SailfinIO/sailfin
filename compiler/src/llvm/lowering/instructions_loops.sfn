@@ -154,26 +154,23 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
     // Detect exit-condition-at-top pattern: loop { if COND { break; } ... }
     // If the first instruction in the body is If, followed by Break, followed by EndIf,
     // extract the condition so we can emit a conditional branch in the loop header.
-    //
-    // For the If check (tag 3), get_instruction_tag returns 21 (data-carrying variant
-    // fallback) because match-on-enum is not yet supported (#50). Instead, we check
-    // that the second instruction is Break (tag 10) and third is EndIf (tag 5) — both
-    // fieldless variants detected exactly — and then extract the condition from the
-    // first instruction. If it's non-empty, we have the pattern.
     let mut loop_exit_condition: string = "";
     if structure.body_start + 2 <= structure.body_end {
-        let second_body_tag = get_instruction_tag(function.instructions, structure.body_start
-            + 1);
-        if second_body_tag == 10 {
-            let third_body_tag = get_instruction_tag(function.instructions, structure.body_start
-                + 2);
-            if third_body_tag == 5 {
-                let raw_exit_cond = trim_text(function.instructions[structure.body_start].condition);
-                if raw_exit_cond.length > 0 {
-                    loop_exit_condition = sanitize_if_condition_text(raw_exit_cond);
-                    if debug_loop {
-                        print.err("emit-llvm: lower_loop detected exit condition: "
-                            + loop_exit_condition);
+        let first_body_tag = get_instruction_tag(function.instructions, structure.body_start);
+        if first_body_tag == 3 {
+            let second_body_tag = get_instruction_tag(function.instructions, structure.body_start
+                + 1);
+            if second_body_tag == 10 {
+                let third_body_tag = get_instruction_tag(function.instructions, structure.body_start
+                    + 2);
+                if third_body_tag == 5 {
+                    let raw_exit_cond = trim_text(function.instructions[structure.body_start].condition);
+                    if raw_exit_cond.length > 0 {
+                        loop_exit_condition = sanitize_if_condition_text(raw_exit_cond);
+                        if debug_loop {
+                            print.err("emit-llvm: lower_loop detected exit condition: "
+                                + loop_exit_condition);
+                        }
                     }
                 }
             }
@@ -240,8 +237,6 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
 
     // When the exit-condition-at-top pattern was detected (if COND { break; } endif),
     // skip those 3 instructions in the body to avoid double-processing.
-    // The seedcheck's get_instruction_tag returns 21 for the If variant, so the
-    // Break inside would set terminated=true and abort the body prematurely.
     let mut body_start_effective = structure.body_start;
     if loop_exit_condition.length > 0 {
         body_start_effective = structure.body_start + 3;
@@ -257,110 +252,8 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
             + number_to_string(structure.body_end));
     }
 
-    // Lower the body, resuming after premature block terminators.
-    // When the seedcheck processes If (tag=21) inline, EndIf (tag=5)
-    // terminates the dispatch early, dropping instructions after the
-    // If block (including loop counter increments → infinite loops).
-    // We detect premature stops via IPC next_index and resume.
-    let mut _body_cursor: int = body_start_effective;
-    let mut _body_lines: string[] = [];
-    let mut _body_allocas: string[] = base_allocas;
-    let mut _body_locals: LocalBinding[] = base_locals;
-    let mut _body_bindings: ParameterBinding[] = current_bindings;
-    let mut _body_temp: int = current_temp;
-    let mut _body_blkctr: int = current_block_counter;
-    let mut _body_nextloc: int = base_local_id;
-    let mut _body_nextreg: int = current_next_region;
-    let mut _body_terminated: boolean = false;
-    let mut _body_mutations: LocalMutation[] = [];
-    let mut _body_lifetime_regions: LifetimeRegionMetadata[] = [];
-    let mut _body_diagnostics: string[] = [];
-    let mut _body_string_constants: StringConstant[] = empty_string_constant_set();
-    let mut _body_active_label: string = body_label;
-    let mut _body_resume_iters: int = 0;
-    loop {
-        if _body_cursor >= structure.body_end { break; }
-        if _body_terminated { break; }
-        if _body_resume_iters > 20 { break; }
-        let _seg_result = lower_instruction_range(function, _body_cursor, structure.body_end, llvm_return, _body_bindings, _body_locals, _body_allocas, [], _body_temp, _body_blkctr, _body_nextloc, _body_nextreg, functions, stacked, context, body_scope_id, scope_depth
-            + 1, _body_active_label);
-        // Merge segment results
-        _body_lines = extend_string_array(_body_lines, _seg_result.lines);
-        _body_allocas = _seg_result.allocas;
-        _body_locals = _seg_result.locals;
-        _body_bindings = _seg_result.bindings;
-        _body_temp = _seg_result.temp_index;
-        _body_blkctr = _seg_result.block_counter;
-        _body_nextloc = _seg_result.next_local_id;
-        _body_nextreg = _seg_result.next_lifetime_region_id;
-        _body_mutations = extend_mutations(_body_mutations, _seg_result.mutations);
-        _body_lifetime_regions = extend_lifetime_regions(_body_lifetime_regions, _seg_result.lifetime_regions);
-        _body_string_constants = merge_string_constants(_body_string_constants, _seg_result.string_constants);
-        let mut _seg_diag_i: int = 0;
-        loop {
-            if _seg_diag_i >= _seg_result.diagnostics.length { break; }
-            _body_diagnostics.push(_seg_result.diagnostics[_seg_diag_i]);
-            _seg_diag_i += 1;
-        }
-        // Check if dispatch stopped early at a block boundary tag
-        if _seg_result.terminated {
-            _body_terminated = true;
-            _body_cursor = _seg_result.next_index;
-        } else {
-            if _seg_result.next_index >= structure.body_end {
-                // Normal completion — reached the end of the body
-                _body_cursor = structure.body_end;
-            } else {
-                // Stopped early (likely at EndIf=5 or Else=4).
-                // Check the tag at the stop position and skip appropriately.
-                let _stop_tag = get_instruction_tag(function.instructions, _seg_result.next_index);
-                if _stop_tag == 5 {
-                    // EndIf: skip it and resume
-                    _body_cursor = _seg_result.next_index + 1;
-                } else {
-                    if _stop_tag == 4 {
-                        // Else: skip to matching EndIf
-                        let mut _skip_i: int = _seg_result.next_index + 1;
-                        loop {
-                            if _skip_i >= structure.body_end { break; }
-                            let _skip_tag = get_instruction_tag(function.instructions, _skip_i);
-                            if _skip_tag == 5 { break; }
-                            _skip_i += 1;
-                        }
-                        if _skip_i < structure.body_end {
-                            _body_cursor = _skip_i + 1;
-                        } else { _body_cursor = structure.body_end; }
-                    } else {
-                        // Other terminator (EndLoop, EndMatch, EndFor) — stop
-                        _body_cursor = structure.body_end;
-                    }
-                }
-            }
-        }
-        _body_resume_iters += 1;
-    }
-
-    // Alias body_result for downstream code
-    let body_result = BlockLoweringResult {
-        lines: _body_lines,
-        allocas: _body_allocas,
-        locals: _body_locals,
-        bindings: _body_bindings,
-        temp_index: _body_temp,
-        block_counter: _body_blkctr,
-        diagnostics: _body_diagnostics,
-        terminated: _body_terminated,
-        next_local_id: _body_nextloc,
-        lifetime_regions: _body_lifetime_regions,
-        next_lifetime_region_id: _body_nextreg,
-        next_index: _body_cursor,
-        mutations: _body_mutations,
-        string_constants: _body_string_constants
-    };
-    let _br_lp_temp = _body_temp;
-    let _br_lp_blkctr = _body_blkctr;
-    let _br_lp_nextloc = _body_nextloc;
-    let _br_lp_nextreg = _body_nextreg;
+    let body_result = lower_instruction_range(function, body_start_effective, structure.body_end, llvm_return, current_bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, stacked, context, body_scope_id, scope_depth
+        + 1, body_label);
     if debug_loop {
         print.err("emit-llvm: lower_loop post_body_lir fn=" + function.name
             + " body_lines="
@@ -375,11 +268,11 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
     }
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
     current_allocas = body_result.allocas;
-    current_temp = _br_lp_temp;
-    current_block_counter = _br_lp_blkctr;
-    current_next_local = _br_lp_nextloc;
+    current_temp = body_result.temp_index;
+    current_block_counter = body_result.block_counter;
+    current_next_local = body_result.next_local_id;
     current_bindings = body_result.bindings;
-    current_next_region = _br_lp_nextreg;
+    current_next_region = body_result.next_lifetime_region_id;
     collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
     collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
 
