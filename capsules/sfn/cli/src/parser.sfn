@@ -23,6 +23,7 @@
 //   * parse failures -> print `error.message` to stderr, exit 2
 // Its observable behavior (stderr text, exit codes) is byte-identical
 // to the pre-`parse()` implementation.
+import { EXIT_OK, EXIT_USAGE } from "./exit_codes";
 import { _format_help } from "./help";
 import {
     Command,
@@ -174,7 +175,7 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
         if subcmd_name.length > 0 {
             print(_format_help(active, cmd.name + " " + subcmd_name));
         } else { print(_format_help(cmd, cmd.name)); }
-        process.exit(0);
+        process.exit(EXIT_OK);
     }
     if strings_equal(kind, "version_requested") {
         if subcmd_name.length > 0 {
@@ -188,7 +189,7 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
                 print(cmd.name + " " + cmd.version);
             } else { print(cmd.name); }
         }
-        process.exit(0);
+        process.exit(EXIT_OK);
     }
 
     // Parse failure: `error.message` already contains the help-hint
@@ -196,7 +197,7 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
     // omits the hint), so a single stderr write reproduces the
     // pre-parse() stderr exactly.
     print.err(result.error.message);
-    process.exit(2);
+    process.exit(EXIT_USAGE);
     return result.matches;
 }
 

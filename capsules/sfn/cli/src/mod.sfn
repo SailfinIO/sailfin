@@ -35,7 +35,8 @@
 //   - help.sfn        help, print_help, _format_help, width helpers
 //   - style.sfn       bold, dim, color helpers, _esc, _ansi_wrap
 //   - print.sfn       print_error, print_warn, print_success, print_hint
-//   - exit_codes.sfn  reserved for Phase 1 (Issue 1.2)
+//   - exit_codes.sfn  EXIT_OK, EXIT_BUILD_FAIL, EXIT_USAGE,
+//                     EXIT_NOT_FOUND, EXIT_INTERNAL
 //
 // Visibility: underscore-prefixed names (`_format_help`, `_pad`, `_esc`,
 // `_ansi_wrap`, `_starts_with`, `_find_flag_long`, `_find_flag_short`,
@@ -110,3 +111,12 @@ export {
     print_success,
     print_hint
 } from "./print";
+
+// ---- Exit code constants ----
+export {
+    EXIT_OK,
+    EXIT_BUILD_FAIL,
+    EXIT_USAGE,
+    EXIT_NOT_FOUND,
+    EXIT_INTERNAL
+} from "./exit_codes";
