@@ -1,0 +1,54 @@
+// Regression coverage for #697: a `let` that re-binds a function
+// parameter with the same name must shadow the parameter, and
+// subsequent reads of that name must resolve to the new local —
+// not the original parameter.
+//
+// Before the fix, identifier resolution in
+// `compiler/src/llvm/expression_lowering/native/core.sfn` searched
+// `find_parameter_binding` before `find_local_binding`, so the
+// parameter always won. The locals list already records bindings
+// newest-first; the fix is to consult it first and only fall
+// back to parameters when no local exists.
+struct _Box {
+    value: int
+}
+
+fn _shadow_primitive(x: int) -> int {
+    let new_x: int = 99;
+    let x = new_x;
+    return x;
+}
+
+fn _shadow_struct(b: _Box) -> int {
+    let new_b = _Box { value: 99 };
+    let b = new_b;
+    return b.value;
+}
+
+fn _nested_shadow(x: int) -> int {
+    let mut observed_inner: int = 0;
+    if x > 0 {
+        let x = 99;
+        observed_inner = x;
+    }
+    // The inner `let x = 99` is scoped to the if-block; after the
+    // block exits, `x` must resolve back to the parameter (= 42).
+    return x + observed_inner;
+}
+
+test "let-shadow: primitive parameter is shadowed by let" {
+    let result = _shadow_primitive(42);
+    assert result == 99;
+}
+
+test "let-shadow: struct parameter is shadowed by let" {
+    let result = _shadow_struct(_Box { value: 42 });
+    assert result == 99;
+}
+
+test "let-shadow: block-scoped shadow does not escape the block" {
+    let result = _nested_shadow(42);
+    // Inner observation == 99 (shadow visible), outer x == 42 (parameter
+    // restored after block exit). 42 + 99 == 141.
+    assert result == 141;
+}
