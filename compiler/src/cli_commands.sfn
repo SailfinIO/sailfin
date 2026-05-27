@@ -1048,10 +1048,26 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
         // through immediately. `SAILFIN_TEST_RETRY=0` opts out for
         // flake-vs-real-failure investigations.
         if _should_retry_test(run_rc, retries_disabled) {
-            let test_basename = _package_basename(path);
-            print("[test] RETRY: " + test_basename + " (exit code "
-                + number_to_string(run_rc)
-                + ", retrying once)");
+            // Banner is a human-mode artifact — the `--json` stream
+            // must stay pure jsonl so consumers don't have to filter
+            // out interleaved decoration. The retry itself still
+            // runs in JSON mode; we just don't announce it.
+            if !json_output {
+                let test_basename = _package_basename(path);
+                print("[test] RETRY: " + test_basename + " (exit code "
+                    + number_to_string(run_rc)
+                    + ", retrying once)");
+            }
+            // Clear any record the first attempt may have written so
+            // the post-retry `_consume_assert_failure_record` only
+            // sees what the retry produced. A 137/139 process usually
+            // dies before `sailfin_assert_fail` writes a record, but
+            // a test that asserts and *then* segfaults during teardown
+            // would otherwise leave a stale record that gets
+            // misattributed to the retry attempt's outcome.
+            if fs.exists(fail_record_path) {
+                fs.deleteFile(fail_record_path);
+            }
             run_rc = process.run(["env", "SAILFIN_TEST_SCRATCH=" + scratch_root, exe_path]);
         }
         if trace_runner {
