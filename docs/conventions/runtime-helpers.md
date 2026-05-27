@@ -84,13 +84,13 @@ The runtime helper registry is for descriptors that:
 It is **not** the right place for:
 
 - Preamble-inlined declares (spawn/await family, arena primitives,
-  the rc-release helper, `sailfin_enum_tag_from_instruction_array`).
-  Those are emitted unconditionally by `render_llvm_preamble`
-  (`lowering_phase_render.sfn:110-112` and `:173-185`); the
-  preamble-inline filter in `render_runtime_helper_declarations`
-  skips them to avoid the `llvm-as: invalid redefinition` failure
-  #740 caught. New preamble-inlined helpers extend that filter
-  list rather than adding a descriptor.
+  the rc-release helper). Those are emitted unconditionally by
+  `render_llvm_preamble` (`lowering_phase_render.sfn:110-112` and
+  `:173-185`); the preamble-inline filter in
+  `render_runtime_helper_declarations` skips them to avoid the
+  `llvm-as: invalid redefinition` failure #740 caught. New
+  preamble-inlined helpers extend that filter list rather than
+  adding a descriptor.
 - Helpers reached only through prelude module-level let bindings
   (`runtime_array_map_fn = runtime.array_map`, etc.). These are
   invisible to both walkers and remain in

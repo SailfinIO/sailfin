@@ -458,7 +458,6 @@ survives until process exit. This is why per-module compiler RAM reaches
 | `sailfin_runtime_sha256_hex` | ✅ | Separate file `sailfin_sha256.c` (~150 lines) |
 | `sailfin_runtime_base64_encode` | ✅ | Separate file `sailfin_base64.c` |
 | `sailfin_runtime_getenv` / `home_dir` / `read_file_bytes` | ✅ | Used by `sfn/os` and package manager |
-| `sailfin_enum_tag_from_instruction_array` | ✅ | Seedcheck workaround for reading `i32` enum tags when `match`/field-access is unavailable |
 
 ### Helpers the compiler declares but never emits (link-time landmines)
 
