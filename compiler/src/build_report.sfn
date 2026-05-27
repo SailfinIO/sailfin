@@ -250,4 +250,245 @@ fn build_report_to_json(report: BuildReport) -> string {
         + "}";
 }
 
-export { BuildReport, empty_build_report, build_report_to_json };
+// -------------------------------------------------------------------
+// Determinism diff (issue #779)
+// -------------------------------------------------------------------
+//
+// `sfn build --check-determinism` runs the build twice and compares
+// the two results. The pure helper below consumes pre-loaded
+// snapshots (one per pass) and produces a structured diff; the CLI
+// orchestrator (`cli_main.sfn`) is responsible for the I/O — reading
+// each pass's per-capsule `build/capsules/<scope>/<name>/manifest.json`
+// sidecar (which carries `modules[*].{slug, cache_key}` per Stage
+// C2c) and shasumming the linked binary, then assembling a
+// `DeterminismSnapshot` for each pass.
+//
+// Splitting the I/O out keeps the comparator unit-testable without
+// filesystem setup — the test passes hand-built snapshots through
+// `compare_for_determinism` and asserts on the resulting diff.
+struct DeterminismModule {
+    slug: string;
+    cache_key: string;
+}
+
+struct DeterminismSnapshot {
+    binary_path: string;
+    binary_sha256: string;
+    modules: DeterminismModule[];
+}
+
+// One module that differed between the two passes. `kind`
+// distinguishes:
+//   - "differ"     — both passes saw the slug but cache_keys differ
+//   - "only_in_a"  — slug present in pass A's modules, missing in B
+//   - "only_in_b"  — slug present in pass B's modules, missing in A
+//
+// `cache_key_a` / `cache_key_b` are `""` for the "missing" side.
+struct DeterminismModuleDiff {
+    slug: string;
+    kind: string;
+    cache_key_a: string;
+    cache_key_b: string;
+}
+
+struct DeterminismDiff {
+    matched: boolean;
+    binary_match: boolean;
+    binary_sha256_a: string;
+    binary_sha256_b: string;
+    binary_path_a: string;
+    binary_path_b: string;
+    module_diffs: DeterminismModuleDiff[];
+}
+
+fn empty_determinism_snapshot() -> DeterminismSnapshot {
+    let empty: DeterminismModule[] = [];
+    return DeterminismSnapshot {
+        binary_path: "",
+        binary_sha256: "",
+        modules: empty
+    };
+}
+
+fn make_determinism_module(slug: string, cache_key: string) -> DeterminismModule {
+    return DeterminismModule { slug: slug, cache_key: cache_key };
+}
+
+// Internal helper for `compare_for_determinism`. Sailfin doesn't
+// yet have proper option types, so this struct doubles as one:
+// `found=false` means "no entry for this slug in the list".
+struct _DetLookup {
+    found: boolean;
+    cache_key: string;
+}
+
+fn _find_module_cache_key(modules: DeterminismModule[], slug: string) -> _DetLookup {
+    let mut i: int = 0;
+    loop {
+        if i >= modules.length { break; }
+        if modules[i].slug == slug {
+            return _DetLookup {
+                found: true,
+                cache_key: modules[i].cache_key
+            };
+        }
+        i += 1;
+    }
+    return _DetLookup { found: false, cache_key: "" };
+}
+
+// Pure comparator. The caller (cli_main.sfn) loads each pass's
+// sidecar and binary sha256 first, then invokes this.
+//
+// Match semantics: `matched=true` iff (a) both binary sha256 digests
+// are non-empty and equal AND (b) the two `modules` lists agree on
+// every slug + cache_key pair (set equality with paired values).
+//
+// A pass with an empty `binary_sha256` is a hard mismatch: an empty
+// digest means `sha256sum` failed (file missing, tool not on PATH,
+// etc.), and reporting "match" in that case would be a false
+// negative. The CLI catches the empty case earlier with a clearer
+// diagnostic; the defense-in-depth here protects the unit-tested
+// surface.
+fn compare_for_determinism(a: DeterminismSnapshot, b: DeterminismSnapshot) -> DeterminismDiff {
+    let mut binary_match: boolean = a.binary_sha256 == b.binary_sha256;
+    if a.binary_sha256.length == 0 { binary_match = false; }
+    if b.binary_sha256.length == 0 { binary_match = false; }
+
+    let mut diffs: DeterminismModuleDiff[] = [];
+
+    let mut i: int = 0;
+    loop {
+        if i >= a.modules.length { break; }
+        let ma = a.modules[i];
+        let lookup_b = _find_module_cache_key(b.modules, ma.slug);
+        if lookup_b.found {
+            if ma.cache_key != lookup_b.cache_key {
+                diffs.push(DeterminismModuleDiff {
+                    slug: ma.slug, kind: "differ", cache_key_a: ma.cache_key, cache_key_b: lookup_b.cache_key
+                });
+            }
+        } else {
+            diffs.push(DeterminismModuleDiff {
+                slug: ma.slug, kind: "only_in_a", cache_key_a: ma.cache_key, cache_key_b: ""
+            });
+        }
+        i += 1;
+    }
+
+    let mut j: int = 0;
+    loop {
+        if j >= b.modules.length { break; }
+        let mb = b.modules[j];
+        let lookup_a = _find_module_cache_key(a.modules, mb.slug);
+        if !lookup_a.found {
+            diffs.push(DeterminismModuleDiff {
+                slug: mb.slug, kind: "only_in_b", cache_key_a: "", cache_key_b: mb.cache_key
+            });
+        }
+        j += 1;
+    }
+
+    let matched = binary_match && diffs.length == 0;
+
+    return DeterminismDiff {
+        matched: matched,
+        binary_match: binary_match,
+        binary_sha256_a: a.binary_sha256,
+        binary_sha256_b: b.binary_sha256,
+        binary_path_a: a.binary_path,
+        binary_path_b: b.binary_path,
+        module_diffs: diffs
+    };
+}
+
+// JSON encoder for `--json` mode. Schema version stays at "1" to
+// match the build-report family — the determinism diff is a new
+// top-level command output, not a breaking change to BuildReport.
+// Field order is stable for byte-deterministic test fixtures.
+fn determinism_diff_to_json(diff: DeterminismDiff) -> string {
+    let mut entries: string = "[";
+    let mut i: int = 0;
+    loop {
+        if i >= diff.module_diffs.length { break; }
+        if i > 0 { entries = entries + ","; }
+        let d = diff.module_diffs[i];
+        entries = entries + "{" + _br_json_string_field("slug", d.slug) + ","
+            + _br_json_string_field("kind", d.kind)
+            + ","
+            + _br_json_string_field("cache_key_a", d.cache_key_a)
+            + ","
+            + _br_json_string_field("cache_key_b", d.cache_key_b)
+            + "}";
+        i += 1;
+    }
+    entries = entries + "]";
+
+    return "{" + _br_json_string_field("schema_version", "1") + ","
+        + _br_json_string_field("command", "build")
+        + ","
+        + _br_json_string_field("check", "determinism")
+        + ","
+        + _br_json_bool_field("matched", diff.matched)
+        + ","
+        + _br_json_bool_field("binary_match", diff.binary_match)
+        + ","
+        + _br_json_string_field("binary_sha256_a", diff.binary_sha256_a)
+        + ","
+        + _br_json_string_field("binary_sha256_b", diff.binary_sha256_b)
+        + ","
+        + _br_json_string_field("binary_path_a", diff.binary_path_a)
+        + ","
+        + _br_json_string_field("binary_path_b", diff.binary_path_b)
+        + ","
+        + _br_json_field("module_diffs", entries)
+        + "}";
+}
+
+// Human-readable summary for default (non-`--json`) mode. The
+// orchestrator prepends/appends its own context lines; this helper
+// only renders the structured diff itself.
+fn determinism_diff_to_text(diff: DeterminismDiff) -> string {
+    if diff.matched {
+        return "[determinism] match: binary sha256 + " + _br_number_to_string(diff.module_diffs.length)
+            + " module diff(s)\n";
+    }
+    let mut out: string = "[determinism] MISMATCH\n";
+    if !diff.binary_match {
+        out = out + "  binary a: " + diff.binary_path_a + " sha256=" + diff.binary_sha256_a
+            + "\n";
+        out = out + "  binary b: " + diff.binary_path_b + " sha256=" + diff.binary_sha256_b
+            + "\n";
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= diff.module_diffs.length { break; }
+        let d = diff.module_diffs[i];
+        out = out + "  module " + d.slug + " [" + d.kind + "]";
+        if d.kind == "differ" {
+            out = out + ": a=" + d.cache_key_a + " b=" + d.cache_key_b;
+        } else if d.kind == "only_in_a" {
+            out = out + ": cache_key=" + d.cache_key_a;
+        } else if d.kind == "only_in_b" {
+            out = out + ": cache_key=" + d.cache_key_b;
+        }
+        out = out + "\n";
+        i += 1;
+    }
+    return out;
+}
+
+export {
+    BuildReport,
+    DeterminismDiff,
+    DeterminismModule,
+    DeterminismModuleDiff,
+    DeterminismSnapshot,
+    build_report_to_json,
+    compare_for_determinism,
+    determinism_diff_to_json,
+    determinism_diff_to_text,
+    empty_build_report,
+    empty_determinism_snapshot,
+    make_determinism_module
+};

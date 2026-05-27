@@ -1,0 +1,310 @@
+// Issue #779 regression tests for `compare_for_determinism` and the
+// determinism-diff encoders in `compiler/src/build_report.sfn`.
+//
+// The comparator is intentionally pure: the CLI orchestrator
+// (`cli_main.sfn`) reads the per-pass `manifest.json` sidecars and
+// shasums the linked binary, then hands the resulting snapshots to
+// the helper. Keeping the comparator I/O-free lets these unit tests
+// drive every interesting code path without filesystem fixtures —
+// the synthetic perturbation case the issue's third acceptance
+// criterion calls out is exactly what `compare_for_determinism`
+// turns into a structured diff.
+import {
+    DeterminismDiff,
+    DeterminismModule,
+    DeterminismModuleDiff,
+    DeterminismSnapshot,
+    compare_for_determinism,
+    determinism_diff_to_json,
+    determinism_diff_to_text,
+    empty_determinism_snapshot,
+    make_determinism_module
+} from "../../src/build_report";
+
+// --------------------------------------------------------------
+// empty_determinism_snapshot
+// --------------------------------------------------------------
+test "empty_determinism_snapshot: zero-valued fields" {
+    let s = empty_determinism_snapshot();
+    assert s.binary_path == "";
+    assert s.binary_sha256 == "";
+    assert s.modules.length == 0;
+}
+
+// --------------------------------------------------------------
+// compare_for_determinism — match path
+// --------------------------------------------------------------
+test "compare_for_determinism: identical snapshots produce matched=true" {
+    let a = DeterminismSnapshot {
+        binary_path: "build/native/sailfin",
+        binary_sha256: "deadbeef",
+        modules: [make_determinism_module("sfn/math/mod", "aa"), make_determinism_module("sfn/io/mod", "bb")]
+    };
+    let b = DeterminismSnapshot {
+        binary_path: "build/det-pass2/native/sailfin",
+        binary_sha256: "deadbeef",
+        modules: [make_determinism_module("sfn/math/mod", "aa"), make_determinism_module("sfn/io/mod", "bb")]
+    };
+    let diff = compare_for_determinism(a, b);
+    assert diff.matched;
+    assert diff.binary_match;
+    assert diff.module_diffs.length == 0;
+}
+
+test "compare_for_determinism: snapshots agree on modules in different order" {
+    let a = DeterminismSnapshot {
+        binary_path: "a",
+        binary_sha256: "ff",
+        modules: [make_determinism_module("sfn/math/mod", "aa"), make_determinism_module("sfn/io/mod", "bb")]
+    };
+    let b = DeterminismSnapshot {
+        binary_path: "b",
+        binary_sha256: "ff",
+        modules: [make_determinism_module("sfn/io/mod", "bb"), make_determinism_module("sfn/math/mod", "aa")]
+    };
+    let diff = compare_for_determinism(a, b);
+    assert diff.matched;
+    assert diff.module_diffs.length == 0;
+}
+
+// --------------------------------------------------------------
+// compare_for_determinism — binary mismatch
+// --------------------------------------------------------------
+test "compare_for_determinism: binary sha mismatch flips matched=false" {
+    let a = DeterminismSnapshot {
+        binary_path: "a",
+        binary_sha256: "aa",
+        modules: []
+    };
+    let b = DeterminismSnapshot {
+        binary_path: "b",
+        binary_sha256: "bb",
+        modules: []
+    };
+    let diff = compare_for_determinism(a, b);
+    assert ! diff.matched;
+    assert ! diff.binary_match;
+    assert diff.binary_sha256_a == "aa";
+    assert diff.binary_sha256_b == "bb";
+}
+
+test "compare_for_determinism: empty sha treated as binary mismatch" {
+    let a = DeterminismSnapshot {
+        binary_path: "a",
+        binary_sha256: "",
+        modules: []
+    };
+    let b = DeterminismSnapshot {
+        binary_path: "b",
+        binary_sha256: "",
+        modules: []
+    };
+    let diff = compare_for_determinism(a, b);
+    // Two empty digests must NOT report a match — empty digest
+    // means sha256sum failed, and we'd be silently approving a
+    // build where we couldn't actually verify the binary.
+    assert ! diff.matched;
+    assert ! diff.binary_match;
+}
+
+// --------------------------------------------------------------
+// compare_for_determinism — module diff path
+// --------------------------------------------------------------
+test "compare_for_determinism: synthetic cache_key perturbation names the slug" {
+    // The third acceptance criterion: a fixture that perturbs one
+    // module's cache_key must surface in the diff and name the
+    // differing slug.
+    let a = DeterminismSnapshot {
+        binary_path: "a",
+        binary_sha256: "ff",
+        modules: [make_determinism_module("sfn/math/mod", "aa"), make_determinism_module("sfn/io/mod", "bb"), make_determinism_module("sfn/net/mod", "cc")]
+    };
+    let b = DeterminismSnapshot {
+        binary_path: "b",
+        binary_sha256: "ff",
+        modules: [make_determinism_module("sfn/math/mod", "aa"), make_determinism_module("sfn/io/mod", "bb-perturbed"), make_determinism_module("sfn/net/mod", "cc")]
+    };
+    let diff = compare_for_determinism(a, b);
+    assert ! diff.matched;
+    // Binary still matches; only the module diff fails.
+    assert diff.binary_match;
+    assert diff.module_diffs.length == 1;
+    let entry = diff.module_diffs[0];
+    assert entry.slug == "sfn/io/mod";
+    assert entry.kind == "differ";
+    assert entry.cache_key_a == "bb";
+    assert entry.cache_key_b == "bb-perturbed";
+}
+
+test "compare_for_determinism: module only in a surfaces as only_in_a" {
+    let a = DeterminismSnapshot {
+        binary_path: "a",
+        binary_sha256: "ff",
+        modules: [make_determinism_module("sfn/math/mod", "aa"), make_determinism_module("sfn/io/mod", "bb")]
+    };
+    let b = DeterminismSnapshot {
+        binary_path: "b",
+        binary_sha256: "ff",
+        modules: [make_determinism_module("sfn/math/mod", "aa")]
+    };
+    let diff = compare_for_determinism(a, b);
+    assert ! diff.matched;
+    assert diff.module_diffs.length == 1;
+    assert diff.module_diffs[0].slug == "sfn/io/mod";
+    assert diff.module_diffs[0].kind == "only_in_a";
+    assert diff.module_diffs[0].cache_key_a == "bb";
+    assert diff.module_diffs[0].cache_key_b == "";
+}
+
+test "compare_for_determinism: module only in b surfaces as only_in_b" {
+    let a = DeterminismSnapshot {
+        binary_path: "a",
+        binary_sha256: "ff",
+        modules: [make_determinism_module("sfn/math/mod", "aa")]
+    };
+    let b = DeterminismSnapshot {
+        binary_path: "b",
+        binary_sha256: "ff",
+        modules: [make_determinism_module("sfn/math/mod", "aa"), make_determinism_module("sfn/extra/mod", "zz")]
+    };
+    let diff = compare_for_determinism(a, b);
+    assert ! diff.matched;
+    assert diff.module_diffs.length == 1;
+    assert diff.module_diffs[0].slug == "sfn/extra/mod";
+    assert diff.module_diffs[0].kind == "only_in_b";
+    assert diff.module_diffs[0].cache_key_a == "";
+    assert diff.module_diffs[0].cache_key_b == "zz";
+}
+
+// --------------------------------------------------------------
+// determinism_diff_to_json
+// --------------------------------------------------------------
+test "determinism_diff_to_json: includes schema_version and check=determinism" {
+    let a = empty_determinism_snapshot();
+    let b = empty_determinism_snapshot();
+    let diff = compare_for_determinism(a, b);
+    let json = determinism_diff_to_json(diff);
+    assert _contains(json, "\"schema_version\":\"1\"");
+    assert _contains(json, "\"check\":\"determinism\"");
+    assert _contains(json, "\"command\":\"build\"");
+}
+
+test "determinism_diff_to_json: matched=true serializes literally on match" {
+    let a = DeterminismSnapshot {
+        binary_path: "a",
+        binary_sha256: "ff",
+        modules: []
+    };
+    let b = DeterminismSnapshot {
+        binary_path: "b",
+        binary_sha256: "ff",
+        modules: []
+    };
+    let diff = compare_for_determinism(a, b);
+    let json = determinism_diff_to_json(diff);
+    assert _contains(json, "\"matched\":true");
+    assert _contains(json, "\"binary_match\":true");
+    assert _contains(json, "\"module_diffs\":[]");
+}
+
+test "determinism_diff_to_json: matched=false on cache_key mismatch" {
+    let a = DeterminismSnapshot {
+        binary_path: "a",
+        binary_sha256: "ff",
+        modules: [make_determinism_module("sfn/io/mod", "bb")]
+    };
+    let b = DeterminismSnapshot {
+        binary_path: "b",
+        binary_sha256: "ff",
+        modules: [make_determinism_module("sfn/io/mod", "bb-perturbed")]
+    };
+    let diff = compare_for_determinism(a, b);
+    let json = determinism_diff_to_json(diff);
+    assert _contains(json, "\"matched\":false");
+    assert _contains(json, "\"slug\":\"sfn/io/mod\"");
+    assert _contains(json, "\"kind\":\"differ\"");
+    assert _contains(json, "\"cache_key_a\":\"bb\"");
+    assert _contains(json, "\"cache_key_b\":\"bb-perturbed\"");
+}
+
+test "determinism_diff_to_json: binary mismatch surfaces both sha256s" {
+    let a = DeterminismSnapshot {
+        binary_path: "build/native/sailfin",
+        binary_sha256: "aa",
+        modules: []
+    };
+    let b = DeterminismSnapshot {
+        binary_path: "build/det-pass2/native/sailfin",
+        binary_sha256: "bb",
+        modules: []
+    };
+    let diff = compare_for_determinism(a, b);
+    let json = determinism_diff_to_json(diff);
+    assert _contains(json, "\"binary_match\":false");
+    assert _contains(json, "\"binary_sha256_a\":\"aa\"");
+    assert _contains(json, "\"binary_sha256_b\":\"bb\"");
+    assert _contains(json, "\"binary_path_a\":\"build/native/sailfin\"");
+}
+
+// --------------------------------------------------------------
+// determinism_diff_to_text
+// --------------------------------------------------------------
+test "determinism_diff_to_text: match path prints concise success line" {
+    let a = DeterminismSnapshot {
+        binary_path: "a",
+        binary_sha256: "ff",
+        modules: []
+    };
+    let b = DeterminismSnapshot {
+        binary_path: "b",
+        binary_sha256: "ff",
+        modules: []
+    };
+    let diff = compare_for_determinism(a, b);
+    let text = determinism_diff_to_text(diff);
+    assert _contains(text, "[determinism] match");
+}
+
+test "determinism_diff_to_text: mismatch names the differing slug" {
+    let a = DeterminismSnapshot {
+        binary_path: "a",
+        binary_sha256: "ff",
+        modules: [make_determinism_module("sfn/io/mod", "bb")]
+    };
+    let b = DeterminismSnapshot {
+        binary_path: "b",
+        binary_sha256: "ff",
+        modules: [make_determinism_module("sfn/io/mod", "bb-perturbed")]
+    };
+    let diff = compare_for_determinism(a, b);
+    let text = determinism_diff_to_text(diff);
+    assert _contains(text, "[determinism] MISMATCH");
+    assert _contains(text, "sfn/io/mod");
+    assert _contains(text, "[differ]");
+    assert _contains(text, "bb-perturbed");
+}
+
+// --------------------------------------------------------------
+// Helpers
+// --------------------------------------------------------------
+fn _contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if haystack.length < needle.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let mut j: int = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches { return true; }
+        i += 1;
+    }
+    return false;
+}
