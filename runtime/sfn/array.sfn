@@ -144,14 +144,17 @@ fn sfn_array_sfn_push_slot(data_ptr: * * u8, len_ptr: * i64, cap_ptr: * i64, ele
 }
 
 // `sfn_array_sfn_map(arr) -> arr` — placeholder per §2.3.3. Real
-// bodies require closures-with-capture (roadmap §0 item 5) plus
-// generic constraints (roadmap §2). Tracked as part of M2 epic #389;
-// a follow-up issue will land once the closure-capture milestone has
-// a concrete plan. Today the prelude's `array.map`/`filter`/`reduce`
-// stubs continue to forward to the C `sailfin_runtime_array_map`
-// trampoline (which itself returns the input array unchanged), so
-// this stub matches that observable behavior — preserve it byte-for-
-// byte until the spec body lights up.
+// bodies are tracked in #766 and gated on generic constraints
+// (post-1.0). Closures-with-capture (Epic #450 M1.5) has now
+// landed — env-capturing lambda emission shipped via #699 — so
+// the call-site closure surface is available; the remaining
+// blocker is the typed `SfnArray<T>` / `(T) -> U` signature shape,
+// which depends on generics. Until #766 ships real bodies, the
+// prelude's `array.map`/`filter`/`reduce` stubs continue to
+// forward to the C `sailfin_runtime_array_map` trampoline (which
+// itself returns the input array unchanged), so these stubs match
+// that observable behavior — preserve them byte-for-byte until
+// the spec body lights up.
 fn sfn_array_sfn_map(arr: * u8) -> * u8 { return arr; }
 
 fn sfn_array_sfn_filter(arr: * u8) -> * u8 { return arr; }
