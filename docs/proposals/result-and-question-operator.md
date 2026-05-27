@@ -24,11 +24,18 @@ struct Error {
 }
 
 fn read_config(path: string) -> Result<Config, Error> ![io] {
-    let text = read_file(path)?;        // propagates Err(Error) on failure
-    let cfg = parse_config(text)?;      // propagates Err(Error) on failure
-    return Ok(cfg);
+    let text = read_file(path)?;        // propagates Err on failure
+    let cfg = parse_config(text)?;      // propagates Err on failure
+    return Result.Ok { value: cfg };
 }
 ```
+
+All examples in this proposal use Sailfin's **current** enum surface:
+qualified construction (`Result.Ok { value: x }`) and `Pattern : expr`
+match arms, as exercised by `compiler/tests/unit/match_tagged_enum_test.sfn`.
+Unqualified constructors (`Ok(x)`) and `=>` match arms are *not* assumed —
+adding ergonomic bare `Ok` / `Err` constructors would be a separate language
+change and is listed under [Future Considerations](#future-considerations).
 
 The `?` here is the new **expression-level postfix** operator. It is
 unrelated to the existing **type-annotation `?`** (`Config?`, `TypeAnnotation?`)
@@ -159,8 +166,12 @@ They never overlap: the type parser only runs in annotation position (after
 parser only runs in value position. `read_file(path)?` is unambiguous —
 `?` follows a *call expression*, which only the expression grammar can
 produce. This proposal does **not** unify or alias the two; they remain
-syntactically distinct constructs that happen to share a token, exactly as
-they do in Rust (`Option<T>` the type vs. `expr?` the operator).
+syntactically distinct constructs that happen to share a token. Swift is the
+closest precedent for one glyph spanning both nullability and propagation
+(`T?` optional types alongside `try?`); Rust uses `?` only for the postfix
+operator and has no type-suffix `?`, so it is not the right analogy for the
+*two-uses* point (Rust remains the precedent for the operator's semantics —
+see Q1).
 
 ## The Eight Open Questions
 
@@ -319,7 +330,7 @@ ship a default `Error` type now (Q8) so that *idiomatic* usage already
 satisfies the future bound. Closures + constraints (Phase 2) are the named
 prerequisites for ever tightening this.
 
-### Q8 — Standard `Error` enum in the prelude
+### Q8 — Standard `Error` type in the prelude
 
 **Decision: yes — the prelude ships a concrete default `Error` type, and
 the dangling `Result<SfnString, Error>` reference in the runtime
@@ -355,8 +366,8 @@ Add a single arm to `parse_postfix_chain`
 (`compiler/src/parser/expressions.sfn:495`), in the existing postfix loop
 alongside `.` / `(` / `[` / `as`. When the current token is the symbol `?`
 **and** the parser is in expression position (which `parse_postfix_chain`
-always is), wrap the current expression in a new `Expression.Try` node and
-advance:
+always is), wrap the current expression in a new `TryOperator` expression
+node (see [AST](#ast)) and advance:
 
 ```
 postfix := primary ( "." ident | "(" args ")" | "[" expr "]" | "as" type | "?" )*
@@ -369,9 +380,10 @@ annotation position and never reaches `parse_postfix_chain`.
 
 ### AST
 
-Add one expression variant (the name `Try` mirrors Rust's internal
-`ExprKind::Try`; it is distinct from the statement-level `TryStatement` at
-`ast.sfn:302`):
+Add one expression variant named `TryOperator` (it echoes Rust's internal
+`ExprKind::Try` but is named in full to stay distinct from the
+statement-level `TryStatement` at `ast.sfn:302`; R.1 must implement exactly
+this name):
 
 ```sfn
 // compiler/src/ast.sfn — Expression enum
@@ -386,16 +398,19 @@ generic-enum AST shape (`ast.sfn:146`, `:257`).
 For `TryOperator { operand }` inside function `f`:
 
 1. Infer the type of `operand`. It must unify with `Result<T, E>` for some
-   `T`, `E`. If not, emit `E-result-question-non-result` ("`?` applied to
-   non-`Result` value").
+   `T`, `E`. If not, emit **`E0810`** ("`?` applied to non-`Result` value").
 2. The enclosing function `f` must have declared return type
-   `Result<U, F>`. If `f`'s return type is not a `Result`, emit
-   `E-result-question-bad-context` ("`?` only valid in a function returning
-   `Result`").
-3. `E` must equal `F` (exact match — Q2). If not, emit
-   `E-result-question-error-mismatch` with both types in the message.
+   `Result<U, F>`. If `f`'s return type is not a `Result`, emit **`E0811`**
+   ("`?` only valid in a function returning `Result`").
+3. `E` must equal `F` (exact match — Q2). If not, emit **`E0812`** with both
+   types in the message.
 4. The type of the whole `TryOperator` expression is `T` (the unwrapped
    success type).
+
+These reserve the next free slots in the existing `E08xx` type-checker
+range (`compiler/src/typecheck_types.sfn` currently tops out at `E0806`),
+matching the numeric-code convention rather than inventing a string-keyed
+scheme.
 
 `Result` itself type-checks as an ordinary generic enum; this is where R.2's
 generic-enum monomorphisation work is exercised (Q3).
@@ -408,14 +423,16 @@ the pipeline sees only constructs that already lower):
 
 ```
 TryOperator(operand)   ==>   match operand {
-                                 Ok { value } => value,        // expression result
-                                 Err { error } => return Err(error)
+                                 Result.Ok { value }
+                                 : value,                       // expression result
+                                 Result.Err { error }
+                                 : return Result.Err { error: error }
                              }
 ```
 
 This reuses the existing enum `match` and enum-construction `.sfn-asm`
-emission paths — no new IR opcode. The `return Err(error)` arm emits the
-same `ret` sequence any explicit early return uses. Because `match` on
+emission paths — no new IR opcode. The `return Result.Err { error: error }`
+arm emits the same `ret` sequence any explicit early return uses. Because `match` on
 payload-carrying enums already emits correct IR (per
 `enum_match_struct_test.sfn` et al.), the only new requirement is that the
 *generic* instantiation `Result<U, F>` is monomorphised (Q3 / R.2).
@@ -443,14 +460,14 @@ Source using `?` (chosen lowering form):
 struct Error { message: string; }
 
 fn parse_int(s: string) -> Result<int, Error> {
-    if s == "" { return Err(Error { message: "empty" }); }
-    return Ok(string_to_int(s));
+    if s == "" { return Result.Err { error: Error { message: "empty" } }; }
+    return Result.Ok { value: string_to_int(s) };
 }
 
 fn sum_two(a: string, b: string) -> Result<int, Error> {
     let x = parse_int(a)?;   // unwrap or early-return Err
     let y = parse_int(b)?;
-    return Ok(x + y);
+    return Result.Ok { value: x + y };
 }
 ```
 
@@ -460,14 +477,18 @@ produces (semantically identical, no `?`):
 ```sfn
 fn sum_two(a: string, b: string) -> Result<int, Error> {
     let x = match parse_int(a) {
-        Ok { value } => value,
-        Err { error } => return Err(error)
+        Result.Ok { value }
+        : value,
+        Result.Err { error }
+        : return Result.Err { error: error }
     };
     let y = match parse_int(b) {
-        Ok { value } => value,
-        Err { error } => return Err(error)
+        Result.Ok { value }
+        : value,
+        Result.Err { error }
+        : return Result.Err { error: error }
     };
-    return Ok(x + y);
+    return Result.Ok { value: x + y };
 }
 ```
 
@@ -485,14 +506,19 @@ follow-up (Q6). The old seed compiles the new compiler unchanged.
 
 1. **R.1 — Parser + AST.** Add the `?` postfix arm to
    `parse_postfix_chain` (`expressions.sfn:495`) and the `TryOperator` AST
-   node (`ast.sfn`). Add `Ok` / `Err` / `Result` / `Error` to
-   `runtime/prelude.sfn`. The new parser still accepts everything the old
-   one did; the seed builds it. **Gate:** `make compile`, parser unit tests.
-2. **R.2 — Generic enum monomorphisation + `Result` type-check.** Make a
-   generic payload-carrying enum (`Result<T, E>`) monomorphise through the
-   type checker and LLVM lowering (the hidden work from Q3). This is the
-   largest sub-issue and may itself need splitting. **Gate:** a standalone
-   `.sfn` defining and matching `Result<int, Error>` compiles and runs.
+   node (`ast.sfn`). **Do not add `Result`/`Error` to the prelude yet** — a
+   generic enum the compiler cannot monomorphise (Q3) would break
+   `make compile` before R.2 lands. R.1 ships parser + AST only; the new
+   parser still accepts everything the old one did, so the seed builds it.
+   **Gate:** `make compile`, parser unit tests.
+2. **R.2 — Generic enum monomorphisation + prelude `Result` + type-check.**
+   Make a generic payload-carrying enum (`Result<T, E>`) monomorphise
+   through the type checker and LLVM lowering (the hidden work from Q3),
+   then add `enum Result<T, E>` and `struct Error` to `runtime/prelude.sfn`
+   in the *same* sub-issue so the prelude never contains an un-lowerable
+   type. This is the largest sub-issue and may itself need splitting.
+   **Gate:** a standalone `.sfn` defining and matching `Result<int, Error>`
+   compiles and runs, and `make compile` succeeds with the prelude addition.
 3. **R.3 — Type rules for `?`.** Implement the four `typecheck.sfn` rules
    above, including the three diagnostics. **Gate:** the must-error test
    cases below produce the right diagnostics.
@@ -516,7 +542,7 @@ the file list is the implementation map for R.1–R.5.)
 
 | Stage | File | Change |
 |---|---|---|
-| Prelude | `runtime/prelude.sfn` | add `enum Result<T, E>`, `struct Error` |
+| Prelude | `runtime/prelude.sfn` | add `enum Result<T, E>`, `struct Error` (lands in **R.2**, not R.1 — needs generic-enum monomorphisation first) |
 | Parser | `compiler/src/parser/expressions.sfn` (~`:495`) | `?` postfix arm in `parse_postfix_chain` |
 | AST | `compiler/src/ast.sfn` | `Expression.TryOperator` variant |
 | Type checker | `compiler/src/typecheck.sfn` | `?` rules + 3 diagnostics; generic-enum monomorphisation (R.2) |
@@ -542,18 +568,18 @@ the file list is the implementation map for R.1–R.5.)
 |---|---|---|
 | Generic enum lowering is larger than an `M` (Q3) | R.2 spike: try to compile a standalone `Result<int, Error>` match | Split R.2; block `Result` behind it; never fall back to compiler-magic |
 | `?` token collides with nullable `?` | Parser unit tests on `let x: Config? = read()?;` | Type-`?` and expr-`?` parse in disjoint positions (verified above) |
-| Self-hosting break from prelude additions | `make compile` after R.1 | Prelude additions are new symbols; old code is untouched |
+| Self-hosting break from prelude additions | `make compile` after R.2 | Prelude additions land only after generic-enum lowering works (R.2); they are new symbols, old code untouched |
 | Union-match segfault (#50) leaks into `Result` match | Run R.2 standalone match test | `Result` uses named enum match, not union match — distinct path |
 | `throw`-vs-`Err` confusion in mixed code | Docs + a test mixing both in one fn | Q4 keeps them orthogonal; spec documents the boundary |
 
 ## Verification
 
 ```bash
-# After R.1 (parser/AST + prelude):
+# After R.1 (parser/AST only — no prelude change yet):
 ulimit -v 8388608 && make compile
 ulimit -v 8388608 && timeout 60 build/native/sailfin test compiler/tests/unit/result_parse_test.sfn
 
-# After R.2 (generic enum monomorphisation):
+# After R.2 (generic enum monomorphisation + prelude Result/Error):
 ulimit -v 8388608 && timeout 60 build/native/sailfin test compiler/tests/unit/result_enum_lowering_test.sfn
 
 # After R.3 (type rules):
@@ -574,29 +600,26 @@ build/native/sailfin fmt --check compiler/src/ runtime/
 These representative inputs must behave as stated end-to-end.
 
 1. **`?` on `Result<int, Error>` returning `int`.**
-   `fn f() -> Result<int, Error> { let x = g()?; return Ok(x); }` where
-   `g() -> Result<int, Error>` — compiles, `x` has type `int`, runs.
+   `fn f() -> Result<int, Error> { let x = g()?; return Result.Ok { value: x }; }`
+   where `g() -> Result<int, Error>` — compiles, `x` has type `int`, runs.
 2. **`?` on a variable (not a call).**
    `let r: Result<int, Error> = g(); let x = r?;` — `?` works on any
    `Result`-typed expression, not just calls.
 3. **`?` chained through 3 calls.**
-   `let x = a()?; let y = b(x)?; return Ok(c(y)?);` — all three propagate to
-   the same `Err(Error)` return; success path threads through.
+   `let x = a()?; let y = b(x)?; return Result.Ok { value: c(y)? };` — all
+   three propagate to the same `Err` return; success path threads through.
 4. **`?` on a non-`Result` expression (must error).**
-   `let x: int = 5; let y = x?;` — emits
-   `E-result-question-non-result`.
+   `let x: int = 5; let y = x?;` — emits `E0810`.
 5. **`?` in a function whose return type is not `Result` (must error).**
-   `fn h() -> int { let x = g()?; return x; }` — emits
-   `E-result-question-bad-context`.
+   `fn h() -> int { let x = g()?; return x; }` — emits `E0811`.
 6. **`?` whose `E` differs from the enclosing `E` (must error).**
    `fn f() -> Result<int, Error> { let x = k()?; ... }` where
-   `k() -> Result<int, OtherErr>` — emits
-   `E-result-question-error-mismatch` (no `From` coercion — Q2).
+   `k() -> Result<int, OtherErr>` — emits `E0812` (no `From` coercion — Q2).
 7. **`?` postfix vs. nullable type `?` coexist in one statement.**
    `let x: Config? = load()?;` — type-annotation `?` and expression
    postfix `?` both parse, unrelated (disambiguation section).
 8. **`Result` round-trips both arms via `match`.**
-   `match g() { Ok { value } => value, Err { error } => error.message }`
+   `match g() { Result.Ok { value } : value, Result.Err { error } : error.message }`
    — confirms the generic enum (R.2) matches and reads payloads, the same
    path the `?` desugaring relies on.
 
@@ -617,12 +640,18 @@ These representative inputs must behave as stated end-to-end.
   - `compiler/src/ast.sfn:146` (`EnumVariant`), `:257` (`EnumDeclaration`
     with `type_parameters`), `:16` (`TypeParameter`)
   - `compiler/src/parser/statements.sfn:1107` (`parse_try_statement` —
-    the single internal `try` site, Q6)
+    the single parser entrypoint for `try`/`catch`; only 2 `try {` usage
+    sites exist in `compiler/src/`, Q6)
 
 ## Future Considerations
 
 - **`From<E>` coercion + `E: Error` bound** (Q2, Q7): unlocks once generic
   type constraints (Phase 2) ship; documented here, groomed separately.
+- **Ergonomic bare constructors** (`Ok(x)` / `Err(e)`) and `=>` match arms:
+  every example here uses today's qualified `Result.Ok { value: x }` /
+  `Pattern : expr` forms. Sugar for unqualified single-payload constructors
+  is a possible quality-of-life follow-up but a distinct language change,
+  out of scope for R.0–R.5.
 - **`Option<T>`**: the same generic-enum machinery (R.2) makes a prelude
   `Option<T>` trivial; sibling [#323](https://github.com/SailfinIO/sailfin/issues/323)
   may pick it up.
