@@ -36,6 +36,7 @@ import {
     _shell_read_cmd,
     _shell_single_quote_arg,
     _string_contains_cmd,
+    _suite_name_from_path,
     _toml_trim_cmd,
     _write_text_cmd
 } from "./cli_commands_utils";
@@ -490,6 +491,57 @@ fn _find_test_group(groups: TestGroup[], key: string) -> int {
     return -1;
 }
 
+// `TestSuite`: per-positional-path bucket for banner emission.
+// Each positional `path` passed to `sfn test` becomes one suite;
+// the runner walks `path` for `*_test.sfn` files, runs them, and
+// emits a `═══ <name>: N/M passed, K failed ═══` banner per suite
+// after the test loop completes. Issue #848 (parent epic #840
+// Phase 1.2): consolidates the four Makefile shell loops
+// (`test-unit` / `test-integration` / `test-e2e` / `test-capsules`)
+// into a single `sfn test` invocation that emits the same banners
+// the loops used to.
+struct TestSuite {
+    name: string;
+    path: string;
+    pass_count: int;
+    fail_count: int;
+    failed_files: string[];
+}
+
+// Emit the per-suite `═══ <name>: N/M passed, K failed ═══` banner
+// for every suite, followed by an indented failed-files list when
+// the suite has failures. Format matches the pre-#848 Makefile
+// shell-loop output at `Makefile:215-220, 243-248, 279-284, 314-319`
+// exactly so log scrubbers and human readers see no diff. Called
+// once at end-of-run from `handle_test_command` only in non-JSON
+// mode — JSON consumers parse the structured summary event
+// instead.
+fn _emit_suite_banners(suites: TestSuite[]) ![io] {
+    let mut bi: int = 0;
+    loop {
+        if bi >= suites.length { break; }
+        let s = suites[bi];
+        let total = s.pass_count + s.fail_count;
+        print("");
+        print("═══ " + s.name + ": " + number_to_string(s.pass_count)
+            + "/"
+            + number_to_string(total)
+            + " passed, "
+            + number_to_string(s.fail_count)
+            + " failed ═══");
+        if s.fail_count > 0 {
+            print("");
+            let mut fi: int = 0;
+            loop {
+                if fi >= s.failed_files.length { break; }
+                print("  " + s.failed_files[fi]);
+                fi += 1;
+            }
+        }
+        bi += 1;
+    }
+}
+
 // Synthesize an `AssertFailure` for a test that was skipped or for
 // which we have no `fail.bin` record. `present=true` so the JSON
 // emitter still attaches an `assertion` object — consumers can
@@ -720,9 +772,12 @@ fn _should_retry_test(exit_code: int, retries_disabled: boolean) -> boolean {
 
 fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock] {
     // Flag parser: `--json` is the only recognised flag for now.
-    // Positional args carry the optional `path` argument; preserves
-    // pre-existing behaviour where `sfn test [path]` accepts at most
-    // one positional. The flag may appear before or after the path.
+    // Positional args carry one or more suite paths; each becomes a
+    // labelled `TestSuite` whose pass/fail tally gets its own
+    // `═══ <name>: N/M passed ═══` banner at end-of-run. Issue #848
+    // (parent epic #840 Phase 1.2): consolidates the four Makefile
+    // shell loops into a single invocation, so passing multiple
+    // positional paths replaced the prior single-path constraint.
     let mut json_output: boolean = false;
     let mut positional: string[] = [];
     let mut ai: int = 1;
@@ -734,13 +789,40 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
         }
         ai += 1;
     }
-    let mut root: string = ".";
-    if positional.length == 1 { root = positional[0]; } else if positional.length > 1 {
-        // Usage hints belong on stderr in `--json` mode so the stdout
-        // jsonl stream stays clean. Mirrored on the human path for
-        // consistency.
-        print.err("usage: sfn test [--json] [path]");
-        return 2;
+
+    // Build the suite list. Zero positional args defaults to a
+    // single "." suite (matches pre-#848 behaviour). One or more
+    // positionals become one suite each, named by their basename.
+    let mut suites: TestSuite[] = [];
+    if positional.length == 0 {
+        let empty_failed: string[] = [];
+        suites.push(TestSuite {
+            name: ".", path: ".", pass_count: 0, fail_count: 0, failed_files: empty_failed
+        });
+    } else {
+        let mut spi: int = 0;
+        loop {
+            if spi >= positional.length { break; }
+            let sp = positional[spi];
+            let sn = _suite_name_from_path(sp);
+            let empty_failed: string[] = [];
+            suites.push(TestSuite {
+                name: sn, path: sp, pass_count: 0, fail_count: 0, failed_files: empty_failed
+            });
+            spi += 1;
+        }
+    }
+
+    // Per-suite banner suppression rule: a single positional `.sfn`
+    // file path runs in legacy single-file mode (no banner). Every
+    // other shape — zero positionals, one directory, multiple
+    // paths — emits banners. Keeps `sfn test path/to/x_test.sfn`
+    // (the shape `scripts/run_native_test.sh` calls) byte-compatible
+    // with pre-#848 output so the wrapper's last-mile callers don't
+    // see decoration they weren't parsing before.
+    let mut emit_banners: boolean = true;
+    if positional.length == 1 && _ends_with_cmd(positional[0], ".sfn") {
+        emit_banners = false;
     }
 
     _ensure_dir_cmd("build");
@@ -759,7 +841,28 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
         || _legacy_flag_file("build/sailfin/.trace_test_runner");
     enter_test_runner_mode(trace_runner);
 
-    let test_files = _collect_test_files_cmd(root, 25);
+    // Walk each suite's path for `_test.sfn` files. `file_suite_index`
+    // tracks the originating suite per file so the loop can attribute
+    // pass/fail counts back to the right banner. The flat `test_files`
+    // list keeps the existing resolver-group partition + arena-mark
+    // loop shape downstream — only the upstream collection step
+    // fans out to multiple roots.
+    let mut test_files: string[] = [];
+    let mut file_suite_index: int[] = [];
+    let mut csi: int = 0;
+    loop {
+        if csi >= suites.length { break; }
+        let suite_files = _collect_test_files_cmd(suites[csi].path, 25);
+        let mut sfi: int = 0;
+        loop {
+            if sfi >= suite_files.length { break; }
+            test_files.push(suite_files[sfi]);
+            file_suite_index.push(csi);
+            sfi += 1;
+        }
+        csi += 1;
+    }
+
     if test_files.length == 0 {
         if json_output {
             // Still produce a valid jsonl stream so consumers don't
@@ -767,9 +870,30 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
             // events, summary with all zeros.
             print(render_start_event(0));
             print(render_summary_event(0, 0, 0, 0));
-        } else { print("no Sailfin test files found under: " + root); }
+            exit_test_runner_mode();
+            return 1;
+        }
+        // Human path: surface a hint for each suite that turned up
+        // empty (mirrors the per-target `[test-X] no *_test.sfn files`
+        // hints the four collapsed Makefile loops used to emit), then
+        // fall through to the empty-banner emission below so the
+        // suite tallies still print 0/0/0 — matches the pre-#848
+        // `test-capsules` behaviour where an empty `capsules/`
+        // produced a banner and exited 0. The other suite targets
+        // historically exited 1 on empty discovery; the unified
+        // runner standardises on the `test-capsules` shape because
+        // the banner already carries the "0/0 passed" signal.
+        let mut hi: int = 0;
+        loop {
+            if hi >= suites.length { break; }
+            print("[test-" + suites[hi].name
+                + "] no *_test.sfn files found under "
+                + suites[hi].path);
+            hi += 1;
+        }
+        if emit_banners { _emit_suite_banners(suites); }
         exit_test_runner_mode();
-        return 1;
+        return 0;
     }
 
     let ll_path = scratch_root + "/test.ll";
@@ -993,9 +1117,14 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
             // ...)`. Emit the same shape so callers parsing test
             // output (CI log scrubbers, human readers) see consistent
             // attribution regardless of which stage failed.
-            print("[test] FAIL: " + _package_basename(path) + " (exit code 1)");
-            exit_test_runner_mode();
-            return 1;
+            let cf_basename = _package_basename(path);
+            print("[test] FAIL: " + cf_basename + " (exit code 1)");
+            suites[file_suite_index[index]].fail_count += 1;
+            suites[file_suite_index[index]].failed_files.push(cf_basename);
+            if overall_rc == 0 { overall_rc = 1; }
+            sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+            index += 1;
+            continue;
         }
 
         if trace_runner { print.err("test runner: link start"); }
@@ -1021,11 +1150,16 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
             // attribution consistent across every failure stage so
             // tooling (CI scrubbers, human readers, future grep-based
             // log audits) sees one shape.
-            print("[test] FAIL: " + _package_basename(path) + " (exit code "
+            let lf_basename = _package_basename(path);
+            print("[test] FAIL: " + lf_basename + " (exit code "
                 + number_to_string(link_rc)
                 + ")");
-            exit_test_runner_mode();
-            return link_rc;
+            suites[file_suite_index[index]].fail_count += 1;
+            suites[file_suite_index[index]].failed_files.push(lf_basename);
+            if overall_rc == 0 { overall_rc = link_rc; }
+            sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+            index += 1;
+            continue;
         }
         // Issue #364: clear any leftover assert-fail record from the
         // previous iteration before spawning. The record is keyed
@@ -1108,14 +1242,19 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
             // `test failed:` lines already carry the per-step
             // attribution the grep heuristic was reconstructing
             // post-hoc.
-            print("[test] FAIL: " + _package_basename(path) + " (exit code "
+            let rf_basename = _package_basename(path);
+            print("[test] FAIL: " + rf_basename + " (exit code "
                 + number_to_string(run_rc)
                 + ")");
             if failure.present {
                 print("test failed: " + _format_assert_failure(path, failure));
             } else { print("test failed: " + path); }
-            exit_test_runner_mode();
-            return run_rc;
+            suites[file_suite_index[index]].fail_count += 1;
+            suites[file_suite_index[index]].failed_files.push(rf_basename);
+            if overall_rc == 0 { overall_rc = run_rc; }
+            sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+            index += 1;
+            continue;
         }
         if json_output {
             let outcome = _outcome_all_pass(file_elapsed_ms as int);
@@ -1129,6 +1268,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
             // on the human path; the JSON path emits structured
             // per-test events instead.
             print("[test] PASS: " + _package_basename(path));
+            suites[file_suite_index[index]].pass_count += 1;
         }
         // Phase 5a: rewind arena scratch back to the per-test
         // mark. Per-iteration allocations (parsed test AST,
@@ -1142,6 +1282,13 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
     if json_output {
         let runner_elapsed_ms = monotonic_millis() - runner_start_ms;
         print(render_summary_event(total_passed, total_failed, total_skipped, runner_elapsed_ms));
+    } else if emit_banners {
+        // Per-suite banners. Suppressed in `--json` mode (the
+        // structured summary event is the source of truth there)
+        // and suppressed in legacy single-`.sfn`-file mode
+        // (`scripts/run_native_test.sh` and friends — `emit_banners`
+        // gates the call site).
+        _emit_suite_banners(suites);
     }
     exit_test_runner_mode();
     return overall_rc;

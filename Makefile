@@ -142,7 +142,21 @@ else
 endif
 	@echo "[install] installed $(DESTDIR)$(BINDIR)/$(INSTALL_NAME)$(EXE_EXT)"
 
-test: test-unit test-integration test-e2e test-capsules
+# Issue #848 (epic #840 Phase 1.2): the four suite shell loops
+# collapsed into one `sfn test` invocation that walks every path,
+# tallies per-suite, and emits the per-suite `═══ <name>: N/M ═══`
+# banners directly. `test-unit` / `test-integration` / `test-e2e` /
+# `test-capsules` keep their names as aliases over the same runner
+# with different paths. The legacy e2e `test_*.sh` scripts still
+# run from `make test` / `make test-e2e` via `test-e2e-sh` — Phase
+# 3.1 migrates them and retires the .sh branch.
+test:
+	@if [ ! -x $(NATIVE_BIN) ]; then \
+		echo "[test] missing $(NATIVE_BIN); running make compile"; \
+		$(MAKE) compile; \
+	fi
+	@$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules
+	@$(MAKE) test-e2e-sh
 
 # =============================================================================
 # Seed management (download a released compiler)
@@ -192,82 +206,66 @@ fetch-seed:
 	@"$(FETCHED_SEED)" version
 	@echo "[fetch-seed] hint: make compile SEED=$(FETCHED_SEED)"
 
+# Aliases over the unified runner (issue #848). Each suite still
+# runs as one `sfn test` invocation; the per-suite banner the
+# Makefile loops used to emit now comes from `_emit_suite_banners`
+# in `handle_test_command`.
 test-unit:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-unit] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@pass=0; fail=0; failed_files=""; \
-	files=$$(find compiler/tests/unit -name '*_test.sfn' -print | sort); \
-	if [ -z "$$files" ]; then \
-		echo "[test-unit] no *_test.sfn files found under compiler/tests/unit"; \
-		exit 1; \
-	fi; \
-	for f in $$files; do \
-		if bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; then \
-			pass=$$((pass + 1)); \
-		else \
-			fail=$$((fail + 1)); \
-			failed_files="$$failed_files  $$(basename $$f)\n"; \
-		fi; \
-	done; \
-	total=$$((pass + fail)); \
-	echo ""; \
-	echo "═══ unit: $$pass/$$total passed, $$fail failed ═══"; \
-	if [ $$fail -gt 0 ]; then \
-		echo ""; \
-		printf '%b' "$$failed_files"; \
-		exit 1; \
-	fi
+	@$(NATIVE_BIN) test compiler/tests/unit
 
 test-integration:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-integration] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@pass=0; fail=0; failed_files=""; \
-	files=$$(find compiler/tests/integration -name '*_test.sfn' -print | sort); \
-	if [ -z "$$files" ]; then \
-		echo "[test-integration] no *_test.sfn files found under compiler/tests/integration"; \
-		exit 1; \
-	fi; \
-	for f in $$files; do \
-		if bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; then \
-			pass=$$((pass + 1)); \
-		else \
-			fail=$$((fail + 1)); \
-			failed_files="$$failed_files  $$(basename $$f)\n"; \
-		fi; \
-	done; \
-	total=$$((pass + fail)); \
-	echo ""; \
-	echo "═══ integration: $$pass/$$total passed, $$fail failed ═══"; \
-	if [ $$fail -gt 0 ]; then \
-		echo ""; \
-		printf '%b' "$$failed_files"; \
-		exit 1; \
-	fi
+	@$(NATIVE_BIN) test compiler/tests/integration
 
+# The legacy e2e `test_*.sh` scripts still run alongside the `.sfn`
+# tests until Phase 3.1 migrates them (see
+# `docs/proposals/test-infra-epic/02-phases.md` Phase 3.1). Until
+# then `test-e2e-sh` keeps the bash-driven scripts on the same
+# `make test-e2e` / `make test` paths they were on before #848.
 test-e2e:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-e2e] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
+	@$(NATIVE_BIN) test compiler/tests/e2e
+	@$(MAKE) test-e2e-sh
+
+# Per-capsule tests live alongside each capsule under
+# `capsules/<scope>/<name>/tests/*_test.sfn`. The unified runner's
+# directory BFS walks every nested `tests/` dir from `capsules/`,
+# so passing just `capsules` matches the prior
+# `find capsules -path '*/tests/*_test.sfn'` discovery.
+test-capsules:
+	@if [ ! -x $(NATIVE_BIN) ]; then \
+		echo "[test-capsules] missing $(NATIVE_BIN); running make compile"; \
+		$(MAKE) compile; \
+	fi
+	@$(NATIVE_BIN) test capsules
+
+# Internal: the legacy e2e `.sh` script loop. Phase 3.1 (parent
+# epic #840) ports each `test_*.sh` to a `_test.sfn` peer and
+# deletes both this target and the source scripts. Until then it
+# emits a `═══ e2e-sh: N/M passed ═══` banner shaped like the
+# runner's own per-suite banners so log scrubbers see one format
+# across the suite.
+.PHONY: test-e2e-sh
+test-e2e-sh:
 	@pass=0; fail=0; failed_files=""; \
-	files=$$(find compiler/tests/e2e -name '*_test.sfn' -print | sort); \
+	files=$$(find compiler/tests/e2e -name 'test_*.sh' -print | sort); \
 	if [ -z "$$files" ]; then \
-		echo "[test-e2e] no *_test.sfn files found under compiler/tests/e2e"; \
-		exit 1; \
+		echo "[test-e2e-sh] no test_*.sh scripts found under compiler/tests/e2e"; \
+		echo ""; \
+		echo "═══ e2e-sh: 0/0 passed, 0 failed ═══"; \
+		exit 0; \
 	fi; \
 	for f in $$files; do \
-		if bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; then \
-			pass=$$((pass + 1)); \
-		else \
-			fail=$$((fail + 1)); \
-			failed_files="$$failed_files  $$(basename $$f)\n"; \
-		fi; \
-	done; \
-	for f in $$(find compiler/tests/e2e -name 'test_*.sh' -print | sort); do \
 		if bash "$$f" $(NATIVE_BIN); then \
 			pass=$$((pass + 1)); \
 		else \
@@ -277,42 +275,7 @@ test-e2e:
 	done; \
 	total=$$((pass + fail)); \
 	echo ""; \
-	echo "═══ e2e: $$pass/$$total passed, $$fail failed ═══"; \
-	if [ $$fail -gt 0 ]; then \
-		echo ""; \
-		printf '%b' "$$failed_files"; \
-		exit 1; \
-	fi
-
-# Per-capsule tests live alongside each capsule under
-# `capsules/<scope>/<name>/tests/*_test.sfn`. Discovered by
-# walking every `tests/` dir under `capsules/`. A capsule without a
-# `tests/` dir is silently skipped; the suite as a whole only fails
-# if at least one *_test.sfn exists somewhere and any of them fail.
-test-capsules:
-	@if [ ! -x $(NATIVE_BIN) ]; then \
-		echo "[test-capsules] missing $(NATIVE_BIN); running make compile"; \
-		$(MAKE) compile; \
-	fi
-	@pass=0; fail=0; failed_files=""; \
-	files=$$(find capsules -path '*/tests/*_test.sfn' -print 2>/dev/null | sort); \
-	if [ -z "$$files" ]; then \
-		echo "[test-capsules] no *_test.sfn files under capsules/*/tests"; \
-		echo ""; \
-		echo "═══ capsules: 0/0 passed, 0 failed ═══"; \
-		exit 0; \
-	fi; \
-	for f in $$files; do \
-		if bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; then \
-			pass=$$((pass + 1)); \
-		else \
-			fail=$$((fail + 1)); \
-			failed_files="$$failed_files  $$(basename $$f)\n"; \
-		fi; \
-	done; \
-	total=$$((pass + fail)); \
-	echo ""; \
-	echo "═══ capsules: $$pass/$$total passed, $$fail failed ═══"; \
+	echo "═══ e2e-sh: $$pass/$$total passed, $$fail failed ═══"; \
 	if [ $$fail -gt 0 ]; then \
 		echo ""; \
 		printf '%b' "$$failed_files"; \

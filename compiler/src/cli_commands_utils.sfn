@@ -21,6 +21,7 @@ export {
     _collect_test_files_cmd,
     _collect_sfn_files_cmd,
     _strip_trailing_slashes_cmd,
+    _suite_name_from_path,
     _curl_post_json_cmd,
     _curl_download_cmd,
     _sha256_of_file_cmd,
@@ -252,6 +253,28 @@ fn _strip_trailing_slashes_cmd(path: string) -> string {
         result = substring(result, 0, result.length - 1);
     }
     return result;
+}
+
+// Derive a per-suite banner label from a positional path passed to
+// `sfn test`. Trims trailing slashes (so `compiler/tests/unit/`
+// yields the same label as `compiler/tests/unit`) and returns the
+// path's basename. Empty input degenerates to `.` so the banner
+// always carries a non-empty label. Pure (no I/O) so it's covered
+// by a fast unit test in
+// `compiler/tests/unit/cli_path_normalization_test.sfn`.
+fn _suite_name_from_path(path: string) -> string {
+    let trimmed = _strip_trailing_slashes_cmd(path);
+    if trimmed.length == 0 { return "."; }
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= trimmed.length { break; }
+        if substring(trimmed, i, i + 1) == "/" { last_slash = i; }
+        i += 1;
+    }
+    if last_slash < 0 { return trimmed; }
+    if last_slash == trimmed.length - 1 { return trimmed; }
+    return substring(trimmed, last_slash + 1, trimmed.length);
 }
 
 fn _collect_sfn_files_cmd(root: string, max_depth: int) -> string[] ![io] {

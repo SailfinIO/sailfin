@@ -8,7 +8,11 @@
 // — to gate this regression. Each invocation costs ~2 min on Linux
 // CI. This unit test gates the same logic in milliseconds, so the
 // e2e test now runs the canonical scenario exactly once.
-import { _collect_test_files_cmd, _strip_trailing_slashes_cmd } from "../../src/cli_commands_utils";
+import {
+    _collect_test_files_cmd,
+    _strip_trailing_slashes_cmd,
+    _suite_name_from_path
+} from "../../src/cli_commands_utils";
 
 test "path-norm: bare directory unchanged" {
     assert _strip_trailing_slashes_cmd("compiler/src") == "compiler/src";
@@ -92,4 +96,35 @@ test "collect-test-files: trailing-slash and bare root produce identical lists" 
         assert bare[i] == with_slash[i];
         i += 1;
     }
+}
+
+// `_suite_name_from_path` derives the per-suite banner label that
+// `_emit_suite_banners` prints (issue #848 — the four Makefile
+// shell-loop banners moved into `handle_test_command`). Same
+// canonical labels regardless of how the user spells the path —
+// trailing slashes, bare names, relative prefixes, all collapse to
+// the directory's basename.
+test "suite-name: bare directory yields basename" {
+    assert _suite_name_from_path("compiler/tests/unit") == "unit";
+    assert _suite_name_from_path("compiler/tests/integration") == "integration";
+    assert _suite_name_from_path("compiler/tests/e2e") == "e2e";
+}
+
+test "suite-name: single segment returns itself" {
+    assert _suite_name_from_path("capsules") == "capsules";
+}
+
+test "suite-name: trailing slash stripped" {
+    assert _suite_name_from_path("compiler/tests/unit/") == "unit";
+    assert _suite_name_from_path("capsules///") == "capsules";
+}
+
+test "suite-name: empty path degenerates to '.'" {
+    assert _suite_name_from_path("") == ".";
+}
+
+test "suite-name: dot stays dot" { assert _suite_name_from_path(".") == "."; }
+
+test "suite-name: relative prefix discarded" {
+    assert _suite_name_from_path("./foo/bar") == "bar";
 }
