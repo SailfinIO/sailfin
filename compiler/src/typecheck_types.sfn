@@ -619,6 +619,105 @@ fn is_extern_primitive_type(text: string) -> boolean {
     return _ret;
 }
 
+// Pure: identifier-form call names that the typechecker's expression
+// walker treats as "no resolution required" — the auto-injection
+// envelope for the #616 decomposition (Issue B). When walker
+// resolution lights up in Issue D (#616 sub-issue 4), any
+// `Call.callee.variant == "Identifier"` whose name returns `true`
+// here short-circuits unknown-identifier diagnostic emission so the
+// 50 examples (per #549) keep compiling clean. The accept-list
+// discipline mirrors `is_extern_primitive_type` above: each member
+// documented inline so the rationale travels with the code.
+//
+// Issue B intentionally introduces the helper without rewiring
+// effect_checker.sfn:623-652 to consume it (see Issue B `Out:`); the
+// inline checks there continue to drive effect injection until a
+// future dedup pass lands.
+//
+// Members of the envelope:
+//   `print`    — bare-form I/O builtin. Member-form `print.info`/
+//                `print.error`/… emits via the effect_checker Member
+//                branch; the bare Call-form is the README first
+//                example and `examples/basics/hello-world.sfn`.
+//                effect_checker.sfn:646 already injects `![io]`.
+//   `console`  — bare-form I/O builtin paired with `print` in the
+//                README envelope. effect_checker.sfn:647 injects `![io]`.
+//   `assert`   — test-and-spec assertion builtin. Surfaces in every
+//                unit/integration test under `compiler/tests/` and in
+//                `examples/` cookbook entries; never a user-defined
+//                function. Audit note (#616): missing from the
+//                pre-existing effect_checker inline list — Issue D will
+//                consume this envelope to keep `assert` calls clean.
+//   `spawn`    — planned concurrency keyword (keywords.md `### spawn`,
+//                "Planned (language keyword)"); the prelude historically
+//                exposed `spawn(task, name)` as a free function. Bare
+//                Call-form exercised by `effect_checker_test.sfn:450`
+//                ("bare spawn() Call carets at the callee identifier")
+//                and `tests/e2e/test_sync_rejects_unimplemented_concurrency.sh`.
+//                effect_checker.sfn:623 already injects `![io]`.
+//   `sleep`    — clock primitive. Bare Call-form in `examples/concurrency/
+//                producer-consumer.sfn:13`, `examples/advanced/
+//                multithreaded-task.sfn:7`, and `effect_checker_test.sfn:466`.
+//                effect_checker.sfn:628 injects `![clock]`.
+//   `serve`    — net primitive. Bare Call-form in `examples/web/
+//                http-server.sfn:6`, `rest-api.sfn:14`, and `examples/
+//                advanced/web-server-with-concurrency.sfn:23`.
+//                effect_checker.sfn:633 injects `![net]`.
+//   `channel`  — channel constructor. Bare Call-form in `examples/
+//                concurrency/channels.sfn:6`, `producer-consumer.sfn:7`,
+//                `dynamic-task-scheduling.sfn:6`, and rejected by
+//                `tests/e2e/test_sync_rejects_unimplemented_concurrency.sh`
+//                pending the structured-concurrency runtime.
+//   `send`     — Channel.send. Today only appears as Member-form
+//                (`buffer.send(...)`, `examples/concurrency/channels.sfn:9`).
+//                Included defensively in the identifier-call allowlist
+//                because the typechecker walker runs before keyword/method
+//                disambiguation — if a user writes `send(buffer, value)`
+//                thinking it's a free function (the same misuse caught
+//                by `test_sync_rejects_unimplemented_concurrency.sh`),
+//                the rejection diagnostic must come from the
+//                concurrency-unimplemented gate, not a spurious
+//                unknown-identifier error from Issue D.
+//   `receive`  — Channel.receive. Same shape as `send`: today only
+//                Member-form (`messages.receive()` in `channels.sfn:12`,
+//                `producer-consumer.sfn:19`, `dynamic-task-scheduling.sfn:11`).
+//                Included for the same defensive reason.
+//   `await`    — unary prefix operator in the grammar (grammar.md L233:
+//                `Unary = ("!" | "-" | "+" | "await") Unary`). Today
+//                used as `await messages.receive()` in `examples/
+//                concurrency/channels.sfn:12`, not as `await(...)`.
+//                Included in the identifier-call allowlist defensively:
+//                until the lexer reserves `await` as a keyword token,
+//                the parser may construct `Call(callee=Identifier(
+//                "await"), …)` from `await(expr)`-style input, and the
+//                walker should not surface unknown-identifier there
+//                while concurrency remains under construction.
+//
+// Intentionally NOT in the envelope (Issue D will surface these as
+// unknown-identifier diagnostics so user code can shadow them):
+//   `len`, `panic` — audit (#616) flagged these as inline gaps in
+//   effect_checker today, but they are library/runtime functions, not
+//   language-level builtins. Resolution should go through the import
+//   table once Issue C threads it in.
+//   Member-form builtins (`string.concat`, `array.push`, `fs.exists`,
+//   …) — out of #616 Issue B scope. Member resolution is handled
+//   through the Member branch of the walker, not this Call-identifier
+//   shortcut.
+fn is_builtin_call_name(name: string) -> boolean {
+    let mut _ret: boolean = false;
+    if strings_equal(name, "print") { _ret = true; }
+    if strings_equal(name, "console") { _ret = true; }
+    if strings_equal(name, "assert") { _ret = true; }
+    if strings_equal(name, "spawn") { _ret = true; }
+    if strings_equal(name, "sleep") { _ret = true; }
+    if strings_equal(name, "serve") { _ret = true; }
+    if strings_equal(name, "channel") { _ret = true; }
+    if strings_equal(name, "send") { _ret = true; }
+    if strings_equal(name, "receive") { _ret = true; }
+    if strings_equal(name, "await") { _ret = true; }
+    return _ret;
+}
+
 // Pure: identifiers that v0 accepts as opaque-pointer pointees behind
 // a leading `*`. The v0 rule is "starts with an uppercase ASCII letter
 // and contains only identifier characters." This is intentionally
