@@ -36,6 +36,7 @@ import { Token } from "./token";
 import { toml_get_dependencies } from "./toml_parser";
 import {
     typecheck_diagnostics,
+    typecheck_diagnostics_with_import_symbols,
     typecheck_diagnostics_with_imports,
     typecheck_has_errors
 } from "./typecheck";
@@ -358,9 +359,13 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
 // import-context the resolver pass produces:
 //
 //   - `imported_interfaces` from `load_imported_interfaces_from_paths`
-//     — fed into `typecheck_diagnostics_with_imports` so cross-module
+//     — paired with `imported_function_effects` and fed into
+//     `typecheck_diagnostics_with_import_symbols` so cross-module
 //     `implements` clauses are conformance-checked end to end (same
-//     wiring `sfn check` adopted in Track A2).
+//     wiring `sfn check` adopted in Track A2). Issue #811 added the
+//     `ImportSymbolTable` slot so the typecheck walker can resolve
+//     imported free-function callees ahead of issue D's enforcement
+//     flip.
 //   - `imported_manifests` reserved for layout-manifest plumbing —
 //     today `[]`; the test path doesn't currently exercise cross-
 //     module struct layout in any of the import-using tests, so
@@ -381,7 +386,7 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
     let trace = test_runner_trace();
     if trace { print.err("test compiler (imports): parse_program start"); }
     let program: Program = parse_program(source);
-    let diagnostics = typecheck_diagnostics_with_imports(program, imported_interfaces);
+    let diagnostics = typecheck_diagnostics_with_import_symbols(program, imported_interfaces, imported_function_effects);
     let mut has_errors: boolean = false;
     let mut di: int = 0;
     loop {

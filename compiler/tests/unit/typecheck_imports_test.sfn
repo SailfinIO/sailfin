@@ -8,7 +8,15 @@
 // test bodies — see check_tool_test.sfn preamble).
 //
 // See docs/proposals/check-architecture.md.
+import { Statement } from "../../src/ast";
+import { ImportSymbolTable, append_import_function, empty_import_symbols } from "../../src/effect_imports";
 import { NativeInterface, NativeInterfaceSignature, NativeParameter } from "../../src/native_ir";
+import { parse_program } from "../../src/parser/mod";
+import {
+    typecheck_diagnostics_with_import_symbols,
+    typecheck_diagnostics_with_imports,
+    typecheck_walker_resolves_import
+} from "../../src/typecheck";
 import {
     interface_statement_from_native,
     interfaces_from_native,
@@ -263,4 +271,79 @@ test "typecheck_imports: multiple natives are converted in order" {
     assert strings_equal(result[0].name, "A");
     assert strings_equal(result[1].name, "B");
     assert strings_equal(result[2].name, "C");
+}
+
+// -------------------------------------------------------------------
+// Tests — typecheck walker resolution probe (issue #811)
+//
+// Issue #811 threads the `ImportSymbolTable` through the typecheck
+// walker so issue D (#616 sub-issue 4) can promote unresolved-callee
+// lookups into diagnostics without re-doing the plumbing. These tests
+// pin the pre-enforcement state:
+//
+//   * The resolution probe `typecheck_walker_resolves_import` agrees
+//     with `lookup_imported_function` (true for imported names, false
+//     otherwise). This is the same lookup the walker uses internally.
+//   * Threading an import table through
+//     `typecheck_diagnostics_with_import_symbols` does NOT emit a new
+//     diagnostic for a program that calls an imported helper today —
+//     issue D will flip the emission gate.
+//   * The 2-arg back-compat entry point still works.
+// -------------------------------------------------------------------
+fn _make_imports_with_helper() -> ImportSymbolTable {
+    let mut table = empty_import_symbols();
+    let effects: string[] = ["io"];
+    return append_import_function(table, "imported_helper", effects);
+}
+
+test "typecheck walker: resolves imported callee against symbol table" {
+    let imports = _make_imports_with_helper();
+    assert typecheck_walker_resolves_import("imported_helper", imports);
+}
+
+test "typecheck walker: does not resolve unimported callee" {
+    let imports = _make_imports_with_helper();
+    assert ! typecheck_walker_resolves_import("not_imported", imports);
+}
+
+test "typecheck walker: empty import table resolves nothing" {
+    let imports = empty_import_symbols();
+    assert ! typecheck_walker_resolves_import("imported_helper", imports);
+}
+
+test "typecheck walker: import-symbol-aware path emits no diagnostics for imported callee" {
+    // Pre-enforcement state: even with the import table threaded
+    // through, the walker discards its resolution result. Issue D
+    // will replace this assertion with one that expects the resolved
+    // call to be silent and the unresolved one to emit.
+    let source = "fn main() { imported_helper(\"hi\"); }";
+    let program = parse_program(source);
+    let imports = _make_imports_with_helper();
+    let no_interfaces: Statement[] = [];
+    let diagnostics = typecheck_diagnostics_with_import_symbols(program, no_interfaces, imports);
+    assert diagnostics.length == 0;
+}
+
+test "typecheck walker: import-symbol-aware path emits no diagnostics for unresolved callee" {
+    // Companion to the test above — proves the walker is silent on
+    // calls that DON'T resolve in the table too. Issue D flips this
+    // to expect a diagnostic.
+    let source = "fn main() { not_imported(\"hi\"); }";
+    let program = parse_program(source);
+    let imports = _make_imports_with_helper();
+    let no_interfaces: Statement[] = [];
+    let diagnostics = typecheck_diagnostics_with_import_symbols(program, no_interfaces, imports);
+    assert diagnostics.length == 0;
+}
+
+test "typecheck walker: 2-arg back-compat path still typechecks clean" {
+    // The legacy 2-arg `typecheck_diagnostics_with_imports` must keep
+    // working — it now delegates to the 3-arg variant with an empty
+    // import table. The diagnostic count must be unchanged for the
+    // pre-issue-#811 callers.
+    let source = "fn main() { imported_helper(\"hi\"); }";
+    let program = parse_program(source);
+    let no_interfaces: Statement[] = [];
+    let diagnostics = typecheck_diagnostics_with_imports(program, no_interfaces);
+    assert diagnostics.length == 0;
 }
