@@ -311,12 +311,14 @@ test "typecheck walker: empty import table resolves nothing" {
     assert ! typecheck_walker_resolves_import("imported_helper", imports);
 }
 
-test "typecheck walker: import-symbol-aware path emits no diagnostics for imported callee" {
+test "typecheck walker: import-symbol-aware path emits no diagnostics for actually-imported callee" {
     // Pre-enforcement state: even with the import table threaded
-    // through, the walker discards its resolution result. Issue D
-    // will replace this assertion with one that expects the resolved
-    // call to be silent and the unresolved one to emit.
-    let source = "fn main() { imported_helper(\"hi\"); }";
+    // through, the walker discards its resolution result. The source
+    // includes an `import { imported_helper }` specifier so the
+    // entry point's `localize_import_symbols_for_program` retains
+    // the entry; issue D will replace this assertion with one that
+    // expects the resolved call to be silent.
+    let source = "import { imported_helper } from \"./helpers\";\nfn main() { imported_helper(\"hi\"); }";
     let program = parse_program(source);
     let imports = _make_imports_with_helper();
     let no_interfaces: Statement[] = [];
@@ -326,9 +328,27 @@ test "typecheck walker: import-symbol-aware path emits no diagnostics for import
 
 test "typecheck walker: import-symbol-aware path emits no diagnostics for unresolved callee" {
     // Companion to the test above — proves the walker is silent on
-    // calls that DON'T resolve in the table too. Issue D flips this
-    // to expect a diagnostic.
+    // calls that DON'T resolve in the (localized) table either.
+    // Issue D flips this to expect a diagnostic.
     let source = "fn main() { not_imported(\"hi\"); }";
+    let program = parse_program(source);
+    let imports = _make_imports_with_helper();
+    let no_interfaces: Statement[] = [];
+    let diagnostics = typecheck_diagnostics_with_import_symbols(program, no_interfaces, imports);
+    assert diagnostics.length == 0;
+}
+
+test "typecheck walker: localization drops globally-present but un-imported names" {
+    // Regression guard for the localization step — without the
+    // `localize_import_symbols_for_program` call inside
+    // `typecheck_diagnostics_with_import_symbols`, any function
+    // exported by any loaded dependency would resolve, even when the
+    // caller program never imported it. Today the walker emits
+    // nothing, so we assert via no-crash + zero diagnostics; issue D
+    // will switch this to expect the E0420 undefined-callee diagnostic
+    // (because the name is NOT in the localized table). Both shapes
+    // require the entry point to localize before traversal.
+    let source = "fn main() { imported_helper(\"hi\"); }";
     let program = parse_program(source);
     let imports = _make_imports_with_helper();
     let no_interfaces: Statement[] = [];

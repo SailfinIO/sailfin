@@ -16,7 +16,12 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "./ast";
-import { ImportSymbolTable, empty_import_symbols, lookup_imported_function } from "./effect_imports";
+import {
+    ImportSymbolTable,
+    empty_import_symbols,
+    localize_import_symbols_for_program,
+    lookup_imported_function
+} from "./effect_imports";
 import { Token, TokenKind } from "./token";
 import {
     Diagnostic,
@@ -89,12 +94,23 @@ fn typecheck_diagnostics_with_imports(program: Program, imported_interfaces: Sta
 // pre-resolver call paths can keep using the 2-arg
 // `typecheck_diagnostics_with_imports` (which delegates here with an
 // empty table).
+//
+// The caller passes the GLOBAL symbol table the loader produced from
+// the dependency `.sfn-asm` artifacts; this entry localizes it once
+// against `program`'s `import { ... }` specifiers (alias rewrites +
+// scope filter) so the per-`Call` lookup keys directly off the
+// localized identifier name — mirroring `effect_checker.validate_-
+// effects_with_imports` (effect_checker.sfn:185). Without the
+// localization step issue D would treat any function exported by
+// any loaded dependency as resolved, including names this program
+// never imported.
 fn typecheck_diagnostics_with_import_symbols(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable) -> Diagnostic[] {
+    let local_imports = localize_import_symbols_for_program(program, imported_function_effects);
     let top_level = collect_top_level_symbols(program);
     let local_interfaces = collect_interface_definitions(program);
     let filtered_imports = _filter_interface_declarations(imported_interfaces);
     let combined_interfaces = local_interfaces.concat(filtered_imports);
-    let scoped_diagnostics = check_program_scopes(program, combined_interfaces, imported_function_effects);
+    let scoped_diagnostics = check_program_scopes(program, combined_interfaces, local_imports);
 
     // Merge diagnostics using concat (avoids loop-with-if-break pattern that
     // the compiler lowers incorrectly — loops emit without exit conditions).
