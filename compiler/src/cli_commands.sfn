@@ -957,15 +957,19 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         if ai >= args.length { break; }
         let arg = args[ai];
         if strings_equal(arg, "--json") { json_output = true; } else if strings_equal(arg, "-k") {
-            if ai + 1 < args.length {
-                ai += 1;
-                name_filter = args[ai];
+            if ai + 1 >= args.length {
+                print("sfn test: -k requires a value");
+                return 2;
             }
+            ai += 1;
+            name_filter = args[ai];
         } else if strings_equal(arg, "--tag") {
-            if ai + 1 < args.length {
-                ai += 1;
-                tag_filter = args[ai];
+            if ai + 1 >= args.length {
+                print("sfn test: --tag requires a value");
+                return 2;
             }
+            ai += 1;
+            tag_filter = args[ai];
         } else { positional.push(arg); }
         ai += 1;
     }

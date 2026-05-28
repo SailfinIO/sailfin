@@ -119,11 +119,11 @@ fn test_filters_active() -> boolean {
 }
 
 // Unwrap a decorator argument's value to its bare string. `@tag("slow")`
-// parses its positional argument as either a `StringLiteral` (already
-// unquoted) or a `Raw` node carrying the literal source including the
-// surrounding quotes (the positional branch of `parse_decorator_argument`
-// skips the Raw→StringLiteral normalization the named branch does), so
-// both shapes are handled here. Non-string arguments yield "".
+// normally parses its argument to a `StringLiteral` (already unquoted)
+// via `expression_from_single_token`. The `Raw` branch is a defensive
+// fallback for the case where expression normalization bails to a raw
+// node carrying the literal source with its surrounding quotes. Both
+// shapes resolve to the bare string; non-string arguments yield "".
 fn _decorator_arg_string(expr: Expression) -> string {
     if expr.variant == "StringLiteral" { return expr.value; }
     if expr.variant == "Raw" {
