@@ -600,6 +600,19 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             };
             continue;
         }
+        if strings_equal(sym, "?") {
+            // Postfix `?` error-propagation operator (R.1, epic #371).
+            // Left-associates through the loop so `a()?.b()?` parses as
+            // `((a()?).b())?`. Nullable type annotations (`let x: Config?`)
+            // are consumed by the type parser and never reach expression
+            // postfix position, so there is no ambiguity here.
+            current_state = expression_tokens_advance(current_state);
+            current_expression = Expression.TryOperator {
+                operand: current_expression,
+                span: source_span_from_tokens([token])
+            };
+            continue;
+        }
         if strings_equal(sym, "{") {
             if !expression_is_struct_target(current_expression) { break; }
             let struct_result = parse_struct_literal(expression_tokens_advance(current_state), current_expression);

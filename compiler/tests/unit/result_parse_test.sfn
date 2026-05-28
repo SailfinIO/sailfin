@@ -1,0 +1,104 @@
+// Regression coverage for the postfix `?` error-propagation operator
+// (R.1, epic #371; issue #828). `parse_postfix_chain` in
+// `compiler/src/parser/expressions.sfn` gains a `?` arm that wraps the
+// preceding expression in `Expression.TryOperator`. This is parse-only:
+// type rules (R.3) and emission (R.4) land later.
+//
+// The coexistence test anchors the one real ambiguity worry — a nullable
+// type annotation (`let x: Config?`) is consumed by the type parser and
+// never reaches expression postfix position, so it must NOT produce a
+// `TryOperator`.
+import {
+    Block,
+    Expression,
+    Program,
+    Statement
+} from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+// -------------------------------------------------------------------
+// Helpers
+// -------------------------------------------------------------------
+fn _find_function_body(program: Program, name: string) -> Block {
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "FunctionDeclaration" {
+            if stmt.signature.name == name { return stmt.body; }
+        }
+        index += 1;
+    }
+    return Block { tokens: [], text: "", statements: [] };
+}
+
+fn _first_variable_declaration(block: Block) -> Statement {
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        let stmt = block.statements[index];
+        if stmt.variant == "VariableDeclaration" { return stmt; }
+        index += 1;
+    }
+    return block.statements[0];
+}
+
+// -------------------------------------------------------------------
+// Tests
+// -------------------------------------------------------------------
+test "parser try-op: `read()?` wraps the call in a TryOperator" {
+    let source = "fn main() { let x = read()?; }";
+    let program = parse_program(source);
+    let body = _find_function_body(program, "main");
+    let decl = _first_variable_declaration(body);
+    assert decl.name == "x";
+    let init = decl.initializer;
+    assert init != null;
+    assert init.variant == "TryOperator";
+    // The operand is the wrapped call expression.
+    assert init.operand.variant == "Call";
+}
+
+test "parser try-op: `a()?.b()?` left-associates to `((a()?).b())?`" {
+    let source = "fn main() { let v = a()?.b()?; }";
+    let program = parse_program(source);
+    let body = _find_function_body(program, "main");
+    let decl = _first_variable_declaration(body);
+    let init = decl.initializer;
+    assert init != null;
+
+    // Outermost: `(...)?`
+    assert init.variant == "TryOperator";
+
+    // Its operand is the `.b()` call.
+    let outer_call = init.operand;
+    assert outer_call.variant == "Call";
+
+    // The call's callee is the `.b` member access.
+    let member = outer_call.callee;
+    assert member.variant == "Member";
+    assert member.member == "b";
+
+    // The member's object is the inner `a()?` TryOperator.
+    let inner_try = member.object;
+    assert inner_try.variant == "TryOperator";
+
+    // …whose operand is the `a()` call.
+    assert inner_try.operand.variant == "Call";
+}
+
+test "parser try-op: nullable type annotation is NOT a TryOperator" {
+    // `let x: Config?` parses the `?` as part of the type annotation,
+    // not as a postfix expression operator. The declaration carries a
+    // type annotation and has no TryOperator initializer.
+    let source = "fn main() { let x: Config? = fetch(); }";
+    let program = parse_program(source);
+    let body = _find_function_body(program, "main");
+    let decl = _first_variable_declaration(body);
+    assert decl.name == "x";
+    assert decl.type_annotation != null;
+    let init = decl.initializer;
+    assert init != null;
+    // The initializer is a plain call — the `?` belonged to the type.
+    assert init.variant == "Call";
+}

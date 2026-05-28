@@ -447,6 +447,81 @@ test "effect violation: http.<x> Member call carets at http" {
     assert found_net;
 }
 
+// Regression for PR #869 (issue #828): the postfix `?` operator parses
+// to `Expression.TryOperator { operand }`. The body walker must recurse
+// into `operand` so effectful calls inside it (`fs.read()?`) still
+// surface — otherwise `?` would silently hide its operand's effects
+// from `sfn check`, a blind spot in the headline effect-enforcement
+// feature. This wraps the same `fs.read()` Member call the tests above
+// exercise in a TryOperator and asserts the io violation is unchanged.
+fn _routine_with_try_member_call(name: string, declared_effects: string[], sig_line: int, namespace: string, member: string, namespace_line: int, namespace_column: int) -> Statement {
+    let sig_span = _span(sig_line, 4);
+    let object_span = _span(namespace_line, namespace_column);
+    let member_span = _span(namespace_line, namespace_column + namespace.length
+        + 1);
+    let object = Expression.Identifier { name: namespace, span: object_span };
+    let member_expr = Expression.Member {
+        object: object,
+        member: member,
+        span: member_span
+    };
+    let no_args: Expression[] = [];
+    let call_expr = Expression.Call {
+        callee: member_expr,
+        arguments: no_args,
+        span: null
+    };
+    let try_expr = Expression.TryOperator { operand: call_expr, span: null };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: try_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: "",
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, declared_effects, sig_span),
+        body: body_block,
+        decorators: empty_decorators
+    };
+}
+
+test "effect violation: TryOperator operand still surfaces fs io effect" {
+    let stmt = _routine_with_try_member_call("read_config", [], 4, "fs", "read", 17, 9);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.routine_name == "read_config";
+    let mut found_io: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= v.missing_effects.length { break; }
+        if v.missing_effects[i] == "io" { found_io = true; }
+        i += 1;
+    }
+    assert found_io;
+    // The caret still lands on the namespace identifier inside the `?`.
+    assert v.trigger != null;
+    let trig: Token? = v.trigger;
+    assert trig.line == 17;
+    assert trig.column == 9;
+    assert trig.lexeme == "fs";
+}
+
+test "effect violation: declared ![io] suppresses TryOperator operand violation" {
+    // Mirror of the happy path — declaring the effect clears it even
+    // through the `?` wrapper, confirming the pass-through doesn't
+    // double-count or spuriously fire.
+    let stmt = _routine_with_try_member_call("read_config", ["io"], 4, "fs", "read", 17, 9);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
 test "effect violation: bare spawn() Call carets at the callee identifier" {
     // `spawn(...)` is the in-module synthetic effect (no Member
     // chain). The trigger should be the callee identifier's span,

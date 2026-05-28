@@ -957,6 +957,9 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
     if expression.variant == "Cast" {
         return walk_expression(expression.operand, bindings, imports);
     }
+    if expression.variant == "TryOperator" {
+        return walk_expression(expression.operand, bindings, imports);
+    }
     return [];
 }
 

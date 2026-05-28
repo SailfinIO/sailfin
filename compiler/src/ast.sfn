@@ -93,6 +93,10 @@ enum Expression {
     },
     Range { start: Expression, end: Expression },
     Cast { operand: Expression, target_type: TypeAnnotation },
+    // Postfix `?` error-propagation operator (R.1, epic #371). Distinct
+    // from the statement-level `TryStatement`. Type rules and emission
+    // land in R.3 / R.4 — today this is parse-only.
+    TryOperator { operand: Expression, span: SourceSpan? },
     Raw { text: string }
 }
 

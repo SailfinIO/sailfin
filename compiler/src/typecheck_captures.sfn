@@ -312,6 +312,9 @@ fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWal
     if expression.variant == "Cast" {
         return walk_expression(scope, expression.operand);
     }
+    if expression.variant == "TryOperator" {
+        return walk_expression(scope, expression.operand);
+    }
     if expression.variant == "Call" {
         let mut result = walk_expression(scope, expression.callee);
         let mut i: int = 0;
