@@ -668,6 +668,56 @@ fn _trj_decode_skipped(packed: int) -> int {
     return p;
 }
 
+// Retry policy for the test-exec phase (per-test child process).
+//
+// History: `scripts/run_native_test.sh` previously implemented two
+// retry classes — a regex-classified I/O-pressure retry that
+// matched on stdout substrings ("no such file or directory", "link
+// failed", ...) and a signal-kill retry for exit codes 137/139.
+// Issue #364 deleted the regex retry (the structured assert-fail
+// record gave the runner an exit-code-driven failure path with
+// typed attribution, and the substring match was masking real
+// compile failures as flakes). The signal-kill retry survives —
+// transient 137 (OOM-SIGKILL) and 139 (SIGSEGV) surface under
+// sustained CI memory pressure during the seedcheck phase of
+// `make check`.
+//
+// Ported into the compiler so `sfn test` returns the correct
+// exit code with no bash post-processing (issue #845, parent
+// epic #840 phase 1.1). `SAILFIN_TEST_RETRY=0` disables retries
+// entirely for flake-vs-real-failure investigations during perf
+// work.
+enum RetryPolicy {
+    None,
+    SignalKill
+}
+
+fn _classify_test_retry(exit_code: int) -> RetryPolicy {
+    if exit_code == 137 { return RetryPolicy.SignalKill(); }
+    if exit_code == 139 { return RetryPolicy.SignalKill(); }
+    return RetryPolicy.None();
+}
+
+// Mirrors the bash `[ "${SAILFIN_TEST_RETRY:-1}" != "0" ]` gate:
+// retries are enabled by default, disabled only when the env var
+// is explicitly set to "0". Any other value (unset, "1", "true",
+// "false", arbitrary strings) leaves retries enabled — the bash
+// gate was a string-equality test against "0", not a boolean
+// parse, so this matches the prior wrapper's semantics exactly.
+fn _test_retries_disabled() -> boolean ![io] {
+    return _get_env_cmd("SAILFIN_TEST_RETRY") == "0";
+}
+
+fn _should_retry_test(exit_code: int, retries_disabled: boolean) -> boolean {
+    if retries_disabled { return false; }
+    let policy = _classify_test_retry(exit_code);
+    match policy {
+        RetryPolicy.None => return false,
+        RetryPolicy.SignalKill => return true
+    }
+    return false;
+}
+
 fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock] {
     // Flag parser: `--json` is the only recognised flag for now.
     // Positional args carry the optional `path` argument; preserves
@@ -886,6 +936,11 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
 
     let runner_start_ms = monotonic_millis();
 
+    // Read the retry gate once before the loop — env var lookups
+    // shell out via popen, and the gate is invariant for the
+    // duration of the invocation.
+    let retries_disabled = _test_retries_disabled();
+
     let mut total_passed: int = 0;
     let mut total_failed: int = 0;
     let mut total_skipped: int = 0;
@@ -933,6 +988,12 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
                 index += 1;
                 continue;
             }
+            // FAIL banner on compile failure: the bash wrapper
+            // surfaced this as `[test] FAIL: <basename> (exit code 1,
+            // ...)`. Emit the same shape so callers parsing test
+            // output (CI log scrubbers, human readers) see consistent
+            // attribution regardless of which stage failed.
+            print("[test] FAIL: " + _package_basename(path) + " (exit code 1)");
             exit_test_runner_mode();
             return 1;
         }
@@ -955,6 +1016,14 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
                 index += 1;
                 continue;
             }
+            // FAIL banner on link failure (issue #845). Same rationale
+            // as the compile-failure banner above — keep `[test] FAIL`
+            // attribution consistent across every failure stage so
+            // tooling (CI scrubbers, human readers, future grep-based
+            // log audits) sees one shape.
+            print("[test] FAIL: " + _package_basename(path) + " (exit code "
+                + number_to_string(link_rc)
+                + ")");
             exit_test_runner_mode();
             return link_rc;
         }
@@ -968,7 +1037,39 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
         if fs.exists(fail_record_path) { fs.deleteFile(fail_record_path); }
 
         if trace_runner { print.err("test runner: exec start"); }
-        let run_rc = process.run(["env", "SAILFIN_TEST_SCRATCH=" + scratch_root, exe_path]);
+        let mut run_rc = process.run(["env", "SAILFIN_TEST_SCRATCH="
+            + scratch_root, exe_path]);
+        // Signal-kill retry (ported from `scripts/run_native_test.sh`
+        // by issue #845). 137 (OOM-SIGKILL) / 139 (SIGSEGV) are
+        // transient under sustained CI memory pressure on the
+        // seedcheck phase of `make check`; retry once before
+        // declaring failure. Other classes — including timeouts
+        // (124), normal asserts (1), and unrelated signals — fall
+        // through immediately. `SAILFIN_TEST_RETRY=0` opts out for
+        // flake-vs-real-failure investigations.
+        if _should_retry_test(run_rc, retries_disabled) {
+            // Banner is a human-mode artifact — the `--json` stream
+            // must stay pure jsonl so consumers don't have to filter
+            // out interleaved decoration. The retry itself still
+            // runs in JSON mode; we just don't announce it.
+            if !json_output {
+                let test_basename = _package_basename(path);
+                print("[test] RETRY: " + test_basename + " (exit code "
+                    + number_to_string(run_rc)
+                    + ", retrying once)");
+            }
+            // Clear any record the first attempt may have written so
+            // the post-retry `_consume_assert_failure_record` only
+            // sees what the retry produced. A 137/139 process usually
+            // dies before `sailfin_assert_fail` writes a record, but
+            // a test that asserts and *then* segfaults during teardown
+            // would otherwise leave a stale record that gets
+            // misattributed to the retry attempt's outcome.
+            if fs.exists(fail_record_path) {
+                fs.deleteFile(fail_record_path);
+            }
+            run_rc = process.run(["env", "SAILFIN_TEST_SCRATCH=" + scratch_root, exe_path]);
+        }
         if trace_runner {
             print.err("test runner: exec done (exit=" + number_to_string(run_rc)
                 + ")");
@@ -996,6 +1097,20 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
                 index += 1;
                 continue;
             }
+            // FAIL banner (issue #845): the bash wrapper used to emit
+            // this line; the compiler emits it now so `sfn test` is
+            // self-contained. The compiler's structured `test failed:`
+            // detail line follows for editor-hyperlinkable assertion
+            // attribution. The bash `grep -nE ... <<< "$output"`
+            // diagnostic excerpt has no in-process analog (we don't
+            // buffer the child's stdout/stderr), but the structured
+            // `test runner: compile failed`, `link failed`, and
+            // `test failed:` lines already carry the per-step
+            // attribution the grep heuristic was reconstructing
+            // post-hoc.
+            print("[test] FAIL: " + _package_basename(path) + " (exit code "
+                + number_to_string(run_rc)
+                + ")");
             if failure.present {
                 print("test failed: " + _format_assert_failure(path, failure));
             } else { print("test failed: " + path); }
@@ -1008,6 +1123,12 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
             total_passed += _trj_decode_passed(packed);
             total_failed += _trj_decode_failed(packed);
             total_skipped += _trj_decode_skipped(packed);
+        } else {
+            // PASS banner (issue #845): matches the bash wrapper's
+            // `[test] PASS: <basename>` output exactly. Emitted only
+            // on the human path; the JSON path emits structured
+            // per-test events instead.
+            print("[test] PASS: " + _package_basename(path));
         }
         // Phase 5a: rewind arena scratch back to the per-test
         // mark. Per-iteration allocations (parsed test AST,
