@@ -170,13 +170,51 @@ fn sha256(data: string) -> string {
 }
 
 fn base64_encode(data: string) -> string {
-    // Encode a string to base64.
-    // Delegates to the C runtime via the `base64.encode` runtime helper
-    // (see compiler/src/llvm/runtime_helpers.sfn). Port tracked by M3.6.
+    // Encode a string to standard RFC 4648 base64 (with `=` padding).
+    // Pure Sailfin: byte-oriented over the raw input, no effects. String
+    // indexing and `.length` are byte-oriented, so this encodes the raw
+    // UTF-8 bytes and matches `base64` for arbitrary content.
     //
     // Usage:
     //   let encoded = base64_encode("hello world");
     //   // encoded == "aGVsbG8gd29ybGQ="
     //
-    return base64.encode(data, data.length);
+    let alphabet: string[] = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "+", "/",];
+
+    let mut bytes: int[] = [];
+    let mut bi: int = 0;
+    loop {
+        if bi >= data.length { break; }
+        bytes.push(char_code(data[bi]) & 255);
+        bi += 1;
+    }
+
+    let len: int = bytes.length;
+    let mut out: string = "";
+
+    // Full 3-byte groups → 4 base64 chars.
+    let mut i: int = 0;
+    loop {
+        if i + 2 >= len { break; }
+        let v: int = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+        out = out + alphabet[(v >> 18) & 63];
+        out = out + alphabet[(v >> 12) & 63];
+        out = out + alphabet[(v >> 6) & 63];
+        out = out + alphabet[v & 63];
+        i += 3;
+    }
+
+    // Trailing 1 or 2 bytes, padded with `=`.
+    if i < len {
+        let mut v: int = bytes[i] << 16;
+        if i + 1 < len { v = v | (bytes[i + 1] << 8); }
+        out = out + alphabet[(v >> 18) & 63];
+        out = out + alphabet[(v >> 12) & 63];
+        if i + 1 < len { out = out + alphabet[(v >> 6) & 63]; } else {
+            out = out + "=";
+        }
+        out = out + "=";
+    }
+
+    return out;
 }

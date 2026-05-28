@@ -647,6 +647,55 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
         }
     }
 
+    // Pointer-read intrinsics (#875, epic #763): lower directly to an LLVM
+    // `load` of the descriptor's width instead of a `call`. The load element
+    // type is driven by `return_type` ("i32"/"i64"), not by parsing the
+    // operand's pointee. An `i8*` (or otherwise mismatched) operand gets a
+    // leading `bitcast` to the matching pointer type; an already-typed
+    // `i32*`/`i64*` operand loads directly with no redundant bitcast.
+    if helper_descriptor != null {
+        let _pr_symbol = helper_descriptor.symbol;
+        if _pr_symbol == "sailfin_intrinsic_pointer_read_i32" || _pr_symbol == "sailfin_intrinsic_pointer_read_i64" {
+            if final_operands.length < 1 {
+                result_diagnostics.push("llvm lowering: " + _pr_symbol
+                    + " requires one pointer operand");
+            } else {
+                let _pr_elem = helper_descriptor.return_type;
+                let _pr_ptr_type = _pr_elem + "*";
+                let _pr_src = final_operands[0];
+                let mut _pr_ptr_value = _pr_src.value;
+                if _pr_src.llvm_type != _pr_ptr_type {
+                    let _pr_cast = format_temp_name(result_temp);
+                    result_lines.push("  " + _pr_cast + " = bitcast " + _pr_src.llvm_type
+                        + " "
+                        + _pr_src.value
+                        + " to "
+                        + _pr_ptr_type);
+                    _pr_ptr_value = _pr_cast;
+                    result_temp = result_temp + 1;
+                }
+                let _pr_loaded = format_temp_name(result_temp);
+                result_lines.push("  " + _pr_loaded + " = load " + _pr_elem
+                    + ", "
+                    + _pr_ptr_type
+                    + " "
+                    + _pr_ptr_value);
+                result_temp = result_temp + 1;
+                let _pr_operand = LLVMOperand {
+                    llvm_type: _pr_elem,
+                    value: _pr_loaded
+                };
+                return ExpressionResult {
+                    lines: result_lines,
+                    temp_index: result_temp,
+                    operand: _pr_operand,
+                    diagnostics: result_diagnostics,
+                    string_constants: collected_string_constants
+                };
+            }
+        }
+    }
+
     // Standard function call
     if _trace_ccl {
         print.err("call_lowering: checkpoint-F call_symbol target="

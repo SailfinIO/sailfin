@@ -1,0 +1,42 @@
+// Tests for sfn/crypto base64 (pure-Sailfin, RFC 4648 standard alphabet).
+//
+// Known-answer vectors covering the empty string, all three padding
+// residues (0, 1, 2 trailing bytes), and a non-ASCII UTF-8 input to pin
+// the byte-oriented contract.
+import { base64_encode } from "../src/mod";
+
+test "base64_encode: empty string" { assert base64_encode("") == ""; }
+
+test "base64_encode: one trailing byte (two pad chars)" {
+    assert base64_encode("f") == "Zg==";
+}
+
+test "base64_encode: two trailing bytes (one pad char)" {
+    assert base64_encode("fo") == "Zm8=";
+}
+
+test "base64_encode: exact three-byte group (no padding)" {
+    assert base64_encode("foo") == "Zm9v";
+}
+
+test "base64_encode: four bytes" {
+    assert base64_encode("foob") == "Zm9vYg==";
+}
+
+test "base64_encode: five bytes" {
+    assert base64_encode("fooba") == "Zm9vYmE=";
+}
+
+test "base64_encode: six bytes" {
+    assert base64_encode("foobar") == "Zm9vYmFy";
+}
+
+test "base64_encode: ascii sentence" {
+    assert base64_encode("hello world") == "aGVsbG8gd29ybGQ=";
+}
+
+test "base64_encode: non-ASCII UTF-8 raw bytes" {
+    // "é" is the two UTF-8 bytes 0xc3 0xa9; byte-oriented indexing encodes
+    // them raw, matching `printf 'é' | base64`.
+    assert base64_encode("é") == "w6k=";
+}
