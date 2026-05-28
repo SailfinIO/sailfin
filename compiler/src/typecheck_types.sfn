@@ -206,6 +206,140 @@ fn parse_type_arguments(annotation_text: string) -> string[] {
     return split_generic_argument_list(block);
 }
 
+// Per-instantiation type-parameter substitution. `olds[i]` is the
+// declared parameter name (e.g. "T"); `news[i]` is the concrete
+// argument supplied at the instantiation site (e.g. "int"). Parallel
+// arrays mirror the convention used elsewhere in the compiler.
+struct TypeSubstitution {
+    olds: string[];
+    news: string[];
+}
+
+// Build a substitution map from a declaration's `type_parameters` and
+// the concrete type-argument list parsed from an instantiation
+// annotation. Pairs by position up to the shorter length; arity
+// validation is a separate concern (see `validate_enum_annotation`).
+fn build_type_substitution(decl_type_parameters: TypeParameter[], type_arguments: string[]) -> TypeSubstitution {
+    let mut olds: string[] = [];
+    let mut news: string[] = [];
+    let mut limit: int = decl_type_parameters.length;
+    if type_arguments.length < limit { limit = type_arguments.length; }
+    let mut index: int = 0;
+    loop {
+        if index >= limit { break; }
+        olds.push(decl_type_parameters[index].name);
+        news.push(type_arguments[index]);
+        index += 1;
+    }
+    return TypeSubstitution { olds: olds, news: news };
+}
+
+// Resolve a single identifier token against the substitution, returning
+// the concrete argument when the token names a declared parameter, or
+// the token unchanged otherwise. Returning the token itself (not an
+// optional) keeps `apply_type_substitution` free of null handling.
+fn substitute_type_token(substitution: TypeSubstitution, name: string) -> string {
+    let mut index: int = 0;
+    loop {
+        if index >= substitution.olds.length { break; }
+        if strings_equal(substitution.olds[index], name) {
+            return substitution.news[index];
+        }
+        index += 1;
+    }
+    return name;
+}
+
+// Substitute type-parameter names in a field-type annotation string.
+// Identifier-boundary aware: replaces only maximal identifier runs that
+// exactly equal a parameter name, so `T` -> `int`, `Array<T>` ->
+// `Array<int>`, `T?` -> `int?`, while `Transaction` is left intact.
+// Non-identifier characters (`<` `>` `?` `[` `]` `,` whitespace) are
+// copied verbatim and act as token boundaries.
+fn apply_type_substitution(type_text: string, substitution: TypeSubstitution) -> string {
+    let mut result: string = "";
+    let mut token: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= type_text.length { break; }
+        let ch = type_text[index];
+        if is_identifier_char(ch) { token = token + ch; } else {
+            if token.length > 0 {
+                result = result + substitute_type_token(substitution, token);
+                token = "";
+            }
+            result = result + ch;
+        }
+        index += 1;
+    }
+    if token.length > 0 {
+        result = result + substitute_type_token(substitution, token);
+    }
+    return result;
+}
+
+// Resolve the concrete type of a single enum variant field at a given
+// instantiation. `enum_decl` is a `Statement.EnumDeclaration`;
+// `variant_name`/`field_name` select the field; `type_arguments` is the
+// parsed concrete arg list (e.g. ["int", "Error"]). Returns the
+// substituted type string (e.g. "int" for Foo<int, Error>.Ok.value), or
+// null if the variant or field does not exist.
+fn resolve_enum_variant_field_type(enum_decl: Statement, variant_name: string, field_name: string, type_arguments: string[]) -> string? {
+    let substitution = build_type_substitution(enum_decl.type_parameters, type_arguments);
+    let mut vi: int = 0;
+    loop {
+        if vi >= enum_decl.variants.length { break; }
+        let variant = enum_decl.variants[vi];
+        if strings_equal(variant.name, variant_name) {
+            let mut fi: int = 0;
+            loop {
+                if fi >= variant.fields.length { break; }
+                let field = variant.fields[fi];
+                if strings_equal(field.name, field_name) {
+                    return apply_type_substitution(field.type_annotation.text, substitution);
+                }
+                fi += 1;
+            }
+        }
+        vi += 1;
+    }
+    return null;
+}
+
+// Same as `resolve_enum_variant_field_type` but parses the concrete
+// arguments out of an instantiation annotation string (e.g.
+// "Foo<int, Error>") via `parse_type_arguments`.
+fn resolve_enum_variant_field_type_from_annotation(enum_decl: Statement, variant_name: string, field_name: string, annotation_text: string) -> string? {
+    return resolve_enum_variant_field_type(enum_decl, variant_name, field_name, parse_type_arguments(annotation_text));
+}
+
+// Validate the type-argument arity of an enum instantiation annotation
+// against the enum's declared type parameters. Reuses the E0302
+// interface-arity factories so the diagnostic family is identical to the
+// struct-implements-interface path (issue #829: "the existing
+// interface-style diagnostics"). `usage_name` is the surface context for
+// the message.
+fn validate_enum_annotation(usage_name: string, enum_decl: Statement, annotation: TypeAnnotation) -> Diagnostic[] {
+    let expected_count = enum_decl.type_parameters.length;
+    let provided_arguments = parse_type_arguments(annotation.text);
+    if expected_count == 0 {
+        if provided_arguments.length > 0 {
+            return [make_interface_no_type_arguments_diagnostic(usage_name, trim_text(annotation.text), enum_decl.name)];
+        }
+        return [];
+    }
+
+    if provided_arguments.length == 0 {
+        return [make_interface_missing_type_arguments_diagnostic(usage_name, enum_decl.name, format_interface_signature(enum_decl))];
+    }
+
+    if provided_arguments.length != expected_count {
+        return [make_interface_type_argument_mismatch_diagnostic(usage_name, trim_text(annotation.text), format_interface_signature(enum_decl))];
+    }
+
+    return [];
+}
+
 fn extract_generic_argument_block(annotation_text: string) -> string? {
     let trimmed = trim_text(annotation_text);
     let mut index: int = 0;

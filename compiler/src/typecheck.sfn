@@ -28,6 +28,7 @@ import {
     ScopeResult,
     SymbolCollectionResult,
     SymbolEntry,
+    append_symbol,
     check_enum_variants,
     check_extern_signature,
     check_function_signature,
@@ -41,6 +42,7 @@ import {
     detect_unsupported_statement_keyword,
     has_symbol,
     is_builtin_call_name,
+    is_identifier_char,
     make_main_signature_param_count_diagnostic,
     make_main_signature_param_type_diagnostic,
     make_removed_keyword_diagnostic,
@@ -532,7 +534,8 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             let case = statement.cases[index];
             diagnostics = diagnostics.concat(walk_expression(case.pattern, bindings, imports));
             diagnostics = diagnostics.concat(walk_expression(case.guard, bindings, imports));
-            let _blk_diags = check_block(case.body, bindings, interfaces, imports, top_level);
+            let arm_bindings = register_match_pattern_bindings(case.pattern, bindings);
+            let _blk_diags = check_block(case.body, arm_bindings, interfaces, imports, top_level);
             let mut _ci: int = 0;
             loop {
                 if _ci >= _blk_diags.length { break; }
@@ -793,6 +796,78 @@ fn _trim_main_type_text(text: string) -> string {
 // Every other position is non-emitting — argument type checking,
 // undefined *variable* references, and member/method resolution are all
 // out of #616 scope.
+// Extract enum-destructure field-binding NAMES from a match-arm
+// pattern and append them to a fresh copy of `bindings` as
+// "variable"-kind symbols so the arm body can reference them. TYPE
+// resolution is deferred to lowering (#830); the typecheck pass tracks
+// names only (`SymbolEntry` has no type field). A bare-identifier
+// pattern (catch-all) binds that single name unless it is the wildcard
+// `_`. Literal patterns add nothing. `append_symbol` clones, so the
+// parent scope is never mutated and arm bindings stay arm-scoped.
+//
+// Shorthand destructures (`Shape.Circle { radius }`) parse to
+// `Expression.Raw`, not `Expression.Struct`, because `parse_object_literal`
+// requires `field: value` and bails on the colon-less form, leaving the
+// brace block unconsumed. The names then live only in the raw text, so the
+// `Raw` branch recovers them. The `Struct` branch still covers the
+// `field: value` form (which does parse structurally).
+fn register_match_pattern_bindings(pattern: Expression?, bindings: SymbolEntry[]) -> SymbolEntry[] {
+    if pattern == null { return bindings; }
+    if pattern.variant == "Struct" {
+        let mut result: SymbolEntry[] = bindings;
+        let mut index: int = 0;
+        loop {
+            if index >= pattern.fields.length { break; }
+            result = append_symbol(result, pattern.fields[index].name, "variable", null);
+            index += 1;
+        }
+        return result;
+    }
+    if pattern.variant == "Raw" {
+        return register_raw_pattern_bindings(pattern.text, bindings);
+    }
+    if pattern.variant == "Identifier" {
+        if pattern.name == "_" { return bindings; }
+        return append_symbol(bindings, pattern.name, "variable", null);
+    }
+    return bindings;
+}
+
+// Collect each identifier token inside the `{ ... }` block of a raw
+// destructure pattern as a "variable" binding. A raw pattern reaches here
+// only for the colon-less shorthand form, so the brace block holds bare
+// field names separated by commas — every identifier run is a binding.
+fn register_raw_pattern_bindings(text: string, bindings: SymbolEntry[]) -> SymbolEntry[] {
+    let mut result: SymbolEntry[] = bindings;
+    let mut in_block: boolean = false;
+    let mut token: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if !in_block {
+            if ch == "{" { in_block = true; }
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if token.length > 0 {
+                result = append_symbol(result, token, "variable", null);
+                token = "";
+            }
+            break;
+        }
+        if is_identifier_char(ch) { token = token + ch; } else {
+            if token.length > 0 {
+                result = append_symbol(result, token, "variable", null);
+                token = "";
+            }
+        }
+        index += 1;
+    }
+    return result;
+}
+
 fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: ImportSymbolTable) -> Diagnostic[] {
     if expression == null { return []; }
     if expression.variant == "Call" {

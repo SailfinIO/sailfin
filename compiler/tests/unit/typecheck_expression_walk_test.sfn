@@ -66,6 +66,22 @@ test "typecheck walker: call inside for-iterable is reached (E0420)" {
     assert _e0420_for("fn main() { for x in notarealfunction() { } }") == 1;
 }
 
+test "typecheck walker: match-arm destructured binding resolves as callee" {
+    // `Other.Run { task }` is a colon-less shorthand destructure, which
+    // parses to `Expression.Raw`. The match-arm binding registration
+    // recovers `task` from the raw text and seeds it into arm scope, so
+    // `task()` resolves and no E0420 fires. Before the registration this
+    // would surface a spurious undefined-callee diagnostic.
+    assert _e0420_for("fn main() { match shape { Other.Run { task }: task() } }") == 0;
+}
+
+test "typecheck walker: undefined callee in match arm still flagged" {
+    // Counterpart to the above: a callee that is NOT a destructured
+    // binding is still unresolved and must surface E0420 — proving the
+    // registration narrows scope to the bound names, not everything.
+    assert _e0420_for("fn main() { match shape { Other.Run { task }: notbound() } }") == 1;
+}
+
 test "typecheck walker: lambda body callee is not yet flagged" {
     // Deliberately documents a deferred gap (outside #812's acceptance
     // criteria, pre-existing from the #809 walker): undefined callees
