@@ -1,0 +1,75 @@
+// Regression coverage for `sfn test` discovery filtering (issue #849).
+//
+// The `-k <substr>` and `--tag <value>` flags filter which tests run.
+// The shared predicate `test_decl_matches_filters`
+// (`compiler/src/test_runner_state.sfn`) is the single decision point
+// for both the file-level pre-filter in `cli_commands.sfn` and the
+// per-test cut in `main.sfn`, so pinning it here covers both passes.
+//
+// These tests drive the predicate directly: parse a small source with
+// `parse_program`, set the filters, and count surviving tests. They do
+// not exercise the subprocess fan-out (covered end-to-end by the suite
+// runner itself).
+import { parse_program } from "../../src/parser/mod";
+import { set_test_filters, test_decl_matches_filters, test_filters_active } from "../../src/test_runner_state";
+
+fn _count_matches(source: string) -> int {
+    let program = parse_program(source);
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        if test_decl_matches_filters(program.statements[i]) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+test "test filter: -k keeps only tests whose name contains the substring" {
+    let source = "test \"auth login works\" { let _x: int = 1; }\n"
+        + "test \"logout works\" { let _x: int = 1; }\n"
+        + "test \"auth refresh works\" { let _x: int = 1; }";
+    set_test_filters("auth", "");
+    let matched = _count_matches(source);
+    set_test_filters("", "");
+    assert matched == 2;
+}
+
+test "test filter: --tag keeps only tests carrying @tag(\"value\")" {
+    let source = "@tag(\"slow\")\ntest \"slow path\" { let _x: int = 1; }\n"
+        + "test \"fast path\" { let _x: int = 1; }\n"
+        + "@tag(\"slow\")\ntest \"another slow\" { let _x: int = 1; }";
+    set_test_filters("", "slow");
+    let matched = _count_matches(source);
+    set_test_filters("", "");
+    assert matched == 2;
+}
+
+test "test filter: -k and --tag compose (a test must satisfy both)" {
+    let source = "@tag(\"slow\")\ntest \"auth slow\" { let _x: int = 1; }\n"
+        + "@tag(\"slow\")\ntest \"db slow\" { let _x: int = 1; }\n"
+        + "test \"auth fast\" { let _x: int = 1; }";
+    set_test_filters("auth", "slow");
+    let matched = _count_matches(source);
+    set_test_filters("", "");
+    assert matched == 1;
+}
+
+test "test filter: a non-matching --tag value excludes every test" {
+    let source = "@tag(\"slow\")\ntest \"slow path\" { let _x: int = 1; }\n"
+        + "test \"fast path\" { let _x: int = 1; }";
+    set_test_filters("", "nonexistent");
+    let matched = _count_matches(source);
+    set_test_filters("", "");
+    assert matched == 0;
+}
+
+test "test filter: test_filters_active reflects the configured filters" {
+    set_test_filters("", "");
+    assert test_filters_active() == false;
+    set_test_filters("auth", "");
+    assert test_filters_active() == true;
+    set_test_filters("", "slow");
+    assert test_filters_active() == true;
+    set_test_filters("", "");
+}

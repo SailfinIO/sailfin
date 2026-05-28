@@ -1,3 +1,11 @@
+import { Decorator, Expression, Statement } from "./ast";
+import {
+    char_at,
+    index_of,
+    strings_equal,
+    substring
+} from "./string_utils";
+
 // compiler/src/test_runner_state.sfn
 //
 // In-process test-runner state shared between the orchestrator
@@ -74,4 +82,100 @@ fn test_runner_active() -> boolean { return _active; }
 fn test_runner_trace() -> boolean {
     if !_active { return false; }
     return _trace;
+}
+
+// ── Test discovery filters (`-k` / `--tag`, issue #849) ──────────────
+//
+// Process-local filter state set once by `handle_test_command` after
+// flag parsing and read on two sites: the file-level pre-filter in
+// `cli_commands.sfn` (drops files with no matching test so no empty
+// harness is ever linked) and the per-test cut in `main.sfn`'s
+// `compile_tests_to_llvm_file_with_module_imports` (drops non-matching
+// `TestDeclaration`s before emit so the synthesized harness only calls
+// the surviving `test:` symbols). Both call `test_decl_matches_filters`
+// so the two passes agree on exactly which tests survive.
+//
+// The multi-file subprocess path re-passes `-k`/`--tag` on each child
+// argv, so each child re-establishes this state for its own leaf
+// compile. An empty filter string means "no constraint on this axis".
+let mut _filter_name: string = "";
+let mut _filter_tag: string = "";
+
+// Record the `-k` (name substring) and `--tag` (decorator value)
+// filters for the running `sfn test` invocation. Empty strings clear
+// the corresponding axis.
+fn set_test_filters(name_filter: string, tag_filter: string) {
+    _filter_name = name_filter;
+    _filter_tag = tag_filter;
+}
+
+// True when at least one discovery filter is in effect. Callers gate
+// the (parse-heavy) pre-filter and the program cut on this so an
+// unfiltered `sfn test` run keeps its existing behavior byte-for-byte.
+fn test_filters_active() -> boolean {
+    if _filter_name.length > 0 { return true; }
+    if _filter_tag.length > 0 { return true; }
+    return false;
+}
+
+// Unwrap a decorator argument's value to its bare string. `@tag("slow")`
+// parses its positional argument as either a `StringLiteral` (already
+// unquoted) or a `Raw` node carrying the literal source including the
+// surrounding quotes (the positional branch of `parse_decorator_argument`
+// skips the Raw→StringLiteral normalization the named branch does), so
+// both shapes are handled here. Non-string arguments yield "".
+fn _decorator_arg_string(expr: Expression) -> string {
+    if expr.variant == "StringLiteral" { return expr.value; }
+    if expr.variant == "Raw" {
+        let text = expr.text;
+        if text.length >= 2 {
+            if char_at(text, 0) == "\"" {
+                if char_at(text, text.length - 1) == "\"" {
+                    return substring(text, 1, text.length - 1);
+                }
+            }
+        }
+        return text;
+    }
+    return "";
+}
+
+// True when `decorators` carries a `@tag("<tag>")` whose string value
+// equals `tag`.
+fn _decorators_have_tag(decorators: Decorator[], tag: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= decorators.length { break; }
+        let decorator = decorators[i];
+        if strings_equal(decorator.name, "tag") {
+            let mut j: int = 0;
+            loop {
+                if j >= decorator.arguments.length { break; }
+                if strings_equal(_decorator_arg_string(decorator.arguments[j].expression), tag) {
+                    return true;
+                }
+                j += 1;
+            }
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// True when `statement` is a `TestDeclaration` that satisfies every
+// active filter. A non-test statement never matches (callers retain
+// non-test statements unconditionally). With no filters active this is
+// only reached behind a `test_filters_active()` guard, so it always
+// sees at least one constraint.
+fn test_decl_matches_filters(statement: Statement) -> boolean {
+    if statement.variant != "TestDeclaration" { return false; }
+    if _filter_name.length > 0 {
+        if index_of(statement.name, _filter_name) < 0 { return false; }
+    }
+    if _filter_tag.length > 0 {
+        if !_decorators_have_tag(statement.decorators, _filter_tag) {
+            return false;
+        }
+    }
+    return true;
 }

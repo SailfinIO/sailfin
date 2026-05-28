@@ -128,7 +128,10 @@ fn parse_statement(initial_parser: Parser) -> StatementParseResult {
         return parse_unknown(original);
     }
     if identifier_matches(token, "test") {
-        if decorators.length > 0 { return parse_unknown(original); }
+        // Decorators attach to `test` declarations (e.g. `@tag("slow")`)
+        // — `parse_test` stores them on `TestDeclaration.decorators` and
+        // infers effects from them, and `emit_test` lowers them as
+        // metadata. The `--tag` discovery filter (issue #849) reads them.
         return parse_test(parser, decorators);
     }
     if identifier_matches(token, "fn") {

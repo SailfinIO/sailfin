@@ -33,7 +33,7 @@ import { LayoutManifest } from "./native_ir";
 import { parse_program } from "./parser/mod";
 import { load_prelude_global_names } from "./prelude_globals";
 import { substring } from "./string_utils";
-import { test_runner_trace } from "./test_runner_state";
+import { test_decl_matches_filters, test_filters_active, test_runner_trace } from "./test_runner_state";
 import { Token } from "./token";
 import { toml_get_dependencies } from "./toml_parser";
 import {
@@ -392,10 +392,36 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
 // on the `Diagnostic` struct, so we filter for `severity == "error"`
 // before reporting and bailing. Warnings (e.g. future W01xx load
 // warnings) flow through without aborting the test compile.
+// Retain every non-test statement (imports, helpers) plus only the
+// `TestDeclaration`s that satisfy the active `-k`/`--tag` filters. Used
+// by the test compile path to cut filtered-out tests before emit.
+fn _filter_program_tests(program: Program) -> Program {
+    let mut kept: Statement[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let statement = program.statements[i];
+        if statement.variant == "TestDeclaration" {
+            if test_decl_matches_filters(statement) {
+                kept.push(statement);
+            }
+        } else { kept.push(statement); }
+        i += 1;
+    }
+    return Program { statements: kept };
+}
+
 fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, imported_interfaces: Statement[], imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_function_effects: ImportSymbolTable, imported_capabilities_required: string[]) -> boolean ![io] {
     let trace = test_runner_trace();
     if trace { print.err("test compiler (imports): parse_program start"); }
-    let program: Program = parse_program(source);
+    let mut program: Program = parse_program(source);
+    // Per-test discovery filter (`-k` / `--tag`, issue #849). Drop
+    // non-matching `TestDeclaration`s before typecheck/emit so the
+    // synthesized harness only calls the surviving `test:` symbols.
+    // The file-level pre-filter in `handle_test_command` guarantees at
+    // least one test survives every file that reaches this point, so
+    // the harness is never synthesized empty.
+    if test_filters_active() { program = _filter_program_tests(program); }
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let diagnostics = typecheck_diagnostics_with_import_symbols_prelude(program, imported_interfaces, imported_function_effects, prelude_globals);
     let mut has_errors: boolean = false;
