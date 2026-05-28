@@ -1,4 +1,4 @@
-// sfn/strings — String formatting and manipulation for Sailfin.
+// sfn/strings — String operations for Sailfin.
 //
 // Provides common string operations. No effects required — pure functions.
 fn trim(text: string) -> string {

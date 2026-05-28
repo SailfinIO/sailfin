@@ -1,7 +1,7 @@
 [capsule]
 name = "sfn/strings"
 version = "0.2.0"
-description = "String formatting and manipulation for Sailfin"
+description = "String operations for Sailfin"
 
 [dependencies]
 
