@@ -1,89 +1,73 @@
-// Unit tests for the typecheck expression walker (issue #809).
+// Unit tests for the typecheck expression walker (issue #809, enforced
+// in issue #812).
 //
-// Issue #809 adds an `ExpressionStatement` branch to `check_statement`
-// and a `walk_expression` recursive visitor. The walker is intentionally
-// non-emitting in this issue — issue D (#616 sub-issue 4) will flip on
-// resolution diagnostics. These tests pin the pre-enforcement state:
+// Issue #809 added an `ExpressionStatement` branch to `check_statement`
+// and a `walk_expression` recursive visitor that reaches every
+// expression position (statement, return value, let-initializer, if
+// condition, match scrutinee, for-iterable, lambda body). It was
+// intentionally non-emitting. Issue #812 flipped enforcement on: a bare
+// `Identifier` callee that resolves to nothing now produces E0420.
 //
-//   * Walking is reached for expression-statement, return-value, and
-//     let-initializer positions (the walker no longer falls through to
-//     the silent no-op return at the end of `check_statement`).
-//   * `typecheck_diagnostics` still reports zero unknown-identifier
-//     diagnostics for calls to names that don't resolve in scope, so
-//     the seed compiler's compile output is unchanged.
-//
-// When issue D lands these assertions are updated to expect the
-// resolution diagnostic (E0xxx, code TBD by issue D).
+// These tests pin that the walker reaches each of those positions by
+// asserting the E0420 diagnostic fires for an undefined callee placed
+// there. (Pre-#812 these asserted zero diagnostics; the count flip is
+// the proof the position is actually visited.)
 import { parse_program } from "../../src/parser/mod";
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 
-fn _count_all(diagnostics: Diagnostic[]) -> int { return diagnostics.length; }
-
-test "typecheck walker: bare call expression statement emits no diagnostics" {
-    // `notarealfunction` is unbound; the walker reaches it but issue D
-    // hasn't enabled resolution yet, so this must still typecheck clean.
-    let source = "fn main() { notarealfunction(\"hi\"); }";
-    let program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    assert _count_all(diagnostics) == 0;
+fn _count_e0420(diagnostics: Diagnostic[]) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, "E0420") { count += 1; }
+        i += 1;
+    }
+    return count;
 }
 
-test "typecheck walker: call inside return value emits no diagnostics" {
+fn _e0420_for(source: string) -> int {
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    return _count_e0420(diagnostics);
+}
+
+test "typecheck walker: bare call expression statement is reached (E0420)" {
+    // `notarealfunction` is unbound; the walker reaches it and #812
+    // surfaces the undefined-callee diagnostic.
+    assert _e0420_for("fn main() { notarealfunction(\"hi\"); }") == 1;
+}
+
+test "typecheck walker: call inside return value is reached (E0420)" {
     let source = "fn main() -> number { return notarealfunction(); }";  // alias-coverage: legacy `-> number` retained until §3 reform lands
-    let program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    assert _count_all(diagnostics) == 0;
+    assert _e0420_for(source) == 1;
 }
 
-test "typecheck walker: call in let initializer emits no diagnostics" {
-    let source = "fn main() { let x = notarealfunction(\"hi\"); }";
-    let program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    assert _count_all(diagnostics) == 0;
+test "typecheck walker: call in let initializer is reached (E0420)" {
+    assert _e0420_for("fn main() { let x = notarealfunction(\"hi\"); }") == 1;
 }
 
-test "typecheck walker: nested call in argument emits no diagnostics" {
-    // Exercises walker recursion into `Call.arguments` — the walker
-    // visits both the outer call and the inner call, but neither emits.
-    let source = "fn main() { outer(inner(\"hi\")); }";
-    let program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    assert _count_all(diagnostics) == 0;
+test "typecheck walker: nested call in argument is reached (E0420)" {
+    // Exercises walker recursion into `Call.arguments` — both the outer
+    // and the inner call are undefined, so two diagnostics fire.
+    assert _e0420_for("fn main() { outer(inner(\"hi\")); }") == 2;
 }
 
-test "typecheck walker: call inside if condition emits no diagnostics" {
-    // Exercises the IfStatement branch addition that walks `condition`.
-    let source = "fn main() { if notarealfunction() { } }";
-    let program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    assert _count_all(diagnostics) == 0;
+test "typecheck walker: call inside if condition is reached (E0420)" {
+    assert _e0420_for("fn main() { if notarealfunction() { } }") == 1;
 }
 
-test "typecheck walker: call inside match scrutinee emits no diagnostics" {
-    // Pins coverage of `MatchStatement.expression` (the scrutinee) —
-    // the position effect_checker.collect_effects_from_statement walks
-    // but the original #809 PR forgot. Restated here so Issue D doesn't
-    // need to re-add the branch.
-    let source = "fn main() { match notarealfunction() { _ => {} } }";
-    let program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    assert _count_all(diagnostics) == 0;
+test "typecheck walker: call inside match scrutinee is reached (E0420)" {
+    assert _e0420_for("fn main() { match notarealfunction() { _ => {} } }") == 1;
 }
 
-test "typecheck walker: call inside for-iterable emits no diagnostics" {
-    let source = "fn main() { for x in notarealfunction() { } }";
-    let program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    assert _count_all(diagnostics) == 0;
+test "typecheck walker: call inside for-iterable is reached (E0420)" {
+    assert _e0420_for("fn main() { for x in notarealfunction() { } }") == 1;
 }
 
-test "typecheck walker: call inside lambda body emits no diagnostics" {
+test "typecheck walker: call inside lambda body is reached (E0420)" {
     // Exercises the Lambda branch which descends into `body` via
-    // `walk_block_expressions`. The lambda body's ExpressionStatement
-    // must be reached by the walker.
-    let source = "fn main() { let f = () => { notarealfunction(); }; }";
-    let program = parse_program(source);
-    let diagnostics = typecheck_diagnostics(program);
-    assert _count_all(diagnostics) == 0;
+    // `walk_block_expressions`.
+    assert _e0420_for("fn main() { let f = () => { notarealfunction(); }; }") == 1;
 }

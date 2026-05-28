@@ -23,6 +23,18 @@ import {
     parameter_from_native,
     type_parameter_from_name
 } from "../../src/typecheck_imports";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _count_e0420(diagnostics: Diagnostic[]) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, "E0420") { count += 1; }
+        i += 1;
+    }
+    return count;
+}
 
 // -------------------------------------------------------------------
 // Builder helpers (avoid nested struct literals in test bodies)
@@ -326,44 +338,41 @@ test "typecheck walker: import-symbol-aware path emits no diagnostics for actual
     assert diagnostics.length == 0;
 }
 
-test "typecheck walker: import-symbol-aware path emits no diagnostics for unresolved callee" {
-    // Companion to the test above — proves the walker is silent on
-    // calls that DON'T resolve in the (localized) table either.
-    // Issue D flips this to expect a diagnostic.
+test "typecheck walker: import-symbol-aware path flags unresolved callee (E0420)" {
+    // Companion to the test above — `not_imported` is neither imported
+    // nor declared nor a builtin, so #812 surfaces E0420.
     let source = "fn main() { not_imported(\"hi\"); }";
     let program = parse_program(source);
     let imports = _make_imports_with_helper();
     let no_interfaces: Statement[] = [];
     let diagnostics = typecheck_diagnostics_with_import_symbols(program, no_interfaces, imports);
-    assert diagnostics.length == 0;
+    assert _count_e0420(diagnostics) == 1;
 }
 
-test "typecheck walker: localization drops globally-present but un-imported names" {
+test "typecheck walker: localization drops globally-present but un-imported names (E0420)" {
     // Regression guard for the localization step — without the
     // `localize_import_symbols_for_program` call inside
     // `typecheck_diagnostics_with_import_symbols`, any function
     // exported by any loaded dependency would resolve, even when the
-    // caller program never imported it. Today the walker emits
-    // nothing, so we assert via no-crash + zero diagnostics; issue D
-    // will switch this to expect the E0420 undefined-callee diagnostic
-    // (because the name is NOT in the localized table). Both shapes
-    // require the entry point to localize before traversal.
+    // caller program never imported it. The source has NO `import`
+    // specifier for `imported_helper`, so the localized table drops it
+    // and #812 flags the call as undefined.
     let source = "fn main() { imported_helper(\"hi\"); }";
     let program = parse_program(source);
     let imports = _make_imports_with_helper();
     let no_interfaces: Statement[] = [];
     let diagnostics = typecheck_diagnostics_with_import_symbols(program, no_interfaces, imports);
-    assert diagnostics.length == 0;
+    assert _count_e0420(diagnostics) == 1;
 }
 
-test "typecheck walker: 2-arg back-compat path still typechecks clean" {
-    // The legacy 2-arg `typecheck_diagnostics_with_imports` must keep
-    // working — it now delegates to the 3-arg variant with an empty
-    // import table. The diagnostic count must be unchanged for the
-    // pre-issue-#811 callers.
+test "typecheck walker: 2-arg back-compat path flags an undefined callee (E0420)" {
+    // The legacy 2-arg `typecheck_diagnostics_with_imports` keeps
+    // working — it delegates to the 3-arg variant with an empty import
+    // table. With no `import` specifier and no local declaration,
+    // `imported_helper` is undefined and #812 flags it.
     let source = "fn main() { imported_helper(\"hi\"); }";
     let program = parse_program(source);
     let no_interfaces: Statement[] = [];
     let diagnostics = typecheck_diagnostics_with_imports(program, no_interfaces);
-    assert diagnostics.length == 0;
+    assert _count_e0420(diagnostics) == 1;
 }

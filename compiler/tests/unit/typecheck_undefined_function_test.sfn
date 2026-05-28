@@ -1,0 +1,146 @@
+// Unit tests for the undefined-callee diagnostic E0420 (issue #812,
+// the enforcement flip for #616 sub-issue 4).
+//
+// A `Call` whose callee is a bare `Identifier` that resolves to neither
+// an in-scope binding (parameter / local / top-level declaration /
+// import-specifier name), a builtin envelope name (#810), nor an
+// imported free function (#811) now produces
+// `error[E0420]: undefined function \`name\``. These tests pin every
+// branch of that resolution: the positive (a real typo fires E0420) and
+// each negative (declared sibling, parameter, local, builtin, member
+// callee, imported callee — all stay silent).
+import { Statement } from "../../src/ast";
+import { ImportSymbolTable, append_import_function, empty_import_symbols } from "../../src/effect_imports";
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics, typecheck_diagnostics_with_import_symbols } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _count_e0420(diagnostics: Diagnostic[]) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, "E0420") { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+fn _e0420_for(source: string) -> int {
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    return _count_e0420(diagnostics);
+}
+
+// -------------------------------------------------------------------
+// Positive: a bare undefined callee fires exactly one E0420
+// -------------------------------------------------------------------
+test "E0420: undefined free-function callee is flagged" {
+    assert _e0420_for("fn main() { notarealfunction(\"hi\"); }") == 1;
+}
+
+test "E0420: carries the undefined-function message and code" {
+    let program = parse_program("fn main() { notarealfunction(\"hi\"); }");
+    let diagnostics = typecheck_diagnostics(program);
+    let mut found: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        let d = diagnostics[i];
+        if strings_equal(d.code, "E0420") {
+            assert strings_equal(d.severity, "error");
+            assert strings_equal(d.message, "undefined function `notarealfunction`");
+            // Caret points at the callee identifier (issue spec).
+            assert d.primary != null;
+            found = true;
+        }
+        i += 1;
+    }
+    assert found;
+}
+
+test "E0420: undefined inner call in argument position is flagged" {
+    // `print` is a builtin (outer call clean); the inner typo fires.
+    assert _e0420_for("fn main() { print(notarealfunction()); }") == 1;
+}
+
+// -------------------------------------------------------------------
+// Negatives: every resolvable callee stays silent
+// -------------------------------------------------------------------
+test "E0420: declared sibling function (declared before) resolves" {
+    assert _e0420_for("fn greet() {} fn main() { greet(); }") == 0;
+}
+
+test "E0420: declared sibling function (declared after) resolves" {
+    // Forward reference: `greet` is declared *after* `main`. The
+    // resolution scope is collected up-front, so source order is
+    // irrelevant — this is the case naive enforcement would break.
+    assert _e0420_for("fn main() { greet(); } fn greet() {}") == 0;
+}
+
+test "E0420: extern function callee resolves" {
+    assert _e0420_for("extern fn host_now() -> number; fn main() { host_now(); }") == 0;
+}
+
+test "E0420: parameter used as callee resolves" {
+    assert _e0420_for("fn run(cb: number) { cb(); }") == 0;
+}
+
+test "E0420: local binding used as callee resolves" {
+    assert _e0420_for("fn main() { let helper = 1; helper(); }") == 0;
+}
+
+test "E0420: builtin print is not flagged" {
+    assert _e0420_for("fn main() ![io] { print(\"hi\"); }") == 0;
+}
+
+test "E0420: method call on a member callee is not flagged" {
+    // The callee is a `Member` (`s.unknownmethod`), not an `Identifier`,
+    // so the member name is never resolved — member/method resolution is
+    // out of #616 scope.
+    assert _e0420_for("fn main() { let s = \"hi\"; s.unknownmethod(); }") == 0;
+}
+
+test "E0420: call inside a test body resolves top-level helper" {
+    // Test bodies are seeded with the top-level scope too, so a `test`
+    // calling a file-local helper must not false-positive.
+    let source = "fn helper() -> int { return 1; } test \"t\" { let x = helper(); }";
+    assert _e0420_for(source) == 0;
+}
+
+// -------------------------------------------------------------------
+// Imports: resolution via the program's own import specifier
+// -------------------------------------------------------------------
+fn _imports_with_helper() -> ImportSymbolTable {
+    let table = empty_import_symbols();
+    let effects: string[] = ["io"];
+    return append_import_function(table, "imported_helper", effects);
+}
+
+test "E0420: imported callee resolves via effect table + specifier" {
+    let source = "import { imported_helper } from \"./helpers\";\nfn main() { imported_helper(\"hi\"); }";
+    let program = parse_program(source);
+    let imports = _imports_with_helper();
+    let no_interfaces: Statement[] = [];
+    let diagnostics = typecheck_diagnostics_with_import_symbols(program, no_interfaces, imports);
+    assert _count_e0420(diagnostics) == 0;
+}
+
+test "E0420: imported callee resolves on the empty-table path via specifier" {
+    // Standalone `typecheck_diagnostics` path: the cross-module effect
+    // table is empty, but the program's own `import { ... }` specifier
+    // proves the name is in scope, so no false positive.
+    let source = "import { imported_helper } from \"./helpers\";\nfn main() { imported_helper(\"hi\"); }";
+    assert _e0420_for(source) == 0;
+}
+
+test "E0420: un-imported name that only exists globally is flagged" {
+    // No `import` specifier for `imported_helper`; the localized table
+    // drops it, so the call is undefined.
+    let source = "fn main() { imported_helper(\"hi\"); }";
+    let program = parse_program(source);
+    let imports = _imports_with_helper();
+    let no_interfaces: Statement[] = [];
+    let diagnostics = typecheck_diagnostics_with_import_symbols(program, no_interfaces, imports);
+    assert _count_e0420(diagnostics) == 1;
+}

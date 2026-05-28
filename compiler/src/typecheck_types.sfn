@@ -703,6 +703,15 @@ fn is_extern_primitive_type(text: string) -> boolean {
 //   …) — out of #616 Issue B scope. Member resolution is handled
 //   through the Member branch of the walker, not this Call-identifier
 //   shortcut.
+//
+// Atomic intrinsics (`atomic_load`/`atomic_store`/`atomic_add`/
+// `atomic_sub`/`atomic_cas`/`atomic_fence`): these are call-form
+// language intrinsics the lowering recognizes by name and emits as LLVM
+// `atomicrmw`/`cmpxchg`/`fence` (canonical recognizer `is_atomic_builtin`,
+// compiler/src/llvm/atomics.sfn:53). They resolve to no source-level
+// declaration, so #812's walker must treat them as builtins or every
+// `atomic_*` call would false-positive E0420. The set is the fixed LLVM
+// atomic op surface; keep it in sync with `is_atomic_builtin`.
 fn is_builtin_call_name(name: string) -> boolean {
     let mut _ret: boolean = false;
     if strings_equal(name, "print") { _ret = true; }
@@ -715,6 +724,12 @@ fn is_builtin_call_name(name: string) -> boolean {
     if strings_equal(name, "send") { _ret = true; }
     if strings_equal(name, "receive") { _ret = true; }
     if strings_equal(name, "await") { _ret = true; }
+    if strings_equal(name, "atomic_load") { _ret = true; }
+    if strings_equal(name, "atomic_store") { _ret = true; }
+    if strings_equal(name, "atomic_add") { _ret = true; }
+    if strings_equal(name, "atomic_sub") { _ret = true; }
+    if strings_equal(name, "atomic_cas") { _ret = true; }
+    if strings_equal(name, "atomic_fence") { _ret = true; }
     return _ret;
 }
 
@@ -1225,6 +1240,25 @@ fn make_removed_keyword_diagnostic(keyword: string) -> Diagnostic {
             + " capsule and the `![model]` effect remains as the capability gate",
         file_path: "",
         primary: null,
+        suggestion: null
+    };
+}
+
+// E0420 — a `Call` whose callee is a bare identifier that resolves to
+// neither an in-scope binding (parameter, local, or top-level
+// function/extern/struct/enum/…), an imported function, nor a builtin.
+// The enforcement flip for #616 (sub-issue #812). E04xx is the
+// resolution/semantic diagnostic band (E0410/E0411 already live here).
+// The caret points at the callee identifier via `token_from_name`;
+// member/method callees (`obj.method()`) never reach this factory — the
+// walker's Member branch only recurses into `.object`.
+fn make_undefined_function_diagnostic(name: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0420",
+        severity: "error",
+        message: "undefined function `" + name + "`",
+        file_path: "",
+        primary: token_from_name(name, span),
         suggestion: null
     };
 }

@@ -1,0 +1,103 @@
+// compiler/src/prelude_globals.sfn
+//
+// #812 — implicit-prelude resolution for the E0420 undefined-callee
+// check. The prelude (`runtime/prelude.sfn`) is implicitly available to
+// every Sailfin module: its top-level `fn` and `let` declarations
+// (`monotonic_millis`, `strings_equal`, `runtime_assert_fail_fn`, the
+// `runtime_*_fn` lowering targets, …) are callable without an explicit
+// `import` and resolve at link time. Without those names in scope the
+// E0420 walker would mistake a bare prelude call — or a parser-
+// synthesized helper call like `runtime_assert_fail_fn` (emitted for
+// every `assert`, parser/statements.sfn:1306) — for an undefined
+// function and break self-host, the test suite, and every example.
+//
+// Extraction is a cheap column-0 line scan rather than a full parse:
+// the prelude declares everything at column 0 and uses only `//` line
+// comments (no `/* */` blocks), so a leading `fn ` / `let ` uniquely
+// marks a top-level declaration. The pure scanner
+// (`prelude_global_names_from_source`) is unit-tested; the IO wrapper
+// (`load_prelude_global_names`) locates the source and degrades to an
+// empty list when it can't be found (an installed compiler that ships
+// only `prelude.o`) — preferring pre-#812 leniency over a false
+// positive.
+import { split_source_lines } from "./diagnostics_render";
+import { substring } from "./string_utils";
+
+fn _pg_is_ident_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    let mut i: int = 0;
+    loop {
+        if i >= allowed.length { break; }
+        if substring(allowed, i, i + 1) == ch { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _pg_extract_ident(line: string, start: int) -> string {
+    let mut end = start;
+    loop {
+        if end >= line.length { break; }
+        let ch = substring(line, end, end + 1);
+        if !_pg_is_ident_char(ch) { break; }
+        end += 1;
+    }
+    if end <= start { return ""; }
+    return substring(line, start, end);
+}
+
+// Pure: collect the names of every top-level `fn` / `let` declaration in
+// a prelude source buffer. Resolution-only — duplicates and private
+// helpers are harmless here (extra names only make MORE calls resolve,
+// never fewer), so no de-dup or export filtering is applied.
+fn prelude_global_names_from_source(source: string) -> string[] {
+    let mut names: string[] = [];
+    let lines = split_source_lines(source);
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        if line.length < 4 { continue; }
+        if substring(line, 0, 3) == "fn " {
+            let name = _pg_extract_ident(line, 3);
+            if name.length > 0 { names.push(name); }
+            continue;
+        }
+        if substring(line, 0, 4) == "let " {
+            let mut start = 4;
+            // `let mut <name>` — skip the qualifier so the bound name is
+            // captured, not the `mut` keyword.
+            if line.length >= 8 {
+                if substring(line, 4, 8) == "mut " { start = 8; }
+            }
+            let name = _pg_extract_ident(line, start);
+            if name.length > 0 { names.push(name); }
+            continue;
+        }
+    }
+    return names;
+}
+
+// Locate `runtime/prelude.sfn` relative to the current working directory
+// and return its top-level declaration names. The candidate list covers
+// the repo-root cwd used by `make compile`/`make test`/`make check`, the
+// per-module `sfn emit` subprocesses, and example runs; an installed
+// compiler that ships only `prelude.o` matches nothing and yields an
+// empty list.
+fn load_prelude_global_names() -> string[] ![io] {
+    let candidates: string[] = ["runtime/prelude.sfn", "../runtime/prelude.sfn", "../../runtime/prelude.sfn"];
+    let mut ci: int = 0;
+    loop {
+        if ci >= candidates.length { break; }
+        let path = candidates[ci];
+        if fs.exists(path) {
+            let source = fs.readFile(path);
+            return prelude_global_names_from_source(source);
+        }
+        ci += 1;
+    }
+    let empty: string[] = [];
+    return empty;
+}
