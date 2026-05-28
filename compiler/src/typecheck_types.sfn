@@ -619,6 +619,79 @@ fn is_extern_primitive_type(text: string) -> boolean {
     return _ret;
 }
 
+// Pure: identifier-form call names that the typechecker's expression
+// walker treats as "no resolution required" — the auto-injection
+// envelope for the #616 decomposition (Issue B). When walker
+// resolution lights up in Issue D (#616 sub-issue 4), any
+// `Call.callee.variant == "Identifier"` whose name returns `true`
+// here short-circuits unknown-identifier diagnostic emission so the
+// 50 examples (per #549) keep compiling clean. The accept-list
+// discipline mirrors `is_extern_primitive_type` above: each member
+// documented inline so the rationale travels with the code.
+//
+// Issue B intentionally introduces the helper without rewiring
+// effect_checker.sfn:623-652 to consume it (see Issue B `Out:`); the
+// inline checks there continue to drive effect injection until a
+// future dedup pass lands.
+//
+// Members of the envelope:
+//   `print`    — bare-form I/O builtin. Member-form `print.info`/
+//                `print.error`/… emits via the effect_checker Member
+//                branch; the bare Call-form is the README first
+//                example and `examples/basics/hello-world.sfn`.
+//                effect_checker.sfn:646 already injects `![io]`.
+//   `console`  — bare-form I/O builtin paired with `print` in the
+//                README envelope. effect_checker.sfn:647 injects `![io]`.
+//   `assert`   — test-and-spec assertion builtin. Surfaces in every
+//                unit/integration test under `compiler/tests/` and in
+//                `examples/` cookbook entries; never a user-defined
+//                function. Audit note (#616): missing from the
+//                pre-existing effect_checker inline list — Issue D will
+//                consume this envelope to keep `assert` calls clean.
+//   `spawn`    — parsed-but-unenforced concurrency keyword (runtime
+//                Phase 4). Appears in `examples/concurrency/*` in
+//                call form. effect_checker.sfn:623 already injects
+//                `![io]` so the walker must skip resolution.
+//   `sleep`    — parsed-but-unenforced clock primitive.
+//                effect_checker.sfn:628 injects `![clock]`.
+//   `serve`    — parsed-but-unenforced server primitive.
+//                effect_checker.sfn:633 injects `![net]`.
+//   `channel`  — parsed-but-unenforced channel constructor (Phase 4).
+//                Appears in concurrency examples in call form;
+//                resolves to a Sailfin runtime primitive when the
+//                concurrency runtime ships.
+//   `send`     — parsed-but-unenforced channel send (Phase 4).
+//                Appears in concurrency examples in call form.
+//   `receive`  — parsed-but-unenforced channel receive (Phase 4).
+//                Appears in concurrency examples in call form.
+//   `await`    — parsed-but-unenforced await primitive (Phase 4).
+//                Pairs with `spawn` in concurrency examples in call form.
+//
+// Intentionally NOT in the envelope (Issue D will surface these as
+// unknown-identifier diagnostics so user code can shadow them):
+//   `len`, `panic` — audit (#616) flagged these as inline gaps in
+//   effect_checker today, but they are library/runtime functions, not
+//   language-level builtins. Resolution should go through the import
+//   table once Issue C threads it in.
+//   Member-form builtins (`string.concat`, `array.push`, `fs.exists`,
+//   …) — out of #616 Issue B scope. Member resolution is handled
+//   through the Member branch of the walker, not this Call-identifier
+//   shortcut.
+fn is_builtin_call_name(name: string) -> boolean {
+    let mut _ret: boolean = false;
+    if strings_equal(name, "print") { _ret = true; }
+    if strings_equal(name, "console") { _ret = true; }
+    if strings_equal(name, "assert") { _ret = true; }
+    if strings_equal(name, "spawn") { _ret = true; }
+    if strings_equal(name, "sleep") { _ret = true; }
+    if strings_equal(name, "serve") { _ret = true; }
+    if strings_equal(name, "channel") { _ret = true; }
+    if strings_equal(name, "send") { _ret = true; }
+    if strings_equal(name, "receive") { _ret = true; }
+    if strings_equal(name, "await") { _ret = true; }
+    return _ret;
+}
+
 // Pure: identifiers that v0 accepts as opaque-pointer pointees behind
 // a leading `*`. The v0 rule is "starts with an uppercase ASCII letter
 // and contains only identifier characters." This is intentionally

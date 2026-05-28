@@ -1,0 +1,76 @@
+// Unit tests for the typecheck builtin-call allowlist (issue #810).
+//
+// Issue #810 centralizes the auto-injection envelope (previously
+// scattered as hardcoded names in effect_checker.sfn:623-652) into a
+// single `is_builtin_call_name` helper on `typecheck_types.sfn`. The
+// envelope establishes which bare `Identifier(...)` call names the
+// expression walker (#809) must treat as "no resolution required"
+// once Issue D (#616 sub-issue 4) flips on unknown-identifier
+// diagnostics. Until then the helper is dead code — these tests pin
+// the envelope contents so the flip-day change in Issue D is a
+// one-call rewire, not a re-audit of which names belong.
+//
+// Mirror the issue's documented envelope: print/console/assert
+// (bare-form builtins) plus the parsed-but-unenforced concurrency
+// keywords (spawn/sleep/serve/channel/send/receive/await). Two
+// negatives close the contract: `notarealfunction` (the universal
+// "user typo" stand-in used by the walker tests) and `len` (a
+// library helper flagged by the #616 audit as missing from the
+// pre-existing inline list, deliberately kept out of the envelope so
+// user code can shadow it).
+import { is_builtin_call_name } from "../../src/typecheck_types";
+
+test "builtin allowlist: print is in envelope" {
+    assert is_builtin_call_name("print") == true;
+}
+
+test "builtin allowlist: console is in envelope" {
+    assert is_builtin_call_name("console") == true;
+}
+
+test "builtin allowlist: assert is in envelope" {
+    assert is_builtin_call_name("assert") == true;
+}
+
+test "builtin allowlist: spawn is in envelope" {
+    assert is_builtin_call_name("spawn") == true;
+}
+
+test "builtin allowlist: sleep is in envelope" {
+    assert is_builtin_call_name("sleep") == true;
+}
+
+test "builtin allowlist: serve is in envelope" {
+    assert is_builtin_call_name("serve") == true;
+}
+
+test "builtin allowlist: channel is in envelope" {
+    assert is_builtin_call_name("channel") == true;
+}
+
+test "builtin allowlist: send is in envelope" {
+    assert is_builtin_call_name("send") == true;
+}
+
+test "builtin allowlist: receive is in envelope" {
+    assert is_builtin_call_name("receive") == true;
+}
+
+test "builtin allowlist: await is in envelope" {
+    assert is_builtin_call_name("await") == true;
+}
+
+test "builtin allowlist: notarealfunction is not in envelope" {
+    // Matches the walker test fixture in typecheck_expression_walk_test.sfn.
+    // Issue D will surface this as an unknown-identifier diagnostic; the
+    // envelope must not absorb it.
+    assert is_builtin_call_name("notarealfunction") == false;
+}
+
+test "builtin allowlist: len is not in envelope" {
+    // Audit note from grooming #616: `len` and `panic` are library
+    // helpers, not language-level builtins. They stay out of the
+    // envelope so user code can shadow them and Issue D can surface
+    // unresolved references through the normal import-table path.
+    assert is_builtin_call_name("len") == false;
+}
