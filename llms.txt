@@ -244,7 +244,7 @@ Declares external C symbols for linking.
 
 | Capsule   | Import       | Effects       | Description                              |
 |-----------|-------------|---------------|------------------------------------------|
-| sfn/fmt   | "fmt"       | None          | String formatting, trim, case, split     |
+| sfn/strings | "strings" | None          | Trim, case, split/join, find/replace     |
 | sfn/json  | "json"      | None          | JSON parse, serialize, pretty-print      |
 | sfn/crypto| "crypto"    | None          | SHA-256, base64                          |
 | sfn/math  | "math"      | None          | abs, min, max, clamp, pow, floor, ceil   |

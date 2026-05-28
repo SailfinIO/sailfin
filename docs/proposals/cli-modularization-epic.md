@@ -146,7 +146,7 @@ breaks it up:
 
 | Function group | Today | Target |
 |---|---|---|
-| `_ends_with_cmd`, `_dirname_cmd`, `_path_join_cmd`, `_has_prefix_cmd`, `_string_contains_cmd` | path/string utils | `sfn/path` + `sfn/strings` (or `compiler/src/cli/util.sfn` if still missing from stdlib) |
+| `_ends_with_cmd`, `_dirname_cmd`, `_path_join_cmd`, `_has_prefix_cmd`, `_string_contains_cmd` | path/string utils | `sfn/path` + `sfn/strings` |
 | `_toml_trim_cmd`, `_byte_at_cmd`, `_word_matches_cmd`, `_is_ident_char_cmd` | token utils | `compiler/src/string_utils.sfn` (already exists; consolidate) |
 | `_shell_read_cmd`, `_curl_post_json_cmd`, `_curl_download_cmd`, `_shell_single_quote_arg` | shell + http | `sfn/http` (curl wrappers); `compiler/src/cli/shell.sfn` (compiler-local) |
 | `_get_env_cmd`, `_get_home_cmd`, `_env_flag`, `_legacy_flag_file` | env policy | `sfn/os` + a thin `compiler/src/cli/env.sfn` for the legacy flag-file shim |

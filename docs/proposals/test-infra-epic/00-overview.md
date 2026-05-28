@@ -70,7 +70,9 @@ test "auth: stores hash to disk" ![io] {
    so the capsule remains buildable on the current parser.
 5. **DRY:** no duplicate `_number_to_string`, no duplicate `run_test()`,
    no duplicate scratch-dir bash. The current `sfn/test/src/mod.sfn`
-   reimplements helpers that already exist in `sfn/strings`/`sfn/fmt`;
+   reimplements helpers that already exist elsewhere — `_find_in_string`
+   duplicates `find` from `sfn/strings`, and `_number_to_string` duplicates
+   the runtime `number_to_string` intrinsic;
    the cleanup is Phase 1, not deferred.
 
 ## Success metrics

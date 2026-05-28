@@ -702,7 +702,7 @@ kind = "library"          # "library" | "binary" | "mixed"
 # bin-name = "httpd"
 
 [dependencies]
-"sfn/fmt" = "0.3.0"
+"sfn/strings" = "0.3.0"
 
 [dev-dependencies]
 "sfn/test" = "0.4.0"
