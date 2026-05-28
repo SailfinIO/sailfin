@@ -4,13 +4,14 @@ version = "0.2.2"
 description = "Test assertion helpers and utilities for Sailfin"
 
 [dependencies]
-# `sfn/fmt::find` replaces the hand-rolled `_find_in_string` helper
-# the capsule used to inline. The matching `sfn/strings` capsule the
-# proposal cited (`docs/proposals/test-infra-epic/02-phases.md`,
-# issue 1.3) does not exist; integer formatting goes through the
-# runtime intrinsic `number_to_string` instead — the same formatter
-# `pure_assert_eq_float` already uses for fractional inputs.
-"sfn/fmt" = "*"
+# `sfn/strings::find` replaces the hand-rolled `_find_in_string` helper
+# the capsule used to inline. That capsule was renamed (#856) from its
+# former `fmt` name to `strings` so its name matches its contents — pure
+# string ops, not formatters (the name the proposal cited in
+# `docs/proposals/test-infra-epic/02-phases.md`, issue 1.3). Integer
+# formatting still goes through the runtime intrinsic `number_to_string`,
+# the same formatter `pure_assert_eq_float` already uses for fractions.
+"sfn/strings" = "*"
 
 [capabilities]
 required = ["io"]

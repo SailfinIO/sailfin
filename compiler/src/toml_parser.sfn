@@ -121,7 +121,7 @@ fn _is_stdlib(name: string) -> boolean {
     if strings_equal(name, "sync") { return true; }
     if strings_equal(name, "json") { return true; }
     if strings_equal(name, "crypto") { return true; }
-    if strings_equal(name, "fmt") { return true; }
+    if strings_equal(name, "strings") { return true; }
     if strings_equal(name, "log") { return true; }
     if strings_equal(name, "time") { return true; }
     if strings_equal(name, "math") { return true; }

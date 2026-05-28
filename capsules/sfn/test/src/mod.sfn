@@ -23,7 +23,7 @@
 // over the caller's effect row when row-polymorphic effects ship
 // post-1.0. Until then, `pure_assert_*` is the production-ready
 // interim — see issue #370 / proposal §P3.
-import { find } from "sfn/fmt";
+import { find } from "sfn/strings";
 
 // ---------------------------------------------------------------------------
 // Internal helpers
