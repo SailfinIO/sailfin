@@ -1,27 +1,41 @@
 // compiler/src/prelude_globals.sfn
 //
-// #812 — implicit-prelude resolution for the E0420 undefined-callee
-// check. The prelude (`runtime/prelude.sfn`) is implicitly available to
-// every Sailfin module: its top-level `fn` and `let` declarations
-// (`monotonic_millis`, `strings_equal`, `runtime_assert_fail_fn`, the
-// `runtime_*_fn` lowering targets, …) are callable without an explicit
+// #812 — implicit-runtime resolution for the E0420 undefined-callee
+// check. The runtime (`runtime/prelude.sfn` plus the `runtime/sfn/**`
+// modules) is implicitly linked into every Sailfin binary, so its
+// top-level `fn` / `let` / `extern fn` declarations (`monotonic_millis`,
+// `strings_equal`, `number_to_string`, `substring_unchecked`, the
+// `runtime_*_fn` lowering targets, the parser-synthesized
+// `runtime_assert_fail_fn`, …) are callable without an explicit
 // `import` and resolve at link time. Without those names in scope the
-// E0420 walker would mistake a bare prelude call — or a parser-
-// synthesized helper call like `runtime_assert_fail_fn` (emitted for
-// every `assert`, parser/statements.sfn:1306) — for an undefined
+// E0420 walker would mistake a bare runtime call for an undefined
 // function and break self-host, the test suite, and every example.
 //
-// Extraction is a cheap column-0 line scan rather than a full parse:
-// the prelude declares everything at column 0 and uses only `//` line
-// comments (no `/* */` blocks), so a leading `fn ` / `let ` uniquely
-// marks a top-level declaration. The pure scanner
-// (`prelude_global_names_from_source`) is unit-tested; the IO wrapper
-// (`load_prelude_global_names`) locates the source and degrades to an
-// empty list when it can't be found (an installed compiler that ships
-// only `prelude.o`) — preferring pre-#812 leniency over a false
-// positive.
+// Names are extracted by a cheap column-0 line scan rather than a full
+// parse: runtime modules declare everything at column 0 and use only
+// `//` line comments, so a leading `fn ` / `let ` / `extern fn ` /
+// `unsafe extern fn ` uniquely marks a top-level declaration. The pure
+// scanner (`prelude_global_names_from_source`) is unit-tested.
+//
+// The runtime SOURCE directory is located via `resolve_runtime_root`
+// (the same exe-relative resolution the linker uses to find
+// `prelude.o`), so the lookup is cwd-independent — integration/e2e
+// tests run the compiler from scratch directories where a cwd-relative
+// `runtime/` would miss. Falls back to cwd-relative candidates and then
+// an empty list (an installed compiler that ships only `prelude.o`),
+// preferring pre-#812 leniency over a false positive.
 import { split_source_lines } from "./diagnostics_render";
+import { runtime_helper_call_names } from "./llvm/runtime_helpers";
 import { substring } from "./string_utils";
+
+// Mirrors the runtime-root externs declared in `cli_main.sfn` (declared,
+// not imported, because the seed's cross-module signature resolver does
+// not hand back runtime-capsule `.sfn` signatures — see the note there).
+// Extern signatures must be C-ABI types (`* u8`, per E0801); the result
+// is cast to `string` for `fs` use exactly as `cli_main` does.
+extern fn exe_path() -> * u8;
+
+extern fn resolve_runtime_root(exe: * u8) -> * u8;
 
 fn _pg_is_ident_char(ch: string) -> boolean {
     if ch.length == 0 { return false; }
@@ -47,10 +61,19 @@ fn _pg_extract_ident(line: string, start: int) -> string {
     return substring(line, start, end);
 }
 
-// Pure: collect the names of every top-level `fn` / `let` declaration in
-// a prelude source buffer. Resolution-only — duplicates and private
-// helpers are harmless here (extra names only make MORE calls resolve,
-// never fewer), so no de-dup or export filtering is applied.
+// If `line` begins (column 0) with `prefix`, return the identifier that
+// follows it; otherwise "". Handles the runtime's declaration keywords.
+fn _pg_name_after_prefix(line: string, prefix: string) -> string {
+    if line.length < prefix.length { return ""; }
+    if substring(line, 0, prefix.length) != prefix { return ""; }
+    return _pg_extract_ident(line, prefix.length);
+}
+
+// Pure: collect the names of every top-level `fn` / `let` / `extern fn`
+// / `unsafe extern fn` declaration in a runtime source buffer.
+// Resolution-only — duplicates and private helpers are harmless (extra
+// names only make MORE calls resolve, never fewer), so no de-dup or
+// export filtering is applied.
 fn prelude_global_names_from_source(source: string) -> string[] {
     let mut names: string[] = [];
     let lines = split_source_lines(source);
@@ -60,9 +83,19 @@ fn prelude_global_names_from_source(source: string) -> string[] {
         let line = lines[i];
         i += 1;
         if line.length < 4 { continue; }
-        if substring(line, 0, 3) == "fn " {
-            let name = _pg_extract_ident(line, 3);
-            if name.length > 0 { names.push(name); }
+        let fn_name = _pg_name_after_prefix(line, "fn ");
+        if fn_name.length > 0 {
+            names.push(fn_name);
+            continue;
+        }
+        let extern_name = _pg_name_after_prefix(line, "extern fn ");
+        if extern_name.length > 0 {
+            names.push(extern_name);
+            continue;
+        }
+        let unsafe_extern_name = _pg_name_after_prefix(line, "unsafe extern fn ");
+        if unsafe_extern_name.length > 0 {
+            names.push(unsafe_extern_name);
             continue;
         }
         if substring(line, 0, 4) == "let " {
@@ -80,24 +113,91 @@ fn prelude_global_names_from_source(source: string) -> string[] {
     return names;
 }
 
-// Locate `runtime/prelude.sfn` relative to the current working directory
-// and return its top-level declaration names. The candidate list covers
-// the repo-root cwd used by `make compile`/`make test`/`make check`, the
-// per-module `sfn emit` subprocesses, and example runs; an installed
-// compiler that ships only `prelude.o` matches nothing and yields an
-// empty list.
-fn load_prelude_global_names() -> string[] ![io] {
-    let candidates: string[] = ["runtime/prelude.sfn", "../runtime/prelude.sfn", "../../runtime/prelude.sfn"];
-    let mut ci: int = 0;
+fn _pg_join(dir: string, child: string) -> string {
+    if dir.length == 0 { return child; }
+    if substring(dir, dir.length - 1, dir.length) == "/" { return dir + child; }
+    return dir + "/" + child;
+}
+
+// Scan every `*.sfn` under `runtime_dir/sfn` (BFS, depth-bounded —
+// mirrors `_cr_collect_capsule_sources` in capsule_resolver.sfn, which
+// notes the seed compiler is brittle around recursive accumulators) and
+// append their top-level names to `names`.
+fn _pg_scan_sfn_tree(runtime_dir: string, names: string[]) -> string[] ![io] {
+    let mut out = names;
+    let sfn_root = _pg_join(runtime_dir, "sfn");
+    if !fs.exists(sfn_root) { return out; }
+    let mut dir_queue: string[] = [sfn_root];
+    let mut head: int = 0;
+    let max_depth: int = 64;
     loop {
-        if ci >= candidates.length { break; }
-        let path = candidates[ci];
-        if fs.exists(path) {
-            let source = fs.readFile(path);
-            return prelude_global_names_from_source(source);
+        if head >= dir_queue.length { break; }
+        if head >= max_depth { break; }
+        let dir = dir_queue[head];
+        head += 1;
+        if !fs.exists(dir) { continue; }
+        let entries = fs.listDirectory(dir);
+        let mut i: int = 0;
+        loop {
+            if i >= entries.length { break; }
+            let entry = entries[i];
+            i += 1;
+            let full = _pg_join(dir, entry);
+            if entry.length >= 4 {
+                if substring(entry, entry.length - 4, entry.length) == ".sfn" {
+                    let source = fs.readFile(full);
+                    let module_names = prelude_global_names_from_source(source);
+                    out = out.concat(module_names);
+                    continue;
+                }
+            }
+            // Anything without a `.sfn` suffix is a candidate subdir;
+            // `listDirectory` on a file returns empty, so this is safe.
+            let child_entries = fs.listDirectory(full);
+            if child_entries.length > 0 { dir_queue.push(full); }
         }
-        ci += 1;
     }
-    let empty: string[] = [];
-    return empty;
+    return out;
+}
+
+// Locate the runtime SOURCE directory (the one containing `prelude.sfn`)
+// cwd-independently. Tries the resolved runtime root first, then
+// cwd-relative fallbacks for in-repo invocations.
+fn _pg_find_runtime_dir() -> string ![io] {
+    let mut candidates: string[] = [];
+    let exe_raw: * u8 = exe_path();
+    let root_raw: * u8 = resolve_runtime_root(exe_raw);
+    let root: string = root_raw as string;
+    if root.length > 0 {
+        candidates.push(root);
+        candidates.push(_pg_join(root, "runtime"));
+    }
+    candidates.push("runtime");
+    candidates.push("../runtime");
+    candidates.push("../../runtime");
+    let mut i: int = 0;
+    loop {
+        if i >= candidates.length { break; }
+        let dir = candidates[i];
+        i += 1;
+        if dir.length == 0 { continue; }
+        if fs.exists(_pg_join(dir, "prelude.sfn")) { return dir; }
+    }
+    return "";
+}
+
+// Names of every implicitly-available callable: the compiler-known
+// runtime-helper builtins (always available — `number_to_string`,
+// `print`, the `runtime_*_fn` family, …) plus the prelude and
+// `runtime/sfn/**` source declarations (available when the runtime
+// source can be located; an installed compiler shipping only object
+// files still gets the helper builtins).
+fn load_prelude_global_names() -> string[] ![io] {
+    let mut names = runtime_helper_call_names();
+    let runtime_dir = _pg_find_runtime_dir();
+    if runtime_dir.length == 0 { return names; }
+    let prelude_source = fs.readFile(_pg_join(runtime_dir, "prelude.sfn"));
+    names = names.concat(prelude_global_names_from_source(prelude_source));
+    names = _pg_scan_sfn_tree(runtime_dir, names);
+    return names;
 }

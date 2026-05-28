@@ -966,6 +966,41 @@ fn append_runtime_helper(values: RuntimeHelperDescriptor[], value: RuntimeHelper
     return out;
 }
 
+fn _rh_has_dot(name: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= name.length { break; }
+        if name[i] == "." { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// #812: the bare-identifier (non-member) runtime-helper targets are the
+// C-trampoline builtins the lowering recognizes by name and emits a
+// global call for — `number_to_string`, `print`, `concat`, the
+// `runtime_*_fn` / `spawn_*` / `await_*` families, etc. They have no
+// source-level declaration (the prelude and `runtime/sfn` modules don't
+// define them), so the E0420 undefined-callee check must treat them as
+// in-scope or every bare call to a runtime helper — including capsule
+// code like `number_to_string` in `sfn/math` — would false-positive.
+// Member targets (`print.info`, `fs.read`, `number.to_string`) are
+// excluded: those resolve through the walker's Member branch, not the
+// Call-identifier path. Deriving the set from `runtime_helper_descriptors`
+// keeps it in sync automatically as helpers are added or retired.
+fn runtime_helper_call_names() -> string[] {
+    let descriptors = runtime_helper_descriptors();
+    let mut names: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= descriptors.length { break; }
+        let target = descriptors[i].target;
+        if !_rh_has_dot(target) { names.push(target); }
+        i += 1;
+    }
+    return names;
+}
+
 fn find_runtime_helper(target: string) -> RuntimeHelperDescriptor? {
     let descriptors = runtime_helper_descriptors();
     let trimmed = trim_text(target);

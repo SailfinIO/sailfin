@@ -55,6 +55,20 @@ test "prelude scanner: ignores line comments" {
     assert ! _contains_name(names, "not_a_real_decl");
 }
 
+test "prelude scanner: captures extern fn name" {
+    // Runtime C-ABI surface (e.g. `substring_unchecked` in
+    // runtime/sfn/string.sfn) is implicitly linked and callable bare.
+    let source = "extern fn substring_unchecked(text: * u8, start: f64, end: f64) -> * u8;";
+    let names = prelude_global_names_from_source(source);
+    assert _contains_name(names, "substring_unchecked");
+}
+
+test "prelude scanner: captures unsafe extern fn name" {
+    let source = "unsafe extern fn malloc(size: usize) -> * u8;";
+    let names = prelude_global_names_from_source(source);
+    assert _contains_name(names, "malloc");
+}
+
 test "prelude scanner: collects multiple declarations" {
     let source = "fn alpha() {}\nlet beta = 1;\nfn gamma() {}";
     let names = prelude_global_names_from_source(source);
