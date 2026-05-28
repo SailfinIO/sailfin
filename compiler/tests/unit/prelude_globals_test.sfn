@@ -1,13 +1,17 @@
 // Unit tests for the prelude-symbol scanner (issue #812).
 //
 // `prelude_global_names_from_source` extracts the names of every
-// top-level `fn` / `let` declaration from a prelude source buffer so the
-// E0420 undefined-callee check treats implicitly-available prelude
-// globals (and the parser-synthesized `runtime_assert_fail_fn` helper,
-// which the prelude binds as a top-level `let`) as in-scope. These tests
-// pin the column-0 scan: top-level decls are captured, nested/indented
-// ones are not, and `let mut` qualifiers are skipped.
-import { prelude_global_names_from_source } from "../../src/prelude_globals";
+// top-level `fn` / `let` / `extern fn` declaration from a runtime source
+// buffer so the E0420 undefined-callee check treats implicitly-available
+// runtime globals (and the parser-synthesized `runtime_assert_fail_fn`
+// helper, which the prelude binds as a top-level `let`) as in-scope.
+// These tests pin the column-0 scan: top-level decls are captured,
+// nested/indented ones are not, and `let mut` qualifiers are skipped.
+//
+// The scanner lives in `prelude_scan` (pure) rather than
+// `prelude_globals` (which references the runtime-root externs) so this
+// test links without the compiler binary's runtime exec object.
+import { prelude_global_names_from_source } from "../../src/prelude_scan";
 
 fn _contains_name(names: string[], target: string) -> boolean {
     let mut i: int = 0;

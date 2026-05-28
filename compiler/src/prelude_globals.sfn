@@ -11,21 +11,15 @@
 // E0420 walker would mistake a bare runtime call for an undefined
 // function and break self-host, the test suite, and every example.
 //
-// Names are extracted by a cheap column-0 line scan rather than a full
-// parse: runtime modules declare everything at column 0 and use only
-// `//` line comments, so a leading `fn ` / `let ` / `extern fn ` /
-// `unsafe extern fn ` uniquely marks a top-level declaration. The pure
-// scanner (`prelude_global_names_from_source`) is unit-tested.
-//
-// The runtime SOURCE directory is located via `resolve_runtime_root`
-// (the same exe-relative resolution the linker uses to find
-// `prelude.o`), so the lookup is cwd-independent — integration/e2e
-// tests run the compiler from scratch directories where a cwd-relative
-// `runtime/` would miss. Falls back to cwd-relative candidates and then
-// an empty list (an installed compiler that ships only `prelude.o`),
-// preferring pre-#812 leniency over a false positive.
-import { split_source_lines } from "./diagnostics_render";
+// This module owns the IO side (runtime-root resolution + source
+// scanning); the pure declaration-name scanner lives in `prelude_scan`
+// so unit tests can cover it without linking the externs below. The
+// runtime SOURCE directory is located via `resolve_runtime_root` (the
+// same exe-relative resolution the linker uses to find `prelude.o`), so
+// the lookup is cwd-independent — integration/e2e tests run the compiler
+// from scratch directories where a cwd-relative `runtime/` would miss.
 import { runtime_helper_call_names } from "./llvm/runtime_helpers";
+import { prelude_global_names_from_source } from "./prelude_scan";
 import { substring } from "./string_utils";
 
 // Mirrors the runtime-root externs declared in `cli_main.sfn` (declared,
@@ -36,82 +30,6 @@ import { substring } from "./string_utils";
 extern fn exe_path() -> * u8;
 
 extern fn resolve_runtime_root(exe: * u8) -> * u8;
-
-fn _pg_is_ident_char(ch: string) -> boolean {
-    if ch.length == 0 { return false; }
-    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
-    let mut i: int = 0;
-    loop {
-        if i >= allowed.length { break; }
-        if substring(allowed, i, i + 1) == ch { return true; }
-        i += 1;
-    }
-    return false;
-}
-
-fn _pg_extract_ident(line: string, start: int) -> string {
-    let mut end = start;
-    loop {
-        if end >= line.length { break; }
-        let ch = substring(line, end, end + 1);
-        if !_pg_is_ident_char(ch) { break; }
-        end += 1;
-    }
-    if end <= start { return ""; }
-    return substring(line, start, end);
-}
-
-// If `line` begins (column 0) with `prefix`, return the identifier that
-// follows it; otherwise "". Handles the runtime's declaration keywords.
-fn _pg_name_after_prefix(line: string, prefix: string) -> string {
-    if line.length < prefix.length { return ""; }
-    if substring(line, 0, prefix.length) != prefix { return ""; }
-    return _pg_extract_ident(line, prefix.length);
-}
-
-// Pure: collect the names of every top-level `fn` / `let` / `extern fn`
-// / `unsafe extern fn` declaration in a runtime source buffer.
-// Resolution-only — duplicates and private helpers are harmless (extra
-// names only make MORE calls resolve, never fewer), so no de-dup or
-// export filtering is applied.
-fn prelude_global_names_from_source(source: string) -> string[] {
-    let mut names: string[] = [];
-    let lines = split_source_lines(source);
-    let mut i: int = 0;
-    loop {
-        if i >= lines.length { break; }
-        let line = lines[i];
-        i += 1;
-        if line.length < 4 { continue; }
-        let fn_name = _pg_name_after_prefix(line, "fn ");
-        if fn_name.length > 0 {
-            names.push(fn_name);
-            continue;
-        }
-        let extern_name = _pg_name_after_prefix(line, "extern fn ");
-        if extern_name.length > 0 {
-            names.push(extern_name);
-            continue;
-        }
-        let unsafe_extern_name = _pg_name_after_prefix(line, "unsafe extern fn ");
-        if unsafe_extern_name.length > 0 {
-            names.push(unsafe_extern_name);
-            continue;
-        }
-        if substring(line, 0, 4) == "let " {
-            let mut start = 4;
-            // `let mut <name>` — skip the qualifier so the bound name is
-            // captured, not the `mut` keyword.
-            if line.length >= 8 {
-                if substring(line, 4, 8) == "mut " { start = 8; }
-            }
-            let name = _pg_extract_ident(line, start);
-            if name.length > 0 { names.push(name); }
-            continue;
-        }
-    }
-    return names;
-}
 
 fn _pg_join(dir: string, child: string) -> string {
     if dir.length == 0 { return child; }

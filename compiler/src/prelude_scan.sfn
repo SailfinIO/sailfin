@@ -1,0 +1,91 @@
+// compiler/src/prelude_scan.sfn
+//
+// #812 — pure column-0 declaration-name scanner for runtime source
+// buffers. Split out from `prelude_globals.sfn` so unit tests can
+// exercise the scanner without linking the runtime-root externs
+// (`exe_path` / `resolve_runtime_root`) that the IO loader references —
+// those symbols live in the compiler binary's link line but not a
+// standalone unit-test executable's.
+//
+// The runtime (`runtime/prelude.sfn` plus `runtime/sfn/**`) declares
+// everything at column 0 and uses only `//` line comments, so a leading
+// `fn ` / `let ` / `extern fn ` / `unsafe extern fn ` uniquely marks a
+// top-level declaration.
+import { split_source_lines } from "./diagnostics_render";
+import { substring } from "./string_utils";
+
+fn _ps_is_ident_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    let mut i: int = 0;
+    loop {
+        if i >= allowed.length { break; }
+        if substring(allowed, i, i + 1) == ch { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _ps_extract_ident(line: string, start: int) -> string {
+    let mut end = start;
+    loop {
+        if end >= line.length { break; }
+        let ch = substring(line, end, end + 1);
+        if !_ps_is_ident_char(ch) { break; }
+        end += 1;
+    }
+    if end <= start { return ""; }
+    return substring(line, start, end);
+}
+
+// If `line` begins (column 0) with `prefix`, return the identifier that
+// follows it; otherwise "".
+fn _ps_name_after_prefix(line: string, prefix: string) -> string {
+    if line.length < prefix.length { return ""; }
+    if substring(line, 0, prefix.length) != prefix { return ""; }
+    return _ps_extract_ident(line, prefix.length);
+}
+
+// Pure: collect the names of every top-level `fn` / `let` / `extern fn`
+// / `unsafe extern fn` declaration in a runtime source buffer.
+// Resolution-only — duplicates and private helpers are harmless (extra
+// names only make MORE calls resolve, never fewer), so no de-dup or
+// export filtering is applied.
+fn prelude_global_names_from_source(source: string) -> string[] {
+    let mut names: string[] = [];
+    let lines = split_source_lines(source);
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        if line.length < 4 { continue; }
+        let fn_name = _ps_name_after_prefix(line, "fn ");
+        if fn_name.length > 0 {
+            names.push(fn_name);
+            continue;
+        }
+        let extern_name = _ps_name_after_prefix(line, "extern fn ");
+        if extern_name.length > 0 {
+            names.push(extern_name);
+            continue;
+        }
+        let unsafe_extern_name = _ps_name_after_prefix(line, "unsafe extern fn ");
+        if unsafe_extern_name.length > 0 {
+            names.push(unsafe_extern_name);
+            continue;
+        }
+        if substring(line, 0, 4) == "let " {
+            let mut start = 4;
+            // `let mut <name>` — skip the qualifier so the bound name is
+            // captured, not the `mut` keyword.
+            if line.length >= 8 {
+                if substring(line, 4, 8) == "mut " { start = 8; }
+            }
+            let name = _ps_extract_ident(line, start);
+            if name.length > 0 { names.push(name); }
+            continue;
+        }
+    }
+    return names;
+}
