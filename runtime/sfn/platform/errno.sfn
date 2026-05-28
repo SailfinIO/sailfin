@@ -24,6 +24,19 @@
 // conditional split is deferred (tracked under #763). The EINTR
 // retry rewrite and the `clock_gettime` field reader that also
 // consume pointer-read intrinsics are separate issues.
+//
+// Status: typecheck + emit smoke module. Deliberately NOT listed in
+// `runtime/native/capsule.toml` `sfn-sources` — exactly like its
+// siblings `posix.sfn` / `libc.sfn` / `net.sfn` / `pthread.sfn`,
+// which are also not yet linked. `sfn-sources` registration forces a
+// link on every target, and `__errno_location` is glibc-only: on
+// macOS arm64 (Darwin uses `__error`) the link fails with an
+// undefined `___errno_location`. The module gets wired into
+// `sfn-sources` once a consumer exists *and* the macOS `__error`
+// platform split lands (both deferred under #763). Until then this
+// file proves the reader type-checks and lowers to a `load i32` on
+// Linux x86_64 (the epic's stated gate); the e2e shape test is
+// `compiler/tests/e2e/test_errno_reader.sh`.
 extern fn __errno_location() -> * i32;
 
 // Read the calling thread's current `errno` value. Pure: a raw
