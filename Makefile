@@ -842,6 +842,27 @@ rebuild:
 		echo "[rebuild] staging type_meta.o..."; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/type_meta.ll -o build/native/obj/runtime/type_meta.o; \
 	fi
+	@# Stage filesystem.o (Sailfin-native fs adapters from
+	@# runtime/sfn/adapters/filesystem.sfn). M3.1a (issue #814,
+	@# epic #390) flips the `fs.readFile` / `fs.writeFile` /
+	@# `fs.appendFile` descriptor rows' `native_signature` to
+	@# `sfn_fs_read_file` / `sfn_fs_write_file` /
+	@# `sfn_fs_append_file`. The legacy `sfn run` / `sfn build`
+	@# link path (`_clang_compile_runtime_objects` in
+	@# `compiler/src/cli_main.sfn`) resolves those symbols against
+	@# this staged .o; the runtime-capsule path reaches
+	@# filesystem.sfn through `runtime/native/capsule.toml`'s
+	@# `sfn-sources` array instead. Without this staging, any user
+	@# program touching `fs.*` fails at link with "undefined
+	@# reference to `sfn_fs_read_file`".
+	@if [ ! -f build/native/obj/runtime/filesystem.ll ]; then \
+		echo "[rebuild] staging filesystem.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/filesystem.ll llvm runtime/sfn/adapters/filesystem.sfn >/dev/null; \
+	fi
+	@if [ ! -f build/native/obj/runtime/filesystem.o ]; then \
+		echo "[rebuild] staging filesystem.o..."; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/filesystem.ll -o build/native/obj/runtime/filesystem.o; \
+	fi
 	@# Stage exec.o (Sailfin-native executable-path + runtime-root
 	@# resolution from runtime/sfn/platform/exec.sfn). Issue #468
 	@# (epic #451 M5.3 prerequisite) ships `@exe_path` /
@@ -936,6 +957,7 @@ ci-cross-windows:
 	TYPE_META_LL="build/native/obj/runtime/type_meta.ll"; \
 	EXEC_LL="build/native/obj/runtime/exec.ll"; \
 	EXCEPTION_LL="build/native/obj/runtime/exception.ll"; \
+	FILESYSTEM_LL="build/native/obj/runtime/filesystem.ll"; \
 	if [ ! -d "$$SAVED_DIR" ] || [ ! -f "$$SAVED_DIR/program.ll" ]; then \
 		echo "[cross-windows][error] missing $$SAVED_DIR/*.ll + program.ll — run 'make rebuild' first" >&2; \
 		exit 1; \
@@ -958,6 +980,10 @@ ci-cross-windows:
 	fi; \
 	if [ ! -f "$$EXCEPTION_LL" ]; then \
 		echo "[cross-windows][error] missing $$EXCEPTION_LL — 'make rebuild' should have emitted it (M2.7b, #404; surfaced by M5.5 #473's @main wrapper)" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$$FILESYSTEM_LL" ]; then \
+		echo "[cross-windows][error] missing $$FILESYSTEM_LL — 'make rebuild' should have emitted it (M3.1a, #814)" >&2; \
 		exit 1; \
 	fi; \
 	echo "[cross-windows] using saved sfn build IR layout ($$SAVED_DIR)"; \
@@ -1022,6 +1048,10 @@ ci-cross-windows:
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
 		-c "$$EXCEPTION_LL" -o "$$WIN_OBJ/runtime/exception.o"; \
 	\
+	echo "[cross-windows] compiling filesystem (Sailfin-native fs adapters, M3.1a #814)..."; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+		-c "$$FILESYSTEM_LL" -o "$$WIN_OBJ/runtime/filesystem.o"; \
+	\
 	echo "[cross-windows] compiling C runtime..."; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_arena.c \
 		-o "$$WIN_OBJ/sailfin_arena.o"; \
@@ -1056,6 +1086,7 @@ ci-cross-windows:
 		"$$WIN_OBJ/runtime/type_meta.o" \
 		"$$WIN_OBJ/runtime/exec.o" \
 		"$$WIN_OBJ/runtime/exception.o" \
+		"$$WIN_OBJ/runtime/filesystem.o" \
 		$$SHIM_O \
 		-lm -lpthread; \
 	\
@@ -1090,6 +1121,10 @@ ci-cross-windows:
 	if [ -f "$$WIN_OBJ/runtime/exception.o" ]; then \
 		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
 		cp -f "$$WIN_OBJ/runtime/exception.o" "$$INSTALLER_DIR/runtime/native/obj/exception.o"; \
+	fi; \
+	if [ -f "$$WIN_OBJ/runtime/filesystem.o" ]; then \
+		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+		cp -f "$$WIN_OBJ/runtime/filesystem.o" "$$INSTALLER_DIR/runtime/native/obj/filesystem.o"; \
 	fi; \
 	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
 	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"

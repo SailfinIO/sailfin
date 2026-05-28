@@ -485,24 +485,36 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "process.handle_wait", symbol: "sailfin_runtime_process_handle_wait", return_type: "i64", parameter_types: ["i64"], effects: ["io"], native_signature: null, c_abi_return_type: null
     });
 
-    // Filesystem adapters
+    // Filesystem adapters.
+    //
+    // M3.1a (#814): `read_file` / `write_file` / `append_file`
+    // flipped to the Sailfin-native `sfn_fs_*` adapters in
+    // `runtime/sfn/adapters/filesystem.sfn`. The legacy C
+    // `sailfin_adapter_fs_*` symbols stay exported throughout the
+    // M3 window so seed-built compiler IR continues to link; the
+    // `symbol` slots below preserve them as the registry's fall-
+    // back, while every fresh emission routes through
+    // `native_signature` per the `effective_symbol` resolution in
+    // `rendering.sfn`. The remaining `sailfin_adapter_fs_*` rows
+    // (list_directory / delete / create_directory / set_perms / …)
+    // flip in M3.1b (#815).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_read_file", symbol: "sailfin_adapter_fs_read_file", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "fs_read_file", symbol: "sailfin_adapter_fs_read_file", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_read_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.readFile", symbol: "sailfin_adapter_fs_read_file", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "fs.readFile", symbol: "sailfin_adapter_fs_read_file", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_read_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_write_file", symbol: "sailfin_adapter_fs_write_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "fs_write_file", symbol: "sailfin_adapter_fs_write_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_fs_write_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.writeFile", symbol: "sailfin_adapter_fs_write_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "fs.writeFile", symbol: "sailfin_adapter_fs_write_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_fs_write_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_append_file", symbol: "sailfin_adapter_fs_append_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "fs_append_file", symbol: "sailfin_adapter_fs_append_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_fs_append_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.appendFile", symbol: "sailfin_adapter_fs_append_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "fs.appendFile", symbol: "sailfin_adapter_fs_append_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_fs_append_file", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs_write_lines", symbol: "sailfin_adapter_fs_write_lines_v2", return_type: "void", parameter_types: ["i8*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: null, c_abi_return_type: null

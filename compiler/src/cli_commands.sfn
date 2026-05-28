@@ -219,6 +219,31 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
             }
             tmi += 1;
         }
+        // M3.1a (issue #814): mirrors the clock / process / type_meta
+        // staging above. The descriptor flips in `runtime_helpers.sfn`
+        // route `fs.readFile` / `fs.writeFile` / `fs.appendFile` to
+        // `@sfn_fs_read_file` / `@sfn_fs_write_file` /
+        // `@sfn_fs_append_file`, defined in
+        // `runtime/sfn/adapters/filesystem.sfn`. Tests that touch
+        // `fs.*` resolve the symbols against this staged .o; tests
+        // that don't are unaffected (the .o sits unreferenced in the
+        // link line). Without this entry, every unit / integration
+        // test that exercises `fs.readFile` (a large fraction of the
+        // suite) fails at link with "undefined reference to
+        // `sfn_fs_read_file`". Same search order as the
+        // clock/process/type_meta paths above.
+        let filesystem_paths: string[] = ["build/selfhost/native/obj/runtime/filesystem.o", "build/native/obj/runtime/filesystem.o", "build/native/obj/filesystem.o", runtime_root
+            + "/native/obj/runtime/filesystem.o", runtime_root
+            + "/native/obj/filesystem.o",];
+        let mut fsi: int = 0;
+        loop {
+            if fsi >= filesystem_paths.length { break; }
+            if fs.exists(filesystem_paths[fsi]) {
+                args.push(filesystem_paths[fsi]);
+                break;
+            }
+            fsi += 1;
+        }
     }
     args.push("-lm");
     args.push("-pthread");
@@ -1929,6 +1954,37 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         if cp_type_meta != 0 {
             print("sfn package: failed to stage type_meta object from "
                 + type_meta_src);
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
+    }
+
+    // Pre-built filesystem object — Sailfin-native `@sfn_fs_read_file`
+    // / `@sfn_fs_write_file` / `@sfn_fs_append_file` definitions
+    // added in M3.1a (issue #814). Mirrors the clock.o / process.o /
+    // type_meta.o staging above: optional on a fresh checkout, hard
+    // fail once staged. Without this the installer link path resolves
+    // `@sfn_fs_read_file` from nowhere and every installed user
+    // program that calls `fs.readFile` / `fs.writeFile` /
+    // `fs.appendFile` fails at link time.
+    let filesystem_a = "build/selfhost/native/obj/runtime/filesystem.o";
+    let filesystem_b = "build/native/obj/runtime/filesystem.o";
+    let mut filesystem_src: string = "";
+    if fs.exists(filesystem_a) { filesystem_src = filesystem_a; } else {
+        if fs.exists(filesystem_b) { filesystem_src = filesystem_b; }
+    }
+    if filesystem_src.length > 0 {
+        let mk_obj_dir = process.run(["mkdir", "-p", staging_runtime_obj]);
+        if mk_obj_dir != 0 {
+            print("sfn package: failed to create runtime obj staging dir");
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
+        let cp_filesystem = process.run(["cp", "-f", filesystem_src, staging_runtime_obj
+            + "/filesystem.o"]);
+        if cp_filesystem != 0 {
+            print("sfn package: failed to stage filesystem object from "
+                + filesystem_src);
             process.run(["rm", "-rf", staging]);
             return 1;
         }
