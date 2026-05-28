@@ -1,4 +1,4 @@
-// Tests for sfn/fmt capsule string-manipulation helpers.
+// Tests for sfn/strings capsule string-manipulation helpers.
 //
 // Moved from compiler/tests/unit/fmt_test.sfn. Helpers stay inlined here —
 // the original was constrained to functions that don't reach the prelude
