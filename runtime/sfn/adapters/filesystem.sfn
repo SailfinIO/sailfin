@@ -50,23 +50,28 @@
 //     stat block). Returns a NUL-terminated buffer the caller
 //     owns; null on OOM or open failure.
 //
-//   - **`sfn_fs_write_file` / `sfn_fs_append_file`**: `fopen`
-//     with `"wb"` / `"ab"`, length-probe `contents` via the
-//     `sailfin_runtime_string_length` C trampoline (handles
-//     non-immediate strings safely — see the immediate-codepoint
-//     caveat below), then `fwrite` the bytes. The C runtime's
-//     matching adapters additionally detect immediate-codepoint
-//     tagged-pointer strings (low ASCII embedded in the pointer
-//     value, or single codepoint in the high 32 bits) and emit
-//     the UTF-8 encoding directly. The compiler self-hosting
-//     path never feeds an immediate-codepoint string to
-//     `fs.writeFile` / `fs.appendFile` (every caller passes a
-//     concatenated IR / source string that is heap-allocated), so
-//     the immediate path is currently omitted. A follow-up wave
-//     will add an immediate-detection branch — either inline in
-//     this module once Sailfin grows the macOS pointer-mapping
-//     guard from `_is_immediate_codepoint_string`, or via a tiny
-//     C helper exported from `sailfin_runtime.c` until then.
+//   - **`sfn_fs_write_file` / `sfn_fs_append_file`**: trampolined
+//     to the legacy C adapters `sailfin_adapter_fs_write_file` /
+//     `sailfin_adapter_fs_append_file`. The C bodies detect
+//     immediate-codepoint tagged-pointer strings (low ASCII
+//     embedded in the pointer value, or single codepoint in the
+//     high 32 bits, gated by a macOS mapped-pointer guard that
+//     reads `mach_vm_region` to avoid false-positives on real
+//     pointers with low 32 bits zero) and emit the UTF-8
+//     encoding directly when the input is immediate, falling
+//     back to `fopen` + `fwrite` otherwise. Replicating that
+//     detection in Sailfin needs the macOS mapped-region probe
+//     and a UTF-8 encoder; both are post-M3.1a work. Until then
+//     the Sailfin module owns the `sfn_fs_write_file` /
+//     `sfn_fs_append_file` symbol names (matching the io.sfn
+//     pattern for `sfn_print_sfn` → `sailfin_runtime_print_raw`)
+//     so the descriptor flip in `runtime_helpers.sfn` lands
+//     against the canonical names; a follow-up wave inlines the
+//     bodies. This trampoline shape is safe by construction —
+//     the C adapter has carried the production fs.writeFile /
+//     fs.appendFile contract since pre-M2, including the
+//     immediate-codepoint hazard surfaced in the M3.1a Copilot
+//     review.
 //
 // Why inline the externs rather than `import { fopen, ... }
 // from "../platform/libc"`? Same rationale as every other
@@ -98,18 +103,17 @@ extern fn fclose(f: * File) -> i32;
 
 extern fn fread(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
 
-extern fn fwrite(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
+// Legacy C adapters from `runtime/native/src/sailfin_runtime.c`
+// that own the production fs.writeFile / fs.appendFile contract,
+// including the immediate-codepoint tagged-pointer detection +
+// macOS mapped-pointer guard the Sailfin port has not yet
+// replicated. The new `sfn_fs_write_file` / `sfn_fs_append_file`
+// exports trampoline through these until a follow-up wave inlines
+// the bodies (see file header). The C symbols stay exported until
+// M3.9 retires `sailfin_runtime.c`.
+extern fn sailfin_adapter_fs_write_file(path: * u8, contents: * u8) -> void;
 
-// `sailfin_runtime_string_length(s)` returns the NUL-terminated
-// byte length of `s`, with a safe-strlen probe that bails at the
-// next unmapped page when `s` is unterminated. The C body lives
-// at `runtime/native/src/sailfin_runtime.c:2803` and stays
-// exported throughout the M3 window — M3.9 retires it alongside
-// the rest of `sailfin_runtime.c` once every caller (this module
-// and the M2.x string trampolines) has migrated to a Sailfin-
-// native length probe (`memchr`-on-NUL or the M1.A.2 SfnString
-// aggregate's `.len` field).
-extern fn sailfin_runtime_string_length(s: * u8) -> i64;
+extern fn sailfin_adapter_fs_append_file(path: * u8, contents: * u8) -> void;
 
 // `sfn_fs_read_file(path)` — slurp the entire contents of `path`
 // into a freshly libc-`malloc`'d NUL-terminated buffer the
@@ -191,54 +195,23 @@ fn sfn_fs_read_file(path: * u8) -> * u8 ![io] {
     return buf;
 }
 
-// `sfn_fs_write_file(path, contents)` — write the full
-// NUL-terminated `contents` payload to `path` in binary mode,
-// truncating any prior contents. Null `path` or `contents` is a
-// no-op (matches the C runtime's defensive null-guard); `fopen`
-// failure silently drops the write (a future `Result<T, E>`
-// rewrite surfaces the error to the caller).
-//
-// Length probe. The C runtime's `sailfin_runtime_string_length`
-// trampoline carries the safe-strlen pass for non-immediate
-// strings and routes immediate-codepoint inputs through a UTF-8
-// encode (returning the encoded byte count). The Sailfin
-// adapter here trusts `contents` is a real heap pointer — see
-// the immediate-codepoint caveat in the file header for the
-// follow-up wave that adds inline immediate detection.
+// `sfn_fs_write_file(path, contents)` — write the full payload
+// of `contents` to `path` in binary mode, truncating any prior
+// contents. Trampolines to the legacy C adapter so the
+// immediate-codepoint tagged-pointer detection (+ macOS mapped-
+// pointer guard) survives the symbol flip. The C body's null
+// guards and `fopen` failure handling already match the
+// architect-spec defensive contract; the Sailfin layer adds no
+// behavior of its own. See the file header for the inlining
+// roadmap.
 fn sfn_fs_write_file(path: * u8, contents: * u8) -> void ![io] {
-    if path as i64 == 0 { return; }
-    if contents as i64 == 0 { return; }
-
-    let mode_str: string = "wb";
-    let mode: * u8 = mode_str as * u8;
-    let f: * File = fopen(path, mode);
-    if f as i64 == 0 { return; }
-
-    let len: i64 = sailfin_runtime_string_length(contents);
-    if len > 0 {
-        fwrite(contents, 1 as usize, len as usize, f);
-    }
-    fclose(f);
+    sailfin_adapter_fs_write_file(path, contents);
 }
 
-// `sfn_fs_append_file(path, contents)` — append the full
-// NUL-terminated `contents` payload to `path` in binary append
-// mode, creating the file if it does not exist. Null `path` or
-// `contents` is a no-op; `fopen` failure silently drops the
-// append. Length probe and immediate-codepoint caveat match
+// `sfn_fs_append_file(path, contents)` — append the full payload
+// of `contents` to `path` in binary append mode, creating the
+// file if absent. Same trampoline + safety contract as
 // `sfn_fs_write_file` above.
 fn sfn_fs_append_file(path: * u8, contents: * u8) -> void ![io] {
-    if path as i64 == 0 { return; }
-    if contents as i64 == 0 { return; }
-
-    let mode_str: string = "ab";
-    let mode: * u8 = mode_str as * u8;
-    let f: * File = fopen(path, mode);
-    if f as i64 == 0 { return; }
-
-    let len: i64 = sailfin_runtime_string_length(contents);
-    if len > 0 {
-        fwrite(contents, 1 as usize, len as usize, f);
-    }
-    fclose(f);
+    sailfin_adapter_fs_append_file(path, contents);
 }

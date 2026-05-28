@@ -137,21 +137,31 @@ PROBE
         cat "$log"
         return 1
     fi
+    # Anchor the match on a non-identifier character (or end of
+    # line) after the symbol name. `\b` word-boundaries are
+    # GNU-only in ERE — BSD/macOS `grep -E` treats `\b` as a
+    # backspace and would silently skip every match. The
+    # delimiter `([^A-Za-z0-9_]|$)` is portable across both
+    # grep dialects.
     local missing=0
     for sym in sfn_fs_read_file sfn_fs_write_file sfn_fs_append_file; do
-        if ! grep -qE "@${sym}\b" "$ll"; then
+        if ! grep -qE "@${sym}([^A-Za-z0-9_]|$)" "$ll"; then
             echo "[test]   fs_probe.sfn does not reference @${sym}"
             missing=$((missing + 1))
         fi
     done
     # Banned legacy entrypoints — these stay defined in
     # sailfin_runtime.c (the issue's `Out:` defers their deletion
-    # to M3.9), but no fresh emission should target them.
+    # to M3.9). Trampoline `declare` lines are allowed (the
+    # Sailfin write/append bodies forward through the legacy C
+    # adapters); only `call` sites are forbidden, so the probe
+    # checks `call ... @<sym>(` specifically. The `(` is the
+    # canonical follow-up in any LLVM call line.
     local found=0
     for sym in sailfin_adapter_fs_read_file sailfin_adapter_fs_write_file sailfin_adapter_fs_append_file; do
-        if grep -qE "call [^\"]*@${sym}\b" "$ll"; then
+        if grep -qE "call [^\"]*@${sym}\(" "$ll"; then
             echo "[test]   fs_probe.sfn still calls @${sym} (expected the sfn_fs_* flip)"
-            grep -nE "@${sym}\b" "$ll" | head -3
+            grep -nE "@${sym}\(" "$ll" | head -3
             found=$((found + 1))
         fi
     done
