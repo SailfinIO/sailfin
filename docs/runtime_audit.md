@@ -412,8 +412,9 @@ survives until process exit. This is why per-module compiler RAM reaches
 | Symbol | Status | Notes |
 |---|---|---|
 | `sailfin_runtime_process_run` | ✅ | `posix_spawnp` with argv from `SailfinPtrArray` |
-| `sailfin_adapter_fs_read_file` | ✅ | fopen/fread/strdup |
-| `sailfin_adapter_fs_write_file` / `_append_file` / `_write_lines` | ✅ | |
+| `sailfin_adapter_fs_read_file` | ✅ | fopen/fread/strdup. **M3.1a (#814):** descriptor `native_signature` now routes to `@sfn_fs_read_file` in `runtime/sfn/adapters/filesystem.sfn` (chunked `fread` + `realloc`); the C body stays exported for seed-built IR. |
+| `sailfin_adapter_fs_write_file` / `_append_file` | ✅ | **M3.1a (#814):** both descriptor rows' `native_signature` now route to `@sfn_fs_write_file` / `@sfn_fs_append_file` in `runtime/sfn/adapters/filesystem.sfn`; the C bodies stay exported for seed-built IR. |
+| `sailfin_adapter_fs_write_lines` | ✅ | `_v2` aliases pending Sailfin port (M3.1b). |
 | `sailfin_adapter_fs_list_directory` | ✅ | Returns `SailfinPtrArray` |
 | `sailfin_adapter_fs_delete_file` / `_create_directory` | ✅ | |
 | `sailfin_intrinsic_fs_exists` | ✅ | stat-based |

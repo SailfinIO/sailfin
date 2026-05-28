@@ -223,3 +223,52 @@ extern fn longjmp(env: * JmpBuf, val: i32) -> void;
 extern fn _NSGetExecutablePath(buf: * u8, bufsize: * i32) -> i32;
 
 extern fn GetModuleFileNameA(handle: * u8, buf: * u8, size: i32) -> i32;
+
+// ── Directory + stat APIs ─────────────────────────────────────
+// POSIX directory-traversal and metadata primitives the M3.1a
+// filesystem adapter (#814) reaches for in `runtime/sfn/adapters/
+// filesystem.sfn`. `*Stat`, `*DIR`, and `*DirEnt` follow the
+// opaque-pointee convention (uppercase identifier ⇒ accepted by
+// `is_extern_opaque_pointee` without a struct definition; lowers
+// to `i8*`). The wave-1a adapter only reads files (no stat call
+// site exists today), but the declarations land here so the M3.1b
+// `list_directory` / `delete` / `mkdir` wave starts from "wire
+// the call site" rather than "extend libc.sfn".
+//
+// Layout caveats. `struct stat` and `struct dirent` are
+// platform-specific: `st_size` sits at byte offset 48 on Linux
+// x86_64, 96 on macOS arm64, and 48 on Linux aarch64. The
+// opaque-pointee discipline means Sailfin callers cannot reach
+// individual fields directly — adapters that need `st_size`
+// either allocate a fixed-size buffer (≥160 bytes to cover every
+// supported platform) and call a tiny per-platform accessor
+// shim, or sidestep stat entirely (the M3.1a read body uses
+// chunked `fread`-until-EOF for size detection). A future
+// `runtime/sfn/platform/sizes_*.sfn` constants module ships
+// per-platform `STAT_SIZE` / `ST_SIZE_OFFSET` once a real caller
+// needs them.
+//
+// Type-discipline notes for the accept-list (see file header):
+//   - `stat`'s second arg is `struct stat *statbuf`; declared
+//     here as `* Stat` (opaque-pointee, lowers to `i8*`).
+//   - `mkdir`'s second arg `mode_t mode` is `unsigned int` on
+//     every supported platform; `i32` matches the call shape
+//     bit-for-bit per the same sign-irrelevance rule used for
+//     `_NSGetExecutablePath`'s `bufsize` slot above.
+//   - `readdir` returns `struct dirent *`; `* DirEnt` is the
+//     opaque pointee. Callers that need the name field will
+//     reach for a platform-specific offset accessor in a
+//     follow-up wave (same layout caveat as `struct stat`).
+extern fn stat(path: * u8, statbuf: * Stat) -> i32;
+
+extern fn opendir(path: * u8) -> * DIR;
+
+extern fn readdir(dirp: * DIR) -> * DirEnt;
+
+extern fn closedir(dirp: * DIR) -> i32;
+
+extern fn unlink(path: * u8) -> i32;
+
+extern fn mkdir(path: * u8, mode: i32) -> i32;
+
+extern fn rmdir(path: * u8) -> i32;

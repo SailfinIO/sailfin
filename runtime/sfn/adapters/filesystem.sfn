@@ -1,0 +1,244 @@
+// runtime/sfn/adapters/filesystem.sfn
+//
+// First-wave Sailfin-native filesystem adapter (M3.1a, #814 —
+// epic #390 / tracker #321). Replaces the C trampolines
+// `sailfin_adapter_fs_read_file` / `_write_file` / `_append_file`
+// with pure-Sailfin bodies routed through `runtime/sfn/platform/
+// libc.sfn`'s `fopen` / `fread` / `fwrite` / `fclose` family.
+// Mirrors the migration shape `runtime/sfn/process.sfn` (M2.9 —
+// `posix_spawnp` + `waitpid`) and `runtime/sfn/clock.sfn`
+// (M2.11 — `sfn_sleep`) used to land their adapter flips.
+//
+// ABI. `compiler/src/llvm/runtime_helpers.sfn` flips the
+// `fs_read_file` / `fs.readFile` / `fs_write_file` /
+// `fs.writeFile` / `fs_append_file` / `fs.appendFile` descriptor
+// rows' `native_signature` to `sfn_fs_read_file` /
+// `sfn_fs_write_file` / `sfn_fs_append_file`. The descriptor
+// shape stays `["i8*"]` (read) / `["i8*", "i8*"]` (write,
+// append) — both `path` and `contents` arrive as NUL-terminated
+// `* u8` buffers. The aggregate-typed SfnString flip (M1.A.2)
+// will retype the parameters to `{i8*, i64}` without touching
+// these bodies' callers.
+//
+// Out (per #814 scope, deferred to M3.1b / #815):
+//   - `fs.list_directory` / `fs.delete_file` / `fs.create_directory`
+//   - `fs.read_bytes` (binary read returning byte array)
+//
+// Out (per #814 scope, deferred to M3.9):
+//   - Deleting `runtime/native/src/sailfin_runtime.c`'s
+//     `sailfin_adapter_fs_*` bodies. They stay exported during the
+//     M3 window so seed-built compiler IR (which still calls them
+//     by their legacy names) continues to link. M3.9 retires
+//     `sailfin_runtime.c` after a seed cut.
+//
+// Effects: `![io]`. The wrappers drive the platform filesystem
+// surface; the descriptors at `runtime_helpers.sfn` list the same
+// effect, so calls to `fs.readFile` / `fs.writeFile` /
+// `fs.appendFile` without `![io]` on the call chain remain a
+// compile-time error after the flip.
+//
+// Implementation notes.
+//
+//   - **`sfn_fs_read_file`**: chunked `fread` into a libc
+//     `malloc`'d buffer that doubles via `realloc` as the input
+//     grows. The C runtime's `sailfin_adapter_fs_read_file` size-
+//     probes the file with `fseek(SEEK_END)` + `ftell` + rewind;
+//     the Sailfin port avoids the seek/tell pair entirely (those
+//     externs are not declared in `libc.sfn` and `stat`-based
+//     size detection requires platform-specific `struct stat`
+//     offsets — see the layout caveat in the libc.sfn directory/
+//     stat block). Returns a NUL-terminated buffer the caller
+//     owns; null on OOM or open failure.
+//
+//   - **`sfn_fs_write_file` / `sfn_fs_append_file`**: `fopen`
+//     with `"wb"` / `"ab"`, length-probe `contents` via the
+//     `sailfin_runtime_string_length` C trampoline (handles
+//     non-immediate strings safely — see the immediate-codepoint
+//     caveat below), then `fwrite` the bytes. The C runtime's
+//     matching adapters additionally detect immediate-codepoint
+//     tagged-pointer strings (low ASCII embedded in the pointer
+//     value, or single codepoint in the high 32 bits) and emit
+//     the UTF-8 encoding directly. The compiler self-hosting
+//     path never feeds an immediate-codepoint string to
+//     `fs.writeFile` / `fs.appendFile` (every caller passes a
+//     concatenated IR / source string that is heap-allocated), so
+//     the immediate path is currently omitted. A follow-up wave
+//     will add an immediate-detection branch — either inline in
+//     this module once Sailfin grows the macOS pointer-mapping
+//     guard from `_is_immediate_codepoint_string`, or via a tiny
+//     C helper exported from `sailfin_runtime.c` until then.
+//
+// Why inline the externs rather than `import { fopen, ... }
+// from "../platform/libc"`? Same rationale as every other
+// `runtime/sfn/*.sfn` module (`memory/arena.sfn` line ~63,
+// `string.sfn` line ~39, `process.sfn` line ~74): the seed
+// compiler reaches the cross-module extern resolver through a
+// path that issue #306 has not closed yet, surfacing as
+// `cannot resolve return type for call to …` fatals during
+// emission. Inlining the four declarations we need keeps this
+// module self-contained for every seed. Once the cross-module
+// path lands, a follow-up PR flips these to imports without
+// touching the bodies.
+//
+// Pinned by `compiler/tests/e2e/test_runtime_adapter_filesystem.sh`
+// (typecheck + fmt + LLVM `define` shape over the three exports +
+// a `make compile`-equivalent round-trip harness that writes and
+// reads a scratch file through the flipped registry rows).
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+extern fn fopen(path: * u8, mode: * u8) -> * File;
+
+extern fn fclose(f: * File) -> i32;
+
+extern fn fread(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
+
+extern fn fwrite(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
+
+// `sailfin_runtime_string_length(s)` returns the NUL-terminated
+// byte length of `s`, with a safe-strlen probe that bails at the
+// next unmapped page when `s` is unterminated. The C body lives
+// at `runtime/native/src/sailfin_runtime.c:2803` and stays
+// exported throughout the M3 window — M3.9 retires it alongside
+// the rest of `sailfin_runtime.c` once every caller (this module
+// and the M2.x string trampolines) has migrated to a Sailfin-
+// native length probe (`memchr`-on-NUL or the M1.A.2 SfnString
+// aggregate's `.len` field).
+extern fn sailfin_runtime_string_length(s: * u8) -> i64;
+
+// `sfn_fs_read_file(path)` — slurp the entire contents of `path`
+// into a freshly libc-`malloc`'d NUL-terminated buffer the
+// caller owns. Returns null on null/empty `path`, on `fopen`
+// failure, or on OOM at any growth step.
+//
+// Size strategy. The buffer starts at 4 KiB and doubles via
+// `realloc` whenever the next chunk would overflow. Each chunk
+// is sized to the remaining capacity (so a 4 KiB chunk that
+// only partially fills triggers the EOF exit). The buffer
+// always has one byte of slack past `capacity` (allocated as
+// `capacity + 1`) so the trailing NUL write at offset `len` is
+// always in-bounds even when the file's last chunk fills the
+// buffer exactly.
+//
+// EOF detection. `fread` returns the actual byte count read,
+// which is strictly less than the requested count at EOF. The
+// loop exits the first time `read_n < chunk`, matching the
+// architect-spec single-pass slurp semantics.
+fn sfn_fs_read_file(path: * u8) -> * u8 ![io] {
+    if path as i64 == 0 { return null; }
+
+    // Mode string literal lowers to a NUL-terminated `* u8`
+    // (`core_strings.sfn::lower_string_literal` writes the
+    // trailing NUL past the byte payload). Cast through `string`
+    // to a raw `* u8` so fopen receives the libc-ABI shape.
+    let mode_str: string = "rb";
+    let mode: * u8 = mode_str as * u8;
+    let f: * File = fopen(path, mode);
+    if f as i64 == 0 { return null; }
+
+    let mut capacity: i64 = 4096;
+    let mut len: i64 = 0;
+    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    if buf as i64 == 0 {
+        fclose(f);
+        return null;
+    }
+
+    let chunk_size: i64 = 4096;
+    loop {
+        // Grow to `capacity * 2` whenever the next full chunk
+        // would overflow the current buffer. The "+1" slack
+        // travels with capacity so the trailing NUL slot stays
+        // reserved across every realloc.
+        if len + chunk_size > capacity {
+            let new_cap: i64 = capacity * 2;
+            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            if new_buf as i64 == 0 {
+                free(buf);
+                fclose(f);
+                return null;
+            }
+            buf = new_buf;
+            capacity = new_cap;
+        }
+        let dst_addr: i64 = (buf as i64) + len;
+        let dst: * u8 = dst_addr as * u8;
+        let read_n: usize = fread(dst, 1 as usize, chunk_size as usize, f);
+        let read_i: i64 = read_n as i64;
+        len = len + read_i;
+        // Short read ⇒ EOF or error. The C runtime path treats
+        // a partial read at EOF as success (returns the bytes
+        // read so far); the Sailfin port mirrors that — error
+        // distinction needs `ferror(f)` which is a follow-up
+        // wave together with `Result<T, E>` (Phase 1 prereq).
+        if read_i < chunk_size { break; }
+    }
+
+    fclose(f);
+
+    // NUL-terminate at offset `len`. `memset(ptr, 0, 1)` writes
+    // a single zero byte — equivalent to `buf[len] = 0` in C.
+    // The +1 capacity slack reserved above guarantees in-bounds.
+    let term_addr: i64 = (buf as i64) + len;
+    let term_ptr: * u8 = term_addr as * u8;
+    memset(term_ptr, 0, 1 as usize);
+
+    return buf;
+}
+
+// `sfn_fs_write_file(path, contents)` — write the full
+// NUL-terminated `contents` payload to `path` in binary mode,
+// truncating any prior contents. Null `path` or `contents` is a
+// no-op (matches the C runtime's defensive null-guard); `fopen`
+// failure silently drops the write (a future `Result<T, E>`
+// rewrite surfaces the error to the caller).
+//
+// Length probe. The C runtime's `sailfin_runtime_string_length`
+// trampoline carries the safe-strlen pass for non-immediate
+// strings and routes immediate-codepoint inputs through a UTF-8
+// encode (returning the encoded byte count). The Sailfin
+// adapter here trusts `contents` is a real heap pointer — see
+// the immediate-codepoint caveat in the file header for the
+// follow-up wave that adds inline immediate detection.
+fn sfn_fs_write_file(path: * u8, contents: * u8) -> void ![io] {
+    if path as i64 == 0 { return; }
+    if contents as i64 == 0 { return; }
+
+    let mode_str: string = "wb";
+    let mode: * u8 = mode_str as * u8;
+    let f: * File = fopen(path, mode);
+    if f as i64 == 0 { return; }
+
+    let len: i64 = sailfin_runtime_string_length(contents);
+    if len > 0 {
+        fwrite(contents, 1 as usize, len as usize, f);
+    }
+    fclose(f);
+}
+
+// `sfn_fs_append_file(path, contents)` — append the full
+// NUL-terminated `contents` payload to `path` in binary append
+// mode, creating the file if it does not exist. Null `path` or
+// `contents` is a no-op; `fopen` failure silently drops the
+// append. Length probe and immediate-codepoint caveat match
+// `sfn_fs_write_file` above.
+fn sfn_fs_append_file(path: * u8, contents: * u8) -> void ![io] {
+    if path as i64 == 0 { return; }
+    if contents as i64 == 0 { return; }
+
+    let mode_str: string = "ab";
+    let mode: * u8 = mode_str as * u8;
+    let f: * File = fopen(path, mode);
+    if f as i64 == 0 { return; }
+
+    let len: i64 = sailfin_runtime_string_length(contents);
+    if len > 0 {
+        fwrite(contents, 1 as usize, len as usize, f);
+    }
+    fclose(f);
+}
