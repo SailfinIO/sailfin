@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # End-to-end test for runtime/sfn/adapters/filesystem.sfn — the
-# M3.1a Sailfin-native filesystem adapter (issue #814, epic #390).
+# Sailfin-native filesystem adapter (M3.1a #814 + M3.1b #815,
+# epic #390).
 #
 # Mirrors test_runtime_io_extended.sh's structure: typecheck + fmt
 # + emit-shape on the source module, plus a compiled-IR regression
 # that the new compiler routes `fs.readFile` / `fs.writeFile` /
-# `fs.appendFile` call sites through the `sfn_fs_*` adapter family
-# instead of the legacy `sailfin_adapter_fs_*` C entrypoints.
-#
-# When M3.1b retires more `sailfin_adapter_fs_*` rows (list_directory
-# / delete / mkdir), the emit-shape assertions stay — they pin the
-# migration symbol surface, not the body strategy.
+# `fs.appendFile` (M3.1a) and `fs.listDirectory` / `fs.deleteFile`
+# / `fs.createDirectory` (M3.1b) call sites through the `sfn_fs_*`
+# adapter family instead of the legacy `sailfin_adapter_fs_*` C
+# entrypoints. The M3.1b wave also adds a behavioral round-trip
+# that recursively creates a directory, enumerates it, and deletes
+# an entry through the flipped registry rows.
 
 set -euo pipefail
 
@@ -110,7 +111,8 @@ test_emit_define_shape() {
         return 1
     fi
     local missing=0
-    for sym in sfn_fs_read_file sfn_fs_write_file sfn_fs_append_file; do
+    for sym in sfn_fs_read_file sfn_fs_write_file sfn_fs_append_file \
+        sfn_fs_delete sfn_fs_mkdir sfn_fs_list_dir sfn_fs_read_bytes; do
         if ! grep -qE "^define .* @${sym}\(" "$ll"; then
             echo "[test]   missing 'define ... @${sym}(' in filesystem.ll"
             missing=$((missing + 1))
@@ -168,6 +170,132 @@ PROBE
     return "$((missing + found))"
 }
 
+# ---- Test: M3.1b probe routes fs.{listDirectory,deleteFile,createDirectory} ----
+#
+# Companion to test_probe_flipped for the #815 rows. The probe uses
+# the listing result in its return value so dead-code elimination
+# cannot drop the `@sfn_fs_list_dir` call before the assertion runs.
+test_probe_flipped_m31b() {
+    local probe="$SCRATCH/fs_probe_m31b.sfn"
+    # deleteFile maps to unlink (files only), so the probe targets a
+    # real file it just wrote — not the directory — to stay
+    # representative if the probe is ever executed.
+    cat > "$probe" <<'PROBE'
+fn main() -> int ![io] {
+    fs.createDirectory("/tmp/sfn_fs_probe_m31b/a/b", true);
+    fs.writeFile("/tmp/sfn_fs_probe_m31b/note.txt", "x");
+    let entries = fs.listDirectory("/tmp/sfn_fs_probe_m31b");
+    fs.deleteFile("/tmp/sfn_fs_probe_m31b/note.txt");
+    return entries.length;
+}
+PROBE
+    local ll="$SCRATCH/fs_probe_m31b.ll"
+    local log="$SCRATCH/fs_probe_m31b.log"
+    if ! "$BINARY" emit -o "$ll" llvm "$probe" > "$log" 2>&1; then
+        echo "[test]   sfn emit llvm failed on fs_probe_m31b.sfn:"
+        cat "$log"
+        return 1
+    fi
+    local missing=0
+    for sym in sfn_fs_list_dir sfn_fs_delete sfn_fs_mkdir; do
+        if ! grep -qE "@${sym}([^A-Za-z0-9_]|$)" "$ll"; then
+            echo "[test]   fs_probe_m31b.sfn does not reference @${sym}"
+            missing=$((missing + 1))
+        fi
+    done
+    # Legacy C call sites must be gone (declares are tolerated for
+    # the list_dir trampoline; only `call` sites are forbidden).
+    local found=0
+    for sym in sailfin_adapter_fs_list_directory_v2 sailfin_adapter_fs_delete_file sailfin_adapter_fs_create_directory; do
+        if grep -qE "call [^\"]*@${sym}\(" "$ll"; then
+            echo "[test]   fs_probe_m31b.sfn still calls @${sym} (expected the sfn_fs_* flip)"
+            grep -nE "@${sym}\(" "$ll" | head -3
+            found=$((found + 1))
+        fi
+    done
+    return "$((missing + found))"
+}
+
+# ---- Test: list / delete / recursive-mkdir round-trip end-to-end ----
+#
+# The #815 behavior gate. One probe recursively creates a nested
+# directory, drops two files in the parent, enumerates it (writing
+# each entry to a listing file through the proven appendFile path),
+# deletes one file, then re-enumerates. The bash assertions inspect
+# the resulting on-disk state and the two listing files — exercising
+# the flipped sfn_fs_mkdir / sfn_fs_list_dir / sfn_fs_delete symbols
+# through the real `sfn run` link path.
+test_round_trip_list_delete_mkdir() {
+    local base="$SCRATCH/m31b"
+    local listing="$SCRATCH/listing.txt"
+    local listing2="$SCRATCH/listing2.txt"
+    local probe="$SCRATCH/m31b_probe.sfn"
+    local out_log="$SCRATCH/m31b.log"
+    cat > "$probe" <<PROBE
+fn main() -> int ![io] {
+    fs.createDirectory("${base}/x/y/z", true);
+    fs.writeFile("${base}/alpha.txt", "a");
+    fs.writeFile("${base}/beta.txt", "b");
+    let entries = fs.listDirectory("${base}");
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        fs.appendFile("${listing}", entries[i]);
+        fs.appendFile("${listing}", "\n");
+        i = i + 1;
+    }
+    fs.deleteFile("${base}/alpha.txt");
+    let after = fs.listDirectory("${base}");
+    let mut j = 0;
+    loop {
+        if j >= after.length { break; }
+        fs.appendFile("${listing2}", after[j]);
+        fs.appendFile("${listing2}", "\n");
+        j = j + 1;
+    }
+    return 0;
+}
+PROBE
+    if ! "$BINARY" run "$probe" > "$out_log" 2>&1; then
+        echo "[test]   sfn run m31b_probe.sfn failed:"
+        cat "$out_log"
+        return 1
+    fi
+    # Recursive mkdir materialized every parent component.
+    if [ ! -d "$base/x/y/z" ]; then
+        echo "[test]   recursive mkdir did not create $base/x/y/z"
+        return 1
+    fi
+    # First enumeration sees both files plus the nested dir 'x'.
+    local want
+    for want in alpha.txt beta.txt x; do
+        if ! grep -qx "$want" "$listing"; then
+            echo "[test]   first listing missing '$want':"
+            sed 's/^/[test]     /' "$listing"
+            return 1
+        fi
+    done
+    # delete removed alpha.txt from disk.
+    if [ -e "$base/alpha.txt" ]; then
+        echo "[test]   delete did not remove $base/alpha.txt"
+        return 1
+    fi
+    # Second enumeration drops alpha.txt but keeps beta.txt and x.
+    if grep -qx "alpha.txt" "$listing2"; then
+        echo "[test]   second listing still contains alpha.txt:"
+        sed 's/^/[test]     /' "$listing2"
+        return 1
+    fi
+    for want in beta.txt x; do
+        if ! grep -qx "$want" "$listing2"; then
+            echo "[test]   second listing missing '$want':"
+            sed 's/^/[test]     /' "$listing2"
+            return 1
+        fi
+    done
+    return 0
+}
+
 # ---- Test: compiler binary exports the sfn_fs_* family ----
 test_compiler_binary_exports() {
     local nm_log
@@ -177,7 +305,8 @@ test_compiler_binary_exports() {
         return 1
     fi
     local missing=0
-    for sym in sfn_fs_read_file sfn_fs_write_file sfn_fs_append_file; do
+    for sym in sfn_fs_read_file sfn_fs_write_file sfn_fs_append_file \
+        sfn_fs_delete sfn_fs_mkdir sfn_fs_list_dir sfn_fs_read_bytes; do
         if ! grep -qE "[[:space:]][Tt][[:space:]]_?${sym}\$" <<< "$nm_log"; then
             echo "[test]   compiler binary does not export defined symbol ${sym}"
             missing=$((missing + 1))
@@ -321,10 +450,12 @@ run_test "sfn fmt --check is canonical for both touched modules" test_fmt_clean
 run_test "libc.sfn declares stat/opendir/readdir/closedir/unlink/mkdir/rmdir" test_libc_declares_dir_stat_externs
 run_test "sfn emit llvm produces define for every sfn_fs_* export" test_emit_define_shape
 run_test "probe binary routes fs.{readFile,writeFile,appendFile} through @sfn_fs_*" test_probe_flipped
-run_test "compiler binary exports defined sfn_fs_read_file / write_file / append_file" test_compiler_binary_exports
+run_test "probe binary routes fs.{listDirectory,deleteFile,createDirectory} through @sfn_fs_*" test_probe_flipped_m31b
+run_test "compiler binary exports defined sfn_fs_* family (read/write/append + list/delete/mkdir/read_bytes)" test_compiler_binary_exports
 run_test "runtime/native/capsule.toml sfn-sources lists the adapter" test_manifest_lists_filesystem
 run_test "fs.writeFile / readFile / appendFile round-trip end-to-end" test_round_trip_file
 run_test "large-file round-trip exercises chunked-read grow path" test_round_trip_large_file
+run_test "fs.createDirectory / listDirectory / deleteFile round-trip end-to-end" test_round_trip_list_delete_mkdir
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
