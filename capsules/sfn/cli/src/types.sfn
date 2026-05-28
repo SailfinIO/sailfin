@@ -69,3 +69,22 @@ struct ParseResult {
     matches: Matches;
     error: ParseError;
 }
+
+// Style carries the resolved policy for emitting ANSI escape codes to
+// a given stream. `enabled` is the single gate every style helper
+// consults — when false, the helpers return plain text. `mode`
+// records how the policy was decided so callers can surface it
+// in `--verbose` / debug output (`"auto"` | `"always"` | `"never"`).
+// `stream` is the stream name the style targets (`"stdout"` |
+// `"stderr"`) — kept on the struct so callers don't have to thread
+// it separately when wiring `print_diag` (issue #793 / 1.4).
+//
+// `Style` values are constructed via `style_for_stream`,
+// `style_with_mode`, or `style_resolve` in `style.sfn`. The struct
+// is intentionally a plain value type with no internal state so it
+// is safe to pass through the call stack without ownership concerns.
+struct Style {
+    enabled: boolean;
+    mode: string;
+    stream: string;
+}

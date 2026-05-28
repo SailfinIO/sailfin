@@ -1,0 +1,171 @@
+// Tests for sfn/cli — NO_COLOR / TTY-aware Style policy (issue #792).
+//
+// Covers:
+//   - `Style` struct exported via the capsule barrel.
+//   - `no_color_active()` agrees with the running env.
+//   - `style_for_stream(stream)` returns enabled iff `NO_COLOR` is unset.
+//   - `style_with_mode` honors `--color=always|never`; falls through
+//     to env detection for `"auto"` and unknown modes.
+//   - `style_resolve` (pure variant) honors all three modes with an
+//     explicit `NO_COLOR` value, independent of the running env.
+//   - Style-aware `paint*` helpers emit plain text when disabled and
+//     either ANSI (when `_esc()` is non-empty) or plain text (when
+//     `_esc()` is empty, the bootstrap default) when enabled.
+//
+// The tests are written to pass regardless of whether the host env
+// has `NO_COLOR` set — env-sensitive assertions branch on the actual
+// runtime value, while the bulk of coverage exercises the pure
+// `style_resolve` entry point so the contract is locked even when
+// the runner env varies. The `Verification` block on the issue
+// invokes this file once with `NO_COLOR=1` and once without to
+// confirm both branches in practice.
+import {
+    Style,
+    bold,
+    no_color_active,
+    paint,
+    paint_bold,
+    paint_dim,
+    paint_red,
+    paint_yellow,
+    red,
+    style_for_stream,
+    style_resolve,
+    style_with_mode
+} from "../src/mod";
+
+// ── Style struct shape ────────────────────────────────────────────
+test "style: Style fields default to disabled-stderr-auto via style_resolve" {
+    let s = style_resolve("stderr", "auto", "1");
+    assert s.enabled == false;
+    assert strings_equal(s.mode, "auto");
+    assert strings_equal(s.stream, "stderr");
+}
+
+// ── style_resolve: --color=never always wins ─────────────────────
+test "style: style_resolve(never) disables regardless of NO_COLOR=unset" {
+    let s = style_resolve("stdout", "never", "");
+    assert s.enabled == false;
+    assert strings_equal(s.mode, "never");
+    assert strings_equal(s.stream, "stdout");
+}
+
+test "style: style_resolve(never) disables regardless of NO_COLOR=set" {
+    let s = style_resolve("stderr", "never", "1");
+    assert s.enabled == false;
+    assert strings_equal(s.mode, "never");
+}
+
+// ── style_resolve: --color=always always wins ────────────────────
+test "style: style_resolve(always) enables regardless of NO_COLOR=set" {
+    let s = style_resolve("stderr", "always", "1");
+    assert s.enabled == true;
+    assert strings_equal(s.mode, "always");
+    assert strings_equal(s.stream, "stderr");
+}
+
+test "style: style_resolve(always) enables regardless of NO_COLOR=unset" {
+    let s = style_resolve("stdout", "always", "");
+    assert s.enabled == true;
+    assert strings_equal(s.mode, "always");
+}
+
+// ── style_resolve: --color=auto defers to NO_COLOR ───────────────
+test "style: style_resolve(auto) disables when NO_COLOR=1" {
+    let s = style_resolve("stderr", "auto", "1");
+    assert s.enabled == false;
+    assert strings_equal(s.mode, "auto");
+}
+
+test "style: style_resolve(auto) enables when NO_COLOR is empty" {
+    let s = style_resolve("stderr", "auto", "");
+    assert s.enabled == true;
+    assert strings_equal(s.mode, "auto");
+}
+
+test "style: style_resolve treats any non-empty NO_COLOR as set" {
+    // Per https://no-color.org/: any non-empty value disables color.
+    let s_zero = style_resolve("stderr", "auto", "0");
+    assert s_zero.enabled == false;
+    let s_no = style_resolve("stderr", "auto", "no");
+    assert s_no.enabled == false;
+}
+
+test "style: style_resolve falls through to auto for unknown modes" {
+    // Unknown --color= values shouldn't crash; behave like "auto".
+    let s = style_resolve("stderr", "rainbow", "1");
+    assert s.enabled == false;
+    assert strings_equal(s.mode, "auto");
+}
+
+// ── stream is preserved verbatim ─────────────────────────────────
+test "style: style_resolve preserves arbitrary stream label" {
+    let s = style_resolve("custom", "always", "");
+    assert strings_equal(s.stream, "custom");
+}
+
+// ── paint* helpers: disabled style emits plain text ──────────────
+test "style: paint returns plain text when style.enabled is false" {
+    let s = style_resolve("stderr", "never", "");
+    assert strings_equal(paint(s, "31", "hello"), "hello");
+    assert strings_equal(paint_bold(s, "x"), "x");
+    assert strings_equal(paint_red(s, "err"), "err");
+    assert strings_equal(paint_dim(s, "y"), "y");
+    assert strings_equal(paint_yellow(s, "warn"), "warn");
+}
+
+// ── paint* helpers: enabled style applies ANSI (when supported) ──
+//
+// The bootstrap `_esc()` returns "" today, so even an enabled Style
+// produces plain text. We assert the output equals what `_ansi_wrap`
+// would produce for the same code — when ESC eventually becomes a
+// real character, this same assertion exercises the ANSI path
+// without test changes. The legacy single-arg `bold(text)` / `red(text)`
+// helpers route through the same `_ansi_wrap` and so produce the
+// identical output, which is what we compare against.
+test "style: paint with enabled style matches legacy bold output" {
+    let s = style_resolve("stderr", "always", "");
+    assert strings_equal(paint_bold(s, "hello"), bold("hello"));
+    assert strings_equal(paint_red(s, "err"), red("err"));
+}
+
+// ── env-sensitive: no_color_active agrees with running env ───────
+//
+// These three tests branch on the actual `NO_COLOR` value so the
+// same suite passes whether the runner sets it or not. The issue's
+// verification block runs the suite once in each state.
+test "style: no_color_active reflects NO_COLOR env" ![io] {
+    let raw = env.get("NO_COLOR");
+    let active = no_color_active();
+    if raw.length > 0 { assert active == true; } else { assert active == false; }
+}
+
+test "style: style_for_stream returns disabled when NO_COLOR is set" ![io] {
+    let raw = env.get("NO_COLOR");
+    let s = style_for_stream("stderr");
+    assert strings_equal(s.mode, "auto");
+    assert strings_equal(s.stream, "stderr");
+    if raw.length > 0 { assert s.enabled == false; } else {
+        assert s.enabled == true;
+    }
+}
+
+test "style: style_with_mode(auto) matches style_for_stream" ![io] {
+    let auto = style_with_mode("stdout", "auto");
+    let direct = style_for_stream("stdout");
+    assert auto.enabled == direct.enabled;
+    assert strings_equal(auto.mode, direct.mode);
+    assert strings_equal(auto.stream, direct.stream);
+}
+
+test "style: style_with_mode(always) ignores env" ![io] {
+    let s = style_with_mode("stderr", "always");
+    assert s.enabled == true;
+    assert strings_equal(s.mode, "always");
+}
+
+test "style: style_with_mode(never) ignores env" ![io] {
+    let s = style_with_mode("stderr", "never");
+    assert s.enabled == false;
+    assert strings_equal(s.mode, "never");
+}
