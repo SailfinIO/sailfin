@@ -693,11 +693,11 @@ feature availability.
 ## Standard Library Capsules (Current)
 
 The following capsules ship as part of the Sailfin standard library under
-`capsules/sfn/`. Users import them by bare name (e.g. `from "fmt"`).
+`capsules/sfn/`. Users import them by bare name (e.g. `from "strings"`).
 
 | Capsule | Import | Status | Effects | Description |
 |---------|--------|--------|---------|-------------|
-| `sfn/fmt` | `"fmt"` | Shipped | None | String formatting, trim, case conversion, split/join |
+| `sfn/strings` | `"strings"` | Shipped | None | Trim, case conversion, split/join, find/replace |
 | `sfn/json` | `"json"` | Shipped | None | JSON parsing, serialization, pretty-print |
 | `sfn/crypto` | `"crypto"` | Shipped | None | SHA-256, base64 encode (via C runtime) |
 | `sfn/math` | `"math"` | Shipped | None | abs, min/max, clamp, floor/ceil/round, pow, sum/mean |
