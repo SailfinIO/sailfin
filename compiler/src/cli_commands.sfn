@@ -37,6 +37,7 @@ import {
     _shell_single_quote_arg,
     _sort_strings_cmd,
     _string_contains_cmd,
+    _strip_trailing_slashes_cmd,
     _suite_name_from_path,
     _toml_trim_cmd,
     _write_text_cmd
@@ -1042,7 +1043,18 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         let mut sub_root = scratch_root;
         let mut scratch_owned = false;
         if scratch_env.length == 0 {
-            let tmp = _shell_read_cmd("mktemp -d /tmp/sfn-test-XXXXXX");
+            // Honor TMPDIR (macOS CI points it at /var/folders/...,
+            // and contributors may aim it at tmpfs/quota dirs),
+            // falling back to /tmp — matching the deleted wrapper's
+            // `${TMPDIR:-/tmp}`. Resolved Sailfin-side via _get_env_cmd
+            // rather than shell `${VAR:-default}` expansion because
+            // `${` is the reserved (parser-pending) interpolation
+            // sigil and isn't safe to embed in a string literal.
+            let mut tmp_base = _get_env_cmd("TMPDIR");
+            if tmp_base.length == 0 { tmp_base = "/tmp"; }
+            tmp_base = _strip_trailing_slashes_cmd(tmp_base);
+            let tmp = _shell_read_cmd("mktemp -d \"" + tmp_base
+                + "/sfn-test-XXXXXX\"");
             if tmp.length > 0 {
                 sub_root = tmp;
                 scratch_owned = true;
