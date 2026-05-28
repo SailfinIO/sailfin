@@ -47,22 +47,25 @@ sfn run src/main.sfn
 
 ---
 
-### `sfn test [path]`
+### `sfn test [path...]`
 
 Discover and run Sailfin test files. Test files follow the `*_test.sfn` naming convention. Without a path argument, `sfn test` discovers all `*_test.sfn` files under the current directory.
+
+Multiple path arguments group tests into named **suites** for reporting: each path becomes a suite labelled by its basename, and the runner emits a per-suite `═══ <name>: N/M passed, K failed ═══` banner at end-of-run. The repository `make test` target uses this to run unit / integration / e2e / capsule tests in one invocation.
 
 **Usage:**
 
 ```bash
-sfn test [path]
+sfn test [--json] [path...]
 ```
 
 **Examples:**
 
 ```bash
 sfn test                                  # run all *_test.sfn files found
-sfn test compiler/tests/unit/             # run tests in a specific directory
-sfn test compiler/tests/unit/arrays_test.sfn  # run a single test file
+sfn test compiler/tests/unit/             # one suite, banner labelled "unit"
+sfn test compiler/tests/unit/arrays_test.sfn  # single file (no banner)
+sfn test compiler/tests/unit compiler/tests/integration capsules  # three suites
 ```
 
 > **Note:** `--filter` is not yet supported. To narrow test scope, pass a specific file or directory path.

@@ -2305,7 +2305,9 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
         return run_rc;
     }
 
-    if is_test { return handle_test_command(args, runtime_root); }
+    if is_test {
+        return handle_test_command(args, runtime_root, binary_dir);
+    }
 
     if is_help {
         print(_usage());

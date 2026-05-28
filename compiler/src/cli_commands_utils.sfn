@@ -2,7 +2,7 @@
 //
 // Utility functions for CLI command handlers: path, string, file, and
 // network operations.
-import { find_char_local, substring } from "./string_utils";
+import { char_code_at_text, find_char_local, substring } from "./string_utils";
 
 export {
     _ends_with_cmd,
@@ -21,6 +21,8 @@ export {
     _collect_test_files_cmd,
     _collect_sfn_files_cmd,
     _strip_trailing_slashes_cmd,
+    _sort_strings_cmd,
+    _suite_name_from_path,
     _curl_post_json_cmd,
     _curl_download_cmd,
     _sha256_of_file_cmd,
@@ -252,6 +254,75 @@ fn _strip_trailing_slashes_cmd(path: string) -> string {
         result = substring(result, 0, result.length - 1);
     }
     return result;
+}
+
+// Derive a per-suite banner label from a positional path passed to
+// `sfn test`. Trims trailing slashes (so `compiler/tests/unit/`
+// yields the same label as `compiler/tests/unit`) and returns the
+// path's basename. Empty input degenerates to `.` so the banner
+// always carries a non-empty label. Pure (no I/O) so it's covered
+// by a fast unit test in
+// `compiler/tests/unit/cli_path_normalization_test.sfn`.
+// Lexicographic byte-wise less-than (mirrors `_string_lt` in
+// `build_cache.sfn`). Used to give `sfn test`'s file discovery a
+// stable, platform-independent order — `fs.listDirectory` returns
+// entries in filesystem order, which varies across platforms, so
+// the runner sorts the collected paths to match the old
+// `find ... | sort` Makefile behaviour.
+fn _string_lt_cmd(a: string, b: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= a.length || i >= b.length { break; }
+        let ca = char_code_at_text(a, i);
+        let cb = char_code_at_text(b, i);
+        if ca < cb { return true; }
+        if ca > cb { return false; }
+        i += 1;
+    }
+    return a.length < b.length;
+}
+
+// Insertion sort over a string array (N is small — at most the test
+// count of one suite). Returns a new sorted array; input is left
+// untouched.
+fn _sort_strings_cmd(input: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut copy_i: int = 0;
+    loop {
+        if copy_i >= input.length { break; }
+        out.push(input[copy_i]);
+        copy_i += 1;
+    }
+    let mut k: int = 1;
+    loop {
+        if k >= out.length { break; }
+        let cur = out[k];
+        let mut j: int = k - 1;
+        loop {
+            if j < 0 { break; }
+            if !_string_lt_cmd(cur, out[j]) { break; }
+            out[j + 1] = out[j];
+            j -= 1;
+        }
+        out[j + 1] = cur;
+        k += 1;
+    }
+    return out;
+}
+
+fn _suite_name_from_path(path: string) -> string {
+    let trimmed = _strip_trailing_slashes_cmd(path);
+    if trimmed.length == 0 { return "."; }
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= trimmed.length { break; }
+        if substring(trimmed, i, i + 1) == "/" { last_slash = i; }
+        i += 1;
+    }
+    if last_slash < 0 { return trimmed; }
+    if last_slash == trimmed.length - 1 { return trimmed; }
+    return substring(trimmed, last_slash + 1, trimmed.length);
 }
 
 fn _collect_sfn_files_cmd(root: string, max_depth: int) -> string[] ![io] {
