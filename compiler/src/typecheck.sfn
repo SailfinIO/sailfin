@@ -28,6 +28,7 @@ import {
     ScopeResult,
     SymbolCollectionResult,
     SymbolEntry,
+    append_symbol,
     check_enum_variants,
     check_extern_signature,
     check_function_signature,
@@ -532,7 +533,8 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             let case = statement.cases[index];
             diagnostics = diagnostics.concat(walk_expression(case.pattern, bindings, imports));
             diagnostics = diagnostics.concat(walk_expression(case.guard, bindings, imports));
-            let _blk_diags = check_block(case.body, bindings, interfaces, imports, top_level);
+            let arm_bindings = register_match_pattern_bindings(case.pattern, bindings);
+            let _blk_diags = check_block(case.body, arm_bindings, interfaces, imports, top_level);
             let mut _ci: int = 0;
             loop {
                 if _ci >= _blk_diags.length { break; }
@@ -793,6 +795,33 @@ fn _trim_main_type_text(text: string) -> string {
 // Every other position is non-emitting — argument type checking,
 // undefined *variable* references, and member/method resolution are all
 // out of #616 scope.
+// Extract enum-destructure field-binding NAMES from a match-arm
+// pattern and append them to a fresh copy of `bindings` as
+// "variable"-kind symbols so the arm body can reference them. TYPE
+// resolution is deferred to lowering (#830); the typecheck pass tracks
+// names only (`SymbolEntry` has no type field). A bare-identifier
+// pattern (catch-all) binds that single name unless it is the wildcard
+// `_`. Literal patterns add nothing. `append_symbol` clones, so the
+// parent scope is never mutated and arm bindings stay arm-scoped.
+fn register_match_pattern_bindings(pattern: Expression?, bindings: SymbolEntry[]) -> SymbolEntry[] {
+    if pattern == null { return bindings; }
+    if pattern.variant == "Struct" {
+        let mut result: SymbolEntry[] = bindings;
+        let mut index: int = 0;
+        loop {
+            if index >= pattern.fields.length { break; }
+            result = append_symbol(result, pattern.fields[index].name, "variable", null);
+            index += 1;
+        }
+        return result;
+    }
+    if pattern.variant == "Identifier" {
+        if pattern.name == "_" { return bindings; }
+        return append_symbol(bindings, pattern.name, "variable", null);
+    }
+    return bindings;
+}
+
 fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: ImportSymbolTable) -> Diagnostic[] {
     if expression == null { return []; }
     if expression.variant == "Call" {

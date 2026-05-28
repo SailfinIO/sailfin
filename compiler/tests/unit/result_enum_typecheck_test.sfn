@@ -1,0 +1,86 @@
+// Unit tests for per-instantiation enum type-parameter substitution
+// (issue #829). The substitution primitives let the typecheck layer
+// resolve a payload-carrying enum's variant fields to concrete types at
+// an instantiation site (e.g. `Foo<int, Error>.Ok.value` -> `int`)
+// instead of the bare declared parameter name (`T`). LLVM layout /
+// lowering consumption is #830 and out of scope here; these tests drive
+// the callable primitives directly, with the enum declared IN-FILE (not
+// in the prelude).
+import { Statement, TypeAnnotation } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+import {
+    Diagnostic,
+    resolve_enum_variant_field_type_from_annotation,
+    validate_enum_annotation
+} from "../../src/typecheck_types";
+
+fn _enum_decl(source: string, name: string) -> Statement? {
+    let program = parse_program(source);
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "EnumDeclaration" {
+            if strings_equal(statement.name, name) { return statement; }
+        }
+        index += 1;
+    }
+    return null;
+}
+
+// Resolve a variant field's concrete type at an instantiation, folding
+// the not-found cases into sentinel strings so the assert sites stay
+// free of optional narrowing.
+fn _resolve_field(source: string, enum_name: string, variant: string, field: string, annotation: string) -> string {
+    let decl = _enum_decl(source, enum_name);
+    if decl == null { return "<no-enum>"; }
+    let resolved = resolve_enum_variant_field_type_from_annotation(decl, variant, field, annotation);
+    if resolved == null { return "<no-field>"; }
+    return resolved;
+}
+
+fn _arity_diags(source: string, enum_name: string, annotation_text: string) -> Diagnostic[] {
+    let decl = _enum_decl(source, enum_name);
+    if decl == null { return []; }
+    return validate_enum_annotation("site", decl, TypeAnnotation {
+        text: annotation_text
+    });
+}
+
+test "result enum: Ok arm field substitutes T -> int" {
+    let source = "enum Foo<T, E> { Ok { value: T }, Err { error: E } }";
+    assert strings_equal(_resolve_field(source, "Foo", "Ok", "value", "Foo<int, Error>"), "int");
+}
+
+test "result enum: Err arm field substitutes E -> Error" {
+    let source = "enum Foo<T, E> { Ok { value: T }, Err { error: E } }";
+    assert strings_equal(_resolve_field(source, "Foo", "Err", "error", "Foo<int, Error>"), "Error");
+}
+
+test "result enum: nested Array<T> field substitutes inner param" {
+    let source = "enum Box<T> { Hold { items: Array<T> } }";
+    assert strings_equal(_resolve_field(source, "Box", "Hold", "items", "Box<int>"), "Array<int>");
+}
+
+test "result enum: unrelated field name leaves identifier intact" {
+    // `Transaction` must not be partially rewritten by the `T` parameter.
+    let source = "enum Ledger<T> { Entry { tx: Transaction } }";
+    assert strings_equal(_resolve_field(source, "Ledger", "Entry", "tx", "Ledger<int>"), "Transaction");
+}
+
+test "result enum: too few type arguments yields E0302" {
+    let diags = _arity_diags("enum Foo<T, E> { Ok { value: T } }", "Foo", "Foo<int>");
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0302");
+}
+
+test "result enum: missing type arguments yields E0302" {
+    let diags = _arity_diags("enum Foo<T, E> { Ok { value: T } }", "Foo", "Foo");
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0302");
+}
+
+test "result enum: correct arity produces no diagnostic" {
+    let diags = _arity_diags("enum Foo<T, E> { Ok { value: T } }", "Foo", "Foo<int, Error>");
+    assert diags.length == 0;
+}
