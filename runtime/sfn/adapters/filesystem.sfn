@@ -281,10 +281,13 @@ fn sfn_fs_append_file(path: * u8, contents: * u8) -> void ![io] {
     sailfin_adapter_fs_append_file(path, contents);
 }
 
-// `sfn_fs_delete(path)` — remove the file (or empty directory)
-// named by `path`. Pure Sailfin: `unlink(2)` returns 0 on success,
-// -1 on error. Mirrors the C `sailfin_adapter_fs_delete_file`
-// null-guard + `unlink == 0` contract exactly.
+// `sfn_fs_delete(path)` — remove the file named by `path`. Pure
+// Sailfin: `unlink(2)` returns 0 on success, -1 on error. Files
+// only — `unlink` cannot remove directories (it fails with
+// `EISDIR` / `EPERM`); directory removal would need `rmdir`, which
+// the `fs.deleteFile` surface does not expose. Mirrors the C
+// `sailfin_adapter_fs_delete_file` null-guard + `unlink == 0`
+// contract exactly.
 fn sfn_fs_delete(path: * u8) -> bool ![io] {
     if path as i64 == 0 { return false; }
     return unlink(path) == 0;

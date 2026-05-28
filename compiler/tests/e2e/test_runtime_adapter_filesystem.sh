@@ -177,11 +177,15 @@ PROBE
 # cannot drop the `@sfn_fs_list_dir` call before the assertion runs.
 test_probe_flipped_m31b() {
     local probe="$SCRATCH/fs_probe_m31b.sfn"
+    # deleteFile maps to unlink (files only), so the probe targets a
+    # real file it just wrote — not the directory — to stay
+    # representative if the probe is ever executed.
     cat > "$probe" <<'PROBE'
 fn main() -> int ![io] {
     fs.createDirectory("/tmp/sfn_fs_probe_m31b/a/b", true);
+    fs.writeFile("/tmp/sfn_fs_probe_m31b/note.txt", "x");
     let entries = fs.listDirectory("/tmp/sfn_fs_probe_m31b");
-    fs.deleteFile("/tmp/sfn_fs_probe_m31b/a");
+    fs.deleteFile("/tmp/sfn_fs_probe_m31b/note.txt");
     return entries.length;
 }
 PROBE
