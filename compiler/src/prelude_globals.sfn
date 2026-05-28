@@ -103,18 +103,6 @@ fn _pg_find_runtime_dir() -> string ![io] {
     return "";
 }
 
-// Process-local memo for `load_prelude_global_names`. The runtime
-// surface is fixed for a given compiler binary, so the name set never
-// changes within a process. Caching it turns the per-file FS work
-// (runtime-root discovery + reading/scanning ~16 runtime sources) into a
-// one-time cost: `sfn check <dir>` and `sfn test` compile many files in
-// a single process and would otherwise redo the traversal per file.
-// (The per-module self-host build spawns a fresh `sfn emit` process per
-// module, so it pays the cost once per process either way.) Mirrors the
-// module-level mutable-state pattern in `test_runner_state.sfn`.
-let mut _pg_cache_loaded: boolean = false;
-let mut _pg_cache_names: string[] = [];
-
 // Names of every implicitly-available callable: the compiler-known
 // runtime-helper builtins passed in by the caller (`helper_names` —
 // `number_to_string`, `print`, the `runtime_*_fn` family, …) plus the
@@ -125,12 +113,17 @@ let mut _pg_cache_names: string[] = [];
 // `helper_names` is supplied by the caller (main.sfn / tools/check.sfn,
 // via `llvm/runtime_helpers.runtime_helper_call_names()`) rather than
 // imported here on purpose: this module is imported by `main`, so a
-// `prelude_globals → llvm/...` edge would invert the layering and break
-// the cold self-host build's module emit order (#812 — the resolver
-// tried to lower this low-level module before the `llvm` layer was
-// staged).
+// `prelude_globals → llvm/...` edge would invert the layering.
+//
+// NOTE (#812): this intentionally recomputes on every call rather than
+// memoizing in a module-level cache. A `let mut _cache: string[]`
+// module global makes the seed compiler emit a call to
+// `@sailfin_module_init__prelude_globals` without a definition (invalid
+// IR — `llvm-as` rejects it, breaking the cold self-host build). Boolean
+// module globals (see `test_runner_state.sfn`) are fine; array-typed
+// ones are not. The per-call FS scan is the accepted cost until that
+// seed codegen bug is fixed; see the PR thread.
 fn load_prelude_global_names(helper_names: string[]) -> string[] ![io] {
-    if _pg_cache_loaded { return _pg_cache_names; }
     let mut names = helper_names;
     let runtime_dir = _pg_find_runtime_dir();
     if runtime_dir.length > 0 {
@@ -138,7 +131,5 @@ fn load_prelude_global_names(helper_names: string[]) -> string[] ![io] {
         names = names.concat(prelude_global_names_from_source(prelude_source));
         names = _pg_scan_sfn_tree(runtime_dir, names);
     }
-    _pg_cache_names = names;
-    _pg_cache_loaded = true;
     return names;
 }
