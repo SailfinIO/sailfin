@@ -1,0 +1,87 @@
+// Unit tests for the prelude-symbol scanner (issue #812).
+//
+// `prelude_global_names_from_source` extracts the names of every
+// top-level `fn` / `let` / `extern fn` declaration from a runtime source
+// buffer so the E0420 undefined-callee check treats implicitly-available
+// runtime globals (and the parser-synthesized `runtime_assert_fail_fn`
+// helper, which the prelude binds as a top-level `let`) as in-scope.
+// These tests pin the column-0 scan: top-level decls are captured,
+// nested/indented ones are not, and `let mut` qualifiers are skipped.
+//
+// The scanner lives in `prelude_scan` (pure) rather than
+// `prelude_globals` (which references the runtime-root externs) so this
+// test links without the compiler binary's runtime exec object.
+import { prelude_global_names_from_source } from "../../src/prelude_scan";
+
+fn _contains_name(names: string[], target: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        if strings_equal(names[i], target) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "prelude scanner: captures a top-level fn name" {
+    let source = "fn monotonic_millis() -> int { return 0; }";
+    let names = prelude_global_names_from_source(source);
+    assert _contains_name(names, "monotonic_millis");
+}
+
+test "prelude scanner: captures a top-level let binding name" {
+    let source = "let runtime_assert_fail_fn = runtime.assert_fail;";
+    let names = prelude_global_names_from_source(source);
+    assert _contains_name(names, "runtime_assert_fail_fn");
+}
+
+test "prelude scanner: skips the let mut qualifier" {
+    let source = "let mut counter = 0;";
+    let names = prelude_global_names_from_source(source);
+    assert _contains_name(names, "counter");
+    assert ! _contains_name(names, "mut");
+}
+
+test "prelude scanner: ignores indented (non-top-level) declarations" {
+    // A `fn`/`let` nested inside a body is indented, so the column-0
+    // scan must not capture it.
+    let source = "fn outer() {\n    let inner_local = 1;\n}";
+    let names = prelude_global_names_from_source(source);
+    assert _contains_name(names, "outer");
+    assert ! _contains_name(names, "inner_local");
+}
+
+test "prelude scanner: ignores line comments" {
+    // A `//` comment line never begins with `fn ` / `let `.
+    let source = "// fn not_a_real_decl() {}\nfn real_decl() {}";
+    let names = prelude_global_names_from_source(source);
+    assert _contains_name(names, "real_decl");
+    assert ! _contains_name(names, "not_a_real_decl");
+}
+
+test "prelude scanner: captures extern fn name" {
+    // Runtime C-ABI surface (e.g. `substring_unchecked` in
+    // runtime/sfn/string.sfn) is implicitly linked and callable bare.
+    let source = "extern fn substring_unchecked(text: * u8, start: f64, end: f64) -> * u8;";
+    let names = prelude_global_names_from_source(source);
+    assert _contains_name(names, "substring_unchecked");
+}
+
+test "prelude scanner: captures unsafe extern fn name" {
+    let source = "unsafe extern fn malloc(size: usize) -> * u8;";
+    let names = prelude_global_names_from_source(source);
+    assert _contains_name(names, "malloc");
+}
+
+test "prelude scanner: collects multiple declarations" {
+    let source = "fn alpha() {}\nlet beta = 1;\nfn gamma() {}";
+    let names = prelude_global_names_from_source(source);
+    assert _contains_name(names, "alpha");
+    assert _contains_name(names, "beta");
+    assert _contains_name(names, "gamma");
+}
+
+test "prelude scanner: empty source yields no names" {
+    let names = prelude_global_names_from_source("");
+    assert names.length == 0;
+}

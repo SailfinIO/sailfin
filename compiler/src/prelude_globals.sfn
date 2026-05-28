@@ -1,0 +1,135 @@
+// compiler/src/prelude_globals.sfn
+//
+// #812 — implicit-runtime resolution for the E0420 undefined-callee
+// check. The runtime (`runtime/prelude.sfn` plus the `runtime/sfn/**`
+// modules) is implicitly linked into every Sailfin binary, so its
+// top-level `fn` / `let` / `extern fn` declarations (`monotonic_millis`,
+// `strings_equal`, `number_to_string`, `substring_unchecked`, the
+// `runtime_*_fn` lowering targets, the parser-synthesized
+// `runtime_assert_fail_fn`, …) are callable without an explicit
+// `import` and resolve at link time. Without those names in scope the
+// E0420 walker would mistake a bare runtime call for an undefined
+// function and break self-host, the test suite, and every example.
+//
+// This module owns the IO side (runtime-root resolution + source
+// scanning); the pure declaration-name scanner lives in `prelude_scan`
+// so unit tests can cover it without linking the externs below. The
+// runtime SOURCE directory is located via `resolve_runtime_root` (the
+// same exe-relative resolution the linker uses to find `prelude.o`), so
+// the lookup is cwd-independent — integration/e2e tests run the compiler
+// from scratch directories where a cwd-relative `runtime/` would miss.
+import { prelude_global_names_from_source } from "./prelude_scan";
+import { substring } from "./string_utils";
+
+// Mirrors the runtime-root externs declared in `cli_main.sfn` (declared,
+// not imported, because the seed's cross-module signature resolver does
+// not hand back runtime-capsule `.sfn` signatures — see the note there).
+// Extern signatures must be C-ABI types (`* u8`, per E0801); the result
+// is cast to `string` for `fs` use exactly as `cli_main` does.
+extern fn exe_path() -> * u8;
+
+extern fn resolve_runtime_root(exe: * u8) -> * u8;
+
+fn _pg_join(dir: string, child: string) -> string {
+    if dir.length == 0 { return child; }
+    if substring(dir, dir.length - 1, dir.length) == "/" { return dir + child; }
+    return dir + "/" + child;
+}
+
+// Scan every `*.sfn` under `runtime_dir/sfn` (BFS, depth-bounded —
+// mirrors `_cr_collect_capsule_sources` in capsule_resolver.sfn, which
+// notes the seed compiler is brittle around recursive accumulators) and
+// append their top-level names to `names`.
+fn _pg_scan_sfn_tree(runtime_dir: string, names: string[]) -> string[] ![io] {
+    let mut out = names;
+    let sfn_root = _pg_join(runtime_dir, "sfn");
+    if !fs.exists(sfn_root) { return out; }
+    let mut dir_queue: string[] = [sfn_root];
+    let mut head: int = 0;
+    let max_depth: int = 64;
+    loop {
+        if head >= dir_queue.length { break; }
+        if head >= max_depth { break; }
+        let dir = dir_queue[head];
+        head += 1;
+        if !fs.exists(dir) { continue; }
+        let entries = fs.listDirectory(dir);
+        let mut i: int = 0;
+        loop {
+            if i >= entries.length { break; }
+            let entry = entries[i];
+            i += 1;
+            let full = _pg_join(dir, entry);
+            if entry.length >= 4 {
+                if substring(entry, entry.length - 4, entry.length) == ".sfn" {
+                    let source = fs.readFile(full);
+                    let module_names = prelude_global_names_from_source(source);
+                    out = out.concat(module_names);
+                    continue;
+                }
+            }
+            // Anything without a `.sfn` suffix is a candidate subdir;
+            // `listDirectory` on a file returns empty, so this is safe.
+            let child_entries = fs.listDirectory(full);
+            if child_entries.length > 0 { dir_queue.push(full); }
+        }
+    }
+    return out;
+}
+
+// Locate the runtime SOURCE directory (the one containing `prelude.sfn`)
+// cwd-independently. Tries the resolved runtime root first, then
+// cwd-relative fallbacks for in-repo invocations.
+fn _pg_find_runtime_dir() -> string ![io] {
+    let mut candidates: string[] = [];
+    let exe_raw: * u8 = exe_path();
+    let root_raw: * u8 = resolve_runtime_root(exe_raw);
+    let root: string = root_raw as string;
+    if root.length > 0 {
+        candidates.push(root);
+        candidates.push(_pg_join(root, "runtime"));
+    }
+    candidates.push("runtime");
+    candidates.push("../runtime");
+    candidates.push("../../runtime");
+    let mut i: int = 0;
+    loop {
+        if i >= candidates.length { break; }
+        let dir = candidates[i];
+        i += 1;
+        if dir.length == 0 { continue; }
+        if fs.exists(_pg_join(dir, "prelude.sfn")) { return dir; }
+    }
+    return "";
+}
+
+// Names of every implicitly-available callable: the compiler-known
+// runtime-helper builtins passed in by the caller (`helper_names` —
+// `number_to_string`, `print`, the `runtime_*_fn` family, …) plus the
+// prelude and `runtime/sfn/**` source declarations (available when the
+// runtime source can be located; an installed compiler shipping only
+// object files still gets the caller-supplied helper builtins).
+//
+// `helper_names` is supplied by the caller (main.sfn / tools/check.sfn,
+// via `llvm/runtime_helpers.runtime_helper_call_names()`) rather than
+// imported here on purpose: this module is imported by `main`, so a
+// `prelude_globals → llvm/...` edge would invert the layering.
+//
+// NOTE (#812): this intentionally recomputes on every call rather than
+// memoizing in a module-level cache. A `let mut _cache: string[]`
+// module global makes the seed compiler emit a call to
+// `@sailfin_module_init__prelude_globals` without a definition (invalid
+// IR — `llvm-as` rejects it, breaking the cold self-host build). Boolean
+// module globals (see `test_runner_state.sfn`) are fine; array-typed
+// ones are not. The per-call FS scan is the accepted cost until that
+// seed codegen bug is fixed; see the PR thread.
+fn load_prelude_global_names(helper_names: string[]) -> string[] ![io] {
+    let mut names = helper_names;
+    let runtime_dir = _pg_find_runtime_dir();
+    if runtime_dir.length > 0 {
+        let prelude_source = fs.readFile(_pg_join(runtime_dir, "prelude.sfn"));
+        names = names.concat(prelude_global_names_from_source(prelude_source));
+        names = _pg_scan_sfn_tree(runtime_dir, names);
+    }
+    return names;
+}

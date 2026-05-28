@@ -30,10 +30,12 @@ import {
 import { validate_capsule_capabilities, validate_effects_with_imports } from "../effect_checker";
 import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
 import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
+import { runtime_helper_call_names } from "../llvm/runtime_helpers";
 import { number_to_string } from "../main";
 import { parse_program } from "../parser/mod";
+import { load_prelude_global_names } from "../prelude_globals";
 import { substring } from "../string_utils";
-import { typecheck_diagnostics_with_import_symbols } from "../typecheck";
+import { typecheck_diagnostics_with_import_symbols_prelude } from "../typecheck";
 import { Diagnostic } from "../typecheck_types";
 
 // -------------------------------------------------------------------
@@ -105,7 +107,8 @@ fn check_source(source: string, file_path: string) -> CheckResult ![io] {
 // keep working unchanged).
 fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[], function_effects: ImportSymbolTable, capabilities_required: string[]) -> CheckResult ![io] {
     let program = parse_program(source);
-    let type_diags = typecheck_diagnostics_with_import_symbols(program, imported_interfaces, function_effects);
+    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
+    let type_diags = typecheck_diagnostics_with_import_symbols_prelude(program, imported_interfaces, function_effects, prelude_globals);
     let effect_violations = validate_effects_with_imports(program, function_effects);
     let capability_violations = validate_capsule_capabilities(program, capabilities_required);
 

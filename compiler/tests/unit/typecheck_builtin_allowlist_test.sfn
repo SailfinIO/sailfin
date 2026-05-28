@@ -60,6 +60,22 @@ test "builtin allowlist: await is in envelope" {
     assert is_builtin_call_name("await") == true;
 }
 
+test "builtin allowlist: atomic_add intrinsic is in envelope" {
+    // #812: atomic_* are call-form lowering intrinsics (emitted as LLVM
+    // atomicrmw/cmpxchg/fence) with no source declaration, so the E0420
+    // walker must treat them as builtins. Mirrors `is_atomic_builtin`
+    // (compiler/src/llvm/atomics.sfn).
+    assert is_builtin_call_name("atomic_add") == true;
+}
+
+test "builtin allowlist: atomic_cas intrinsic is in envelope" {
+    assert is_builtin_call_name("atomic_cas") == true;
+}
+
+test "builtin allowlist: atomic_fence intrinsic is in envelope" {
+    assert is_builtin_call_name("atomic_fence") == true;
+}
+
 test "builtin allowlist: notarealfunction is not in envelope" {
     // Matches the walker test fixture in typecheck_expression_walk_test.sfn.
     // Issue D will surface this as an unknown-identifier diagnostic; the
