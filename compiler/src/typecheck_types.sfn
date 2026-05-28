@@ -648,24 +648,50 @@ fn is_extern_primitive_type(text: string) -> boolean {
 //                function. Audit note (#616): missing from the
 //                pre-existing effect_checker inline list — Issue D will
 //                consume this envelope to keep `assert` calls clean.
-//   `spawn`    — parsed-but-unenforced concurrency keyword (runtime
-//                Phase 4). Appears in `examples/concurrency/*` in
-//                call form. effect_checker.sfn:623 already injects
-//                `![io]` so the walker must skip resolution.
-//   `sleep`    — parsed-but-unenforced clock primitive.
+//   `spawn`    — planned concurrency keyword (keywords.md `### spawn`,
+//                "Planned (language keyword)"); the prelude historically
+//                exposed `spawn(task, name)` as a free function. Bare
+//                Call-form exercised by `effect_checker_test.sfn:450`
+//                ("bare spawn() Call carets at the callee identifier")
+//                and `tests/e2e/test_sync_rejects_unimplemented_concurrency.sh`.
+//                effect_checker.sfn:623 already injects `![io]`.
+//   `sleep`    — clock primitive. Bare Call-form in `examples/concurrency/
+//                producer-consumer.sfn:13`, `examples/advanced/
+//                multithreaded-task.sfn:7`, and `effect_checker_test.sfn:466`.
 //                effect_checker.sfn:628 injects `![clock]`.
-//   `serve`    — parsed-but-unenforced server primitive.
+//   `serve`    — net primitive. Bare Call-form in `examples/web/
+//                http-server.sfn:6`, `rest-api.sfn:14`, and `examples/
+//                advanced/web-server-with-concurrency.sfn:23`.
 //                effect_checker.sfn:633 injects `![net]`.
-//   `channel`  — parsed-but-unenforced channel constructor (Phase 4).
-//                Appears in concurrency examples in call form;
-//                resolves to a Sailfin runtime primitive when the
-//                concurrency runtime ships.
-//   `send`     — parsed-but-unenforced channel send (Phase 4).
-//                Appears in concurrency examples in call form.
-//   `receive`  — parsed-but-unenforced channel receive (Phase 4).
-//                Appears in concurrency examples in call form.
-//   `await`    — parsed-but-unenforced await primitive (Phase 4).
-//                Pairs with `spawn` in concurrency examples in call form.
+//   `channel`  — channel constructor. Bare Call-form in `examples/
+//                concurrency/channels.sfn:6`, `producer-consumer.sfn:7`,
+//                `dynamic-task-scheduling.sfn:6`, and rejected by
+//                `tests/e2e/test_sync_rejects_unimplemented_concurrency.sh`
+//                pending the structured-concurrency runtime.
+//   `send`     — Channel.send. Today only appears as Member-form
+//                (`buffer.send(...)`, `examples/concurrency/channels.sfn:9`).
+//                Included defensively in the identifier-call allowlist
+//                because the typechecker walker runs before keyword/method
+//                disambiguation — if a user writes `send(buffer, value)`
+//                thinking it's a free function (the same misuse caught
+//                by `test_sync_rejects_unimplemented_concurrency.sh`),
+//                the rejection diagnostic must come from the
+//                concurrency-unimplemented gate, not a spurious
+//                unknown-identifier error from Issue D.
+//   `receive`  — Channel.receive. Same shape as `send`: today only
+//                Member-form (`messages.receive()` in `channels.sfn:12`,
+//                `producer-consumer.sfn:19`, `dynamic-task-scheduling.sfn:11`).
+//                Included for the same defensive reason.
+//   `await`    — unary prefix operator in the grammar (grammar.md L233:
+//                `Unary = ("!" | "-" | "+" | "await") Unary`). Today
+//                used as `await messages.receive()` in `examples/
+//                concurrency/channels.sfn:12`, not as `await(...)`.
+//                Included in the identifier-call allowlist defensively:
+//                until the lexer reserves `await` as a keyword token,
+//                the parser may construct `Call(callee=Identifier(
+//                "await"), …)` from `await(expr)`-style input, and the
+//                walker should not surface unknown-identifier there
+//                while concurrency remains under construction.
 //
 // Intentionally NOT in the envelope (Issue D will surface these as
 // unknown-identifier diagnostics so user code can shadow them):
