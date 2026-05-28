@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/cli"
-version = "0.5.0"
+version = "0.6.0"
 description = "CLI argument parsing and terminal output for Sailfin"
 
 [dependencies]
