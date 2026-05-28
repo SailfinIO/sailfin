@@ -683,10 +683,11 @@ fn mangle_slug(slug: string) -> string {
 // Resolve the scratch root used for `_cr_legacy_ll_path` and the
 // `compile_capsule_modules` ensure-dir calls. Defaults to
 // `"build/sailfin"`; honours `SAILFIN_TEST_SCRATCH` when set so that
-// callers wanting per-invocation isolation (e.g.
-// `scripts/run_native_test.sh` running tests under a fresh
-// `mktemp -d`) can keep concurrent `sfn test` runs from racing on
-// `build/sailfin/capsules/<slug>.ll`. The env var is read once via
+// callers wanting per-invocation isolation can keep concurrent
+// `sfn test` runs from racing on `build/sailfin/capsules/<slug>.ll`.
+// The multi-file `sfn test` runner mints such a root via `mktemp -d`
+// (issue #850, replacing the retired `scripts/run_native_test.sh`)
+// and hands it to each child via `env`. The env var is read once via
 // the shell printf trick the resolver already uses for
 // `SAILFIN_BUILD_JOBS`; an empty value falls through to the default
 // so that `unset SAILFIN_TEST_SCRATCH` and `SAILFIN_TEST_SCRATCH=`
