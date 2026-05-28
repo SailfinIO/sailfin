@@ -1,6 +1,6 @@
 [capsule]
 name = "sailfin"
-version = "0.7.0-alpha.9"
+version = "0.7.0-alpha.10"
 description = "The Sailfin compiler — self-hosted, targeting LLVM via .sfn-asm IR"
 
 [dependencies]
