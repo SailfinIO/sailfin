@@ -104,6 +104,18 @@ fn _pg_find_runtime_dir() -> string ![io] {
     return "";
 }
 
+// Process-local memo for `load_prelude_global_names`. The runtime
+// surface is fixed for a given compiler binary, so the name set never
+// changes within a process. Caching it turns the per-file FS work
+// (runtime-root discovery + reading/scanning ~16 runtime sources) into a
+// one-time cost: `sfn check <dir>` and `sfn test` compile many files in
+// a single process and would otherwise redo the traversal per file.
+// (The per-module self-host build spawns a fresh `sfn emit` process per
+// module, so it pays the cost once per process either way.) Mirrors the
+// module-level mutable-state pattern in `test_runner_state.sfn`.
+let mut _pg_cache_loaded: boolean = false;
+let mut _pg_cache_names: string[] = [];
+
 // Names of every implicitly-available callable: the compiler-known
 // runtime-helper builtins (always available — `number_to_string`,
 // `print`, the `runtime_*_fn` family, …) plus the prelude and
@@ -111,11 +123,15 @@ fn _pg_find_runtime_dir() -> string ![io] {
 // source can be located; an installed compiler shipping only object
 // files still gets the helper builtins).
 fn load_prelude_global_names() -> string[] ![io] {
+    if _pg_cache_loaded { return _pg_cache_names; }
     let mut names = runtime_helper_call_names();
     let runtime_dir = _pg_find_runtime_dir();
-    if runtime_dir.length == 0 { return names; }
-    let prelude_source = fs.readFile(_pg_join(runtime_dir, "prelude.sfn"));
-    names = names.concat(prelude_global_names_from_source(prelude_source));
-    names = _pg_scan_sfn_tree(runtime_dir, names);
+    if runtime_dir.length > 0 {
+        let prelude_source = fs.readFile(_pg_join(runtime_dir, "prelude.sfn"));
+        names = names.concat(prelude_global_names_from_source(prelude_source));
+        names = _pg_scan_sfn_tree(runtime_dir, names);
+    }
+    _pg_cache_names = names;
+    _pg_cache_loaded = true;
     return names;
 }

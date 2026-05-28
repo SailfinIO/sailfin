@@ -67,11 +67,14 @@ test "typecheck walker: call inside for-iterable is reached (E0420)" {
 }
 
 test "typecheck walker: lambda body callee is not yet flagged" {
-    // Known gap (deferred, not part of #812's acceptance criteria):
-    // undefined callees inside lambda bodies are not surfaced today.
-    // The walker has a Lambda branch (`walk_block_expressions`), but the
-    // let-initialized lambda body emits nothing in practice — tracked as
-    // follow-up. Pinned to actual behavior so a future fix flips this to
-    // `== 1` deliberately rather than silently.
-    assert _e0420_for("fn main() { let f = () => { notarealfunction(); }; }") == 0;
+    // Deliberately documents a deferred gap (outside #812's acceptance
+    // criteria, pre-existing from the #809 walker): undefined callees
+    // inside lambda bodies are not surfaced. `walk_expression` has a
+    // Lambda branch that calls `walk_block_expressions`, but in practice
+    // the body emits nothing — verified to hold for the canonical Sailfin
+    // lambda form `fn() { ... }` (not the `=>` arrow, which the parser
+    // reserves for match arms). Pinned at `== 0` so a future fix that
+    // wires lambda-body traversal flips this to `== 1` deliberately
+    // rather than silently regressing coverage.
+    assert _e0420_for("fn main() { let f = fn() { notarealfunction(); }; }") == 0;
 }
