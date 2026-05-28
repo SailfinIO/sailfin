@@ -20,11 +20,43 @@
 // will retype the parameters to `{i8*, i64}` without touching
 // these bodies' callers.
 //
-// Out (per #814 scope, deferred to M3.1b / #815):
-//   - `fs.list_directory` / `fs.delete_file` / `fs.create_directory`
-//   - `fs.read_bytes` (binary read returning byte array)
+// M3.1b (#815): the directory-listing, delete, create-directory,
+// and byte-read rows flip here too. The split mirrors the M3.1a
+// read-vs-write decision — portable, self-contained bodies land
+// in pure Sailfin; bodies that need a platform-specific struct
+// layout or a proven C hot path trampoline through the legacy C
+// adapter behind the new `sfn_fs_*` symbol name:
+//   - **`sfn_fs_delete`**: pure Sailfin — `unlink(path)`.
+//   - **`sfn_fs_mkdir`** (recursive): pure Sailfin — a forward
+//     component walk that NUL-terminates each `/`-bounded prefix
+//     of a writable scratch copy and `mkdir`s it, then probes the
+//     final path via `sailfin_intrinsic_fs_exists`. Avoids the
+//     `errno == EEXIST` check the C body uses (no `errno` access
+//     in Sailfin) by treating "directory exists afterward" as the
+//     success signal — equivalent outcome, no platform errno
+//     coupling.
+//   - **`sfn_fs_list_dir`**: trampolines to the legacy C
+//     `sailfin_adapter_fs_list_directory_v2`. Reading `dirent`'s
+//     `d_name` field needs a platform-specific byte offset (19 on
+//     Linux glibc, 21 on macOS arm64 — see the layout caveat in
+//     `libc.sfn`'s directory/stat block) and the result is an
+//     `SfnArray` (`{ i8**, i64, i64 }*`) the C adapter already
+//     builds with sorting + `.`/`..` filtering. Replicating both
+//     in Sailfin is a follow-up inline wave; the symbol flip lands
+//     against the canonical `sfn_fs_list_dir` name now (same shape
+//     as the M3.1a write/append trampolines).
+//   - **`sfn_fs_read_bytes`**: trampolines to the C
+//     `sailfin_runtime_read_file_bytes` (the read_bytes row's
+//     existing `symbol`). That body reports the true binary length
+//     through the `int64_t *out_length` out-param via `fseek`/
+//     `ftell` (neither extern is declared in `libc.sfn`; the
+//     `sfn_fs_read_file` chunked-read body cannot recover an
+//     embedded-NUL length). No `fs.read_bytes` call site exists in
+//     the tree yet, so the flip is pure forward surface — a
+//     follow-up wave inlines a binary-safe chunked body once a
+//     caller and e2e exist.
 //
-// Out (per #814 scope, deferred to M3.9):
+// Out (deferred to M3.9):
 //   - Deleting `runtime/native/src/sailfin_runtime.c`'s
 //     `sailfin_adapter_fs_*` bodies. They stay exported during the
 //     M3 window so seed-built compiler IR (which still calls them
@@ -114,6 +146,39 @@ extern fn fread(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
 extern fn sailfin_adapter_fs_write_file(path: * u8, contents: * u8) -> void;
 
 extern fn sailfin_adapter_fs_append_file(path: * u8, contents: * u8) -> void;
+
+// M3.1b additions. `memcpy` / `strlen` / `strchr` back the
+// recursive `sfn_fs_mkdir` component walk; `unlink` / `mkdir` are
+// the POSIX primitives for delete + create (declared in
+// `libc.sfn`, inlined here per the #306 cross-module workaround in
+// the file header). `sailfin_intrinsic_fs_exists` is the existing
+// stat-based existence probe (also inlined by
+// `runtime/sfn/platform/exec.sfn`); `sfn_fs_mkdir` uses it to
+// report "directory exists afterward" without an `errno` read.
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+extern fn strchr(s: * u8, c: i32) -> * u8;
+
+extern fn unlink(path: * u8) -> i32;
+
+extern fn mkdir(path: * u8, mode: i32) -> i32;
+
+extern fn sailfin_intrinsic_fs_exists(path: * u8) -> bool;
+
+// Legacy C adapters the M3.1b list/read_bytes flips trampoline
+// through (see the file header). `sailfin_adapter_fs_list_directory_v2`
+// returns an `SfnArray` (`{ i8**, i64, i64 }*`) — spelled `* u8`
+// here per the `runtime/sfn/array.sfn` convention (both lower to
+// the same pointer at the IR level). `sailfin_runtime_read_file_bytes`
+// is the read_bytes row's existing C `symbol`; its second arg is an
+// `int64_t *out_length` out-param, spelled `* u8` to stay on the
+// extern accept-list (it lowers to the same pointer). Both stay
+// exported until M3.9 retires `sailfin_runtime.c`.
+extern fn sailfin_adapter_fs_list_directory_v2(path: * u8) -> * u8;
+
+extern fn sailfin_runtime_read_file_bytes(path: * u8, out_length: * u8) -> * u8;
 
 // `sfn_fs_read_file(path)` — slurp the entire contents of `path`
 // into a freshly libc-`malloc`'d NUL-terminated buffer the
@@ -214,4 +279,103 @@ fn sfn_fs_write_file(path: * u8, contents: * u8) -> void ![io] {
 // `sfn_fs_write_file` above.
 fn sfn_fs_append_file(path: * u8, contents: * u8) -> void ![io] {
     sailfin_adapter_fs_append_file(path, contents);
+}
+
+// `sfn_fs_delete(path)` — remove the file (or empty directory)
+// named by `path`. Pure Sailfin: `unlink(2)` returns 0 on success,
+// -1 on error. Mirrors the C `sailfin_adapter_fs_delete_file`
+// null-guard + `unlink == 0` contract exactly.
+fn sfn_fs_delete(path: * u8) -> bool ![io] {
+    if path as i64 == 0 { return false; }
+    return unlink(path) == 0;
+}
+
+// `sfn_fs_mkdir(path, recursive)` — create the directory `path`.
+// When `recursive` is true, create every missing parent component
+// first (`mkdir -p` semantics).
+//
+// Non-recursive: a single `mkdir(path, 0o777)`. The result is
+// ignored in favor of probing `sailfin_intrinsic_fs_exists(path)`
+// — that collapses the "already existed" (`EEXIST`) and "just
+// created" cases into one `true` without reading `errno` (which
+// Sailfin cannot reach), matching the C body's
+// `errno == EEXIST ⇒ true` outcome.
+//
+// Recursive: walk the path forward, NUL-terminating at each `/`
+// of a writable scratch copy and `mkdir`ing the prefix so parents
+// materialize in order. The scratch copy is mandatory — `path`
+// may point into read-only `.rodata` (string literals), so the C
+// body copies before mutating and this port does the same.
+// Mid-walk `mkdir` failures are ignored (a parent that already
+// exists is the common case); the final
+// `sailfin_intrinsic_fs_exists` probe is the authoritative
+// success signal, so a genuine failure (e.g. a permission error
+// that prevents creation) still surfaces as `false`.
+//
+// `47` is ASCII `/` and `511` is `0o777`; both are inlined as
+// decimals because the seed compiler accepts neither char literals
+// (`'/'`) nor octal literals yet — same convention as
+// `runtime/sfn/platform/exec.sfn` (`47`) and
+// `runtime/sfn/process.sfn` (`127` / `65280`).
+fn sfn_fs_mkdir(path: * u8, recursive: bool) -> bool ![io] {
+    if path as i64 == 0 { return false; }
+
+    if recursive {
+        let n: i64 = strlen(path) as i64;
+        if n <= 0 { return false; }
+
+        // Duplicate `path` (including its trailing NUL) into a
+        // writable buffer so the `/`-rewrite walk never touches a
+        // read-only literal.
+        let scratch: * u8 = malloc((n + 1) as usize);
+        if scratch as i64 == 0 { return false; }
+        memcpy(scratch, path, (n + 1) as usize);
+
+        // Start one byte in so a leading `/` (absolute paths) does
+        // not produce an empty `mkdir("")` prefix; `strchr` then
+        // locates each subsequent separator.
+        let mut cursor: * u8 = scratch + 1;
+        loop {
+            let slash: * u8 = strchr(cursor, 47);
+            if slash as i64 == 0 { break; }
+            memset(slash, 0, 1 as usize);
+            mkdir(scratch, 511);
+            memset(slash, 47, 1 as usize);
+            cursor = slash + 1;
+        }
+        mkdir(scratch, 511);
+
+        let ok: bool = sailfin_intrinsic_fs_exists(scratch);
+        free(scratch);
+        return ok;
+    }
+
+    mkdir(path, 511);
+    return sailfin_intrinsic_fs_exists(path);
+}
+
+// `sfn_fs_list_dir(path)` — enumerate the entries of `path`,
+// returning a sorted `SfnArray` (`{ i8**, i64, i64 }*`, spelled
+// `* u8`) that omits `.` and `..`. Trampolines to the legacy C
+// `sailfin_adapter_fs_list_directory_v2`: reading `dirent.d_name`
+// needs a platform-specific byte offset and the sorted SfnArray
+// construction is non-trivial, so both are deferred to a follow-up
+// inline wave (see the file header). The symbol flip lands against
+// the canonical `sfn_fs_list_dir` name now.
+fn sfn_fs_list_dir(path: * u8) -> * u8 ![io] {
+    return sailfin_adapter_fs_list_directory_v2(path);
+}
+
+// `sfn_fs_read_bytes(path, out_length)` — slurp `path` into a
+// freshly allocated NUL-terminated buffer and write the true byte
+// count (binary-safe, embedded NULs counted) through the
+// `int64_t *out_length` out-param. Trampolines to the C
+// `sailfin_runtime_read_file_bytes`, whose `fseek`/`ftell` size
+// probe recovers a length the `sfn_fs_read_file` chunked body
+// cannot (its `strlen`-free NUL terminator hides embedded NULs).
+// No `fs.read_bytes` call site exists yet, so the flip is forward
+// surface; a follow-up wave inlines a binary-safe chunked body
+// once a caller and e2e land.
+fn sfn_fs_read_bytes(path: * u8, out_length: * u8) -> * u8 ![io] {
+    return sailfin_runtime_read_file_bytes(path, out_length);
 }

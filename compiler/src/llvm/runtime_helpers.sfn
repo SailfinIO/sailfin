@@ -489,15 +489,20 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     //
     // M3.1a (#814): `read_file` / `write_file` / `append_file`
     // flipped to the Sailfin-native `sfn_fs_*` adapters in
-    // `runtime/sfn/adapters/filesystem.sfn`. The legacy C
-    // `sailfin_adapter_fs_*` symbols stay exported throughout the
-    // M3 window so seed-built compiler IR continues to link; the
-    // `symbol` slots below preserve them as the registry's fall-
-    // back, while every fresh emission routes through
-    // `native_signature` per the `effective_symbol` resolution in
-    // `rendering.sfn`. The remaining `sailfin_adapter_fs_*` rows
-    // (list_directory / delete / create_directory / set_perms / …)
-    // flip in M3.1b (#815).
+    // `runtime/sfn/adapters/filesystem.sfn`. M3.1b (#815) extends
+    // the flip to `list_directory` / `delete_file` /
+    // `create_directory` (→ `sfn_fs_list_dir` / `sfn_fs_delete` /
+    // `sfn_fs_mkdir`) and `fs.read_bytes` (→ `sfn_fs_read_bytes`).
+    // The legacy C `sailfin_adapter_fs_*` /
+    // `sailfin_runtime_read_file_bytes` symbols stay exported
+    // throughout the M3 window so seed-built compiler IR continues
+    // to link; the `symbol` slots below preserve them as the
+    // registry's fall-back, while every fresh emission routes
+    // through `native_signature` per the `effective_symbol`
+    // resolution in `rendering.sfn`. The `set_perms` / `get_perms`
+    // / `mkdtemp` / `is_executable` / `symlink` rows remain on
+    // their C symbols — they are live (wrapped by the `sfn/fs`
+    // capsule) and get a follow-up adapter wave.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs_read_file", symbol: "sailfin_adapter_fs_read_file", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_read_file", c_abi_return_type: null
     });
@@ -523,22 +528,22 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "fs.writeLines", symbol: "sailfin_adapter_fs_write_lines_v2", return_type: "void", parameter_types: ["i8*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_list_directory", symbol: "sailfin_adapter_fs_list_directory_v2", return_type: "{ i8**, i64, i64 }*", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "fs_list_directory", symbol: "sailfin_adapter_fs_list_directory_v2", return_type: "{ i8**, i64, i64 }*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_list_dir", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.listDirectory", symbol: "sailfin_adapter_fs_list_directory_v2", return_type: "{ i8**, i64, i64 }*", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "fs.listDirectory", symbol: "sailfin_adapter_fs_list_directory_v2", return_type: "{ i8**, i64, i64 }*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_list_dir", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_delete_file", symbol: "sailfin_adapter_fs_delete_file", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "fs_delete_file", symbol: "sailfin_adapter_fs_delete_file", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_delete", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.deleteFile", symbol: "sailfin_adapter_fs_delete_file", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "fs.deleteFile", symbol: "sailfin_adapter_fs_delete_file", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_delete", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_create_directory", symbol: "sailfin_adapter_fs_create_directory", return_type: "i1", parameter_types: ["i8*", "i1"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "fs_create_directory", symbol: "sailfin_adapter_fs_create_directory", return_type: "i1", parameter_types: ["i8*", "i1"], effects: ["io"], native_signature: "sfn_fs_mkdir", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.createDirectory", symbol: "sailfin_adapter_fs_create_directory", return_type: "i1", parameter_types: ["i8*", "i1"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "fs.createDirectory", symbol: "sailfin_adapter_fs_create_directory", return_type: "i1", parameter_types: ["i8*", "i1"], effects: ["io"], native_signature: "sfn_fs_mkdir", c_abi_return_type: null
     });
 
     // P5 (#366): filesystem stdlib gap-fill. Permission ops, temp-dir
@@ -940,7 +945,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "env.home", symbol: "sailfin_runtime_home_dir", return_type: "{i8*, i64}", parameter_types: ["ptr"], effects: ["io"], native_signature: "sfn_home_dir", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.read_bytes", symbol: "sailfin_runtime_read_file_bytes", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "fs.read_bytes", symbol: "sailfin_runtime_read_file_bytes", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_fs_read_bytes", c_abi_return_type: null
     });
     // Prelude functions called directly by their original name.
     // These are defined in runtime/prelude.sfn and compiled into
