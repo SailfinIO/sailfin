@@ -156,4 +156,14 @@ test "reads a file" ![io] {
     let content = fs.read("fixtures/sample.txt");
     assert content.length > 0;
 }
+
+@tag("slow")
+test "rebuilds the whole index" ![io] {
+    assert reindex() == Ok;
+}
 ```
+
+Tests accept decorators, parsed as metadata under the same rule as other
+declarations (no semantic enforcement today). The `@tag("<value>")`
+decorator is consumed by the `sfn test --tag <value>` filter — see
+[§11 Testing](/docs/reference/spec/11-testing/).

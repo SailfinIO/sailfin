@@ -20,6 +20,35 @@ test "name" ![effects] {
 
 ---
 
+## Filtering which tests run
+
+Two flags narrow a `sfn test` run to a subset of the discovered tests.
+They filter per **test**, not per file — a file containing both matching
+and non-matching tests runs only the matches.
+
+```sfn
+@tag("slow")
+test "auth refresh round-trips a token" ![io] {
+    assert refresh("old").length > 0;
+}
+```
+
+```bash
+sfn test -k auth            # run only tests whose name contains "auth"
+sfn test --tag slow         # run only tests carrying @tag("slow")
+sfn test -k auth --tag slow # both filters compose (a test must match both)
+```
+
+- `-k <substring>` keeps tests whose name **contains** `<substring>`
+  (plain substring match, not a glob or regex).
+- `--tag <value>` keeps tests carrying a `@tag("<value>")` decorator
+  (see [§3.8 Test Declarations](/docs/reference/spec/03-declarations/)).
+- When both are given, a test must satisfy **both** to run.
+- A filter that matches nothing is not an error: the run reports
+  `0/0 passed` and exits `0`.
+
+---
+
 ## Test runner JSON output
 
 `sfn test --json` emits a machine-readable [JSON Lines](https://jsonlines.org/)

@@ -62,7 +62,13 @@ import {
     render_summary_event,
     render_test_event
 } from "./test_runner_json";
-import { enter_test_runner_mode, exit_test_runner_mode } from "./test_runner_state";
+import {
+    enter_test_runner_mode,
+    exit_test_runner_mode,
+    set_test_filters,
+    test_decl_matches_filters,
+    test_filters_active
+} from "./test_runner_state";
 import {
     toml_add_dependency,
     toml_add_dev_dependency,
@@ -848,12 +854,64 @@ fn _resolve_timeout_cmd() -> string ![io] {
 // wrapped in the resolved timeout command when one is available.
 // In-runner port of the script's
 // `"$TIMEOUT_CMD" "$TIMEOUT" "$COMPILER" test "$TEST_FILE"`.
-fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: string, self_exe: string, path: string) -> int ![io] {
-    if timeout_cmd.length > 0 {
-        return process.run([timeout_cmd, timeout_secs, "env", "SAILFIN_TEST_SCRATCH="
-            + child_scratch, self_exe, "test", path]);
+// Retain non-test statements plus only the `TestDeclaration`s that
+// satisfy the active `-k`/`--tag` filters. Mirrors `main.sfn`'s
+// `_filter_program_tests` so the `--json` pre-pass enumerates exactly
+// the tests the harness will run.
+fn _filter_program_tests_cmd(program: Program) -> Program {
+    let mut kept: Statement[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let statement = program.statements[i];
+        if statement.variant == "TestDeclaration" {
+            if test_decl_matches_filters(statement) {
+                kept.push(statement);
+            }
+        } else { kept.push(statement); }
+        i += 1;
     }
-    return process.run(["env", "SAILFIN_TEST_SCRATCH=" + child_scratch, self_exe, "test", path]);
+    return Program { statements: kept };
+}
+
+// True when `path` parses to a program with at least one test matching
+// the active `-k`/`--tag` filters. Drives the file-level pre-filter.
+fn _file_has_matching_test(path: string) -> boolean ![io] {
+    let source = fs.readFile(path);
+    let program = parse_program(source);
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        if test_decl_matches_filters(program.statements[i]) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Append the active discovery filters to a child `<self> test <file>`
+// argv so each per-file subprocess re-establishes the same filter
+// state and applies the per-test cut to its own leaf compile.
+fn _append_test_filter_args(argv: string[], name_filter: string, tag_filter: string) -> string[] {
+    let mut out = argv;
+    if name_filter.length > 0 {
+        out.push("-k");
+        out.push(name_filter);
+    }
+    if tag_filter.length > 0 {
+        out.push("--tag");
+        out.push(tag_filter);
+    }
+    return out;
+}
+
+fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: string, self_exe: string, path: string, name_filter: string, tag_filter: string) -> int ![io] {
+    if timeout_cmd.length > 0 {
+        let base = [timeout_cmd, timeout_secs, "env", "SAILFIN_TEST_SCRATCH="
+            + child_scratch, self_exe, "test", path];
+        return process.run(_append_test_filter_args(base, name_filter, tag_filter));
+    }
+    let base = ["env", "SAILFIN_TEST_SCRATCH=" + child_scratch, self_exe, "test", path];
+    return process.run(_append_test_filter_args(base, name_filter, tag_filter));
 }
 
 // Tear down a runner-owned ephemeral scratch tree, mirroring the
@@ -877,7 +935,9 @@ fn _cleanup_test_scratch(owned: boolean, scratch_root: string, success: boolean)
 }
 
 fn handle_test_command(args: string[], runtime_root: string, binary_dir: string) -> int ![io, clock] {
-    // Flag parser: `--json` is the only recognised flag for now.
+    // Flag parser: `--json` selects the jsonl event stream; `-k` and
+    // `--tag` (issue #849) each consume the following argv element as a
+    // discovery filter value (see below). Everything else is positional.
     // Positional args carry one or more suite paths; each becomes a
     // labelled `TestSuite` whose pass/fail tally gets its own
     // `═══ <name>: N/M passed ═══` banner at end-of-run. Issue #848
@@ -886,15 +946,34 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
     // positional paths replaced the prior single-path constraint.
     let mut json_output: boolean = false;
     let mut positional: string[] = [];
+    // Discovery filters (issue #849): `-k <substr>` keeps tests whose
+    // name contains <substr>; `--tag <value>` keeps tests carrying
+    // `@tag("<value>")`. Both take the following argv element as their
+    // value and compose (a test must satisfy every active filter).
+    let mut name_filter: string = "";
+    let mut tag_filter: string = "";
     let mut ai: int = 1;
     loop {
         if ai >= args.length { break; }
         let arg = args[ai];
-        if strings_equal(arg, "--json") { json_output = true; } else {
-            positional.push(arg);
-        }
+        if strings_equal(arg, "--json") { json_output = true; } else if strings_equal(arg, "-k") {
+            if ai + 1 >= args.length {
+                print("sfn test: -k requires a value");
+                return 2;
+            }
+            ai += 1;
+            name_filter = args[ai];
+        } else if strings_equal(arg, "--tag") {
+            if ai + 1 >= args.length {
+                print("sfn test: --tag requires a value");
+                return 2;
+            }
+            ai += 1;
+            tag_filter = args[ai];
+        } else { positional.push(arg); }
         ai += 1;
     }
+    set_test_filters(name_filter, tag_filter);
 
     // Build the suite list. Zero positional args defaults to a
     // single "." suite (matches pre-#848 behaviour). One or more
@@ -975,6 +1054,31 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
             sfi += 1;
         }
         csi += 1;
+    }
+
+    // File-level discovery pre-filter (issue #849). When `-k`/`--tag`
+    // are active, drop any test file that contains no matching test so
+    // it never reaches the compile path — a file compiled with every
+    // test filtered out would synthesize an empty harness (no `@main`)
+    // and fail to link. The per-test cut in
+    // `compile_tests_to_llvm_file_with_module_imports` then trims the
+    // surviving files down to only their matching tests. Both passes
+    // share `test_decl_matches_filters`, so a file kept here always has
+    // at least one test that survives the cut.
+    if test_filters_active() {
+        let mut kept_files: string[] = [];
+        let mut kept_suite_index: int[] = [];
+        let mut fpi: int = 0;
+        loop {
+            if fpi >= test_files.length { break; }
+            if _file_has_matching_test(test_files[fpi]) {
+                kept_files.push(test_files[fpi]);
+                kept_suite_index.push(file_suite_index[fpi]);
+            }
+            fpi += 1;
+        }
+        test_files = kept_files;
+        file_suite_index = kept_suite_index;
     }
 
     if test_files.length == 0 {
@@ -1088,13 +1192,13 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
             // `SAILFIN_TEST_SCRATCH` via `_test_scratch_root`.
             let child_scratch = sub_root + "/sub-" + number_to_string(ti);
             _ensure_dir_cmd(child_scratch);
-            let mut rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, self_exe, path);
+            let mut rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, self_exe, path, name_filter, tag_filter);
             if _should_retry_test(rc, sub_retries_disabled) {
                 print("[test] RETRY: " + _package_basename(path)
                     + " (exit code "
                     + number_to_string(rc)
                     + ", retrying once)");
-                rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, self_exe, path);
+                rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, self_exe, path, name_filter, tag_filter);
             }
             if rc == 0 { suites[suite_idx].pass_count += 1; } else {
                 suites[suite_idx].fail_count += 1;
@@ -1262,7 +1366,13 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
             if pi >= test_files.length { break; }
             let pre_path = test_files[pi];
             let pre_source = fs.readFile(pre_path);
-            let pre_program: Program = parse_program(pre_source);
+            let mut pre_program: Program = parse_program(pre_source);
+            // Mirror the per-test cut the harness compile applies
+            // (issue #849) so the `start` total and per-test events
+            // describe exactly the tests that will run.
+            if test_filters_active() {
+                pre_program = _filter_program_tests_cmd(pre_program);
+            }
             let entries = collect_test_entries(pre_program, pre_path);
             per_file_entries.push(entries);
             total_tests += entries.length;
