@@ -2,6 +2,161 @@
 //
 // Provides secure hash functions for data integrity, checksums, and
 // content-addressable storage. No effects required — pure computation.
+//
+// SHA-256 is implemented in pure Sailfin (FIPS 180-4). All arithmetic is
+// performed on i64 values masked to 32 bits after every operation, because
+// `>>` lowers to LLVM `ashr` (arithmetic shift): keeping every intermediate
+// non-negative and below 2^32 makes `ashr` behave as the logical shift the
+// algorithm requires. Hex literals are unavailable, so the round constants
+// and initial state are written in decimal (4294967295 is the 0xffffffff mask).
+// Rotate a 32-bit word right by `n` bits.
+fn sha256_rotr(x: int, n: int) -> int {
+    return ((x >> n) | (x << (32 - n))) & 4294967295;
+}
+
+// Render a 32-bit word as 8 lowercase hex characters.
+fn sha256_word_hex(x: int) -> string {
+    let digits: string[] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f",];
+    let mut out: string = "";
+    let mut shift: int = 28;
+    loop {
+        if shift < 0 { break; }
+        out = out + digits[(x >> shift) & 15];
+        shift -= 4;
+    }
+    return out;
+}
+
+fn sha256_hex(data: string) -> string {
+    // Compute the SHA-256 digest of `data` and return the bare 64-character
+    // lowercase hex string (no "sha256:" prefix).
+    //
+    // Usage:
+    //   let h = sha256_hex("abc");
+    //   // h == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    let mask: int = 4294967295;
+
+    // 1. Decode the input into a byte sequence. Sailfin string indexing and
+    //    `.length` are byte-oriented (`s[i]` is the i-th byte, `char_code`
+    //    returns its 0-255 value), so this hashes the raw UTF-8 bytes and
+    //    matches `sha256sum` for arbitrary content, not just ASCII.
+    let mut bytes: int[] = [];
+    let mut bi: int = 0;
+    loop {
+        if bi >= data.length { break; }
+        bytes.push(char_code(data[bi]) & 255);
+        bi += 1;
+    }
+    let bit_len: int = bytes.length * 8;
+
+    // 2. Pad: append 0x80, then zeros until length ≡ 56 (mod 64), then the
+    //    64-bit big-endian message length in bits.
+    bytes.push(128);
+    loop {
+        if (bytes.length % 64) == 56 { break; }
+        bytes.push(0);
+    }
+    let hi: int = (bit_len >> 32) & mask;
+    let lo: int = bit_len & mask;
+    bytes.push((hi >> 24) & 255);
+    bytes.push((hi >> 16) & 255);
+    bytes.push((hi >> 8) & 255);
+    bytes.push(hi & 255);
+    bytes.push((lo >> 24) & 255);
+    bytes.push((lo >> 16) & 255);
+    bytes.push((lo >> 8) & 255);
+    bytes.push(lo & 255);
+
+    // Round constants K[0..63].
+    let k: int[] = [1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221, 3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580, 3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986, 2554220882, 2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895, 666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037, 2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344, 430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298,];
+
+    // Initial hash state H[0..7].
+    let mut h0: int = 1779033703;
+    let mut h1: int = 3144134277;
+    let mut h2: int = 1013904242;
+    let mut h3: int = 2773480762;
+    let mut h4: int = 1359893119;
+    let mut h5: int = 2600822924;
+    let mut h6: int = 528734635;
+    let mut h7: int = 1541459225;
+
+    // 3. Process each 64-byte block.
+    let num_blocks: int = bytes.length / 64;
+    let mut block: int = 0;
+    loop {
+        if block >= num_blocks { break; }
+        let base: int = block * 64;
+
+        // Build the 64-word message schedule.
+        let mut w: int[] = [];
+        let mut t: int = 0;
+        loop {
+            if t >= 16 { break; }
+            let j: int = base + t * 4;
+            let word: int = ((bytes[j] << 24) | (bytes[j + 1] << 16) | (bytes[j
+                + 2] << 8) | bytes[j
+                + 3]) & mask;
+            w.push(word);
+            t += 1;
+        }
+        t = 16;
+        loop {
+            if t >= 64 { break; }
+            let w15: int = w[t - 15];
+            let w2: int = w[t - 2];
+            let s0: int = (sha256_rotr(w15, 7) ^ sha256_rotr(w15, 18) ^ ((w15 >> 3) & mask)) & mask;
+            let s1: int = (sha256_rotr(w2, 17) ^ sha256_rotr(w2, 19) ^ ((w2 >> 10) & mask)) & mask;
+            w.push((w[t - 16] + s0 + w[t - 7] + s1) & mask);
+            t += 1;
+        }
+
+        let mut a: int = h0;
+        let mut b: int = h1;
+        let mut c: int = h2;
+        let mut d: int = h3;
+        let mut e: int = h4;
+        let mut f: int = h5;
+        let mut g: int = h6;
+        let mut h: int = h7;
+
+        let mut r: int = 0;
+        loop {
+            if r >= 64 { break; }
+            let big_s1: int = (sha256_rotr(e, 6) ^ sha256_rotr(e, 11) ^ sha256_rotr(e, 25)) & mask;
+            let ch: int = ((e & f) ^ ((mask ^ e) & g)) & mask;
+            let temp1: int = (h + big_s1 + ch + k[r] + w[r]) & mask;
+            let big_s0: int = (sha256_rotr(a, 2) ^ sha256_rotr(a, 13) ^ sha256_rotr(a, 22)) & mask;
+            let maj: int = ((a & b) ^ (a & c) ^ (b & c)) & mask;
+            let temp2: int = (big_s0 + maj) & mask;
+            h = g;
+            g = f;
+            f = e;
+            e = (d + temp1) & mask;
+            d = c;
+            c = b;
+            b = a;
+            a = (temp1 + temp2) & mask;
+            r += 1;
+        }
+
+        h0 = (h0 + a) & mask;
+        h1 = (h1 + b) & mask;
+        h2 = (h2 + c) & mask;
+        h3 = (h3 + d) & mask;
+        h4 = (h4 + e) & mask;
+        h5 = (h5 + f) & mask;
+        h6 = (h6 + g) & mask;
+        h7 = (h7 + h) & mask;
+        block += 1;
+    }
+
+    return sha256_word_hex(h0) + sha256_word_hex(h1) + sha256_word_hex(h2)
+        + sha256_word_hex(h3)
+        + sha256_word_hex(h4)
+        + sha256_word_hex(h5)
+        + sha256_word_hex(h6)
+        + sha256_word_hex(h7);
+}
 
 fn sha256(data: string) -> string {
     // Compute the SHA-256 hash of a string.
@@ -11,23 +166,13 @@ fn sha256(data: string) -> string {
     //   let hash = sha256("hello world");
     //   // hash == "sha256:b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
     //
-    return crypto.sha256(data, data.length);
-}
-
-fn sha256_hex(data: string) -> string {
-    // Compute the SHA-256 hash and return just the hex string (no prefix).
-    let full = crypto.sha256(data, data.length);
-    // Strip "sha256:" prefix (7 chars)
-    if full.length > 7 {
-        return substring(full, 7, full.length);
-    }
-    return full;
+    return "sha256:" + sha256_hex(data);
 }
 
 fn base64_encode(data: string) -> string {
     // Encode a string to base64.
     // Delegates to the C runtime via the `base64.encode` runtime helper
-    // (see compiler/src/llvm/runtime_helpers.sfn).
+    // (see compiler/src/llvm/runtime_helpers.sfn). Port tracked by M3.6.
     //
     // Usage:
     //   let encoded = base64_encode("hello world");

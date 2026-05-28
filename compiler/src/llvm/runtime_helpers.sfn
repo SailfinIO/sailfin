@@ -907,9 +907,15 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
 
     // ---- Package-manager primitives ----
-    // SHA-256 hashing
+    // SHA-256 hashing. M3 (#816): SHA-256 now lives in pure Sailfin under
+    // `capsules/sfn/crypto/src/mod.sfn`; the `crypto.sha256` intrinsic resolves
+    // to that capsule's `sha256` (the "sha256:"-prefixed digest, matching the
+    // legacy C contract) rather than the C symbol `sailfin_runtime_sha256_hex`.
+    // The C body stays linked for seed compat until M3.9 deletes
+    // `runtime/native/src/sailfin_sha256.c`. The capsule's own `sha256()` calls
+    // `sha256_hex()` in-language, so this descriptor has no in-tree caller today.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "crypto.sha256", symbol: "sailfin_runtime_sha256_hex", return_type: "i8*", parameter_types: ["i8*", "i64"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "crypto.sha256", symbol: "sha256__capsules__sfn__crypto__src__mod", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
     // Base64 encode/decode
