@@ -762,6 +762,13 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         required = merge_requirements(required, collect_effects_from_expression(expression.end, imports));
         return required;
     }
+    if expression.variant == "TryOperator" {
+        // Pass-through: `?` is control flow, contributing no effect of
+        // its own, but its operand (e.g. `fs.read()?`) must still be
+        // walked so effectful calls inside it surface. Type rules (R.3)
+        // and lowering (R.4) stay deferred; this is non-regression only.
+        return collect_effects_from_expression(expression.operand, imports);
+    }
     if expression.variant == "Raw" {
         return collect_effects_from_text(expression.text);
     }
