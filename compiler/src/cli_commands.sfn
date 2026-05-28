@@ -35,6 +35,7 @@ import {
     _sha256_of_file_cmd,
     _shell_read_cmd,
     _shell_single_quote_arg,
+    _sort_strings_cmd,
     _string_contains_cmd,
     _suite_name_from_path,
     _toml_trim_cmd,
@@ -770,7 +771,22 @@ fn _should_retry_test(exit_code: int, retries_disabled: boolean) -> boolean {
     return false;
 }
 
-fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock] {
+// Resolve the path to this compiler binary so the multi-file runner
+// can re-invoke itself (`<self> test <file>`) once per test for
+// process isolation. Mirrors `_resolve_self_path` in `cli_main.sfn`:
+// prefer `<binary_dir>/sailfin` (computed by `fn main` from
+// `exe_path()` / `realpath(argv[0])` on every platform), fall back to
+// the Linux `/proc/self/exe` symlink when no binary_dir was threaded
+// through.
+fn _resolve_test_self_path(binary_dir: string) -> string ![io] {
+    if binary_dir.length > 0 {
+        let candidate = _path_join_cmd(binary_dir, "sailfin");
+        if fs.exists(candidate) { return candidate; }
+    }
+    return _shell_read_cmd("readlink -f /proc/self/exe");
+}
+
+fn handle_test_command(args: string[], runtime_root: string, binary_dir: string) -> int ![io, clock] {
     // Flag parser: `--json` is the only recognised flag for now.
     // Positional args carry one or more suite paths; each becomes a
     // labelled `TestSuite` whose pass/fail tally gets its own
@@ -852,7 +868,10 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
     let mut csi: int = 0;
     loop {
         if csi >= suites.length { break; }
-        let suite_files = _collect_test_files_cmd(suites[csi].path, 25);
+        // Sort within each suite so the run order is deterministic
+        // across platforms (`fs.listDirectory` returns entries in
+        // filesystem order). Matches the pre-#848 `find ... | sort`.
+        let suite_files = _sort_strings_cmd(_collect_test_files_cmd(suites[csi].path, 25));
         let mut sfi: int = 0;
         loop {
             if sfi >= suite_files.length { break; }
@@ -864,25 +883,23 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
     }
 
     if test_files.length == 0 {
+        // Empty discovery exits 0 in BOTH modes (issue #848). The
+        // pre-#848 split — JSON returned 1, the human path printed
+        // "no Sailfin test files found" and also returned 1, while
+        // the Makefile's `test-capsules` loop special-cased an empty
+        // `capsules/` to exit 0 — left the runner and the Makefile
+        // disagreeing. The unified runner standardises on the
+        // `test-capsules` shape: an empty suite is a benign 0/0/0,
+        // not a failure. The all-zeros JSON summary / `0/0 passed`
+        // banner is the "no tests" signal consumers read; the exit
+        // code stays 0 so a legitimately-empty suite (e.g. a capsule
+        // with no `tests/` dir) doesn't fail the build.
         if json_output {
-            // Still produce a valid jsonl stream so consumers don't
-            // have to special-case empty discovery — start, no test
-            // events, summary with all zeros.
             print(render_start_event(0));
             print(render_summary_event(0, 0, 0, 0));
             exit_test_runner_mode();
-            return 1;
+            return 0;
         }
-        // Human path: surface a hint for each suite that turned up
-        // empty (mirrors the per-target `[test-X] no *_test.sfn files`
-        // hints the four collapsed Makefile loops used to emit), then
-        // fall through to the empty-banner emission below so the
-        // suite tallies still print 0/0/0 — matches the pre-#848
-        // `test-capsules` behaviour where an empty `capsules/`
-        // produced a banner and exited 0. The other suite targets
-        // historically exited 1 on empty discovery; the unified
-        // runner standardises on the `test-capsules` shape because
-        // the banner already carries the "0/0 passed" signal.
         let mut hi: int = 0;
         loop {
             if hi >= suites.length { break; }
@@ -894,6 +911,68 @@ fn handle_test_command(args: string[], runtime_root: string) -> int ![io, clock]
         if emit_banners { _emit_suite_banners(suites); }
         exit_test_runner_mode();
         return 0;
+    }
+
+    // Multi-file isolation (issue #848). When more than one test file
+    // runs in this invocation, compile + link + run each in a fresh
+    // `<self> test <file>` subprocess and aggregate the exit codes
+    // into the per-suite banners. The single-shared in-process path
+    // below groups every test under one resolver pass whose
+    // `native_texts` is the UNION of every test's imports — and tests
+    // with conflicting expectations for the same symbol cannot
+    // coexist in that union. The canonical case: `number_to_string`
+    // resolves to the `![pure]` int-signature import for
+    // `cross_module_int_signature_test` (pinning the #633 fix) but to
+    // the `double` runtime-helper descriptor for `pure_assert_smoke_test`
+    // — one resolver group can only pick one, so the loser fails with
+    // an ABI mismatch. Per-file subprocesses give each test its own
+    // resolver pass (its own imports only), which is exactly what the
+    // retired `scripts/run_native_test.sh` per-file loop did. JSON
+    // mode keeps the single-process path so the jsonl stream stays a
+    // single ordered document; `--json` callers run one file at a
+    // time today.
+    if test_files.length > 1 && !json_output {
+        let self_exe = _resolve_test_self_path(binary_dir);
+        // Same signal-kill retry gate the in-process path uses: a
+        // child killed by SIGKILL/SIGSEGV (137/139) under transient
+        // CI memory pressure is retried once before being counted as
+        // a failure. Without this the per-child subprocess path would
+        // be flakier than the in-process path (which retries the test
+        // exec internally) — a child OOM-killed mid-compile dies
+        // before its in-process retry can fire, so the parent must
+        // re-run the whole child. `SAILFIN_TEST_RETRY=0` opts out.
+        let sub_retries_disabled = _test_retries_disabled();
+        let mut overall_rc: int = 0;
+        let mut ti: int = 0;
+        loop {
+            if ti >= test_files.length { break; }
+            let path = test_files[ti];
+            let suite_idx = file_suite_index[ti];
+            // Per-test scratch so concurrent or sequential children
+            // never clobber each other's `.ll` / `test` / `fail.bin`
+            // (mirrors the retired wrapper's `mktemp -d`). The child
+            // re-reads `SAILFIN_TEST_SCRATCH` via `_test_scratch_root`.
+            let child_scratch = scratch_root + "/sub-" + number_to_string(ti);
+            _ensure_dir_cmd(child_scratch);
+            let mut rc = process.run(["env", "SAILFIN_TEST_SCRATCH="
+                + child_scratch, self_exe, "test", path]);
+            if _should_retry_test(rc, sub_retries_disabled) {
+                print("[test] RETRY: " + _package_basename(path)
+                    + " (exit code "
+                    + number_to_string(rc)
+                    + ", retrying once)");
+                rc = process.run(["env", "SAILFIN_TEST_SCRATCH=" + child_scratch, self_exe, "test", path]);
+            }
+            if rc == 0 { suites[suite_idx].pass_count += 1; } else {
+                suites[suite_idx].fail_count += 1;
+                suites[suite_idx].failed_files.push(_package_basename(path));
+                if overall_rc == 0 { overall_rc = rc; }
+            }
+            ti += 1;
+        }
+        if emit_banners { _emit_suite_banners(suites); }
+        exit_test_runner_mode();
+        return overall_rc;
     }
 
     let ll_path = scratch_root + "/test.ll";

@@ -230,7 +230,7 @@ sfn test src/parser_test.sfn
 sfn test tests/unit/
 
 # Run multiple suites in one invocation — each path becomes a labelled
-# suite with its own `═══ <name>: N/M passed ═══` banner at end-of-run
+# suite with its own `═══ <name>: N/M passed, K failed ═══` banner at end-of-run
 sfn test tests/unit tests/integration tests/e2e
 
 # Note: --filter is not yet supported; run a specific file to narrow scope

@@ -155,8 +155,15 @@ test:
 		echo "[test] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules
-	@$(MAKE) test-e2e-sh
+	@# Run the unified runner, then the legacy e2e .sh scripts, and
+	@# surface a non-zero status if *either* failed. The `.sh` scripts
+	@# must still run even when a `.sfn` suite fails — matches the
+	@# pre-#848 `test-e2e` loop, which ran its `.sh` branch after the
+	@# `.sfn` branch regardless of `.sfn` failures.
+	@rc=0; \
+	$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules || rc=$$?; \
+	$(MAKE) test-e2e-sh || rc=$$?; \
+	exit $$rc
 
 # =============================================================================
 # Seed management (download a released compiler)
@@ -234,8 +241,10 @@ test-e2e:
 		echo "[test-e2e] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@$(NATIVE_BIN) test compiler/tests/e2e
-	@$(MAKE) test-e2e-sh
+	@rc=0; \
+	$(NATIVE_BIN) test compiler/tests/e2e || rc=$$?; \
+	$(MAKE) test-e2e-sh || rc=$$?; \
+	exit $$rc
 
 # Per-capsule tests live alongside each capsule under
 # `capsules/<scope>/<name>/tests/*_test.sfn`. The unified runner's
