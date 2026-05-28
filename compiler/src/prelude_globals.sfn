@@ -18,7 +18,6 @@
 // same exe-relative resolution the linker uses to find `prelude.o`), so
 // the lookup is cwd-independent — integration/e2e tests run the compiler
 // from scratch directories where a cwd-relative `runtime/` would miss.
-import { runtime_helper_call_names } from "./llvm/runtime_helpers";
 import { prelude_global_names_from_source } from "./prelude_scan";
 import { substring } from "./string_utils";
 
@@ -117,14 +116,22 @@ let mut _pg_cache_loaded: boolean = false;
 let mut _pg_cache_names: string[] = [];
 
 // Names of every implicitly-available callable: the compiler-known
-// runtime-helper builtins (always available — `number_to_string`,
-// `print`, the `runtime_*_fn` family, …) plus the prelude and
-// `runtime/sfn/**` source declarations (available when the runtime
-// source can be located; an installed compiler shipping only object
-// files still gets the helper builtins).
-fn load_prelude_global_names() -> string[] ![io] {
+// runtime-helper builtins passed in by the caller (`helper_names` —
+// `number_to_string`, `print`, the `runtime_*_fn` family, …) plus the
+// prelude and `runtime/sfn/**` source declarations (available when the
+// runtime source can be located; an installed compiler shipping only
+// object files still gets the caller-supplied helper builtins).
+//
+// `helper_names` is supplied by the caller (main.sfn / tools/check.sfn,
+// via `llvm/runtime_helpers.runtime_helper_call_names()`) rather than
+// imported here on purpose: this module is imported by `main`, so a
+// `prelude_globals → llvm/...` edge would invert the layering and break
+// the cold self-host build's module emit order (#812 — the resolver
+// tried to lower this low-level module before the `llvm` layer was
+// staged).
+fn load_prelude_global_names(helper_names: string[]) -> string[] ![io] {
     if _pg_cache_loaded { return _pg_cache_names; }
-    let mut names = runtime_helper_call_names();
+    let mut names = helper_names;
     let runtime_dir = _pg_find_runtime_dir();
     if runtime_dir.length > 0 {
         let prelude_source = fs.readFile(_pg_join(runtime_dir, "prelude.sfn"));

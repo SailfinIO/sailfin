@@ -28,6 +28,7 @@ import {
 } from "./llvm/lowering/entrypoints";
 import { lower_to_llvm_for_tests } from "./llvm/lowering/entrypoints_tests";
 import { write_llvm_ir_for_tests_from_text_with_context } from "./llvm/lowering/entrypoints_tests_writer";
+import { runtime_helper_call_names } from "./llvm/runtime_helpers";
 import { LayoutManifest } from "./native_ir";
 import { parse_program } from "./parser/mod";
 import { load_prelude_global_names } from "./prelude_globals";
@@ -72,7 +73,7 @@ fn _reject_reexport_violations(program: Program) -> boolean ![io] {
 
 fn compile_to_sailfin(source: string) -> string ![io] {
     let program: Program = parse_program(source);
-    let prelude_globals = load_prelude_global_names();
+    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     if typecheck_has_errors_with_prelude(program, prelude_globals) {
         let diagnostics = typecheck_diagnostics_with_prelude(program, prelude_globals);
         _emit_typecheck_diagnostics(diagnostics, source, "main");
@@ -176,7 +177,7 @@ fn module_name_from_path(source_path: string) -> string {
 
 fn compile_to_llvm(source: string) -> string ![io] {
     let program: Program = parse_program(source);
-    let prelude_globals = load_prelude_global_names();
+    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     if typecheck_has_errors_with_prelude(program, prelude_globals) {
         let diagnostics = typecheck_diagnostics_with_prelude(program, prelude_globals);
         _emit_typecheck_diagnostics(diagnostics, source, "main");
@@ -225,7 +226,7 @@ fn compile_to_llvm(source: string) -> string ![io] {
 // when the big joined IR string was returned and then printed.
 fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] {
     let program: Program = parse_program(source);
-    let prelude_globals = load_prelude_global_names();
+    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK")
         || _legacy_flag_file("build/sailfin/.skip_typecheck");
     if !skip_typecheck {
@@ -246,7 +247,7 @@ fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] 
 
 fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![io] {
     let program: Program = parse_program(source);
-    let prelude_globals = load_prelude_global_names();
+    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK")
         || _legacy_flag_file("build/sailfin/.skip_typecheck");
     if !skip_typecheck {
@@ -295,7 +296,7 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
 fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> string ![io, clock] {
     let t0 = monotonic_millis();
     let program: Program = parse_program(source);
-    let prelude_globals = load_prelude_global_names();
+    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let t_parse = _ms_since(t0);
 
     let t1 = monotonic_millis();
@@ -395,7 +396,7 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
     let trace = test_runner_trace();
     if trace { print.err("test compiler (imports): parse_program start"); }
     let program: Program = parse_program(source);
-    let prelude_globals = load_prelude_global_names();
+    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let diagnostics = typecheck_diagnostics_with_import_symbols_prelude(program, imported_interfaces, imported_function_effects, prelude_globals);
     let mut has_errors: boolean = false;
     let mut di: int = 0;
@@ -462,7 +463,7 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
 
 fn compile_to_native_text_with_module(source: string, module_name: string) -> string ![io] {
     let program: Program = parse_program(source);
-    let prelude_globals = load_prelude_global_names();
+    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     if typecheck_has_errors_with_prelude(program, prelude_globals) {
         let diagnostics = typecheck_diagnostics_with_prelude(program, prelude_globals);
         _emit_typecheck_diagnostics(diagnostics, source, module_name);
@@ -487,7 +488,7 @@ fn compile_to_native_text_with_module(source: string, module_name: string) -> st
 // Write native text directly to a file to avoid returning large strings across ABI boundaries.
 fn write_native_text_file_with_module(source: string, module_name: string, out_path: string) -> boolean ![io] {
     let program: Program = parse_program(source);
-    let prelude_globals = load_prelude_global_names();
+    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     if typecheck_has_errors_with_prelude(program, prelude_globals) {
         let diagnostics = typecheck_diagnostics_with_prelude(program, prelude_globals);
         _emit_typecheck_diagnostics(diagnostics, source, module_name);
@@ -506,7 +507,7 @@ fn write_native_text_file_with_module(source: string, module_name: string, out_p
 // is safe to invoke from parallel workers.
 fn compile_to_llvm_file_with_module(source: string, module_name: string, out_path: string, work_dir: string) -> boolean ![io] {
     let program: Program = parse_program(source);
-    let prelude_globals = load_prelude_global_names();
+    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let mut skip_typecheck_probe: string = "build/sailfin/.skip_typecheck";
     if work_dir.length > 0 {
         skip_typecheck_probe = work_dir + "/sailfin/.skip_typecheck";

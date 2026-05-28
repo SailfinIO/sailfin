@@ -662,6 +662,35 @@ rebuild:
 	@if [ -d build/native/import-context ]; then \
 		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
 	fi
+	@# #812: pre-stage the runtime/sfn/platform extern modules with the
+	@# SEED *before* `sfn build -p compiler`. `runtime/sfn/io.sfn` calls
+	@# `write` (from `./platform/libc`) and `runtime/sfn/clock.sfn` calls
+	@# `nanosleep` (from `./platform/posix`); their cold emit during the
+	@# build must read those `.sfn-asm` to resolve the extern return
+	@# types. On a true cold build (no `.ll` cache — e.g. CI `make
+	@# rebuild`) the resolver's staging order is not guaranteed to stage
+	@# these before io.sfn/clock.sfn emit, so the build fails with
+	@# "cannot resolve return type for call to `write`". The seed-emitted
+	@# signatures are good enough for the in-build resolution; the
+	@# post-build block below re-stages them with NATIVE_OUT for the
+	@# canonical (proper-pointee) form. Mirrors the post-stage loop.
+	@mkdir -p build/native/import-context/runtime/sfn/platform
+	@seed=$$(cat build/.seed-resolved); \
+	for mod in libc posix pthread net; do \
+		asm_path="build/native/import-context/runtime/sfn/platform/$$mod.sfn-asm"; \
+		manifest_path="build/native/import-context/runtime/sfn/platform/$$mod.layout-manifest"; \
+		if [ ! -f "$$asm_path" ]; then \
+			echo "[rebuild] pre-staging runtime/sfn/platform/$$mod.sfn-asm (seed)..."; \
+			if ! "$$seed" emit --module-name "runtime/sfn/platform/$$mod" -o "$$asm_path" native "runtime/sfn/platform/$$mod.sfn" >/dev/null 2>&1; then \
+				echo "[rebuild][warn] seed pre-stage failed for platform/$$mod.sfn; post-stage will retry with NATIVE_OUT" >&2; \
+				rm -f "$$asm_path"; \
+			fi; \
+		fi; \
+		if [ -f "$$asm_path" ] && [ ! -f "$$manifest_path" ]; then \
+			grep '^\.layout' "$$asm_path" > "$$manifest_path" 2>/dev/null || :; \
+			[ -f "$$manifest_path" ] || touch "$$manifest_path"; \
+		fi; \
+	done
 	@# Wipe stale `build/sailfin/program` so the existence check
 	@# below can't be fooled by an old binary surviving a failed
 	@# seed run. The `set -o pipefail` + bash wrapper captures
@@ -874,6 +903,11 @@ rebuild:
 	@# companion file is intentionally empty — stage_capsule_imports
 	@# does the same when `_cr_extract_layout_manifest` finds no
 	@# `.layout` lines in the emitted asm.
+	@# #812: drop the seed pre-staged platform asm (staged before the
+	@# build for cold-emit resolution) so the loop below re-emits them
+	@# with NATIVE_OUT — the canonical proper-pointee signatures, matching
+	@# the pre-#812 final state.
+	@rm -f build/native/import-context/runtime/sfn/platform/*.sfn-asm build/native/import-context/runtime/sfn/platform/*.layout-manifest
 	@mkdir -p build/native/import-context/runtime/sfn/platform
 	@set -e; \
 	for mod in libc posix pthread net; do \
