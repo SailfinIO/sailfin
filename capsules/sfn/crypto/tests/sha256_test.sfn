@@ -25,3 +25,13 @@ test "sha256_hex: 64-byte block boundary" {
 test "sha256: prefixed digest" {
     assert sha256("abc") == "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 }
+
+test "sha256_hex: non-ASCII UTF-8 (single multibyte char)" {
+    // "é" is the two UTF-8 bytes 0xc3 0xa9; byte-oriented indexing hashes
+    // them raw, matching `printf 'é' | sha256sum`.
+    assert sha256_hex("é") == "4a99557e4033c3539de2eb65472017cad5f9557f7a0625a09f1c3f6e2ba69c4c";
+}
+
+test "sha256_hex: non-ASCII UTF-8 (mixed ASCII + multibyte)" {
+    assert sha256_hex("héllo wörld") == "a1003f7d04a4115711d0b48a2eaf1359ce565d2d2a6fd65098dfcffadeeef59f";
+}

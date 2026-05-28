@@ -36,9 +36,10 @@ fn sha256_hex(data: string) -> string {
     //   // h == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     let mask: int = 4294967295;
 
-    // 1. Decode the input into a byte sequence. For ASCII / byte content the
-    //    per-character codepoint is the byte value (matches the C runtime,
-    //    which hashes raw bytes).
+    // 1. Decode the input into a byte sequence. Sailfin string indexing and
+    //    `.length` are byte-oriented (`s[i]` is the i-th byte, `char_code`
+    //    returns its 0-255 value), so this hashes the raw UTF-8 bytes and
+    //    matches `sha256sum` for arbitrary content, not just ASCII.
     let mut bytes: int[] = [];
     let mut bi: int = 0;
     loop {
