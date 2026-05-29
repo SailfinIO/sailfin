@@ -45,7 +45,10 @@ jobs:
             fail-fast: false
             matrix:
                 include:
-                    - os: macos-latest
+                    # Pinned to macos-15: `macos-latest` migrates to macOS 26
+                    # on 2026-06-15. Seed-producing build; keep the toolchain
+                    # stable rather than letting the image shift mid-cycle.
+                    - os: macos-15
                       package_label: macos-arm64
                       clang: clang
                     - os: ubuntu-24.04
