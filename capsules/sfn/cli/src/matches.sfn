@@ -76,6 +76,90 @@ fn has(m: Matches, name: string) -> boolean {
     return false;
 }
 
+fn get_int(m: Matches, name: string) -> int {
+    // Get a `flag_int` value parsed to an integer. Returns the
+    // sentinel `0` when the flag was not provided. Callers that must
+    // distinguish "absent" from a literal 0 should guard with
+    // `has_flag`/`has` first. Assumes `parse()` already validated the
+    // value (typed flags reject non-numeric input as `type_error`).
+    return _string_to_int(get(m, name));
+}
+
+fn get_float(m: Matches, name: string) -> float {
+    // Get a `flag_float` value parsed to a float. Returns the sentinel
+    // `0.0` when the flag was not provided. Guard with `has_flag`/`has`
+    // to distinguish "absent" from a literal 0.0.
+    return _string_to_float(get(m, name));
+}
+
+fn get_path(m: Matches, name: string) -> string {
+    // Get a `flag_path` value. Returns the sentinel "" when the flag
+    // was not provided. The path is returned verbatim — existence and
+    // permission checks are the caller's responsibility.
+    return get(m, name);
+}
+
+fn _string_to_int(value: string) -> int {
+    // Parse a base-10 integer (optional leading sign). Stops at the
+    // first non-digit; returns 0 for empty input. Validation lives in
+    // `parser._is_valid_int`, so this is a permissive reader.
+    let len = value.length;
+    if len == 0 { return 0; }
+    let mut i: int = 0;
+    let mut negative = false;
+    let first = grapheme_at(value, 0);
+    if strings_equal(first, "-") {
+        negative = true;
+        i = 1;
+    } else if strings_equal(first, "+") { i = 1; }
+    let mut result: int = 0;
+    loop {
+        if i >= len { break; }
+        let code = char_code(grapheme_at(value, i));
+        if code < 48 || code > 57 { break; }
+        result = result * 10 + (code - 48);
+        i = i + 1;
+    }
+    if negative { return 0 - result; }
+    return result;
+}
+
+fn _string_to_float(value: string) -> float {
+    // Parse a decimal number (optional leading sign, optional single
+    // '.'). Stops at the first unexpected character; returns 0.0 for
+    // empty input. Validation lives in `parser._is_valid_float`.
+    let len = value.length;
+    if len == 0 { return 0.0; }
+    let mut i: int = 0;
+    let mut negative = false;
+    let first = grapheme_at(value, 0);
+    if strings_equal(first, "-") {
+        negative = true;
+        i = 1;
+    } else if strings_equal(first, "+") { i = 1; }
+    let mut int_part: int = 0;
+    let mut frac: float = 0.0;
+    let mut scale: float = 1.0;
+    let mut seen_dot = false;
+    loop {
+        if i >= len { break; }
+        let ch = grapheme_at(value, i);
+        if strings_equal(ch, ".") { seen_dot = true; } else {
+            let code = char_code(ch);
+            if code < 48 || code > 57 { break; }
+            let digit = code - 48;
+            if seen_dot {
+                scale = scale * 10.0;
+                frac = frac + (digit as float) / scale;
+            } else { int_part = int_part * 10 + digit; }
+        }
+        i = i + 1;
+    }
+    let mut result: float = (int_part as float) + frac;
+    if negative { result = 0.0 - result; }
+    return result;
+}
+
 fn subcommand(m: Matches) -> string {
     // Returns the matched subcommand name, or empty string if none.
     return m.subcommand_name;

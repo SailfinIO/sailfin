@@ -97,6 +97,16 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
                         + " requires a value", flag_name, "");
                 }
                 fl_values.push(argv[idx]);
+                let detail = _validate_typed_value(f.value_kind, argv[idx]);
+                if detail.length > 0 {
+                    return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "type_error", _with_hint(cmd.name, subcmd_name, "error: flag --"
+                        + flag_name
+                        + " "
+                        + detail
+                        + " (argv["
+                        + _int_to_string(idx)
+                        + "])"), f.long_name, "");
+                }
             } else { fl_values.push("true"); }
         } else if _starts_with(token, "-") && token.length > 1 {
             // Short flag: -v or -o value
@@ -116,6 +126,16 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
                         + " requires a value", short, "");
                 }
                 fl_values.push(argv[idx]);
+                let detail = _validate_typed_value(f.value_kind, argv[idx]);
+                if detail.length > 0 {
+                    return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "type_error", _with_hint(cmd.name, subcmd_name, "error: flag -"
+                        + short
+                        + " "
+                        + detail
+                        + " (argv["
+                        + _int_to_string(idx)
+                        + "])"), f.long_name, "");
+                }
             } else { fl_values.push("true"); }
         } else {
             // Positional argument.
@@ -270,7 +290,8 @@ fn _find_flag_long(cmd: Command, name: string) -> Flag {
         short_name: "",
         description: "",
         takes_value: false,
-        required: false
+        required: false,
+        value_kind: "string"
     };
 }
 
@@ -288,7 +309,8 @@ fn _find_flag_short(cmd: Command, name: string) -> Flag {
         short_name: "",
         description: "",
         takes_value: false,
-        required: false
+        required: false,
+        value_kind: "string"
     };
 }
 
@@ -322,4 +344,94 @@ fn _help_hint(root_name: string, subcmd_name: string) -> string {
         return root_name + " " + subcmd_name + " --help";
     }
     return root_name + " --help";
+}
+
+fn _validate_typed_value(value_kind: string, value: string) -> string {
+    // Returns "" when `value` satisfies `value_kind`, otherwise a short
+    // human-readable detail describing the expectation. Drives the
+    // `type_error` diagnostics in `parse()`. "string" (and any
+    // unrecognized kind) accept anything.
+    if strings_equal(value_kind, "int") {
+        if !_is_valid_int(value) { return "expects an integer"; }
+    } else if strings_equal(value_kind, "float") {
+        if !_is_valid_float(value) { return "expects a number"; }
+    } else if strings_equal(value_kind, "path") {
+        if value.length == 0 { return "expects a non-empty path"; }
+    }
+    return "";
+}
+
+fn _is_valid_int(value: string) -> boolean {
+    // True when `value` is a base-10 i64 (optional leading sign, at
+    // least one digit, no overflow past the i64 maximum magnitude).
+    let len = value.length;
+    if len == 0 { return false; }
+    let mut i: int = 0;
+    let first = grapheme_at(value, 0);
+    if strings_equal(first, "-") || strings_equal(first, "+") { i = 1; }
+    if i >= len { return false; }
+    let int_max: int = 9223372036854775807;
+    let mut result: int = 0;
+    loop {
+        if i >= len { break; }
+        let code = char_code(grapheme_at(value, i));
+        if code < 48 || code > 57 { return false; }
+        let digit = code - 48;
+        // Overflow guard: reject before result * 10 + digit wraps.
+        if result > (int_max - digit) / 10 { return false; }
+        result = result * 10 + digit;
+        i = i + 1;
+    }
+    return true;
+}
+
+fn _is_valid_float(value: string) -> boolean {
+    // True when `value` is a decimal number: optional leading sign, at
+    // least one digit, at most one '.'. Exponent notation is out of
+    // scope for the typed-flag MVP.
+    let len = value.length;
+    if len == 0 { return false; }
+    let mut i: int = 0;
+    let first = grapheme_at(value, 0);
+    if strings_equal(first, "-") || strings_equal(first, "+") { i = 1; }
+    if i >= len { return false; }
+    let mut digits: int = 0;
+    let mut dots: int = 0;
+    loop {
+        if i >= len { break; }
+        let ch = grapheme_at(value, i);
+        if strings_equal(ch, ".") {
+            dots = dots + 1;
+            if dots > 1 { return false; }
+        } else {
+            let code = char_code(ch);
+            if code < 48 || code > 57 { return false; }
+            digits = digits + 1;
+        }
+        i = i + 1;
+    }
+    if digits == 0 { return false; }
+    return true;
+}
+
+fn _int_to_string(value: int) -> string {
+    // Minimal base-10 int formatter for diagnostic messages. The
+    // prelude has no int->string intrinsic exposed to capsules yet.
+    if value == 0 { return "0"; }
+    let table = "0123456789";
+    let mut n = value;
+    let mut negative = false;
+    if n < 0 {
+        negative = true;
+        n = 0 - n;
+    }
+    let mut digits = "";
+    loop {
+        if n == 0 { break; }
+        let d = n - (n / 10) * 10;
+        digits = substring(table, d, d + 1) + digits;
+        n = n / 10;
+    }
+    if negative { return "-" + digits; }
+    return digits;
 }

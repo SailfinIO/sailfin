@@ -36,7 +36,8 @@ fn flag(long_name: string, description: string) -> Flag {
         short_name: "",
         description: description,
         takes_value: false,
-        required: false
+        required: false,
+        value_kind: "string"
     };
 }
 
@@ -47,7 +48,8 @@ fn flag_value(long_name: string, description: string) -> Flag {
         short_name: "",
         description: description,
         takes_value: true,
-        required: false
+        required: false,
+        value_kind: "string"
     };
 }
 
@@ -58,7 +60,8 @@ fn flag_short(long_name: string, short_name: string, description: string) -> Fla
         short_name: short_name,
         description: description,
         takes_value: false,
-        required: false
+        required: false,
+        value_kind: "string"
     };
 }
 
@@ -69,7 +72,53 @@ fn flag_value_short(long_name: string, short_name: string, description: string) 
         short_name: short_name,
         description: description,
         takes_value: true,
-        required: false
+        required: false,
+        value_kind: "string"
+    };
+}
+
+fn flag_int(long_name: string, description: string) -> Flag {
+    // Create a flag that takes an integer value (e.g. --count 3).
+    // `parse()` validates the value as a base-10 i64 and emits a
+    // `ParseError { kind: "type_error" }` on non-numeric input or
+    // i64 overflow. Read the parsed value with `get_int`.
+    return Flag {
+        long_name: long_name,
+        short_name: "",
+        description: description,
+        takes_value: true,
+        required: false,
+        value_kind: "int"
+    };
+}
+
+fn flag_float(long_name: string, description: string) -> Flag {
+    // Create a flag that takes a floating-point value (e.g. --ratio
+    // 0.5). `parse()` validates the value as a decimal number and
+    // emits a `ParseError { kind: "type_error" }` on non-numeric
+    // input. Read the parsed value with `get_float`.
+    return Flag {
+        long_name: long_name,
+        short_name: "",
+        description: description,
+        takes_value: true,
+        required: false,
+        value_kind: "float"
+    };
+}
+
+fn flag_path(long_name: string, description: string) -> Flag {
+    // Create a flag that takes a filesystem path (e.g. --out dir/x).
+    // `parse()` validates string shape only (non-empty); existence
+    // and permission checks are the caller's responsibility. Read the
+    // value with `get_path`.
+    return Flag {
+        long_name: long_name,
+        short_name: "",
+        description: description,
+        takes_value: true,
+        required: false,
+        value_kind: "path"
     };
 }
 
@@ -83,7 +132,8 @@ fn flag_required(f: Flag) -> Flag {
         short_name: f.short_name,
         description: f.description,
         takes_value: f.takes_value,
-        required: true
+        required: true,
+        value_kind: f.value_kind
     };
 }
 
