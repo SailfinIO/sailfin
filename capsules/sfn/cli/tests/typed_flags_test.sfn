@@ -1,0 +1,140 @@
+// Tests for sfn/cli typed value flags — `flag_int`, `flag_float`,
+// `flag_path` builders, their `get_int` / `get_float` / `get_path`
+// accessors, and the `type_error` ParseError path added in Issue #794
+// (Phase 1 of the CLI Modularization Epic, #351).
+//
+// Typed flags reuse the value-flag plumbing: `parse()` validates the
+// argv value against the flag's `value_kind` and returns a structured
+// `ParseError { kind: "type_error", flag_name, message }` on failure
+// rather than calling `process.exit`.
+import {
+    command,
+    flag_float,
+    flag_int,
+    flag_path,
+    get_float,
+    get_int,
+    get_path,
+    parse,
+    with_flag
+} from "../src/mod";
+
+// ---- happy path: int ----
+test "typed: flag_int parses a positive integer" {
+    let cmd = with_flag(command("app", "desc"), flag_int("count", "How many"));
+    let argv: string[] = ["app", "--count", "42"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert get_int(r.matches, "count") == 42;
+}
+
+test "typed: flag_int parses a negative integer" {
+    let cmd = with_flag(command("app", "desc"), flag_int("delta", "Offset"));
+    let argv: string[] = ["app", "--delta", "-7"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert get_int(r.matches, "delta") == -7;
+}
+
+test "typed: flag_int accepts the i64 maximum" {
+    let cmd = with_flag(command("app", "desc"), flag_int("big", "Max"));
+    let argv: string[] = ["app", "--big", "9223372036854775807"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert get_int(r.matches, "big") == 9223372036854775807;
+}
+
+// ---- happy path: float ----
+test "typed: flag_float parses a decimal value" {
+    let cmd = with_flag(command("app", "desc"), flag_float("ratio", "Ratio"));
+    let argv: string[] = ["app", "--ratio", "0.5"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert get_float(r.matches, "ratio") == 0.5;
+}
+
+test "typed: flag_float parses a negative decimal value" {
+    let cmd = with_flag(command("app", "desc"), flag_float("ratio", "Ratio"));
+    let argv: string[] = ["app", "--ratio", "-2.25"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert get_float(r.matches, "ratio") == -2.25;
+}
+
+// ---- happy path: path ----
+test "typed: flag_path returns the path verbatim" {
+    let cmd = with_flag(command("app", "desc"), flag_path("out", "Output"));
+    let argv: string[] = ["app", "--out", "build/out.txt"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert strings_equal(get_path(r.matches, "out"), "build/out.txt");
+}
+
+// ---- type_error: overflow ----
+test "typed: flag_int overflow yields type_error" {
+    let cmd = with_flag(command("app", "desc"), flag_int("big", "Max"));
+    // i64 max + 1.
+    let argv: string[] = ["app", "--big", "9223372036854775808"];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "type_error");
+    assert strings_equal(r.error.flag_name, "big");
+}
+
+// ---- type_error: non-numeric int ----
+test "typed: flag_int non-numeric input yields type_error" {
+    let cmd = with_flag(command("app", "desc"), flag_int("count", "How many"));
+    let argv: string[] = ["app", "--count", "twelve"];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "type_error");
+    assert strings_equal(r.error.flag_name, "count");
+}
+
+// ---- type_error: empty value ----
+test "typed: flag_int empty value yields type_error" {
+    let cmd = with_flag(command("app", "desc"), flag_int("count", "How many"));
+    let argv: string[] = ["app", "--count", ""];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "type_error");
+    assert strings_equal(r.error.flag_name, "count");
+}
+
+// ---- type_error: non-numeric float ----
+test "typed: flag_float non-numeric input yields type_error" {
+    let cmd = with_flag(command("app", "desc"), flag_float("ratio", "Ratio"));
+    let argv: string[] = ["app", "--ratio", "1.2.3"];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "type_error");
+    assert strings_equal(r.error.flag_name, "ratio");
+}
+
+// ---- type_error: empty path ----
+test "typed: flag_path empty value yields type_error" {
+    let cmd = with_flag(command("app", "desc"), flag_path("out", "Output"));
+    let argv: string[] = ["app", "--out", ""];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "type_error");
+    assert strings_equal(r.error.flag_name, "out");
+}
+
+// ---- parse() never exits: error carries a usage hint ----
+test "typed: type_error message includes a usage hint" {
+    let cmd = with_flag(command("app", "desc"), flag_int("count", "How many"));
+    let argv: string[] = ["app", "--count", "nope"];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert string_starts_with(r.error.message, "error: flag --count");
+}
+
+// ---- absent optional typed flag returns the documented sentinel ----
+test "typed: get_int returns 0 sentinel when flag absent" {
+    let cmd = with_flag(command("app", "desc"), flag_int("count", "How many"));
+    let argv: string[] = ["app"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert get_int(r.matches, "count") == 0;
+}

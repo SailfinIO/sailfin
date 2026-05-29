@@ -15,6 +15,11 @@ struct Flag {
     description: string;
     takes_value: boolean;
     required: boolean;
+    // `value_kind` selects how `parse()` validates the flag's value:
+    // "string" (no validation), "int", "float", or "path" (non-empty
+    // shape check only — existence is the caller's responsibility).
+    // String discriminants are used until proper sum types land.
+    value_kind: string;
 }
 
 struct Command {
@@ -40,8 +45,13 @@ struct Matches {
 //
 // `kind` is one of: "ok", "help_requested", "version_requested",
 // "unknown_flag", "missing_value", "unexpected_positional",
-// "missing_required". String discriminants are used until proper sum
-// types land post-1.0.
+// "missing_required", "type_error". String discriminants are used
+// until proper sum types land post-1.0.
+//
+// `"type_error"` is emitted when a typed flag (`flag_int`,
+// `flag_float`, `flag_path`) receives a value that fails its shape
+// check. `flag_name` carries the failing flag's long name and
+// `message` records the offending argv index plus the expected type.
 //
 // `message` carries the human-readable text that `run()` would print
 // to stderr (empty for "help_requested" / "version_requested", where
