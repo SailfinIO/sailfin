@@ -168,6 +168,9 @@ fn _classify_role(token: Token, prev_lexeme: string, next_lexeme: string) -> str
     }
 
     if strings_equal(kind, "Identifier") {
+        if strings_equal(lex, "new") {
+            if strings_equal(next_lexeme, "(") { return "value"; }
+        }
         if _is_keyword(lex) { return "keyword"; }
         return "value";
     }
