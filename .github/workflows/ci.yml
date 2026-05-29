@@ -46,7 +46,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          # Pinned to macos-15: the `macos-latest` label migrates to macOS 26
+          # starting 2026-06-15. Keep CI on the known-good image; macOS 26 is
+          # being trialed in nightly-selfhost.yml before we adopt it here.
+          - os: macos-15
             package_label: macos-arm64
             asset_os: macos
             asset_arch: arm64

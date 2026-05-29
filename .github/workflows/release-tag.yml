@@ -49,7 +49,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          # Pinned to macos-15: `macos-latest` migrates to macOS 26 on
+          # 2026-06-15. These jobs produce the shipped macos-arm64 binaries
+          # (pinned as seeds), so the build toolchain must not shift silently.
+          - os: macos-15
             package_label: macos-arm64
             clang: clang
           - os: ubuntu-24.04

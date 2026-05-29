@@ -48,7 +48,10 @@ jobs:
           - os: ubuntu-24.04
             package_label: linux-x86_64
             clang: clang-18
-          - os: macos-latest
+          # Trialing macos-26 ahead of the 2026-06-15 `macos-latest` migration:
+          # nightly is the early-warning canary for fixed-point / determinism
+          # breakage on the new image before CI and release jobs adopt it.
+          - os: macos-26
             package_label: macos-arm64
             clang: clang
     steps:
