@@ -81,6 +81,19 @@ run_test "fmt: simple function spacing" assert_fmt "simple_fn" \
     'fn hello() -> string { return "world"; }' \
     'fn hello() -> string { return "world"; }'
 
+# ---- Test: method named new does not get a space before ( ----
+run_test "fmt: new method name spacing" assert_fmt "new_method_name" \
+    'struct R {
+    fn new(w: int) -> R { return R {}; }
+}
+let r = R.new(1);' \
+    'struct R {
+    fn new(w: int) -> R {
+        return R { };
+    }
+}
+let r = R.new(1);'
+
 # ---- Test: unary negation (no space after -) ----
 run_test "fmt: unary negation" assert_fmt "unary_neg" \
     "fn neg(x: number) -> number { return -x; }" \
