@@ -54,8 +54,7 @@
 // sentinel — fails the moment the registry rewire is reverted).
 // The end-to-end unit semantics are pinned by
 // `test_sleep_unit_semantics.sh` (issue #307).
-import { clock_gettime } from "./platform/posix";
-import { nanosleep } from "./platform/posix";
+import { clock_gettime, nanosleep } from "./platform/posix";
 
 struct Timespec {
     tv_sec: i64;
