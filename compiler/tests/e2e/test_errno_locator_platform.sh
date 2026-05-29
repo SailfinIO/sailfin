@@ -99,9 +99,30 @@ emit_for_os() {
 
 LL_LINUX="$SCRATCH/errno_linux.ll"
 LL_DARWIN="$SCRATCH/errno_darwin.ll"
+LL_WINDOWS="$SCRATCH/errno_windows.ll"
 
 test_emit_linux() { emit_for_os "Linux" "$LL_LINUX"; }
 test_emit_darwin() { emit_for_os "Darwin" "$LL_DARWIN"; }
+
+# Emit IR with the cross-compile target override `SAILFIN_TARGET_OS`
+# set to $1; writes to $2. This is the cross-compilation path (#877):
+# the override names the *target* OS and takes precedence over the
+# `uname -s` host probe, so `make ci-cross-windows` (a Linux host
+# producing a Windows binary) gets the target's errno accessor. The
+# `uname` value is left as the real host here precisely to prove the
+# override wins regardless of host.
+emit_for_target_os() {
+    local target_os="$1" out="$2"
+    local log="$SCRATCH/emit-target-$target_os.log"
+    if ! SAILFIN_TARGET_OS="$target_os" "$BINARY" emit -o "$out" llvm "$FIXTURE" > "$log" 2>&1; then
+        echo "[test]   sfn emit llvm failed (SAILFIN_TARGET_OS=$target_os):"
+        cat "$log"
+        return 1
+    fi
+    return 0
+}
+
+test_emit_windows() { emit_for_target_os "Windows" "$LL_WINDOWS"; }
 
 # --- Linux path: @__errno_location, not @__error ---
 
@@ -171,14 +192,46 @@ test_darwin_no_linux_symbol() {
     return 0
 }
 
+# --- Windows (cross-compile target override): @_errno, not the glibc
+#     or Darwin spellings (#877). mingw-w64 exposes the errno slot as
+#     `int *_errno(void)`; the Linux-host cross-build must emit that. ---
+
+test_windows_call() {
+    if ! grep -qE 'call i32\* @_errno\(\)' "$LL_WINDOWS"; then
+        echo "[test]   missing 'call i32* @_errno()' on the Windows-target path"
+        return 1
+    fi
+    return 0
+}
+
+test_windows_declare() {
+    if ! grep -qE 'declare i32\* @_errno\(\)' "$LL_WINDOWS"; then
+        echo "[test]   missing 'declare i32* @_errno()' on the Windows-target path"
+        return 1
+    fi
+    return 0
+}
+
+test_windows_no_other_symbol() {
+    # Anchor on `(` not `\b` for BSD/macOS `grep -E` portability. Neither
+    # the glibc nor the Darwin locator may appear when the target is
+    # Windows — otherwise the mingw link picks up an undefined symbol.
+    if grep -qE '@__errno_location\(|@__error\(' "$LL_WINDOWS"; then
+        echo "[test]   unexpected non-Windows locator in Windows-target IR:"
+        grep -nE '@__errno_location\(|@__error\(' "$LL_WINDOWS"
+        return 1
+    fi
+    return 0
+}
+
 # --- The sentinel name must never appear as a real symbol ---
 
 test_no_sentinel_leak() {
     local n
-    n="$(grep -cE '(call|declare) .*@sailfin_intrinsic_errno_location' "$LL_LINUX" "$LL_DARWIN" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')"
+    n="$(grep -cE '(call|declare) .*@sailfin_intrinsic_errno_location' "$LL_LINUX" "$LL_DARWIN" "$LL_WINDOWS" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')"
     if [ "$n" != "0" ]; then
         echo "[test]   expected 0 call/declare of the sentinel symbol, found $n:"
-        grep -nE '(call|declare) .*@sailfin_intrinsic_errno_location' "$LL_LINUX" "$LL_DARWIN" || true
+        grep -nE '(call|declare) .*@sailfin_intrinsic_errno_location' "$LL_LINUX" "$LL_DARWIN" "$LL_WINDOWS" || true
         return 1
     fi
     return 0
@@ -187,6 +240,7 @@ test_no_sentinel_leak() {
 run_test "sfn check passes on the errno-locator fixture" test_check_clean
 run_test "sfn emit llvm produces IR (uname=Linux)" test_emit_linux
 run_test "sfn emit llvm produces IR (uname=Darwin)" test_emit_darwin
+run_test "sfn emit llvm produces IR (SAILFIN_TARGET_OS=Windows)" test_emit_windows
 run_test "Linux path calls @__errno_location" test_linux_call
 run_test "Linux path declares @__errno_location" test_linux_declare
 run_test "Linux path derefs via 'load i32'" test_linux_load
@@ -194,6 +248,9 @@ run_test "Linux path omits @__error" test_linux_no_darwin_symbol
 run_test "Darwin path calls @__error" test_darwin_call
 run_test "Darwin path declares @__error" test_darwin_declare
 run_test "Darwin path omits @__errno_location" test_darwin_no_linux_symbol
+run_test "Windows-target path calls @_errno" test_windows_call
+run_test "Windows-target path declares @_errno" test_windows_declare
+run_test "Windows-target path omits @__errno_location and @__error" test_windows_no_other_symbol
 run_test "sentinel symbol never emitted as call/declare" test_no_sentinel_leak
 
 echo "[summary] $PASS passed, $FAIL failed"

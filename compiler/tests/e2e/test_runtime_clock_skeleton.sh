@@ -166,12 +166,59 @@ test_emit_eintr_loop_shape() {
     return 0
 }
 
+test_emit_eintr_errno_check() {
+    local ll="$SCRATCH/clock.ll"
+    if [ ! -f "$ll" ]; then
+        echo "[test]   $ll missing — test_emit_wrapper_shape must run first to produce it"
+        return 1
+    fi
+    # Issue #877: the loop no longer trusts the return value alone —
+    # after a non-zero `nanosleep` it reads `errno` and resumes only
+    # on `EINTR`. That read is the host-aware locator sentinel (#887)
+    # dereferenced by the pointer-read load (#875): the @sfn_sleep
+    # body must contain `call i32* @<locator>()` *after* the
+    # `@nanosleep` call. The locator spelling is host-dependent —
+    # `@__errno_location` on glibc, `@__error` on Darwin — and this
+    # test runs natively on both the ubuntu and macos-arm64 CI legs,
+    # so accept either. A revert to the return-value-only shortcut
+    # (#693 shape) removes the locator call and fails here.
+    local body_file="$SCRATCH/sfn_sleep.body"
+    awk '/^define void @sfn_sleep\(/,/^}/' "$ll" > "$body_file"
+    if [ ! -s "$body_file" ]; then
+        echo "[test]   could not extract @sfn_sleep body from $ll"
+        return 1
+    fi
+    local call_line errno_line
+    call_line="$(grep -nE 'call i32 @nanosleep\(' "$body_file" | head -n 1 | cut -d: -f1)"
+    if [ -z "$call_line" ]; then
+        echo "[test]   no call to @nanosleep found inside @sfn_sleep body"
+        return 1
+    fi
+    # Anchor on the trailing `(` rather than `\b`: BSD/macOS `grep -E`
+    # treats `\b` as a literal backspace, not a word boundary.
+    errno_line="$(awk -v start="$call_line" 'NR > start && /call i32\* @(__errno_location|__error)\(/ { print NR; exit }' "$body_file")"
+    if [ -z "$errno_line" ]; then
+        echo "[test]   no errno-locator call (@__errno_location / @__error) after @nanosleep in @sfn_sleep body — EINTR errno check missing"
+        echo "[test]   --- @sfn_sleep body ---"
+        cat "$body_file"
+        return 1
+    fi
+    # The locator result must be dereferenced (`load i32`) to read the
+    # errno value — confirms the pointer-read intrinsic lowered.
+    if ! grep -qE 'load i32, i32\* %' "$body_file"; then
+        echo "[test]   missing 'load i32, i32* %…' errno deref in @sfn_sleep body"
+        return 1
+    fi
+    return 0
+}
+
 run_test "sfn check runtime/sfn/clock.sfn passes" test_check_clean
 run_test "sfn fmt --check runtime/sfn/clock.sfn is canonical" test_fmt_clean
 run_test "sfn emit llvm produces sfn_sleep wrapper over @nanosleep" test_emit_wrapper_shape
 run_test "sfn emit llvm declares the nanosleep import" test_emit_declare_shape
 run_test "sailfin_runtime_sleep is fully retired from clock.sfn emission" test_no_sailfin_runtime_sleep
 run_test "sfn_sleep wraps @nanosleep in a bounded EINTR retry loop (#693)" test_emit_eintr_loop_shape
+run_test "sfn_sleep reads errno and resumes only on EINTR (#877)" test_emit_eintr_errno_check
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
