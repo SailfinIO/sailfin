@@ -231,42 +231,53 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
 
     // errno-location sentinel (#877, epic #763). Resolves the
     // thread-local `errno` slot's address. The concrete C symbol is
-    // host-dependent — glibc exposes `int *__errno_location(void)`,
-    // while Darwin/macOS exposes `int *__error(void)` — so the
-    // call-emission dispatcher (`coerce_and_emit_call` in
-    // `core_call_emission.sfn`) special-cases this symbol and emits a
-    // `call i32* @__errno_location()` or `call i32* @__error()`
-    // chosen by host detection at emit time, returning an `i32*` that
-    // feeds straight into `sailfin_intrinsic_pointer_read_i32`. This
-    // is the first host-conditional symbol selection in lowering and
-    // is what lets `runtime/sfn/clock.sfn` read `errno` without
+    // platform-dependent — glibc exposes `int *__errno_location(void)`,
+    // Darwin/macOS `int *__error(void)`, and Windows/mingw-w64
+    // `int *_errno(void)` — so the call-emission dispatcher
+    // (`coerce_and_emit_call` in `core_call_emission.sfn`) special-cases
+    // this symbol and emits the matching `call i32* @<sym>()` chosen by
+    // `errno_locator_symbol` at emit time (the `SAILFIN_TARGET_OS`
+    // target override, else the `uname -s` host probe), returning an
+    // `i32*` that feeds straight into `sailfin_intrinsic_pointer_read_i32`.
+    // This is the first target-conditional symbol selection in lowering
+    // and is what lets `runtime/sfn/clock.sfn` read `errno` without
     // hardcoding the glibc-only locator (which broke the macOS link —
-    // see #876/#882). Empty effects: choosing/reading the locator is
-    // not a capability. The declare loop in `rendering.sfn` skips the
-    // sentinel target; the concrete locator's `declare` is emitted by
-    // the lowering branch itself.
+    // see #876/#882 — and the Windows cross-compile link — see #877).
+    // Empty effects: choosing/reading the locator is not a capability.
+    // The declare loop in `rendering.sfn` skips the sentinel target; the
+    // concrete locator's `declare` is emitted by the lowering branch
+    // itself.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "sailfin_intrinsic_errno_location", symbol: "sailfin_intrinsic_errno_location", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
     });
     // Concrete errno-locator C symbols backing the sentinel above.
     // These exist only so the post-lowering call-target scan
     // (`collect_runtime_helper_targets_from_lines`) emits a matching
-    // `declare i32* @__errno_location()` / `@__error()` for whichever
-    // symbol the sentinel branch actually emits on the build host —
-    // the scan matches `descriptor.symbol` against emitted `call`
-    // lines and the declare loop declares `symbol`, so only the host's
-    // locator (the one with a real call site) is ever declared; the
-    // other descriptor stays inert. Their `target`s are deliberately
-    // dotted (member-style) so `runtime_helper_call_names()` does NOT
-    // seed `__errno_location` / `__error` as bare source-level globals
-    // — otherwise `__error()` would typecheck on Linux and then fail
-    // to link. Callers must go through the host-aware sentinel; these
-    // rows are internal-only.
+    // `declare i32* @__errno_location()` / `@__error()` / `@_errno()`
+    // for whichever symbol the sentinel branch actually emits for the
+    // resolved target — the scan matches `descriptor.symbol` against
+    // emitted `call` lines and the declare loop declares `symbol`, so
+    // only the selected locator (the one with a real call site) is ever
+    // declared; the other descriptors stay inert. Their `target`s are
+    // deliberately dotted (member-style) so `runtime_helper_call_names()`
+    // does NOT seed `__errno_location` / `__error` / `_errno` as bare
+    // source-level globals — otherwise `__error()` would typecheck on
+    // Linux and then fail to link. Callers must go through the
+    // target-aware sentinel; these rows are internal-only.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "intrinsic.errno_location.glibc", symbol: "__errno_location", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "intrinsic.errno_location.darwin", symbol: "__error", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    // Windows/mingw-w64 spells the errno-slot accessor `int *_errno(void)`.
+    // Selected when the sentinel resolves the *target* OS to Windows via
+    // `SAILFIN_TARGET_OS` (cross-compilation from a Linux host — see
+    // `make ci-cross-windows` and `errno_locator_symbol` in
+    // `lowering_debug_state.sfn`, #877). Dotted target, same rationale as
+    // the rows above: internal-only, never a bare source-level global.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "intrinsic.errno_location.mingw", symbol: "_errno", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
     });
 
     // Network intrinsics

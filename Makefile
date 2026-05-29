@@ -1038,9 +1038,12 @@ ci-cross-windows:
 			-c "$$PRELUDE_LL" -o "$$WIN_OBJ/runtime/prelude.o"; \
 	fi; \
 	\
+	echo "[cross-windows] re-emitting clock for Windows target (errno -> _errno, #877)..."; \
+	SAILFIN_TARGET_OS=Windows $(NATIVE_OUT) emit \
+		-o "$$WIN_OBJ/runtime/clock.ll" llvm runtime/sfn/clock.sfn >/dev/null; \
 	echo "[cross-windows] compiling clock (Sailfin-native @sfn_sleep, #397)..."; \
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-		-c "$$CLOCK_LL" -o "$$WIN_OBJ/runtime/clock.o"; \
+		-c "$$WIN_OBJ/runtime/clock.ll" -o "$$WIN_OBJ/runtime/clock.o"; \
 	\
 	echo "[cross-windows] compiling type_meta (Sailfin-native type-metadata registry, M2.10 #402)..."; \
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
