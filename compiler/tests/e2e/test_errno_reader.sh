@@ -186,10 +186,13 @@ test_windows_no_other_symbol() {
 # --- Neither sentinel name may ever appear as a real symbol ---
 
 test_no_sentinel_leak() {
+    # Count matches directly with awk rather than `grep -c | awk`:
+    # `grep -c` exits 1 when there are zero matches (the expected pass
+    # case), which under `pipefail` (and especially `inherit_errexit`)
+    # can abort the script before the count is read. awk always exits 0.
     local n
-    n="$(grep -cE '(call|declare) .*@sailfin_intrinsic_(errno_location|pointer_read_i32)' \
-            "$LL_LINUX" "$LL_DARWIN" "$LL_WINDOWS" 2>/dev/null \
-         | awk -F: '{s+=$2} END {print s+0}')"
+    n="$(awk '/(call|declare) .*@sailfin_intrinsic_(errno_location|pointer_read_i32)/ { c++ } END { print c + 0 }' \
+            "$LL_LINUX" "$LL_DARWIN" "$LL_WINDOWS" 2>/dev/null)"
     if [ "$n" != "0" ]; then
         echo "[test]   expected 0 call/declare of a sentinel symbol, found $n:"
         grep -nE '(call|declare) .*@sailfin_intrinsic_(errno_location|pointer_read_i32)' \
