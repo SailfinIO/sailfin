@@ -883,6 +883,41 @@ fn _runtime_filesystem_path(root: string) -> string ![io] {
     return "";
 }
 
+// M3 (issue #818, epic #390) mirrors the M3.1a filesystem migration
+// above: the descriptor flips in
+// `compiler/src/llvm/runtime_helpers.sfn` route `http.get_body` /
+// `http.post_json` / `http.download` (and the `http_get` /
+// `http_post` aliases) to `sfn_http_get` / `sfn_http_post` /
+// `sfn_http_post2` / `sfn_http_download`, defined in
+// `runtime/sfn/adapters/http.sfn` (the pure-Sailfin socket client
+// that replaces the curl subprocess path, HTTP only — no TLS for
+// v0). The `sfn run` / `sfn build` link path (this function's
+// caller, `_clang_compile_runtime_objects`) needs the staged `.o`
+// to resolve those symbols whenever a user program reaches an
+// `http.*` call site. The runtime-capsule path reaches http.sfn
+// through `runtime/native/capsule.toml`'s `sfn-sources` array
+// instead. Search order mirrors `_runtime_filesystem_path` so
+// bundled installs and in-tree dev builds both find the staged
+// object. Empty return becomes fail-loud at link time as "undefined
+// reference to `sfn_http_get`" the moment any user program touches
+// `http.get_body` — same fail-loud contract as the filesystem path.
+fn _runtime_http_path(root: string) -> string ![io] {
+    let bundled = _path_join(root, "native/obj/http.o");
+    if fs.exists(bundled) { return bundled; }
+    let bundled_nested = _path_join(root, "native/obj/runtime/http.o");
+    if fs.exists(bundled_nested) { return bundled_nested; }
+    let parent = _dirname(root);
+    let fallback = _path_join(parent, "build/native/obj/http.o");
+    if fs.exists(fallback) { return fallback; }
+    let fallback_nested = _path_join(parent, "build/native/obj/runtime/http.o");
+    if fs.exists(fallback_nested) { return fallback_nested; }
+    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/http.o");
+    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
+    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/http.o");
+    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
+    return "";
+}
+
 // Last `/`-separated segment of a path. Returns the input itself
 // when there's no slash. Used for naming runtime obj outputs after
 // their source basename, matching the legacy `_clang_compile_runtime_objects`
@@ -1224,18 +1259,22 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     // for `@sfn_type_register` / `@sfn_resolve_type` / `@sfn_instance_of`
     // and the five primitive type guards; `filesystem_obj` is the M3.1a
     // (#814) addition for `@sfn_fs_read_file` / `@sfn_fs_write_file` /
-    // `@sfn_fs_append_file`. Empty `clock_obj` / `process_obj` /
+    // `@sfn_fs_append_file`; `http_obj` is the M3 (#818) addition for
+    // `@sfn_http_get` / `@sfn_http_post` / `@sfn_http_post2` /
+    // `@sfn_http_download` (the pure-Sailfin socket HTTP client).
+    // Empty `clock_obj` / `process_obj` /
     // `exception_obj` / `exec_obj` / `type_meta_obj` / `filesystem_obj`
+    // / `http_obj`
     // entries are tolerated when the corresponding `runtime/sfn/*.sfn`
     // module has not yet been staged into the runtime bundle —
     // callers skip empty entries when assembling the link line. Any
     // of the first four going empty signals a failed runtime compile
     // and propagates back to the caller as a hard fail.
     if runtime_root.length == 0 {
-        return ["", "", "", "", "", "", "", "", "", ""];
+        return ["", "", "", "", "", "", "", "", "", "", ""];
     }
     if !_runtime_bundle_exists(runtime_root) {
-        return ["", "", "", "", "", "", "", "", "", ""];
+        return ["", "", "", "", "", "", "", "", "", "", ""];
     }
 
     let include_dir = _path_join(runtime_root, "native/include");
@@ -1249,6 +1288,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     let exec_obj = _runtime_exec_path(runtime_root);
     let type_meta_obj = _runtime_type_meta_path(runtime_root);
     let filesystem_obj = _runtime_filesystem_path(runtime_root);
+    let http_obj = _runtime_http_path(runtime_root);
 
     let runtime_obj = _path_join(out_dir, "sailfin_runtime" + opt_flag + ".o");
     let arena_obj = _path_join(out_dir, "sailfin_arena" + opt_flag + ".o");
@@ -1258,7 +1298,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
         let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
             + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
         if rc != 0 {
-            return ["", "", "", "", "", "", "", "", "", ""];
+            return ["", "", "", "", "", "", "", "", "", "", ""];
         }
     }
 
@@ -1266,18 +1306,18 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
         let rc_arena = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
             + include_dir, "-c", arena_src, "-o", arena_obj,]);
         if rc_arena != 0 {
-            return ["", "", "", "", "", "", "", "", "", ""];
+            return ["", "", "", "", "", "", "", "", "", "", ""];
         }
     }
 
     if !fs.exists(globals_obj) {
         let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", runtime_ir, "-o", globals_obj,]);
         if rc2 != 0 {
-            return ["", "", "", "", "", "", "", "", "", ""];
+            return ["", "", "", "", "", "", "", "", "", "", ""];
         }
     }
 
-    return [runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj];
+    return [runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj, http_obj];
 }
 
 fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> int ![io] {
@@ -1426,6 +1466,16 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         // reference to `sfn_fs_read_file`" so the missing staged
         // artifact surfaces immediately.
         let filesystem_obj = cached[9];
+        // M3 (#818): `http_obj` carries the Sailfin-native socket HTTP
+        // client (`@sfn_http_get` / `@sfn_http_post` / `@sfn_http_post2`
+        // / `@sfn_http_download`). Same empty-string fallback contract
+        // as `filesystem_obj` — user programs without an `http.*` call
+        // site don't reach the symbols and the link succeeds either way;
+        // user programs that touch `http.get_body` / `http.post_json` /
+        // `http.download` fail loudly at link time with "undefined
+        // reference to `sfn_http_get`" so the missing staged artifact
+        // surfaces immediately.
+        let http_obj = cached[10];
         let mut _missing: boolean = false;
         if runtime_obj.length == 0 { _missing = true; }
         if arena_obj.length == 0 { _missing = true; }
@@ -1445,6 +1495,7 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         if exec_obj.length > 0 { runtime_objs.push(exec_obj); }
         if type_meta_obj.length > 0 { runtime_objs.push(type_meta_obj); }
         if filesystem_obj.length > 0 { runtime_objs.push(filesystem_obj); }
+        if http_obj.length > 0 { runtime_objs.push(http_obj); }
         runtime_link_libs.push("-lm");
     }
 

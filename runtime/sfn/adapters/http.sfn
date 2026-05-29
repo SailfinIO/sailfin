@@ -1,0 +1,522 @@
+// runtime/sfn/adapters/http.sfn
+//
+// First-wave Sailfin-native HTTP/1.1 client adapter (M3, #818 —
+// epic #390 / tracker #321). Replaces the curl-subprocess HTTP
+// path (`sailfin_runtime_http_get` / `_post_json` / `_download`
+// in `runtime/native/src/sailfin_runtime.c`, which shell out to
+// `curl -sfS`) with a pure-Sailfin socket client built on the
+// BSD-sockets surface declared in `runtime/sfn/platform/net.sfn`.
+// Mirrors the migration shape of `runtime/sfn/adapters/filesystem.sfn`
+// (M3.1, #814/#815) and `runtime/sfn/process.sfn` (M2.9).
+//
+// Scope: HTTP only — NO TLS for v0 (Option A per the epic). An
+// `https://` URL is rejected (returns null); capsules needing
+// HTTPS stay on the legacy curl path until a 1.1 TLS story lands.
+//
+// ABI. `compiler/src/llvm/runtime_helpers.sfn` flips the curl
+// registry rows by setting `native_signature` to the symbols
+// defined here, exactly as the `fs.*` rows were flipped to
+// `sfn_fs_*` (the legacy C `symbol` stays for seed compat):
+//   - `http.get_body`  (url)               -> `sfn_http_get`
+//   - `http.post_json` (url, body, auth)   -> `sfn_http_post`
+//   - `http.download`  (url, output_path)  -> `sfn_http_download`
+//   - `http_get`       (url)               -> `sfn_http_get`
+//   - `http_post`      (request, body)      -> `sfn_http_post2`
+// All descriptors keep their existing `i8*`-in / `i8*`-out shape
+// (raw NUL-terminated `* u8` buffers, no arena threading) — the
+// same plain-pointer ABI the `sfn_fs_*` adapters use. The issue's
+// `*Arena` / `SfnString` shorthand would require retyping the
+// descriptors to the aggregate ABI and threading an arena through
+// `core_call_lowering.sfn` (not in this issue's Files Affected);
+// matching the proven `fs.*` raw-pointer shape keeps the flip
+// self-contained.
+//
+// The two POST arities exist because the registry carries two
+// rows of different arity: `http.post_json` is (url, body,
+// auth_header) and the `http_post` alias is (request, body). The
+// alias points at `sfn_http_post2`, a 2-arg wrapper that forwards
+// to `sfn_http_post` with an empty auth header.
+//
+// Return semantics (matching the curl bodies they replace):
+//   - get / post: the response BODY (headers stripped), null on a
+//     socket/connect failure or an HTTP status >= 400 (mirrors
+//     curl `-f`).
+//   - download: the literal `"ok"` on success, null on failure
+//     (mirrors `sailfin_runtime_http_download`'s contract). Writes
+//     the body to `output_path` in binary mode.
+//
+// Host resolution (v0): numeric dotted-quad IPv4 (`atoi` per octet)
+// plus a `localhost` -> 127.0.0.1 special case. Real DNS
+// (`getaddrinfo`) is a follow-up wave — the v0 smoke test targets a
+// localhost listener, so name resolution is deliberately minimal.
+//
+// Effects: `![net]` for get/post, `![net, io]` for download (it
+// opens a file). The flipped descriptors carry the same effects, so
+// calling `http.get_body` / `http.post_json` without `![net]` (or
+// `http.download` without `![net, io]`) on the call chain remains a
+// compile-time error after the flip.
+//
+// Why inline the externs rather than `import` from
+// `../platform/net.sfn` / `../platform/libc.sfn`? Same rationale as
+// every other `runtime/sfn/*.sfn` module (see `filesystem.sfn`
+// header, ~line 108): the seed compiler reaches the cross-module
+// extern resolver through a path #306 has not closed, so inlining
+// the declarations keeps this module self-contained for every seed.
+// A follow-up PR flips these to imports once #306 lands, without
+// touching the bodies. Declaring the same C symbol in two modules
+// is safe — each emits its own LLVM `declare` and the linker
+// resolves both to the single libc / libc-socket entrypoint (see
+// the `net.sfn` symbol-collision note).
+//
+// Decimal byte constants (no char/octal literals in the seed):
+//   46 = '.'   47 = '/'   58 = ':'   32 = ' '   48 = '0'
+//   111 = 'o'  107 = 'k'
+// AF_INET = 2, SOCK_STREAM = 1 (identical on Linux x86_64 and
+// macOS arm64, the two targets this runtime builds for).
+//
+// Pinned by `compiler/tests/e2e/test_runtime_adapter_http.sh`
+// (typecheck + fmt + emit-define shape over the exports + an IR
+// routing probe + a behavioral round-trip against a localhost
+// listener).
+// ── libc memory + string helpers ──────────────────────────────
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+extern fn strchr(s: * u8, c: i32) -> * u8;
+
+extern fn strstr(haystack: * u8, needle: * u8) -> * u8;
+
+extern fn strcmp(a: * u8, b: * u8) -> i32;
+
+// C `int atoi(const char *)` — parses a leading decimal integer,
+// stops at the first non-digit. Declared `-> i32` to match the C
+// 32-bit return (a 64-bit declaration would read undefined upper
+// bits); octet / port values fit comfortably.
+extern fn atoi(s: * u8) -> i32;
+
+// ── BSD sockets (libc) ────────────────────────────────────────
+// `addr` is spelled `* u8` (the `net.sfn` opaque-handle policy:
+// adapters cast the family-specific sockaddr struct through `* u8`
+// at the call site). Identical C ABI to `const struct sockaddr *`.
+extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+
+extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+
+extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+extern fn close(fd: i32) -> i32;
+
+// ── libc stdio (download write path) ──────────────────────────
+extern fn fopen(path: * u8, mode: * u8) -> * File;
+
+extern fn fwrite(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
+
+extern fn fclose(f: * File) -> i32;
+
+// `_ptr_off(p, off)` — byte-stride pointer arithmetic for a
+// variable offset. Mirrors `filesystem.sfn`'s `(buf as i64) + len`
+// idiom; centralized here because the HTTP paths offset by runtime
+// values throughout (recv cursor, response scan, sockaddr fields).
+fn _ptr_off(p: * u8, off: i64) -> * u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as * u8;
+}
+
+// `_strdup_n(src, n)` — copy `n` bytes from `src` into a fresh
+// libc-`malloc`'d NUL-terminated buffer the caller owns. Returns
+// null on OOM. `n == 0` yields a valid empty string.
+fn _strdup_n(src: * u8, n: i64) -> * u8 {
+    let buf: * u8 = malloc((n + 1) as usize);
+    if buf as i64 == 0 { return null; }
+    if n > 0 { memcpy(buf, src, n as usize); }
+    memset(_ptr_off(buf, n), 0, 1 as usize);
+    return buf;
+}
+
+// `_uint_to_str(value)` — render a non-negative i64 as a freshly
+// allocated decimal string (used for the POST `Content-Length`
+// header). Returns null on OOM.
+fn _uint_to_str(value: i64) -> * u8 {
+    if value <= 0 {
+        let zero: * u8 = malloc(2 as usize);
+        if zero as i64 == 0 { return null; }
+        memset(_ptr_off(zero, 0), 48, 1 as usize);
+        memset(_ptr_off(zero, 1), 0, 1 as usize);
+        return zero;
+    }
+    let mut count: i64 = 0;
+    let mut probe: i64 = value;
+    loop {
+        if probe == 0 { break; }
+        probe = probe / 10;
+        count = count + 1;
+    }
+    let buf: * u8 = malloc((count + 1) as usize);
+    if buf as i64 == 0 { return null; }
+    memset(_ptr_off(buf, count), 0, 1 as usize);
+    let mut remaining: i64 = value;
+    let mut idx: i64 = count - 1;
+    loop {
+        if remaining == 0 { break; }
+        let digit: i64 = remaining % 10;
+        memset(_ptr_off(buf, idx), (48 + digit) as i32, 1 as usize);
+        remaining = remaining / 10;
+        idx = idx - 1;
+    }
+    return buf;
+}
+
+// `_host_ip4(host, out)` — resolve `host` to four IPv4 octets,
+// written to `out[0..4]`. Handles the `localhost` alias and numeric
+// dotted-quad addresses; returns false on anything else (no DNS in
+// v0). `out` must point at >= 4 writable bytes.
+fn _host_ip4(host: * u8, out: * u8) -> bool {
+    let localhost: string = "localhost";
+    if strcmp(host, localhost as * u8) == 0 {
+        memset(_ptr_off(out, 0), 127, 1 as usize);
+        memset(_ptr_off(out, 1), 0, 1 as usize);
+        memset(_ptr_off(out, 2), 0, 1 as usize);
+        memset(_ptr_off(out, 3), 1, 1 as usize);
+        return true;
+    }
+    let mut cursor: * u8 = host;
+    let mut i: i64 = 0;
+    loop {
+        if i >= 4 { break; }
+        let octet: i64 = atoi(cursor) as i64;
+        memset(_ptr_off(out, i), octet as i32, 1 as usize);
+        if i < 3 {
+            let dot: * u8 = strchr(cursor, 46);
+            if dot as i64 == 0 { return false; }
+            cursor = _ptr_off(dot, 1);
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+// `_connect_tcp(host, port)` — build an IPv4 `sockaddr_in`, open a
+// stream socket, and connect. Returns the connected fd, or -1 on
+// any failure. The 16-byte sockaddr is built byte-wise: family
+// AF_INET (low byte 2, the rest zero), `sin_port` in network byte
+// order (big-endian), then the four address octets, then the
+// 8-byte zero pad left from the initial `memset`.
+fn _connect_tcp(host: * u8, port: i64) -> i32 ![net] {
+    let addr: * u8 = malloc(16 as usize);
+    if addr as i64 == 0 { return 0 - 1; }
+    memset(addr, 0, 16 as usize);
+    // sin_family = AF_INET (2), little-endian u16 -> byte0 = 2.
+    memset(_ptr_off(addr, 0), 2, 1 as usize);
+    // sin_port (network byte order = big-endian).
+    memset(_ptr_off(addr, 2), ((port >> 8) & 255) as i32, 1 as usize);
+    memset(_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
+    // sin_addr octets at offset 4..8.
+    if _host_ip4(host, _ptr_off(addr, 4)) {
+        let fd: i32 = socket(2, 1, 0);
+        if fd < 0 {
+            free(addr);
+            return 0 - 1;
+        }
+        let rc: i32 = connect(fd, addr, 16);
+        free(addr);
+        if rc != 0 {
+            close(fd);
+            return 0 - 1;
+        }
+        return fd;
+    }
+    free(addr);
+    return 0 - 1;
+}
+
+// `_send_all(fd, buf, total)` — write `total` bytes, retrying on
+// short sends. Returns false if `send` ever fails.
+fn _send_all(fd: i32, buf: * u8, total: i64) -> bool ![net] {
+    let mut sent: i64 = 0;
+    loop {
+        if sent >= total { break; }
+        let n: i64 = send(fd, _ptr_off(buf, sent), total - sent, 0);
+        if n <= 0 { return false; }
+        sent = sent + n;
+    }
+    return true;
+}
+
+// `_recv_all(fd)` — drain the socket into a growing libc buffer
+// (doubling like `filesystem.sfn`'s slurp), NUL-terminated and
+// caller-owned. Returns null on OOM. Loops until `recv` returns 0
+// (peer closed — guaranteed by the request's `Connection: close`)
+// or an error.
+fn _recv_all(fd: i32) -> * u8 ![net] {
+    let mut capacity: i64 = 8192;
+    let mut len: i64 = 0;
+    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    if buf as i64 == 0 { return null; }
+    let chunk: i64 = 8192;
+    loop {
+        if len + chunk > capacity {
+            let new_cap: i64 = capacity * 2;
+            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            if new_buf as i64 == 0 {
+                free(buf);
+                return null;
+            }
+            buf = new_buf;
+            capacity = new_cap;
+        }
+        let n: i64 = recv(fd, _ptr_off(buf, len), chunk, 0);
+        if n <= 0 { break; }
+        len = len + n;
+    }
+    memset(_ptr_off(buf, len), 0, 1 as usize);
+    return buf;
+}
+
+// `_extract_body(resp)` — given a raw HTTP response buffer, check
+// the status line and return a fresh copy of the body (everything
+// after the first `\r\n\r\n`). Returns null when the status code is
+// >= 400 (mirrors curl `-f`) or when no header terminator is found.
+// `resp` is left untouched; the caller frees it.
+fn _extract_body(resp: * u8) -> * u8 {
+    if resp as i64 == 0 { return null; }
+    // Status code: the first space precedes "NNN reason".
+    let space: * u8 = strchr(resp, 32);
+    if space as i64 != 0 {
+        let code: i64 = atoi(_ptr_off(space, 1)) as i64;
+        if code >= 400 { return null; }
+    }
+    let terminator: string = "\r\n\r\n";
+    let header_end: * u8 = strstr(resp, terminator as * u8);
+    if header_end as i64 == 0 { return null; }
+    let body_start: * u8 = _ptr_off(header_end, 4);
+    let body_len: i64 = strlen(body_start) as i64;
+    return _strdup_n(body_start, body_len);
+}
+
+// `_http_send(url, is_post, body, auth_header)` — the shared
+// request/response core. Parses `url` (scheme/host/port/path),
+// connects, writes the request head (plus body for POST), drains
+// the response, and returns the extracted body (or null on any
+// failure). `auth_header`, when non-null and non-empty, is emitted
+// as an `Authorization:` header (POST only).
+fn _http_send(url: * u8, is_post: bool, body: * u8, auth_header: * u8) -> * u8 ![net] {
+    // Reject TLS — no HTTPS in v0.
+    let https: string = "https://";
+    if (strstr(url, https as * u8) as i64) == (url as i64) { return null; }
+
+    // Locate the authority: skip past "scheme://" if present.
+    let sep: string = "://";
+    let mut host_start: * u8 = url;
+    let scheme: * u8 = strstr(url, sep as * u8);
+    if scheme as i64 != 0 { host_start = _ptr_off(scheme, 3); }
+
+    // Path begins at the first '/' after the authority; default "/".
+    let slash: * u8 = strchr(host_start, 47);
+    let mut authority_len: i64 = 0;
+    if slash as i64 != 0 {
+        authority_len = (slash as i64) - (host_start as i64);
+    } else { authority_len = strlen(host_start) as i64; }
+    let authority: * u8 = _strdup_n(host_start, authority_len);
+    if authority as i64 == 0 { return null; }
+
+    // Split host:port (terminate host in place at the colon).
+    let mut port: i64 = 80;
+    let colon: * u8 = strchr(authority, 58);
+    if colon as i64 != 0 {
+        port = atoi(_ptr_off(colon, 1)) as i64;
+        memset(colon, 0, 1 as usize);
+    }
+
+    let root: string = "/";
+    let mut path: * u8 = root as * u8;
+    if slash as i64 != 0 { path = slash; }
+
+    let fd: i32 = _connect_tcp(authority, port);
+    if fd < 0 {
+        free(authority);
+        return null;
+    }
+
+    // ── Build and send the request head ──
+    let host_line: string = " HTTP/1.1\r\nHost: ";
+    let tail: string = "\r\nConnection: close\r\n\r\n";
+    let path_len: i64 = strlen(path) as i64;
+    let host_len: i64 = strlen(authority) as i64;
+
+    if is_post {
+        let verb: string = "POST ";
+        let ctype: string = "\r\nContent-Type: application/json\r\nContent-Length: ";
+        let body_len: i64 = strlen(body) as i64;
+        let clen: * u8 = _uint_to_str(body_len);
+        if clen as i64 == 0 {
+            free(authority);
+            close(fd);
+            return null;
+        }
+        // Optional Authorization header.
+        let auth_label: string = "\r\nAuthorization: ";
+        let mut has_auth: bool = false;
+        let mut auth_len: i64 = 0;
+        if auth_header as i64 != 0 {
+            auth_len = strlen(auth_header) as i64;
+            if auth_len > 0 { has_auth = true; }
+        }
+        let mut total: i64 = (strlen(verb as * u8) as i64) + path_len + (strlen(host_line as * u8) as i64)
+            + host_len
+            + (strlen(ctype as * u8) as i64)
+            + (strlen(clen) as i64)
+            + (strlen(tail as * u8) as i64);
+        if has_auth {
+            total = total + (strlen(auth_label as * u8) as i64) + auth_len;
+        }
+        let head: * u8 = malloc((total + 1) as usize);
+        if head as i64 == 0 {
+            free(clen);
+            free(authority);
+            close(fd);
+            return null;
+        }
+        let mut off: i64 = 0;
+        off = _append(head, off, verb as * u8);
+        off = _append(head, off, path);
+        off = _append(head, off, host_line as * u8);
+        off = _append(head, off, authority);
+        off = _append(head, off, ctype as * u8);
+        off = _append(head, off, clen);
+        if has_auth {
+            off = _append(head, off, auth_label as * u8);
+            off = _append(head, off, auth_header);
+        }
+        off = _append(head, off, tail as * u8);
+        memset(_ptr_off(head, off), 0, 1 as usize);
+        free(clen);
+
+        let head_ok: bool = _send_all(fd, head, off);
+        free(head);
+        if head_ok {
+            if _send_all(fd, body, body_len) {
+                // fall through to recv
+            } else {
+                free(authority);
+                close(fd);
+                return null;
+            }
+        } else {
+            free(authority);
+            close(fd);
+            return null;
+        }
+    } else {
+        let verb: string = "GET ";
+        let total: i64 = (strlen(verb as * u8) as i64) + path_len + (strlen(host_line as * u8) as i64)
+            + host_len
+            + (strlen(tail as * u8) as i64);
+        let head: * u8 = malloc((total + 1) as usize);
+        if head as i64 == 0 {
+            free(authority);
+            close(fd);
+            return null;
+        }
+        let mut off: i64 = 0;
+        off = _append(head, off, verb as * u8);
+        off = _append(head, off, path);
+        off = _append(head, off, host_line as * u8);
+        off = _append(head, off, authority);
+        off = _append(head, off, tail as * u8);
+        memset(_ptr_off(head, off), 0, 1 as usize);
+
+        let head_ok: bool = _send_all(fd, head, off);
+        free(head);
+        if head_ok {
+            // fall through to recv
+        } else {
+            free(authority);
+            close(fd);
+            return null;
+        }
+    }
+
+    free(authority);
+    let resp: * u8 = _recv_all(fd);
+    close(fd);
+    let result: * u8 = _extract_body(resp);
+    if resp as i64 != 0 { free(resp); }
+    return result;
+}
+
+// `_append(dst, off, src)` — copy the NUL-terminated `src` into
+// `dst` at byte offset `off`, returning the new offset. The caller
+// pre-sizes `dst` from the summed piece lengths.
+fn _append(dst: * u8, off: i64, src: * u8) -> i64 {
+    let n: i64 = strlen(src) as i64;
+    memcpy(_ptr_off(dst, off), src, n as usize);
+    return off + n;
+}
+
+// `sfn_http_get(url)` — GET `url`, returning a caller-owned copy of
+// the response body. Null on a null url, connect failure, or HTTP
+// status >= 400.
+fn sfn_http_get(url: * u8) -> * u8 ![net] {
+    if url as i64 == 0 { return null; }
+    return _http_send(url, false, null, null);
+}
+
+// `sfn_http_post(url, body, auth_header)` — POST `body` to `url`
+// with `Content-Type: application/json`. When `auth_header` is
+// non-empty it is sent verbatim as the `Authorization:` value
+// (matching the curl `sailfin_runtime_http_post_json` contract).
+// Returns a caller-owned copy of the response body, null on
+// failure or status >= 400.
+fn sfn_http_post(url: * u8, body: * u8, auth_header: * u8) -> * u8 ![net] {
+    if url as i64 == 0 { return null; }
+    if body as i64 == 0 { return null; }
+    return _http_send(url, true, body, auth_header);
+}
+
+// `sfn_http_post2(url, body)` — 2-arg POST for the `http_post`
+// registry alias; forwards to `sfn_http_post` with no auth header.
+fn sfn_http_post2(url: * u8, body: * u8) -> * u8 ![net] {
+    return sfn_http_post(url, body, null);
+}
+
+// `sfn_http_download(url, output_path)` — GET `url` and write the
+// body to `output_path` in binary mode. Returns the literal `"ok"`
+// on success, null on failure (matching the curl
+// `sailfin_runtime_http_download` contract).
+fn sfn_http_download(url: * u8, output_path: * u8) -> * u8 ![net, io] {
+    if url as i64 == 0 { return null; }
+    if output_path as i64 == 0 { return null; }
+    let body: * u8 = _http_send(url, false, null, null);
+    if body as i64 == 0 { return null; }
+
+    let mode: string = "wb";
+    let f: * File = fopen(output_path, mode as * u8);
+    if f as i64 == 0 {
+        free(body);
+        return null;
+    }
+    let body_len: i64 = strlen(body) as i64;
+    if body_len > 0 {
+        fwrite(body, 1 as usize, body_len as usize, f);
+    }
+    fclose(f);
+    free(body);
+
+    let ok: * u8 = malloc(3 as usize);
+    if ok as i64 == 0 { return null; }
+    memset(_ptr_off(ok, 0), 111, 1 as usize);
+    memset(_ptr_off(ok, 1), 107, 1 as usize);
+    memset(_ptr_off(ok, 2), 0, 1 as usize);
+    return ok;
+}
