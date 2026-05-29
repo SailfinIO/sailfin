@@ -864,6 +864,29 @@ rebuild:
 		echo "[rebuild] staging filesystem.o..."; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/filesystem.ll -o build/native/obj/runtime/filesystem.o; \
 	fi
+	@# Stage http.o (Sailfin-native socket HTTP client from
+	@# runtime/sfn/adapters/http.sfn). M3 (issue #818, epic #390)
+	@# flips the `http.get_body` / `http.post_json` / `http.download`
+	@# descriptor rows' `native_signature` (and the `http_get` /
+	@# `http_post` aliases) to `sfn_http_get` / `sfn_http_post` /
+	@# `sfn_http_post2` / `sfn_http_download`, replacing the curl
+	@# subprocess path with a pure-Sailfin socket client (HTTP only,
+	@# no TLS for v0). The legacy `sfn run` / `sfn build` link path
+	@# (`_clang_compile_runtime_objects` in
+	@# `compiler/src/cli_main.sfn`) resolves those symbols against
+	@# this staged .o; the runtime-capsule path reaches http.sfn
+	@# through `runtime/native/capsule.toml`'s `sfn-sources` array
+	@# instead. Without this staging, any user program touching
+	@# `http.*` fails at link with "undefined reference to
+	@# `sfn_http_get`".
+	@if [ ! -f build/native/obj/runtime/http.ll ]; then \
+		echo "[rebuild] staging http.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/http.ll llvm runtime/sfn/adapters/http.sfn >/dev/null; \
+	fi
+	@if [ ! -f build/native/obj/runtime/http.o ]; then \
+		echo "[rebuild] staging http.o..."; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/http.ll -o build/native/obj/runtime/http.o; \
+	fi
 	@# Stage exec.o (Sailfin-native executable-path + runtime-root
 	@# resolution from runtime/sfn/platform/exec.sfn). Issue #468
 	@# (epic #451 M5.3 prerequisite) ships `@exe_path` /
@@ -964,6 +987,7 @@ ci-cross-windows:
 	EXEC_LL="build/native/obj/runtime/exec.ll"; \
 	EXCEPTION_LL="build/native/obj/runtime/exception.ll"; \
 	FILESYSTEM_LL="build/native/obj/runtime/filesystem.ll"; \
+	HTTP_LL="build/native/obj/runtime/http.ll"; \
 	if [ ! -d "$$SAVED_DIR" ] || [ ! -f "$$SAVED_DIR/program.ll" ]; then \
 		echo "[cross-windows][error] missing $$SAVED_DIR/*.ll + program.ll — run 'make rebuild' first" >&2; \
 		exit 1; \
@@ -990,6 +1014,10 @@ ci-cross-windows:
 	fi; \
 	if [ ! -f "$$FILESYSTEM_LL" ]; then \
 		echo "[cross-windows][error] missing $$FILESYSTEM_LL — 'make rebuild' should have emitted it (M3.1a, #814)" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$$HTTP_LL" ]; then \
+		echo "[cross-windows][error] missing $$HTTP_LL — 'make rebuild' should have emitted it (M3, #818)" >&2; \
 		exit 1; \
 	fi; \
 	echo "[cross-windows] using saved sfn build IR layout ($$SAVED_DIR)"; \
@@ -1061,6 +1089,10 @@ ci-cross-windows:
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
 		-c "$$FILESYSTEM_LL" -o "$$WIN_OBJ/runtime/filesystem.o"; \
 	\
+		echo "[cross-windows] compiling http (Sailfin-native socket HTTP client, M3 #818)..."; \
+		$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+			-c "$$HTTP_LL" -o "$$WIN_OBJ/runtime/http.o"; \
+		\
 	echo "[cross-windows] compiling C runtime..."; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_arena.c \
 		-o "$$WIN_OBJ/sailfin_arena.o"; \
@@ -1096,8 +1128,9 @@ ci-cross-windows:
 		"$$WIN_OBJ/runtime/exec.o" \
 		"$$WIN_OBJ/runtime/exception.o" \
 		"$$WIN_OBJ/runtime/filesystem.o" \
+		"$$WIN_OBJ/runtime/http.o" \
 		$$SHIM_O \
-		-lm -lpthread; \
+		-lm -lpthread -lws2_32; \
 	\
 	echo "[cross-windows] built $$WIN_OUT"; \
 	ls -lh "$$WIN_OUT"; \
@@ -1134,6 +1167,10 @@ ci-cross-windows:
 	if [ -f "$$WIN_OBJ/runtime/filesystem.o" ]; then \
 		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
 		cp -f "$$WIN_OBJ/runtime/filesystem.o" "$$INSTALLER_DIR/runtime/native/obj/filesystem.o"; \
+	fi; \
+	if [ -f "$$WIN_OBJ/runtime/http.o" ]; then \
+		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+		cp -f "$$WIN_OBJ/runtime/http.o" "$$INSTALLER_DIR/runtime/native/obj/http.o"; \
 	fi; \
 	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
 	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"

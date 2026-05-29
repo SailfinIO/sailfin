@@ -655,12 +655,17 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "fs.symlink", symbol: "sailfin_adapter_fs_symlink", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
     });
 
-    // HTTP adapters (distinct from intrinsics for adapter infrastructure)
+    // HTTP adapters (distinct from intrinsics for adapter infrastructure).
+    // M3 (#818): flipped to the Sailfin-native socket client in
+    // `runtime/sfn/adapters/http.sfn`. The legacy C `symbol`s
+    // (`sailfin_adapter_http_*`, no-op stubs) stay for seed compat; the
+    // `native_signature` override routes calls to `sfn_http_get` /
+    // `sfn_http_post2` (the 2-arg POST wrapper matching this row's arity).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http_get", symbol: "sailfin_adapter_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: null, c_abi_return_type: null
+        target: "http_get", symbol: "sailfin_adapter_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: "sfn_http_get", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http_post", symbol: "sailfin_adapter_http_post", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net"], native_signature: null, c_abi_return_type: null
+        target: "http_post", symbol: "sailfin_adapter_http_post", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net"], native_signature: "sfn_http_post2", c_abi_return_type: null
     });
 
     // Serve adapters
@@ -1016,15 +1021,21 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "base64.encode", symbol: "base64_encode__capsules__sfn__crypto__src__mod", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
-    // HTTP helpers (curl subprocess)
+    // HTTP helpers. M3 (#818): flipped from the curl-subprocess C path
+    // to the Sailfin-native socket client in
+    // `runtime/sfn/adapters/http.sfn` (HTTP/1.1, no TLS for v0). The
+    // legacy curl `symbol`s stay exported for seed compat; the
+    // `native_signature` override routes `http.get_body` /
+    // `http.post_json` / `http.download` to `sfn_http_get` /
+    // `sfn_http_post` (url, body, auth_header) / `sfn_http_download`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.get_body", symbol: "sailfin_runtime_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: null, c_abi_return_type: null
+        target: "http.get_body", symbol: "sailfin_runtime_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: "sfn_http_get", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.post_json", symbol: "sailfin_runtime_http_post_json", return_type: "i8*", parameter_types: ["i8*", "i8*", "i8*"], effects: ["net"], native_signature: null, c_abi_return_type: null
+        target: "http.post_json", symbol: "sailfin_runtime_http_post_json", return_type: "i8*", parameter_types: ["i8*", "i8*", "i8*"], effects: ["net"], native_signature: "sfn_http_post", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.download", symbol: "sailfin_runtime_http_download", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net", "io"], native_signature: null, c_abi_return_type: null
+        target: "http.download", symbol: "sailfin_runtime_http_download", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net", "io"], native_signature: "sfn_http_download", c_abi_return_type: null
     });
 
     // Environment & path helpers
