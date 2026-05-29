@@ -130,9 +130,13 @@ test_linux_load() {
 }
 
 test_linux_no_darwin_symbol() {
-    if grep -qE '@__error\b' "$LL_LINUX"; then
-        echo "[test]   unexpected '@__error' in Linux-path IR:"
-        grep -nE '@__error\b' "$LL_LINUX"
+    # Anchor on the trailing `(` rather than `\b`: BSD/macOS `grep -E`
+    # treats `\b` as a literal backspace, not a word boundary (see
+    # test_runtime_libc_skeleton.sh:95-102), and this test runs on the
+    # macos-arm64 CI leg.
+    if grep -qE '@__error\(' "$LL_LINUX"; then
+        echo "[test]   unexpected '@__error(' in Linux-path IR:"
+        grep -nE '@__error\(' "$LL_LINUX"
         return 1
     fi
     return 0
@@ -157,9 +161,11 @@ test_darwin_declare() {
 }
 
 test_darwin_no_linux_symbol() {
-    if grep -qE '@__errno_location\b' "$LL_DARWIN"; then
-        echo "[test]   unexpected '@__errno_location' in Darwin-path IR:"
-        grep -nE '@__errno_location\b' "$LL_DARWIN"
+    # Anchor on `(` not `\b` for BSD/macOS `grep -E` portability — see
+    # test_linux_no_darwin_symbol above.
+    if grep -qE '@__errno_location\(' "$LL_DARWIN"; then
+        echo "[test]   unexpected '@__errno_location(' in Darwin-path IR:"
+        grep -nE '@__errno_location\(' "$LL_DARWIN"
         return 1
     fi
     return 0

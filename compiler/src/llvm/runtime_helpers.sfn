@@ -254,15 +254,19 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // `declare i32* @__errno_location()` / `@__error()` for whichever
     // symbol the sentinel branch actually emits on the build host —
     // the scan matches `descriptor.symbol` against emitted `call`
-    // lines, so only the host's locator (the one with a real call
-    // site) is ever declared; the other descriptor stays inert. They
-    // are NOT skipped in `rendering.sfn` (unlike the sentinel) because
-    // their declare is exactly what we want.
+    // lines and the declare loop declares `symbol`, so only the host's
+    // locator (the one with a real call site) is ever declared; the
+    // other descriptor stays inert. Their `target`s are deliberately
+    // dotted (member-style) so `runtime_helper_call_names()` does NOT
+    // seed `__errno_location` / `__error` as bare source-level globals
+    // — otherwise `__error()` would typecheck on Linux and then fail
+    // to link. Callers must go through the host-aware sentinel; these
+    // rows are internal-only.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "__errno_location", symbol: "__errno_location", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+        target: "intrinsic.errno_location.glibc", symbol: "__errno_location", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "__error", symbol: "__error", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+        target: "intrinsic.errno_location.darwin", symbol: "__error", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
     });
 
     // Network intrinsics
