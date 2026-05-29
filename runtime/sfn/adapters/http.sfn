@@ -45,10 +45,19 @@
 //     (mirrors `sailfin_runtime_http_download`'s contract). Writes
 //     the body to `output_path` in binary mode.
 //
-// Host resolution (v0): numeric dotted-quad IPv4 (`atoi` per octet)
-// plus a `localhost` -> 127.0.0.1 special case. Real DNS
-// (`getaddrinfo`) is a follow-up wave — the v0 smoke test targets a
-// localhost listener, so name resolution is deliberately minimal.
+// Host resolution (v0): numeric dotted-quad IPv4 (`atoi` per octet,
+// each validated to 0..255) plus a `localhost` -> 127.0.0.1 special
+// case. Real DNS (`getaddrinfo`) is a follow-up wave — the v0 smoke
+// test targets a localhost listener, so name resolution is
+// deliberately minimal.
+//
+// v0 limitations (follow-up waves): no DNS, no `Transfer-Encoding:
+// chunked` decoding (the v0 contract is `Content-Length` responses;
+// a chunked response would surface its raw chunk framing as the
+// body), and no redirect following. Response bodies are length-
+// tracked end-to-end (`_recv_all` -> `_extract_body`), so binary
+// payloads with embedded NULs download faithfully even though the
+// get/post `i8*` return is also NUL-terminated for string use.
 //
 // Effects: `![net]` for get/post, `![net, io]` for download (it
 // opens a file). The flipped descriptors carry the same effects, so
@@ -195,6 +204,11 @@ fn _host_ip4(host: * u8, out: * u8) -> bool {
     loop {
         if i >= 4 { break; }
         let octet: i64 = atoi(cursor) as i64;
+        // Reject malformed octets — `atoi` happily returns values
+        // outside 0..255 (or negative), which would silently
+        // wrap/truncate into one byte and connect to an unintended
+        // address.
+        if octet < 0 || octet > 255 { return false; }
         memset(_ptr_off(out, i), octet as i32, 1 as usize);
         if i < 3 {
             let dot: * u8 = strchr(cursor, 46);
@@ -208,35 +222,57 @@ fn _host_ip4(host: * u8, out: * u8) -> bool {
 
 // `_connect_tcp(host, port)` — build an IPv4 `sockaddr_in`, open a
 // stream socket, and connect. Returns the connected fd, or -1 on
-// any failure. The 16-byte sockaddr is built byte-wise: family
-// AF_INET (low byte 2, the rest zero), `sin_port` in network byte
-// order (big-endian), then the four address octets, then the
-// 8-byte zero pad left from the initial `memset`.
+// any failure.
+//
+// `sockaddr_in` byte layout differs across the two targets this
+// runtime builds for, and the platform-agnostic emitted IR cannot
+// branch on it, so we try both layouts (fresh socket each time,
+// first success wins):
+//   - Linux:     `sin_family` is a u16 at offset 0 → low byte = 2
+//                (AF_INET), high byte 0.
+//   - macOS/BSD: `sin_len` (u8) at offset 0, `sin_family` (u8) at
+//                offset 1 → byte0 = 16 (struct size), byte1 = 2.
+// On Linux the macOS layout yields `sin_family = 16 | (2<<8) = 528`
+// (EAFNOSUPPORT) and vice-versa, so the wrong-layout attempt fails
+// fast without connecting anywhere. For localhost (the v0 target)
+// the live attempt succeeds or refuses immediately, so the extra
+// attempt costs nothing observable. `sin_port` is big-endian
+// (network byte order); the four address octets sit at offset 4.
 fn _connect_tcp(host: * u8, port: i64) -> i32 ![net] {
-    let addr: * u8 = malloc(16 as usize);
-    if addr as i64 == 0 { return 0 - 1; }
-    memset(addr, 0, 16 as usize);
-    // sin_family = AF_INET (2), little-endian u16 -> byte0 = 2.
-    memset(_ptr_off(addr, 0), 2, 1 as usize);
-    // sin_port (network byte order = big-endian).
-    memset(_ptr_off(addr, 2), ((port >> 8) & 255) as i32, 1 as usize);
-    memset(_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
-    // sin_addr octets at offset 4..8.
-    if _host_ip4(host, _ptr_off(addr, 4)) {
-        let fd: i32 = socket(2, 1, 0);
-        if fd < 0 {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 2 { break; }
+        let addr: * u8 = malloc(16 as usize);
+        if addr as i64 == 0 { return 0 - 1; }
+        memset(addr, 0, 16 as usize);
+        if attempt == 0 {
+            // Linux: u16 sin_family at offset 0.
+            memset(_ptr_off(addr, 0), 2, 1 as usize);
+        } else {
+            // macOS/BSD: u8 sin_len at 0, u8 sin_family at 1.
+            memset(_ptr_off(addr, 0), 16, 1 as usize);
+            memset(_ptr_off(addr, 1), 2, 1 as usize);
+        }
+        // sin_port (network byte order = big-endian).
+        memset(_ptr_off(addr, 2), ((port >> 8) & 255) as i32, 1 as usize);
+        memset(_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
+        // sin_addr octets at offset 4..8.
+        if _host_ip4(host, _ptr_off(addr, 4)) {
+            let fd: i32 = socket(2, 1, 0);
+            if fd < 0 {
+                free(addr);
+                return 0 - 1;
+            }
+            let rc: i32 = connect(fd, addr, 16);
+            free(addr);
+            if rc == 0 { return fd; }
+            close(fd);
+        } else {
             free(addr);
             return 0 - 1;
         }
-        let rc: i32 = connect(fd, addr, 16);
-        free(addr);
-        if rc != 0 {
-            close(fd);
-            return 0 - 1;
-        }
-        return fd;
+        attempt = attempt + 1;
     }
-    free(addr);
     return 0 - 1;
 }
 
@@ -253,12 +289,16 @@ fn _send_all(fd: i32, buf: * u8, total: i64) -> bool ![net] {
     return true;
 }
 
-// `_recv_all(fd)` — drain the socket into a growing libc buffer
-// (doubling like `filesystem.sfn`'s slurp), NUL-terminated and
-// caller-owned. Returns null on OOM. Loops until `recv` returns 0
-// (peer closed — guaranteed by the request's `Connection: close`)
-// or an error.
-fn _recv_all(fd: i32) -> * u8 ![net] {
+// `_recv_all(fd, len_slot)` — drain the socket into a growing libc
+// buffer (doubling like `filesystem.sfn`'s slurp), NUL-terminated
+// and caller-owned, writing the exact byte count received through
+// `len_slot` (so binary bodies with embedded NULs are length-known,
+// not `strlen`-truncated). Returns null on OOM or a `recv` error
+// (`n < 0`); a clean EOF (`n == 0`, guaranteed by the request's
+// `Connection: close`) ends the loop and returns the buffer. The
+// trailing NUL keeps the buffer usable as a C string for the
+// text-body get/post paths.
+fn _recv_all(fd: i32, len_slot: * i64) -> * u8 ![net] {
     let mut capacity: i64 = 8192;
     let mut len: i64 = 0;
     let mut buf: * u8 = malloc((capacity + 1) as usize);
@@ -276,19 +316,39 @@ fn _recv_all(fd: i32) -> * u8 ![net] {
             capacity = new_cap;
         }
         let n: i64 = recv(fd, _ptr_off(buf, len), chunk, 0);
-        if n <= 0 { break; }
+        // Distinguish a socket error from a clean close: a partial
+        // buffer from an errored socket must not look like success.
+        if n < 0 {
+            free(buf);
+            return null;
+        }
+        if n == 0 { break; }
         len = len + n;
     }
     memset(_ptr_off(buf, len), 0, 1 as usize);
+    atomic_store(len_slot, len);
     return buf;
 }
 
-// `_extract_body(resp)` — given a raw HTTP response buffer, check
-// the status line and return a fresh copy of the body (everything
-// after the first `\r\n\r\n`). Returns null when the status code is
-// >= 400 (mirrors curl `-f`) or when no header terminator is found.
-// `resp` is left untouched; the caller frees it.
-fn _extract_body(resp: * u8) -> * u8 {
+// `_extract_body(resp, total_len, body_len_slot)` — given a raw
+// HTTP response buffer of `total_len` bytes, check the status line
+// and return a fresh copy of the body (everything after the first
+// `\r\n\r\n`), writing the body's exact byte length through
+// `body_len_slot`. The length is computed as `total_len - body_off`
+// (NOT `strlen`), so bodies containing embedded NULs are copied
+// whole — required for `http.download` to be a faithful binary
+// download. Returns null when the status code is >= 400 (mirrors
+// curl `-f`) or when no header terminator is found. The status line
+// and headers are ASCII (no NUL before the body), so `strchr` /
+// `strstr` over them are safe. `resp` is left untouched; the caller
+// frees it.
+//
+// v0 limitation: `Transfer-Encoding: chunked` is not decoded — the
+// raw chunk framing would be returned as the body. The v0 contract
+// targets `Content-Length` responses (e.g. the localhost listener);
+// chunked decoding is a follow-up wave.
+fn _extract_body(resp: * u8, total_len: i64, body_len_slot: * i64) -> * u8 {
+    atomic_store(body_len_slot, 0);
     if resp as i64 == 0 { return null; }
     // Status code: the first space precedes "NNN reason".
     let space: * u8 = strchr(resp, 32);
@@ -299,9 +359,13 @@ fn _extract_body(resp: * u8) -> * u8 {
     let terminator: string = "\r\n\r\n";
     let header_end: * u8 = strstr(resp, terminator as * u8);
     if header_end as i64 == 0 { return null; }
-    let body_start: * u8 = _ptr_off(header_end, 4);
-    let body_len: i64 = strlen(body_start) as i64;
-    return _strdup_n(body_start, body_len);
+    let body_off: i64 = ((header_end as i64) - (resp as i64)) + 4;
+    let body_len: i64 = total_len - body_off;
+    if body_len < 0 { return null; }
+    let body: * u8 = _strdup_n(_ptr_off(resp, body_off), body_len);
+    if body as i64 == 0 { return null; }
+    atomic_store(body_len_slot, body_len);
+    return body;
 }
 
 // `_http_send(url, is_post, body, auth_header)` — the shared
@@ -310,7 +374,7 @@ fn _extract_body(resp: * u8) -> * u8 {
 // the response, and returns the extracted body (or null on any
 // failure). `auth_header`, when non-null and non-empty, is emitted
 // as an `Authorization:` header (POST only).
-fn _http_send(url: * u8, is_post: bool, body: * u8, auth_header: * u8) -> * u8 ![net] {
+fn _http_send(url: * u8, is_post: bool, body: * u8, auth_header: * u8, body_len_slot: * i64) -> * u8 ![net] {
     // Reject TLS — no HTTPS in v0.
     let https: string = "https://";
     if (strstr(url, https as * u8) as i64) == (url as i64) { return null; }
@@ -448,9 +512,10 @@ fn _http_send(url: * u8, is_post: bool, body: * u8, auth_header: * u8) -> * u8 !
     }
 
     free(authority);
-    let resp: * u8 = _recv_all(fd);
+    let mut total_len: i64 = 0;
+    let resp: * u8 = _recv_all(fd, & total_len);
     close(fd);
-    let result: * u8 = _extract_body(resp);
+    let result: * u8 = _extract_body(resp, total_len, body_len_slot);
     if resp as i64 != 0 { free(resp); }
     return result;
 }
@@ -469,7 +534,10 @@ fn _append(dst: * u8, off: i64, src: * u8) -> i64 {
 // status >= 400.
 fn sfn_http_get(url: * u8) -> * u8 ![net] {
     if url as i64 == 0 { return null; }
-    return _http_send(url, false, null, null);
+    // get/post return an `i8*` C string, so the body length is
+    // unused here — pass a throwaway slot.
+    let mut body_len: i64 = 0;
+    return _http_send(url, false, null, null, & body_len);
 }
 
 // `sfn_http_post(url, body, auth_header)` — POST `body` to `url`
@@ -481,7 +549,8 @@ fn sfn_http_get(url: * u8) -> * u8 ![net] {
 fn sfn_http_post(url: * u8, body: * u8, auth_header: * u8) -> * u8 ![net] {
     if url as i64 == 0 { return null; }
     if body as i64 == 0 { return null; }
-    return _http_send(url, true, body, auth_header);
+    let mut body_len: i64 = 0;
+    return _http_send(url, true, body, auth_header, & body_len);
 }
 
 // `sfn_http_post2(url, body)` — 2-arg POST for the `http_post`
@@ -493,11 +562,14 @@ fn sfn_http_post2(url: * u8, body: * u8) -> * u8 ![net] {
 // `sfn_http_download(url, output_path)` — GET `url` and write the
 // body to `output_path` in binary mode. Returns the literal `"ok"`
 // on success, null on failure (matching the curl
-// `sailfin_runtime_http_download` contract).
+// `sailfin_runtime_http_download` contract). Uses the exact body
+// length reported by `_http_send` (not `strlen`), so binary
+// payloads with embedded NULs are written whole.
 fn sfn_http_download(url: * u8, output_path: * u8) -> * u8 ![net, io] {
     if url as i64 == 0 { return null; }
     if output_path as i64 == 0 { return null; }
-    let body: * u8 = _http_send(url, false, null, null);
+    let mut body_len: i64 = 0;
+    let body: * u8 = _http_send(url, false, null, null, & body_len);
     if body as i64 == 0 { return null; }
 
     let mode: string = "wb";
@@ -506,7 +578,6 @@ fn sfn_http_download(url: * u8, output_path: * u8) -> * u8 ![net, io] {
         free(body);
         return null;
     }
-    let body_len: i64 = strlen(body) as i64;
     if body_len > 0 {
         fwrite(body, 1 as usize, body_len as usize, f);
     }

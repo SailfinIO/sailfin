@@ -1130,7 +1130,7 @@ ci-cross-windows:
 		"$$WIN_OBJ/runtime/filesystem.o" \
 		"$$WIN_OBJ/runtime/http.o" \
 		$$SHIM_O \
-		-lm -lpthread; \
+		-lm -lpthread -lws2_32; \
 	\
 	echo "[cross-windows] built $$WIN_OUT"; \
 	ls -lh "$$WIN_OUT"; \

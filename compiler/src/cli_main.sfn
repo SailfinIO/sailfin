@@ -1247,7 +1247,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     // Build (or reuse) cached runtime object files so repeated `test` invocations
     // don't recompile the runtime C sources per test file.
     //
-    // Return shape: `[runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj]`.
+    // Return shape: `[runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj, http_obj]`.
     // The trailing `clock_obj` slot is the PR 2 (#397) addition for the
     // Sailfin-native `@sfn_sleep` definition; `process_obj` is the M2.9
     // (#405) addition for `@sfn_process_run`; `exception_obj` is the

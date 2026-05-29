@@ -144,15 +144,17 @@ PROBE
 # connect / send / recv / status-check / body-extraction — for both
 # `sfn_http_get` and `sfn_http_post`.
 test_get_round_trip() {
-    local port=18097
     local server="$SCRATCH/server.py"
-    cat > "$server" <<PYEOF
+    cat > "$server" <<'PYEOF'
 import socket, sys
 srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-srv.bind(("127.0.0.1", ${port}))
+# Bind to an ephemeral port (0) and report it — avoids flaky
+# collisions with whatever else is live on a shared CI runner.
+srv.bind(("127.0.0.1", 0))
 srv.listen(4)
 srv.settimeout(20)
+print("PORT=%d" % srv.getsockname()[1], flush=True)
 print("ready", flush=True)
 try:
     while True:
@@ -198,6 +200,14 @@ PYEOF
             return 1
         fi
     done
+
+    local port
+    port="$(grep -oE 'PORT=[0-9]+' "$ready" | head -1 | cut -d= -f2)"
+    if [ -z "$port" ]; then
+        echo "[test]   listener did not report a port:"
+        cat "$ready"
+        return 1
+    fi
 
     local probe="$SCRATCH/get_probe.sfn"
     cat > "$probe" <<PROBE
