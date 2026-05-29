@@ -54,9 +54,14 @@
 // **Back-compat.** `_legacy_flag_file` keeps `touch
 // build/sailfin/.trace_lowering` working for one release. Drop the
 // shim in the release after #312 ships.
-import { _env_flag, _legacy_flag_file } from "../cli_commands_utils";
+import { _env_flag, _legacy_flag_file, _shell_read_cmd } from "../cli_commands_utils";
 
-export { trace_lowering, trace_call_lowering, skip_module_globals };
+export {
+    trace_lowering,
+    trace_call_lowering,
+    skip_module_globals,
+    errno_locator_symbol
+};
 
 // Per-flag cache cells. `_X_initialized` flips from false to true on
 // the first call to the flag's probe; `_X_value` is the resolved
@@ -70,6 +75,12 @@ let mut _trace_call_lowering_initialized: boolean = false;
 let mut _trace_call_lowering_value: boolean = false;
 let mut _skip_module_globals_initialized: boolean = false;
 let mut _skip_module_globals_value: boolean = false;
+// Cache for the host's `errno`-location C symbol (#877, epic #763).
+// `_errno_locator_initialized` flips to true after the one-time
+// `uname -s` probe; `_errno_locator_value` holds the resolved symbol
+// name (`__errno_location` on Linux/glibc, `__error` on Darwin).
+let mut _errno_locator_initialized: boolean = false;
+let mut _errno_locator_value: string = "";
 
 // True when the user requested LLVM-lowering stderr trace via
 // `SAILFIN_TRACE_LOWERING=1` (or the legacy `.trace_lowering` file).
@@ -112,4 +123,28 @@ fn skip_module_globals() -> boolean ![io] {
         _skip_module_globals_initialized = true;
     }
     return _skip_module_globals_value;
+}
+
+// The host's C symbol for the thread-local `errno` slot address
+// (#877, epic #763). glibc exposes `int *__errno_location(void)`;
+// Darwin/macOS exposes `int *__error(void)`. The `sailfin_intrinsic_
+// errno_location` sentinel's lowering branch
+// (`core_call_emission.sfn`) reads this to emit the correct
+// `call i32* @<sym>()` so the same compiler source links on both
+// Linux and macOS when built natively per platform (CI emits target-
+// neutral IR resolved by the host clang). Defaults to the glibc
+// spelling on any non-Darwin or empty `uname` so the dominant Linux
+// leg is never wrong — only an explicit `Darwin` flips to `__error`.
+// Probed once via `uname -s` and cached (the lowering hot path may
+// hit this per errno read); mirrors the lazy-init contract of the
+// trace toggles above.
+fn errno_locator_symbol() -> string ![io] {
+    if !_errno_locator_initialized {
+        let os = _shell_read_cmd("uname -s");
+        if os == "Darwin" { _errno_locator_value = "__error"; } else {
+            _errno_locator_value = "__errno_location";
+        }
+        _errno_locator_initialized = true;
+    }
+    return _errno_locator_value;
 }

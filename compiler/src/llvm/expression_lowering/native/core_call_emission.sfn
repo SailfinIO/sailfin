@@ -5,7 +5,7 @@
 import { NativeFunction, NativeParameter } from "../../../native_ir";
 import { find_last_index_of_char, substring } from "../../../string_utils";
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
-import { trace_lowering } from "../../lowering_debug_state";
+import { errno_locator_symbol, trace_lowering } from "../../lowering_debug_state";
 import { merge_string_constants } from "../../strings";
 import { find_interface_info_by_name } from "../../type_context_queries";
 import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
@@ -644,6 +644,35 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
             result_diagnostics.push("llvm lowering: malformed trait dispatch target `"
                 + trimmed_target
                 + "`");
+        }
+    }
+
+    // errno-location sentinel (#877, epic #763): emit a `call` to the
+    // host's concrete locator symbol — `@__errno_location` on Linux/glibc,
+    // `@__error` on Darwin/macOS — chosen at emit time. The same compiler
+    // source thus links on both platforms when built natively (the IR is
+    // target-neutral; the host clang resolves the symbol). The result is an
+    // `i32*` that feeds straight into `sailfin_intrinsic_pointer_read_i32`.
+    // The concrete symbol's `declare` is emitted via its registry descriptor
+    // when the post-lowering call-target scan sees this call line.
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_errno_location" {
+            let _en_symbol = errno_locator_symbol();
+            let _en_tmp = format_temp_name(result_temp);
+            result_lines.push("  " + _en_tmp + " = call i32* @" + _en_symbol
+                + "()");
+            result_temp = result_temp + 1;
+            let _en_operand = LLVMOperand {
+                llvm_type: "i32*",
+                value: _en_tmp
+            };
+            return ExpressionResult {
+                lines: result_lines,
+                temp_index: result_temp,
+                operand: _en_operand,
+                diagnostics: result_diagnostics,
+                string_constants: collected_string_constants
+            };
         }
     }
 

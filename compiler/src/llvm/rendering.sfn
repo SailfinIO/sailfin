@@ -191,6 +191,17 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             if descriptor.target == "sailfin_intrinsic_pointer_read_i64" {
                 _preamble_inlined = true;
             }
+            // #877: the errno-location sentinel never appears as a real
+            // `call @sailfin_intrinsic_errno_location(` — the lowering
+            // branch emits the concrete `__errno_location`/`__error`
+            // instead. The source-text walker still picks the sentinel
+            // target up from the call expression in `clock.sfn`, so skip
+            // it here to avoid a bogus `declare` to a symbol that does
+            // not exist. The concrete locator's declare is emitted via
+            // its own descriptor row when the line scan sees the call.
+            if descriptor.target == "sailfin_intrinsic_errno_location" {
+                _preamble_inlined = true;
+            }
             if _preamble_inlined {
                 index += 1;
                 continue;
