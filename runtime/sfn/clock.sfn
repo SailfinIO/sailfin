@@ -40,7 +40,17 @@
 // dereferenced by the `sailfin_intrinsic_pointer_read_i32` load
 // (#875). This is what lets `clock.sfn` stay in `sfn-sources` and
 // link on both Linux and macOS without hardcoding a glibc-only
-// symbol. `EINTR == 4` on both Linux and macOS; a platform-constant
+// symbol.
+//
+// This is the same sentinel chain that `platform/errno.sfn::errno()`
+// wraps (#893); `sfn_sleep` keeps it inline rather than importing
+// `errno()` because the runtime `sfn-source` emit path resolves
+// imported `extern` signatures (e.g. `posix.sfn`'s `nanosleep`) but
+// not imported *defined* functions, so importing `errno()` here fails
+// lowering with "callee signature is not known". The DRY re-point is
+// deferred until that cross-module resolution lands (epic #763).
+//
+// `EINTR == 4` on both Linux and macOS; a platform-constant
 // home for that value is a follow-up. The loop re-passes the same
 // `req` each iteration — that slightly over-sleeps after a signal
 // (we lose the consumed portion) but preserves the wall-clock-≥-
