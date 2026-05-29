@@ -15,11 +15,11 @@ repo hosts the **self-hosted native compiler** (the primary toolchain), marching
 toward a 1.0 release with a pure Sailfin toolchain — no Python, no C runtime, no
 downstream fixup scripts.
 
-The compiler self-hosts from a released seed binary via `<seed> build -p compiler`.
-The binary's entry point is the Sailfin-emitted `@main` (M5, #451) — no C code
-participates in startup. Supporting C runtime helpers (strings, arrays,
-exceptions, the C arena, crypto) still live under `runtime/native/src/`; M3 will
-port them into Sailfin and delete the directory before 1.0.
+The compiler self-hosts from a released seed binary via `<seed> build -p compiler`,
+and its entry point is the Sailfin-emitted `@main` — no C code participates in
+startup. Supporting C runtime helpers (strings, arrays, exceptions, the C arena,
+crypto) still live under `runtime/native/src/` and will be ported into Sailfin
+before 1.0.
 
 **Three pillars (the differentiators — don't dilute them):**
 1. **Effect types** (`![io, net, model, clock]`) for compile-time capability enforcement
@@ -75,7 +75,7 @@ See `examples/README.md` for per-example capability requirements.
 | `compiler/src/cli_main.sfn` + `capsule_resolver.sfn` | The build driver — **pure orchestration, no fixups** |
 | `compiler/src/build_stamp.sfn` | Writes `build/native/.build-stamp` (`<version>+dev.<hash>`) |
 | `runtime/prelude.sfn` | Sailfin-native runtime (collections, strings, type checks) |
-| `runtime/native/` | Supporting C helpers (M3 will port the remainder into Sailfin) |
+| `runtime/native/` | Supporting C helpers (to be ported into Sailfin before 1.0) |
 | `compiler/tests/{unit,integration,e2e}/*_test.sfn` | Regression coverage |
 
 ## Effect System
@@ -104,9 +104,7 @@ the effect to the signature, and ensure parent callers declare it transitively.
 ## Build & Self-Hosting
 
 The compiler self-hosts from a released seed using `<seed> build -p compiler` —
-the unified Sailfin-native driver. The current seed produces clean LLVM IR; no
-Python post-processing. The historical `scripts/build.sh` orchestrator and
-`selfhost_native.py` fixup era are **gone** (retired in Stage E PR7, #383).
+the unified Sailfin-native driver.
 
 **`make check`** is the full validation gate:
 1. Builds the compiler from the seed (first-pass binary)
