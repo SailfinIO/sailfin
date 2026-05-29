@@ -169,6 +169,19 @@ test_no_call_sentinel() {
 }
 
 test_monotonic_advance() {
+    # Linux-only: the adapter passes `CLOCK_MONOTONIC = 1`, which is the
+    # Linux x86_64 constant. macOS arm64 spells `CLOCK_MONOTONIC = 6`, so
+    # on Darwin `clock_gettime(1, …)` would not read the monotonic clock
+    # (and the adapter's error path returns 0). The constant platform-
+    # split is deferred under epic #763 (this issue's `Out:` scope), so
+    # skip the runtime smoke off-Linux rather than fail the macOS CI
+    # matrix. The IR-shape / stale-read / fmt checks above are platform-
+    # neutral and still run everywhere.
+    if [ "$(uname -s)" != "Linux" ]; then
+        echo "[test] SKIP: monotonic advance — CLOCK_MONOTONIC=1 is Linux-only (epic #763); OS=$(uname -s)"
+        return 0
+    fi
+
     # `sfn_clock_monotonic_nanos` is compiled into the runtime via
     # `runtime/native/capsule.toml` sfn-sources, so a user program can
     # reach it through an extern declaration (the same linkage path that
