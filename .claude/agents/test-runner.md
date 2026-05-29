@@ -4,6 +4,7 @@ description: Runs Sailfin compiler tests safely (with memory caps and timeouts) 
 tools: Bash, Read, Grep, Glob
 model: sonnet
 maxTurns: 20
+color: yellow
 ---
 
 You are a Sailfin test execution specialist. You run tests safely and analyze failures with deep knowledge of the compiler's test structure and common failure modes.

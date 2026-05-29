@@ -146,7 +146,7 @@ Key rules (enforced in `.github/AGENTS.md`):
 | `compiler-architect` | Opus | Designs features, refactors, and fixes with forward-thinking plans | Before implementing anything non-trivial; when a change touches multiple pipeline stages |
 | `seed-stabilizer` | Opus | Deep diagnosis of compiler bugs — miscompilation, IR errors, performance regressions | When a build fails or produces wrong output and the cause isn't obvious |
 | `compiler-explorer` | Sonnet | Traces how features flow through the pipeline; finds implementations | When you need to understand how something currently works |
-| `code-reviewer` | Sonnet | Reviews changes for correctness, safety, and conventions | After implementing, before committing |
+| `code-reviewer` | Opus | Reviews changes for correctness, safety, and conventions | After implementing, before committing |
 | `test-runner` | Sonnet | Runs tests safely with memory caps; analyzes failures | After changes, to validate correctness |
 | `docs-updater` | Sonnet | Updates status.md, spec.md, roadmap.md in sync | After a feature ships or changes status |
 
