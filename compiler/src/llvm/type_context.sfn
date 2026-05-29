@@ -136,6 +136,7 @@ fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
             if is_unit_enum(enum_def) {
                 fixed = NativeEnum {
                     name: enum_def.name,
+                    type_parameters: enum_def.type_parameters,
                     variants: enum_def.variants,
                     layout: synthesize_unit_enum_layout(enum_def)
                 };
@@ -152,6 +153,7 @@ fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
             if is_unit_enum(enum_def) {
                 fixed = NativeEnum {
                     name: enum_def.name,
+                    type_parameters: enum_def.type_parameters,
                     variants: enum_def.variants,
                     layout: synthesize_unit_enum_layout(enum_def)
                 };
@@ -328,7 +330,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             payload_scan += 1;
         }
         enum_entries = append_enum_type_info(enum_entries, EnumTypeInfo {
-            name: enum_def.name, llvm_name: llvm_enum_name, tag_type: enum_layout.tag_type, tag_size: enum_layout.tag_size, tag_align: enum_layout.tag_align, max_payload_size: max_payload_size, size: enum_layout.size, align: enum_align_value, variants: variants
+            name: enum_def.name, type_parameters: enum_def.type_parameters, llvm_name: llvm_enum_name, tag_type: enum_layout.tag_type, tag_size: enum_layout.tag_size, tag_align: enum_layout.tag_align, max_payload_size: max_payload_size, size: enum_layout.size, align: enum_align_value, variants: variants
         });
         enum_index += 1;
     }

@@ -15,6 +15,8 @@ import {
 } from "../type_context_queries";
 import {
     ends_with_pointer_suffix,
+    enum_inst_parse_args,
+    enum_inst_substitute_annotation,
     layout_annotation_represents_user_value,
     map_struct_field_annotation,
     strip_pointer_suffix
@@ -37,7 +39,7 @@ import {
 import { number_to_string, trim_text } from "../utils";
 import { lower_condition_to_i1 } from "./instructions_condition";
 
-fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperand, case: MatchCaseStructure, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchCaseCondition {
+fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperand, subject_type_annotation: string, case: MatchCaseStructure, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchCaseCondition {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -164,13 +166,36 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                             }
 
                             if found_field != null {
+                                // #830: resolve generic payload type parameters
+                                // (e.g. `T`) against the match subject's concrete
+                                // instantiation (`Foo<int, Error>`) before mapping
+                                // to an LLVM type. For monomorphic enums the enum
+                                // carries no type parameters, so this leaves the
+                                // declared annotation (and pre-mapped llvm_type)
+                                // untouched — a byte-for-byte no-op.
+                                let mut resolved_annotation: string = found_field.type_annotation;
+                                let mut substituted: boolean = false;
+                                if enum_info.type_parameters.length > 0 {
+                                    let inst_args = enum_inst_parse_args(subject_type_annotation);
+                                    if inst_args.length > 0 {
+                                        let candidate = enum_inst_substitute_annotation(found_field.type_annotation, enum_info.type_parameters, inst_args);
+                                        if candidate != found_field.type_annotation {
+                                            resolved_annotation = candidate;
+                                            substituted = true;
+                                        }
+                                    }
+                                }
                                 let mut llvm_field_type: string = found_field.llvm_type;
+                                let mut needs_mapping: boolean = substituted;
                                 if llvm_field_type.length == 0 {
-                                    llvm_field_type = map_struct_field_annotation(found_field.type_annotation);
+                                    needs_mapping = true;
+                                }
+                                if needs_mapping {
+                                    llvm_field_type = map_struct_field_annotation(resolved_annotation);
                                     if llvm_field_type.length == 0 {
                                         llvm_field_type = "i8*";
                                     }
-                                    if layout_annotation_represents_user_value(found_field.type_annotation) {
+                                    if layout_annotation_represents_user_value(resolved_annotation) {
                                         if ends_with_pointer_suffix(llvm_field_type) {
                                             let stripped = strip_pointer_suffix(llvm_field_type);
                                             if stripped.length > 0 {

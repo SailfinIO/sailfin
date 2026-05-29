@@ -66,7 +66,7 @@ fn build_enum_infos_inline(enums: NativeEnum[]) -> EnumTypeInfo[] {
         }
 
         recovered.push(EnumTypeInfo {
-            name: name, llvm_name: llvm, tag_type: tag_type, tag_size: tag_size, tag_align: tag_align, max_payload_size: max_ps, size: size, align: align, variants: variants_out
+            name: name, type_parameters: e.type_parameters, llvm_name: llvm, tag_type: tag_type, tag_size: tag_size, tag_align: tag_align, max_payload_size: max_ps, size: size, align: align, variants: variants_out
         });
         idx += 1;
     }

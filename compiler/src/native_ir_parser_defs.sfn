@@ -40,6 +40,8 @@ import {
 import {
     index_of,
     is_trim_char,
+    last_index_of,
+    split_top_level_commas,
     split_whitespace,
     starts_with,
     strip_generics,
@@ -498,10 +500,44 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
     };
 }
 
+// Extract declared type-parameter names from an enum header name such as
+// `Foo<T, E>` or `Foo<T : Display, E>`, returning `["T", "E"]`. Only the
+// parameter name (before any `:` bound) is kept. A header with no generic
+// clause yields `[]`. Used by #830 per-instantiation payload substitution.
+fn parse_enum_header_type_parameters(header_name: string) -> string[] {
+    let open_index = index_of(header_name, "<");
+    if open_index < 0 { return []; }
+    let close_index = last_index_of(header_name, ">");
+    if close_index <= open_index { return []; }
+    let block = trim_text(substring(header_name, open_index + 1, close_index));
+    if block.length == 0 { return []; }
+    let raw_entries = split_top_level_commas(block);
+    let mut names: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= raw_entries.length { break; }
+        let mut entry = trim_text(raw_entries[index]);
+        let bound_index = index_of(entry, ":");
+        if bound_index >= 0 {
+            entry = trim_text(substring(entry, 0, bound_index));
+        }
+        if entry.length > 0 { names.push(entry); }
+        index += 1;
+    }
+    return names;
+}
+
 fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
     let mut diagnostics: string[] = [];
     let header = trim_text(lines[start_index]);
     let name_text = trim_text(strip_prefix(header, ".enum "));
+    // Capture declared type parameters (e.g. `<T, E>`) from the full header
+    // BEFORE any truncation. The generic clause `<T, E>` contains an internal
+    // space, so the space-split below would otherwise sever it. These names
+    // drive per-instantiation payload substitution in the LLVM layer (#830);
+    // monomorphic enums have no clause, so this is `[]` and downstream
+    // substitution is a no-op.
+    let enum_type_parameters = parse_enum_header_type_parameters(name_text);
     let mut enum_name: string = name_text;
     let space_index = index_of(enum_name, " ");
     if space_index >= 0 {
@@ -544,6 +580,7 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
             return EnumParseResult {
                 definition: NativeEnum {
                     name: enum_name,
+                    type_parameters: enum_type_parameters,
                     variants: variants,
                     layout: enum_layout_value
                 },
@@ -699,6 +736,7 @@ fn parse_enum_definition(lines: string[], start_index: int) -> EnumParseResult {
     return EnumParseResult {
         definition: NativeEnum {
             name: enum_name,
+            type_parameters: enum_type_parameters,
             variants: variants,
             layout: enum_layout_value
         },
