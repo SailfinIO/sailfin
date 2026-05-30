@@ -519,6 +519,38 @@ fn canonicalize_flags(flags: string[]) -> string {
 }
 
 // ----------------------------------------------------------------
+// Content-hash primitive (shared)
+// ----------------------------------------------------------------
+// Public wrapper over the private `_sha256_of_file_cmd` so callers
+// outside this module can content-address their own artifacts
+// without reaching into `cli_commands_utils` internals. Promoted to
+// a single exported helper per #514's plan; the runtime C-object
+// cache (#632) is the first external consumer. Returns "" if the
+// file can't be hashed (missing source, sha tool absent) — callers
+// must treat an empty hash as "not content-addressable" and fall
+// back to recompile rather than risk a stale hit.
+fn sha256_of_file(file_path: string) -> string ![io] {
+    return _sha256_of_file_cmd(file_path);
+}
+
+// Content-addressed cache key for a runtime C / LL object compile.
+// The runtime-capsule and legacy runtime-object compile paths in
+// `cli_main.sfn` previously keyed their `.o` cache purely on the
+// source basename + opt flag, so editing a tracked source left a
+// stale cached object that the linker silently reused (#632). This
+// helper mixes the source file's content SHA-256 with the opt flag
+// so a content edit busts the key while a pure mtime touch (same
+// bytes) keeps it stable. The `\n` separator keeps the two fields
+// from colliding via concatenation, matching `cache_key_for`'s
+// invariant. Returns "" when the source can't be hashed so the
+// caller can fall back to an always-recompile path.
+fn runtime_object_cache_key(src_path: string, opt_flag: string) -> string ![io] {
+    let content = sha256_of_file(src_path);
+    if content.length == 0 { return ""; }
+    return content + "\n" + opt_flag;
+}
+
+// ----------------------------------------------------------------
 // Cache key derivation
 // ----------------------------------------------------------------
 // Compute the content-addressed cache key for a single module
@@ -581,6 +613,8 @@ export {
     cache_store_artifact,
     canonicalize_flags,
     cache_key_for,
+    sha256_of_file,
+    runtime_object_cache_key,
     empty_cache_stats,
     cache_stats_is_empty,
     empty_build_cache_config,
