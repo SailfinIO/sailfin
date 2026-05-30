@@ -135,6 +135,50 @@ PROBE
     return "$missing"
 }
 
+# ---- Test: member-call `http.get(url)` / `http.post(url, body)` flip (#912) ----
+#
+# Distinct from `test_probe_flipped` above, which exercises the
+# `http.get_body` / `http.post_json` adapter rows. This probe pins the
+# *member-call* descriptors (`target: "http.get"` / `target: "http.post"`
+# in runtime_helpers.sfn) flipped in #912: `http.get(url)` must lower to
+# `@sfn_http_get` and `http.post(url, body)` to the 2-arg `@sfn_http_post2`,
+# with no residual call to the old `@sailfin_intrinsic_http_*` symbols.
+test_probe_member_call_flipped() {
+    local probe="$SCRATCH/http_member_probe.sfn"
+    cat > "$probe" <<'PROBE'
+fn main() -> int ![net, io] {
+    let got = http.get("http://127.0.0.1:9/");
+    print(got);
+    let posted = http.post("http://127.0.0.1:9/", "{}");
+    print(posted);
+    return 0;
+}
+PROBE
+    local ll="$SCRATCH/http_member_probe.ll"
+    local log="$SCRATCH/http_member_probe.log"
+    if ! "$BINARY" emit -o "$ll" llvm "$probe" > "$log" 2>&1; then
+        echo "[test]   sfn emit llvm failed on http_member_probe.sfn:"
+        cat "$log"
+        return 1
+    fi
+    local missing=0
+    # Anchor on a non-identifier follow char (portable across GNU/BSD grep).
+    if ! grep -qE "call [^\"]*@sfn_http_get\(" "$ll"; then
+        echo "[test]   http.get(url) does not lower to a @sfn_http_get call"
+        missing=$((missing + 1))
+    fi
+    if ! grep -qE "call [^\"]*@sfn_http_post2\(" "$ll"; then
+        echo "[test]   http.post(url, body) does not lower to a @sfn_http_post2 call"
+        missing=$((missing + 1))
+    fi
+    # The old member-call intrinsics must not be CALLED anymore.
+    if grep -qE "call [^\"]*@sailfin_intrinsic_http_(get|post)\(" "$ll"; then
+        echo "[test]   member call still emits @sailfin_intrinsic_http_* (expected the #912 flip)"
+        missing=$((missing + 1))
+    fi
+    return "$missing"
+}
+
 # ---- Behavioral: GET + POST round-trip against a localhost listener ----
 #
 # Starts a Python TCP listener that loops one-response-per-connection,
@@ -243,6 +287,7 @@ run_test "sfn check runtime/sfn/adapters/http.sfn passes" test_check_clean
 run_test "sfn fmt --check runtime/sfn/adapters/http.sfn is canonical" test_fmt_clean
 run_test "sfn emit llvm defines every sfn_http_* export + socket declares" test_emit_define_shape
 run_test "http.get_body lowers to @sfn_http_get (not the curl path)" test_probe_flipped
+run_test "http.get/http.post member calls lower to @sfn_http_get/@sfn_http_post2 (#912)" test_probe_member_call_flipped
 run_test "GET + POST round-trip against a localhost listener returns the body" test_get_round_trip
 
 echo "[summary] $PASS passed, $FAIL failed"
