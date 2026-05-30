@@ -47,7 +47,8 @@ import {
     canonicalize_flags,
     empty_build_cache_config,
     empty_cache_stats,
-    is_valid_digest
+    is_valid_digest,
+    sha256_of_file
 } from "./build_cache";
 import {
     CapsuleArtifactLayout,
@@ -1025,16 +1026,49 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
 // compiler's normal import resolver (llvm/imports.sfn:_resolve_layout_manifest_path_for_slug)
 // looks in build/native/import-context/<slug>.* so that's where we write.
 //
-// Cache invalidation contract: a present `.sfn-asm` artifact paired
-// with its `.layout-manifest` is treated as valid and re-used as-is.
-// Sailfin's emit is deterministic (proven by `make check`'s stage2 ==
-// stage3 byte-identical fixed-point), so re-emitting an already-staged
-// module produces the same bytes — making the re-emit pure overhead.
-// Pre-cache, `sfn check compiler/src/main.sfn` re-emitted ~130 modules
-// sequentially and crashed the seed compiler at ~84s; with the cache,
-// staging is a no-op when `make compile` has already produced the
-// artifacts. Refresh by `rm -rf build/native/import-context/` (or
-// `make rebuild`), the same invalidation contract `make` itself uses.
+// Cache invalidation contract: a staged `.sfn-asm` + `.layout-manifest`
+// pair is a valid cache hit only when a `.srchash` sidecar written next to
+// them matches the current SHA-256 of the module's source. A missing or
+// stale sidecar (or an unreadable source) forces a fresh emit; the sidecar
+// is (re)written after every fresh emit.
+//
+// This is content-addressed, not mtime-based, on purpose: Sailfin's emit is
+// deterministic (proven by `make check`'s stage2 == stage3 byte-identical
+// fixed-point), so byte-identical source <=> byte-identical IR, and the
+// source hash is the canonical predicate. mtime is deliberately NOT used —
+// `git checkout` resets mtimes to checkout time, so timestamps lie (#514).
+// Because of this, the Makefile no longer wipes the staged IR by hand;
+// `stage_capsule_imports` notices a changed source on its own.
+// _cr_srchash_path: location of the source-content sidecar for a staged
+// module, alongside its `.sfn-asm` / `.layout-manifest`.
+fn _cr_srchash_path(context_root: string, slug: string) -> string {
+    return context_root + "/" + slug + ".srchash";
+}
+
+// _cr_stage_cache_hit: true when the staged artifacts are a valid cache hit
+// for `src_path` — both `.sfn-asm` and `.layout-manifest` exist AND the
+// recorded `.srchash` matches the current SHA-256 of the source. A missing
+// or stale sidecar, or an unreadable source, returns false (fresh emit).
+fn _cr_stage_cache_hit(asm_path: string, manifest_path: string, srchash_path: string, src_path: string) -> boolean ![io] {
+    if !fs.exists(asm_path) { return false; }
+    if !fs.exists(manifest_path) { return false; }
+    if !fs.exists(srchash_path) { return false; }
+    let recorded = fs.readFile(srchash_path);
+    if recorded.length == 0 { return false; }
+    let current = sha256_of_file(src_path);
+    if current.length == 0 { return false; }
+    return strings_equal(recorded, current);
+}
+
+// _cr_write_srchash: record the source SHA-256 sidecar for a freshly staged
+// module so the next run's cache-hit probe can detect an unchanged source.
+// Best-effort: a hash failure leaves no sidecar, which forces a re-emit.
+fn _cr_write_srchash(srchash_path: string, src_path: string) ![io] {
+    let current = sha256_of_file(src_path);
+    if current.length == 0 { return; }
+    fs.writeFile(srchash_path, current);
+}
+
 // Stage E PR1: stage one capsule source's import-context
 // (`.sfn-asm` + `.layout-manifest`). When `sailfin_exe.length >
 // 0`, the heavy native-text emit happens in a subprocess so the
@@ -1048,14 +1082,15 @@ fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string, work_dir: string) -> b
     let context_root = _cr_import_context_root(work_dir);
     let asm_path = context_root + "/" + src.slug + ".sfn-asm";
     let manifest_path = context_root + "/" + src.slug + ".layout-manifest";
+    let srchash_path = _cr_srchash_path(context_root, src.slug);
     let asm_dir = _cr_dirname(asm_path);
     _cr_ensure_dir(asm_dir);
 
-    // Cache hit: both the asm and the manifest are present. Trust the
-    // pair — they were produced by a prior `make compile` (or earlier
-    // staging pass) of this same source file.
-    if fs.exists(asm_path) {
-        if fs.exists(manifest_path) { return true; }
+    // Cache hit: the asm + manifest are present AND the source-content
+    // sidecar matches (see cache invalidation contract above). A stale or
+    // missing sidecar falls through to a fresh emit.
+    if _cr_stage_cache_hit(asm_path, manifest_path, srchash_path, src.source_path) {
+        return true;
     }
 
     if !fs.exists(src.source_path) {
@@ -1097,6 +1132,9 @@ fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string, work_dir: string) -> b
     // helper with the parallel-stage path so both routes produce
     // byte-identical manifests.
     _cr_extract_layout_manifest(asm_path, manifest_path);
+    // Record the source-content sidecar so the next run can detect an
+    // unchanged source (best-effort; a hash failure simply re-emits later).
+    _cr_write_srchash(srchash_path, src.source_path);
     return true;
 }
 
@@ -1195,12 +1233,12 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
         let src = sources[si];
         let asm_path = context_root + "/" + src.slug + ".sfn-asm";
         let manifest_path = context_root + "/" + src.slug + ".layout-manifest";
+        let srchash_path = _cr_srchash_path(context_root, src.slug);
         let asm_dir = _cr_dirname(asm_path);
         _cr_ensure_dir(asm_dir);
-        let mut cache_hit: boolean = false;
-        if fs.exists(asm_path) {
-            if fs.exists(manifest_path) { cache_hit = true; }
-        }
+        // Cache hit requires asm + manifest present AND the source sidecar
+        // to match (same content-hash contract as the serial path).
+        let cache_hit = _cr_stage_cache_hit(asm_path, manifest_path, srchash_path, src.source_path);
         if !cache_hit {
             if !fs.exists(src.source_path) {
                 print.err("capsule-resolver: missing source file: " + src.source_path);
@@ -1232,7 +1270,11 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
             let asm_path = context_root + "/" + src.slug + ".sfn-asm";
             let manifest_path = context_root + "/" + src.slug
                 + ".layout-manifest";
+            let srchash_path = _cr_srchash_path(context_root, src.slug);
             _cr_extract_layout_manifest(asm_path, manifest_path);
+            // Record the source-content sidecar so a subsequent probe sees
+            // this freshly-emitted module as a valid cache hit.
+            _cr_write_srchash(srchash_path, src.source_path);
             ei += 1;
         }
     }

@@ -1,0 +1,179 @@
+// Regression tests for #514: `stage_capsule_imports` must invalidate its
+// staged `.sfn-asm` + `.layout-manifest` cache by source-content hash, not
+// by file existence or mtime.
+//
+// Before #514 the staging cache treated a present `.sfn-asm` + `.layout-manifest`
+// pair as an authoritative hit purely by existence, so the Makefile had to
+// wipe `build/native/import-context/*.sfn-asm` by hand on every rebuild. The
+// fix records a `.srchash` sidecar holding the SHA-256 of the source; a hit
+// now requires that sidecar to match the source's current hash.
+//
+// These tests pin the content-hash semantics so a future "mtime is faster"
+// refactor can't silently regress: `git checkout` resets mtimes to checkout
+// time, so timestamps lie — only the content hash is trustworthy.
+//
+// The cache-hit predicate lives in `compiler/src/capsule_resolver.sfn`, but
+// importing that module's entry points pulls in the whole driver (and fails
+// to link standalone — `exe_path` / `resolve_runtime_root` are unresolved in
+// a unit-test link). So, mirroring `workspace_resolver_test.sfn`, the three
+// pure helpers are inlined here verbatim. Only the linkable `sha256_of_file`
+// primitive is imported from `build_cache`.
+//
+// Keep in sync with `capsule_resolver.sfn`'s `_cr_srchash_path`,
+// `_cr_stage_cache_hit`, and `_cr_write_srchash`.
+//
+// Each test uses its own `/tmp` namespace so parallel runs don't collide,
+// and cleans up on exit.
+import { sha256_of_file } from "../../src/build_cache";
+
+// -- inline copy of capsule_resolver.sfn:_cr_srchash_path --
+fn _cr_srchash_path(context_root: string, slug: string) -> string {
+    return context_root + "/" + slug + ".srchash";
+}
+
+// -- inline copy of capsule_resolver.sfn:_cr_stage_cache_hit --
+fn _cr_stage_cache_hit(asm_path: string, manifest_path: string, srchash_path: string, src_path: string) -> boolean ![io] {
+    if !fs.exists(asm_path) { return false; }
+    if !fs.exists(manifest_path) { return false; }
+    if !fs.exists(srchash_path) { return false; }
+    let recorded = fs.readFile(srchash_path);
+    if recorded.length == 0 { return false; }
+    let current = sha256_of_file(src_path);
+    if current.length == 0 { return false; }
+    return strings_equal(recorded, current);
+}
+
+// -- inline copy of capsule_resolver.sfn:_cr_write_srchash --
+fn _cr_write_srchash(srchash_path: string, src_path: string) ![io] {
+    let current = sha256_of_file(src_path);
+    if current.length == 0 { return; }
+    fs.writeFile(srchash_path, current);
+}
+
+// --------------------------------------------------------------
+// Fixture helpers
+// --------------------------------------------------------------
+fn _sct_tmp_root(label: string) -> string ![io] {
+    let root = "/tmp/sfn_stage_cache_test_" + label;
+    process.run(["rm", "-rf", root]);
+    process.run(["mkdir", "-p", root]);
+    return root;
+}
+
+fn _sct_cleanup(path: string) ![io] {
+    process.run(["rm", "-rf", path]);
+}
+
+// Stage the three on-disk artifacts a real cache hit needs:
+// `<root>/<slug>.sfn-asm`, `<root>/<slug>.layout-manifest`, and the
+// `.srchash` sidecar recording the current source hash.
+fn _sct_stage(root: string, slug: string, src_path: string, asm_path: string, manifest_path: string) ![io] {
+    fs.writeFile(asm_path, "; staged native IR placeholder\n");
+    fs.writeFile(manifest_path, ".layout foo i64\n");
+    _cr_write_srchash(_cr_srchash_path(root, slug), src_path);
+}
+
+// --------------------------------------------------------------
+// Sidecar path shape
+// --------------------------------------------------------------
+test "stage cache: srchash sidecar is a sibling of the staged artifacts" {
+    assert _cr_srchash_path("build/native/import-context", "cli_main") == "build/native/import-context/cli_main.srchash";
+    assert _cr_srchash_path("build/native/import-context", "sfn/cli/mod") == "build/native/import-context/sfn/cli/mod.srchash";
+}
+
+// --------------------------------------------------------------
+// Cache hit / miss by content
+// --------------------------------------------------------------
+test "stage cache: hit when source is unchanged" ![io] {
+    let root = _sct_tmp_root("hit_unchanged");
+    let slug = "mymod";
+    let src_path = root + "/mymod.sfn";
+    let asm_path = root + "/" + slug + ".sfn-asm";
+    let manifest_path = root + "/" + slug + ".layout-manifest";
+    fs.writeFile(src_path, "fn main() { }\n");
+    _sct_stage(root, slug, src_path, asm_path, manifest_path);
+    assert _cr_stage_cache_hit(asm_path, manifest_path, _cr_srchash_path(root, slug), src_path);
+    _sct_cleanup(root);
+}
+
+test "stage cache: miss when source content changes" ![io] {
+    let root = _sct_tmp_root("miss_changed");
+    let slug = "mymod";
+    let src_path = root + "/mymod.sfn";
+    let asm_path = root + "/" + slug + ".sfn-asm";
+    let manifest_path = root + "/" + slug + ".layout-manifest";
+    fs.writeFile(src_path, "fn main() { }\n");
+    _sct_stage(root, slug, src_path, asm_path, manifest_path);
+    // The sidecar now records the OLD hash; changing the bytes must miss.
+    fs.writeFile(src_path, "fn main() { print.info(\"changed\"); }\n");
+    assert ! _cr_stage_cache_hit(asm_path, manifest_path, _cr_srchash_path(root, slug), src_path);
+    _sct_cleanup(root);
+}
+
+// The headline guarantee: a pure mtime bump (rewrite of byte-identical
+// content) must NOT invalidate. An mtime-based cache would wrongly miss
+// here; the content-hash predicate must still hit.
+test "stage cache: identical content after rewrite still hits (content-hash, not mtime)" ![io] {
+    let root = _sct_tmp_root("mtime_only");
+    let slug = "mymod";
+    let src_path = root + "/mymod.sfn";
+    let asm_path = root + "/" + slug + ".sfn-asm";
+    let manifest_path = root + "/" + slug + ".layout-manifest";
+    let body = "fn main() { }\n";
+    fs.writeFile(src_path, body);
+    _sct_stage(root, slug, src_path, asm_path, manifest_path);
+    fs.writeFile(src_path, body);
+    assert _cr_stage_cache_hit(asm_path, manifest_path, _cr_srchash_path(root, slug), src_path);
+    _sct_cleanup(root);
+}
+
+// --------------------------------------------------------------
+// Cache miss guards
+// --------------------------------------------------------------
+test "stage cache: miss when sidecar absent" ![io] {
+    let root = _sct_tmp_root("no_sidecar");
+    let slug = "mymod";
+    let src_path = root + "/mymod.sfn";
+    let asm_path = root + "/" + slug + ".sfn-asm";
+    let manifest_path = root + "/" + slug + ".layout-manifest";
+    fs.writeFile(src_path, "fn main() { }\n");
+    fs.writeFile(asm_path, "; ir\n");
+    fs.writeFile(manifest_path, "");
+    // asm + manifest exist but no `.srchash` -> miss (forces fresh emit).
+    assert ! _cr_stage_cache_hit(asm_path, manifest_path, _cr_srchash_path(root, slug), src_path);
+    _sct_cleanup(root);
+}
+
+test "stage cache: miss when asm or manifest missing" ![io] {
+    let root = _sct_tmp_root("missing_artifact");
+    let slug = "mymod";
+    let src_path = root + "/mymod.sfn";
+    let asm_path = root + "/" + slug + ".sfn-asm";
+    let manifest_path = root + "/" + slug + ".layout-manifest";
+    fs.writeFile(src_path, "fn main() { }\n");
+    _cr_write_srchash(_cr_srchash_path(root, slug), src_path);
+    // Sidecar matches, but artifacts are absent -> miss.
+    assert ! _cr_stage_cache_hit(asm_path, manifest_path, _cr_srchash_path(root, slug), src_path);
+    fs.writeFile(asm_path, "; ir\n");
+    // asm present, manifest still absent -> miss.
+    assert ! _cr_stage_cache_hit(asm_path, manifest_path, _cr_srchash_path(root, slug), src_path);
+    _sct_cleanup(root);
+}
+
+// --------------------------------------------------------------
+// Underlying content-addressing primitive
+// --------------------------------------------------------------
+test "stage cache: sha256_of_file is content-addressed, not mtime-addressed" ![io] {
+    let root = _sct_tmp_root("sha_content");
+    let a = root + "/a.sfn";
+    fs.writeFile(a, "fn x() { }\n");
+    let h1 = sha256_of_file(a);
+    assert h1.length == 64;
+    // Rewrite byte-identical content (bumps mtime) -> same hash.
+    fs.writeFile(a, "fn x() { }\n");
+    assert sha256_of_file(a) == h1;
+    // Different bytes -> different hash.
+    fs.writeFile(a, "fn y() { }\n");
+    assert sha256_of_file(a) != h1;
+    _sct_cleanup(root);
+}
