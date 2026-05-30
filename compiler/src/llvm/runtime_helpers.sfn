@@ -966,19 +966,17 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "has_exception", symbol: "sailfin_runtime_has_exception", return_type: "i1", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
     });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "try_enter", symbol: "sailfin_runtime_try_enter", return_type: "i32", parameter_types: ["i8**"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "try_leave", symbol: "sailfin_runtime_try_leave", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "throw", symbol: "sailfin_runtime_throw", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "take_exception", symbol: "sailfin_runtime_take_exception", return_type: "i8*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
-    });
 
+    // M2.7b (#404) replaced the legacy TLS-polling exception primitives
+    // (`throw` / `try_enter` / `try_leave` / `take_exception`) with the
+    // frame-based path below. Those four descriptors had no live call
+    // emit site — `instructions_try.sfn` lowers exclusively through
+    // `sfn_throw_frame` / `sfn_take_exception_frame` /
+    // `sfn_exception_push_frame` / `sfn_exception_pop_frame` — and their
+    // would-be `sfn_*` targets are ABI-mismatched, so they were dropped
+    // (not flipped) under #918. The backing legacy C exception symbols
+    // stay exported in `runtime/native/` for seed-built IR until the
+    // M3.9 seed cut.
     // M2.7b (#404): frame-based exception primitives from
     // `runtime/sfn/exception.sfn`. `instructions_try.sfn` emits inline
     // `sfn_exception_push_frame` + `setjmp` + `sfn_exception_pop_frame`

@@ -2227,7 +2227,8 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 | `sailfin_runtime_process_run` (`process_run_v2`) | `sfn_process_run` | M2 — ✓ #911 |
 | `sailfin_adapter_fs_read_file` | `sfn_fs_read_file` | M3 — ✓ #911 |
 | `sailfin_adapter_fs_write_file` | `sfn_fs_write_file` | M3 — ✓ #911 |
-| `sailfin_runtime_set/has/clear/take_exception` | `sfn_try_enter/leave/throw/take` | M2 |
+| `sailfin_runtime_set/has/clear_exception` | frame-based `sfn_exception_*` path (M2.7b, #404) | M2 — `set/has/clear` descriptor rows retained for the Throw/Try declare lists (seed-compat); C symbols stay exported until M3.9 |
+| `sailfin_runtime_throw/try_enter/try_leave/take_exception` | `sfn_throw`/`sfn_take_exception` (frame-based, M2.7b #404) | M2 — **legacy descriptor rows removed (#918)**: dead since M2.7b (no live call emit site), ABI-mismatched so dropped not flipped. Backing C symbols stay exported in `runtime/native/` for seed-built IR until the M3.9 seed cut. |
 | `sailfin_runtime_spawn_*` | `sfn_spawn` | M4 |
 | `sailfin_runtime_await_*` | `sfn_await` | M4 |
 | `sailfin_runtime_channel` | `sfn_channel_create` | M4 |
