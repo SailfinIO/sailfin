@@ -1,0 +1,100 @@
+// Regression coverage for `sfn fmt` generic type-annotation handling
+// (`compiler/src/tools/fmt.sfn`).
+//
+// History (#900): the formatter classified `<` / `>` as comparison
+// operators in every position. In a let-binding type annotation the
+// generic close `>` immediately preceded the `=` assignment, and the
+// compound-assignment spacing rule (operator + `=`) fused them into a
+// single `>=` token: `let x: Box<int> = …` reformatted to `Box<int>=`,
+// which re-lexes as a comparison and miscompiles at runtime. The
+// formatter also inserted intra-bracket spaces (`Box < int >`).
+//
+// The fix adds a generic-recognition pass that, in type-annotation
+// positions (after `:` / `->` / a `struct`/`enum`/`fn`/… decl head),
+// reclassifies a balanced `<…>` into `generic_open` / `generic_close`
+// roles. The emit phase keeps them tight and never fuses `>` with a
+// following `=`. Comparison/shift expressions are left untouched.
+import { index_of } from "../../src/string_utils";
+import { format_source } from "../../src/tools/fmt";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+// ── The headline correctness bug: `> =` must not collapse to `>=` ────
+test "fmt generic: let-binding type does not fuse close with assign" {
+    let src = "fn make() -> int {\n    let x: Box<int> = Box { value: 5 };\n    return x.value;\n}\n";
+    let out = format_source(src);
+    // The generic close + assignment stays a generic close + assign.
+    assert _contains(out, "let x: Box<int> = Box");
+    // It must NOT become the comparison token `>=`.
+    assert _contains(out, "Box<int>=") == false;
+    assert _contains(out, "Box<int> >=") == false;
+}
+
+// ── Idempotency: a second pass changes nothing ───────────────────────
+test "fmt generic: let-binding type is idempotent" {
+    let src = "fn make() -> int {\n    let x: Box<int> = Box { value: 5 };\n    return x.value;\n}\n";
+    let once = format_source(src);
+    let twice = format_source(once);
+    assert once == twice;
+}
+
+// ── Two-argument generic in let position (the #832 Result case) ──────
+test "fmt generic: Result<int, string> let-binding round-trips" {
+    let src = "fn g() -> int {\n    let r: Result<int, string> = parse();\n    return 0;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "let r: Result<int, string> = parse");
+    assert _contains(out, "Result<int, string>=") == false;
+}
+
+// ── Struct type-parameter clause ─────────────────────────────────────
+test "fmt generic: struct type-parameter clause stays tight" {
+    let src = "struct Box<T> {\n    value: T\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "struct Box<T>");
+    assert _contains(out, "Box < T >") == false;
+}
+
+// ── Enum type-parameter clause with multiple parameters ──────────────
+test "fmt generic: enum multi-parameter clause keeps comma spacing" {
+    let src = "enum Foo<T, E> {\n    A(T)\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "enum Foo<T, E>");
+    assert _contains(out, "Foo<T,E>") == false;
+}
+
+// ── Parameter type and return type positions ─────────────────────────
+test "fmt generic: parameter and return generic types stay tight" {
+    let src = "fn f(p: Foo<int>) -> int {\n    return 0;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "fn f(p: Foo<int>) -> int");
+    assert _contains(out, "Foo < int >") == false;
+}
+
+// ── Generic return type (no params after) ────────────────────────────
+test "fmt generic: generic return type formats tight" {
+    let src = "fn h() -> Result<int, string> {\n    return parse();\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "-> Result<int, string>");
+}
+
+// ── Comparison expressions are NOT mistaken for generics ─────────────
+test "fmt generic: less-than comparison keeps surrounding spaces" {
+    let src = "fn cmp() -> boolean {\n    let a = 1;\n    let b = 2;\n    return a < b;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "a < b");
+    assert _contains(out, "a<b") == false;
+}
+
+test "fmt generic: greater-or-equal comparison is unaffected" {
+    let src = "fn cmp() -> boolean {\n    let a = 1;\n    let b = 2;\n    return a >= b;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "a >= b");
+}
+
+test "fmt generic: right-shift expression is unaffected" {
+    let src = "fn sh() -> int {\n    let a = 4;\n    return a >> 1;\n}\n";
+    let out = format_source(src);
+    assert _contains(out, "a >> 1");
+}

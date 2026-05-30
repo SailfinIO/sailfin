@@ -516,6 +516,160 @@ fn _reclassify_unary_ops(fmt_tokens: FmtToken[]) -> FmtToken[] {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Phase 2.5: Recognize generic angle brackets in type positions
+// ═══════════════════════════════════════════════════════════════════
+// `<` / `>` are lexed as comparison operators. In type-annotation
+// positions they are generic delimiters: `let x: Box<int>`,
+// `fn f(p: Foo<int>)`, `-> Result<int, E>`, `struct Box<T>`,
+// `enum Foo<T, E>`. Misformatting them inserts intra-bracket spaces
+// and — fatally — collapses a generic close followed by `=` into a
+// single `>=` token (`let x: Box<int> = …` → `Box<int>=`), which
+// re-lexes as a comparison and miscompiles. This pass reclassifies the
+// `<` / `>` of a balanced, type-context generic into `generic_open` /
+// `generic_close` roles so the emit phase keeps them tight and never
+// fuses `>` with a following `=`.
+// Is the token after a candidate generic close a plausible post-type
+// token? A generic type is followed by `=`, `;`, `,`, `)`, `]`, `{`,
+// `(`, `->`, `.`, `?`, `}`, or end-of-stream — never by a bare value,
+// keyword, colon, or operator (those signal a comparison instead).
+fn _valid_post_generic(fmt_tokens: FmtToken[], close_idx: int) -> boolean {
+    let next_idx = close_idx + 1;
+    if next_idx >= fmt_tokens.length { return true; }
+    let role = fmt_tokens[next_idx].role;
+    if strings_equal(role, "value") { return false; }
+    if strings_equal(role, "keyword") { return false; }
+    if strings_equal(role, "colon") { return false; }
+    if strings_equal(role, "operator") { return false; }
+    return true;
+}
+
+// Scan a balanced generic starting at `start` (a `<`). Returns the index
+// of the matching outermost close (`>` or `>>`) on success, or -1 if the
+// span is not a generic (a comparison/shift expression instead).
+fn _scan_generic(fmt_tokens: FmtToken[], start: int) -> int {
+    let mut depth = 0;
+    let mut j = start;
+    let len = fmt_tokens.length;
+    loop {
+        if j >= len { return -1; }
+        let ft = fmt_tokens[j];
+        let lex = ft.token.lexeme;
+        let role = ft.role;
+
+        if strings_equal(lex, "<") {
+            depth += 1;
+            j += 1;
+            continue;
+        }
+        if strings_equal(lex, ">") {
+            depth -= 1;
+            if depth == 0 {
+                if _valid_post_generic(fmt_tokens, j) { return j; }
+                return -1;
+            }
+            j += 1;
+            continue;
+        }
+        if strings_equal(lex, ">>") {
+            // The lexer glues two adjacent generic closes into one `>>`.
+            if depth >= 2 {
+                depth -= 2;
+                if depth == 0 {
+                    if _valid_post_generic(fmt_tokens, j) { return j; }
+                    return -1;
+                }
+                j += 1;
+                continue;
+            }
+            return -1;
+        }
+
+        // Tokens that cannot appear inside a generic argument list →
+        // this `<` was a comparison, not a generic open.
+        if strings_equal(role, "semicolon") { return -1; }
+        if strings_equal(role, "block_open") { return -1; }
+        if strings_equal(role, "block_close") { return -1; }
+        if strings_equal(role, "assign") { return -1; }
+        if strings_equal(role, "arrow") { return -1; }
+        if strings_equal(role, "colon") { return -1; }
+        if strings_equal(role, "decorator") { return -1; }
+        if strings_equal(role, "bang_bracket") { return -1; }
+        // Any operator other than the angle delimiters handled above
+        // (e.g. `>=`, `+`, `&&`, `==`) → comparison/arithmetic, not a type.
+        if strings_equal(role, "operator") { return -1; }
+        if strings_equal(lex, "<<") { return -1; }
+
+        j += 1;
+    }
+    return -1;
+}
+
+// Reclassify every `<` / `>` / `>>` in [start, end] to generic roles.
+fn _apply_generic_roles(fmt_tokens: FmtToken[], start: int, end: int) -> FmtToken[] {
+    let mut j = start;
+    loop {
+        if j > end { break; }
+        let ft = fmt_tokens[j];
+        let lex = ft.token.lexeme;
+        let mut new_role = ft.role;
+        if strings_equal(lex, "<") { new_role = "generic_open"; }
+        if strings_equal(lex, ">") { new_role = "generic_close"; }
+        if strings_equal(lex, ">>") { new_role = "generic_close"; }
+        if !strings_equal(new_role, ft.role) {
+            fmt_tokens[j] = FmtToken {
+                token: ft.token,
+                leading_comments: ft.leading_comments,
+                trailing_comment: ft.trailing_comment,
+                blank_lines_before: ft.blank_lines_before,
+                role: new_role
+            };
+        }
+        j += 1;
+    }
+    return fmt_tokens;
+}
+
+// Is the `<` at index `i` an outer generic open? It must follow a type
+// name (a value) that sits in a type position: after `:` (var/param/
+// field annotation), after `->` (return type), or after a
+// `struct`/`enum`/`interface`/`impl`/`fn`/`type` declaration head.
+fn _is_generic_open_candidate(fmt_tokens: FmtToken[], i: int) -> boolean {
+    if i < 2 { return false; }
+    if !strings_equal(fmt_tokens[i].role, "operator") { return false; }
+    if !strings_equal(fmt_tokens[i].token.lexeme, "<") { return false; }
+    if !strings_equal(fmt_tokens[i - 1].role, "value") { return false; }
+    let prev2 = fmt_tokens[i - 2];
+    if strings_equal(prev2.role, "colon") { return true; }
+    if strings_equal(prev2.role, "arrow") { return true; }
+    let kw = prev2.token.lexeme;
+    if strings_equal(kw, "struct") { return true; }
+    if strings_equal(kw, "enum") { return true; }
+    if strings_equal(kw, "interface") { return true; }
+    if strings_equal(kw, "impl") { return true; }
+    if strings_equal(kw, "fn") { return true; }
+    if strings_equal(kw, "type") { return true; }
+    return false;
+}
+
+fn _reclassify_generics(fmt_tokens: FmtToken[]) -> FmtToken[] {
+    let mut toks = fmt_tokens;
+    let mut i = 0;
+    loop {
+        if i >= toks.length { break; }
+        if _is_generic_open_candidate(toks, i) {
+            let match_end = _scan_generic(toks, i);
+            if match_end > i {
+                toks = _apply_generic_roles(toks, i, match_end);
+                i = match_end + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return toks;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Phase 3: Emit formatted output
 // ═══════════════════════════════════════════════════════════════════
 // Measure the single-line length of tokens from start (inclusive, should be
@@ -671,6 +825,13 @@ fn _needs_space_before(role: string, prev_role: string, lexeme: string, prev_lex
     // No space after unary operator (!, -)
     if strings_equal(prev_role, "unary_op") { return false; }
 
+    // Generic angle brackets: tight, no intra-bracket spacing.
+    // `Box<int>` not `Box < int >`. The close `>` is a distinct role so
+    // a following `=` is never fused into `>=`.
+    if strings_equal(role, "generic_open") { return false; }
+    if strings_equal(prev_role, "generic_open") { return false; }
+    if strings_equal(role, "generic_close") { return false; }
+
     // Optional suffix ?: no space before
     if strings_equal(role, "optional_suffix") { return false; }
 
@@ -701,6 +862,7 @@ fn _needs_space_before(role: string, prev_role: string, lexeme: string, prev_lex
         if strings_equal(prev_role, "value") { return false; }
         if strings_equal(prev_role, "paren_close") { return false; }
         if strings_equal(prev_role, "bracket_close") { return false; }
+        if strings_equal(prev_role, "generic_close") { return false; }
     }
 
     // Index: no space before [
@@ -708,6 +870,7 @@ fn _needs_space_before(role: string, prev_role: string, lexeme: string, prev_lex
         if strings_equal(prev_role, "value") { return false; }
         if strings_equal(prev_role, "paren_close") { return false; }
         if strings_equal(prev_role, "bracket_close") { return false; }
+        if strings_equal(prev_role, "generic_close") { return false; }
     }
 
     // bang_bracket: space before, no space after !
@@ -857,6 +1020,13 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
             paren_depth -= 1;
             if paren_depth < 0 { paren_depth = 0; }
         }
+        if strings_equal(role, "generic_close") {
+            // `>>` closes two nested generic levels in one token.
+            if strings_equal(lexeme, ">>") { paren_depth -= 2; } else {
+                paren_depth -= 1;
+            }
+            if paren_depth < 0 { paren_depth = 0; }
+        }
 
         // ── Determine whitespace before token ──
         if in_inline {
@@ -958,6 +1128,7 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
         }
         if strings_equal(role, "paren_open") { paren_depth += 1; }
         if strings_equal(role, "bracket_open") { paren_depth += 1; }
+        if strings_equal(role, "generic_open") { paren_depth += 1; }
 
         // ── Track inline block exit ──
         if strings_equal(role, "block_close") {
@@ -1401,7 +1572,8 @@ fn format_source(source: string) -> string {
         return out;
     }
     let classified = _reclassify_unary_ops(fmt_tokens);
-    let sorted = sort_imports(classified);
+    let with_generics = _reclassify_generics(classified);
+    let sorted = sort_imports(with_generics);
     return emit_formatted(sorted);
 }
 
