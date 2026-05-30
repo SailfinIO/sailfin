@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end regression test for the `c_abi_return_type` post-call
 # coercion in the legacy `coerce_and_emit_call` path (extended under
-# issue #639). User-written calls to helpers like `monotonic_millis()`
+# issue #639). User-written calls to bare-target `double`-ABI helpers
 # flow through `core_call_lowering` → `core_call_emission.coerce_and_emit_call`,
 # NOT through `emit_runtime_call`. That makes this path the *actual*
 # fix surface for #634: the unit-level coverage in
@@ -12,11 +12,22 @@
 # would re-introduce the `%xmm0`/`%rax` register-class mismatch that
 # crashed PR #637 (see #641 RCA).
 #
+# Worked example: `sailfin_intrinsic_runtime_arena_mark()` — a nullary,
+# bare-target helper whose descriptor still carries
+# `c_abi_return_type: "double"` (the C body returns `double`; the
+# caller-visible type is `i64`). It replaced `monotonic_millis()` here
+# under issue #819, which migrated `monotonic_millis` off the C `double`
+# symbol entirely onto the Sailfin-native `i64`-returning
+# `@sfn_clock_millis` — so `monotonic_millis` no longer exercises the
+# `double`→`i64` coercion path this test guards. `arena_mark` is the
+# remaining nullable bare-target `double` helper that resolves
+# standalone under `--emit llvm`, so it is now the worked example.
+#
 # This shell test compiles a minimal program with `sfn emit llvm` and
 # greps the emitted IR for the three landmarks of the post-call
 # coercion sequence:
 #
-#   1. `call double @sailfin_runtime_monotonic_millis()` — the call
+#   1. `call double @sailfin_intrinsic_runtime_arena_mark()` — the call
 #      lands against the C ABI return type (`%xmm0`), not against the
 #      caller-visible `i64`.
 #   2. `call double @round(double ...)` — the canonical Sailfin
@@ -54,26 +65,26 @@ run_test() {
     fi
 }
 
-# The minimal #634 reproducer from the issue body. `monotonic_millis()`
-# is the worked example; flowing it through `--emit llvm` exercises the
-# legacy call-emission path because the call site is user-written
-# (not an internally-synthesized lowering call that uses
-# `emit_runtime_call` directly).
+# A minimal #634-shaped reproducer. `sailfin_intrinsic_runtime_arena_mark()`
+# is the worked example (a nullary bare-target `double`-ABI helper);
+# flowing it through `--emit llvm` exercises the legacy call-emission
+# path because the call site is user-written (not an
+# internally-synthesized lowering call that uses `emit_runtime_call`
+# directly). The two call sites in two `int`-returning functions yield
+# ≥ 4 `alloca i64` let-binding slots.
 write_fixture() {
     local src="$1"
     cat > "$src" <<'EOF'
-import { monotonic_millis } from "runtime/prelude";
-
-fn _ms_since(start_ms: int) -> int {
-    let end_ms = monotonic_millis();
-    let delta = end_ms - start_ms;
+fn _delta_since(start_mark: int) -> int {
+    let end_mark = sailfin_intrinsic_runtime_arena_mark();
+    let delta = end_mark - start_mark;
     if delta < 0 { return 0; }
     return delta;
 }
 
-fn main() ![io, clock] {
-    let t0 = monotonic_millis();
-    let elapsed = _ms_since(t0);
+fn main() ![io] {
+    let m0 = sailfin_intrinsic_runtime_arena_mark();
+    let elapsed = _delta_since(m0);
     print.info("ok");
 }
 EOF
@@ -92,8 +103,8 @@ test_legacy_path_emits_call_double_then_round_then_fptosi() {
     fi
 
     local missing=0
-    if ! grep -qE 'call double @sailfin_runtime_monotonic_millis\(\)' "$ll"; then
-        echo "[test]   missing 'call double @sailfin_runtime_monotonic_millis()' in emitted IR"
+    if ! grep -qE 'call double @sailfin_intrinsic_runtime_arena_mark\(\)' "$ll"; then
+        echo "[test]   missing 'call double @sailfin_intrinsic_runtime_arena_mark()' in emitted IR"
         echo "         (registry flip not honored by coerce_and_emit_call — #637 register-class mismatch will return)"
         missing=$((missing + 1))
     fi
@@ -119,13 +130,14 @@ test_let_binding_alloca_is_i64() {
         return 1
     fi
 
-    # Both `let t0 = monotonic_millis()` in `main` and `let end_ms = monotonic_millis()`
-    # in `_ms_since` allocate i64 locals. Two i64 functions × two i64 allocas
-    # each gives ≥ 4 lines (the issue's headline assertion is `alloca i64`).
+    # Both `let m0 = arena_mark()` in `main` and `let end_mark = arena_mark()`
+    # in `_delta_since` allocate i64 locals. Two i64 functions × two i64
+    # allocas each gives ≥ 4 lines (the issue's headline assertion is
+    # `alloca i64`).
     local hits
     hits="$(grep -cE '^\s*%[a-zA-Z_][a-zA-Z0-9_]* = alloca i64' "$ll" || true)"
     if [ "${hits:-0}" -lt 4 ]; then
-        echo "[test]   expected ≥ 4 'alloca i64' lines (let bindings for monotonic_millis()), found $hits"
+        echo "[test]   expected ≥ 4 'alloca i64' lines (let bindings for arena_mark()), found $hits"
         return 1
     fi
     return 0
@@ -146,7 +158,7 @@ test_no_abi_primitive_mismatch_warning() {
     hits="$(echo "$combined" | grep -cE 'ABI primitive mismatch' || true)"
     if [ "${hits:-0}" -gt 0 ]; then
         echo "[test]   expected 0 'ABI primitive mismatch' warnings, found $hits"
-        echo "         (#634 headline ask — monotonic_millis() → int should not warn)"
+        echo "         (#634 headline ask — a double-ABI helper → int should not warn)"
         return 1
     fi
     return 0
@@ -167,24 +179,24 @@ test_declare_line_matches_c_abi() {
     # to a `double`-returning symbol). A `declare i64` here would
     # produce the `%rax`-vs-`%xmm0` mismatch that crashed #637 even
     # though the call site itself uses `call double`.
-    if ! grep -qE '^declare double @sailfin_runtime_monotonic_millis\(\)' "$ll"; then
-        echo "[test]   missing 'declare double @sailfin_runtime_monotonic_millis()' — declare must match C ABI"
+    if ! grep -qE '^declare double @sailfin_intrinsic_runtime_arena_mark\(\)' "$ll"; then
+        echo "[test]   missing 'declare double @sailfin_intrinsic_runtime_arena_mark()' — declare must match C ABI"
         return 1
     fi
-    if grep -qE '^declare i64 @sailfin_runtime_monotonic_millis\(\)' "$ll"; then
-        echo "[test]   regression: 'declare i64 @sailfin_runtime_monotonic_millis()' emitted — would mis-link"
+    if grep -qE '^declare i64 @sailfin_intrinsic_runtime_arena_mark\(\)' "$ll"; then
+        echo "[test]   regression: 'declare i64 @sailfin_intrinsic_runtime_arena_mark()' emitted — would mis-link"
         return 1
     fi
     return 0
 }
 
-run_test "legacy coerce_and_emit_call emits 'call double + round + fptosi to i64' for monotonic_millis()" \
+run_test "legacy coerce_and_emit_call emits 'call double + round + fptosi to i64' for arena_mark()" \
     test_legacy_path_emits_call_double_then_round_then_fptosi
-run_test "let bindings for monotonic_millis() lower to 'alloca i64'" \
+run_test "let bindings for arena_mark() lower to 'alloca i64'" \
     test_let_binding_alloca_is_i64
-run_test "monotonic_millis() lowering emits zero 'ABI primitive mismatch' warnings" \
+run_test "arena_mark() lowering emits zero 'ABI primitive mismatch' warnings" \
     test_no_abi_primitive_mismatch_warning
-run_test "declare line for sailfin_runtime_monotonic_millis matches C ABI ('declare double')" \
+run_test "declare line for sailfin_intrinsic_runtime_arena_mark matches C ABI ('declare double')" \
     test_declare_line_matches_c_abi
 
 echo "[summary] $PASS passed, $FAIL failed"

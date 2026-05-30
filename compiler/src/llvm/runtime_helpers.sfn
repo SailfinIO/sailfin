@@ -347,11 +347,17 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
 
     // Monotonic clock for profiling/timing.
     // Support both the prelude binding name and direct calls.
+    // Issue #819: routed to the Sailfin-native `@sfn_clock_millis`
+    // (defined in `runtime/sfn/clock.sfn`, linked via the runtime
+    // capsule's `sfn-sources`) instead of the legacy C
+    // `sailfin_runtime_monotonic_millis`. The native helper returns
+    // `i64` directly, so `c_abi_return_type` drops to `null` — no
+    // `double`→`i64` post-call coercion is needed anymore.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_monotonic_millis_fn", symbol: "sailfin_runtime_monotonic_millis", return_type: "i64", parameter_types: [], effects: ["clock"], native_signature: null, c_abi_return_type: "double"
+        target: "runtime_monotonic_millis_fn", symbol: "sfn_clock_millis", return_type: "i64", parameter_types: [], effects: ["clock"], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "monotonic_millis", symbol: "sailfin_runtime_monotonic_millis", return_type: "i64", parameter_types: [], effects: ["clock"], native_signature: null, c_abi_return_type: "double"
+        target: "monotonic_millis", symbol: "sfn_clock_millis", return_type: "i64", parameter_types: [], effects: ["clock"], native_signature: null, c_abi_return_type: null
     });
     // Untyped `channel` / `spawn` / `parallel` descriptors removed under
     // issue #617 — their C bridges were silent no-ops and the
@@ -1063,8 +1069,8 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // @find_char, etc. — they need declares in every module that
     // calls them.
     // Note: monotonic_millis is already registered above (target:
-    // "monotonic_millis" → sailfin_runtime_monotonic_millis) so it
-    // is not duplicated here.
+    // "monotonic_millis" → sfn_clock_millis) so it is not duplicated
+    // here.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "find_char", symbol: "find_char", return_type: "i64", parameter_types: ["i8*", "i8*", "i64"], effects: [], native_signature: null, c_abi_return_type: null
     });

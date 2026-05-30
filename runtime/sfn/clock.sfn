@@ -87,6 +87,10 @@ let CLOCK_MONOTONIC: i32 = 1;
 // combined nanosecond result.
 let NANOS_PER_SEC: i64 = 1000000000;
 
+// Nanoseconds per millisecond — the divisor reducing the combined
+// nanosecond reading to whole milliseconds for `sfn_clock_millis`.
+let NANOS_PER_MILLI: i64 = 1000000;
+
 // Read the monotonic clock and return the elapsed time as a single
 // nanosecond count. This is the shared `clock_gettime` field-reader
 // that #819's `sfn_clock_millis` consumes: it stack-allocates a
@@ -127,6 +131,29 @@ fn sfn_clock_monotonic_nanos() -> i64 ![clock] {
     let nsec: i64 = sailfin_intrinsic_pointer_read_i64(nsec_ptr);
 
     return sec * NANOS_PER_SEC + nsec;
+}
+
+// The never-shipped `monotonic_millis` backend (issue #819). The
+// prelude's `monotonic_millis()` and `runtime_monotonic_millis_fn`
+// route here through the helper registry
+// (`compiler/src/llvm/runtime_helpers.sfn`), replacing the legacy C
+// `sailfin_runtime_monotonic_millis` (which returned a `double` and
+// needed the `c_abi_return_type` coercion). This native version reads
+// the monotonic clock through `sfn_clock_monotonic_nanos` (#878's
+// `clock_gettime` field-reader) and divides the nanosecond reading
+// down to whole milliseconds.
+//
+// Monotonicity: `clock_gettime(CLOCK_MONOTONIC, …)` is non-decreasing,
+// and integer division by a positive constant preserves that — so the
+// returned `i64` is monotonically non-decreasing across calls, the
+// contract `monotonic_millis()` callers (profiling brackets in
+// `cli_commands.sfn`, `lowering_core.sfn`, `main.sfn`) rely on.
+//
+// Effect: `![clock]` — reading the monotonic clock is the `clock`
+// capability, same as `sfn_clock_monotonic_nanos` and `sfn_sleep`.
+fn sfn_clock_millis() -> i64 ![clock] {
+    let nanos: i64 = sfn_clock_monotonic_nanos();
+    return nanos / NANOS_PER_MILLI;
 }
 
 fn sfn_sleep(milliseconds: float) -> void ![clock] {

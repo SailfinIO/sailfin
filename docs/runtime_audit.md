@@ -345,7 +345,7 @@ calls to it in current code paths.
 |---|---|---|
 | `sailfin_runtime_print_raw/err/info/warn/error` | ✅ | stdout/stderr line writes |
 | `sfn_sleep` (Sailfin-native) | ✅ | Defined in `runtime/sfn/clock.sfn`; calls libc `nanosleep` directly via `runtime/sfn/platform/posix.sfn`. PR 2 of the sleep migration (#397) deleted the C `sailfin_runtime_sleep` entrypoint and the `sfn_sleep` C trampoline. |
-| `sailfin_runtime_monotonic_millis` | ✅ | Clock-backed, used for bench |
+| `sailfin_runtime_monotonic_millis` | ✅ | Superseded by Sailfin-native `sfn_clock_millis` (`runtime/sfn/clock.sfn`, issue #819); `monotonic_millis` registry rows now route there. C body retained for seed compat, dead in fresh emission. |
 | `sailfin_runtime_log_execution` | ✅ | Prints value via `print.info`, returns value |
 
 ### Strings (implemented, with perf scaffolding)
