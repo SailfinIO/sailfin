@@ -157,6 +157,56 @@ assert_build_fails_closed() {
     return 0
 }
 
+# `sfn emit llvm` shares the lowering pipeline with `sfn build`, so the
+# same void-call lowering `[fatal]` must abort it: rc != 0, no `.ll`
+# artifact, and the `cannot resolve` diagnostic naming the symbol.
+# `emit llvm` is a separate CLI surface with its own output path, so it
+# gets its own assertion rather than relying on the `build` coverage.
+assert_emit_llvm_rejects() {
+    local label="$1"
+    local source="$2"
+    local symbol="$3"
+
+    local src_path="$SCRATCH/${label}.sfn"
+    local out_path="$SCRATCH/${label}.ll"
+    local log_path="$SCRATCH/${label}.emitll.log"
+    printf '%s\n' "$source" > "$src_path"
+
+    local rc=0
+    ( cd "$SCRATCH" && "$BINARY" emit -o "$out_path" llvm "$src_path" ) \
+        > "$log_path" 2>&1 || rc=$?
+
+    if [ "$rc" -eq 0 ]; then
+        echo "[test]   emit llvm of ${label}.sfn exited 0 — expected non-zero (fail-closed)" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if [ -e "$out_path" ]; then
+        echo "[test]   emit llvm of ${label}.sfn produced an .ll at ${out_path} — expected none" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if ! grep -q "cannot resolve" "$log_path"; then
+        echo "[test]   emit llvm diagnostic for ${label}.sfn did not mention 'cannot resolve'" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if ! grep -q "\`${symbol}\`" "$log_path"; then
+        echo "[test]   emit llvm diagnostic for ${label}.sfn did not name '\`${symbol}\`'" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 test_channel_via_sfn_sync_rejected() {
     assert_build_rejects "channel_import_caller" \
 'import { channel } from "sfn/sync";
@@ -225,12 +275,26 @@ test_unknown_void_helper_rejected() {
 }'
 }
 
+# Issue #631: `sfn emit llvm` must fail closed on the void-call lowering
+# fatal exactly like `sfn build`. The `spawn` case exercises the LLVM
+# lowering void path (type-checks, but the descriptor is gone), which is
+# precisely the surface the statement-level diagnostic propagation fix
+# guards — pre-fix this emitted the fatal yet still wrote an `.ll` at rc=0.
+test_emit_llvm_spawn_rejected() {
+    assert_emit_llvm_rejects "spawn_emit_llvm_caller" \
+'fn main() ![io] {
+    spawn(0, "worker");
+}' \
+        "spawn"
+}
+
 run_test "sfn build rejects sfn/sync.channel import (#617)" test_channel_via_sfn_sync_rejected
 run_test "sfn build rejects sfn/sync.parallel import (#617)" test_parallel_via_sfn_sync_rejected
 run_test "sfn build rejects sfn/sync.spawn import (#617)" test_spawn_via_sfn_sync_rejected
 run_test "sfn build rejects bare prelude channel() (#617)" test_channel_via_prelude_name_rejected
 run_test "sfn build rejects bare prelude spawn() (#617)" test_spawn_via_prelude_name_rejected
 run_test "sfn build fails closed on unknown void helper (#631)" test_unknown_void_helper_rejected
+run_test "sfn emit llvm fails closed on void spawn() (#631)" test_emit_llvm_spawn_rejected
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
