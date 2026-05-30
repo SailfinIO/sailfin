@@ -1,0 +1,101 @@
+// Unit tests for the runtime C/LL object cache key (#632).
+//
+// Before this fix, the runtime C-object cache in `cli_main.sfn`
+// keyed each `.o` purely on source basename + opt flag and gated
+// on `fs.exists`. Editing a tracked `runtime/native/src/*.c`
+// source therefore left a stale cached object the linker silently
+// reused — the worst kind of cache bug, because a function-body
+// edit that doesn't change an exported symbol produced a stale
+// binary with no link error and no diagnostic.
+//
+// `runtime_object_cache_key` is the content-addressing primitive
+// the fix introduces: it mixes the source file's SHA-256 with the
+// opt flag, so these tests pin the contract by calling the helper
+// before and after a content edit and asserting key (in)equality.
+// The key is content-addressed, not mtime-addressed: a pure
+// rewrite-with-identical-bytes must reproduce the same key.
+import { runtime_object_cache_key } from "../../src/build_cache";
+
+// Each test gets its own tmp namespace so parallel runs don't
+// collide on `/tmp/sfn_c_source_cache_test_<X>`.
+fn _tmp_root(label: string) -> string ![io] {
+    let root = "/tmp/sfn_c_source_cache_test_" + label;
+    process.run(["rm", "-rf", root]);
+    process.run(["mkdir", "-p", root]);
+    return root;
+}
+
+fn _cleanup(path: string) ![io] { process.run(["rm", "-rf", path]); }
+
+// A content edit to the source must change the cache key, so the
+// next build misses and recompiles. This is the exact regression
+// from PR #630: a function-body edit left the key unchanged and
+// served a stale `.o`.
+test "c-source cache: content edit changes the key" ![io] {
+    let scratch = _tmp_root("content_edit");
+    let src = scratch + "/sailfin_runtime.c";
+
+    fs.writeFile(src, "char *sailfin_runtime_log_execution(void) { return 0; }\n");
+    let key_before = runtime_object_cache_key(src, "-O2");
+
+    // Whitespace-only edit inside the body still changes the bytes.
+    fs.writeFile(src, "char *sailfin_runtime_log_execution(void) { return  0; }\n");
+    let key_after = runtime_object_cache_key(src, "-O2");
+
+    assert key_before.length == 64 + 1 + 3;  // sha256 hex + "\n" + "-O2"
+    assert key_before != key_after;
+
+    _cleanup(scratch);
+}
+
+// The key is content-addressed, not mtime-addressed: rewriting the
+// exact same bytes (the "pure touch" case) must reproduce the
+// original key so the cache still hits. This pins the contract
+// #514 holds for the staging cache — identical content cache-hits.
+test "c-source cache: identical content reproduces the key" ![io] {
+    let scratch = _tmp_root("identical_content");
+    let src = scratch + "/sailfin_runtime.c";
+    let body = "int sailfin_runtime_channel(void) { return 7; }\n";
+
+    fs.writeFile(src, body);
+    let key_first = runtime_object_cache_key(src, "-O2");
+
+    // Edit away, then restore byte-identical content.
+    fs.writeFile(src, "int sailfin_runtime_channel(void) { return 8; }\n");
+    let key_edited = runtime_object_cache_key(src, "-O2");
+    fs.writeFile(src, body);
+    let key_restored = runtime_object_cache_key(src, "-O2");
+
+    assert key_first != key_edited;
+    assert key_first == key_restored;
+
+    _cleanup(scratch);
+}
+
+// The opt flag participates in the key so the same source compiled
+// at different optimisation levels never collides on one `.o`.
+test "c-source cache: opt flag participates in the key" ![io] {
+    let scratch = _tmp_root("opt_flag");
+    let src = scratch + "/sailfin_arena.c";
+    fs.writeFile(src, "void sailfin_arena_init(void) {}\n");
+
+    let key_o0 = runtime_object_cache_key(src, "-O0");
+    let key_o2 = runtime_object_cache_key(src, "-O2");
+
+    assert key_o0 != key_o2;
+
+    _cleanup(scratch);
+}
+
+// An unhashable source (missing file) yields an empty key, which
+// the caller treats as "not content-addressable" and falls back to
+// an always-recompile path — never a silent stale hit.
+test "c-source cache: missing source yields empty key" ![io] {
+    let scratch = _tmp_root("missing");
+    let src = scratch + "/does_not_exist.c";
+
+    let key = runtime_object_cache_key(src, "-O2");
+    assert key.length == 0;
+
+    _cleanup(scratch);
+}

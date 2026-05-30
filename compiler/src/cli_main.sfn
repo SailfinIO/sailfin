@@ -6,7 +6,8 @@ import {
     CacheStats,
     cache_root,
     cache_stats_is_empty,
-    resolve_build_cache_config
+    resolve_build_cache_config,
+    runtime_object_cache_key
 } from "./build_cache";
 import {
     BuildReport,
@@ -992,11 +993,38 @@ fn _runtime_obj_prefix(capsule_name: string) -> string {
     return out + "__";
 }
 
+// Content-addressed cache gate for a runtime object compile (#632).
+// A previously-compiled `.o` at `obj_path` may be reused iff the
+// object exists AND the sidecar `<obj_path>.key` records a content
+// key byte-identical to the current source's key. A content edit
+// changes the key (via `runtime_object_cache_key`'s source SHA-256),
+// busting the cache and forcing a recompile; a pure mtime touch
+// leaves the bytes — hence the key — unchanged, so the cache still
+// hits. An empty key (unhashable source) is treated as a miss so a
+// hash failure never serves a stale object. Before this gate the
+// caller keyed solely on `fs.exists(obj_path)`, which silently
+// reused a stale `.o` after any source-content edit.
+fn _runtime_obj_cache_hit(obj_path: string, key: string) -> boolean ![io] {
+    if key.length == 0 { return false; }
+    if !fs.exists(obj_path) { return false; }
+    let sidecar = obj_path + ".key";
+    if !fs.exists(sidecar) { return false; }
+    return fs.readFile(sidecar) == key;
+}
+
+// Persist the content key alongside a freshly-compiled `.o` so the
+// next build's `_runtime_obj_cache_hit` can validate it. No-op on an
+// empty key (the gate already forced an uncached recompile).
+fn _runtime_obj_cache_record(obj_path: string, key: string) ![io] {
+    if key.length == 0 { return; }
+    fs.writeFile(obj_path + ".key", key);
+}
+
 // Compile every `c-sources` / `ll-sources` entry from a list of
 // `kind = "runtime"` capsule artifacts and return the resulting
 // `.o` paths plus the accumulated `link-libs`. Caches `.o` outputs
-// under `out_dir` keyed by source basename + `opt_flag` so repeat
-// builds skip clang.
+// under `out_dir` keyed by source content SHA-256 + `opt_flag`
+// (#632) so a content edit recompiles while repeat builds skip clang.
 //
 // Used only when the resolver returns at least one runtime capsule
 // artifact (i.e. the project's `[dependencies]` declared a
@@ -1037,7 +1065,8 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             let obj = _path_join(out_dir, cap_prefix + _path_basename(src)
                 + opt_flag
                 + ".o");
-            if !fs.exists(obj) {
+            let key = runtime_object_cache_key(src, opt_flag);
+            if !_runtime_obj_cache_hit(obj, key) {
                 let mut args: string[] = ["clang", opt_flag, "-Wno-override-module"];
                 let mut fi: int = 0;
                 loop {
@@ -1054,6 +1083,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                     print("sfn build: failed to compile runtime c-source " + src);
                     return _failed_runtime_link_inputs();
                 }
+                _runtime_obj_cache_record(obj, key);
             }
             objects.push(obj);
             ci += 1;
@@ -1068,13 +1098,15 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             let obj = _path_join(out_dir, cap_prefix + _path_basename(src)
                 + opt_flag
                 + ".o");
-            if !fs.exists(obj) {
+            let key = runtime_object_cache_key(src, opt_flag);
+            if !_runtime_obj_cache_hit(obj, key) {
                 let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-c", src, "-o", obj]);
                 if rc != 0 {
                     print("sfn build: failed to assemble runtime ll-source "
                         + src);
                     return _failed_runtime_link_inputs();
                 }
+                _runtime_obj_cache_record(obj, key);
             }
             objects.push(obj);
             li += 1;
@@ -1294,27 +1326,36 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     let arena_obj = _path_join(out_dir, "sailfin_arena" + opt_flag + ".o");
     let globals_obj = _path_join(out_dir, "runtime_globals" + opt_flag + ".o");
 
-    if !fs.exists(runtime_obj) {
+    // Content-addressed cache keys (#632): a content edit to any of
+    // these in-tree runtime sources busts the corresponding `.o`,
+    // matching the runtime-capsule path's behaviour above.
+    let runtime_key = runtime_object_cache_key(runtime_src, opt_flag);
+    if !_runtime_obj_cache_hit(runtime_obj, runtime_key) {
         let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
             + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
         if rc != 0 {
             return ["", "", "", "", "", "", "", "", "", "", ""];
         }
+        _runtime_obj_cache_record(runtime_obj, runtime_key);
     }
 
-    if !fs.exists(arena_obj) {
+    let arena_key = runtime_object_cache_key(arena_src, opt_flag);
+    if !_runtime_obj_cache_hit(arena_obj, arena_key) {
         let rc_arena = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
             + include_dir, "-c", arena_src, "-o", arena_obj,]);
         if rc_arena != 0 {
             return ["", "", "", "", "", "", "", "", "", "", ""];
         }
+        _runtime_obj_cache_record(arena_obj, arena_key);
     }
 
-    if !fs.exists(globals_obj) {
+    let globals_key = runtime_object_cache_key(runtime_ir, opt_flag);
+    if !_runtime_obj_cache_hit(globals_obj, globals_key) {
         let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", runtime_ir, "-o", globals_obj,]);
         if rc2 != 0 {
             return ["", "", "", "", "", "", "", "", "", "", ""];
         }
+        _runtime_obj_cache_record(globals_obj, globals_key);
     }
 
     return [runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj, http_obj];
