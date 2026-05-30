@@ -233,7 +233,7 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             // `@<sym>` to `@<sym>__<module>`. Limit the skip to
             // `target == symbol` mirror rows so the helper's alias-declare
             // path below (which handles `target != symbol` C entrypoints
-            // like `monotonic_millis` → `sailfin_runtime_monotonic_millis`)
+            // like `monotonic_millis` → `sfn_clock_millis`)
             // is not affected.
             let mut _shadowed_by_import: boolean = false;
             if descriptor.target == descriptor.symbol {

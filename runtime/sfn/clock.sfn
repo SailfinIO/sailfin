@@ -76,16 +76,31 @@ struct Timespec {
 // platform-constants home is deferred (this issue's `Out:` scope).
 let EINTR: i32 = 4;
 
-// POSIX `CLOCK_MONOTONIC` — a steadily-advancing clock unaffected by
-// wall-clock adjustments, the correct source for elapsed-time
-// measurement. The value is `1` on Linux x86_64. macOS arm64 spells
-// it `6`; that platform-constant divergence is deferred under epic
-// #763 (this issue's `Out:` scope is the Linux gate).
-let CLOCK_MONOTONIC: i32 = 1;
+// POSIX `CLOCK_MONOTONIC` clk_id — a steadily-advancing clock
+// unaffected by wall-clock adjustments, the correct source for
+// elapsed-time measurement. The numeric `clk_id` diverges by platform:
+// Linux x86_64 spells it `1`, while macOS arm64 (Darwin) spells it `6`.
+//
+// Pure Sailfin can't yet read the platform's header constant (a
+// target-aware platform-constant mechanism is deferred under epic
+// #763), and the clean fix — an emit-time sentinel intrinsic that folds
+// to the right `i32` per target — can't be used *here* either:
+// `make compile` recompiles this runtime module with the pinned *seed*
+// compiler, which predates any newly-added intrinsic, so a sentinel
+// would have to ship in a seed before `clock.sfn` could call it. Until
+// that lands (tracked as the #819 follow-up), `sfn_clock_monotonic_nanos`
+// probes the value at runtime: it tries the Linux clk_id first and, on
+// failure, retries with the Darwin clk_id (see below).
+let CLOCK_MONOTONIC_LINUX: i32 = 1;
+let CLOCK_MONOTONIC_DARWIN: i32 = 6;
 
 // Nanoseconds per second — the scale factor folding `tv_sec` into the
 // combined nanosecond result.
 let NANOS_PER_SEC: i64 = 1000000000;
+
+// Nanoseconds per millisecond — the divisor reducing the combined
+// nanosecond reading to whole milliseconds for `sfn_clock_millis`.
+let NANOS_PER_MILLI: i64 = 1000000;
 
 // Read the monotonic clock and return the elapsed time as a single
 // nanosecond count. This is the shared `clock_gettime` field-reader
@@ -114,8 +129,16 @@ fn sfn_clock_monotonic_nanos() -> i64 ![clock] {
     let mut ts: Timespec = Timespec { tv_sec: 0, tv_nsec: 0 };
     let ts_ptr: * Timespec = & ts;
 
-    // Kernel writes `tv_sec` / `tv_nsec` through `ts_ptr`.
-    let ret: i32 = clock_gettime(CLOCK_MONOTONIC, ts_ptr);
+    // Read the monotonic clock. `CLOCK_MONOTONIC`'s `clk_id` differs by
+    // platform (Linux `1`, Darwin `6`), so probe the Linux value first
+    // and, on failure, retry with the Darwin value. On Linux the first
+    // call succeeds (`ret == 0`) and the fallback is never taken; on
+    // Darwin `clock_gettime(1, …)` returns `EINVAL` (non-zero, leaving
+    // `ts` untouched) and the second call with `6` populates it. The
+    // kernel writes `tv_sec` / `tv_nsec` through `ts_ptr` on whichever
+    // call succeeds.
+    let mut ret: i32 = clock_gettime(CLOCK_MONOTONIC_LINUX, ts_ptr);
+    if ret != 0 { ret = clock_gettime(CLOCK_MONOTONIC_DARWIN, ts_ptr); }
     if ret != 0 { return 0; }
 
     // Read the fields back from the *same* allocation, after the call.
@@ -127,6 +150,29 @@ fn sfn_clock_monotonic_nanos() -> i64 ![clock] {
     let nsec: i64 = sailfin_intrinsic_pointer_read_i64(nsec_ptr);
 
     return sec * NANOS_PER_SEC + nsec;
+}
+
+// The never-shipped `monotonic_millis` backend (issue #819). The
+// prelude's `monotonic_millis()` and `runtime_monotonic_millis_fn`
+// route here through the helper registry
+// (`compiler/src/llvm/runtime_helpers.sfn`), replacing the legacy C
+// `sailfin_runtime_monotonic_millis` (which returned a `double` and
+// needed the `c_abi_return_type` coercion). This native version reads
+// the monotonic clock through `sfn_clock_monotonic_nanos` (#878's
+// `clock_gettime` field-reader) and divides the nanosecond reading
+// down to whole milliseconds.
+//
+// Monotonicity: `clock_gettime(CLOCK_MONOTONIC, …)` is non-decreasing,
+// and integer division by a positive constant preserves that — so the
+// returned `i64` is monotonically non-decreasing across calls, the
+// contract `monotonic_millis()` callers (profiling brackets in
+// `cli_commands.sfn`, `lowering_core.sfn`, `main.sfn`) rely on.
+//
+// Effect: `![clock]` — reading the monotonic clock is the `clock`
+// capability, same as `sfn_clock_monotonic_nanos` and `sfn_sleep`.
+fn sfn_clock_millis() -> i64 ![clock] {
+    let nanos: i64 = sfn_clock_monotonic_nanos();
+    return nanos / NANOS_PER_MILLI;
 }
 
 fn sfn_sleep(milliseconds: float) -> void ![clock] {

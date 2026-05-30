@@ -2189,7 +2189,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 | `sailfin_runtime_print_err` | `sfn_print_err` | M2 |
 | `sailfin_runtime_print_info/warn/error` | `sfn_print_info/warn/error` | M2 |
 | `sailfin_runtime_sleep` | `sfn_sleep` | **Call-site routed 2026-05-04; `@sfn_sleep` currently a C trampoline. Sailfin link in PR 2 (gated on issue #308 + §2.9 Q7).** |
-| `sailfin_runtime_monotonic_millis` | `sfn_clock_millis` | M2 |
+| `sailfin_runtime_monotonic_millis` | `sfn_clock_millis` | **Shipped 2026-05-30 (issue #819, M3.3)** — `monotonic_millis` registry rows now route to the Sailfin-native `@sfn_clock_millis` (reads `clock_gettime` via #878's field-reader, returns `i64`); the C symbol stays for seed compat only. |
 | `sailfin_runtime_string_length` | `SfnString.len` (field access) | M1 |
 | `sailfin_runtime_string_concat` | `sfn_str_concat` | M2 |
 | `sailfin_runtime_string_append` | `sfn_str_concat` (arena) | M2 |
