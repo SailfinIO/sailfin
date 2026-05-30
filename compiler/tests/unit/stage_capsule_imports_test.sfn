@@ -12,10 +12,43 @@
 // refactor can't silently regress: `git checkout` resets mtimes to checkout
 // time, so timestamps lie — only the content hash is trustworthy.
 //
+// The cache-hit predicate lives in `compiler/src/capsule_resolver.sfn`, but
+// importing that module's entry points pulls in the whole driver (and fails
+// to link standalone — `exe_path` / `resolve_runtime_root` are unresolved in
+// a unit-test link). So, mirroring `workspace_resolver_test.sfn`, the three
+// pure helpers are inlined here verbatim. Only the linkable `sha256_of_file`
+// primitive is imported from `build_cache`.
+//
+// Keep in sync with `capsule_resolver.sfn`'s `_cr_srchash_path`,
+// `_cr_stage_cache_hit`, and `_cr_write_srchash`.
+//
 // Each test uses its own `/tmp` namespace so parallel runs don't collide,
 // and cleans up on exit.
 import { sha256_of_file } from "../../src/build_cache";
-import { _cr_srchash_path, _cr_stage_cache_hit, _cr_write_srchash } from "../../src/capsule_resolver";
+
+// -- inline copy of capsule_resolver.sfn:_cr_srchash_path --
+fn _cr_srchash_path(context_root: string, slug: string) -> string {
+    return context_root + "/" + slug + ".srchash";
+}
+
+// -- inline copy of capsule_resolver.sfn:_cr_stage_cache_hit --
+fn _cr_stage_cache_hit(asm_path: string, manifest_path: string, srchash_path: string, src_path: string) -> boolean ![io] {
+    if !fs.exists(asm_path) { return false; }
+    if !fs.exists(manifest_path) { return false; }
+    if !fs.exists(srchash_path) { return false; }
+    let recorded = fs.readFile(srchash_path);
+    if recorded.length == 0 { return false; }
+    let current = sha256_of_file(src_path);
+    if current.length == 0 { return false; }
+    return strings_equal(recorded, current);
+}
+
+// -- inline copy of capsule_resolver.sfn:_cr_write_srchash --
+fn _cr_write_srchash(srchash_path: string, src_path: string) ![io] {
+    let current = sha256_of_file(src_path);
+    if current.length == 0 { return; }
+    fs.writeFile(srchash_path, current);
+}
 
 // --------------------------------------------------------------
 // Fixture helpers
