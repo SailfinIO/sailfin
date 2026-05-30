@@ -180,9 +180,6 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs.write", symbol: "sailfin_intrinsic_fs_write", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
     });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.exists", symbol: "sailfin_intrinsic_fs_exists", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
-    });
 
     // Arena mark / rewind. Phase 5a (`docs/proposals/phase-5a-arena-reset.md`)
     // exposes the existing C bump-allocator's mark/rewind primitive
@@ -283,12 +280,6 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // Network intrinsics
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "net_request", symbol: "sailfin_intrinsic_net_request", return_type: "i8*", parameter_types: ["i8*", "i8*", "i8*"], effects: ["net"], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.get", symbol: "sailfin_intrinsic_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.post", symbol: "sailfin_intrinsic_http_post", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net"], native_signature: null, c_abi_return_type: null
     });
 
     // Concurrency intrinsics. Sleep call sites route through the
@@ -697,16 +688,6 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
 
     // Collection helpers
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_array_map_fn", symbol: "sailfin_runtime_array_map", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_array_filter_fn", symbol: "sailfin_runtime_array_filter", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_array_reduce_fn", symbol: "sailfin_runtime_array_reduce", return_type: "i8*", parameter_types: ["i8*", "i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-
     // String utility helpers
     //
     // M2.4a (#396): the four string descriptors below carry a

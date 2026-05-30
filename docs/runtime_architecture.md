@@ -2203,6 +2203,26 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 > now returns only not-yet-ported (Cat-B/C, `native_signature: null`)
 > and M4 scheduler rows. Cat-B/C flips track via #912; M4 stays.
 
+> **Registry sweep — #912 (Cat-B triage), 2026-05-30.** Per-symbol
+> audit of the Cat-B candidates found most were not clean flips: six
+> rows were **dead/vestigial and have been removed** rather than
+> flipped (per the #912 "drop dead duplicates" clause): the array
+> higher-order placeholders `runtime_array_map_fn` /
+> `runtime_array_filter_fn` / `runtime_array_reduce_fn` (`.map`/`.filter`/
+> `.reduce` are lowered inline; the legacy `sailfin_runtime_array_*`
+> symbols were never defined), and the intrinsic duplicates `fs.exists`
+> (`sailfin_intrinsic_fs_exists`), `http.get`
+> (`sailfin_intrinsic_http_get`), `http.post`
+> (`sailfin_intrinsic_http_post`) — superseded by the adapter rows #911
+> flipped, with no call site resolving to the dotted intrinsic forms.
+> All six had zero external references; removal is validated by
+> self-host. **Deferred** (not in this sweep): the exception family
+> (`throw` / `try_enter` / `try_leave` / `take_exception` → `sfn_*`)
+> remains a real flip pending exec-test ABI validation, and arena
+> (`sailfin_intrinsic_runtime_arena_mark` / `_rewind`) is an ABI
+> hazard — the bare `sfn_arena_mark` takes an arena pointer and is not
+> a drop-in, so it needs a real adapter, not a symbol flip.
+
 | Current C symbol | Native replacement | Milestone |
 |---|---|---|
 | `sailfin_runtime_print_raw` | `sfn_print` | M2 — ✓ #911 |
