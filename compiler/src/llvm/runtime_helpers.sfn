@@ -284,11 +284,16 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "net_request", symbol: "sailfin_intrinsic_net_request", return_type: "i8*", parameter_types: ["i8*", "i8*", "i8*"], effects: ["net"], native_signature: null, c_abi_return_type: null
     });
+    // `http.get` / `http.post` member calls flipped (#912) to the
+    // Sailfin-native socket client in `runtime/sfn/adapters/http.sfn`:
+    // `sfn_http_get` (`i8*`->`i8*`) and `sfn_http_post2` (the 2-arg
+    // `(url, body)` POST wrapper matching this row's arity). ABI-verified,
+    // link-time resolved against the already-shipped bodies.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.get", symbol: "sailfin_intrinsic_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: null, c_abi_return_type: null
+        target: "http.get", symbol: "sfn_http_get", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: "sfn_http_get", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "http.post", symbol: "sailfin_intrinsic_http_post", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net"], native_signature: null, c_abi_return_type: null
+        target: "http.post", symbol: "sfn_http_post2", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net"], native_signature: "sfn_http_post2", c_abi_return_type: null
     });
 
     // Concurrency intrinsics. Sleep call sites route through the
