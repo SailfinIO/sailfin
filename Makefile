@@ -407,20 +407,6 @@ check:
 	@# `NATIVE_OPT` that lower the opt level for stage2/stage3 are
 	@# silently ignored until the driver grows an `--opt` flag.
 	@mkdir -p build/selfhost/native-seedcheck
-	@# Wipe stale import-context + scratch artifacts so the
-	@# stage_capsule_imports cache-hit short-circuit (treats existing
-	@# `.sfn-asm` + `.layout-manifest` as authoritative without source-
-	@# change invalidation) cannot serve a previous run's IR.
-	@# Mirrors `make rebuild`'s `build/native/import-context` wipe at
-	@# Makefile:654-656; without it, a re-run after a source change
-	@# could compile against stale staged modules and silently
-	@# undermine the fixed-point hash-diff. Per-stage, narrow to the
-	@# two file shapes that matter (rather than `rm -rf` the whole
-	@# work-dir) so the directory mtime survives for incremental
-	@# tooling that watches it.
-	@if [ -d build/selfhost/native-seedcheck/native/import-context ]; then \
-		find build/selfhost/native-seedcheck/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
-	fi
 	@if [ -d build/selfhost/native-seedcheck/scratch/capsules ]; then \
 		find build/selfhost/native-seedcheck/scratch/capsules -type f -name '*.ll' -delete; \
 	fi
@@ -454,14 +440,6 @@ check:
 	@# `make compile`) populated. See the stage2 block above for
 	@# the rationale.
 	@mkdir -p build/selfhost/native-stage3
-	@# Same wipe as stage2 — stage_capsule_imports's cache-hit
-	@# probe ignores source mtime, so stale staged modules from a
-	@# prior `make check` run would invisibly satisfy stage3 and
-	@# defeat the fixed-point comparison. See the stage2 block
-	@# above for the rationale.
-	@if [ -d build/selfhost/native-stage3/native/import-context ]; then \
-		find build/selfhost/native-stage3/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
-	fi
 	@if [ -d build/selfhost/native-stage3/scratch/capsules ]; then \
 		find build/selfhost/native-stage3/scratch/capsules -type f -name '*.ll' -delete; \
 	fi
@@ -653,15 +631,6 @@ rebuild:
 		exit 1; \
 	fi; \
 	echo "$$seed" > build/.seed-resolved
-	@# Wipe stale import-context so a "force rebuild" actually
-	@# re-stages every module instead of reusing whatever the
-	@# previous build left on disk. `stage_capsule_imports`
-	@# treats existing `.sfn-asm` + `.layout-manifest` pairs as
-	@# authoritative cache hits with no mtime/content check.
-	@mkdir -p build/native/import-context
-	@if [ -d build/native/import-context ]; then \
-		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
-	fi
 	@# #812: pre-stage the runtime/sfn/platform extern modules with the
 	@# SEED *before* `sfn build -p compiler`. `runtime/sfn/io.sfn` calls
 	@# `write` (from `./platform/libc`) and `runtime/sfn/clock.sfn` calls
