@@ -239,16 +239,16 @@ fn _parse_number(text: string, start: int) -> _ParseResult {
                 let mut d: int = 0;
                 loop {
                     if d >= decimal_place { break; }
-                    divisor = divisor * 10;
+                    divisor = divisor * 10.0;
                     d += 1;
                 }
-                value = value + digit / divisor;
+                value = value + (digit as float) / divisor;
                 decimal_place += 1;
-            } else { value = value * 10 + digit; }
+            } else { value = value * 10.0 + (digit as float); }
         }
         i += 1;
     }
-    if negative { value = 0 - value; }
+    if negative { value = 0.0 - value; }
     return _parse_result(number_val(value), p);
 }
 

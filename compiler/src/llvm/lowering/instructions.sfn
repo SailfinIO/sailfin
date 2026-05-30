@@ -301,6 +301,13 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
                     current_temp = lowered.temp_index;
                     current_next_region = lowered.next_region_id;
                     current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                    // Issue #631: collect the statement's diagnostics so a
+                    // `[fatal]` from a void-returning call (e.g. an unknown
+                    // helper with no resolvable return type) reaches the
+                    // emit-level `has_fatal_lowering_diagnostic` gate and
+                    // aborts the build. Previously this branch dropped them,
+                    // letting void-call fatals slip past with rc=0.
+                    diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
                     collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
                 }
                 active_label = find_last_label(current_lines, active_label);
