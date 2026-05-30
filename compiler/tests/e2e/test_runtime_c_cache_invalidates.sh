@@ -66,11 +66,19 @@ EOF
 # Portable mtime reader (Linux coreutils first, macOS BSD stat fallback).
 mtime_of() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 
+# `timeout` is GNU coreutils — present on linux-x86_64 CI, absent on
+# macos-arm64. Use it when available; otherwise invoke the binary
+# directly. (`ulimit -v` is likewise Linux-only — macos-arm64 rejects
+# it with "cannot modify limit" — so it's applied best-effort below.)
+TIMEOUT_PREFIX=""
+if command -v timeout >/dev/null 2>&1; then TIMEOUT_PREFIX="timeout 120"; fi
+
 # Build the one-line program into the isolated work-dir so runtime
 # objects land under "$WORK/sailfin/" instead of the repo's
 # build/sailfin/.
 do_build() {
-    ( ulimit -v 8388608; timeout 120 "$BINARY" build "$SCRATCH/hello.sfn" \
+    ( ulimit -v 8388608 2>/dev/null || true
+      ${TIMEOUT_PREFIX} "$BINARY" build "$SCRATCH/hello.sfn" \
         -o "$SCRATCH/hello" --work-dir "$WORK" ) >"$SCRATCH/build.log" 2>&1
 }
 
