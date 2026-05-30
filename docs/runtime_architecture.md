@@ -2183,41 +2183,61 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 
 ## Appendix A: Mapping from Current C Symbols to Native Symbols
 
+> **Registry sweep — #911 (Cat-A), 2026-05-30.** For every "Category A"
+> helper — one whose `symbol:` previously pointed at a legacy
+> `sailfin_runtime_*` / `sailfin_intrinsic_*` / `sailfin_adapter_*`
+> entrypoint *and* already carried a non-null `sfn_*` `native_signature`
+> — the registry's `symbol:` field in
+> `compiler/src/llvm/runtime_helpers.sfn` has been rewritten to equal
+> its `native_signature`, retiring the legacy entrypoint name rather
+> than keeping it "for archeology." This is **not** a global
+> `symbol == native_signature` invariant: helpers whose `symbol` was
+> already a source/prelude-level name (e.g. `substring` → `sfn_str_slice`,
+> `strings_equal` → `sfn_str_eq`, the prelude `number_to_string` alias)
+> intentionally keep `symbol` != `native_signature` and are untouched.
+> The flip is **link-time-inert** — lowering already resolves
+> `native_signature ?? symbol`, so `.sfn-asm` and LLVM IR are
+> byte-identical (verified against `examples/basics/hello-world.sfn`).
+> Rows marked **✓ #911** below are flipped. The audit grep
+> (`symbol: "(sailfin_runtime|sailfin_intrinsic|sailfin_adapter)_`)
+> now returns only not-yet-ported (Cat-B/C, `native_signature: null`)
+> and M4 scheduler rows. Cat-B/C flips track via #912; M4 stays.
+
 | Current C symbol | Native replacement | Milestone |
 |---|---|---|
-| `sailfin_runtime_print_raw` | `sfn_print` | M2 |
-| `sailfin_runtime_print_err` | `sfn_print_err` | M2 |
-| `sailfin_runtime_print_info/warn/error` | `sfn_print_info/warn/error` | M2 |
+| `sailfin_runtime_print_raw` | `sfn_print` | M2 — ✓ #911 |
+| `sailfin_runtime_print_err` | `sfn_print_err` | M2 — ✓ #911 |
+| `sailfin_runtime_print_info/warn/error` | `sfn_print_info/warn/error` | M2 — ✓ #911 |
 | `sailfin_runtime_sleep` | `sfn_sleep` | **Call-site routed 2026-05-04; `@sfn_sleep` currently a C trampoline. Sailfin link in PR 2 (gated on issue #308 + §2.9 Q7).** |
 | `sailfin_runtime_monotonic_millis` | `sfn_clock_millis` | **Shipped 2026-05-30 (issue #819, M3.3)** — `monotonic_millis` registry rows now route to the Sailfin-native `@sfn_clock_millis` (reads `clock_gettime` via #878's field-reader, returns `i64`); the C symbol stays for seed compat only. |
-| `sailfin_runtime_string_length` | `SfnString.len` (field access) | M1 |
+| `sailfin_runtime_string_length` | `sfn_str_len` / `SfnString.len` (field access) | M1 — ✓ #911 |
 | `sailfin_runtime_string_concat` | `sfn_str_concat` | M2 |
 | `sailfin_runtime_string_append` | `sfn_str_concat` (arena) | M2 |
 | `sailfin_runtime_string_drop` | `sfn_rc_release` or arena bulk | M2 |
 | `sailfin_runtime_substring` | `sfn_str_slice` | M2 |
-| `sailfin_runtime_grapheme_at` | `sfn_str_grapheme_at` | M2 |
-| `sailfin_runtime_grapheme_count` | `sfn_str_grapheme_count` | M2 |
-| `sailfin_runtime_char_code` | `sfn_str_codepoint` | M2 |
-| `sailfin_runtime_string_to_number` | `sfn_str_to_number` | M2 |
-| `sailfin_runtime_number_to_string` | `sfn_number_to_str` | M2 |
-| `sailfin_runtime_concat` (array) | `sfn_array_concat` | M2 |
-| `sailfin_runtime_append_string` | `sfn_array_push` | M2 |
+| `sailfin_runtime_grapheme_at` | `sfn_str_grapheme_at` | M2 — ✓ #911 |
+| `sailfin_runtime_grapheme_count` | `sfn_str_grapheme_count` | M2 — ✓ #911 |
+| `sailfin_runtime_char_code` | `sfn_str_codepoint` | M2 — ✓ #911 |
+| `sailfin_runtime_string_to_number` | `sfn_str_to_number` | M2 — ✓ #911 |
+| `sailfin_runtime_number_to_string` | `sfn_number_to_str` | M2 — ✓ #911 |
+| `sailfin_runtime_concat` (array, `concat_v2`) | `sfn_array_concat` | M2 — ✓ #911 |
+| `sailfin_runtime_append_string` (`append_string_v2`) | `sfn_array_push_string` | M2 — ✓ #911 |
 | `sailfin_runtime_array_push` | `sfn_array_push` | M2 |
-| `sailfin_runtime_array_push_slot` | `sfn_array_push` (monomorphic) | M2 |
-| `sailfin_runtime_process_run` | `sfn_process_run` | M2 |
-| `sailfin_adapter_fs_read_file` | `sfn_fs_read_file` | M3 |
-| `sailfin_adapter_fs_write_file` | `sfn_fs_write_file` | M3 |
+| `sailfin_runtime_array_push_slot` (`array_push_slot_v2`) | `sfn_array_push_slot` (monomorphic) | M2 — ✓ #911 |
+| `sailfin_runtime_process_run` (`process_run_v2`) | `sfn_process_run` | M2 — ✓ #911 |
+| `sailfin_adapter_fs_read_file` | `sfn_fs_read_file` | M3 — ✓ #911 |
+| `sailfin_adapter_fs_write_file` | `sfn_fs_write_file` | M3 — ✓ #911 |
 | `sailfin_runtime_set/has/clear/take_exception` | `sfn_try_enter/leave/throw/take` | M2 |
 | `sailfin_runtime_spawn_*` | `sfn_spawn` | M4 |
 | `sailfin_runtime_await_*` | `sfn_await` | M4 |
 | `sailfin_runtime_channel` | `sfn_channel_create` | M4 |
 | `sailfin_runtime_serve` | `sfn_serve` | M4 |
-| `sailfin_runtime_is_string/number/boolean/...` | `sfn_type_of` (compile-time fold or registry) | M2 |
+| `sailfin_runtime_is_string/number/boolean/array/callable`, `instance_of`, `resolve_type` | `sfn_is_*` / `sfn_instance_of` / `sfn_resolve_type` | M2 — ✓ #911 |
 | `sailfin_runtime_sha256_hex` | `sfn/crypto` capsule | M3 |
 | `sailfin_runtime_base64_encode` | `sfn/crypto` capsule | M3 |
-| `sailfin_runtime_http_get/post_json/download` | `sfn_http_get/post` | M3 |
-| `sailfin_runtime_getenv` | `sfn_getenv` | **M2.8b (#726) shipped SfnString aggregate ABI + arena-threaded marshalling; legacy `i8*` entrypoint retained for seed compatibility.** |
-| `sailfin_runtime_home_dir` | `sfn_home_dir` | **M2.8b (#726) shipped SfnString aggregate ABI + arena-threaded marshalling; legacy `i8*` entrypoint retained for seed compatibility.** |
+| `sailfin_runtime_http_get/post_json/download`, `sailfin_adapter_http_get/post` | `sfn_http_get/post/post2/download` | M3 — ✓ #911 |
+| `sailfin_runtime_getenv` | `sfn_getenv` | **M2.8b (#726)** shipped SfnString aggregate ABI + arena-threaded marshalling. — ✓ #911 (registry `symbol` flipped) |
+| `sailfin_runtime_home_dir` | `sfn_home_dir` | **M2.8b (#726)** shipped SfnString aggregate ABI + arena-threaded marshalling. — ✓ #911 (registry `symbol` flipped) |
 
 ## Appendix B: Compiler Files Affected by Milestone
 
