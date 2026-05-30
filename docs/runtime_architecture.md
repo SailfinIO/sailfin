@@ -2235,7 +2235,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 | `sailfin_runtime_is_string/number/boolean/array/callable`, `instance_of`, `resolve_type` | `sfn_is_*` / `sfn_instance_of` / `sfn_resolve_type` | M2 — ✓ #911 |
 | `sailfin_runtime_sha256_hex` | `sfn/crypto` capsule | M3 |
 | `sailfin_runtime_base64_encode` | `sfn/crypto` capsule | M3 |
-| `sailfin_runtime_http_get/post_json/download`, `sailfin_adapter_http_get/post` | `sfn_http_get/post/post2/download` | M3 — ✓ #911 |
+| `sailfin_runtime_http_get/post_json/download`, `sailfin_adapter_http_get/post`, `sailfin_intrinsic_http_get/post` | `sfn_http_get/post/post2/download` | M3 — ✓ #911 (runtime/adapter rows); ✓ #912 (`http.get`/`http.post` member-call descriptors → `sfn_http_get`/`sfn_http_post2`) |
 | `sailfin_runtime_getenv` | `sfn_getenv` | **M2.8b (#726)** shipped SfnString aggregate ABI + arena-threaded marshalling. — ✓ #911 (registry `symbol` flipped) |
 | `sailfin_runtime_home_dir` | `sfn_home_dir` | **M2.8b (#726)** shipped SfnString aggregate ABI + arena-threaded marshalling. — ✓ #911 (registry `symbol` flipped) |
 
