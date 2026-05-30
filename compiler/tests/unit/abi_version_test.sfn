@@ -60,21 +60,29 @@ test "abi_version: descriptor accepts native_signature: <string> (M2 flip)" {
 // =============================================================================
 // M2.8 (#401) flipped the print / console / env descriptors to
 // the Sailfin-native sfn_print* / sfn_getenv / sfn_home_dir
-// symbols. The pinned native_signature values below are the
-// migration unit — the underlying `symbol` field stays at the
-// legacy C entrypoint for archeology. Effect classes that have
-// not yet flipped (fs.* / net.* / etc.) still report null.
+// symbols via `native_signature`. As of the #821/#911 registry
+// sweep (the final cleanup before the C-runtime deletion), an
+// already-routed (Category A) helper's `symbol` field is itself
+// rewritten to equal its `native_signature` — the legacy C
+// entrypoint name is retired from the registry rather than kept
+// for archeology, so the pre-deletion audit grep over `symbol:`
+// returns only not-yet-ported (Cat-B/C) and M4 rows. The flip is
+// link-time-inert: lowering already resolves
+// `native_signature ?? symbol`, so emitted IR is unchanged.
+// Effect classes that have not yet flipped (fs.* intrinsics /
+// net.* / etc.) still carry their legacy `symbol` and null
+// `native_signature`.
 test "abi_version: `print` helper carries native_signature sfn_print" {
     let helper = find_runtime_helper("print");
     assert helper != null;
-    assert helper.symbol == "sailfin_runtime_print_raw";
+    assert helper.symbol == "sfn_print";
     assert helper.native_signature == "sfn_print";
 }
 
 test "abi_version: `print.err` helper carries native_signature sfn_print_err" {
     let helper = find_runtime_helper("print.err");
     assert helper != null;
-    assert helper.symbol == "sailfin_runtime_print_err";
+    assert helper.symbol == "sfn_print_err";
     assert helper.native_signature == "sfn_print_err";
 }
 
