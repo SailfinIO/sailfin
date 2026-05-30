@@ -2183,14 +2183,19 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 
 ## Appendix A: Mapping from Current C Symbols to Native Symbols
 
-> **Registry sweep — #911 (Cat-A), 2026-05-30.** For every "already
-> routed" helper (one whose descriptor carries a non-null
-> `native_signature`), the registry's `symbol:` field in
+> **Registry sweep — #911 (Cat-A), 2026-05-30.** For every "Category A"
+> helper — one whose `symbol:` previously pointed at a legacy
+> `sailfin_runtime_*` / `sailfin_intrinsic_*` / `sailfin_adapter_*`
+> entrypoint *and* already carried a non-null `sfn_*` `native_signature`
+> — the registry's `symbol:` field in
 > `compiler/src/llvm/runtime_helpers.sfn` has been rewritten to equal
-> its `native_signature` (the `sfn_*` name). The legacy
-> `sailfin_runtime_*` / `sailfin_adapter_*` entrypoint name is retired
-> from the registry rather than kept "for archeology." The flip is
-> **link-time-inert** — lowering already resolves
+> its `native_signature`, retiring the legacy entrypoint name rather
+> than keeping it "for archeology." This is **not** a global
+> `symbol == native_signature` invariant: helpers whose `symbol` was
+> already a source/prelude-level name (e.g. `substring` → `sfn_str_slice`,
+> `strings_equal` → `sfn_str_eq`, the prelude `number_to_string` alias)
+> intentionally keep `symbol` != `native_signature` and are untouched.
+> The flip is **link-time-inert** — lowering already resolves
 > `native_signature ?? symbol`, so `.sfn-asm` and LLVM IR are
 > byte-identical (verified against `examples/basics/hello-world.sfn`).
 > Rows marked **✓ #911** below are flipped. The audit grep
