@@ -61,20 +61,20 @@ run_test() {
 }
 
 # Run `sfn build` against the supplied source and confirm the
-# lowering diagnostic is emitted and names the offending symbol.
+# build fails closed: a non-zero exit code, no output binary on
+# disk, and a lowering diagnostic that names the offending symbol.
 # The build is invoked from a directory OUTSIDE the source tree
 # (we use the scratch dir as cwd) so the driver does not stumble
 # onto a workspace capsule and try to compile it instead.
 #
-# We deliberately do NOT assert a non-zero exit code or absence of
-# an output binary. Both hold for the value-returning cases
-# (`channel` / `parallel` — `sfn build` exits 1 and produces no
-# binary), but the void-returning `spawn` case stumbles past the
-# fatal diagnostic and still emits a (broken) binary with rc=0.
-# That divergence is a separate lowering / driver bug to file as
-# a follow-up; here we just verify the failure is *visible*
-# (grep-checkable on stdout+stderr), which is the explicit
-# acceptance criterion in #617.
+# Issue #631: this assertion is now strict for ALL callers,
+# including the void-returning `spawn` case. The void branch used
+# to drop its `[fatal]` lowering diagnostic before it reached the
+# emit-level fatal gate, so `sfn build` printed the fatal but still
+# wrote a (broken) binary and exited 0. The fix threads the
+# statement-level diagnostics through to `has_fatal_lowering_diagnostic`,
+# so the build now fails closed (rc != 0, no binary) just like the
+# value-returning cases.
 assert_build_rejects() {
     local label="$1"
     local source="$2"
@@ -85,8 +85,23 @@ assert_build_rejects() {
     local log_path="$SCRATCH/${label}.log"
     printf '%s\n' "$source" > "$src_path"
 
+    local rc=0
     ( cd "$SCRATCH" && "$BINARY" build -o "$out_path" "$src_path" ) \
-        > "$log_path" 2>&1 || true
+        > "$log_path" 2>&1 || rc=$?
+
+    if [ "$rc" -eq 0 ]; then
+        echo "[test]   build of ${label}.sfn exited 0 — expected non-zero (fail-closed)" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if [ -e "$out_path" ]; then
+        echo "[test]   build of ${label}.sfn produced an output binary at ${out_path} — expected none" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
 
     if ! grep -q "cannot resolve" "$log_path"; then
         echo "[test]   diagnostic for ${label}.sfn did not mention 'cannot resolve'" >&2
@@ -97,6 +112,43 @@ assert_build_rejects() {
 
     if ! grep -q "\`${symbol}\`" "$log_path"; then
         echo "[test]   diagnostic for ${label}.sfn did not name '\`${symbol}\`'" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Generic fail-closed assertion: rc != 0 AND no output binary, with no
+# requirement on which pipeline stage produced the diagnostic. Used for
+# the bare-undefined-callee fixture below, which the type checker rejects
+# (E0420) before lowering ever runs — a different stage from the `spawn`
+# lowering path, but the headline contract (`sfn build` exits non-zero and
+# writes no binary) must hold uniformly regardless of where the failure
+# originates.
+assert_build_fails_closed() {
+    local label="$1"
+    local source="$2"
+
+    local src_path="$SCRATCH/${label}.sfn"
+    local out_path="$SCRATCH/${label}.out"
+    local log_path="$SCRATCH/${label}.log"
+    printf '%s\n' "$source" > "$src_path"
+
+    local rc=0
+    ( cd "$SCRATCH" && "$BINARY" build -o "$out_path" "$src_path" ) \
+        > "$log_path" 2>&1 || rc=$?
+
+    if [ "$rc" -eq 0 ]; then
+        echo "[test]   build of ${label}.sfn exited 0 — expected non-zero (fail-closed)" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if [ -e "$out_path" ]; then
+        echo "[test]   build of ${label}.sfn produced an output binary at ${out_path} — expected none" >&2
         echo "[test]   output:" >&2
         sed 's/^/[test]     /' "$log_path" >&2
         return 1
@@ -157,11 +209,28 @@ test_spawn_via_prelude_name_rejected() {
         "spawn"
 }
 
+# Issue #631: pin the bare void-call statement shape directly, independent
+# of the `sfn/sync` surface. A statement that discards the result of an
+# unresolved call must fail closed (rc != 0, no binary). The `spawn` cases
+# above exercise the LLVM-lowering void path (the descriptor is gone but
+# the name type-checks); this fixture covers a wholly-undefined callee,
+# which the type checker rejects with E0420 before lowering. Both shapes
+# previously risked a false-green rc=0 on the void statement branch — the
+# fix that threads statement-level diagnostics to the fatal gate is what
+# guarantees the build now fails closed for the lowering case.
+test_unknown_void_helper_rejected() {
+    assert_build_fails_closed "unknown_void_helper_caller" \
+'fn main() ![io] {
+    unknown_void_helper();
+}'
+}
+
 run_test "sfn build rejects sfn/sync.channel import (#617)" test_channel_via_sfn_sync_rejected
 run_test "sfn build rejects sfn/sync.parallel import (#617)" test_parallel_via_sfn_sync_rejected
 run_test "sfn build rejects sfn/sync.spawn import (#617)" test_spawn_via_sfn_sync_rejected
 run_test "sfn build rejects bare prelude channel() (#617)" test_channel_via_prelude_name_rejected
 run_test "sfn build rejects bare prelude spawn() (#617)" test_spawn_via_prelude_name_rejected
+run_test "sfn build fails closed on unknown void helper (#631)" test_unknown_void_helper_rejected
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

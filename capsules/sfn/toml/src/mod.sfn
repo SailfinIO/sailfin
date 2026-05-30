@@ -323,16 +323,16 @@ fn _parse_number(value: string) -> TomlValue {
                 let mut d: int = 0;
                 loop {
                     if d >= decimal_place { break; }
-                    divisor = divisor * 10;
+                    divisor = divisor * 10.0;
                     d += 1;
                 }
-                result = result + digit / divisor;
+                result = result + (digit as float) / divisor;
                 decimal_place += 1;
-            } else { result = result * 10 + digit; }
+            } else { result = result * 10.0 + (digit as float); }
         }
         j += 1;
     }
-    if negative { result = 0 - result; }
+    if negative { result = 0.0 - result; }
 
     if has_dot { return float_val(result); }
     return integer_val(result);

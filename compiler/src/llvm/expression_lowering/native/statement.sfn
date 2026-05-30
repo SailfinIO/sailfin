@@ -346,6 +346,17 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
     let consumption = ownership_analysis.consumption;
 
     let _lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+    // Issue #631: a bare expression statement (e.g. a void-returning call
+    // like `spawn(...)`) can surface a `[fatal]` lowering diagnostic when
+    // the callee's return type cannot be resolved. Collect those into the
+    // statement result so the caller (and the emit-level fatal gate) sees
+    // them; otherwise the build silently continues and exits 0.
+    let mut _ci_expr_stmt: int = 0;
+    loop {
+        if _ci_expr_stmt >= _lowered.diagnostics.length { break; }
+        diagnostics.push(_lowered.diagnostics[_ci_expr_stmt]);
+        _ci_expr_stmt += 1;
+    }
     current_temp = recover_temp_from_lines(current_lines, current_temp);
     if consumption != null {
         if consumption.kind == "local" {
