@@ -164,6 +164,7 @@ struct NativeEnumLayout {
 
 struct NativeEnum {
     name: string;
+    type_parameters: string[];
     variants: NativeEnumVariant[];
     layout: NativeEnumLayout?;
 }

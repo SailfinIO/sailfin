@@ -85,6 +85,37 @@ fn _match_make_local_binding(name: string, pointer: string, llvm_type: string, s
     };
 }
 
+// #830: resolve the declared source annotation of a match subject by name,
+// so generic enum payload field types can be substituted per instantiation.
+// Locals take precedence over parameters (a local may shadow/rebind). Returns
+// "" when the subject is not a simple identifier or carries no annotation.
+fn resolve_match_subject_annotation(subject_name: string, bindings: ParameterBinding[], locals: LocalBinding[]) -> string {
+    if subject_name.length == 0 { return ""; }
+    let mut found: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= locals.length { break; }
+        if locals[i].name == subject_name {
+            if locals[i].type_annotation.length > 0 {
+                found = locals[i].type_annotation;
+            }
+        }
+        i += 1;
+    }
+    if found.length > 0 { return found; }
+    i = 0;
+    loop {
+        if i >= bindings.length { break; }
+        if bindings[i].name == subject_name {
+            if bindings[i].type_annotation.length > 0 {
+                return bindings[i].type_annotation;
+            }
+        }
+        i += 1;
+    }
+    return "";
+}
+
 fn collect_match_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> MatchStructure {
     let mut diagnostics: string[] = [];
     let mut cases: MatchCaseStructure[] = [];
@@ -247,6 +278,11 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
 
     let subject_operand = subject_result.operand;
 
+    // #830: capture the match subject's declared source annotation (e.g.
+    // `Foo<int, Error>`) so payload field types can be resolved per
+    // instantiation. Empty for non-identifier subjects / monomorphic enums.
+    let subject_type_annotation = resolve_match_subject_annotation(subject_name, bindings, current_locals);
+
     let union_payload_types = parse_union_payload_types(subject_operand.llvm_type);
     let mut matched_union_variants: int[] = [];
     let subject_enum_info = find_enum_info_by_llvm_type(context, subject_operand.llvm_type);
@@ -341,7 +377,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
         }
 
         current_lines.push(test_labels[index] + ":");
-        let lowered_condition = lower_match_case_condition(function.name, subject_operand, case, bindings, current_locals, current_temp, current_lines, functions, context);
+        let lowered_condition = lower_match_case_condition(function.name, subject_operand, subject_type_annotation, case, bindings, current_locals, current_temp, current_lines, functions, context);
         let mut _ci2: int = 0;
         loop {
             if _ci2 >= lowered_condition.diagnostics.length { break; }

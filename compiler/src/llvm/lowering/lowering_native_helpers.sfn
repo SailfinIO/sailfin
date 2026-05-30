@@ -121,7 +121,18 @@ fn make_native_struct_layout_field(lf_name: string, lf_type: string, lf_offset: 
 
 // ── NativeEnum constructors ──────────────────────────────────────────
 fn make_native_enum(ename: string, evariants: NativeEnumVariant[], elayout: NativeEnumLayout?) -> NativeEnum {
-    return NativeEnum { name: ename, variants: evariants, layout: elayout };
+    // `type_parameters: []` — this constructor backs `recover_native_enums_light`
+    // (lowering_recovery.sfn), the legacy cross-module recovery fallback that the
+    // phase-4 arena path no longer arms. It stores the raw header text and never
+    // captures generic parameters, so it cannot supply them here. If that fallback
+    // is ever re-armed, generic payload enums (#830) would need real parameter
+    // capture; today this is dead and the empty default is benign.
+    return NativeEnum {
+        name: ename,
+        type_parameters: [],
+        variants: evariants,
+        layout: elayout
+    };
 }
 
 fn make_native_enum_variant(vname: string) -> NativeEnumVariant {

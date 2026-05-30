@@ -136,6 +136,147 @@ fn looks_like_user_type(annotation: string) -> boolean {
     return false;
 }
 
+// ── #830: generic enum instantiation helpers ─────────────────────────
+// Self-contained (no cross-layer imports) parsing + substitution used to
+// resolve a generic payload enum's declared type parameters against the
+// concrete type arguments at a match site. Monomorphic enums never carry a
+// generic clause, so every entry point below is an inert no-op for them.
+fn enum_inst_is_ident_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let code = char_code(ch);
+    let mut ok: boolean = false;
+    if code >= char_code("a") {
+        if code <= char_code("z") { ok = true; }
+    }
+    if code >= char_code("A") {
+        if code <= char_code("Z") { ok = true; }
+    }
+    if code >= char_code("0") {
+        if code <= char_code("9") { ok = true; }
+    }
+    if ch == "_" { ok = true; }
+    return ok;
+}
+
+// Parse the top-level type-argument list out of an instantiation
+// annotation such as `Foo<int, Result<int, E>>` -> ["int", "Result<int, E>"].
+// Returns [] when there is no generic clause. Angle-bracket nesting aware.
+fn enum_inst_parse_args(annotation: string) -> string[] {
+    let trimmed = trim_text(annotation);
+    let open = index_of(trimmed, "<");
+    if open < 0 { return []; }
+    let mut args: string[] = [];
+    let mut depth: int = 0;
+    let mut current: string = "";
+    let mut started: boolean = false;
+    let mut index: int = open;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        if ch == "<" {
+            depth += 1;
+            if depth == 1 {
+                started = true;
+                index += 1;
+                continue;
+            }
+            current = current + ch;
+        } else if ch == ">" {
+            if depth > 0 { depth -= 1; }
+            if depth == 0 {
+                if trim_text(current).length > 0 {
+                    args.push(trim_text(current));
+                }
+                break;
+            }
+            current = current + ch;
+        } else if ch == "," {
+            if depth == 1 {
+                args.push(trim_text(current));
+                current = "";
+            } else { current = current + ch; }
+        } else { current = current + ch; }
+        index += 1;
+    }
+    if !started { return []; }
+    return args;
+}
+
+// True when `annotation` contains an identifier token that exactly matches
+// one of the declared `params` (e.g. `T`, `Array<T>`, `T?`). Used at
+// construction sites to recognise a generic payload field whose concrete
+// type must be taken from the value operand rather than the type-erased
+// declared annotation (#830).
+fn enum_inst_annotation_references_param(annotation: string, params: string[]) -> boolean {
+    if params.length == 0 { return false; }
+    let mut token: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= annotation.length { break; }
+        let ch = substring(annotation, index, index + 1);
+        if enum_inst_is_ident_char(ch) { token = token + ch; } else {
+            if token.length > 0 {
+                let mut p: int = 0;
+                loop {
+                    if p >= params.length { break; }
+                    if params[p] == token { return true; }
+                    p += 1;
+                }
+                token = "";
+            }
+        }
+        index += 1;
+    }
+    if token.length > 0 {
+        let mut p: int = 0;
+        loop {
+            if p >= params.length { break; }
+            if params[p] == token { return true; }
+            p += 1;
+        }
+    }
+    return false;
+}
+
+fn enum_inst_resolve_token(token: string, params: string[], args: string[]) -> string {
+    let mut index: int = 0;
+    let mut limit: int = params.length;
+    if args.length < limit { limit = args.length; }
+    loop {
+        if index >= limit { break; }
+        if params[index] == token { return args[index]; }
+        index += 1;
+    }
+    return token;
+}
+
+// Substitute declared parameter names with concrete arguments in a field
+// type annotation, identifier-boundary aware (`T` -> `int`, `T[]` ->
+// `int[]`, `Array<T>` -> `Array<int>`, while `Transaction` is left intact).
+// Returns the annotation unchanged when `params` is empty.
+fn enum_inst_substitute_annotation(annotation: string, params: string[], args: string[]) -> string {
+    if params.length == 0 { return annotation; }
+    let mut result: string = "";
+    let mut token: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= annotation.length { break; }
+        let ch = substring(annotation, index, index + 1);
+        if enum_inst_is_ident_char(ch) { token = token + ch; } else {
+            if token.length > 0 {
+                result = result + enum_inst_resolve_token(token, params, args);
+                token = "";
+            }
+            result = result + ch;
+        }
+        index += 1;
+    }
+    if token.length > 0 {
+        result = result + enum_inst_resolve_token(token, params, args);
+    }
+    return result;
+}
+
 fn annotation_is_array(annotation: string) -> boolean {
     let trimmed = trim_text(annotation);
     if trimmed.length < 3 { return false; }

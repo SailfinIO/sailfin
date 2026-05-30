@@ -375,6 +375,7 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
 
                 let enum_def = NativeEnum {
                     name: enum_name,
+                    type_parameters: [],
                     variants: [],
                     layout: NativeEnumLayout {
                         size: header_result.size,

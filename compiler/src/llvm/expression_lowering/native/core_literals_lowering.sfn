@@ -16,7 +16,7 @@ import {
 import {
     array_struct_type_for_element,
     ends_with_pointer_suffix,
-    layout_annotation_represents_user_value,
+    enum_inst_annotation_references_param,
     map_type_annotation,
     strip_pointer_suffix
 } from "../../type_mapping";
@@ -1149,6 +1149,22 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
         loop {
             if field_index >= variant_info.fields.length { break; }
             let expected = variant_info.fields[field_index];
+            // #830: a generic payload field (declared `value: T`) type-erases
+            // to `%T` in `expected.llvm_type`. The concrete instantiation is
+            // not recoverable here (the construction's target arrives already
+            // mapped to its boxed LLVM type), so for a field that references a
+            // declared type parameter we take the field's concrete LLVM type
+            // from the lowered value operand instead. This keeps the payload
+            // store in lock-step with the match-arm read, which derives the
+            // same concrete type from the subject's instantiation annotation.
+            // Monomorphic enums have no type parameters, so `field_is_generic`
+            // is false and `field_llvm_type` keeps the pre-mapped value.
+            let field_is_generic = enum_inst_annotation_references_param(expected.type_annotation, enum_info.type_parameters);
+            let mut field_llvm_type: string = expected.llvm_type;
+            // For a generic field, lower the value with no type hint so its
+            // natural LLVM type surfaces; otherwise hint the declared type.
+            let mut value_type_hint: string = field_llvm_type;
+            if field_is_generic { value_type_hint = ""; }
             let mut literal_index: int = -1;
             let mut literal_lookup_index: int = 0;
             loop {
@@ -1162,7 +1178,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
 
             if literal_index >= 0 {
                 let literal_field = parse.fields[literal_index];
-                let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type);
+                let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, value_type_hint);
                 let mut _ci7: int = 0;
                 loop {
                     if _ci7 >= lowered.diagnostics.length { break; }
@@ -1173,12 +1189,25 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                 current_temp = lowered.temp_index;
                 if lowered.operand != null {
                     let mut field_operand = lowered.operand;
+                    // #830: for a generic payload field, adopt the value's
+                    // concrete LLVM type as the field type. A fat string
+                    // aggregate (`{i8*, i64}`) is narrowed to its `i8*` data
+                    // pointer so it fits the pointer-width payload slot and
+                    // matches the match-arm read (which maps `string` -> i8*).
+                    if field_is_generic {
+                        let operand_type = trim_text(field_operand.llvm_type);
+                        if operand_type == "{i8*, i64}" {
+                            field_llvm_type = "i8*";
+                        } else if operand_type.length > 0 {
+                            field_llvm_type = operand_type;
+                        }
+                    }
                     let trimmed_field_type = trim_text(field_operand.llvm_type);
                     let mut _let69: boolean = false;
                     if starts_with(trimmed_field_type, "%") { _let69 = true; }
                     if starts_with(trimmed_field_type, "{") { _let69 = true; }
                     let field_is_aggregate = _let69;
-                    if ends_with_pointer_suffix(expected.llvm_type) {
+                    if ends_with_pointer_suffix(field_llvm_type) {
                         if !ends_with_pointer_suffix(field_operand.llvm_type) {
                             if field_is_aggregate {
                                 // M1.A: SfnString aggregate flowing into
@@ -1188,12 +1217,12 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                                 // and break every legacy reader.
                                 let mut should_unwrap_string_field: boolean = false;
                                 if trimmed_field_type == "{i8*, i64}" {
-                                    if expected.llvm_type == "i8*" {
+                                    if field_llvm_type == "i8*" {
                                         should_unwrap_string_field = true;
                                     }
                                 }
                                 if !should_unwrap_string_field {
-                                    let boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context);
+                                    let boxed = box_aggregate_operand(field_operand, field_llvm_type, current_temp, current_lines, context);
                                     let mut _ci8: int = 0;
                                     loop {
                                         if _ci8 >= boxed.diagnostics.length {
@@ -1218,7 +1247,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                     // self-locating.
                     // Slice E.2 follow-up (#540): thread the enum-literal
                     // site span; same shape as the struct-literal branch.
-                    let coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines, false, span);
+                    let coerced = coerce_operand_to_type(field_operand, field_llvm_type, current_temp, current_lines, false, span);
                     let mut _ci9: int = 0;
                     loop {
                         if _ci9 >= coerced.diagnostics.length { break; }
@@ -1256,7 +1285,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                             + "."
                             + expected.name
                             + "` (expected `"
-                            + expected.llvm_type
+                            + field_llvm_type
                             + "`)";
                         if span != null {
                             _payload_diag = _payload_diag + " at "
@@ -1312,7 +1341,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                                 + field_byte_ptr_temp
                                 + " to ptr");
 
-                            current_lines.push("  store " + expected.llvm_type
+                            current_lines.push("  store " + field_llvm_type
                                 + " "
                                 + coerced.operand.value
                                 + ", ptr "

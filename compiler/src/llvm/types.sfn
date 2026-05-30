@@ -317,6 +317,9 @@ struct EnumVariantInfo {
 
 struct EnumTypeInfo {
     name: string;
+    // Declared generic type-parameter names (e.g. ["T", "E"]); empty for
+    // monomorphic enums. Drives #830 per-instantiation payload substitution.
+    type_parameters: string[];
     llvm_name: string;
     tag_type: string;
     tag_size: int;

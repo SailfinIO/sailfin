@@ -572,6 +572,7 @@ fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], m
             let target = updated_enums[target_index];
             let replaced = NativeEnum {
                 name: target.name,
+                type_parameters: target.type_parameters,
                 variants: target.variants,
                 layout: layout_enum.layout
             };

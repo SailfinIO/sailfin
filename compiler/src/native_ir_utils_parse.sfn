@@ -928,6 +928,11 @@ fn split_parameter_entries(body: string) -> string[] {
         if ch == "(" { _if383 = true; }
         if ch == "[" { _if383 = true; }
         if ch == "{" { _if383 = true; }
+        // `<` opens a generic argument list (e.g. `Foo<i64, i64>`); without
+        // tracking it, the comma inside a multi-arg instantiation would be
+        // mistaken for a parameter separator, splitting one param into two
+        // and truncating its type annotation (#830).
+        if ch == "<" { _if383 = true; }
         if _if383 {
             depth += 1;
             current = current + ch;
@@ -939,6 +944,13 @@ fn split_parameter_entries(body: string) -> string[] {
         if ch == ")" { _if384 = true; }
         if ch == "]" { _if384 = true; }
         if ch == "}" { _if384 = true; }
+        if ch == ">" { _if384 = true; }
+        // The `depth > 0` guard makes a bare `>` (e.g. from `->` in a
+        // `fn(int) -> int` param type at depth 0) a harmless no-op. A `->`
+        // nested inside a generic argument (`Map<string, fn() -> int>`)
+        // decrements one level early, but the structure's own trailing `>`
+        // then fails to decrement at depth 0 — the two errors cancel, so the
+        // top-level comma split stays correct. Keep the guard.
         if _if384 {
             if depth > 0 { depth -= 1; }
             current = current + ch;

@@ -636,7 +636,7 @@ feature availability.
 | `async fn` | Parsed | `await` is **not** parsed; async is structural only |
 | Structs | Shipped | Including generic params, `implements` clause |
 | Interfaces | Shipped | Trait-style method signatures |
-| Enums / ADTs | Shipped | Variants with payloads |
+| Enums / ADTs | Shipped | Variants with payloads. Generic payload enums (`enum Foo<T, E> { Ok { value: T } }`) resolve payload field types per instantiation at construction + `match` sites (#830) — by-value reads/writes of pointer-width payloads (`int`, `string`, boxed user types). Distinct per-instantiation layout *sizes* (e.g. a >8-byte by-value payload) are not yet emitted; the shared opaque-payload blob is sized from the pointer-width erased layout |
 | Type aliases | Shipped | Including generic params |
 | `if`/`else` | Shipped | |
 | `for` loops | Shipped | |
