@@ -69,9 +69,9 @@ test "abi_version: descriptor accepts native_signature: <string> (M2 flip)" {
 // returns only not-yet-ported (Cat-B/C) and M4 rows. The flip is
 // link-time-inert: lowering already resolves
 // `native_signature ?? symbol`, so emitted IR is unchanged.
-// Effect classes that have not yet flipped (fs.* intrinsics /
-// net.* / etc.) still carry their legacy `symbol` and null
-// `native_signature`.
+// Effect classes that have not yet flipped (net.* / etc.) still
+// carry their legacy `symbol` and null `native_signature`; the
+// fs.* adapters completed their flip in M3.1c (#926).
 test "abi_version: `print` helper carries native_signature sfn_print" {
     let helper = find_runtime_helper("print");
     assert helper != null;
@@ -86,11 +86,15 @@ test "abi_version: `print.err` helper carries native_signature sfn_print_err" {
     assert helper.native_signature == "sfn_print_err";
 }
 
-test "abi_version: default `fs.exists` helper has native_signature == null" {
+// M3.1c (#926) flipped `fs.exists` to the pure-Sailfin
+// `sfn_fs_exists` adapter, rewriting both `symbol` and
+// `native_signature` to the canonical name (same shape as the
+// `print` / `print.err` Category-A rows above).
+test "abi_version: `fs.exists` helper carries native_signature sfn_fs_exists" {
     let helper = find_runtime_helper("fs.exists");
     assert helper != null;
-    assert helper.symbol == "sailfin_intrinsic_fs_exists";
-    assert helper.native_signature == null;
+    assert helper.symbol == "sfn_fs_exists";
+    assert helper.native_signature == "sfn_fs_exists";
 }
 
 // =============================================================================

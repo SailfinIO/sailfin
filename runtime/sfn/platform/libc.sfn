@@ -272,3 +272,31 @@ extern fn unlink(path: * u8) -> i32;
 extern fn mkdir(path: * u8, mode: i32) -> i32;
 
 extern fn rmdir(path: * u8) -> i32;
+
+// ── Extended POSIX filesystem primitives (#926, M3.1c) ────────
+// Canonical declarations for the `chmod(2)` / `access(2)` /
+// `symlink(2)` / `mkdtemp(3)` primitives behind the extended fs
+// adapters in `runtime/sfn/adapters/filesystem.sfn`. The M3.1c
+// `sfn_fs_*` bodies currently trampoline through the legacy C
+// adapters (which carry the `#if _WIN32` stubs the single
+// `filesystem.ll` needs to link on the Windows cross target), so
+// these are not consumed yet — they are staged here for the
+// follow-up inline wave that ports the bodies to pure Sailfin once a
+// per-platform externs story (`runtime/sfn/platform/sizes_*.sfn`)
+// makes raw POSIX symbols cross-platform-linkable. POSIX-only (#366).
+//
+// Type-discipline notes for the accept-list (see file header):
+//   - `chmod`'s `mode_t mode` and `access`'s `int mode` are both
+//     32-bit `int`-family on every supported platform; `i32`
+//     matches the call shape bit-for-bit per the same
+//     sign-irrelevance rule `mkdir` uses above.
+//   - `mkdtemp` mutates and returns its `char *template` argument
+//     in place (the `XXXXXX` suffix is overwritten); both the
+//     argument and result are `* u8`.
+extern fn chmod(path: * u8, mode: i32) -> i32;
+
+extern fn access(path: * u8, mode: i32) -> i32;
+
+extern fn symlink(target: * u8, linkpath: * u8) -> i32;
+
+extern fn mkdtemp(template: * u8) -> * u8;
