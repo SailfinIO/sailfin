@@ -154,11 +154,15 @@ test "runtime int helper: runtime_grapheme_count_fn emits call+round+fptosi to i
 }
 
 test "runtime int helper: sailfin_intrinsic_runtime_arena_mark emits call+round+fptosi to i64" ![io] {
+    // #927: the `sailfin_intrinsic_runtime_arena_mark` *target* now
+    // resolves to the Sailfin-native symbol `@sfn_arena_sfn_mark`
+    // (`runtime/sfn/memory/arena.sfn`); the `double` C-ABI + the
+    // round/fptosi coercion to the caller-visible `i64` are unchanged.
     let operands: LLVMOperand[] = [];
     let result = emit_runtime_call("sailfin_intrinsic_runtime_arena_mark", operands, empty_runtime_call_overrides(), 0, []);
 
     assert result.lines.length == 3;
-    assert result.lines[0] == "  %t0 = call double @sailfin_intrinsic_runtime_arena_mark()";
+    assert result.lines[0] == "  %t0 = call double @sfn_arena_sfn_mark()";
     assert result.lines[1] == "  %t1 = call double @round(double %t0)";
     assert result.lines[2] == "  %t2 = fptosi double %t1 to i64";
 

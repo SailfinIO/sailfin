@@ -204,10 +204,10 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // `sailfin_intrinsic_runtime_arena_mark()` (or a friendlier
     // alias added at that time).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_runtime_arena_mark", symbol: "sailfin_intrinsic_runtime_arena_mark", return_type: "i64", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: "double"
+        target: "sailfin_intrinsic_runtime_arena_mark", symbol: "sfn_arena_sfn_mark", return_type: "i64", parameter_types: [], effects: [], native_signature: "sfn_arena_sfn_mark", c_abi_return_type: "double"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_runtime_arena_rewind", symbol: "sailfin_intrinsic_runtime_arena_rewind", return_type: "void", parameter_types: ["double"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "sailfin_intrinsic_runtime_arena_rewind", symbol: "sfn_arena_sfn_rewind", return_type: "void", parameter_types: ["double"], effects: [], native_signature: "sfn_arena_sfn_rewind", c_abi_return_type: null
     });
 
     // Pointer-read intrinsics (#875, epic #763). These lower directly to an
@@ -491,7 +491,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "runtime_is_void_fn", symbol: "sfn_is_void", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: "sfn_is_void", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime.bounds_check", symbol: "sailfin_runtime_bounds_check", return_type: "void", parameter_types: ["i64", "i64"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "runtime.bounds_check", symbol: "sfn_mem_bounds_check", return_type: "void", parameter_types: ["i64", "i64"], effects: [], native_signature: "sfn_mem_bounds_check", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_is_array_fn", symbol: "sfn_is_array", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: "sfn_is_array", c_abi_return_type: null
@@ -902,7 +902,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "concat", symbol: "sfn_array_concat", return_type: "{ i8**, i64, i64 }*", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: [], native_signature: "sfn_array_concat", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "copy_bytes", symbol: "sailfin_runtime_copy_bytes", return_type: "void", parameter_types: ["i8*", "i8*", "i64"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "copy_bytes", symbol: "sfn_mem_copy_bytes", return_type: "void", parameter_types: ["i8*", "i8*", "i64"], effects: [], native_signature: "sfn_mem_copy_bytes", c_abi_return_type: null
     });
 
     // M1.B v2 byte-wise push: takes data, len, cap pointers + elem_size.
@@ -921,7 +921,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // Generic field accessor for opaque imported types
     // Takes object pointer and field name, returns field value as i8*
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "get_field", symbol: "sailfin_runtime_get_field", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "get_field", symbol: "sfn_mem_get_field", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_mem_get_field", c_abi_return_type: null
     });
 
     // String persistence helper for Stage2 memory management
@@ -950,7 +950,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // metadata; the runtime exposes the matching arena-aware entrypoint
     // here. Already declared via `lowering_phase_render.sfn:167`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime.free", symbol: "sailfin_runtime_free", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "runtime.free", symbol: "sfn_mem_free", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: "sfn_mem_free", c_abi_return_type: null
     });
 
     // Exceptions (stage2-native minimal)

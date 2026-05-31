@@ -1012,6 +1012,34 @@ fn _runtime_array_path(root: string) -> string ![io] {
     return "";
 }
 
+// #927 (sub-issue of #390): companion resolver for the narrow memory
+// primitives. The descriptor flip routes `get_field` / `copy_bytes` /
+// `runtime.bounds_check` / `runtime.free` to the `sfn_mem_*` exports
+// in `runtime/sfn/memory/mem.sfn`, so user IR + prelude.o now carry
+// undefined references to `@sfn_mem_get_field` / `@sfn_mem_copy_bytes`
+// / `@sfn_mem_bounds_check` / `@sfn_mem_free`. The legacy `sfn build`
+// / `sfn run` link path needs the staged `mem.o` to resolve them; the
+// runtime-capsule path reaches `mem.sfn` through
+// `runtime/native/capsule.toml`'s `sfn-sources` array instead. Search
+// order mirrors `_runtime_array_path`. Empty return becomes fail-loud
+// at link time as "undefined reference to `sfn_mem_bounds_check`".
+fn _runtime_mem_path(root: string) -> string ![io] {
+    let bundled = _path_join(root, "native/obj/mem.o");
+    if fs.exists(bundled) { return bundled; }
+    let bundled_nested = _path_join(root, "native/obj/runtime/mem.o");
+    if fs.exists(bundled_nested) { return bundled_nested; }
+    let parent = _dirname(root);
+    let fallback = _path_join(parent, "build/native/obj/mem.o");
+    if fs.exists(fallback) { return fallback; }
+    let fallback_nested = _path_join(parent, "build/native/obj/runtime/mem.o");
+    if fs.exists(fallback_nested) { return fallback_nested; }
+    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/mem.o");
+    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
+    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/mem.o");
+    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
+    return "";
+}
+
 // Last `/`-separated segment of a path. Returns the input itself
 // when there's no slash. Used for naming runtime obj outputs after
 // their source basename, matching the legacy `_clang_compile_runtime_objects`
@@ -1372,7 +1400,11 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     // Build (or reuse) cached runtime object files so repeated `test` invocations
     // don't recompile the runtime C sources per test file.
     //
-    // Return shape: `[runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj, http_obj, io_obj, string_obj, array_obj]`.
+    // Return shape: `[runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj, http_obj, io_obj, string_obj, array_obj, mem_obj]`.
+    // `mem_obj` (#927) carries the narrow memory primitives
+    // (`sfn_mem_get_field` / `_copy_bytes` / `_bounds_check` / `_free`)
+    // ported from `sailfin_runtime.c`; same empty-tolerated contract as
+    // the clock/http/io/string/array slots.
     // `io_obj` (#925) carries the Sailfin-native `@sfn_log_execution`
     // (`@logExecution` decorator body); `string_obj` (#925) carries
     // `@sfn_to_debug_string` plus the `sfn_str_is_*` char-predicate
@@ -1403,10 +1435,10 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     // of the first four going empty signals a failed runtime compile
     // and propagates back to the caller as a hard fail.
     if runtime_root.length == 0 {
-        return ["", "", "", "", "", "", "", "", "", "", "", "", "", ""];
+        return ["", "", "", "", "", "", "", "", "", "", "", "", "", "", ""];
     }
     if !_runtime_bundle_exists(runtime_root) {
-        return ["", "", "", "", "", "", "", "", "", "", "", "", "", ""];
+        return ["", "", "", "", "", "", "", "", "", "", "", "", "", "", ""];
     }
 
     let include_dir = _path_join(runtime_root, "native/include");
@@ -1430,6 +1462,11 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     // #925: array_obj carries the `sfn_array_sfn_map/filter/reduce`
     // stub exports the prelude's array-HOF wrappers reference.
     let array_obj = _runtime_array_path(runtime_root);
+    // #927: mem_obj carries the narrow memory primitives
+    // (`sfn_mem_get_field` / `_copy_bytes` / `_bounds_check` /
+    // `_free`). Empty entry tolerated like clock/http — the caller
+    // skips it when assembling the link line.
+    let mem_obj = _runtime_mem_path(runtime_root);
 
     let runtime_obj = _path_join(out_dir, "sailfin_runtime" + opt_flag + ".o");
     let arena_obj = _path_join(out_dir, "sailfin_arena" + opt_flag + ".o");
@@ -1443,7 +1480,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
         let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
             + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
         if rc != 0 {
-            return ["", "", "", "", "", "", "", "", "", "", "", "", "", ""];
+            return ["", "", "", "", "", "", "", "", "", "", "", "", "", "", ""];
         }
         _runtime_obj_cache_record(runtime_obj, runtime_key);
     }
@@ -1453,7 +1490,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
         let rc_arena = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
             + include_dir, "-c", arena_src, "-o", arena_obj,]);
         if rc_arena != 0 {
-            return ["", "", "", "", "", "", "", "", "", "", "", "", "", ""];
+            return ["", "", "", "", "", "", "", "", "", "", "", "", "", "", ""];
         }
         _runtime_obj_cache_record(arena_obj, arena_key);
     }
@@ -1462,12 +1499,12 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     if !_runtime_obj_cache_hit(globals_obj, globals_key) {
         let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", runtime_ir, "-o", globals_obj,]);
         if rc2 != 0 {
-            return ["", "", "", "", "", "", "", "", "", "", "", "", "", ""];
+            return ["", "", "", "", "", "", "", "", "", "", "", "", "", "", ""];
         }
         _runtime_obj_cache_record(globals_obj, globals_key);
     }
 
-    return [runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj, http_obj, io_obj, string_obj, array_obj];
+    return [runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj, http_obj, io_obj, string_obj, array_obj, mem_obj];
 }
 
 fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> int ![io] {
@@ -1640,6 +1677,14 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         // stubs the prelude's array-HOF wrappers reference. Same
         // empty-string fallback contract as `io_obj` / `string_obj`.
         let array_obj = cached[13];
+        // #927: `mem_obj` carries the narrow memory primitives
+        // (`sfn_mem_get_field` / `_copy_bytes` / `_bounds_check` /
+        // `_free`). Same empty-string fallback contract as `io_obj` /
+        // `string_obj` / `array_obj` — but in practice nearly every
+        // program reaches at least `bounds_check` (array indexing) or
+        // the scope-exit `free`, so a missing `mem.o` fails loudly with
+        // "undefined reference to `sfn_mem_bounds_check`".
+        let mem_obj = cached[14];
         let mut _missing: boolean = false;
         if runtime_obj.length == 0 { _missing = true; }
         if arena_obj.length == 0 { _missing = true; }
@@ -1663,6 +1708,7 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         if io_obj.length > 0 { runtime_objs.push(io_obj); }
         if string_obj.length > 0 { runtime_objs.push(string_obj); }
         if array_obj.length > 0 { runtime_objs.push(array_obj); }
+        if mem_obj.length > 0 { runtime_objs.push(mem_obj); }
         runtime_link_libs.push("-lm");
     }
 

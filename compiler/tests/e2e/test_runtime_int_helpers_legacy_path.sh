@@ -12,24 +12,33 @@
 # would re-introduce the `%xmm0`/`%rax` register-class mismatch that
 # crashed PR #637 (see #641 RCA).
 #
-# Worked example: `sailfin_intrinsic_runtime_arena_mark()` — a nullary,
-# bare-target helper whose descriptor still carries
-# `c_abi_return_type: "double"` (the C body returns `double`; the
-# caller-visible type is `i64`). It replaced `monotonic_millis()` here
-# under issue #819, which migrated `monotonic_millis` off the C `double`
-# symbol entirely onto the Sailfin-native `i64`-returning
-# `@sfn_clock_millis` — so `monotonic_millis` no longer exercises the
-# `double`→`i64` coercion path this test guards. `arena_mark` is the
-# remaining nullable bare-target `double` helper that resolves
-# standalone under `--emit llvm`, so it is now the worked example.
+# Worked example: the user-written bare call
+# `sailfin_intrinsic_runtime_arena_mark()` — a nullary, bare-target
+# helper whose descriptor still carries `c_abi_return_type: "double"`
+# (the body returns `double`; the caller-visible type is `i64`). It
+# replaced `monotonic_millis()` here under issue #819, which migrated
+# `monotonic_millis` off the C `double` symbol entirely onto the
+# Sailfin-native `i64`-returning `@sfn_clock_millis` — so
+# `monotonic_millis` no longer exercises the `double`→`i64` coercion
+# path this test guards. `arena_mark` is the remaining nullary
+# bare-target `double` helper that resolves standalone under
+# `--emit llvm`, so it is the worked example.
+#
+# #927 note: the arena mark/rewind bodies migrated from C to Sailfin
+# (`runtime/sfn/memory/arena.sfn`), so the descriptor's `symbol` /
+# `native_signature` now resolve the user-written
+# `sailfin_intrinsic_runtime_arena_mark()` *target* to the emitted
+# symbol `@sfn_arena_sfn_mark`. The `double` C-ABI is unchanged
+# (`c_abi_return_type: "double"` stays — the Sailfin body returns a
+# `number`/`double`), so this remains the canonical `double`→`i64`
+# coercion guard; only the emitted symbol name moved.
 #
 # This shell test compiles a minimal program with `sfn emit llvm` and
 # greps the emitted IR for the three landmarks of the post-call
 # coercion sequence:
 #
-#   1. `call double @sailfin_intrinsic_runtime_arena_mark()` — the call
-#      lands against the C ABI return type (`%xmm0`), not against the
-#      caller-visible `i64`.
+#   1. `call double @sfn_arena_sfn_mark()` — the call lands against
+#      the C ABI return type (`%xmm0`), not the caller-visible `i64`.
 #   2. `call double @round(double ...)` — the canonical Sailfin
 #      rounding step (`coerce_numeric_primitive`'s `double → i64`
 #      lowering).
@@ -103,8 +112,8 @@ test_legacy_path_emits_call_double_then_round_then_fptosi() {
     fi
 
     local missing=0
-    if ! grep -qE 'call double @sailfin_intrinsic_runtime_arena_mark\(\)' "$ll"; then
-        echo "[test]   missing 'call double @sailfin_intrinsic_runtime_arena_mark()' in emitted IR"
+    if ! grep -qE 'call double @sfn_arena_sfn_mark\(\)' "$ll"; then
+        echo "[test]   missing 'call double @sfn_arena_sfn_mark()' in emitted IR"
         echo "         (registry flip not honored by coerce_and_emit_call — #637 register-class mismatch will return)"
         missing=$((missing + 1))
     fi
@@ -175,16 +184,17 @@ test_declare_line_matches_c_abi() {
         return 1
     fi
 
-    # `declare double` must match the C function body (linker resolves
-    # to a `double`-returning symbol). A `declare i64` here would
-    # produce the `%rax`-vs-`%xmm0` mismatch that crashed #637 even
-    # though the call site itself uses `call double`.
-    if ! grep -qE '^declare double @sailfin_intrinsic_runtime_arena_mark\(\)' "$ll"; then
-        echo "[test]   missing 'declare double @sailfin_intrinsic_runtime_arena_mark()' — declare must match C ABI"
+    # `declare double` must match the function body's ABI (linker
+    # resolves to a `double`-returning symbol — the Sailfin
+    # `sfn_arena_sfn_mark` returns a `number`/`double`). A `declare i64`
+    # here would produce the `%rax`-vs-`%xmm0` mismatch that crashed
+    # #637 even though the call site itself uses `call double`.
+    if ! grep -qE '^declare double @sfn_arena_sfn_mark\(\)' "$ll"; then
+        echo "[test]   missing 'declare double @sfn_arena_sfn_mark()' — declare must match the double ABI"
         return 1
     fi
-    if grep -qE '^declare i64 @sailfin_intrinsic_runtime_arena_mark\(\)' "$ll"; then
-        echo "[test]   regression: 'declare i64 @sailfin_intrinsic_runtime_arena_mark()' emitted — would mis-link"
+    if grep -qE '^declare i64 @sfn_arena_sfn_mark\(\)' "$ll"; then
+        echo "[test]   regression: 'declare i64 @sfn_arena_sfn_mark()' emitted — would mis-link"
         return 1
     fi
     return 0
@@ -196,7 +206,7 @@ run_test "let bindings for arena_mark() lower to 'alloca i64'" \
     test_let_binding_alloca_is_i64
 run_test "arena_mark() lowering emits zero 'ABI primitive mismatch' warnings" \
     test_no_abi_primitive_mismatch_warning
-run_test "declare line for sailfin_intrinsic_runtime_arena_mark matches C ABI ('declare double')" \
+run_test "declare line for sfn_arena_sfn_mark matches the double ABI ('declare double')" \
     test_declare_line_matches_c_abi
 
 echo "[summary] $PASS passed, $FAIL failed"

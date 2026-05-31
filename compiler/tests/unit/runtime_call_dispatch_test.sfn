@@ -90,7 +90,9 @@ test "emit_runtime_call: runtime.bounds_check renders void call with two i64 arg
     let operands: LLVMOperand[] = [idx, len];
     let result = emit_runtime_call("runtime.bounds_check", operands, empty_runtime_call_overrides(), 0, []);
     assert result.lines.length == 1;
-    assert result.lines[0] == "  call void @sailfin_runtime_bounds_check(i64 %idx, i64 %len)";
+    // #927: `runtime.bounds_check` now resolves to the Sailfin-native
+    // `@sfn_mem_bounds_check` (`runtime/sfn/memory/mem.sfn`).
+    assert result.lines[0] == "  call void @sfn_mem_bounds_check(i64 %idx, i64 %len)";
     assert result.temp_index == 0;
     assert result.operand == null;
     assert result.diagnostics.length == 0;

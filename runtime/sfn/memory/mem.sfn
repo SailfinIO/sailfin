@@ -1,0 +1,140 @@
+// runtime/sfn/memory/mem.sfn
+//
+// Sailfin-native ports of the narrow memory primitives that the LLVM
+// lowering emits by descriptor: `get_field`, `copy_bytes`,
+// `bounds_check`, and `free`. Sub-issue of #390 (tracker #821),
+// grouped with the arena mark/rewind pair in
+// `runtime/sfn/memory/arena.sfn`. Each body reproduces the C
+// original in `runtime/native/src/sailfin_runtime.c` exactly; the
+// runtime-helper descriptors in
+// `compiler/src/llvm/runtime_helpers.sfn` flip their `symbol` /
+// `native_signature` to the `sfn_mem_*` names so call-site emission
+// routes here through `effective_symbol = native_signature ?? symbol`.
+//
+// Coexistence: the legacy C bodies (`sailfin_runtime_get_field` /
+// `_copy_bytes` / `_bounds_check` / `_free`) stay exported in the
+// compiler binary — descriptor resolution simply stops calling them.
+// M3 retires the C namesakes. No bare-name collision risk here: these
+// `sfn_mem_*` names are net-new (unlike the arena pair, whose
+// `sfn_arena_*` namesakes are live C exports, forcing the
+// `sfn_arena_sfn_*` infix in `arena.sfn`).
+//
+// Effects: none. Memory primitives sit below the I/O layer — same
+// discipline as `runtime/sfn/memory/rc.sfn` and
+// `runtime/sfn/memory/arena.sfn`. `bounds_check`'s failure path writes
+// a diagnostic to fd 2 and `abort()`s; that's a process-termination
+// primitive, not an `![io]` capability surface (it mirrors the C
+// body, which is also un-annotated).
+//
+// Why inline `extern fn`? The same cross-module extern-resolution
+// limitation documented in `arena.sfn` / `rc.sfn` (#306): importing
+// from `runtime/sfn/platform/libc.sfn` trips the seed's extern
+// accept-list, so the libc symbols we need are declared inline.
+extern fn malloc(size: usize) -> * u8;
+
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+// libc `write(fd, buf, count)` and `abort()` back `bounds_check`'s
+// failure diagnostic + termination. Same surface `exception.sfn`
+// uses for its own abort path.
+extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+
+extern fn abort() -> void;
+
+// arena-mode probe (C `sfn_arena_enabled`, exported from
+// `runtime/native/src/sailfin_arena.c`). Backs the `sfn_mem_free`
+// arena-mode no-op guard below.
+extern fn sfn_arena_enabled() -> bool;
+
+// `_get_field_safe_buf` head. The C original (`sailfin_runtime.c:373`)
+// keeps a 4096-byte static, 16-byte aligned, zero-initialised buffer
+// and returns a pointer into it for every unresolved `get_field`
+// call. Reads of zeroed memory degrade safely: first byte NUL = empty
+// string, `{NULL, 0}` = empty array, `0`/`0.0`/`false` for scalars —
+// preventing SIGSEGV while the GEP-replacement pass in
+// `core_member_lowering.sfn` handles the fields it can resolve
+// statically. Stored as an `i64` address (lazily malloc'd + zeroed on
+// first call) to dodge the seed's non-`i64` module-global quirk —
+// same idiom as `runtime/sfn/type_meta.sfn:114`.
+let mut sfn_mem_get_field_buf_addr: i64 = 0;
+
+// Safe-buffer size, mirroring the C static's `[4096]`.
+fn _sfn_mem_safe_buf_size() -> i64 { return 4096; }
+
+// `sfn_mem_get_field(base, field)` — faithful port of
+// `sailfin_runtime_get_field`. The C body ignores both arguments and
+// returns a pointer to the shared zeroed safe buffer; the real field
+// access is performed ahead of this call by the GEP-replacement pass
+// (only `.variant` and statically-resolvable members are rewritten —
+// everything else falls through to this safe default). Lazily
+// allocates + zero-fills the buffer on first use. Descriptor ABI is
+// `(i8*, i8*) -> i8*`.
+fn sfn_mem_get_field(base: * u8, field: * u8) -> * u8 {
+    if sfn_mem_get_field_buf_addr == 0 {
+        let size: i64 = _sfn_mem_safe_buf_size();
+        let buf: * u8 = malloc(size as usize);
+        if buf as i64 == 0 { return buf; }
+        // Zero-fill so the buffer reads as empty/false/0 for every
+        // type interpretation (matches the C static's zero-init).
+        let mut i: i64 = 0;
+        loop {
+            if i >= size { break; }
+            let slot: * u8 = buf + i;
+            let byte_slot: * i64 = slot as * i64;
+            // Zero a full 8-byte word at a time; `size` (4096) is a
+            // multiple of 8 so the loop never writes past the buffer.
+            atomic_store(byte_slot, 0);
+            i = i + 8;
+        }
+        sfn_mem_get_field_buf_addr = buf as i64;
+    }
+    return sfn_mem_get_field_buf_addr as * u8;
+}
+
+// `sfn_mem_copy_bytes(dest, src, length)` — faithful port of
+// `sailfin_runtime_copy_bytes`. No-op when either pointer is null or
+// `length <= 0`; otherwise `memcpy(dest, src, length)`. Descriptor
+// ABI is `(i8*, i8*, i64) -> void`.
+fn sfn_mem_copy_bytes(dest: * u8, src: * u8, length: i64) -> void {
+    if dest as i64 == 0 { return; }
+    if src as i64 == 0 { return; }
+    if length <= 0 { return; }
+    memcpy(dest, src, length as usize);
+}
+
+// `sfn_mem_bounds_check(index, length)` — faithful port of
+// `sailfin_runtime_bounds_check`. Aborts with a diagnostic on fd 2
+// when `index` is out of `[0, length)`. The C body uses
+// `fprintf(stderr, …)` with the offending values; the Sailfin port
+// emits the fixed prefix the C message leads with (numeric
+// interpolation needs the SfnString formatting surface, which lives
+// above this primitive layer — the prefix alone preserves the
+// "bounds_check failed" signal an operator greps for). Descriptor ABI
+// is `(i64, i64) -> void`.
+fn sfn_mem_bounds_check(index: i64, length: i64) -> void {
+    let mut out_of_range: bool = false;
+    if index < 0 { out_of_range = true; }
+    if index >= length { out_of_range = true; }
+    if out_of_range {
+        let msg: * u8 = "[stage2-native] bounds_check failed\n" as * u8;
+        write(2, msg, 35 as usize);
+        abort();
+    }
+}
+
+// `sfn_mem_free(ptr)` — faithful port of `sailfin_runtime_free` /
+// `_rt_free`. Null-safe. Under arena mode the C `_rt_free` is a no-op
+// (the arena reclaims in bulk); the descriptor for `runtime.free`
+// only fires on the malloc-fallback boxed-return path, where a real
+// libc `free` is correct. The arena-mode no-op guard lived in the C
+// `_rt_free` wrapper keyed on `sfn_arena_enabled()`; we preserve it
+// here so a `runtime.free` emitted under arena mode stays a no-op
+// rather than handing an arena pointer to libc `free` (which
+// corrupts glibc chunk metadata). Descriptor ABI is `(i8*) -> void`.
+fn sfn_mem_free(ptr: * u8) -> void {
+    if ptr as i64 == 0 { return; }
+    if sfn_arena_enabled() { return; }
+    free(ptr);
+}

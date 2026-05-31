@@ -913,6 +913,24 @@ rebuild:
 		echo "[rebuild] staging array.o..."; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/array.ll -o build/native/obj/runtime/array.o; \
 	fi
+	@# Stage mem.o (Sailfin-native narrow memory primitives from
+	@# runtime/sfn/memory/mem.sfn). #927 (epic #390) flips the
+	@# `get_field` / `copy_bytes` / `runtime.bounds_check` /
+	@# `runtime.free` descriptors to the `sfn_mem_*` exports, so user
+	@# IR + prelude.o now reference `@sfn_mem_bounds_check` etc. Nearly
+	@# every program reaches `bounds_check` (array indexing) or the
+	@# scope-exit `free`, so without this staged .o the legacy link
+	@# path fails with "undefined reference to `sfn_mem_bounds_check`".
+	@# The runtime-capsule path reaches mem.sfn through
+	@# `runtime/native/capsule.toml`'s `sfn-sources` array instead.
+	@if [ ! -f build/native/obj/runtime/mem.ll ]; then \
+		echo "[rebuild] staging mem.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/mem.ll llvm runtime/sfn/memory/mem.sfn >/dev/null; \
+	fi
+	@if [ ! -f build/native/obj/runtime/mem.o ]; then \
+		echo "[rebuild] staging mem.o..."; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/mem.ll -o build/native/obj/runtime/mem.o; \
+	fi
 	@# Stage exec.o (Sailfin-native executable-path + runtime-root
 	@# resolution from runtime/sfn/platform/exec.sfn). Issue #468
 	@# (epic #451 M5.3 prerequisite) ships `@exe_path` /
@@ -1017,6 +1035,7 @@ ci-cross-windows:
 	IO_LL="build/native/obj/runtime/io.ll"; \
 	STRING_LL="build/native/obj/runtime/string.ll"; \
 	ARRAY_LL="build/native/obj/runtime/array.ll"; \
+	MEM_LL="build/native/obj/runtime/mem.ll"; \
 	if [ ! -d "$$SAVED_DIR" ] || [ ! -f "$$SAVED_DIR/program.ll" ]; then \
 		echo "[cross-windows][error] missing $$SAVED_DIR/*.ll + program.ll — run 'make rebuild' first" >&2; \
 		exit 1; \
@@ -1059,6 +1078,10 @@ ci-cross-windows:
 	fi; \
 	if [ ! -f "$$ARRAY_LL" ]; then \
 		echo "[cross-windows][error] missing $$ARRAY_LL — 'make rebuild' should have emitted it (Cat-C ports, #925)" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$$MEM_LL" ]; then \
+		echo "[cross-windows][error] missing $$MEM_LL — 'make rebuild' should have emitted it (memory primitives, #927)" >&2; \
 		exit 1; \
 	fi; \
 	echo "[cross-windows] using saved sfn build IR layout ($$SAVED_DIR)"; \
@@ -1143,6 +1166,9 @@ ci-cross-windows:
 	echo "[cross-windows] compiling array (Sailfin-native @sfn_array_sfn_* stubs, Cat-C #925)..."; \
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
 		-c "$$ARRAY_LL" -o "$$WIN_OBJ/runtime/array.o"; \
+	echo "[cross-windows] compiling mem (Sailfin-native memory primitives, #927)..."; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+		-c "$$MEM_LL" -o "$$WIN_OBJ/runtime/mem.o"; \
 	\
 	echo "[cross-windows] compiling C runtime..."; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_arena.c \
@@ -1183,6 +1209,7 @@ ci-cross-windows:
 		"$$WIN_OBJ/runtime/io.o" \
 		"$$WIN_OBJ/runtime/string.o" \
 		"$$WIN_OBJ/runtime/array.o" \
+		"$$WIN_OBJ/runtime/mem.o" \
 		$$SHIM_O \
 		-lm -lpthread -lws2_32; \
 	\
@@ -1237,6 +1264,10 @@ ci-cross-windows:
 	if [ -f "$$WIN_OBJ/runtime/array.o" ]; then \
 		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
 		cp -f "$$WIN_OBJ/runtime/array.o" "$$INSTALLER_DIR/runtime/native/obj/array.o"; \
+	fi; \
+	if [ -f "$$WIN_OBJ/runtime/mem.o" ]; then \
+		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+		cp -f "$$WIN_OBJ/runtime/mem.o" "$$INSTALLER_DIR/runtime/native/obj/mem.o"; \
 	fi; \
 	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
 	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"
