@@ -304,8 +304,8 @@ requests in `compiler/src/llvm/runtime_helpers.sfn`.
   (`is_*`/`resolve_type`/`instance_of`), and concurrency primitives (`channel`,
   `parallel`, top-level `spawn`, `serve`) are **stubs**.
 - Several helper symbols the compiler declares in `runtime_helpers.sfn`
-  (e.g. `sailfin_intrinsic_io_read`, `sailfin_adapter_channel_*`,
-  `sailfin_adapter_spawn_task`) **do not exist in the runtime at all** — these
+  (e.g. `sailfin_adapter_channel_*`, `sailfin_adapter_spawn_task`)
+  **do not exist in the runtime at all** — these
   are declaration-only and would fail at link time if ever emitted. They are
   effectively dead paths in the compiler today.
 - **The runtime has no memory management.** Arrays never free. `string_drop`
@@ -470,27 +470,6 @@ survives until process exit. This is why per-module compiler RAM reaches
 | `sailfin_runtime_sha256_hex` | ✅ (ported) | SHA-256 reimplemented in pure Sailfin in `capsules/sfn/crypto/src/mod.sfn` (M3, #816); the `crypto.sha256` intrinsic now resolves to the capsule symbol. C body in `sailfin_sha256.c` (~150 lines) stays linked for seed compat until M3.9 deletes it. |
 | `sailfin_runtime_base64_encode` | ✅ | Separate file `sailfin_base64.c` |
 | `sailfin_runtime_getenv` / `home_dir` / `read_file_bytes` | ✅ | Used by `sfn/os` and package manager |
-
-### Helpers the compiler declares but never emits (link-time landmines)
-
-`compiler/src/llvm/runtime_helpers.sfn` registers these symbols in the runtime
-helper descriptor table, but they have **no C definition**. They appear to be
-aspirational placeholders left over from earlier effect-adapter plans:
-
-- `sailfin_intrinsic_io_read`
-- `sailfin_intrinsic_fs_read`, `sailfin_intrinsic_fs_write`
-- `sailfin_intrinsic_model_invoke`
-- `sailfin_intrinsic_net_request`
-- `sailfin_intrinsic_http_get`, `sailfin_intrinsic_http_post`
-- `sailfin_adapter_serve_start`, `sailfin_adapter_serve_handler_dispatch`
-- `sailfin_adapter_spawn_task`
-- `sailfin_adapter_channel_create`, `_channel_send`, `_channel_receive`
-
-No current compiler path emits calls to these, so the build links clean. If
-someone ever extends an existing lowering path to route through one of these
-(e.g. wires `io.read()` to `sailfin_intrinsic_io_read`), the build will fail at
-link time. Worth cleaning up when the ABI is locked: either delete the entries
-from the registry, or define stub C symbols so the names mean something.
 
 ## Bootstrap-Era Defensive Scaffolding
 
