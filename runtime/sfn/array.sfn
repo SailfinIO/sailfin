@@ -143,20 +143,29 @@ fn sfn_array_sfn_push_slot(data_ptr: * * u8, len_ptr: * i64, cap_ptr: * i64, ele
     return sailfin_runtime_array_push_slot_v2(data_ptr, len_ptr, cap_ptr, elem_size);
 }
 
-// `sfn_array_sfn_map(arr) -> arr` — placeholder per §2.3.3. Real
-// bodies are tracked in #766 and gated on generic constraints
+// `sfn_array_sfn_map(arr, mapper) -> arr` — placeholder per §2.3.3.
+// Real bodies are tracked in #766 and gated on generic constraints
 // (post-1.0). Closures-with-capture (Epic #450 M1.5) has now
 // landed — env-capturing lambda emission shipped via #699 — so
 // the call-site closure surface is available; the remaining
 // blocker is the typed `SfnArray<T>` / `(T) -> U` signature shape,
-// which depends on generics. Until #766 ships real bodies, the
-// prelude's `array.map`/`filter`/`reduce` stubs continue to
-// forward to the C `sailfin_runtime_array_map` trampoline (which
-// itself returns the input array unchanged), so these stubs match
-// that observable behavior — preserve them byte-for-byte until
-// the spec body lights up.
-fn sfn_array_sfn_map(arr: * u8) -> * u8 { return arr; }
+// which depends on generics. Until #766 ships real bodies, these
+// stubs return the input unchanged (`map`/`filter` → `arr`,
+// `reduce` → `initial`), matching the legacy C
+// `sailfin_runtime_array_*` bodies' observable behavior.
+//
+// #925: the parameter lists mirror the runtime-helper descriptors'
+// ABI exactly — `map`/`filter` take `(arr, callback)` and `reduce`
+// takes `(arr, initial, reducer)` (the arg order the prelude's
+// `array_reduce(items, initial, reducer)` wrapper emits). The
+// trailing callback/reducer operands are accepted-and-ignored so
+// the descriptor arity (`["i8*","i8*"]` / `["i8*","i8*","i8*"]`)
+// matches the defined symbol's signature one-to-one — no reliance
+// on the SysV/AAPCS "extra args are ignored" rule.
+fn sfn_array_sfn_map(arr: * u8, mapper: * u8) -> * u8 { return arr; }
 
-fn sfn_array_sfn_filter(arr: * u8) -> * u8 { return arr; }
+fn sfn_array_sfn_filter(arr: * u8, predicate: * u8) -> * u8 { return arr; }
 
-fn sfn_array_sfn_reduce(arr: * u8, init: * u8) -> * u8 { return init; }
+fn sfn_array_sfn_reduce(arr: * u8, initial: * u8, reducer: * u8) -> * u8 {
+    return initial;
+}
