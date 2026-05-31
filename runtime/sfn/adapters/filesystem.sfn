@@ -164,36 +164,38 @@ extern fn unlink(path: * u8) -> i32;
 
 extern fn mkdir(path: * u8, mode: i32) -> i32;
 
-// M3.1c (#926): extended POSIX fs primitives backing the pure-
-// Sailfin `sfn_fs_exists` / `sfn_fs_set_perms` / `sfn_fs_symlink` /
-// `sfn_fs_is_executable` bodies. All four are declared canonically
-// in `libc.sfn` and inlined here per the #306 cross-module
-// workaround in the file header. `stat`'s `statbuf` is spelled
-// `* u8` — `sfn_fs_exists` only needs stat's success/failure (no
-// field read), so it hands over a plain malloc'd buffer rather than
-// reaching a platform-specific `struct stat` offset (see the layout
-// caveat in `libc.sfn`'s directory/stat block). `chmod`'s `mode`
-// and `access`'s `mode` are `i32` per the same `mode_t`/`int`
-// sign-irrelevance rule `mkdir` uses above.
-extern fn stat(path: * u8, statbuf: * u8) -> i32;
+// M3.1c (#926): legacy C adapters the seven extended-fs flips
+// trampoline through. Each carries the production POSIX behaviour
+// *and* a `#if defined(_WIN32)` stub in `runtime/native/src/
+// sailfin_runtime.c`, so trampolining keeps the `sfn_fs_*` exports
+// cross-platform-linkable — the Windows cross-compile (which links
+// the same `filesystem.ll` it builds for Linux) has no MinGW symbol
+// for `symlink` / `mkdtemp` / raw `stat`, and the C stubs are the
+// only Windows-safe source. This mirrors the M3.1b `list_dir` /
+// `read_bytes` split: portable bodies stay pure Sailfin (delete /
+// mkdir, above), platform-specific ones trampoline behind the
+// canonical name. A follow-up wave inlines the bodies once a
+// per-platform externs story (`runtime/sfn/platform/sizes_*.sfn`)
+// lands. All stay exported until M3.9 retires `sailfin_runtime.c`.
+//
+//   - `sailfin_intrinsic_fs_exists` — `stat(2)`-based existence probe.
+//   - `sailfin_adapter_fs_set_perms` — `chmod(2)`, masks to `07777`.
+//   - `sailfin_adapter_fs_is_executable` — `access(X_OK)`.
+//   - `sailfin_adapter_fs_symlink` — `symlink(2)`.
+//   - `sailfin_adapter_fs_get_perms` — reads `st_mode` at a
+//     platform-specific `struct stat` offset.
+//   - `sailfin_adapter_fs_mkdtemp` — `$TMPDIR` anchoring + `mkdtemp(3)`.
+//   - `sailfin_adapter_fs_write_lines_v2` — unpacks the `SfnArray`
+//     (`{ i8**, i64, i64 }*`, spelled `* u8`) into the legacy
+//     `SailfinPtrArray` shim.
+extern fn sailfin_intrinsic_fs_exists(path: * u8) -> bool;
 
-extern fn chmod(path: * u8, mode: i32) -> i32;
+extern fn sailfin_adapter_fs_set_perms(path: * u8, mode: i64) -> bool;
 
-extern fn access(path: * u8, mode: i32) -> i32;
+extern fn sailfin_adapter_fs_is_executable(path: * u8) -> bool;
 
-extern fn symlink(target: * u8, linkpath: * u8) -> i32;
+extern fn sailfin_adapter_fs_symlink(target: * u8, link: * u8) -> bool;
 
-// Legacy C adapters the M3.1c `get_perms` / `mkdtemp` / `write_lines`
-// flips trampoline through. `sailfin_adapter_fs_get_perms` reads the
-// `st_mode` field at a platform-specific `struct stat` offset (the
-// same layout caveat that keeps `sfn_fs_list_dir` on its C body);
-// `sailfin_adapter_fs_mkdtemp` carries the `$TMPDIR` anchoring +
-// `mkdtemp(3)` template construction; `sailfin_adapter_fs_write_lines_v2`
-// unpacks the `SfnArray` (`{ i8**, i64, i64 }*`, spelled `* u8`) into
-// the legacy `SailfinPtrArray` shim. All three stay exported until
-// M3.9 retires `sailfin_runtime.c`; the symbol flips land against the
-// canonical `sfn_fs_*` names now (same shape as the M3.1b
-// list/read_bytes trampolines).
 extern fn sailfin_adapter_fs_get_perms(path: * u8) -> i64;
 
 extern fn sailfin_adapter_fs_mkdtemp(prefix: * u8) -> * u8;
@@ -327,22 +329,16 @@ fn sfn_fs_delete(path: * u8) -> bool ![io] {
 }
 
 // `sfn_fs_exists(path)` — true iff `path` resolves on disk (files
-// and directories alike). Pure Sailfin: `stat(path, &buf) == 0`,
-// mirroring the legacy C `sailfin_intrinsic_fs_exists` exactly.
-// Only stat's success/failure is consulted, so the scratch buffer
-// is never read — that sidesteps the platform-specific `struct
-// stat` field offsets (see the libc.sfn layout caveat) the
-// `get_perms` body must trampoline around. `256` safely covers
-// `struct stat` on every supported POSIX target (144 bytes on
-// Linux x86_64/aarch64 and macOS arm64). Returns false on null
-// `path` or on OOM (no buffer to stat into).
+// and directories alike). Trampolines to the legacy C
+// `sailfin_intrinsic_fs_exists` (`stat(2)`-based). A pure-Sailfin
+// port would call raw `stat`, which has no linkable MinGW symbol
+// (the C runtime reaches it through the header→`_stat64i32`
+// remapping the IR can't replicate), so the Windows cross-compile
+// link would fail; the C body is the Windows-safe source. The
+// scattered `fs.exists` call sites across the compiler + `exec.sfn`
+// route through this canonical wrapper now.
 fn sfn_fs_exists(path: * u8) -> bool ![io] {
-    if path as i64 == 0 { return false; }
-    let buf: * u8 = malloc(256 as usize);
-    if buf as i64 == 0 { return false; }
-    let rc: i32 = stat(path, buf);
-    free(buf);
-    return rc == 0;
+    return sailfin_intrinsic_fs_exists(path);
 }
 
 // `sfn_fs_mkdir(path, recursive)` — create the directory `path`.
@@ -435,17 +431,14 @@ fn sfn_fs_read_bytes(path: * u8, out_length: * u8) -> * u8 ![io] {
     return sailfin_runtime_read_file_bytes(path, out_length);
 }
 
-// `sfn_fs_set_perms(path, mode)` — `chmod(2)` equivalent. Pure
-// Sailfin: mask `mode` to the POSIX permission bits (`07777`,
-// decimal `4095` — the seed accepts neither octal nor char
-// literals, same convention as `511` == `0o777` in `sfn_fs_mkdir`)
-// and `chmod`. Returns true iff the syscall reports success.
-// Mirrors the C `sailfin_adapter_fs_set_perms` null-guard + mask +
-// `chmod == 0` contract exactly. POSIX-only (#366).
+// `sfn_fs_set_perms(path, mode)` — `chmod(2)` equivalent (masks
+// `mode` to the POSIX permission bits `07777`). Trampolines to the
+// legacy C `sailfin_adapter_fs_set_perms`, which carries the mask +
+// null-guard + `#if _WIN32` stub. Trampolined (rather than a pure
+// `chmod` call) so the single `filesystem.ll` links on both the
+// Linux native and Windows cross targets. POSIX-only (#366).
 fn sfn_fs_set_perms(path: * u8, mode: i64) -> bool ![io] {
-    if path as i64 == 0 { return false; }
-    let masked: i64 = mode & 4095;
-    return chmod(path, masked as i32) == 0;
+    return sailfin_adapter_fs_set_perms(path, mode);
 }
 
 // `sfn_fs_get_perms(path)` — return the lower 12 bits of `st_mode`
@@ -473,26 +466,24 @@ fn sfn_fs_mkdtemp(prefix: * u8) -> * u8 ![io] {
 }
 
 // `sfn_fs_is_executable(path)` — true iff the current process has
-// execute access to `path`. Pure Sailfin: `access(path, X_OK)`,
-// where `X_OK` is `1` on every POSIX platform (inlined as a decimal
-// per the file's literal convention). Missing files and permission
-// errors both collapse to `false`, mirroring the C
-// `sailfin_adapter_fs_is_executable` contract. POSIX-only (#366).
+// execute access to `path` (`access(path, X_OK)`). Trampolines to
+// the legacy C `sailfin_adapter_fs_is_executable`, which carries the
+// null-guard + `#if _WIN32` stub. Missing files and permission
+// errors both collapse to `false`. Trampolined for the same
+// single-`filesystem.ll` cross-platform-link reason as
+// `sfn_fs_set_perms`. POSIX-only (#366).
 fn sfn_fs_is_executable(path: * u8) -> bool ![io] {
-    if path as i64 == 0 { return false; }
-    return access(path, 1) == 0;
+    return sailfin_adapter_fs_is_executable(path);
 }
 
 // `sfn_fs_symlink(target, link)` — create `link` pointing at
-// `target`. Pure Sailfin: `symlink(2)`. Per POSIX the target need
-// not exist, so dangling symlinks are intentionally allowed.
-// Returns true iff the syscall reports success. Mirrors the C
-// `sailfin_adapter_fs_symlink` null-guard + `symlink == 0` contract
-// exactly. POSIX-only (#366).
+// `target` (`symlink(2)`; per POSIX the target need not exist, so
+// dangling symlinks are allowed). Trampolines to the legacy C
+// `sailfin_adapter_fs_symlink`: `symlink` has no MinGW symbol at all
+// (the C body stubs it under `#if _WIN32`), so a pure call would
+// break the Windows cross-compile link. POSIX-only (#366).
 fn sfn_fs_symlink(target: * u8, link: * u8) -> bool ![io] {
-    if target as i64 == 0 { return false; }
-    if link as i64 == 0 { return false; }
-    return symlink(target, link) == 0;
+    return sailfin_adapter_fs_symlink(target, link);
 }
 
 // `sfn_fs_write_lines(path, lines)` — write each entry of the

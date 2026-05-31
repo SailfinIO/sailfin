@@ -170,12 +170,14 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
 
     // Filesystem intrinsics
     //
-    // M3.1c (#926): `fs.exists` flipped to the pure-Sailfin
-    // `sfn_fs_exists` (stat-based) in
-    // `runtime/sfn/adapters/filesystem.sfn`. The legacy C intrinsic
-    // stays exported through the M3 window so seed-built compiler IR
-    // keeps linking; fresh emission routes through `native_signature`
-    // per the `effective_symbol` resolution in `rendering.sfn`.
+    // M3.1c (#926): `fs.exists` flipped to the `sfn_fs_exists`
+    // adapter in `runtime/sfn/adapters/filesystem.sfn` (trampolines
+    // to the legacy C intrinsic — see that module for why the
+    // single cross-platform `filesystem.ll` keeps the C body). The
+    // legacy C intrinsic stays exported through the M3 window so
+    // seed-built compiler IR keeps linking; fresh emission routes
+    // through `native_signature` per the `effective_symbol`
+    // resolution in `rendering.sfn`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs.exists", symbol: "sfn_fs_exists", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_exists", c_abi_return_type: null
     });
@@ -640,14 +642,14 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // P5 (#366): filesystem stdlib gap-fill. Permission ops, temp-dir
     // creation, exec-bit probing, and symlinks — the five POSIX
     // primitives ~12 e2e bash scripts depend on. M3.1c (#926) flips
-    // them to the pure-Sailfin / trampolined `sfn_fs_*` adapters in
-    // `runtime/sfn/adapters/filesystem.sfn`: `set_perms` (chmod),
-    // `is_executable` (access X_OK), and `symlink` are pure Sailfin;
-    // `get_perms` (struct-stat offset) and `mkdtemp` ($TMPDIR
-    // template) trampoline to their legacy C bodies behind the new
-    // names. The legacy C `sailfin_adapter_fs_*` symbols stay
-    // exported through the M3 window for seed-link compat; fresh
-    // emission routes through `native_signature`.
+    // them to the `sfn_fs_*` adapters in
+    // `runtime/sfn/adapters/filesystem.sfn`. The bodies trampoline to
+    // the legacy C `sailfin_adapter_fs_*` adapters, which carry the
+    // `#if _WIN32` stubs the single cross-platform `filesystem.ll`
+    // needs to link (`symlink` / `mkdtemp` / raw `stat` have no MinGW
+    // symbol); pure-Sailfin inlining is a follow-up wave. The C
+    // symbols stay exported through the M3 window for seed-link
+    // compat; fresh emission routes through `native_signature`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs.set_perms", symbol: "sfn_fs_set_perms", return_type: "i1", parameter_types: ["i8*", "i64"], effects: ["io"], native_signature: "sfn_fs_set_perms", c_abi_return_type: null
     });
