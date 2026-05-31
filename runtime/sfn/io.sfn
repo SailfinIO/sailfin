@@ -141,3 +141,16 @@ fn sfn_getenv_sfn(name: * u8) -> * u8 ![io] {
 // `sfn_home_dir` trampoline carries the aggregate ABI; this body
 // stays a `* u8` forwarder until M1.A.2.
 fn sfn_home_dir_sfn() -> * u8 ![io] { return sailfin_runtime_home_dir(); }
+
+// #925 (sub-issue of #390): `sfn_log_execution(value)` — port of the C
+// `sailfin_runtime_log_execution`, the body the `@logExecution`
+// decorator lowers to (via `emit_runtime_call("runtime_log_execution_fn",
+// …)` at `emission.sfn:470`). Semantics preserved byte-for-byte: print
+// the value through `[info]`-prefixed stdout when non-NULL, then return
+// it unchanged. Carries `![io]` for the print. Descriptor ABI is
+// `(i8*) -> i8*`. The NULL guard uses the `as i64 == 0` idiom (no null
+// comparison on raw `* u8` until `Result<T, E>` lands).
+fn sfn_log_execution(value: * u8) -> * u8 ![io] {
+    if value as i64 != 0 { sailfin_runtime_print_info(value); }
+    return value;
+}

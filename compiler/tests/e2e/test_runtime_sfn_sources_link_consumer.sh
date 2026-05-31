@@ -101,7 +101,13 @@ ll-sources = ["ir/runtime_globals.ll"]
 # "undefined reference to sfn_exception_*". The list still leads
 # with `test_marker.sfn` so the "consumer fires for sfn-sources"
 # assertions below remain pointed at the marker file.
-sfn-sources = ["../sfn/test_marker.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn"]
+# #925 (epic #390) ported the Cat-C helpers, so prelude.o now
+# emits unconditional calls to `@sfn_log_execution` (io.sfn),
+# `@sfn_to_debug_string` (string.sfn), and `@sfn_array_sfn_map` /
+# `_filter` / `_reduce` (array.sfn). All three modules are required
+# here or the link fails with "undefined reference to
+# `sfn_log_execution`" / `sfn_to_debug_string` / `sfn_array_sfn_filter`.
+sfn-sources = ["../sfn/test_marker.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/io.sfn", "../sfn/string.sfn", "../sfn/array.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm"]
 prelude-entry = "../prelude.sfn"
@@ -133,6 +139,16 @@ EOF
     # sfn-sources list the synthetic build fails at link with
     # "undefined reference to `sfn_type_register`".
     ln -s "$REPO_ROOT/runtime/sfn/type_meta.sfn" "$ws/runtime/sfn/type_meta.sfn"
+    # #925 deps — prelude.o calls `@sfn_log_execution` (io.sfn),
+    # `@sfn_to_debug_string` (string.sfn), and `@sfn_array_sfn_*`
+    # (array.sfn). io.sfn additionally imports `./platform/libc`
+    # (`write`), so libc.sfn must exist on disk for the consumer's
+    # `sfn emit` to resolve the extern. string.sfn / array.sfn have
+    # no imports.
+    ln -s "$REPO_ROOT/runtime/sfn/io.sfn" "$ws/runtime/sfn/io.sfn"
+    ln -s "$REPO_ROOT/runtime/sfn/string.sfn" "$ws/runtime/sfn/string.sfn"
+    ln -s "$REPO_ROOT/runtime/sfn/array.sfn" "$ws/runtime/sfn/array.sfn"
+    ln -s "$REPO_ROOT/runtime/sfn/platform/libc.sfn" "$ws/runtime/sfn/platform/libc.sfn"
 
     # The sfn-source under test. Tiny self-contained module.
     cat > "$ws/runtime/sfn/test_marker.sfn" <<'EOF'

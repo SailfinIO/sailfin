@@ -328,3 +328,48 @@ fn sfn_number_to_str_sfn(value: f64) -> * u8 {
 // terminated heap buffer. The Sailfin body retires the C
 // trampoline once arena threading lands at the call surface.
 fn sfn_int_to_str_sfn(value: i64) -> * u8 { return sfn_int_to_str(value); }
+
+// #925 (sub-issue of #390): Cat-C char-predicate ports. The legacy C
+// bodies (`sailfin_runtime_is_alpha_char` / `_is_decimal_digit` /
+// `_is_whitespace_char`) took a `double` codepoint; the runtime-helper
+// descriptor ABI is `(i8) -> i1`, so these bare `sfn_str_is_*` bodies
+// take a `u8` byte (lowers to LLVM `i8`) and widen to `i64` for the
+// range comparisons. ASCII semantics preserved byte-for-byte. Nested
+// `if` accumulators (not `&&`) match the self-host-safe idiom used
+// across the runtime/sfn modules.
+fn sfn_str_is_digit(ch: u8) -> bool {
+    let c: i64 = ch as i64;
+    let mut result: bool = false;
+    if c >= 48 {
+        if c <= 57 { result = true; }
+    }
+    return result;
+}
+
+fn sfn_str_is_whitespace(ch: u8) -> bool {
+    let c: i64 = ch as i64;
+    let mut result: bool = false;
+    if c == 32 { result = true; }
+    if c == 9 { result = true; }
+    if c == 10 { result = true; }
+    if c == 13 { result = true; }
+    return result;
+}
+
+fn sfn_str_is_alpha(ch: u8) -> bool {
+    let c: i64 = ch as i64;
+    let mut result: bool = false;
+    if c >= 97 {
+        if c <= 122 { result = true; }
+    }
+    if c >= 65 {
+        if c <= 90 { result = true; }
+    }
+    return result;
+}
+
+// #925: `sfn_to_debug_string(value)` — identity port of the C
+// `sailfin_runtime_to_debug_string`, which returns its argument
+// unchanged (debug rendering is value-side type tagging, deferred).
+// Descriptor ABI is `(i8*) -> i8*`.
+fn sfn_to_debug_string(value: * u8) -> * u8 { return value; }
