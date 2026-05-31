@@ -919,6 +919,99 @@ fn _runtime_http_path(root: string) -> string ![io] {
     return "";
 }
 
+// #925 (sub-issue of #390) mirrors the M3.1a / M3 filesystem & http
+// migrations above: the descriptor flip in
+// `compiler/src/llvm/runtime_helpers.sfn` routes the `@logExecution`
+// decorator emission to `sfn_log_execution`, defined in
+// `runtime/sfn/io.sfn` (the Cat-C port of the legacy C
+// `sailfin_runtime_log_execution`). The `sfn run` / `sfn build` link
+// path (this function's caller, `_clang_compile_runtime_objects`)
+// needs the staged `.o` to resolve the symbol whenever a user program
+// reaches a `@logExecution` call site. The runtime-capsule path
+// reaches io.sfn through `runtime/native/capsule.toml`'s `sfn-sources`
+// array instead. Search order mirrors `_runtime_filesystem_path` so
+// bundled installs and in-tree dev builds both find the staged
+// object. Empty return becomes fail-loud at link time as "undefined
+// reference to `sfn_log_execution`" the moment any user program uses
+// `@logExecution` — same fail-loud contract as the filesystem path.
+fn _runtime_io_path(root: string) -> string ![io] {
+    let bundled = _path_join(root, "native/obj/io.o");
+    if fs.exists(bundled) { return bundled; }
+    let bundled_nested = _path_join(root, "native/obj/runtime/io.o");
+    if fs.exists(bundled_nested) { return bundled_nested; }
+    let parent = _dirname(root);
+    let fallback = _path_join(parent, "build/native/obj/io.o");
+    if fs.exists(fallback) { return fallback; }
+    let fallback_nested = _path_join(parent, "build/native/obj/runtime/io.o");
+    if fs.exists(fallback_nested) { return fallback_nested; }
+    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/io.o");
+    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
+    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/io.o");
+    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
+    return "";
+}
+
+// #925 (sub-issue of #390): companion to `_runtime_io_path` above for
+// the Cat-C string ports. The descriptor flip routes
+// `runtime_to_debug_string_fn` to `sfn_to_debug_string` and the three
+// char-predicate descriptors to `sfn_str_is_digit` /
+// `sfn_str_is_whitespace` / `sfn_str_is_alpha`, all defined in
+// `runtime/sfn/string.sfn`. The legacy link path needs the staged
+// `.o` to resolve `sfn_to_debug_string` whenever a user program
+// reaches `to_debug_string` (live in prelude struct formatting). The
+// runtime-capsule path reaches string.sfn through
+// `runtime/native/capsule.toml`'s `sfn-sources` array instead. Search
+// order mirrors `_runtime_filesystem_path`. Empty return becomes
+// fail-loud at link time as "undefined reference to
+// `sfn_to_debug_string`" the moment any user program formats a struct.
+fn _runtime_string_path(root: string) -> string ![io] {
+    let bundled = _path_join(root, "native/obj/string.o");
+    if fs.exists(bundled) { return bundled; }
+    let bundled_nested = _path_join(root, "native/obj/runtime/string.o");
+    if fs.exists(bundled_nested) { return bundled_nested; }
+    let parent = _dirname(root);
+    let fallback = _path_join(parent, "build/native/obj/string.o");
+    if fs.exists(fallback) { return fallback; }
+    let fallback_nested = _path_join(parent, "build/native/obj/runtime/string.o");
+    if fs.exists(fallback_nested) { return fallback_nested; }
+    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/string.o");
+    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
+    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/string.o");
+    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
+    return "";
+}
+
+// #925 (sub-issue of #390): companion to `_runtime_io_path` /
+// `_runtime_string_path` for the array-HOF routing. The descriptor
+// flip routes `runtime_array_map_fn` / `runtime_array_filter_fn` /
+// `runtime_array_reduce_fn` to the `sfn_array_sfn_map` /
+// `sfn_array_sfn_filter` / `sfn_array_sfn_reduce` stub exports in
+// `runtime/sfn/array.sfn` (real closure-backed semantics are M4). The
+// prelude's `array_map` / `array_filter` / `array_reduce` wrappers
+// reference those symbols, so prelude.o carries an undefined reference
+// to each — the legacy link path needs the staged `.o` to resolve
+// them. The runtime-capsule path reaches array.sfn through
+// `runtime/native/capsule.toml`'s `sfn-sources` array instead. Search
+// order mirrors `_runtime_filesystem_path`. Empty return becomes
+// fail-loud at link time as "undefined reference to
+// `sfn_array_sfn_filter`".
+fn _runtime_array_path(root: string) -> string ![io] {
+    let bundled = _path_join(root, "native/obj/array.o");
+    if fs.exists(bundled) { return bundled; }
+    let bundled_nested = _path_join(root, "native/obj/runtime/array.o");
+    if fs.exists(bundled_nested) { return bundled_nested; }
+    let parent = _dirname(root);
+    let fallback = _path_join(parent, "build/native/obj/array.o");
+    if fs.exists(fallback) { return fallback; }
+    let fallback_nested = _path_join(parent, "build/native/obj/runtime/array.o");
+    if fs.exists(fallback_nested) { return fallback_nested; }
+    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/array.o");
+    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
+    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/array.o");
+    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
+    return "";
+}
+
 // Last `/`-separated segment of a path. Returns the input itself
 // when there's no slash. Used for naming runtime obj outputs after
 // their source basename, matching the legacy `_clang_compile_runtime_objects`
@@ -1279,7 +1372,14 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     // Build (or reuse) cached runtime object files so repeated `test` invocations
     // don't recompile the runtime C sources per test file.
     //
-    // Return shape: `[runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj, http_obj]`.
+    // Return shape: `[runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj, http_obj, io_obj, string_obj, array_obj]`.
+    // `io_obj` (#925) carries the Sailfin-native `@sfn_log_execution`
+    // (`@logExecution` decorator body); `string_obj` (#925) carries
+    // `@sfn_to_debug_string` plus the `sfn_str_is_*` char-predicate
+    // ports; `array_obj` (#925) carries the
+    // `sfn_array_sfn_map/filter/reduce` stubs the prelude's array-HOF
+    // wrappers reference. All follow the same empty-tolerated contract
+    // as the clock/http slots.
     // The trailing `clock_obj` slot is the PR 2 (#397) addition for the
     // Sailfin-native `@sfn_sleep` definition; `process_obj` is the M2.9
     // (#405) addition for `@sfn_process_run`; `exception_obj` is the
@@ -1303,10 +1403,10 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     // of the first four going empty signals a failed runtime compile
     // and propagates back to the caller as a hard fail.
     if runtime_root.length == 0 {
-        return ["", "", "", "", "", "", "", "", "", "", ""];
+        return ["", "", "", "", "", "", "", "", "", "", "", "", "", ""];
     }
     if !_runtime_bundle_exists(runtime_root) {
-        return ["", "", "", "", "", "", "", "", "", "", ""];
+        return ["", "", "", "", "", "", "", "", "", "", "", "", "", ""];
     }
 
     let include_dir = _path_join(runtime_root, "native/include");
@@ -1321,6 +1421,15 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     let type_meta_obj = _runtime_type_meta_path(runtime_root);
     let filesystem_obj = _runtime_filesystem_path(runtime_root);
     let http_obj = _runtime_http_path(runtime_root);
+    // #925: io_obj carries `@sfn_log_execution`; string_obj carries
+    // `@sfn_to_debug_string` (+ the char-predicate ports). Empty
+    // entries are tolerated the same way clock/http are — callers skip
+    // them when assembling the link line.
+    let io_obj = _runtime_io_path(runtime_root);
+    let string_obj = _runtime_string_path(runtime_root);
+    // #925: array_obj carries the `sfn_array_sfn_map/filter/reduce`
+    // stub exports the prelude's array-HOF wrappers reference.
+    let array_obj = _runtime_array_path(runtime_root);
 
     let runtime_obj = _path_join(out_dir, "sailfin_runtime" + opt_flag + ".o");
     let arena_obj = _path_join(out_dir, "sailfin_arena" + opt_flag + ".o");
@@ -1334,7 +1443,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
         let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
             + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
         if rc != 0 {
-            return ["", "", "", "", "", "", "", "", "", "", ""];
+            return ["", "", "", "", "", "", "", "", "", "", "", "", "", ""];
         }
         _runtime_obj_cache_record(runtime_obj, runtime_key);
     }
@@ -1344,7 +1453,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
         let rc_arena = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
             + include_dir, "-c", arena_src, "-o", arena_obj,]);
         if rc_arena != 0 {
-            return ["", "", "", "", "", "", "", "", "", "", ""];
+            return ["", "", "", "", "", "", "", "", "", "", "", "", "", ""];
         }
         _runtime_obj_cache_record(arena_obj, arena_key);
     }
@@ -1353,12 +1462,12 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     if !_runtime_obj_cache_hit(globals_obj, globals_key) {
         let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", runtime_ir, "-o", globals_obj,]);
         if rc2 != 0 {
-            return ["", "", "", "", "", "", "", "", "", "", ""];
+            return ["", "", "", "", "", "", "", "", "", "", "", "", "", ""];
         }
         _runtime_obj_cache_record(globals_obj, globals_key);
     }
 
-    return [runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj, http_obj];
+    return [runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj, http_obj, io_obj, string_obj, array_obj];
 }
 
 fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> int ![io] {
@@ -1517,6 +1626,20 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         // reference to `sfn_http_get`" so the missing staged artifact
         // surfaces immediately.
         let http_obj = cached[10];
+        // #925: `io_obj` carries `@sfn_log_execution` (the `@logExecution`
+        // decorator body); `string_obj` carries `@sfn_to_debug_string`
+        // (live in prelude struct formatting) plus the char-predicate
+        // ports. Same empty-string fallback contract as `filesystem_obj`
+        // / `http_obj` — user programs that don't reach the symbols link
+        // fine; ones that use `@logExecution` / format a struct fail
+        // loudly with "undefined reference to `sfn_log_execution`" /
+        // "`sfn_to_debug_string`" so a missing staged artifact surfaces.
+        let io_obj = cached[11];
+        let string_obj = cached[12];
+        // #925: `array_obj` carries the `sfn_array_sfn_map/filter/reduce`
+        // stubs the prelude's array-HOF wrappers reference. Same
+        // empty-string fallback contract as `io_obj` / `string_obj`.
+        let array_obj = cached[13];
         let mut _missing: boolean = false;
         if runtime_obj.length == 0 { _missing = true; }
         if arena_obj.length == 0 { _missing = true; }
@@ -1537,6 +1660,9 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         if type_meta_obj.length > 0 { runtime_objs.push(type_meta_obj); }
         if filesystem_obj.length > 0 { runtime_objs.push(filesystem_obj); }
         if http_obj.length > 0 { runtime_objs.push(http_obj); }
+        if io_obj.length > 0 { runtime_objs.push(io_obj); }
+        if string_obj.length > 0 { runtime_objs.push(string_obj); }
+        if array_obj.length > 0 { runtime_objs.push(array_obj); }
         runtime_link_libs.push("-lm");
     }
 

@@ -298,3 +298,16 @@ fn sfn_is_boolean(value: * u8) -> bool { return false; }
 fn sfn_is_callable(value: * u8) -> bool { return false; }
 
 fn sfn_is_array(value: * u8) -> bool { return false; }
+
+// #925 (sub-issue of #390): `sfn_is_void(value)` — port of the C
+// `sailfin_runtime_is_void`, which is a NULL check (`value == NULL`).
+// Unlike the `sfn_is_*` primitive guards above, this carries real
+// semantics today: `runtime.is_void` is live at `prelude.sfn:546`
+// (`instance_of "void"`). Descriptor ABI is `(i8*) -> i1`. The raw
+// pointer is compared via the `as i64 == 0` idiom (no null comparison
+// on raw `* u8` until `Result<T, E>` lands).
+fn sfn_is_void(value: * u8) -> bool {
+    let mut result: bool = false;
+    if value as i64 == 0 { result = true; }
+    return result;
+}

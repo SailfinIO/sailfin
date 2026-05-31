@@ -856,6 +856,63 @@ rebuild:
 		echo "[rebuild] staging http.o..."; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/http.ll -o build/native/obj/runtime/http.o; \
 	fi
+	@# Stage io.o (Sailfin-native I/O wrappers from runtime/sfn/io.sfn).
+	@# #925 (epic #390) ports the Cat-C `@logExecution` decorator body
+	@# to `@sfn_log_execution`, defined only in this Sailfin module. The
+	@# legacy `sfn run` / `sfn build` link path
+	@# (`_clang_compile_runtime_objects` in `compiler/src/cli_main.sfn`)
+	@# resolves the symbol against this staged .o; the runtime-capsule
+	@# path reaches io.sfn through `runtime/native/capsule.toml`'s
+	@# `sfn-sources` array instead. Without this staging, any user
+	@# program using `@logExecution` fails at link with "undefined
+	@# reference to `sfn_log_execution`".
+	@if [ ! -f build/native/obj/runtime/io.ll ]; then \
+		echo "[rebuild] staging io.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/io.ll llvm runtime/sfn/io.sfn >/dev/null; \
+	fi
+	@if [ ! -f build/native/obj/runtime/io.o ]; then \
+		echo "[rebuild] staging io.o..."; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/io.ll -o build/native/obj/runtime/io.o; \
+	fi
+	@# Stage string.o (Sailfin-native string helpers from
+	@# runtime/sfn/string.sfn). #925 (epic #390) ports the Cat-C
+	@# `to_debug_string` (→ `@sfn_to_debug_string`, live in prelude
+	@# struct formatting) and the `sfn_str_is_*` char predicates to
+	@# Sailfin bodies. The legacy link path resolves
+	@# `@sfn_to_debug_string` against this staged .o; the runtime-capsule
+	@# path reaches string.sfn through `runtime/native/capsule.toml`'s
+	@# `sfn-sources` array instead. Without this staging, any user
+	@# program that formats a struct fails at link with "undefined
+	@# reference to `sfn_to_debug_string`".
+	@if [ ! -f build/native/obj/runtime/string.ll ]; then \
+		echo "[rebuild] staging string.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/string.ll llvm runtime/sfn/string.sfn >/dev/null; \
+	fi
+	@if [ ! -f build/native/obj/runtime/string.o ]; then \
+		echo "[rebuild] staging string.o..."; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/string.ll -o build/native/obj/runtime/string.o; \
+	fi
+	@# Stage array.o (Sailfin-native array stubs from
+	@# runtime/sfn/array.sfn). #925 (epic #390) routes the
+	@# `runtime_array_map_fn` / `_filter_fn` / `_reduce_fn` descriptors
+	@# to the `sfn_array_sfn_map` / `_filter` / `_reduce` stub exports
+	@# (real closure-backed semantics are M4). The prelude's `array_map`
+	@# / `array_filter` / `array_reduce` wrappers reference those
+	@# symbols, so prelude.o carries an undefined reference to each; the
+	@# legacy link path resolves them against this staged .o. The
+	@# runtime-capsule path reaches array.sfn through
+	@# `runtime/native/capsule.toml`'s `sfn-sources` array instead.
+	@# Without this staging, every user program fails at link with
+	@# "undefined reference to `sfn_array_sfn_filter`" (prelude.o pulls
+	@# the array-HOF wrappers in unconditionally).
+	@if [ ! -f build/native/obj/runtime/array.ll ]; then \
+		echo "[rebuild] staging array.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/array.ll llvm runtime/sfn/array.sfn >/dev/null; \
+	fi
+	@if [ ! -f build/native/obj/runtime/array.o ]; then \
+		echo "[rebuild] staging array.o..."; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/array.ll -o build/native/obj/runtime/array.o; \
+	fi
 	@# Stage exec.o (Sailfin-native executable-path + runtime-root
 	@# resolution from runtime/sfn/platform/exec.sfn). Issue #468
 	@# (epic #451 M5.3 prerequisite) ships `@exe_path` /
@@ -957,6 +1014,9 @@ ci-cross-windows:
 	EXCEPTION_LL="build/native/obj/runtime/exception.ll"; \
 	FILESYSTEM_LL="build/native/obj/runtime/filesystem.ll"; \
 	HTTP_LL="build/native/obj/runtime/http.ll"; \
+	IO_LL="build/native/obj/runtime/io.ll"; \
+	STRING_LL="build/native/obj/runtime/string.ll"; \
+	ARRAY_LL="build/native/obj/runtime/array.ll"; \
 	if [ ! -d "$$SAVED_DIR" ] || [ ! -f "$$SAVED_DIR/program.ll" ]; then \
 		echo "[cross-windows][error] missing $$SAVED_DIR/*.ll + program.ll — run 'make rebuild' first" >&2; \
 		exit 1; \
@@ -987,6 +1047,18 @@ ci-cross-windows:
 	fi; \
 	if [ ! -f "$$HTTP_LL" ]; then \
 		echo "[cross-windows][error] missing $$HTTP_LL — 'make rebuild' should have emitted it (M3, #818)" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$$IO_LL" ]; then \
+		echo "[cross-windows][error] missing $$IO_LL — 'make rebuild' should have emitted it (Cat-C ports, #925)" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$$STRING_LL" ]; then \
+		echo "[cross-windows][error] missing $$STRING_LL — 'make rebuild' should have emitted it (Cat-C ports, #925)" >&2; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$$ARRAY_LL" ]; then \
+		echo "[cross-windows][error] missing $$ARRAY_LL — 'make rebuild' should have emitted it (Cat-C ports, #925)" >&2; \
 		exit 1; \
 	fi; \
 	echo "[cross-windows] using saved sfn build IR layout ($$SAVED_DIR)"; \
@@ -1062,6 +1134,16 @@ ci-cross-windows:
 		$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
 			-c "$$HTTP_LL" -o "$$WIN_OBJ/runtime/http.o"; \
 		\
+	echo "[cross-windows] compiling io (Sailfin-native @sfn_log_execution, Cat-C #925)..."; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+		-c "$$IO_LL" -o "$$WIN_OBJ/runtime/io.o"; \
+	echo "[cross-windows] compiling string (Sailfin-native @sfn_to_debug_string + char preds, Cat-C #925)..."; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+		-c "$$STRING_LL" -o "$$WIN_OBJ/runtime/string.o"; \
+	echo "[cross-windows] compiling array (Sailfin-native @sfn_array_sfn_* stubs, Cat-C #925)..."; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+		-c "$$ARRAY_LL" -o "$$WIN_OBJ/runtime/array.o"; \
+	\
 	echo "[cross-windows] compiling C runtime..."; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_arena.c \
 		-o "$$WIN_OBJ/sailfin_arena.o"; \
@@ -1098,6 +1180,9 @@ ci-cross-windows:
 		"$$WIN_OBJ/runtime/exception.o" \
 		"$$WIN_OBJ/runtime/filesystem.o" \
 		"$$WIN_OBJ/runtime/http.o" \
+		"$$WIN_OBJ/runtime/io.o" \
+		"$$WIN_OBJ/runtime/string.o" \
+		"$$WIN_OBJ/runtime/array.o" \
 		$$SHIM_O \
 		-lm -lpthread -lws2_32; \
 	\
@@ -1140,6 +1225,18 @@ ci-cross-windows:
 	if [ -f "$$WIN_OBJ/runtime/http.o" ]; then \
 		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
 		cp -f "$$WIN_OBJ/runtime/http.o" "$$INSTALLER_DIR/runtime/native/obj/http.o"; \
+	fi; \
+	if [ -f "$$WIN_OBJ/runtime/io.o" ]; then \
+		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+		cp -f "$$WIN_OBJ/runtime/io.o" "$$INSTALLER_DIR/runtime/native/obj/io.o"; \
+	fi; \
+	if [ -f "$$WIN_OBJ/runtime/string.o" ]; then \
+		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+		cp -f "$$WIN_OBJ/runtime/string.o" "$$INSTALLER_DIR/runtime/native/obj/string.o"; \
+	fi; \
+	if [ -f "$$WIN_OBJ/runtime/array.o" ]; then \
+		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+		cp -f "$$WIN_OBJ/runtime/array.o" "$$INSTALLER_DIR/runtime/native/obj/array.o"; \
 	fi; \
 	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
 	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"

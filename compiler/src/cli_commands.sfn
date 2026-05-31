@@ -253,6 +253,61 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
             }
             fsi += 1;
         }
+        // #925 (epic #390): mirrors the clock / process / type_meta /
+        // filesystem staging above for the Cat-C ports. The prelude's
+        // `logExecution` wrapper references `@sfn_log_execution`
+        // (defined in `runtime/sfn/io.sfn`); without this `.o` every
+        // test binary fails at link with "undefined reference to
+        // `sfn_log_execution`" because prelude.o pulls the wrapper in
+        // unconditionally. Same search order as the paths above.
+        let io_paths: string[] = ["build/selfhost/native/obj/runtime/io.o", "build/native/obj/runtime/io.o", "build/native/obj/io.o", runtime_root
+            + "/native/obj/runtime/io.o", runtime_root
+            + "/native/obj/io.o",];
+        let mut ioi: int = 0;
+        loop {
+            if ioi >= io_paths.length { break; }
+            if fs.exists(io_paths[ioi]) {
+                args.push(io_paths[ioi]);
+                break;
+            }
+            ioi += 1;
+        }
+        // #925: companion to the io.o staging above. The prelude's
+        // `to_debug_string` wrapper references `@sfn_to_debug_string`
+        // (defined in `runtime/sfn/string.sfn`, alongside the
+        // `sfn_str_is_*` char-predicate ports); without this `.o` every
+        // test binary fails at link with "undefined reference to
+        // `sfn_to_debug_string`".
+        let string_paths: string[] = ["build/selfhost/native/obj/runtime/string.o", "build/native/obj/runtime/string.o", "build/native/obj/string.o", runtime_root
+            + "/native/obj/runtime/string.o", runtime_root
+            + "/native/obj/string.o",];
+        let mut stri: int = 0;
+        loop {
+            if stri >= string_paths.length { break; }
+            if fs.exists(string_paths[stri]) {
+                args.push(string_paths[stri]);
+                break;
+            }
+            stri += 1;
+        }
+        // #925: companion to the io.o / string.o staging above. The
+        // prelude's `array_map` / `array_filter` / `array_reduce`
+        // wrappers reference `@sfn_array_sfn_map` / `_filter` /
+        // `_reduce` (defined in `runtime/sfn/array.sfn`); without this
+        // `.o` every test binary fails at link with "undefined
+        // reference to `sfn_array_sfn_filter`".
+        let array_paths: string[] = ["build/selfhost/native/obj/runtime/array.o", "build/native/obj/runtime/array.o", "build/native/obj/array.o", runtime_root
+            + "/native/obj/runtime/array.o", runtime_root
+            + "/native/obj/array.o",];
+        let mut ari: int = 0;
+        loop {
+            if ari >= array_paths.length { break; }
+            if fs.exists(array_paths[ari]) {
+                args.push(array_paths[ari]);
+                break;
+            }
+            ari += 1;
+        }
     }
     args.push("-lm");
     args.push("-pthread");
@@ -2432,6 +2487,47 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
                 + filesystem_src);
             process.run(["rm", "-rf", staging]);
             return 1;
+        }
+    }
+
+    // Pre-built io / string / array objects — Sailfin-native Cat-C
+    // ports added in #925 (epic #390). Mirrors the clock.o / process.o
+    // / type_meta.o / filesystem.o staging above: optional on a fresh
+    // checkout, hard fail once staged. The prelude's `logExecution` /
+    // `to_debug_string` / `array_map` / `array_filter` / `array_reduce`
+    // wrappers reference `@sfn_log_execution` / `@sfn_to_debug_string`
+    // / `@sfn_array_sfn_*` unconditionally, so without these objects
+    // every program compiled by the installed binary fails at link.
+    let cat_c_mods: string[] = ["io", "string", "array"];
+    let mut cci: int = 0;
+    loop {
+        if cci >= cat_c_mods.length { break; }
+        let mod_name = cat_c_mods[cci];
+        cci += 1;
+        let cat_c_a = "build/selfhost/native/obj/runtime/" + mod_name + ".o";
+        let cat_c_b = "build/native/obj/runtime/" + mod_name + ".o";
+        let mut cat_c_src: string = "";
+        if fs.exists(cat_c_a) { cat_c_src = cat_c_a; } else {
+            if fs.exists(cat_c_b) { cat_c_src = cat_c_b; }
+        }
+        if cat_c_src.length > 0 {
+            let mk_obj_dir = process.run(["mkdir", "-p", staging_runtime_obj]);
+            if mk_obj_dir != 0 {
+                print("sfn package: failed to create runtime obj staging dir");
+                process.run(["rm", "-rf", staging]);
+                return 1;
+            }
+            let cp_cat_c = process.run(["cp", "-f", cat_c_src, staging_runtime_obj
+                + "/"
+                + mod_name
+                + ".o"]);
+            if cp_cat_c != 0 {
+                print("sfn package: failed to stage " + mod_name
+                    + " object from "
+                    + cat_c_src);
+                process.run(["rm", "-rf", staging]);
+                return 1;
+            }
         }
     }
 
