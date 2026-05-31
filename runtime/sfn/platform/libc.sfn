@@ -272,3 +272,26 @@ extern fn unlink(path: * u8) -> i32;
 extern fn mkdir(path: * u8, mode: i32) -> i32;
 
 extern fn rmdir(path: * u8) -> i32;
+
+// ── Extended POSIX filesystem primitives (#926, M3.1c) ────────
+// Back the `sfn_fs_set_perms` / `sfn_fs_is_executable` /
+// `sfn_fs_symlink` / `sfn_fs_mkdtemp` adapter bodies in
+// `runtime/sfn/adapters/filesystem.sfn`. Declared canonically here;
+// the adapter inlines its own copies per the #306 cross-module
+// workaround documented in that module's header. POSIX-only (#366).
+//
+// Type-discipline notes for the accept-list (see file header):
+//   - `chmod`'s `mode_t mode` and `access`'s `int mode` are both
+//     32-bit `int`-family on every supported platform; `i32`
+//     matches the call shape bit-for-bit per the same
+//     sign-irrelevance rule `mkdir` uses above.
+//   - `mkdtemp` mutates and returns its `char *template` argument
+//     in place (the `XXXXXX` suffix is overwritten); both the
+//     argument and result are `* u8`.
+extern fn chmod(path: * u8, mode: i32) -> i32;
+
+extern fn access(path: * u8, mode: i32) -> i32;
+
+extern fn symlink(target: * u8, linkpath: * u8) -> i32;
+
+extern fn mkdtemp(template: * u8) -> * u8;

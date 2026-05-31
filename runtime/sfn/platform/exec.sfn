@@ -118,14 +118,13 @@ extern fn readlink(path: * u8, buf: * u8, bufsize: usize) -> i64;
 
 extern fn realpath(path: * u8, resolved: * u8) -> * u8;
 
-// `sailfin_intrinsic_fs_exists` is the existing C runtime helper
-// that backs the prelude's `fs.exists` surface (stat-based; true
-// for files and directories alike). M3.1 replaces this with a
-// pure-Sailfin `sfn_fs_exists` via `runtime/sfn/adapters/
-// filesystem.sfn`; until then this is the canonical "does this
-// path exist on disk" probe and is what the issue's `Context`
-// section explicitly recommends.
-extern fn sailfin_intrinsic_fs_exists(path: * u8) -> bool;
+// `sfn_fs_exists` is the pure-Sailfin stat-based existence probe in
+// `runtime/sfn/adapters/filesystem.sfn` (M3.1c #926, replacing the
+// legacy C `sailfin_intrinsic_fs_exists`). True for files and
+// directories alike. Declared extern here per the #306 cross-module
+// workaround used throughout this module; the definition links from
+// the filesystem adapter.
+extern fn sfn_fs_exists(path: * u8) -> bool;
 
 // `sailfin_runtime_string_concat` is the C runtime's
 // NUL-terminated concat. Used to build the
@@ -288,7 +287,7 @@ fn resolve_runtime_root(exe_path: string) -> string ![io] {
         if idx >= 3 { break; }
         let suffix: * u8 = _candidate_suffix(idx);
         let candidate: * u8 = sailfin_runtime_string_concat(exe_dir, suffix);
-        if sailfin_intrinsic_fs_exists(candidate) {
+        if sfn_fs_exists(candidate) {
             let canon: * u8 = realpath(candidate, null);
             if canon as i64 != 0 { return canon as string; }
             return candidate as string;
