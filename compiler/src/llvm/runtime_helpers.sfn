@@ -770,9 +770,6 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "string.append", symbol: "sfn_str_append", return_type: "void", parameter_types: ["ptr", "{i8*, i64}", "ptr"], effects: [], native_signature: null, c_abi_return_type: null
     });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.drop", symbol: "sailfin_runtime_string_drop", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
-    });
     // Scope-exit drop helper for owned RC locals (M1.5.2, issue #326).
     // Emit_scope_drops generates `call void @sfn_rc_release(i8* %ptr)` for
     // each owned local with `allocation_kind == "rc"` at scope close. The
