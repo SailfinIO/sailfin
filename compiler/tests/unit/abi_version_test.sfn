@@ -86,10 +86,10 @@ test "abi_version: `print.err` helper carries native_signature sfn_print_err" {
     assert helper.native_signature == "sfn_print_err";
 }
 
-test "abi_version: default `fs.read` helper has native_signature == null" {
-    let helper = find_runtime_helper("fs.read");
+test "abi_version: default `fs.exists` helper has native_signature == null" {
+    let helper = find_runtime_helper("fs.exists");
     assert helper != null;
-    assert helper.symbol == "sailfin_intrinsic_fs_read";
+    assert helper.symbol == "sailfin_intrinsic_fs_exists";
     assert helper.native_signature == null;
 }
 

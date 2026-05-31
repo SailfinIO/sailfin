@@ -168,18 +168,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "console.error", symbol: "sfn_print_error", return_type: "void", parameter_types: ["{i8*, i64}"], effects: ["io"], native_signature: "sfn_print_error", c_abi_return_type: null
     });
 
-    // IO intrinsics
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "io_read", symbol: "sailfin_intrinsic_io_read", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
-    });
-
     // Filesystem intrinsics
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.read", symbol: "sailfin_intrinsic_fs_read", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.write", symbol: "sailfin_intrinsic_fs_write", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
-    });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs.exists", symbol: "sailfin_intrinsic_fs_exists", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
     });
@@ -280,10 +269,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "intrinsic.errno_location.mingw", symbol: "_errno", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
     });
 
-    // Network intrinsics
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "net_request", symbol: "sailfin_intrinsic_net_request", return_type: "i8*", parameter_types: ["i8*", "i8*", "i8*"], effects: ["net"], native_signature: null, c_abi_return_type: null
-    });
+    // Network intrinsics.
     // `http.get` / `http.post` member calls flipped (#912) to the
     // Sailfin-native socket client in `runtime/sfn/adapters/http.sfn`:
     // `sfn_http_get` (`i8*`->`i8*`) and `sfn_http_post2` (the 2-arg
