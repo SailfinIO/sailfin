@@ -1,0 +1,44 @@
+// Prelude `Result<T, E>` + `Error` (#832, epic #371 R.2c).
+//
+// #829 (typecheck substitution) and #830 (per-instantiation lowering)
+// reached the pinned seed, so the prelude can now declare the canonical
+// `Result<T, E>` enum and `Error` struct with by-value generic payloads
+// instead of type-erasing them to `i8*`. This test exercises the prelude
+// declarations directly from a user file (no in-file `enum` / `import`):
+// `Result` and `Error` resolve implicitly because the prelude is linked
+// into every Sailfin binary.
+//
+// `?` type rules (#833) and emitter (#834) are out of scope here — this
+// only proves construction + `match` over the prelude `Result`.
+// Each helper takes its `Result<…>` instantiation as a parameter, so the
+// `match` arms resolve `value` / `error` against a concrete instantiation
+// (`Result<int, int>` here, `Result<string, Error>` below) rather than the
+// bare type parameters.
+fn unwrap_or(r: Result<int, int>, fallback: int) -> int {
+    match r {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return fallback + error; }
+    }
+}
+
+// `Result<string, Error>` — a distinct instantiation whose `Err` payload is
+// the prelude `Error` struct, proving the default error type round-trips by
+// value alongside the int instantiation above.
+fn ok_len_or(r: Result<string, Error>, fallback: int) -> int {
+    match r {
+        Result.Ok { value } => { return value.length; },
+        Result.Err { error } => { return fallback + error.message.length; }
+    }
+}
+
+test "prelude Result: by-value int payload through both arms" {
+    assert unwrap_or(Result.Ok { value: 5 }, 0) == 5;
+    assert unwrap_or(Result.Err { error: 7 }, 100) == 107;
+}
+
+test "prelude Result: Error struct payload round-trips" {
+    assert ok_len_or(Result.Ok { value: "hello" }, -1) == 5;
+    assert ok_len_or(Result.Err {
+        error: Error { message: "boom" }
+    }, 10) == 14;
+}
