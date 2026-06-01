@@ -31,7 +31,18 @@ runs:
     # The key is exact (no restore-keys): a hit guarantees the binary
     # matches `.seed-version`, so the fetch step below can safely skip
     # the download. Saved automatically in the job's post phase.
+    #
+    # Gated to a concrete pin: with `seed_version` unset/`latest` the key
+    # (`...-latest`) never changes as the moving `latest` tag advances,
+    # so a cache hit + the skip-download guard below would pin the runner
+    # to a stale seed forever. All current callers pass a resolved
+    # `.seed-version` pin; this `if:` keeps a future `latest` caller
+    # correct (it just re-downloads every run). The build cache below is
+    # not gated — it is self-protecting because `cache_key_for`
+    # (compiler/src/build_cache.sfn) embeds the real seed/compiler
+    # version in the on-disk digest, so a stale-seed entry simply misses.
     - name: Restore seed cache
+      if: ${{ inputs.seed_version != '' && inputs.seed_version != 'latest' }}
       uses: actions/cache@v4
       with:
         path: build/seed
