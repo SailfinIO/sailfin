@@ -35,6 +35,37 @@ extern fn posix_spawnp(pid: * i32, path: * u8, file_actions: * PosixSpawnFileAct
 
 extern fn waitpid(pid: i32, status: * i32, options: i32) -> i32;
 
+// ── Capture / streaming spawn surface (#928) ──────────────────
+// Stdout/stderr-capturing (`run_capture`) and the streaming
+// `handle_*` family build on `pipe(2)` + `poll(2)` +
+// `posix_spawn_file_actions_*`. `file_actions` is the same opaque
+// `* PosixSpawnFileActions` handle `posix_spawnp` accepts; adapters
+// `malloc` a platform-sized byte buffer and pass the pointer through
+// (see §2.9 Q7). `pipe` writes the read/write fds through a two-`i32`
+// out-array. `poll` takes an array of opaque `* PollFd` (`struct
+// pollfd`); `nfds` is `usize` (the seed lowers `u64` casts to a
+// number-to-string conversion, not an integer — see the matching
+// note in `runtime/sfn/process.sfn`). The bodies that consume these
+// live in `process.sfn` and re-declare them inline per the #306
+// cross-module-extern limitation noted in this file's header.
+extern fn pipe(fds: * i32) -> i32;
+
+extern fn read(fd: i32, buf: * u8, count: usize) -> i64;
+
+extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+
+extern fn close(fd: i32) -> i32;
+
+extern fn poll(fds: * PollFd, nfds: usize, timeout: i32) -> i32;
+
+extern fn posix_spawn_file_actions_init(fa: * PosixSpawnFileActions) -> i32;
+
+extern fn posix_spawn_file_actions_destroy(fa: * PosixSpawnFileActions) -> i32;
+
+extern fn posix_spawn_file_actions_addclose(fa: * PosixSpawnFileActions, fd: i32) -> i32;
+
+extern fn posix_spawn_file_actions_adddup2(fa: * PosixSpawnFileActions, fd: i32, newfd: i32) -> i32;
+
 // ── Clock / sleep ─────────────────────────────────────────────
 // `clk_id` is one of POSIX's `CLOCK_*` constants (e.g.
 // `CLOCK_MONOTONIC = 1` on Linux). Adapters expose the constants
