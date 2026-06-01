@@ -436,15 +436,6 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
 
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_create_capability_grant", symbol: "sailfin_runtime_create_capability_grant", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_create_filesystem_bridge", symbol: "sailfin_runtime_create_filesystem_bridge", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_create_http_bridge", symbol: "sailfin_runtime_create_http_bridge", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_log_execution_fn", symbol: "sfn_log_execution", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_log_execution", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {

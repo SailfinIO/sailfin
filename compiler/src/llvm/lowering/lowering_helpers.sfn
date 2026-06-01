@@ -920,9 +920,6 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "runtime_serve_fn");
     helpers = append_unique_effect(helpers, "runtime_sleep_fn");
     helpers = append_unique_effect(helpers, "runtime_to_debug_string_fn");
-    helpers = append_unique_effect(helpers, "runtime_create_capability_grant");
-    helpers = append_unique_effect(helpers, "runtime_create_filesystem_bridge");
-    helpers = append_unique_effect(helpers, "runtime_create_http_bridge");
     // Filesystem adapters — compiler emits direct calls to these C runtime
     // symbols from modules that use fs.readFile, fs.exists, etc. Without
     // unconditional declares, separate-compilation produces "use of
