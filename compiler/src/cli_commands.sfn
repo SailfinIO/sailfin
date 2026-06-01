@@ -42,6 +42,13 @@ import {
     _toml_trim_cmd,
     _write_text_cmd
 } from "./cli_commands_utils";
+// Issue #940: the `sfn test` link path resolves + assembles the
+// runtime exactly like `sfn build`/`run`. `assemble_runtime_capsule_link_inputs`
+// lives in `cli_main` (the build/run link path's home); importing it
+// here forms the `cli_main <-> cli_commands` cycle (`cli_main` already
+// imports `handle_test_command` from this module). Sailfin resolves
+// function-level import cycles, so the reverse edge is safe.
+import { RuntimeLinkInputs, assemble_runtime_capsule_link_inputs } from "./cli_main";
 import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "./dist_manifest";
 import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import { lock_add_entry, lock_get_version } from "./lock";
@@ -53,6 +60,7 @@ import {
 } from "./main";
 import { LayoutManifest } from "./native_ir";
 import { parse_program } from "./parser/mod";
+import { runtime_capsule_from_root } from "./runtime_capsule_resolver";
 import { find_char_local, substring } from "./string_utils";
 import {
     TestEntry,
@@ -129,7 +137,7 @@ fn _is_safe_capsule_version_cmd(value: string) -> boolean {
 // symbol tests need, and the backstop became dead code. See
 // `docs/proposals/build-architecture.md` Stage B for the full
 // trail.
-fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[]) -> int ![io] {
+fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[], cache_dir: string, binary_dir: string) -> int ![io] {
     let mut args: string[] = ["clang", "-O0", "-o", out_path, ll_path];
     let mut di: int = 0;
     loop {
@@ -137,195 +145,37 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         args.push(dep_ll_paths[di]);
         di += 1;
     }
-    if runtime_root.length > 0 {
-        let src_dir = runtime_root + "/native/src";
-        let include_dir = runtime_root + "/native/include";
-        if fs.exists(src_dir) {
-            if fs.exists(include_dir) { args.push("-I" + include_dir); }
-            let entries = fs.listDirectory(src_dir);
-            let mut i: int = 0;
-            loop {
-                if i >= entries.length { break; }
-                if _ends_with_cmd(entries[i], ".c") {
-                    args.push(src_dir + "/" + entries[i]);
-                }
-                i += 1;
-            }
-        }
-        let globals_ll = runtime_root + "/native/ir/runtime_globals.ll";
-        if fs.exists(globals_ll) { args.push(globals_ll); }
-        let prelude_paths: string[] = ["build/selfhost/native/obj/runtime/prelude.o", "build/native/obj/runtime/prelude.o", "build/native/obj/prelude.o", runtime_root
-            + "/native/obj/runtime/prelude.o", runtime_root
-            + "/native/obj/prelude.o",];
-        let mut pi: int = 0;
-        loop {
-            if pi >= prelude_paths.length { break; }
-            if fs.exists(prelude_paths[pi]) {
-                args.push(prelude_paths[pi]);
-                break;
-            }
-            pi += 1;
-        }
-        // PR 2 of the sleep migration (issue #397) moved `@sfn_sleep`
-        // from `runtime/native/src/sailfin_runtime.c` into the Sailfin
-        // module `runtime/sfn/clock.sfn`. The test-link path globs the
-        // C sources above but doesn't compile Sailfin modules, so the
-        // staged clock.o has to be added explicitly here for any test
-        // that calls `sleep()` (and for the prelude's `sleep` wrapper,
-        // which is always linked even when the test itself doesn't
-        // exercise it — the unresolved external is the failure mode).
-        // Same search order as the prelude paths above.
-        let clock_paths: string[] = ["build/selfhost/native/obj/runtime/clock.o", "build/native/obj/runtime/clock.o", "build/native/obj/clock.o", runtime_root
-            + "/native/obj/runtime/clock.o", runtime_root
-            + "/native/obj/clock.o",];
-        let mut ci: int = 0;
-        loop {
-            if ci >= clock_paths.length { break; }
-            if fs.exists(clock_paths[ci]) {
-                args.push(clock_paths[ci]);
-                break;
-            }
-            ci += 1;
-        }
-        // M2.9 (issue #405): mirrors the clock staging above. The
-        // descriptor's `native_signature` for `process.run` now
-        // points at `@sfn_process_run`, defined in
-        // `runtime/sfn/process.sfn`. Tests that exercise
-        // `process.run(...)` resolve the symbol against this staged
-        // .o; integration tests that don't call `process.run` are
-        // unaffected (the .o just sits unreferenced in the link line).
-        let process_paths: string[] = ["build/selfhost/native/obj/runtime/process.o", "build/native/obj/runtime/process.o", "build/native/obj/process.o", runtime_root
-            + "/native/obj/runtime/process.o", runtime_root
-            + "/native/obj/process.o",];
-        let mut pri: int = 0;
-        loop {
-            if pri >= process_paths.length { break; }
-            if fs.exists(process_paths[pri]) {
-                args.push(process_paths[pri]);
-                break;
-            }
-            pri += 1;
-        }
-        // M2.10 (issue #402): mirrors the clock / process staging
-        // above. Every module's `@__sfn_module_type_init__*` ctor
-        // calls `@sfn_type_register`, defined in
-        // `runtime/sfn/type_meta.sfn`. Without this `.o` on the link
-        // line the test binaries fail at link with "undefined
-        // reference to `sfn_type_register`". The same `.o` also
-        // satisfies the seven `native_signature` flips in
-        // `runtime_helpers.sfn` (`sfn_is_*`, `sfn_resolve_type`,
-        // `sfn_instance_of`) for tests that route through the
-        // prelude's `check_type_descriptor` path.
-        let type_meta_paths: string[] = ["build/selfhost/native/obj/runtime/type_meta.o", "build/native/obj/runtime/type_meta.o", "build/native/obj/type_meta.o", runtime_root
-            + "/native/obj/runtime/type_meta.o", runtime_root
-            + "/native/obj/type_meta.o",];
-        let mut tmi: int = 0;
-        loop {
-            if tmi >= type_meta_paths.length { break; }
-            if fs.exists(type_meta_paths[tmi]) {
-                args.push(type_meta_paths[tmi]);
-                break;
-            }
-            tmi += 1;
-        }
-        // M3.1a (issue #814): mirrors the clock / process / type_meta
-        // staging above. The descriptor flips in `runtime_helpers.sfn`
-        // route `fs.readFile` / `fs.writeFile` / `fs.appendFile` to
-        // `@sfn_fs_read_file` / `@sfn_fs_write_file` /
-        // `@sfn_fs_append_file`, defined in
-        // `runtime/sfn/adapters/filesystem.sfn`. Tests that touch
-        // `fs.*` resolve the symbols against this staged .o; tests
-        // that don't are unaffected (the .o sits unreferenced in the
-        // link line). Without this entry, every unit / integration
-        // test that exercises `fs.readFile` (a large fraction of the
-        // suite) fails at link with "undefined reference to
-        // `sfn_fs_read_file`". Same search order as the
-        // clock/process/type_meta paths above.
-        let filesystem_paths: string[] = ["build/selfhost/native/obj/runtime/filesystem.o", "build/native/obj/runtime/filesystem.o", "build/native/obj/filesystem.o", runtime_root
-            + "/native/obj/runtime/filesystem.o", runtime_root
-            + "/native/obj/filesystem.o",];
-        let mut fsi: int = 0;
-        loop {
-            if fsi >= filesystem_paths.length { break; }
-            if fs.exists(filesystem_paths[fsi]) {
-                args.push(filesystem_paths[fsi]);
-                break;
-            }
-            fsi += 1;
-        }
-        // #925 (epic #390): mirrors the clock / process / type_meta /
-        // filesystem staging above for the Cat-C ports. The prelude's
-        // `logExecution` wrapper references `@sfn_log_execution`
-        // (defined in `runtime/sfn/io.sfn`); without this `.o` every
-        // test binary fails at link with "undefined reference to
-        // `sfn_log_execution`" because prelude.o pulls the wrapper in
-        // unconditionally. Same search order as the paths above.
-        let io_paths: string[] = ["build/selfhost/native/obj/runtime/io.o", "build/native/obj/runtime/io.o", "build/native/obj/io.o", runtime_root
-            + "/native/obj/runtime/io.o", runtime_root
-            + "/native/obj/io.o",];
-        let mut ioi: int = 0;
-        loop {
-            if ioi >= io_paths.length { break; }
-            if fs.exists(io_paths[ioi]) {
-                args.push(io_paths[ioi]);
-                break;
-            }
-            ioi += 1;
-        }
-        // #925: companion to the io.o staging above. The prelude's
-        // `to_debug_string` wrapper references `@sfn_to_debug_string`
-        // (defined in `runtime/sfn/string.sfn`, alongside the
-        // `sfn_str_is_*` char-predicate ports); without this `.o` every
-        // test binary fails at link with "undefined reference to
-        // `sfn_to_debug_string`".
-        let string_paths: string[] = ["build/selfhost/native/obj/runtime/string.o", "build/native/obj/runtime/string.o", "build/native/obj/string.o", runtime_root
-            + "/native/obj/runtime/string.o", runtime_root
-            + "/native/obj/string.o",];
-        let mut stri: int = 0;
-        loop {
-            if stri >= string_paths.length { break; }
-            if fs.exists(string_paths[stri]) {
-                args.push(string_paths[stri]);
-                break;
-            }
-            stri += 1;
-        }
-        // #925: companion to the io.o / string.o staging above. The
-        // prelude's `array_map` / `array_filter` / `array_reduce`
-        // wrappers reference `@sfn_array_sfn_map` / `_filter` /
-        // `_reduce` (defined in `runtime/sfn/array.sfn`); without this
-        // `.o` every test binary fails at link with "undefined
-        // reference to `sfn_array_sfn_filter`".
-        let array_paths: string[] = ["build/selfhost/native/obj/runtime/array.o", "build/native/obj/runtime/array.o", "build/native/obj/array.o", runtime_root
-            + "/native/obj/runtime/array.o", runtime_root
-            + "/native/obj/array.o",];
-        let mut ari: int = 0;
-        loop {
-            if ari >= array_paths.length { break; }
-            if fs.exists(array_paths[ari]) {
-                args.push(array_paths[ari]);
-                break;
-            }
-            ari += 1;
-        }
-        // #927: companion to the array.o staging above. The descriptor
-        // flip routes `get_field` / `copy_bytes` / `runtime.bounds_check`
-        // / `runtime.free` to `@sfn_mem_*` (defined in
-        // `runtime/sfn/memory/mem.sfn`); nearly every test binary indexes
-        // an array or drops a scope local, so without this `.o` it fails
-        // at link with "undefined reference to `sfn_mem_bounds_check`".
-        let mem_paths: string[] = ["build/selfhost/native/obj/runtime/mem.o", "build/native/obj/runtime/mem.o", "build/native/obj/mem.o", runtime_root
-            + "/native/obj/runtime/mem.o", runtime_root
-            + "/native/obj/mem.o",];
-        let mut memi: int = 0;
-        loop {
-            if memi >= mem_paths.length { break; }
-            if fs.exists(mem_paths[memi]) {
-                args.push(mem_paths[memi]);
-                break;
-            }
-            memi += 1;
-        }
+    // Issue #940: resolve the implicit runtime capsule
+    // (`<runtime_root>/native/capsule.toml`) and assemble its objects
+    // on the SAME path as `sfn build` / `sfn run` — c-sources +
+    // ll-sources + sfn-sources + prelude-entry, all content/exists
+    // cached under `cache_dir` (the test scratch root, stable for the
+    // whole `sfn test` invocation) so the runtime compiles once and
+    // every subsequent test file cache-hits. This replaces the retired
+    // probe ladder over `build/.../obj/runtime/*.o` plus the inline
+    // `native/src/*.c` glob; once Rb (#941) deletes the legacy staging,
+    // this declarative path is the only runtime link path tests have.
+    let runtime_caps = runtime_capsule_from_root(runtime_root);
+    if runtime_caps.length == 0 {
+        print.err("sfn test: runtime bundle/manifest missing — expected "
+            + runtime_root
+            + "/native/capsule.toml (kind = \"runtime\")");
+        return 1;
+    }
+    _ensure_dir_cmd(cache_dir);
+    let rt = assemble_runtime_capsule_link_inputs(runtime_caps, cache_dir, "-O0", binary_dir);
+    if !rt.success { return 1; }
+    let mut roi: int = 0;
+    loop {
+        if roi >= rt.object_paths.length { break; }
+        args.push(rt.object_paths[roi]);
+        roi += 1;
+    }
+    let mut lli: int = 0;
+    loop {
+        if lli >= rt.link_libs.length { break; }
+        args.push(rt.link_libs[lli]);
+        lli += 1;
     }
     args.push("-lm");
     args.push("-pthread");
@@ -1524,7 +1374,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         }
 
         if trace_runner { print.err("test runner: link start"); }
-        let link_rc = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths);
+        let link_rc = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths, scratch_root, binary_dir);
         if link_rc != 0 {
             print.err("link failed (clang exit=" + number_to_string(link_rc)
                 + ")");

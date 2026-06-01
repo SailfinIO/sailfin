@@ -336,8 +336,46 @@ fn enumerate_runtime_capsule_artifacts(workspace_root: string, dep_specs: string
     return out;
 }
 
+// Resolve the well-known runtime capsule (`<runtime_root>/native/
+// capsule.toml`) as an *implicit* dependency, independent of any
+// `workspace.toml` membership. This is the implicit runtime-capsule
+// link path for an end-user `sfn build` / `sfn run` / `sfn test` of a
+// binary that declares no `[dependencies]`: the driver injects the
+// result as a pure fallback when the normal resolver surfaced no
+// runtime capsules (issue #940, Ra of #939 / Phase R of #513).
+//
+// The runtime root is well-known (it is computed from the binary's
+// own location), so there is no `[build] implicit = true` flag to
+// honour here — a flag would be parsed-but-unenforced today. When
+// `sfn/prelude` becomes a real workspace library (Stage F), this
+// retires in favour of the workspace-implicit resolver path.
+//
+// Path model mirrors a one-member `enumerate_runtime_capsule_artifacts`
+// walk: `workspace_root = runtime_root`, `member_path = "native"`, so
+// `manifest_dir` resolves to `<runtime_root>/native` and the
+// manifest's relative entries normalize against it (e.g.
+// `../sfn/io.sfn` → `<runtime_root>/sfn/io.sfn`, `../prelude.sfn` →
+// `<runtime_root>/prelude.sfn`).
+//
+// Returns `[]` when the manifest is absent (caller surfaces a loud
+// "runtime bundle/manifest missing" error) or doesn't parse as a
+// `kind = "runtime"` capsule with a name — same skip-silently shape
+// as `enumerate_runtime_capsule_artifacts`.
+fn runtime_capsule_from_root(runtime_root: string) -> RuntimeCapsuleArtifacts[] ![io] {
+    let mut out: RuntimeCapsuleArtifacts[] = [];
+    if runtime_root.length == 0 { return out; }
+    let manifest = _rcr_path_join(runtime_root, "native/capsule.toml");
+    if !fs.exists(manifest) { return out; }
+    let manifest_text = fs.readFile(manifest);
+    let artifacts = _rcr_artifacts_from_manifest(runtime_root, "native", manifest_text);
+    if artifacts.capsule_name.length == 0 { return out; }
+    out.push(artifacts);
+    return out;
+}
+
 export {
     RuntimeCapsuleArtifacts,
     empty_runtime_capsule_artifacts,
-    enumerate_runtime_capsule_artifacts
+    enumerate_runtime_capsule_artifacts,
+    runtime_capsule_from_root
 };
