@@ -16,7 +16,14 @@
 //
 // Runs from the repo root (`make test-integration` invokes
 // `build/native/sailfin test compiler/tests/integration`), so the
-// compiler binary and `/tmp` fixtures resolve relative to that cwd.
+// `build/native/sailfin` binary resolves relative to that cwd. The
+// child is launched with an *empty* environment on purpose: the binary
+// is named by an explicit slashed path (so `posix_spawnp` never
+// consults `PATH`), the runtime root is resolved exe-relative rather
+// than via the environment, and `sfn check`'s only env knobs
+// (`SAILFIN_EFFECT_ENFORCE` / `SAILFIN_USE_ARENA`) must stay unset so
+// the test exercises the shipped defaults deterministically instead of
+// inheriting an ambient shell setting.
 fn _contains(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if needle.length > haystack.length { return false; }
@@ -28,6 +35,20 @@ fn _contains(haystack: string, needle: string) -> boolean {
         i += 1;
     }
     return false;
+}
+
+// Mint a collision-free fixture. `fs.mkdtemp` returns a kernel-unique
+// `0700` scratch dir (anchored under `$TMPDIR` / `/tmp`), so parallel
+// `sfn test` invocations never share a fixture path. The fs surface
+// has no `rmdir` primitive, so the caller deletes the fixture file and
+// only the empty unique dir is left behind — strictly less residue
+// than a fixed `/tmp/<name>` path.
+fn _mint_fixture(name: string, source: string) -> string ![io] {
+    let dir = fs.mkdtemp("sfn-e0420-");
+    assert dir.length > 0;
+    let path = dir + "/" + name;
+    fs.writeFile(path, source);
+    return path;
 }
 
 // Run `build/native/sailfin check <path>` capturing both streams, and
@@ -50,8 +71,7 @@ fn _check_exit(path: string) -> i64 ![io] {
 }
 
 test "E0420: undefined free-function callee exits non-zero with the diagnostic" ![io] {
-    let fixture = "/tmp/sfn_e0420_undef_813.sfn";
-    fs.writeFile(fixture, "fn main() {\n    notarealfunction_813(\"hi\");\n}\n");
+    let fixture = _mint_fixture("undef.sfn", "fn main() {\n    notarealfunction_813(\"hi\");\n}\n");
 
     let rc = _check_exit(fixture);
     assert rc != 0;
@@ -60,15 +80,18 @@ test "E0420: undefined free-function callee exits non-zero with the diagnostic" 
     assert _contains(combined, "E0420");
     assert _contains(combined, "undefined function");
     assert _contains(combined, "notarealfunction_813");
+
+    fs.deleteFile(fixture);
 }
 
 test "E0420: locally-defined callee checks clean (envelope negative case)" ![io] {
-    let fixture = "/tmp/sfn_e0420_ok_813.sfn";
-    fs.writeFile(fixture, "fn greet() {}\nfn main() {\n    greet();\n}\n");
+    let fixture = _mint_fixture("ok.sfn", "fn greet() {}\nfn main() {\n    greet();\n}\n");
 
     let rc = _check_exit(fixture);
     assert rc == 0;
 
     let combined = _check_output(fixture);
     assert ! _contains(combined, "E0420");
+
+    fs.deleteFile(fixture);
 }
