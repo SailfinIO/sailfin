@@ -157,6 +157,25 @@ struct TypeDescriptor {
     items: TypeDescriptor[];
 }
 
+// Canonical typed-error result. `Result<T, E>` carries an `Ok` payload of
+// the success type and an `Err` payload of the error type; the generic
+// payloads are monomorphised per instantiation (#829/#830) so `value` and
+// `error` read by value rather than type-erasing to `i8*`. The `?` operator
+// (R.3 — #833) and emitter support (R.4 — #834) build on this declaration;
+// an `E: Error` bound / `From` coercion is deferred until generic
+// constraints land. See docs/runtime_architecture.md.
+enum Result<T, E> {
+    Ok { value: T },
+    Err { error: E }
+}
+
+// Default error payload for `Result<T, Error>`. A bare message today;
+// structured fields (code, cause) follow once generic constraints allow an
+// `E: Error` bound.
+struct Error {
+    message: string;
+}
+
 // alias-coverage: runtime helper double-ABI seam — `runtime_sleep_fn`
 // (and the underlying `sfn_sleep` Sailfin definition in
 // `runtime/sfn/clock.sfn`, which calls libc `nanosleep` directly
