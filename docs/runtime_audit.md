@@ -99,10 +99,12 @@
 >   `compiler/src/llvm/runtime_helpers.sfn`, and the matching helper-
 >   preamble entry in `compiler/src/llvm/lowering/lowering_helpers.sfn`.
 >   `runtime/native/capsule.toml`'s `sfn-sources` now lists
->   `../sfn/clock.sfn`, so the runtime-capsule link path picks it up;
->   `make rebuild` additionally stages `build/native/obj/runtime/clock.o`
->   for the legacy `sfn run` / `sfn build` link path
->   (`_clang_compile_runtime_objects` in `compiler/src/cli_main.sfn`).
+>   `../sfn/clock.sfn`, so the runtime-capsule link path picks it up.
+>   (#941: the legacy `make rebuild` `build/native/obj/runtime/*.o`
+>   staging was deleted — post-#940 every link path emits the runtime
+>   from source via the capsule path, so the pre-built objects were no
+>   longer read. `ci-cross-windows` now emits its runtime IR itself and
+>   the installer bundles `runtime/prelude.sfn` + `runtime/sfn/`.)
 >   EINTR-resume landed via bounded retry loop (issue #693,
 >   2026-05-26): `sfn_sleep` now wraps the `nanosleep` call in a
 >   `loop`-with-`break` capped at 32 iterations that exits on

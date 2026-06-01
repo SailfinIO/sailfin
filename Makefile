@@ -533,26 +533,21 @@ package: compile
 # =============================================================================
 
 # Verify the build artifacts the Sailfin-native test runner expects
-# (import-context + runtime prelude object) are present at their
-# canonical locations.
+# (import-context) are present at their canonical location.
 #
 # `make rebuild` is the only path to producing `build/native/sailfin`,
-# so the artifacts are guaranteed to land at
-# `build/native/import-context/` and `build/native/obj/runtime/prelude.o`
-# directly. The legacy `build/selfhost/native/...` fallback paths
-# this target used to copy from are dead in the rebuild flow — so
-# the target collapses to a presence check.
+# so `build/native/import-context/` is guaranteed to land directly.
+# #941: the former `build/native/obj/runtime/prelude.o` check was
+# dropped — post-#940 the test runner links the runtime through the
+# declarative runtime-capsule path (emit-from-source + per-work-dir
+# cache), so no pre-staged `prelude.o` exists or is needed.
 ci-prepare-test-artifacts:
 	@set -eu; \
 	if [ ! -d build/native/import-context ] || [ -z "$$(find build/native/import-context -name '*.sfn-asm' -print -quit 2>/dev/null)" ]; then \
 		echo "[ci-prepare-test-artifacts][error] missing build/native/import-context — run 'make rebuild' first" >&2; \
 		exit 1; \
 	fi; \
-	if [ ! -f build/native/obj/runtime/prelude.o ]; then \
-		echo "[ci-prepare-test-artifacts][error] missing build/native/obj/runtime/prelude.o — run 'make rebuild' first" >&2; \
-		exit 1; \
-	fi; \
-	echo "[ci-prepare-test-artifacts] build/native/import-context + build/native/obj/runtime/prelude.o present"
+	echo "[ci-prepare-test-artifacts] build/native/import-context present"
 
 # Package native compiler + installer artifacts for a given target label.
 # Stage C4 migration: this target now delegates to `sfn package`
@@ -695,263 +690,14 @@ rebuild:
 	@mkdir -p build/native/raw
 	@cp -a build/sailfin/capsules/. build/native/raw/ 2>/dev/null || true
 	@cp -f build/sailfin/program.ll build/native/raw/program.ll 2>/dev/null || true
-	@# Stage prelude.o + prelude.ll for the freshly-built compiler.
-	@# End-user `sfn build` / `sfn run` invocations from this
-	@# binary check `_runtime_bundle_exists("runtime")` which
-	@# requires a prebuilt `prelude.o` somewhere under the runtime
-	@# tree (see `_runtime_prelude_path` in cli_main.sfn for the
-	@# search list). The fresh-clone repo's `runtime/` has no
-	@# `obj/`, so without this step the in-tree compiler would
-	@# fail to link any user program with "runtime bundle missing
-	@# expected files." Replicate via the new compiler emitting
-	@# prelude.ll + clang compiling it to an object.
-	@#
-	@# The .ll is also load-bearing for `ci-cross-windows`, which
-	@# reads it as the Windows-target prelude IR. Each artifact
-	@# is generated independently — if a prior build dropped
-	@# prelude.ll but kept prelude.o (or vice-versa), regenerate
-	@# the missing one on its own rather than re-doing both.
-	@mkdir -p build/native/obj/runtime
-	@# Emit + validate prelude.ll with retry. The single-shot
-	@# `$(NATIVE_OUT) emit` here doesn't go through the resolver's
-	@# retry+validator cascade (that path is gated behind multi-
-	@# source builds), so a seed-corruption flake on the prelude
-	@# emit (`翶* %t5` and friends) would escape into the .o
-	@# compile and fail the rebuild. Up to 3 attempts; each
-	@# attempt validates via the same `llvm-as` / `llvm-as-18` /
-	@# `clang -c -emit-llvm` / `clang-18` cascade the resolver
-	@# uses.
-	@if [ ! -f build/native/obj/runtime/prelude.ll ]; then \
-		echo "[rebuild] staging prelude.ll..."; \
-		attempt=0; ok=0; \
-		while [ $$attempt -lt 3 ]; do \
-			attempt=$$((attempt + 1)); \
-			rm -f build/native/obj/runtime/prelude.ll; \
-			$(NATIVE_OUT) emit -o build/native/obj/runtime/prelude.ll llvm runtime/prelude.sfn >/dev/null || continue; \
-			[ -s build/native/obj/runtime/prelude.ll ] || continue; \
-			if (command -v llvm-as >/dev/null 2>&1 && llvm-as < build/native/obj/runtime/prelude.ll >/dev/null 2>&1) \
-				|| (command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < build/native/obj/runtime/prelude.ll >/dev/null 2>&1) \
-				|| (command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir build/native/obj/runtime/prelude.ll -o /dev/null >/dev/null 2>&1) \
-				|| (command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir build/native/obj/runtime/prelude.ll -o /dev/null >/dev/null 2>&1); then \
-				ok=1; break; \
-			fi; \
-			echo "[rebuild][warn] prelude.ll IR validation rejected output (attempt $$attempt/3)" >&2; \
-		done; \
-		if [ "$$ok" -ne 1 ]; then \
-			echo "[rebuild][error] failed to emit valid prelude.ll after 3 attempts" >&2; \
-			exit 1; \
-		fi; \
-	fi
-	@if [ ! -f build/native/obj/runtime/prelude.o ]; then \
-		echo "[rebuild] staging prelude.o..."; \
-		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/prelude.ll -o build/native/obj/runtime/prelude.o; \
-	fi
-	@# Stage clock.o (Sailfin-native `@sfn_sleep` from runtime/sfn/clock.sfn).
-	@# PR 2 of the sleep migration (issue #397) deleted the C `sfn_sleep`
-	@# trampoline; `@sfn_sleep` now lives only in the Sailfin module.
-	@# The legacy `sfn run` / `sfn build` link path
-	@# (`_clang_compile_runtime_objects` in `compiler/src/cli_main.sfn`)
-	@# resolves the symbol against this staged .o. The runtime-capsule
-	@# link path (used by `make compile`) instead reaches clock.sfn
-	@# through `runtime/native/capsule.toml`'s `sfn-sources` array.
-	@if [ ! -f build/native/obj/runtime/clock.ll ]; then \
-		echo "[rebuild] staging clock.ll..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/clock.ll llvm runtime/sfn/clock.sfn >/dev/null; \
-	fi
-	@if [ ! -f build/native/obj/runtime/clock.o ]; then \
-		echo "[rebuild] staging clock.o..."; \
-		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/clock.ll -o build/native/obj/runtime/clock.o; \
-	fi
-	@# Stage process.o (Sailfin-native `@sfn_process_run` from
-	@# runtime/sfn/process.sfn). Mirrors the clock.o staging above:
-	@# M2.9 (issue #405) flips `process.run`'s `native_signature` to
-	@# `sfn_process_run`, defined only in the Sailfin module. The
-	@# legacy link path resolves the symbol against this staged .o;
-	@# the runtime-capsule path reaches process.sfn through
-	@# `runtime/native/capsule.toml`'s `sfn-sources` array instead.
-	@if [ ! -f build/native/obj/runtime/process.ll ]; then \
-		echo "[rebuild] staging process.ll..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/process.ll llvm runtime/sfn/process.sfn >/dev/null; \
-	fi
-	@if [ ! -f build/native/obj/runtime/process.o ]; then \
-		echo "[rebuild] staging process.o..."; \
-		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/process.ll -o build/native/obj/runtime/process.o; \
-	fi
-	@# Stage exception.o (Sailfin-native frame primitives from
-	@# runtime/sfn/exception.sfn). M2.7b (issue #404) ships the
-	@# compiler-emission migration that inlines `sfn_exception_push_frame`
-	@# + `setjmp` + `sfn_exception_pop_frame` at every user try block;
-	@# the legacy link path (`_clang_compile_runtime_objects` in
-	@# `compiler/src/cli_main.sfn`) resolves those symbols against this
-	@# staged .o. The runtime-capsule path reaches exception.sfn through
-	@# `runtime/native/capsule.toml`'s `sfn-sources` array instead.
-	@if [ ! -f build/native/obj/runtime/exception.ll ]; then \
-		echo "[rebuild] staging exception.ll..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/exception.ll llvm runtime/sfn/exception.sfn >/dev/null; \
-	fi
-	@if [ ! -f build/native/obj/runtime/exception.o ]; then \
-		echo "[rebuild] staging exception.o..."; \
-		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/exception.ll -o build/native/obj/runtime/exception.o; \
-	fi
-	@# Stage type_meta.o (Sailfin-native type-metadata registry from
-	@# runtime/sfn/type_meta.sfn). M2.10 (issue #402) flips seven
-	@# `runtime_helpers.sfn` descriptors to `sfn_*` `native_signature`
-	@# entries (`sfn_is_string` / `_resolve_type` / `_instance_of`,
-	@# etc.) and emits a `@__sfn_module_type_init__*` constructor per
-	@# module that calls `@sfn_type_register`. The legacy link path
-	@# (`_clang_compile_runtime_objects` in `compiler/src/cli_main.sfn`)
-	@# resolves the symbol against this staged .o; without it, every
-	@# `sfn test` invocation fails at link with "undefined reference
-	@# to `sfn_type_register`" the moment a test's compiled IR carries
-	@# a single named struct/enum/interface descriptor.
-	@if [ ! -f build/native/obj/runtime/type_meta.ll ]; then \
-		echo "[rebuild] staging type_meta.ll..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/type_meta.ll llvm runtime/sfn/type_meta.sfn >/dev/null; \
-	fi
-	@if [ ! -f build/native/obj/runtime/type_meta.o ]; then \
-		echo "[rebuild] staging type_meta.o..."; \
-		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/type_meta.ll -o build/native/obj/runtime/type_meta.o; \
-	fi
-	@# Stage filesystem.o (Sailfin-native fs adapters from
-	@# runtime/sfn/adapters/filesystem.sfn). M3.1a (issue #814,
-	@# epic #390) flips the `fs.readFile` / `fs.writeFile` /
-	@# `fs.appendFile` descriptor rows' `native_signature` to
-	@# `sfn_fs_read_file` / `sfn_fs_write_file` /
-	@# `sfn_fs_append_file`. The legacy `sfn run` / `sfn build`
-	@# link path (`_clang_compile_runtime_objects` in
-	@# `compiler/src/cli_main.sfn`) resolves those symbols against
-	@# this staged .o; the runtime-capsule path reaches
-	@# filesystem.sfn through `runtime/native/capsule.toml`'s
-	@# `sfn-sources` array instead. Without this staging, any user
-	@# program touching `fs.*` fails at link with "undefined
-	@# reference to `sfn_fs_read_file`".
-	@if [ ! -f build/native/obj/runtime/filesystem.ll ]; then \
-		echo "[rebuild] staging filesystem.ll..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/filesystem.ll llvm runtime/sfn/adapters/filesystem.sfn >/dev/null; \
-	fi
-	@if [ ! -f build/native/obj/runtime/filesystem.o ]; then \
-		echo "[rebuild] staging filesystem.o..."; \
-		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/filesystem.ll -o build/native/obj/runtime/filesystem.o; \
-	fi
-	@# Stage http.o (Sailfin-native socket HTTP client from
-	@# runtime/sfn/adapters/http.sfn). M3 (issue #818, epic #390)
-	@# flips the `http.get_body` / `http.post_json` / `http.download`
-	@# descriptor rows' `native_signature` (and the `http_get` /
-	@# `http_post` aliases) to `sfn_http_get` / `sfn_http_post` /
-	@# `sfn_http_post2` / `sfn_http_download`, replacing the curl
-	@# subprocess path with a pure-Sailfin socket client (HTTP only,
-	@# no TLS for v0). The legacy `sfn run` / `sfn build` link path
-	@# (`_clang_compile_runtime_objects` in
-	@# `compiler/src/cli_main.sfn`) resolves those symbols against
-	@# this staged .o; the runtime-capsule path reaches http.sfn
-	@# through `runtime/native/capsule.toml`'s `sfn-sources` array
-	@# instead. Without this staging, any user program touching
-	@# `http.*` fails at link with "undefined reference to
-	@# `sfn_http_get`".
-	@if [ ! -f build/native/obj/runtime/http.ll ]; then \
-		echo "[rebuild] staging http.ll..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/http.ll llvm runtime/sfn/adapters/http.sfn >/dev/null; \
-	fi
-	@if [ ! -f build/native/obj/runtime/http.o ]; then \
-		echo "[rebuild] staging http.o..."; \
-		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/http.ll -o build/native/obj/runtime/http.o; \
-	fi
-	@# Stage io.o (Sailfin-native I/O wrappers from runtime/sfn/io.sfn).
-	@# #925 (epic #390) ports the Cat-C `@logExecution` decorator body
-	@# to `@sfn_log_execution`, defined only in this Sailfin module. The
-	@# legacy `sfn run` / `sfn build` link path
-	@# (`_clang_compile_runtime_objects` in `compiler/src/cli_main.sfn`)
-	@# resolves the symbol against this staged .o; the runtime-capsule
-	@# path reaches io.sfn through `runtime/native/capsule.toml`'s
-	@# `sfn-sources` array instead. Without this staging, any user
-	@# program using `@logExecution` fails at link with "undefined
-	@# reference to `sfn_log_execution`".
-	@if [ ! -f build/native/obj/runtime/io.ll ]; then \
-		echo "[rebuild] staging io.ll..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/io.ll llvm runtime/sfn/io.sfn >/dev/null; \
-	fi
-	@if [ ! -f build/native/obj/runtime/io.o ]; then \
-		echo "[rebuild] staging io.o..."; \
-		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/io.ll -o build/native/obj/runtime/io.o; \
-	fi
-	@# Stage string.o (Sailfin-native string helpers from
-	@# runtime/sfn/string.sfn). #925 (epic #390) ports the Cat-C
-	@# `to_debug_string` (→ `@sfn_to_debug_string`, live in prelude
-	@# struct formatting) and the `sfn_str_is_*` char predicates to
-	@# Sailfin bodies. The legacy link path resolves
-	@# `@sfn_to_debug_string` against this staged .o; the runtime-capsule
-	@# path reaches string.sfn through `runtime/native/capsule.toml`'s
-	@# `sfn-sources` array instead. Without this staging, any user
-	@# program that formats a struct fails at link with "undefined
-	@# reference to `sfn_to_debug_string`".
-	@if [ ! -f build/native/obj/runtime/string.ll ]; then \
-		echo "[rebuild] staging string.ll..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/string.ll llvm runtime/sfn/string.sfn >/dev/null; \
-	fi
-	@if [ ! -f build/native/obj/runtime/string.o ]; then \
-		echo "[rebuild] staging string.o..."; \
-		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/string.ll -o build/native/obj/runtime/string.o; \
-	fi
-	@# Stage array.o (Sailfin-native array stubs from
-	@# runtime/sfn/array.sfn). #925 (epic #390) routes the
-	@# `runtime_array_map_fn` / `_filter_fn` / `_reduce_fn` descriptors
-	@# to the `sfn_array_sfn_map` / `_filter` / `_reduce` stub exports
-	@# (real closure-backed semantics are M4). The prelude's `array_map`
-	@# / `array_filter` / `array_reduce` wrappers reference those
-	@# symbols, so prelude.o carries an undefined reference to each; the
-	@# legacy link path resolves them against this staged .o. The
-	@# runtime-capsule path reaches array.sfn through
-	@# `runtime/native/capsule.toml`'s `sfn-sources` array instead.
-	@# Without this staging, every user program fails at link with
-	@# "undefined reference to `sfn_array_sfn_filter`" (prelude.o pulls
-	@# the array-HOF wrappers in unconditionally).
-	@if [ ! -f build/native/obj/runtime/array.ll ]; then \
-		echo "[rebuild] staging array.ll..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/array.ll llvm runtime/sfn/array.sfn >/dev/null; \
-	fi
-	@if [ ! -f build/native/obj/runtime/array.o ]; then \
-		echo "[rebuild] staging array.o..."; \
-		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/array.ll -o build/native/obj/runtime/array.o; \
-	fi
-	@# Stage mem.o (Sailfin-native narrow memory primitives from
-	@# runtime/sfn/memory/mem.sfn). #927 (epic #390) flips the
-	@# `get_field` / `copy_bytes` / `runtime.bounds_check` /
-	@# `runtime.free` descriptors to the `sfn_mem_*` exports, so user
-	@# IR + prelude.o now reference `@sfn_mem_bounds_check` etc. Nearly
-	@# every program reaches `bounds_check` (array indexing) or the
-	@# scope-exit `free`, so without this staged .o the legacy link
-	@# path fails with "undefined reference to `sfn_mem_bounds_check`".
-	@# The runtime-capsule path reaches mem.sfn through
-	@# `runtime/native/capsule.toml`'s `sfn-sources` array instead.
-	@if [ ! -f build/native/obj/runtime/mem.ll ]; then \
-		echo "[rebuild] staging mem.ll..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/mem.ll llvm runtime/sfn/memory/mem.sfn >/dev/null; \
-	fi
-	@if [ ! -f build/native/obj/runtime/mem.o ]; then \
-		echo "[rebuild] staging mem.o..."; \
-		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/mem.ll -o build/native/obj/runtime/mem.o; \
-	fi
-	@# Stage exec.o (Sailfin-native executable-path + runtime-root
-	@# resolution from runtime/sfn/platform/exec.sfn). Issue #468
-	@# (epic #451 M5.3 prerequisite) ships `@exe_path` /
-	@# `@binary_dir` / `@resolve_runtime_root` as the pure-Sailfin
-	@# replacement for the C-driver's executable-path resolver,
-	@# retired in M5.5 / #473. The legacy link path
-	@# (`_clang_compile_runtime_objects` in `compiler/src/cli_main.sfn`)
-	@# resolves those symbols against this staged .o; the runtime-
-	@# capsule path reaches exec.sfn through `runtime/native/
-	@# capsule.toml`'s `sfn-sources` array instead. The compiler's
-	@# `fn main` in `compiler/src/cli_main.sfn` is the load-bearing
-	@# internal caller after #473; a missing staged artifact surfaces
-	@# at link time as "undefined reference to `exe_path`".
-	@if [ ! -f build/native/obj/runtime/exec.ll ]; then \
-		echo "[rebuild] staging exec.ll..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/exec.ll llvm runtime/sfn/platform/exec.sfn >/dev/null; \
-	fi
-	@if [ ! -f build/native/obj/runtime/exec.o ]; then \
-		echo "[rebuild] staging exec.o..."; \
-		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/exec.ll -o build/native/obj/runtime/exec.o; \
-	fi
+	@# Runtime-object staging removed (#941). Post-#940 the freshly-built
+	@# compiler resolves the runtime via runtime/native/capsule.toml (the
+	@# declarative runtime capsule), emitting prelude + each sfn-source from
+	@# source on demand and caching the .o under the per-work-dir build cache.
+	@# No link path reads the old build/native/obj/runtime/*.o, so the per-module
+	@# .ll+.o staging that used to live here is gone. ci-cross-windows now emits
+	@# the Windows-target runtime IR itself (self-contained loop below), and the
+	@# installer bundles the runtime .sfn sources (see _package_installer).
 	@# Stage import-context for `runtime/sfn/platform/*.sfn` extern-fn
 	@# modules. `runtime/sfn/clock.sfn` imports `nanosleep` from
 	@# `./platform/posix`, and `runtime/sfn/io.sfn` imports `write`
@@ -1025,63 +771,8 @@ ci-cross-windows:
 	@set -eu; \
 	echo "[cross-windows] cross-compiling for Windows from Linux LLVM IR..."; \
 	SAVED_DIR="build/native/raw"; \
-	PRELUDE_LL="build/native/obj/runtime/prelude.ll"; \
-	CLOCK_LL="build/native/obj/runtime/clock.ll"; \
-	TYPE_META_LL="build/native/obj/runtime/type_meta.ll"; \
-	EXEC_LL="build/native/obj/runtime/exec.ll"; \
-	EXCEPTION_LL="build/native/obj/runtime/exception.ll"; \
-	FILESYSTEM_LL="build/native/obj/runtime/filesystem.ll"; \
-	HTTP_LL="build/native/obj/runtime/http.ll"; \
-	IO_LL="build/native/obj/runtime/io.ll"; \
-	STRING_LL="build/native/obj/runtime/string.ll"; \
-	ARRAY_LL="build/native/obj/runtime/array.ll"; \
-	MEM_LL="build/native/obj/runtime/mem.ll"; \
 	if [ ! -d "$$SAVED_DIR" ] || [ ! -f "$$SAVED_DIR/program.ll" ]; then \
 		echo "[cross-windows][error] missing $$SAVED_DIR/*.ll + program.ll — run 'make rebuild' first" >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -f "$$PRELUDE_LL" ]; then \
-		echo "[cross-windows][error] missing $$PRELUDE_LL — 'make rebuild' should have emitted it" >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -f "$$CLOCK_LL" ]; then \
-		echo "[cross-windows][error] missing $$CLOCK_LL — 'make rebuild' should have emitted it (sleep migration PR 2, #397)" >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -f "$$TYPE_META_LL" ]; then \
-		echo "[cross-windows][error] missing $$TYPE_META_LL — 'make rebuild' should have emitted it (M2.10, #402)" >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -f "$$EXEC_LL" ]; then \
-		echo "[cross-windows][error] missing $$EXEC_LL — 'make rebuild' should have emitted it (M5.5, #473)" >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -f "$$EXCEPTION_LL" ]; then \
-		echo "[cross-windows][error] missing $$EXCEPTION_LL — 'make rebuild' should have emitted it (M2.7b, #404; surfaced by M5.5 #473's @main wrapper)" >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -f "$$FILESYSTEM_LL" ]; then \
-		echo "[cross-windows][error] missing $$FILESYSTEM_LL — 'make rebuild' should have emitted it (M3.1a, #814)" >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -f "$$HTTP_LL" ]; then \
-		echo "[cross-windows][error] missing $$HTTP_LL — 'make rebuild' should have emitted it (M3, #818)" >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -f "$$IO_LL" ]; then \
-		echo "[cross-windows][error] missing $$IO_LL — 'make rebuild' should have emitted it (Cat-C ports, #925)" >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -f "$$STRING_LL" ]; then \
-		echo "[cross-windows][error] missing $$STRING_LL — 'make rebuild' should have emitted it (Cat-C ports, #925)" >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -f "$$ARRAY_LL" ]; then \
-		echo "[cross-windows][error] missing $$ARRAY_LL — 'make rebuild' should have emitted it (Cat-C ports, #925)" >&2; \
-		exit 1; \
-	fi; \
-	if [ ! -f "$$MEM_LL" ]; then \
-		echo "[cross-windows][error] missing $$MEM_LL — 'make rebuild' should have emitted it (memory primitives, #927)" >&2; \
 		exit 1; \
 	fi; \
 	echo "[cross-windows] using saved sfn build IR layout ($$SAVED_DIR)"; \
@@ -1124,60 +815,60 @@ ci-cross-windows:
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
 		-c "$$WIN_OBJ/sailfin.linked.bc" -o "$$WIN_OBJ/native.linked.o"; \
 	\
-	echo "[cross-windows] compiling prelude..."; \
-	if [ -n "$$PRELUDE_LL" ]; then \
+	echo "[cross-windows] emitting + compiling runtime modules..."; \
+	\
+	: "#941: the runtime IR this target consumes is now emitted by"; \
+	: "ci-cross-windows itself (was staged by 'make rebuild', deleted"; \
+	: "in #941). RUNTIME_MODS is this bridge's copy of"; \
+	: "runtime/native/capsule.toml's sfn-sources (+ the prelude-entry),"; \
+	: "MINUS process.sfn — Windows resolves @sfn_process_run from the"; \
+	: "_WIN32 C wrapper in sailfin_runtime.c, so linking the Sailfin"; \
+	: "object too would duplicate the symbol. A guard test"; \
+	: "(compiler/tests/e2e/test_cross_windows_runtime_modules.sh) asserts"; \
+	: "this list stays in sync with the manifest (Risk R4). clock is"; \
+	: "re-emitted with SAILFIN_TARGET_OS=Windows for the errno->_errno"; \
+	: "fix (#877); the rest are target-independent IR compiled for"; \
+	: "mingw. Each <module>:<source> pair is space-separated."; \
+	RUNTIME_MODS="prelude:runtime/prelude.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn"; \
+	RUNTIME_OBJS=""; \
+	for pair in $$RUNTIME_MODS; do \
+		mod="$${pair%%:*}"; \
+		src="$${pair#*:}"; \
+		ll="$$WIN_OBJ/runtime/$$mod.ll"; \
+		obj="$$WIN_OBJ/runtime/$$mod.o"; \
+		echo "[cross-windows] emitting + compiling $$mod ($$src)..."; \
+		: "Emit with retry + IR validation (mirrors the prelude staging"; \
+		: "the former 'make rebuild' block used). A single-shot 'emit'"; \
+		: "doesn't go through the resolver's retry+validator cascade, so a"; \
+		: "seed-emit flake (invalid IR) would otherwise escape straight"; \
+		: "into clang. Up to 3 attempts; each validated via the same"; \
+		: "llvm-as / clang -emit-llvm cascade the resolver uses."; \
+		attempt=0; ok=0; \
+		while [ $$attempt -lt 3 ]; do \
+			attempt=$$((attempt + 1)); \
+			rm -f "$$ll"; \
+			if [ "$$mod" = "clock" ]; then \
+				SAILFIN_TARGET_OS=Windows $(NATIVE_OUT) emit -o "$$ll" llvm "$$src" >/dev/null || continue; \
+			else \
+				$(NATIVE_OUT) emit -o "$$ll" llvm "$$src" >/dev/null || continue; \
+			fi; \
+			[ -s "$$ll" ] || continue; \
+			if (command -v llvm-as >/dev/null 2>&1 && llvm-as < "$$ll" >/dev/null 2>&1) \
+				|| (command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < "$$ll" >/dev/null 2>&1) \
+				|| (command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir "$$ll" -o /dev/null >/dev/null 2>&1) \
+				|| (command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir "$$ll" -o /dev/null >/dev/null 2>&1); then \
+				ok=1; break; \
+			fi; \
+			echo "[cross-windows][warn] $$mod IR validation rejected output (attempt $$attempt/3)" >&2; \
+		done; \
+		if [ "$$ok" -ne 1 ]; then \
+			echo "[cross-windows][error] failed to emit valid $$mod IR after 3 attempts" >&2; \
+			exit 1; \
+		fi; \
 		$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-			-c "$$PRELUDE_LL" -o "$$WIN_OBJ/runtime/prelude.o"; \
-	fi; \
-	\
-	echo "[cross-windows] re-emitting clock for Windows target (errno -> _errno, #877)..."; \
-	SAILFIN_TARGET_OS=Windows $(NATIVE_OUT) emit \
-		-o "$$WIN_OBJ/runtime/clock.ll" llvm runtime/sfn/clock.sfn >/dev/null; \
-	echo "[cross-windows] compiling clock (Sailfin-native @sfn_sleep, #397)..."; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-		-c "$$WIN_OBJ/runtime/clock.ll" -o "$$WIN_OBJ/runtime/clock.o"; \
-	\
-	echo "[cross-windows] emitting + compiling arena (Sailfin-native arena mark/rewind, #937)..."; \
-	$(NATIVE_OUT) emit -o "$$WIN_OBJ/runtime/arena.ll" llvm runtime/sfn/memory/arena.sfn >/dev/null; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-		-c "$$WIN_OBJ/runtime/arena.ll" -o "$$WIN_OBJ/runtime/arena.o"; \
-	echo "[cross-windows] emitting + compiling rc (Sailfin-native reference counting)..."; \
-	$(NATIVE_OUT) emit -o "$$WIN_OBJ/runtime/rc.ll" llvm runtime/sfn/memory/rc.sfn >/dev/null; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-		-c "$$WIN_OBJ/runtime/rc.ll" -o "$$WIN_OBJ/runtime/rc.o"; \
-	\
-	echo "[cross-windows] compiling type_meta (Sailfin-native type-metadata registry, M2.10 #402)..."; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-		-c "$$TYPE_META_LL" -o "$$WIN_OBJ/runtime/type_meta.o"; \
-	\
-	echo "[cross-windows] compiling exec (Sailfin-native executable-path resolver, M5.5 #473)..."; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-		-c "$$EXEC_LL" -o "$$WIN_OBJ/runtime/exec.o"; \
-	\
-	echo "[cross-windows] compiling exception (Sailfin-native exception runtime, M2.7b #404)..."; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-		-c "$$EXCEPTION_LL" -o "$$WIN_OBJ/runtime/exception.o"; \
-	\
-	echo "[cross-windows] compiling filesystem (Sailfin-native fs adapters, M3.1a #814)..."; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-		-c "$$FILESYSTEM_LL" -o "$$WIN_OBJ/runtime/filesystem.o"; \
-	\
-		echo "[cross-windows] compiling http (Sailfin-native socket HTTP client, M3 #818)..."; \
-		$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-			-c "$$HTTP_LL" -o "$$WIN_OBJ/runtime/http.o"; \
-		\
-	echo "[cross-windows] compiling io (Sailfin-native @sfn_log_execution, Cat-C #925)..."; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-		-c "$$IO_LL" -o "$$WIN_OBJ/runtime/io.o"; \
-	echo "[cross-windows] compiling string (Sailfin-native @sfn_to_debug_string + char preds, Cat-C #925)..."; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-		-c "$$STRING_LL" -o "$$WIN_OBJ/runtime/string.o"; \
-	echo "[cross-windows] compiling array (Sailfin-native @sfn_array_sfn_* stubs, Cat-C #925)..."; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-		-c "$$ARRAY_LL" -o "$$WIN_OBJ/runtime/array.o"; \
-	echo "[cross-windows] compiling mem (Sailfin-native memory primitives, #927)..."; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
-		-c "$$MEM_LL" -o "$$WIN_OBJ/runtime/mem.o"; \
+			-c "$$ll" -o "$$obj"; \
+		RUNTIME_OBJS="$$RUNTIME_OBJS $$obj"; \
+	done; \
 	\
 	echo "[cross-windows] compiling C runtime..."; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_arena.c \
@@ -1208,19 +899,7 @@ ci-cross-windows:
 		"$$WIN_OBJ/sailfin_base64.o" \
 		"$$WIN_OBJ/runtime_globals.o" \
 		"$$WIN_OBJ/native.linked.o" \
-		"$$WIN_OBJ/runtime/prelude.o" \
-		"$$WIN_OBJ/runtime/clock.o" \
-		"$$WIN_OBJ/runtime/type_meta.o" \
-		"$$WIN_OBJ/runtime/exec.o" \
-		"$$WIN_OBJ/runtime/exception.o" \
-		"$$WIN_OBJ/runtime/filesystem.o" \
-		"$$WIN_OBJ/runtime/http.o" \
-		"$$WIN_OBJ/runtime/io.o" \
-		"$$WIN_OBJ/runtime/string.o" \
-		"$$WIN_OBJ/runtime/array.o" \
-		"$$WIN_OBJ/runtime/mem.o" \
-		"$$WIN_OBJ/runtime/arena.o" \
-		"$$WIN_OBJ/runtime/rc.o" \
+		$$RUNTIME_OBJS \
 		$$SHIM_O \
 		-lm -lpthread -lws2_32; \
 	\
@@ -1234,59 +913,18 @@ ci-cross-windows:
 	mkdir -p "$$INSTALLER_DIR/bin"; \
 	cp -f "$$WIN_OUT" "$$INSTALLER_DIR/bin/sailfin.exe"; \
 	cp -f "$$WIN_OUT" "$$INSTALLER_DIR/bin/sfn.exe"; \
-	mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+	mkdir -p "$$INSTALLER_DIR/runtime"; \
 	cp -R runtime/native "$$INSTALLER_DIR/runtime/native"; \
-	if [ -f "$$WIN_OBJ/runtime/prelude.o" ]; then \
-		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-		cp -f "$$WIN_OBJ/runtime/prelude.o" "$$INSTALLER_DIR/runtime/native/obj/prelude.o"; \
-	fi; \
-	if [ -f "$$WIN_OBJ/runtime/clock.o" ]; then \
-		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-		cp -f "$$WIN_OBJ/runtime/clock.o" "$$INSTALLER_DIR/runtime/native/obj/clock.o"; \
-	fi; \
-	if [ -f "$$WIN_OBJ/runtime/type_meta.o" ]; then \
-		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-		cp -f "$$WIN_OBJ/runtime/type_meta.o" "$$INSTALLER_DIR/runtime/native/obj/type_meta.o"; \
-	fi; \
-	if [ -f "$$WIN_OBJ/runtime/exec.o" ]; then \
-		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-		cp -f "$$WIN_OBJ/runtime/exec.o" "$$INSTALLER_DIR/runtime/native/obj/exec.o"; \
-	fi; \
-	if [ -f "$$WIN_OBJ/runtime/exception.o" ]; then \
-		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-		cp -f "$$WIN_OBJ/runtime/exception.o" "$$INSTALLER_DIR/runtime/native/obj/exception.o"; \
-	fi; \
-	if [ -f "$$WIN_OBJ/runtime/filesystem.o" ]; then \
-		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-		cp -f "$$WIN_OBJ/runtime/filesystem.o" "$$INSTALLER_DIR/runtime/native/obj/filesystem.o"; \
-	fi; \
-	if [ -f "$$WIN_OBJ/runtime/http.o" ]; then \
-		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-		cp -f "$$WIN_OBJ/runtime/http.o" "$$INSTALLER_DIR/runtime/native/obj/http.o"; \
-	fi; \
-	if [ -f "$$WIN_OBJ/runtime/io.o" ]; then \
-		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-		cp -f "$$WIN_OBJ/runtime/io.o" "$$INSTALLER_DIR/runtime/native/obj/io.o"; \
-	fi; \
-	if [ -f "$$WIN_OBJ/runtime/string.o" ]; then \
-		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-		cp -f "$$WIN_OBJ/runtime/string.o" "$$INSTALLER_DIR/runtime/native/obj/string.o"; \
-	fi; \
-	if [ -f "$$WIN_OBJ/runtime/array.o" ]; then \
-		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-		cp -f "$$WIN_OBJ/runtime/array.o" "$$INSTALLER_DIR/runtime/native/obj/array.o"; \
-	fi; \
-	if [ -f "$$WIN_OBJ/runtime/mem.o" ]; then \
-		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-		cp -f "$$WIN_OBJ/runtime/mem.o" "$$INSTALLER_DIR/runtime/native/obj/mem.o"; \
-	fi; \
-	if [ -f "$$WIN_OBJ/runtime/arena.o" ]; then \
-		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-		cp -f "$$WIN_OBJ/runtime/arena.o" "$$INSTALLER_DIR/runtime/native/obj/arena.o"; \
-	fi; \
-	if [ -f "$$WIN_OBJ/runtime/rc.o" ]; then \
-		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-		cp -f "$$WIN_OBJ/runtime/rc.o" "$$INSTALLER_DIR/runtime/native/obj/rc.o"; \
-	fi; \
+	: "#941: bundle the runtime Sailfin sources. A fresh Windows install"; \
+	: "relinks user programs against the runtime via the capsule"; \
+	: "emit-from-source path (assemble_runtime_capsule_link_inputs in"; \
+	: "cli_main.sfn), which reads <root>/runtime/prelude.sfn +"; \
+	: "<root>/runtime/sfn/** relative to the bundled capsule.toml;"; \
+	: "without them a fresh install cannot link any runtime-touching"; \
+	: "program. The former per-.o bundle copies are gone — those"; \
+	: "objects were never consumed by the post-#940 link path. Mirrors"; \
+	: "_package_installer (the Linux/host installer)."; \
+	cp -f runtime/prelude.sfn "$$INSTALLER_DIR/runtime/prelude.sfn"; \
+	cp -R runtime/sfn "$$INSTALLER_DIR/runtime/sfn"; \
 	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
 	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"

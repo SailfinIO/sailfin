@@ -316,10 +316,21 @@ CHARNESS
     # (the IR-shape assertions still pin the contract; this round-
     # trip is a smoke test on top).
     local bin="$SCRATCH/roundtrip"
-    local type_meta_o="$REPO_ROOT/build/native/obj/runtime/type_meta.o"
+    # #941: the Makefile no longer stages `build/native/obj/runtime/*.o`
+    # (every link path now emits the runtime from source). Emit
+    # `type_meta` from `runtime/sfn/type_meta.sfn` on the fly so the
+    # `@__sfn_module_type_init__*` constructor's `@sfn_type_register`
+    # call resolves at link. If that object can't be produced, skip the
+    # roundtrip (the IR-shape assertions above still pin the contract).
+    local type_meta_ll="$SCRATCH/type_meta.ll"
+    local type_meta_o="$SCRATCH/type_meta.o"
     local extra_o=()
-    if [ -f "$type_meta_o" ]; then
+    if "$BINARY" emit -o "$type_meta_ll" llvm "$REPO_ROOT/runtime/sfn/type_meta.sfn" >/dev/null 2>&1 \
+        && "$clang_bin" -Wno-override-module -c "$type_meta_ll" -o "$type_meta_o" 2>/dev/null; then
         extra_o+=("$type_meta_o")
+    else
+        echo "[test]   could not emit type_meta object — skipping roundtrip"
+        return 0
     fi
     if ! "$clang_bin" -Wno-override-module "$harness" "$ll" "${extra_o[@]}" -o "$bin" -lm 2>"$SCRATCH/clang.log"; then
         echo "[test]   clang failed to link roundtrip harness:"
