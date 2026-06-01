@@ -123,7 +123,7 @@ jobs:
       # instead SAVED after the gates pass (save-only, no `if:`), so a
       # failed gate never poisons the cache PRs consume.
       - name: Restore seed cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/seed
           key: sailfin-seed-linux-x86_64-${{ steps.seed.outputs.seed_version }}
@@ -244,7 +244,7 @@ jobs:
       # already exists (no source change since the last main run) the
       # save is a no-op.
       - name: Save build cache for PR CI
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: build/cache
           key: sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', '.seed-version') }}
