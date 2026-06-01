@@ -148,13 +148,23 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
     // Issue #940: resolve the implicit runtime capsule
     // (`<runtime_root>/native/capsule.toml`) and assemble its objects
     // on the SAME path as `sfn build` / `sfn run` — c-sources +
-    // ll-sources + sfn-sources + prelude-entry, all content/exists
-    // cached under `cache_dir` (the test scratch root, stable for the
-    // whole `sfn test` invocation) so the runtime compiles once and
-    // every subsequent test file cache-hits. This replaces the retired
-    // probe ladder over `build/.../obj/runtime/*.o` plus the inline
-    // `native/src/*.c` glob; once Rb (#941) deletes the legacy staging,
-    // this declarative path is the only runtime link path tests have.
+    // ll-sources + sfn-sources + prelude-entry. This replaces the
+    // retired probe ladder over `build/.../obj/runtime/*.o` plus the
+    // inline `native/src/*.c` glob.
+    //
+    // PERF (#940): the multi-file runner forks a child `sfn test`
+    // process per file, each with its own per-file scratch. Compiling
+    // the runtime into that private scratch would rebuild the entire
+    // runtime (14 sfn-module emits + C compiles) once PER TEST FILE.
+    // Instead the parent runner warms the runtime once into a shared,
+    // invocation-stable dir and hands it to every child via
+    // `SAILFIN_TEST_RUNTIME_OBJDIR`; with that set we assemble against
+    // the shared dir, so every child cache-hits and the runtime is
+    // built once per invocation. Falls back to `cache_dir` (the
+    // single-file leaf path, where no shared dir is plumbed).
+    let mut rt_cache_dir = cache_dir;
+    let shared_objdir = _get_env_cmd("SAILFIN_TEST_RUNTIME_OBJDIR");
+    if shared_objdir.length > 0 { rt_cache_dir = shared_objdir; }
     let runtime_caps = runtime_capsule_from_root(runtime_root);
     if runtime_caps.length == 0 {
         print.err("sfn test: runtime bundle/manifest missing — expected "
@@ -162,8 +172,8 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
             + "/native/capsule.toml (kind = \"runtime\")");
         return 1;
     }
-    _ensure_dir_cmd(cache_dir);
-    let rt = assemble_runtime_capsule_link_inputs(runtime_caps, cache_dir, "-O0", binary_dir);
+    _ensure_dir_cmd(rt_cache_dir);
+    let rt = assemble_runtime_capsule_link_inputs(runtime_caps, rt_cache_dir, "-O0", binary_dir);
     if !rt.success { return 1; }
     let mut roi: int = 0;
     loop {
@@ -827,13 +837,18 @@ fn _append_test_filter_args(argv: string[], name_filter: string, tag_filter: str
     return out;
 }
 
-fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: string, self_exe: string, path: string, name_filter: string, tag_filter: string) -> int ![io] {
+fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: string, runtime_objdir: string, self_exe: string, path: string, name_filter: string, tag_filter: string) -> int ![io] {
+    // #940: `SAILFIN_TEST_RUNTIME_OBJDIR` points the child's runtime
+    // link at the shared, invocation-stable object dir the parent
+    // warmed once, so the runtime isn't recompiled per test file.
     if timeout_cmd.length > 0 {
         let base = [timeout_cmd, timeout_secs, "env", "SAILFIN_TEST_SCRATCH="
-            + child_scratch, self_exe, "test", path];
+            + child_scratch, "SAILFIN_TEST_RUNTIME_OBJDIR="
+            + runtime_objdir, self_exe, "test", path];
         return process.run(_append_test_filter_args(base, name_filter, tag_filter));
     }
-    let base = ["env", "SAILFIN_TEST_SCRATCH=" + child_scratch, self_exe, "test", path];
+    let base = ["env", "SAILFIN_TEST_SCRATCH=" + child_scratch, "SAILFIN_TEST_RUNTIME_OBJDIR="
+        + runtime_objdir, self_exe, "test", path];
     return process.run(_append_test_filter_args(base, name_filter, tag_filter));
 }
 
@@ -1103,6 +1118,27 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         // before its in-process retry can fire, so the parent must
         // re-run the whole child. `SAILFIN_TEST_RETRY=0` opts out.
         let sub_retries_disabled = _test_retries_disabled();
+        // #940 PERF: warm the runtime-capsule objects ONCE into the
+        // shared `sub_root` before forking per-file children. Each
+        // child links against this shared dir via
+        // `SAILFIN_TEST_RUNTIME_OBJDIR` and cache-hits, so the runtime
+        // is compiled once per `sfn test` invocation instead of once
+        // per test file (the regression #940 must not introduce — the
+        // retired probe path used pre-staged `.o`). Done here, outside
+        // the per-test `timeout` wrapper, so the first child isn't
+        // charged the full runtime compile and tripped by the cap. A
+        // warm failure is non-fatal: children re-attempt and surface a
+        // precise per-file link error.
+        let warm_caps = runtime_capsule_from_root(runtime_root);
+        if warm_caps.length > 0 {
+            _ensure_dir_cmd(sub_root);
+            let warm = assemble_runtime_capsule_link_inputs(warm_caps, sub_root, "-O0", binary_dir);
+            if !warm.success {
+                print.err("[test] warning: failed to pre-warm runtime objects under "
+                    + sub_root
+                    + " (children will retry per file)");
+            }
+        }
         let mut overall_rc: int = 0;
         let mut ti: int = 0;
         loop {
@@ -1112,16 +1148,18 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
             // Per-test scratch so concurrent or sequential children
             // never clobber each other's `.ll` / `test` / `fail.bin`
             // (mirrors the wrapper's `mktemp -d`). The child re-reads
-            // `SAILFIN_TEST_SCRATCH` via `_test_scratch_root`.
+            // `SAILFIN_TEST_SCRATCH` via `_test_scratch_root`. Runtime
+            // objects live in the shared `sub_root` (warmed above), not
+            // this per-file dir — see `SAILFIN_TEST_RUNTIME_OBJDIR`.
             let child_scratch = sub_root + "/sub-" + number_to_string(ti);
             _ensure_dir_cmd(child_scratch);
-            let mut rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, self_exe, path, name_filter, tag_filter);
+            let mut rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter);
             if _should_retry_test(rc, sub_retries_disabled) {
                 print("[test] RETRY: " + _package_basename(path)
                     + " (exit code "
                     + number_to_string(rc)
                     + ", retrying once)");
-                rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, self_exe, path, name_filter, tag_filter);
+                rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter);
             }
             if rc == 0 { suites[suite_idx].pass_count += 1; } else {
                 suites[suite_idx].fail_count += 1;
