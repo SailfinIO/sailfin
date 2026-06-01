@@ -10,9 +10,10 @@
 //
 // `?` type rules (#833) and emitter (#834) are out of scope here — this
 // only proves construction + `match` over the prelude `Result`.
-// Construct inline as a call argument: `let r: Result<int, int> = ...`
-// trips the known `sfn fmt` generic-annotation mangling, so the
-// instantiation type is recovered from the parameter signature instead.
+// Each helper takes its `Result<…>` instantiation as a parameter, so the
+// `match` arms resolve `value` / `error` against a concrete instantiation
+// (`Result<int, int>` here, `Result<string, Error>` below) rather than the
+// bare type parameters.
 fn unwrap_or(r: Result<int, int>, fallback: int) -> int {
     match r {
         Result.Ok { value } => { return value; },
