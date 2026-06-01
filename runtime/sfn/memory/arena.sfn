@@ -380,11 +380,23 @@ fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usiz
 //
 // The mark is encoded as a Sailfin `number` (LLVM `double`): the C
 // wrapper packs `(page_index << 32) | (used & 0xFFFFFFFF)` into the
-// low 53 mantissa bits and round-trips it through `double`. The value
-// `0` means "page 0, used 0" and also covers the arena-disabled /
-// never-allocated case, so rewind on a disabled arena is a harmless
-// no-op. Bit-shift / mask / `i64 ⇄ f64` round-tripping is verified to
-// lower and execute correctly on the seed.
+// low 53 mantissa bits and round-trips it through `double`. Bit-shift
+// / mask / `i64 ⇄ f64` round-tripping is verified to lower and execute
+// correctly on the seed.
+//
+// Semantics of the encoded value `0` (matching the C wrapper exactly):
+//   - When the arena is **disabled** (`!sfn_arena_enabled()`),
+//     `sfn_arena_sfn_mark` returns `0.0` and `sfn_arena_sfn_rewind`
+//     early-returns before decoding — so a mark/rewind pair around a
+//     disabled arena is a genuine no-op.
+//   - When the arena is **enabled**, `0` decodes to `page_index = 0,
+//     used = 0`, i.e. "rewind the first page to offset 0 and zero
+//     every later page." That is a real *partial reset to the chain
+//     head*, NOT a no-op. A caller that took a mark *after* allocating
+//     on page 0 and then rewinds `0` will discard those allocations.
+//     Callers must therefore pair a rewind with the value an actual
+//     `sfn_arena_sfn_mark` returned, never a hardcoded `0`, unless a
+//     reset-to-head is the intent.
 //
 // The global-arena C structs are read by raw field offset (the
 // `_addr` discipline this module already uses):
@@ -399,9 +411,6 @@ fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usiz
 extern fn sfn_arena_enabled() -> bool;
 
 extern fn sfn_arena_global() -> * u8;
-
-// `2^32`, the page-index shift factor used by the double encoding.
-fn _sfn_arena_mark_page_shift() -> i64 { return 4294967296; }
 
 // `sfn_arena_sfn_mark()` snapshots the global arena's current page +
 // used offset, encoded as `(page_index << 32) | used` cast to a

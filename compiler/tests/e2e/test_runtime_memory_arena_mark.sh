@@ -24,7 +24,11 @@
 #                    mark → alloc → rewind and asserts the rewind
 #                    reclaims the post-mark bump (a fresh alloc reuses
 #                    the rewound offset). Also asserts mark on a
-#                    disabled arena encodes 0 and rewind(0) is a no-op.
+#                    on an enabled arena rewind(0) resets to the page-0
+#                    head (a real partial reset, NOT a no-op). The
+#                    disabled-arena no-op path (mark→0.0, rewind inert)
+#                    is checked first, in a forked child that never
+#                    enables the arena.
 
 set -euo pipefail
 
@@ -141,6 +145,8 @@ test_mark_rewind_roundtrip() {
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include "sailfin_arena.h"
 
 /* The Sailfin mark/rewind bodies call these (declared in arena.ll). */
@@ -161,6 +167,31 @@ void sfn_type_register(void *meta) { (void)meta; }
  * the linked sailfin_arena.c. We force arena mode on by setting the
  * env var before the first `sfn_arena_global()` call. */
 int main(void) {
+    /* ---- DISABLED arena: mark→0.0, rewind inert (genuine no-op) ----
+     * Run first, in a forked child that never enables the arena (the
+     * `sfn_arena_global()` singleton is process-wide and persists once
+     * created, so this must precede the enabled-arena section below).
+     * With arena mode off, mark returns 0.0 and rewind early-returns
+     * before decoding; the calls must simply not crash. */
+    pid_t dpid = fork();
+    if (dpid == 0) {
+        unsetenv("SAILFIN_USE_ARENA");
+        double dmark = sfn_arena_sfn_mark();
+        sfn_arena_sfn_rewind(dmark);
+        sfn_arena_sfn_rewind(123.0);
+        _exit(dmark == 0.0 ? 0 : 1);
+    } else if (dpid > 0) {
+        int dstatus = 0;
+        waitpid(dpid, &dstatus, 0);
+        if (!WIFEXITED(dstatus) || WEXITSTATUS(dstatus) != 0) {
+            fprintf(stderr, "disabled-arena mark/rewind no-op check failed (status=%d)\n", dstatus);
+            return 9;
+        }
+    } else {
+        fprintf(stderr, "fork failed\n");
+        return 10;
+    }
+
     /* ---- arena ON: mark/rewind reclaim post-mark bump ---- */
     setenv("SAILFIN_USE_ARENA", "1", 1);
     if (!sfn_arena_enabled()) {
@@ -200,14 +231,22 @@ int main(void) {
         return 6;
     }
 
-    /* ---- mark encodes a finite double; rewind(0) is a no-op ---- */
-    /* rewind(0) on the live arena must not corrupt it — a subsequent
-     * alloc still succeeds. */
+    /* ---- rewind(0) on an ENABLED arena resets to page-0/used-0 ---- */
+    /* Encoded `0` decodes to (page_index=0, used=0): a real partial
+     * reset to the chain head, NOT a no-op (the no-op case is the
+     * *disabled* arena, exercised separately below). After it, the
+     * arena is still valid and the next alloc lands at the head of
+     * page 0 — i.e. back at `before` (the first allocation made on
+     * this freshly-created arena). */
     sfn_arena_sfn_rewind(0.0);
     void *after_zero = sfn_arena_alloc(arena, 16, 8);
     if (!after_zero) {
         fprintf(stderr, "alloc after rewind(0) failed\n");
         return 7;
+    }
+    if (after_zero != before) {
+        fprintf(stderr, "rewind(0) did not reset to page-0 head: before=%p after_zero=%p\n", before, after_zero);
+        return 8;
     }
 
     return 0;

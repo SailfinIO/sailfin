@@ -104,22 +104,39 @@ fn sfn_mem_copy_bytes(dest: * u8, src: * u8, length: i64) -> void {
     memcpy(dest, src, length as usize);
 }
 
-// `sfn_mem_bounds_check(index, length)` — faithful port of
-// `sailfin_runtime_bounds_check`. Aborts with a diagnostic on fd 2
-// when `index` is out of `[0, length)`. The C body uses
-// `fprintf(stderr, …)` with the offending values; the Sailfin port
-// emits the fixed prefix the C message leads with (numeric
-// interpolation needs the SfnString formatting surface, which lives
-// above this primitive layer — the prefix alone preserves the
-// "bounds_check failed" signal an operator greps for). Descriptor ABI
-// is `(i64, i64) -> void`.
+// `sfn_mem_bounds_check(index, length)` — aborts with a diagnostic on
+// fd 2 when `index` is out of `[0, length)`, matching the abort
+// semantics of `sailfin_runtime_bounds_check`. Descriptor ABI is
+// `(i64, i64) -> void`.
+//
+// **Diagnostic deviation (intentional, narrowed contract).** The C
+// body emits `fprintf(stderr, "[stage2-native] bounds_check failed:
+// index=%lld length=%lld\n", …)` with the offending values. This port
+// emits only the fixed prefix `"[stage2-native] bounds_check
+// failed\n"`. Including the integer values would require formatting
+// `index`/`length` into a stack buffer, which needs a single-byte
+// store (`buf[i] = digit as u8`) — and the seed compiler does **not**
+// yet lower element-assignment to a `* u8` slot to a `store i8` (it
+// computes the `trunc i64 to i8` then drops the store; same codegen
+// gap family as the `* u8` struct-field store documented in
+// `rc.sfn`/`arena.sfn`). Rather than ship a subtly-broken inline
+// formatter, the port keeps the greppable `"bounds_check failed"`
+// signal and defers value interpolation until either that codegen gap
+// closes or the SfnString formatting surface is reachable from this
+// primitive layer. The reduced message is the accepted contract here
+// and is what `test_runtime_memory_mem.sh` asserts (it only checks
+// that the out-of-range path aborts, not the message body). The full
+// `index=…/length=…` C diagnostic stays available via the legacy
+// `sailfin_runtime_bounds_check` C export for seed-built IR until M3.
 fn sfn_mem_bounds_check(index: i64, length: i64) -> void {
     let mut out_of_range: bool = false;
     if index < 0 { out_of_range = true; }
     if index >= length { out_of_range = true; }
     if out_of_range {
+        // 36 bytes including the trailing newline (the literal has no
+        // NUL in its byte length; `write` takes an explicit count).
         let msg: * u8 = "[stage2-native] bounds_check failed\n" as * u8;
-        write(2, msg, 35 as usize);
+        write(2, msg, 36 as usize);
         abort();
     }
 }
