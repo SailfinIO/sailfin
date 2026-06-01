@@ -99,6 +99,48 @@ extern fn sfn_str_to_cstr(s: * u8) -> * u8;
 
 extern fn sailfin_runtime_get_environ() -> * * u8;
 
+// ── Additional POSIX surface for the capture / handle variants ──
+// (#928, M3). These back `sfn_process_run_capture`,
+// `sfn_process_capture_take_*`, and the `sfn_process_handle_*`
+// family below. Inlined here for the same #306 reason the spawn
+// externs are inlined (see the file header) — the cross-module
+// extern resolver is not yet wired for runtime sfn-sources, so the
+// surface in `runtime/sfn/platform/posix.sfn` is typecheck-only and
+// each consumer module re-declares the externs it actually calls.
+extern fn realloc(ptr: * u8, size: usize) -> * u8;
+
+extern fn memset(ptr: * u8, value: i32, n: usize) -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+extern fn exit(code: i32) -> void;
+
+extern fn pipe(fds: * i32) -> i32;
+
+extern fn read(fd: i32, buf: * u8, count: usize) -> i64;
+
+extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+
+extern fn close(fd: i32) -> i32;
+
+extern fn poll(fds: * u8, nfds: usize, timeout: i32) -> i32;
+
+extern fn posix_spawn_file_actions_init(fa: * u8) -> i32;
+
+extern fn posix_spawn_file_actions_destroy(fa: * u8) -> i32;
+
+extern fn posix_spawn_file_actions_addclose(fa: * u8, fd: i32) -> i32;
+
+extern fn posix_spawn_file_actions_adddup2(fa: * u8, fd: i32, newfd: i32) -> i32;
+
+// POSIX `EINTR` (4 on Linux and macOS) — the only `read`/`write`/
+// `poll` failure that warrants a resume. Read host-portably via the
+// `sailfin_intrinsic_errno_location` sentinel dereferenced by the
+// `sailfin_intrinsic_pointer_read_i32` load (mirrors the discipline
+// in `runtime/sfn/clock.sfn`). Hex folds to 0 on the seed; decimal
+// `4` is used directly.
+let SFN_EINTR: i32 = 4;
+
 fn sfn_process_run(argv: string[]) -> float ![io] {
     let len: i64 = argv.length;
     if len <= 0 { return 127.0; }
@@ -173,4 +215,627 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
         return result;
     }
     return 127.0;
+}
+
+// ===================================================================
+// Capture / handle process variants (#928, M3 — epic #390).
+//
+// Ports `sailfin_runtime_process_{exit,run_capture,
+// capture_take_stdout,capture_take_stderr,handle_write,
+// handle_close_stdin,handle_read_stdout,handle_read_stderr,
+// handle_wait}` from `runtime/native/src/sailfin_runtime.c` to
+// Sailfin-native bodies. `process_spawn_with_env` stays C (M4) and
+// remains the sole producer of the handle the `handle_*` family
+// consumes — see the `SailfinProcessHandle` note below.
+//
+// Same seed-quirk discipline as `sfn_process_run` above: hex literals
+// fold to 0 (decimal masks 127 / 65280 / 65535 inlined); `slots[i] =
+// x` on a raw `* i64` is a no-op so `atomic_store` is used for argv
+// marshalling; `environ` is fetched through
+// `sailfin_runtime_get_environ`. i32 struct-field stores lower
+// correctly on the pinned seed (`getelementptr … i32 0, i32 N` +
+// `store i32`, verified 2026-06-01), which is what lets the
+// `handle_*` bodies persist `-1` fd sentinels into the C-owned
+// handle struct.
+// ===================================================================
+// Stdout/stderr stash for `run_capture` → `capture_take_*`. The C
+// runtime used `__thread char*` TLS; Sailfin has no TLS surface, so
+// two process-global `i64` addresses hold the malloc'd, NUL-
+// terminated capture buffers between the `run_capture` call and the
+// matching `capture_take_*` retrieval. `0` means "no capture pending"
+// (the take helpers then hand back a fresh empty string). Stored as
+// `i64` to dodge the seed's non-`i64` module-mutable-global quirk
+// (matches `runtime/sfn/exception.sfn` / `runtime/sfn/type_meta.sfn`).
+let mut sfn_capture_stdout_addr: i64 = 0;
+
+let mut sfn_capture_stderr_addr: i64 = 0;
+
+// Growable byte buffer: `{ addr, len, cap }`, all `i64`. `addr` is
+// the malloc/realloc'd data pointer (cast to `i64`); `0` means
+// unallocated. Used standalone for `run_capture`'s two streams and
+// overlaid directly onto the C handle struct's stdout/stderr stash
+// triples (see `SailfinProcessHandle`).
+struct GrowBuf {
+    addr: i64;
+    len: i64;
+    cap: i64;
+}
+
+// `pollfd` overlay: `{ int fd; short events; short revents; }` is 8
+// bytes. The two shorts pack into `events_revents`: little-endian
+// low half = `events`, high half = `revents`. Set `events_revents =
+// 1` (POLLIN, revents cleared) before `poll`; read `revents` back as
+// `(events_revents >> 16) & 65535`. Also reused as a `{ rd, wr }`
+// overlay for the two-int buffer `pipe(2)` writes (fd = read end,
+// events_revents = write end).
+struct PollSlot {
+    fd: i32;
+    events_revents: i32;
+}
+
+// Overlay matching the C `SailfinProcessHandle` (sailfin_runtime.c —
+// the struct `process_spawn_with_env` mallocs and returns as an
+// `int64`). The byte layout MUST stay identical to the C struct
+// because `spawn_with_env` (the producer) is still C (M4): the four
+// `i32` fds occupy offsets 0/4/8/12, then six `i64` slots at
+// 16/24/32/40/48/56 (total 64 bytes, no trailing pad). LLVM lays
+// `{ i32, i32, i32, i32, i64, i64, i64, i64, i64, i64 }` out at
+// exactly those offsets. The two `{ buf, len, cap }` triples at
+// offset 16 (stdout) and 40 (stderr) are each a `GrowBuf`, so the
+// drain helpers operate on them through a `* GrowBuf` view computed
+// by address arithmetic. When `spawn_with_env` ports to Sailfin
+// (M4), this struct becomes the canonical owner and the C struct is
+// deleted — keep the two in lockstep until then.
+struct SailfinProcessHandle {
+    pid: i32;
+    stdin_fd: i32;
+    stdout_fd: i32;
+    stderr_fd: i32;
+    stdout_buf: i64;
+    stdout_len: i64;
+    stdout_cap: i64;
+    stderr_buf: i64;
+    stderr_len: i64;
+    stderr_cap: i64;
+}
+
+// Build a NULL-terminated C `char**` argv/envp buffer from a Sailfin
+// `string[]`. `(n + 1)` 8-byte slots; element pointers adopted via
+// the identity-bridge `sfn_str_to_cstr` (see `sfn_process_run`).
+// `atomic_store` is the seed-supported pointer-slot store. An empty
+// array yields a single NULL slot — i.e. an empty argv/env (the
+// os-capsule env contract treats `Env { entries: [] }` as the empty
+// environment, never "inherit"). Returns the null pointer on OOM.
+fn _process_build_cstr_argv(items: string[]) -> * u8 {
+    let n: i64 = items.length;
+    if n < 0 { return 0 as * u8; }
+    let buf_size: i64 = (n + 1) * 8;
+    let buf: * u8 = malloc(buf_size as usize);
+    if buf as i64 == 0 { return buf; }
+    let slots: * i64 = buf as * i64;
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        let element: string = items[i];
+        let s_ptr: * u8 = sfn_str_to_cstr(element as * u8);
+        let slot_ptr: * i64 = slots + i;
+        let s_as_i64: i64 = s_ptr as i64;
+        atomic_store(slot_ptr, s_as_i64);
+        i = i + 1;
+    }
+    let null_slot: * i64 = slots + n;
+    let zero: i64 = 0;
+    atomic_store(null_slot, zero);
+    return buf;
+}
+
+// Read one chunk (≤4096 bytes) from `fd` directly into the tail of
+// `gb`, growing the buffer first so there is always room for the
+// chunk plus a trailing NUL. Returns the `read(2)` result: `> 0`
+// bytes appended, `0` EOF, `< 0` unrecoverable error. EINTR is
+// retried in-place. On OOM returns `-1` without reading. The pre-
+// grow guarantees `gb.len + 1 <= gb.cap` after any successful read,
+// so `_growbuf_take` can always write its terminator.
+fn _growbuf_read_from(gb: * GrowBuf, fd: i32) -> i64 {
+    let chunk: i64 = 4096;
+    let needed: i64 = gb.len + chunk + 1;
+    if needed > gb.cap {
+        let mut new_cap: i64 = gb.cap;
+        if new_cap < 4096 { new_cap = 4096; }
+        loop {
+            if needed <= new_cap { break; }
+            new_cap = new_cap * 2;
+        }
+        let old: * u8 = gb.addr as * u8;
+        let r: * u8 = realloc(old, new_cap as usize);
+        if r as i64 == 0 { return -1; }
+        gb.addr = r as i64;
+        gb.cap = new_cap;
+    }
+    let dst: * u8 = (gb.addr + gb.len) as * u8;
+    loop {
+        let n: i64 = read(fd, dst, chunk as usize);
+        if n < 0 {
+            let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
+            if err == SFN_EINTR {
+                // Interrupted before any byte was read — retry.
+            } else { return n; }
+        } else {
+            if n > 0 { gb.len = gb.len + n; }
+            return n;
+        }
+    }
+}
+
+// NUL-terminate `gb`'s buffer and hand ownership to the caller,
+// resetting `gb` to empty so the producer no longer frees it. An
+// unallocated buffer yields a fresh 1-byte empty string (mirrors the
+// C `_take` / drain helpers). Caller owns the returned pointer.
+fn _growbuf_take(gb: * GrowBuf) -> * u8 {
+    let addr: i64 = gb.addr;
+    let len: i64 = gb.len;
+    if addr == 0 {
+        let e: * u8 = malloc(1 as usize);
+        if e as i64 != 0 { memset(e, 0, 1 as usize); }
+        return e;
+    }
+    let term: * u8 = (addr + len) as * u8;
+    memset(term, 0, 1 as usize);
+    gb.addr = 0;
+    gb.len = 0;
+    gb.cap = 0;
+    return addr as * u8;
+}
+
+// Fresh malloc'd empty C string (`""`). Shared fallback for the take
+// helpers when nothing was captured.
+fn _process_empty_cstr() -> * u8 {
+    let e: * u8 = malloc(1 as usize);
+    if e as i64 != 0 { memset(e, 0, 1 as usize); }
+    return e;
+}
+
+// Concurrently drain two pipe read-ends into `gb_out` / `gb_err`
+// until both hit EOF. Polling both at once (rather than reading one
+// to completion first) is mandatory: a child writing > PIPE_BUF to
+// one stream would otherwise deadlock against the parent blocked on
+// the other. `poll` ignores fds set to `-1`, so closed streams are
+// parked in-slot rather than compacting the array. `pbuf` is a
+// 16-byte two-`pollfd` buffer; each `pollfd` is `{ i32 fd, i32
+// events_revents }` (the `events`/`revents` shorts packed into the
+// low/high halves of the second word — little-endian POSIX). Both
+// fds are closed by the time this returns.
+fn _drain_two_pipes(out_fd_in: i32, err_fd_in: i32, gb_out: * GrowBuf, gb_err: * GrowBuf) -> void {
+    let mut out_fd: i32 = out_fd_in;
+    let mut err_fd: i32 = err_fd_in;
+    let pbuf: * u8 = malloc(16 as usize);
+    if pbuf as i64 == 0 {
+        if out_fd >= 0 { close(out_fd); }
+        if err_fd >= 0 { close(err_fd); }
+        return;
+    }
+    let p0: * PollSlot = pbuf as * PollSlot;
+    let p1: * PollSlot = ((pbuf as i64) + 8) as * PollSlot;
+    loop {
+        if out_fd < 0 {
+            if err_fd < 0 { break; }
+        }
+        p0.fd = out_fd;
+        p0.events_revents = 1;
+        p1.fd = err_fd;
+        p1.events_revents = 1;
+        let pr: i32 = poll(pbuf, 2 as usize, -1);
+        if pr < 0 {
+            let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
+            if err == SFN_EINTR {
+                // Interrupted — re-arm and poll again.
+            } else { break; }
+        } else {
+            if out_fd >= 0 {
+                let r0: i32 = (p0.events_revents >> 16) & 65535;
+                if r0 != 0 {
+                    let n: i64 = _growbuf_read_from(gb_out, out_fd);
+                    if n <= 0 {
+                        close(out_fd);
+                        out_fd = -1;
+                    }
+                }
+            }
+            if err_fd >= 0 {
+                let r1: i32 = (p1.events_revents >> 16) & 65535;
+                if r1 != 0 {
+                    let n: i64 = _growbuf_read_from(gb_err, err_fd);
+                    if n <= 0 {
+                        close(err_fd);
+                        err_fd = -1;
+                    }
+                }
+            }
+        }
+    }
+    // Close any fds still open when the loop exits early (a non-EINTR
+    // `poll` error breaks with one or both fds live). On the normal
+    // both-EOF exit they are already `-1`, so the guards no-op. Mirrors
+    // the C `_sfn_drain_pipes` close-on-return contract — without this
+    // an erroring drain leaks the pipe read ends.
+    if out_fd >= 0 { close(out_fd); }
+    if err_fd >= 0 { close(err_fd); }
+    free(pbuf);
+}
+
+// ── process.exit ───────────────────────────────────────────────
+// Port of `sailfin_runtime_process_exit`. `code` arrives as `double`
+// per the descriptor's `parameter_types: ["double"]`; truncate
+// toward zero and `exit(2)`. Never returns.
+fn sfn_process_exit(code: float) -> void ![io] {
+    let c: i64 = code;
+    exit(c as i32);
+}
+
+// ── process.run_capture ────────────────────────────────────────
+// Port of `sailfin_runtime_process_run_capture`. Runs the child to
+// completion with stdout/stderr piped, stashes both captured streams
+// in the module globals for `capture_take_*`, and returns the exit
+// code (0..255), `128 + signal` for signal death, or `-1` on any
+// setup/spawn/wait failure. `env_flat` is a flat `string[]` of
+// `"KEY=VALUE"` entries; an empty array means the empty environment.
+fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
+    if sfn_capture_stdout_addr != 0 {
+        free(sfn_capture_stdout_addr as * u8);
+        sfn_capture_stdout_addr = 0;
+    }
+    if sfn_capture_stderr_addr != 0 {
+        free(sfn_capture_stderr_addr as * u8);
+        sfn_capture_stderr_addr = 0;
+    }
+
+    let argc: i64 = argv.length;
+    if argc <= 0 { return -1; }
+
+    let child_argv: * u8 = _process_build_cstr_argv(argv);
+    if child_argv as i64 == 0 { return -1; }
+    let child_envp: * u8 = _process_build_cstr_argv(env_flat);
+    if child_envp as i64 == 0 {
+        free(child_argv);
+        return -1;
+    }
+
+    let out_pipe: * PollSlot = malloc(8 as usize) as * PollSlot;
+    if out_pipe as i64 == 0 {
+        free(child_argv);
+        free(child_envp);
+        return -1;
+    }
+    if pipe(out_pipe as * i32) < 0 {
+        free(out_pipe as * u8);
+        free(child_argv);
+        free(child_envp);
+        return -1;
+    }
+    let out_rd: i32 = out_pipe.fd;
+    let out_wr: i32 = out_pipe.events_revents;
+
+    let err_pipe: * PollSlot = malloc(8 as usize) as * PollSlot;
+    if err_pipe as i64 == 0 {
+        close(out_rd);
+        close(out_wr);
+        free(out_pipe as * u8);
+        free(child_argv);
+        free(child_envp);
+        return -1;
+    }
+    if pipe(err_pipe as * i32) < 0 {
+        close(out_rd);
+        close(out_wr);
+        free(out_pipe as * u8);
+        free(err_pipe as * u8);
+        free(child_argv);
+        free(child_envp);
+        return -1;
+    }
+    let err_rd: i32 = err_pipe.fd;
+    let err_wr: i32 = err_pipe.events_revents;
+    free(out_pipe as * u8);
+    free(err_pipe as * u8);
+
+    let actions: * u8 = malloc(256 as usize);
+    if actions as i64 == 0 {
+        close(out_rd);
+        close(out_wr);
+        close(err_rd);
+        close(err_wr);
+        free(child_argv);
+        free(child_envp);
+        return -1;
+    }
+    if posix_spawn_file_actions_init(actions) != 0 {
+        free(actions);
+        close(out_rd);
+        close(out_wr);
+        close(err_rd);
+        close(err_wr);
+        free(child_argv);
+        free(child_envp);
+        return -1;
+    }
+    // Child closes the parent-side read ends, dup2's the write ends
+    // over stdout(1)/stderr(2), then closes the originals.
+    posix_spawn_file_actions_addclose(actions, out_rd);
+    posix_spawn_file_actions_addclose(actions, err_rd);
+    posix_spawn_file_actions_adddup2(actions, out_wr, 1);
+    posix_spawn_file_actions_adddup2(actions, err_wr, 2);
+    posix_spawn_file_actions_addclose(actions, out_wr);
+    posix_spawn_file_actions_addclose(actions, err_wr);
+
+    let mut pid: i32 = 0;
+    let pid_ptr: * i32 = & pid;
+    let first: string = argv[0];
+    let path: * u8 = sfn_str_to_cstr(first as * u8);
+    let argv_pp: * * u8 = child_argv as * * u8;
+    let envp_pp: * * u8 = child_envp as * * u8;
+    let spawn_err: i32 = posix_spawnp(pid_ptr, path, actions, null, argv_pp, envp_pp);
+    posix_spawn_file_actions_destroy(actions);
+    free(actions);
+    if spawn_err != 0 {
+        close(out_rd);
+        close(out_wr);
+        close(err_rd);
+        close(err_wr);
+        free(child_argv);
+        free(child_envp);
+        return -1;
+    }
+
+    // Parent closes the write ends so the read ends see EOF on exit.
+    close(out_wr);
+    close(err_wr);
+    free(child_argv);
+    free(child_envp);
+
+    let gb_out: * GrowBuf = malloc(24 as usize) as * GrowBuf;
+    let gb_err: * GrowBuf = malloc(24 as usize) as * GrowBuf;
+    if gb_out as i64 == 0 {
+        close(out_rd);
+        close(err_rd);
+        free(gb_err as * u8);
+        waitpid(pid, null, 0);
+        return -1;
+    }
+    if gb_err as i64 == 0 {
+        close(out_rd);
+        close(err_rd);
+        free(gb_out as * u8);
+        waitpid(pid, null, 0);
+        return -1;
+    }
+    gb_out.addr = 0;
+    gb_out.len = 0;
+    gb_out.cap = 0;
+    gb_err.addr = 0;
+    gb_err.len = 0;
+    gb_err.cap = 0;
+
+    _drain_two_pipes(out_rd, err_rd, gb_out, gb_err);
+
+    let mut status: i32 = 0;
+    let status_ptr: * i32 = & status;
+    let wait_err: i32 = waitpid(pid, status_ptr, 0);
+
+    let out_cstr: * u8 = _growbuf_take(gb_out);
+    let err_cstr: * u8 = _growbuf_take(gb_err);
+    free(gb_out as * u8);
+    free(gb_err as * u8);
+
+    if wait_err < 0 {
+        free(out_cstr);
+        free(err_cstr);
+        return -1;
+    }
+
+    sfn_capture_stdout_addr = out_cstr as i64;
+    sfn_capture_stderr_addr = err_cstr as i64;
+
+    let sig: i32 = status & 127;
+    if sig == 0 {
+        let masked: i32 = status & 65280;
+        let code: i32 = masked >> 8;
+        return code as i64;
+    }
+    if sig != 127 {
+        let signaled: i32 = 128 + sig;
+        return signaled as i64;
+    }
+    return -1;
+}
+
+// ── process.capture_take_stdout / _stderr ──────────────────────
+// Hand off the captured stream stashed by the preceding
+// `run_capture`, clearing the global so a second take yields empty.
+// A fresh empty string is returned when no capture is pending.
+fn sfn_process_capture_take_stdout() -> * u8 ![io] {
+    let addr: i64 = sfn_capture_stdout_addr;
+    sfn_capture_stdout_addr = 0;
+    if addr == 0 { return _process_empty_cstr(); }
+    return addr as * u8;
+}
+
+fn sfn_process_capture_take_stderr() -> * u8 ![io] {
+    let addr: i64 = sfn_capture_stderr_addr;
+    sfn_capture_stderr_addr = 0;
+    if addr == 0 { return _process_empty_cstr(); }
+    return addr as * u8;
+}
+
+// ── process.handle_write ───────────────────────────────────────
+// Port of `sailfin_runtime_process_handle_write`. Writes the full
+// NUL-terminated `data` to the child's stdin, resuming short writes
+// and EINTR. Returns bytes written, or `-1` on a dead handle / closed
+// stdin / write error.
+fn sfn_process_handle_write(handle_id: i64, data: * u8) -> i64 ![io] {
+    if handle_id == 0 { return -1; }
+    if data as i64 == 0 { return -1; }
+    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let fd: i32 = h.stdin_fd;
+    if fd < 0 { return -1; }
+    let total: i64 = strlen(data) as i64;
+    let mut written: i64 = 0;
+    loop {
+        if written >= total { break; }
+        let dst: * u8 = ((data as i64) + written) as * u8;
+        let remaining: i64 = total - written;
+        let n: i64 = write(fd, dst, remaining as usize);
+        if n < 0 {
+            let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
+            if err == SFN_EINTR {
+                // Interrupted before any byte — retry the same span.
+            } else { return -1; }
+        } else { written = written + n; }
+    }
+    return written;
+}
+
+// ── process.handle_close_stdin ─────────────────────────────────
+// Close the child's stdin so a reader blocked on it sees EOF.
+// Persists the `-1` sentinel so `handle_wait` does not double-close.
+fn sfn_process_handle_close_stdin(handle_id: i64) -> void ![io] {
+    if handle_id == 0 { return; }
+    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let fd: i32 = h.stdin_fd;
+    if fd < 0 { return; }
+    close(fd);
+    h.stdin_fd = -1;
+}
+
+// Concurrently drain the handle's stdout/stderr into its stash
+// `GrowBuf`s until the requested stream hits EOF, then hand that
+// stream off. The non-requested stream's bytes stay stashed in the
+// handle for its matching `handle_read_*` call. Port of the C
+// `_sfn_handle_drain_one`.
+fn _handle_drain_one(h: * SailfinProcessHandle, want_stdout: bool) -> * u8 {
+    let gb_out: * GrowBuf = ((h as i64) + 16) as * GrowBuf;
+    let gb_err: * GrowBuf = ((h as i64) + 40) as * GrowBuf;
+    let pbuf: * u8 = malloc(16 as usize);
+    if pbuf as i64 != 0 {
+        let p0: * PollSlot = pbuf as * PollSlot;
+        let p1: * PollSlot = ((pbuf as i64) + 8) as * PollSlot;
+        loop {
+            let out_fd: i32 = h.stdout_fd;
+            let err_fd: i32 = h.stderr_fd;
+            let mut done: bool = false;
+            if want_stdout {
+                if out_fd < 0 { done = true; }
+            } else {
+                if err_fd < 0 { done = true; }
+            }
+            if done { break; }
+            if out_fd < 0 {
+                if err_fd < 0 { break; }
+            }
+            p0.fd = out_fd;
+            p0.events_revents = 1;
+            p1.fd = err_fd;
+            p1.events_revents = 1;
+            let pr: i32 = poll(pbuf, 2 as usize, -1);
+            if pr < 0 {
+                let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
+                if err == SFN_EINTR {
+                    // Interrupted — re-arm and poll again.
+                } else { break; }
+            } else {
+                if out_fd >= 0 {
+                    let r0: i32 = (p0.events_revents >> 16) & 65535;
+                    if r0 != 0 {
+                        let n: i64 = _growbuf_read_from(gb_out, out_fd);
+                        if n <= 0 {
+                            close(out_fd);
+                            h.stdout_fd = -1;
+                        }
+                    }
+                }
+                if err_fd >= 0 {
+                    let r1: i32 = (p1.events_revents >> 16) & 65535;
+                    if r1 != 0 {
+                        let n: i64 = _growbuf_read_from(gb_err, err_fd);
+                        if n <= 0 {
+                            close(err_fd);
+                            h.stderr_fd = -1;
+                        }
+                    }
+                }
+            }
+        }
+        free(pbuf);
+    }
+    if want_stdout { return _growbuf_take(gb_out); }
+    return _growbuf_take(gb_err);
+}
+
+// ── process.handle_read_stdout / _stderr ───────────────────────
+fn sfn_process_handle_read_stdout(handle_id: i64) -> * u8 ![io] {
+    if handle_id == 0 { return _process_empty_cstr(); }
+    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    return _handle_drain_one(h, true);
+}
+
+fn sfn_process_handle_read_stderr(handle_id: i64) -> * u8 ![io] {
+    if handle_id == 0 { return _process_empty_cstr(); }
+    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    return _handle_drain_one(h, false);
+}
+
+// ── process.handle_wait ────────────────────────────────────────
+// Close any still-open fds, reap the child, free the stash buffers
+// and the handle itself, and return the exit code (0..255),
+// `128 + signal`, `127` for stop/continue, or `-1` if the handle is
+// dead / `waitpid` fails. Port of `sailfin_runtime_process_handle_wait`.
+fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] {
+    if handle_id == 0 { return -1; }
+    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let in_fd: i32 = h.stdin_fd;
+    if in_fd >= 0 {
+        close(in_fd);
+        h.stdin_fd = -1;
+    }
+    let out_fd: i32 = h.stdout_fd;
+    if out_fd >= 0 {
+        close(out_fd);
+        h.stdout_fd = -1;
+    }
+    let err_fd: i32 = h.stderr_fd;
+    if err_fd >= 0 {
+        close(err_fd);
+        h.stderr_fd = -1;
+    }
+
+    let pid: i32 = h.pid;
+    let mut status: i32 = 0;
+    let status_ptr: * i32 = & status;
+    let wait_err: i32 = waitpid(pid, status_ptr, 0);
+    let mut result: i64 = -1;
+    if wait_err >= 0 {
+        let sig: i32 = status & 127;
+        if sig == 0 {
+            let masked: i32 = status & 65280;
+            let code: i32 = masked >> 8;
+            result = code as i64;
+        } else {
+            if sig != 127 {
+                let signaled: i32 = 128 + sig;
+                result = signaled as i64;
+            } else { result = 127; }
+        }
+    }
+
+    let gb_out: * GrowBuf = ((h as i64) + 16) as * GrowBuf;
+    let gb_err: * GrowBuf = ((h as i64) + 40) as * GrowBuf;
+    if gb_out.addr != 0 {
+        free(gb_out.addr as * u8);
+        gb_out.addr = 0;
+    }
+    if gb_err.addr != 0 {
+        free(gb_err.addr as * u8);
+        gb_err.addr = 0;
+    }
+    free(h as * u8);
+    return result;
 }
