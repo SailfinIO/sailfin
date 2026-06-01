@@ -1137,6 +1137,15 @@ ci-cross-windows:
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
 		-c "$$WIN_OBJ/runtime/clock.ll" -o "$$WIN_OBJ/runtime/clock.o"; \
 	\
+	echo "[cross-windows] emitting + compiling arena (Sailfin-native arena mark/rewind, #937)..."; \
+	$(NATIVE_OUT) emit -o "$$WIN_OBJ/runtime/arena.ll" llvm runtime/sfn/memory/arena.sfn >/dev/null; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+		-c "$$WIN_OBJ/runtime/arena.ll" -o "$$WIN_OBJ/runtime/arena.o"; \
+	echo "[cross-windows] emitting + compiling rc (Sailfin-native reference counting)..."; \
+	$(NATIVE_OUT) emit -o "$$WIN_OBJ/runtime/rc.ll" llvm runtime/sfn/memory/rc.sfn >/dev/null; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+		-c "$$WIN_OBJ/runtime/rc.ll" -o "$$WIN_OBJ/runtime/rc.o"; \
+	\
 	echo "[cross-windows] compiling type_meta (Sailfin-native type-metadata registry, M2.10 #402)..."; \
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
 		-c "$$TYPE_META_LL" -o "$$WIN_OBJ/runtime/type_meta.o"; \
@@ -1210,6 +1219,8 @@ ci-cross-windows:
 		"$$WIN_OBJ/runtime/string.o" \
 		"$$WIN_OBJ/runtime/array.o" \
 		"$$WIN_OBJ/runtime/mem.o" \
+		"$$WIN_OBJ/runtime/arena.o" \
+		"$$WIN_OBJ/runtime/rc.o" \
 		$$SHIM_O \
 		-lm -lpthread -lws2_32; \
 	\
@@ -1268,6 +1279,14 @@ ci-cross-windows:
 	if [ -f "$$WIN_OBJ/runtime/mem.o" ]; then \
 		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
 		cp -f "$$WIN_OBJ/runtime/mem.o" "$$INSTALLER_DIR/runtime/native/obj/mem.o"; \
+	fi; \
+	if [ -f "$$WIN_OBJ/runtime/arena.o" ]; then \
+		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+		cp -f "$$WIN_OBJ/runtime/arena.o" "$$INSTALLER_DIR/runtime/native/obj/arena.o"; \
+	fi; \
+	if [ -f "$$WIN_OBJ/runtime/rc.o" ]; then \
+		mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
+		cp -f "$$WIN_OBJ/runtime/rc.o" "$$INSTALLER_DIR/runtime/native/obj/rc.o"; \
 	fi; \
 	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
 	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"
