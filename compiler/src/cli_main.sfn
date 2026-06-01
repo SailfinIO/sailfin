@@ -75,7 +75,7 @@ import {
     print_llvm_with_module,
     write_native_text_file_with_module
 } from "./main";
-import { RuntimeCapsuleArtifacts } from "./runtime_capsule_resolver";
+import { RuntimeCapsuleArtifacts, runtime_capsule_from_root } from "./runtime_capsule_resolver";
 import {
     toml_get_build_kind,
     toml_get_entry,
@@ -653,391 +653,29 @@ fn _do_determinism_check(pass1_out: string, is_library: boolean, cap_capsule_nam
     return 1;
 }
 
+// Issue #940: validate the declarative runtime bundle by the
+// presence of `<root>/native/capsule.toml` (the manifest the
+// implicit runtime-capsule resolver reads) alongside the C runtime
+// source, include root, and global IR. Previously this probed for a
+// Makefile-staged `prelude.o` via `_runtime_prelude_path`; with the
+// prelude now emitted from source via the capsule's `prelude-entry`,
+// the manifest is the load-bearing artifact, and `_runtime_prelude_path`
+// is gone.
 fn _runtime_bundle_exists(root: string) -> boolean ![io] {
     if root.length == 0 { return false; }
     let include_dir = _path_join(root, "native/include");
     let runtime_src = _path_join(root, "native/src/sailfin_runtime.c");
     let runtime_ir = _path_join(root, "native/ir/runtime_globals.ll");
-    let prelude_obj = _runtime_prelude_path(root);
+    let manifest = _path_join(root, "native/capsule.toml");
     let mut _bundle_ok: boolean = false;
     if fs.exists(include_dir) {
         if fs.exists(runtime_src) {
             if fs.exists(runtime_ir) {
-                if prelude_obj.length > 0 { _bundle_ok = true; }
+                if fs.exists(manifest) { _bundle_ok = true; }
             }
         }
     }
     return _bundle_ok;
-}
-
-fn _runtime_prelude_path(root: string) -> string ![io] {
-    let bundled = _path_join(root, "native/obj/prelude.o");
-    if fs.exists(bundled) { return bundled; }
-    let bundled_nested = _path_join(root, "native/obj/runtime/prelude.o");
-    if fs.exists(bundled_nested) { return bundled_nested; }
-    let parent = _dirname(root);
-    let fallback = _path_join(parent, "build/native/obj/prelude.o");
-    if fs.exists(fallback) { return fallback; }
-    let fallback_nested = _path_join(parent, "build/native/obj/runtime/prelude.o");
-    if fs.exists(fallback_nested) { return fallback_nested; }
-    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/prelude.o");
-    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
-    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/prelude.o");
-    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
-    return "";
-}
-
-// PR 2 of the sleep migration (issue #397) deleted the C
-// `sfn_sleep` trampoline from `runtime/native/src/sailfin_runtime.c`.
-// `@sfn_sleep` now lives only in the Sailfin module
-// `runtime/sfn/clock.sfn`; the legacy `sfn run` / `sfn build` link
-// path needs the staged `.o` to resolve the symbol. Search order
-// mirrors `_runtime_prelude_path` so a bundled install and an
-// in-tree dev build both pick the right file. Returns `""` when
-// the artifact is missing — in practice the link will then fail
-// with "undefined reference to `sfn_sleep`", because the prelude
-// is always linked and its `sleep(milliseconds)` wrapper emits a
-// `call void @sfn_sleep(...)` regardless of whether the user
-// program itself calls `sleep()`. The only situation where an
-// empty return is benign is when linking against a legacy runtime
-// bundle that still defines `sfn_sleep` in `sailfin_runtime.c`
-// (i.e. a runtime that predates this PR); callers don't try to
-// detect that and let `clang`'s linker surface the error.
-fn _runtime_clock_path(root: string) -> string ![io] {
-    let bundled = _path_join(root, "native/obj/clock.o");
-    if fs.exists(bundled) { return bundled; }
-    let bundled_nested = _path_join(root, "native/obj/runtime/clock.o");
-    if fs.exists(bundled_nested) { return bundled_nested; }
-    let parent = _dirname(root);
-    let fallback = _path_join(parent, "build/native/obj/clock.o");
-    if fs.exists(fallback) { return fallback; }
-    let fallback_nested = _path_join(parent, "build/native/obj/runtime/clock.o");
-    if fs.exists(fallback_nested) { return fallback_nested; }
-    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/clock.o");
-    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
-    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/clock.o");
-    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
-    return "";
-}
-
-// M2.9 (issue #405) mirrors the M2.11 clock migration above: the
-// `process.run` descriptor's `native_signature` now points at
-// `@sfn_process_run`, defined in `runtime/sfn/process.sfn`. The
-// Sailfin-native function takes over the `posix_spawnp` + `waitpid`
-// dance the C trampoline `sailfin_runtime_process_run_v2` used to
-// drive. The legacy `sfn run` / `sfn build` link path (this
-// function's caller, `_clang_compile_runtime_objects`) needs the
-// staged `.o` to resolve `@sfn_process_run`; the runtime-capsule
-// path reaches the source through `runtime/native/capsule.toml`'s
-// `sfn-sources` array instead. Search order mirrors
-// `_runtime_clock_path` so bundled installs and in-tree dev builds
-// both find the staged object. Empty return surfaces as
-// "undefined reference to `sfn_process_run`" at link time once any
-// user code (or the runtime helpers' vestigial `declare`) reaches
-// the symbol — same fail-loud contract as the clock path.
-fn _runtime_process_path(root: string) -> string ![io] {
-    let bundled = _path_join(root, "native/obj/process.o");
-    if fs.exists(bundled) { return bundled; }
-    let bundled_nested = _path_join(root, "native/obj/runtime/process.o");
-    if fs.exists(bundled_nested) { return bundled_nested; }
-    let parent = _dirname(root);
-    let fallback = _path_join(parent, "build/native/obj/process.o");
-    if fs.exists(fallback) { return fallback; }
-    let fallback_nested = _path_join(parent, "build/native/obj/runtime/process.o");
-    if fs.exists(fallback_nested) { return fallback_nested; }
-    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/process.o");
-    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
-    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/process.o");
-    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
-    return "";
-}
-
-// M2.7b (issue #404) mirrors the M2.11 clock and M2.9 process
-// migrations above: the compiler-emission migration in
-// `compiler/src/llvm/lowering/instructions_try.sfn` now emits inline
-// `sfn_exception_push_frame` + `setjmp` + `sfn_exception_pop_frame`
-// at every user try block, and `sfn_throw` (longjmp) at every throw
-// site. Those symbols are defined in the Sailfin-native module
-// `runtime/sfn/exception.sfn`; the legacy `sfn run` / `sfn build`
-// link path (this function's caller, `_clang_compile_runtime_objects`)
-// needs the staged `.o` to resolve them. The runtime-capsule path
-// reaches the source through `runtime/native/capsule.toml`'s
-// `sfn-sources` array instead. Search order mirrors
-// `_runtime_clock_path` so bundled installs and in-tree dev builds
-// both find the staged object. Empty return surfaces as "undefined
-// reference to `sfn_exception_push_frame`" (and friends) at link
-// time once any user code with a `try` block reaches the linker —
-// same fail-loud contract as the clock path.
-fn _runtime_exception_path(root: string) -> string ![io] {
-    let bundled = _path_join(root, "native/obj/exception.o");
-    if fs.exists(bundled) { return bundled; }
-    let bundled_nested = _path_join(root, "native/obj/runtime/exception.o");
-    if fs.exists(bundled_nested) { return bundled_nested; }
-    let parent = _dirname(root);
-    let fallback = _path_join(parent, "build/native/obj/exception.o");
-    if fs.exists(fallback) { return fallback; }
-    let fallback_nested = _path_join(parent, "build/native/obj/runtime/exception.o");
-    if fs.exists(fallback_nested) { return fallback_nested; }
-    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/exception.o");
-    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
-    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/exception.o");
-    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
-    return "";
-}
-
-// Issue #468 (M5.3 prerequisite per epic #451) ships the Sailfin
-// equivalents of the C-driver's `_resolve_runtime_root(argv0)` and
-// per-OS executable-path helpers, retired in M5.5 / #473. The
-// module `runtime/sfn/platform/exec.sfn` exports `@binary_dir`,
-// `@exe_path`, and `@resolve_runtime_root`; the legacy `sfn run` /
-// `sfn build` link path (this function's caller,
-// `_clang_compile_runtime_objects`) needs the staged `.o` to
-// resolve them once any user program reaches the symbols. The
-// runtime-capsule path reaches exec.sfn through `runtime/native/
-// capsule.toml`'s `sfn-sources` array instead. The compiler's own
-// `fn main` (`cli_main.sfn`) is the load-bearing internal caller
-// after #473 — a missing staged artifact surfaces at link time as
-// "undefined reference to `exe_path`". Search order mirrors
-// `_runtime_clock_path` so bundled installs and in-tree dev builds
-// both find the staged object.
-fn _runtime_exec_path(root: string) -> string ![io] {
-    let bundled = _path_join(root, "native/obj/exec.o");
-    if fs.exists(bundled) { return bundled; }
-    let bundled_nested = _path_join(root, "native/obj/runtime/exec.o");
-    if fs.exists(bundled_nested) { return bundled_nested; }
-    let parent = _dirname(root);
-    let fallback = _path_join(parent, "build/native/obj/exec.o");
-    if fs.exists(fallback) { return fallback; }
-    let fallback_nested = _path_join(parent, "build/native/obj/runtime/exec.o");
-    if fs.exists(fallback_nested) { return fallback_nested; }
-    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/exec.o");
-    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
-    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/exec.o");
-    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
-    return "";
-}
-
-// M2.10 (issue #402) mirrors the clock / process / exception / exec
-// migrations above: the descriptor flips in
-// `compiler/src/llvm/runtime_helpers.sfn` route the seven type-meta
-// helpers (`sfn_is_*` / `sfn_resolve_type` / `sfn_instance_of`) to
-// the Sailfin module `runtime/sfn/type_meta.sfn`, and every emitted
-// module's `@__sfn_module_type_init__*` constructor calls
-// `@sfn_type_register` unconditionally. The legacy `sfn run` /
-// `sfn build` link path (this function's caller,
-// `_clang_compile_runtime_objects`) needs the staged `.o` to
-// resolve those symbols. The runtime-capsule path reaches the
-// source through `runtime/native/capsule.toml`'s `sfn-sources`
-// array instead. Search order mirrors `_runtime_clock_path` so
-// bundled installs and in-tree dev builds both find the staged
-// object. Empty return becomes fail-loud at link time once any
-// emitted module references the ctor (i.e. every non-trivial
-// program), so the missing staged artifact surfaces immediately.
-fn _runtime_type_meta_path(root: string) -> string ![io] {
-    let bundled = _path_join(root, "native/obj/type_meta.o");
-    if fs.exists(bundled) { return bundled; }
-    let bundled_nested = _path_join(root, "native/obj/runtime/type_meta.o");
-    if fs.exists(bundled_nested) { return bundled_nested; }
-    let parent = _dirname(root);
-    let fallback = _path_join(parent, "build/native/obj/type_meta.o");
-    if fs.exists(fallback) { return fallback; }
-    let fallback_nested = _path_join(parent, "build/native/obj/runtime/type_meta.o");
-    if fs.exists(fallback_nested) { return fallback_nested; }
-    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/type_meta.o");
-    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
-    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/type_meta.o");
-    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
-    return "";
-}
-
-// M3.1a (issue #814, epic #390) mirrors the M2.x clock / process /
-// exception / exec / type_meta migrations above: the descriptor
-// flips in `compiler/src/llvm/runtime_helpers.sfn` route
-// `fs.readFile` / `fs.writeFile` / `fs.appendFile` to
-// `sfn_fs_read_file` / `sfn_fs_write_file` / `sfn_fs_append_file`,
-// defined in `runtime/sfn/adapters/filesystem.sfn`. The legacy
-// `sfn run` / `sfn build` link path (this function's caller,
-// `_clang_compile_runtime_objects`) needs the staged `.o` to
-// resolve those symbols whenever a user program reaches an `fs.*`
-// call site. The runtime-capsule path reaches filesystem.sfn
-// through `runtime/native/capsule.toml`'s `sfn-sources` array
-// instead. Search order mirrors `_runtime_clock_path` so bundled
-// installs and in-tree dev builds both find the staged object.
-// Empty return becomes fail-loud at link time as "undefined
-// reference to `sfn_fs_read_file`" the moment any user program
-// touches `fs.readFile` — same fail-loud contract as the clock
-// / process / exception / type_meta paths.
-fn _runtime_filesystem_path(root: string) -> string ![io] {
-    let bundled = _path_join(root, "native/obj/filesystem.o");
-    if fs.exists(bundled) { return bundled; }
-    let bundled_nested = _path_join(root, "native/obj/runtime/filesystem.o");
-    if fs.exists(bundled_nested) { return bundled_nested; }
-    let parent = _dirname(root);
-    let fallback = _path_join(parent, "build/native/obj/filesystem.o");
-    if fs.exists(fallback) { return fallback; }
-    let fallback_nested = _path_join(parent, "build/native/obj/runtime/filesystem.o");
-    if fs.exists(fallback_nested) { return fallback_nested; }
-    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/filesystem.o");
-    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
-    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/filesystem.o");
-    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
-    return "";
-}
-
-// M3 (issue #818, epic #390) mirrors the M3.1a filesystem migration
-// above: the descriptor flips in
-// `compiler/src/llvm/runtime_helpers.sfn` route `http.get_body` /
-// `http.post_json` / `http.download` (and the `http_get` /
-// `http_post` aliases) to `sfn_http_get` / `sfn_http_post` /
-// `sfn_http_post2` / `sfn_http_download`, defined in
-// `runtime/sfn/adapters/http.sfn` (the pure-Sailfin socket client
-// that replaces the curl subprocess path, HTTP only — no TLS for
-// v0). The `sfn run` / `sfn build` link path (this function's
-// caller, `_clang_compile_runtime_objects`) needs the staged `.o`
-// to resolve those symbols whenever a user program reaches an
-// `http.*` call site. The runtime-capsule path reaches http.sfn
-// through `runtime/native/capsule.toml`'s `sfn-sources` array
-// instead. Search order mirrors `_runtime_filesystem_path` so
-// bundled installs and in-tree dev builds both find the staged
-// object. Empty return becomes fail-loud at link time as "undefined
-// reference to `sfn_http_get`" the moment any user program touches
-// `http.get_body` — same fail-loud contract as the filesystem path.
-fn _runtime_http_path(root: string) -> string ![io] {
-    let bundled = _path_join(root, "native/obj/http.o");
-    if fs.exists(bundled) { return bundled; }
-    let bundled_nested = _path_join(root, "native/obj/runtime/http.o");
-    if fs.exists(bundled_nested) { return bundled_nested; }
-    let parent = _dirname(root);
-    let fallback = _path_join(parent, "build/native/obj/http.o");
-    if fs.exists(fallback) { return fallback; }
-    let fallback_nested = _path_join(parent, "build/native/obj/runtime/http.o");
-    if fs.exists(fallback_nested) { return fallback_nested; }
-    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/http.o");
-    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
-    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/http.o");
-    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
-    return "";
-}
-
-// #925 (sub-issue of #390) mirrors the M3.1a / M3 filesystem & http
-// migrations above: the descriptor flip in
-// `compiler/src/llvm/runtime_helpers.sfn` routes the `@logExecution`
-// decorator emission to `sfn_log_execution`, defined in
-// `runtime/sfn/io.sfn` (the Cat-C port of the legacy C
-// `sailfin_runtime_log_execution`). The `sfn run` / `sfn build` link
-// path (this function's caller, `_clang_compile_runtime_objects`)
-// needs the staged `.o` to resolve the symbol whenever a user program
-// reaches a `@logExecution` call site. The runtime-capsule path
-// reaches io.sfn through `runtime/native/capsule.toml`'s `sfn-sources`
-// array instead. Search order mirrors `_runtime_filesystem_path` so
-// bundled installs and in-tree dev builds both find the staged
-// object. Empty return becomes fail-loud at link time as "undefined
-// reference to `sfn_log_execution`" the moment any user program uses
-// `@logExecution` — same fail-loud contract as the filesystem path.
-fn _runtime_io_path(root: string) -> string ![io] {
-    let bundled = _path_join(root, "native/obj/io.o");
-    if fs.exists(bundled) { return bundled; }
-    let bundled_nested = _path_join(root, "native/obj/runtime/io.o");
-    if fs.exists(bundled_nested) { return bundled_nested; }
-    let parent = _dirname(root);
-    let fallback = _path_join(parent, "build/native/obj/io.o");
-    if fs.exists(fallback) { return fallback; }
-    let fallback_nested = _path_join(parent, "build/native/obj/runtime/io.o");
-    if fs.exists(fallback_nested) { return fallback_nested; }
-    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/io.o");
-    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
-    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/io.o");
-    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
-    return "";
-}
-
-// #925 (sub-issue of #390): companion to `_runtime_io_path` above for
-// the Cat-C string ports. The descriptor flip routes
-// `runtime_to_debug_string_fn` to `sfn_to_debug_string` and the three
-// char-predicate descriptors to `sfn_str_is_digit` /
-// `sfn_str_is_whitespace` / `sfn_str_is_alpha`, all defined in
-// `runtime/sfn/string.sfn`. The legacy link path needs the staged
-// `.o` to resolve `sfn_to_debug_string` whenever a user program
-// reaches `to_debug_string` (live in prelude struct formatting). The
-// runtime-capsule path reaches string.sfn through
-// `runtime/native/capsule.toml`'s `sfn-sources` array instead. Search
-// order mirrors `_runtime_filesystem_path`. Empty return becomes
-// fail-loud at link time as "undefined reference to
-// `sfn_to_debug_string`" the moment any user program formats a struct.
-fn _runtime_string_path(root: string) -> string ![io] {
-    let bundled = _path_join(root, "native/obj/string.o");
-    if fs.exists(bundled) { return bundled; }
-    let bundled_nested = _path_join(root, "native/obj/runtime/string.o");
-    if fs.exists(bundled_nested) { return bundled_nested; }
-    let parent = _dirname(root);
-    let fallback = _path_join(parent, "build/native/obj/string.o");
-    if fs.exists(fallback) { return fallback; }
-    let fallback_nested = _path_join(parent, "build/native/obj/runtime/string.o");
-    if fs.exists(fallback_nested) { return fallback_nested; }
-    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/string.o");
-    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
-    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/string.o");
-    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
-    return "";
-}
-
-// #925 (sub-issue of #390): companion to `_runtime_io_path` /
-// `_runtime_string_path` for the array-HOF routing. The descriptor
-// flip routes `runtime_array_map_fn` / `runtime_array_filter_fn` /
-// `runtime_array_reduce_fn` to the `sfn_array_sfn_map` /
-// `sfn_array_sfn_filter` / `sfn_array_sfn_reduce` stub exports in
-// `runtime/sfn/array.sfn` (real closure-backed semantics are M4). The
-// prelude's `array_map` / `array_filter` / `array_reduce` wrappers
-// reference those symbols, so prelude.o carries an undefined reference
-// to each — the legacy link path needs the staged `.o` to resolve
-// them. The runtime-capsule path reaches array.sfn through
-// `runtime/native/capsule.toml`'s `sfn-sources` array instead. Search
-// order mirrors `_runtime_filesystem_path`. Empty return becomes
-// fail-loud at link time as "undefined reference to
-// `sfn_array_sfn_filter`".
-fn _runtime_array_path(root: string) -> string ![io] {
-    let bundled = _path_join(root, "native/obj/array.o");
-    if fs.exists(bundled) { return bundled; }
-    let bundled_nested = _path_join(root, "native/obj/runtime/array.o");
-    if fs.exists(bundled_nested) { return bundled_nested; }
-    let parent = _dirname(root);
-    let fallback = _path_join(parent, "build/native/obj/array.o");
-    if fs.exists(fallback) { return fallback; }
-    let fallback_nested = _path_join(parent, "build/native/obj/runtime/array.o");
-    if fs.exists(fallback_nested) { return fallback_nested; }
-    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/array.o");
-    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
-    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/array.o");
-    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
-    return "";
-}
-
-// #927 (sub-issue of #390): companion resolver for the narrow memory
-// primitives. The descriptor flip routes `get_field` / `copy_bytes` /
-// `runtime.bounds_check` / `runtime.free` to the `sfn_mem_*` exports
-// in `runtime/sfn/memory/mem.sfn`, so user IR + prelude.o now carry
-// undefined references to `@sfn_mem_get_field` / `@sfn_mem_copy_bytes`
-// / `@sfn_mem_bounds_check` / `@sfn_mem_free`. The legacy `sfn build`
-// / `sfn run` link path needs the staged `mem.o` to resolve them; the
-// runtime-capsule path reaches `mem.sfn` through
-// `runtime/native/capsule.toml`'s `sfn-sources` array instead. Search
-// order mirrors `_runtime_array_path`. Empty return becomes fail-loud
-// at link time as "undefined reference to `sfn_mem_bounds_check`".
-fn _runtime_mem_path(root: string) -> string ![io] {
-    let bundled = _path_join(root, "native/obj/mem.o");
-    if fs.exists(bundled) { return bundled; }
-    let bundled_nested = _path_join(root, "native/obj/runtime/mem.o");
-    if fs.exists(bundled_nested) { return bundled_nested; }
-    let parent = _dirname(root);
-    let fallback = _path_join(parent, "build/native/obj/mem.o");
-    if fs.exists(fallback) { return fallback; }
-    let fallback_nested = _path_join(parent, "build/native/obj/runtime/mem.o");
-    if fs.exists(fallback_nested) { return fallback_nested; }
-    let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/mem.o");
-    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
-    let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/mem.o");
-    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
-    return "";
 }
 
 // Last `/`-separated segment of a path. Returns the input itself
@@ -1301,6 +939,57 @@ fn _resolve_self_path(binary_dir: string) -> string ![io] {
 // `_clang_compile_runtime_capsule_objects` covers the dormant
 // case (which is every build today, since
 // `runtime/native/capsule.toml` deliberately omits `sfn-sources`).
+// Emit a single runtime `.sfn` module to a link-ready `.o` via the
+// child compiler, returning the `.o` path (or `""` on failure).
+// Shared by the `sfn_sources` loop and the `prelude-entry` consumer
+// below so both take the byte-identical emit path: same env-var
+// clearing, same cache-key shape (`cap_prefix + basename + opt_flag`),
+// same `clang -c`. Keeping the prelude on this exact path matters for
+// self-host stability (#940 Risk R2) — during `make compile` the
+// runtime capsule's `prelude-entry` is emitted by the *current*
+// compiler, so any drift between the two emit paths would surface as
+// a stage2≠stage3 mismatch.
+fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string) -> string ![io] {
+    let slug = module_name_from_path(src);
+    let ll_path = _path_join(out_dir, cap_prefix + _path_basename(src)
+        + opt_flag
+        + ".ll");
+    let obj_path = _path_join(out_dir, cap_prefix + _path_basename(src)
+        + opt_flag
+        + ".o");
+    if !fs.exists(ll_path) {
+        // Build the `sh -c` argv. Each `KEY= ` clears that toggle for
+        // the child; everything else inherits from the parent (PATH,
+        // HOME, PWD, etc.). The shell-quote escaping here protects
+        // against paths that contain spaces or shell metacharacters.
+        let cmd = "SAILFIN_TRACE_EMIT= SAILFIN_SKIP_TYPECHECK= SAILFIN_TRACE_TEST_RUNNER= SAILFIN_DUMP_TEST_SOURCES= SAILFIN_NO_LEGACY_PROBE=1 "
+            + _shell_single_quote_arg(self_path)
+            + " emit --module-name "
+            + _shell_single_quote_arg(slug)
+            + " -o "
+            + _shell_single_quote_arg(ll_path)
+            + " llvm "
+            + _shell_single_quote_arg(src);
+        let rc = process.run(["sh", "-c", cmd]);
+        if rc != 0 {
+            print("sfn build: failed to emit runtime sfn-source " + src
+                + " (child exit="
+                + number_to_string(rc)
+                + ")");
+            return "";
+        }
+    }
+    if !fs.exists(obj_path) {
+        let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", ll_path, "-o", obj_path]);
+        if rc2 != 0 {
+            print("sfn build: failed to compile runtime sfn-source object "
+                + obj_path);
+            return "";
+        }
+    }
+    return obj_path;
+}
+
 fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string) -> RuntimeLinkInputs ![io] {
     let mut objects: string[] = [];
     let empty_libs: string[] = [];
@@ -1312,6 +1001,9 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         };
     }
     // Quick path: nothing to do if no capsule declares sfn_sources.
+    // (`prelude-entry` is handled separately by
+    // `assemble_runtime_capsule_link_inputs`, independent of the
+    // disable gate above — see #940.)
     let mut has_any: boolean = false;
     let mut probe: int = 0;
     loop {
@@ -1346,44 +1038,8 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            let slug = module_name_from_path(src);
-            let ll_path = _path_join(out_dir, cap_prefix + _path_basename(src)
-                + opt_flag
-                + ".ll");
-            let obj_path = _path_join(out_dir, cap_prefix + _path_basename(src)
-                + opt_flag
-                + ".o");
-            if !fs.exists(ll_path) {
-                // Build the `sh -c` argv. Each `KEY= ` clears that
-                // toggle for the child; everything else inherits
-                // from the parent (PATH, HOME, PWD, etc.). The
-                // shell-quote escaping here protects against paths
-                // that contain spaces or shell metacharacters.
-                let cmd = "SAILFIN_TRACE_EMIT= SAILFIN_SKIP_TYPECHECK= SAILFIN_TRACE_TEST_RUNNER= SAILFIN_DUMP_TEST_SOURCES= SAILFIN_NO_LEGACY_PROBE=1 "
-                    + _shell_single_quote_arg(self_path)
-                    + " emit --module-name "
-                    + _shell_single_quote_arg(slug)
-                    + " -o "
-                    + _shell_single_quote_arg(ll_path)
-                    + " llvm "
-                    + _shell_single_quote_arg(src);
-                let rc = process.run(["sh", "-c", cmd]);
-                if rc != 0 {
-                    print("sfn build: failed to emit runtime sfn-source " + src
-                        + " (child exit="
-                        + number_to_string(rc)
-                        + ")");
-                    return _failed_runtime_link_inputs();
-                }
-            }
-            if !fs.exists(obj_path) {
-                let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", ll_path, "-o", obj_path]);
-                if rc2 != 0 {
-                    print("sfn build: failed to compile runtime sfn-source object "
-                        + obj_path);
-                    return _failed_runtime_link_inputs();
-                }
-            }
+            let obj_path = _emit_runtime_sfn_to_obj(self_path, cap_prefix, src, out_dir, opt_flag);
+            if obj_path.length == 0 { return _failed_runtime_link_inputs(); }
             objects.push(obj_path);
             si += 1;
         }
@@ -1396,115 +1052,81 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
     };
 }
 
-fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_flag: string) -> string[] ![io] {
-    // Build (or reuse) cached runtime object files so repeated `test` invocations
-    // don't recompile the runtime C sources per test file.
-    //
-    // Return shape: `[runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj, http_obj, io_obj, string_obj, array_obj, mem_obj]`.
-    // `mem_obj` (#927) carries the narrow memory primitives
-    // (`sfn_mem_get_field` / `_copy_bytes` / `_bounds_check` / `_free`)
-    // ported from `sailfin_runtime.c`; same empty-tolerated contract as
-    // the clock/http/io/string/array slots.
-    // `io_obj` (#925) carries the Sailfin-native `@sfn_log_execution`
-    // (`@logExecution` decorator body); `string_obj` (#925) carries
-    // `@sfn_to_debug_string` plus the `sfn_str_is_*` char-predicate
-    // ports; `array_obj` (#925) carries the
-    // `sfn_array_sfn_map/filter/reduce` stubs the prelude's array-HOF
-    // wrappers reference. All follow the same empty-tolerated contract
-    // as the clock/http slots.
-    // The trailing `clock_obj` slot is the PR 2 (#397) addition for the
-    // Sailfin-native `@sfn_sleep` definition; `process_obj` is the M2.9
-    // (#405) addition for `@sfn_process_run`; `exception_obj` is the
-    // M2.7b (#404) addition for the frame-based exception primitives
-    // (`sfn_exception_push_frame` / `sfn_exception_pop_frame` /
-    // `sfn_take_exception` / `sfn_throw`); `exec_obj` is the #468
-    // addition for `@exe_path` / `@binary_dir` / `@resolve_runtime_root`
-    // (M5.3 prerequisite); `type_meta_obj` is the M2.10 (#402) addition
-    // for `@sfn_type_register` / `@sfn_resolve_type` / `@sfn_instance_of`
-    // and the five primitive type guards; `filesystem_obj` is the M3.1a
-    // (#814) addition for `@sfn_fs_read_file` / `@sfn_fs_write_file` /
-    // `@sfn_fs_append_file`; `http_obj` is the M3 (#818) addition for
-    // `@sfn_http_get` / `@sfn_http_post` / `@sfn_http_post2` /
-    // `@sfn_http_download` (the pure-Sailfin socket HTTP client).
-    // Empty `clock_obj` / `process_obj` /
-    // `exception_obj` / `exec_obj` / `type_meta_obj` / `filesystem_obj`
-    // / `http_obj`
-    // entries are tolerated when the corresponding `runtime/sfn/*.sfn`
-    // module has not yet been staged into the runtime bundle —
-    // callers skip empty entries when assembling the link line. Any
-    // of the first four going empty signals a failed runtime compile
-    // and propagates back to the caller as a hard fail.
-    if runtime_root.length == 0 {
-        return ["", "", "", "", "", "", "", "", "", "", "", "", "", "", ""];
+// Issue #940: assemble the full runtime object + link-lib set for a
+// resolved runtime capsule (implicit or declared). Compiles the
+// capsule's `c-sources` + `ll-sources`, then its `sfn-sources` and
+// `prelude-entry` (both via the child-compiler emit path), and
+// returns the combined `.o` paths + `link-libs`. `success = false`
+// on any clang/emit failure. Shared by the build/run link path
+// (`_clang_link_multi_with_opt`) and the `sfn test` link path
+// (`cli_commands.sfn::_clang_link_test_cmd_with_deps`, which imports
+// this through the `cli_main <-> cli_commands` cycle) so the two
+// paths resolve the runtime identically.
+fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string) -> RuntimeLinkInputs ![io] {
+    let inputs = _clang_compile_runtime_capsule_objects(runtime_capsules, out_dir, opt_flag);
+    if !inputs.success { return _failed_runtime_link_inputs(); }
+    let mut objects: string[] = inputs.object_paths;
+    let link_libs: string[] = inputs.link_libs;
+    // `sfn-sources` + `prelude-entry` are materialized here (the
+    // prelude rides the same emit path as of #940).
+    let sfn_inputs = _compile_runtime_sfn_sources(runtime_capsules, out_dir, opt_flag, binary_dir);
+    if !sfn_inputs.success { return _failed_runtime_link_inputs(); }
+    let mut soi: int = 0;
+    loop {
+        if soi >= sfn_inputs.object_paths.length { break; }
+        objects.push(sfn_inputs.object_paths[soi]);
+        soi += 1;
     }
-    if !_runtime_bundle_exists(runtime_root) {
-        return ["", "", "", "", "", "", "", "", "", "", "", "", "", "", ""];
-    }
-
-    let include_dir = _path_join(runtime_root, "native/include");
-    let runtime_src = _path_join(runtime_root, "native/src/sailfin_runtime.c");
-    let arena_src = _path_join(runtime_root, "native/src/sailfin_arena.c");
-    let runtime_ir = _path_join(runtime_root, "native/ir/runtime_globals.ll");
-    let prelude_obj = _runtime_prelude_path(runtime_root);
-    let clock_obj = _runtime_clock_path(runtime_root);
-    let process_obj = _runtime_process_path(runtime_root);
-    let exception_obj = _runtime_exception_path(runtime_root);
-    let exec_obj = _runtime_exec_path(runtime_root);
-    let type_meta_obj = _runtime_type_meta_path(runtime_root);
-    let filesystem_obj = _runtime_filesystem_path(runtime_root);
-    let http_obj = _runtime_http_path(runtime_root);
-    // #925: io_obj carries `@sfn_log_execution`; string_obj carries
-    // `@sfn_to_debug_string` (+ the char-predicate ports). Empty
-    // entries are tolerated the same way clock/http are — callers skip
-    // them when assembling the link line.
-    let io_obj = _runtime_io_path(runtime_root);
-    let string_obj = _runtime_string_path(runtime_root);
-    // #925: array_obj carries the `sfn_array_sfn_map/filter/reduce`
-    // stub exports the prelude's array-HOF wrappers reference.
-    let array_obj = _runtime_array_path(runtime_root);
-    // #927: mem_obj carries the narrow memory primitives
-    // (`sfn_mem_get_field` / `_copy_bytes` / `_bounds_check` /
-    // `_free`). Empty entry tolerated like clock/http — the caller
-    // skips it when assembling the link line.
-    let mem_obj = _runtime_mem_path(runtime_root);
-
-    let runtime_obj = _path_join(out_dir, "sailfin_runtime" + opt_flag + ".o");
-    let arena_obj = _path_join(out_dir, "sailfin_arena" + opt_flag + ".o");
-    let globals_obj = _path_join(out_dir, "runtime_globals" + opt_flag + ".o");
-
-    // Content-addressed cache keys (#632): a content edit to any of
-    // these in-tree runtime sources busts the corresponding `.o`,
-    // matching the runtime-capsule path's behaviour above.
-    let runtime_key = runtime_object_cache_key(runtime_src, opt_flag);
-    if !_runtime_obj_cache_hit(runtime_obj, runtime_key) {
-        let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
-            + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
-        if rc != 0 {
-            return ["", "", "", "", "", "", "", "", "", "", "", "", "", "", ""];
+    // #940: emit each capsule's `prelude-entry` on the same
+    // child-compiler path as `sfn-sources`, but deliberately OUTSIDE
+    // `_compile_runtime_sfn_sources` so the prelude is NOT gated by
+    // `SAILFIN_DISABLE_RUNTIME_SFN_SOURCES`. The prelude predates the
+    // sfn-sources migration and must always link (its `sleep` wrapper
+    // emits `@sfn_sleep` unconditionally, etc.); the rollback flag is
+    // only meant to short-circuit the migrated runtime modules. The
+    // slug resolves to `runtime/prelude` (prefix kept → symbols stay
+    // unmangled), matching the Makefile-staged `prelude.o` this
+    // replaces. Linked exactly once — the standalone
+    // `_runtime_prelude_path` append was removed atomically (Risk R1).
+    let mut has_prelude: boolean = false;
+    let mut pp: int = 0;
+    loop {
+        if pp >= runtime_capsules.length { break; }
+        if runtime_capsules[pp].prelude_entry.length > 0 {
+            has_prelude = true;
+            break;
         }
-        _runtime_obj_cache_record(runtime_obj, runtime_key);
+        pp += 1;
     }
-
-    let arena_key = runtime_object_cache_key(arena_src, opt_flag);
-    if !_runtime_obj_cache_hit(arena_obj, arena_key) {
-        let rc_arena = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
-            + include_dir, "-c", arena_src, "-o", arena_obj,]);
-        if rc_arena != 0 {
-            return ["", "", "", "", "", "", "", "", "", "", "", "", "", "", ""];
+    if has_prelude {
+        let self_path = _resolve_self_path(binary_dir);
+        if self_path.length == 0 {
+            print("sfn build: cannot resolve self path for runtime prelude-entry emit");
+            print("           tried: <binary_dir>/sailfin (binary_dir=\""
+                + binary_dir
+                + "\"), then readlink -f /proc/self/exe");
+            return _failed_runtime_link_inputs();
         }
-        _runtime_obj_cache_record(arena_obj, arena_key);
-    }
-
-    let globals_key = runtime_object_cache_key(runtime_ir, opt_flag);
-    if !_runtime_obj_cache_hit(globals_obj, globals_key) {
-        let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", runtime_ir, "-o", globals_obj,]);
-        if rc2 != 0 {
-            return ["", "", "", "", "", "", "", "", "", "", "", "", "", "", ""];
+        let mut pi: int = 0;
+        loop {
+            if pi >= runtime_capsules.length { break; }
+            let cap = runtime_capsules[pi];
+            if cap.prelude_entry.length > 0 {
+                let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
+                let prelude_obj = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag);
+                if prelude_obj.length == 0 {
+                    return _failed_runtime_link_inputs();
+                }
+                objects.push(prelude_obj);
+            }
+            pi += 1;
         }
-        _runtime_obj_cache_record(globals_obj, globals_key);
     }
-
-    return [runtime_obj, arena_obj, globals_obj, prelude_obj, clock_obj, process_obj, exception_obj, exec_obj, type_meta_obj, filesystem_obj, http_obj, io_obj, string_obj, array_obj, mem_obj];
+    return RuntimeLinkInputs {
+        object_paths: objects,
+        link_libs: link_libs,
+        success: true
+    };
 }
 
 fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> int ![io] {
@@ -1528,189 +1150,32 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     // directory into CWD when a virtualized work-dir was requested.
     _ensure_dir(cache_dir);
 
-    // Stage D PR2 routing: when the resolver surfaced runtime
-    // capsule artifacts (the project declared `[dependencies]
-    // "sfn/runtime-native"` etc.), use the declarative source
-    // lists. Otherwise fall through to the legacy hardcoded
-    // `runtime_root/native/...` layout that end-user `sfn build`
-    // relies on. The legacy path stays load-bearing for every
-    // build whose project doesn't declare a runtime dep — that's
-    // the steady-state until Stage F's runtime rewrite.
+    // Issue #940 (Ra of #939): the runtime link always takes the
+    // declarative runtime-capsule path. `sfn build` / `sfn run` /
+    // `sfn test` inject the implicit `runtime/native/capsule.toml` as
+    // a fallback when the resolver surfaced no `[dependencies]`, and
+    // `-p` / declared-dep builds (including the compiler's own
+    // self-host, whose `capsule.toml` declares the runtime dep) carry
+    // the capsule already. An empty list here therefore means the
+    // runtime bundle / manifest is genuinely missing — fail loudly
+    // rather than silently producing an unlinkable binary.
     let mut runtime_objs: string[] = [];
     let mut runtime_link_libs: string[] = [];
-    if runtime_capsules.length > 0 {
-        let inputs = _clang_compile_runtime_capsule_objects(runtime_capsules, cache_dir, opt_flag);
-        if !inputs.success { return 1; }
-        runtime_objs = inputs.object_paths;
-        runtime_link_libs = inputs.link_libs;
-        // Issue #308: compile any `sfn-sources` declared by a
-        // `kind = "runtime"` capsule into link-ready `.o`s and
-        // append before the prelude. Dormant by default — no
-        // active manifest declares `sfn-sources` today, so this
-        // returns success-with-no-objects and the loop is a
-        // no-op. PR B of the sleep migration flips
-        // `runtime/native/capsule.toml` to populate the array,
-        // at which point this branch becomes load-bearing.
-        let sfn_inputs = _compile_runtime_sfn_sources(runtime_capsules, cache_dir, opt_flag, binary_dir);
-        if !sfn_inputs.success { return 1; }
-        let mut soi: int = 0;
-        loop {
-            if soi >= sfn_inputs.object_paths.length { break; }
-            runtime_objs.push(sfn_inputs.object_paths[soi]);
-            soi += 1;
-        }
-        // The runtime capsule's `prelude-entry` field (Stage D
-        // PR1 transitional bridge) isn't yet consumed here —
-        // the prelude continues to ship as a pre-built `.o`
-        // located via `_runtime_prelude_path`. Stage D PR3+ or
-        // Stage F retires that fallback.
-        //
-        // When the resolver returned runtime capsule artifacts
-        // (i.e. the project actually depends on a `kind =
-        // "runtime"` capsule), the prelude `.o` is REQUIRED for
-        // the link to succeed — the capsule's compiled C
-        // sources reference prelude-emitted symbols. Failing
-        // early with a targeted diagnostic is much easier to
-        // act on than letting clang complain about ~20
-        // undefined references later.
-        let prelude_obj = _runtime_prelude_path(runtime_root);
-        if prelude_obj.length == 0 {
-            print("sfn build: prelude object not found under runtime_root=\""
-                + runtime_root
-                + "\"");
-            print("           expected one of: <root>/native/obj/prelude.o,");
-            print("                            <root>/native/obj/runtime/prelude.o,");
-            print("                            <parent>/build/native/obj/prelude.o,");
-            print("                            <parent>/build/selfhost/native/obj/prelude.o");
-            print("           hint: run `make compile` first so the selfhost build stages prelude.o");
-            return 1;
-        }
-        runtime_objs.push(prelude_obj);
-    } else {
-        if runtime_root.length == 0 {
-            print("runtime bundle not found; set SAILFIN_RUNTIME_ROOT or install runtime alongside the binary");
-            return 1;
-        }
-        if !_runtime_bundle_exists(runtime_root) {
-            print("runtime bundle missing expected files under: " + runtime_root);
-            return 1;
-        }
-        let cached = _clang_compile_runtime_objects(runtime_root, cache_dir, opt_flag);
-        let runtime_obj = cached[0];
-        let arena_obj = cached[1];
-        let globals_obj = cached[2];
-        let prelude_obj = cached[3];
-        // PR 2 (#397): `clock_obj` carries the Sailfin-native
-        // `@sfn_sleep` definition. Empty-string fallback covers
-        // older runtime bundles that predate the staging step.
-        let clock_obj = cached[4];
-        // M2.9 (#405): `process_obj` carries the Sailfin-native
-        // `@sfn_process_run` definition. Same empty-string fallback
-        // contract as `clock_obj`.
-        let process_obj = cached[5];
-        // M2.7b (#404): `exception_obj` carries the Sailfin-native
-        // frame-based exception primitives. Same empty-string
-        // fallback contract as `clock_obj` / `process_obj` — user
-        // programs without a `try` block don't reach the symbols
-        // and the link succeeds either way; user programs with
-        // a `try` block fail loudly at link time with "undefined
-        // reference to `sfn_exception_push_frame`" so the missing
-        // staged artifact surfaces immediately.
-        let exception_obj = cached[6];
-        // #468 (M5.3 prereq): `exec_obj` carries the Sailfin-native
-        // `@exe_path` / `@binary_dir` / `@resolve_runtime_root`
-        // helpers. Same empty-string fallback contract as
-        // `clock_obj` / `process_obj` / `exception_obj` — user
-        // programs that don't `extern fn exe_path()` (today, that
-        // is every user program; M5.3's lowered `@main` will be the
-        // first internal caller) don't reach the symbols and the
-        // link succeeds either way. Once M5.3 lands, the symbols
-        // become unconditionally referenced and a missing staged
-        // artifact surfaces immediately as "undefined reference to
-        // `exe_path`".
-        let exec_obj = cached[7];
-        // M2.10 (#402): `type_meta_obj` carries the Sailfin-native
-        // type-meta registry (`sfn_type_register` /
-        // `sfn_resolve_type` / `sfn_instance_of` + the five
-        // primitive guards). The compiler unconditionally emits
-        // `@__sfn_module_type_init__*` constructors for every
-        // module with named types, so the symbols are referenced
-        // by the linker whenever any user program ships a struct,
-        // enum, or interface. Empty fallback covers older runtime
-        // bundles that predate the staging step; tests then fail
-        // loudly at link with "undefined reference to
-        // `sfn_type_register`", surfacing the missing artifact.
-        let type_meta_obj = cached[8];
-        // M3.1a (#814): `filesystem_obj` carries the Sailfin-native
-        // `@sfn_fs_read_file` / `@sfn_fs_write_file` /
-        // `@sfn_fs_append_file` definitions. Same empty-string
-        // fallback contract as `clock_obj` / `process_obj` /
-        // `exception_obj` / `exec_obj` / `type_meta_obj` — user
-        // programs without an `fs.*` call site don't reach the
-        // symbols and the link succeeds either way; user programs
-        // that touch `fs.readFile` / `fs.writeFile` /
-        // `fs.appendFile` fail loudly at link time with "undefined
-        // reference to `sfn_fs_read_file`" so the missing staged
-        // artifact surfaces immediately.
-        let filesystem_obj = cached[9];
-        // M3 (#818): `http_obj` carries the Sailfin-native socket HTTP
-        // client (`@sfn_http_get` / `@sfn_http_post` / `@sfn_http_post2`
-        // / `@sfn_http_download`). Same empty-string fallback contract
-        // as `filesystem_obj` — user programs without an `http.*` call
-        // site don't reach the symbols and the link succeeds either way;
-        // user programs that touch `http.get_body` / `http.post_json` /
-        // `http.download` fail loudly at link time with "undefined
-        // reference to `sfn_http_get`" so the missing staged artifact
-        // surfaces immediately.
-        let http_obj = cached[10];
-        // #925: `io_obj` carries `@sfn_log_execution` (the `@logExecution`
-        // decorator body); `string_obj` carries `@sfn_to_debug_string`
-        // (live in prelude struct formatting) plus the char-predicate
-        // ports. Same empty-string fallback contract as `filesystem_obj`
-        // / `http_obj` — user programs that don't reach the symbols link
-        // fine; ones that use `@logExecution` / format a struct fail
-        // loudly with "undefined reference to `sfn_log_execution`" /
-        // "`sfn_to_debug_string`" so a missing staged artifact surfaces.
-        let io_obj = cached[11];
-        let string_obj = cached[12];
-        // #925: `array_obj` carries the `sfn_array_sfn_map/filter/reduce`
-        // stubs the prelude's array-HOF wrappers reference. Same
-        // empty-string fallback contract as `io_obj` / `string_obj`.
-        let array_obj = cached[13];
-        // #927: `mem_obj` carries the narrow memory primitives
-        // (`sfn_mem_get_field` / `_copy_bytes` / `_bounds_check` /
-        // `_free`). Same empty-string fallback contract as `io_obj` /
-        // `string_obj` / `array_obj` — but in practice nearly every
-        // program reaches at least `bounds_check` (array indexing) or
-        // the scope-exit `free`, so a missing `mem.o` fails loudly with
-        // "undefined reference to `sfn_mem_bounds_check`".
-        let mem_obj = cached[14];
-        let mut _missing: boolean = false;
-        if runtime_obj.length == 0 { _missing = true; }
-        if arena_obj.length == 0 { _missing = true; }
-        if globals_obj.length == 0 { _missing = true; }
-        if prelude_obj.length == 0 { _missing = true; }
-        if _missing {
-            print("failed to build cached runtime objects");
-            return 1;
-        }
-        runtime_objs.push(runtime_obj);
-        runtime_objs.push(arena_obj);
-        runtime_objs.push(globals_obj);
-        runtime_objs.push(prelude_obj);
-        if clock_obj.length > 0 { runtime_objs.push(clock_obj); }
-        if process_obj.length > 0 { runtime_objs.push(process_obj); }
-        if exception_obj.length > 0 { runtime_objs.push(exception_obj); }
-        if exec_obj.length > 0 { runtime_objs.push(exec_obj); }
-        if type_meta_obj.length > 0 { runtime_objs.push(type_meta_obj); }
-        if filesystem_obj.length > 0 { runtime_objs.push(filesystem_obj); }
-        if http_obj.length > 0 { runtime_objs.push(http_obj); }
-        if io_obj.length > 0 { runtime_objs.push(io_obj); }
-        if string_obj.length > 0 { runtime_objs.push(string_obj); }
-        if array_obj.length > 0 { runtime_objs.push(array_obj); }
-        if mem_obj.length > 0 { runtime_objs.push(mem_obj); }
-        runtime_link_libs.push("-lm");
+    if runtime_capsules.length == 0 {
+        // Reached by `sfn build` / `sfn run` (and indirectly `sfn test`
+        // via the shared assembly), so the diagnostic is command-neutral.
+        let mut root_display = runtime_root;
+        if root_display.length == 0 { root_display = "<runtime-root>"; }
+        print("sfn: runtime bundle/manifest missing — no runtime capsule resolved");
+        print("     expected " + root_display
+            + "/native/capsule.toml (kind = \"runtime\")");
+        print("     hint: ensure the runtime bundle ships alongside the compiler binary");
+        return 1;
     }
+    let inputs = assemble_runtime_capsule_link_inputs(runtime_capsules, cache_dir, opt_flag, binary_dir);
+    if !inputs.success { return 1; }
+    runtime_objs = inputs.object_paths;
+    runtime_link_libs = inputs.link_libs;
 
     let mut args: string[] = ["clang", opt_flag, "-Wno-override-module"];
     let mut roi: int = 0;
@@ -2431,7 +1896,17 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
             all_lls.push(capsule_lls[cli]);
             cli += 1;
         }
-        let rc = _clang_link_multi(all_lls, exe_path, runtime_root, capsule_result.runtime_capsules, binary_dir, sailfin_cache_dir);
+        // Issue #940: inject the implicit runtime capsule as a pure
+        // fallback when the resolver surfaced no `[dependencies]`. A
+        // `-p` / declared-dep build (incl. self-host) already carries
+        // `runtime_capsules`, so this is a no-op there; an end-user
+        // `sfn build <file>` with no deps now links via the implicit
+        // `runtime/native/capsule.toml` instead of the retired probe.
+        let mut build_runtime_caps = capsule_result.runtime_capsules;
+        if build_runtime_caps.length == 0 {
+            build_runtime_caps = runtime_capsule_from_root(runtime_root);
+        }
+        let rc = _clang_link_multi(all_lls, exe_path, runtime_root, build_runtime_caps, binary_dir, sailfin_cache_dir);
         if rc != 0 {
             if !json_flag {
                 print("link failed (clang exit=" + number_to_string(rc) + ")");
@@ -2550,7 +2025,14 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
             all_lls.push(capsule_lls[rli]);
             rli += 1;
         }
-        let link_rc = _clang_link_multi(all_lls, exe_path, runtime_root, run_capsule_result.runtime_capsules, binary_dir, "");
+        // Issue #940: same implicit-capsule fallback as `sfn build`
+        // (no-op for `-p` / declared-dep, load-bearing for a no-dep
+        // `sfn run <file>`).
+        let mut run_runtime_caps = run_capsule_result.runtime_capsules;
+        if run_runtime_caps.length == 0 {
+            run_runtime_caps = runtime_capsule_from_root(runtime_root);
+        }
+        let link_rc = _clang_link_multi(all_lls, exe_path, runtime_root, run_runtime_caps, binary_dir, "");
         if link_rc != 0 {
             print("link failed (clang exit=" + number_to_string(link_rc) + ")");
             print("run: native link failed; attempting seed fallback via `sfn run`");
@@ -2788,3 +2270,12 @@ fn main(argv: string[]) -> int ![io, clock] {
     }
     return sailfin_cli_main_with_paths(tail, runtime_root as string, bin_dir as string);
 }
+
+// Issue #940: `cli_main` is the `@main` entrypoint root AND now an
+// imported module — the `sfn test` link path in `cli_commands.sfn`
+// imports the runtime-link assembly through the
+// `cli_main <-> cli_commands` cycle (`cli_main` already imports
+// `handle_test_command` from `cli_commands`). Sailfin resolves
+// function/struct-level import cycles (e.g. parser `statements` <->
+// `declarations`), so this reverse edge is safe.
+export { RuntimeLinkInputs, assemble_runtime_capsule_link_inputs };

@@ -14,14 +14,18 @@
 #   2. A content edit MUST produce a cache miss — the `.o` is
 #      recompiled and its mtime advances.
 #
-# It drives the legacy `_clang_compile_runtime_objects` path (a plain
-# `sfn build <file.sfn>`), which compiles the exact source the issue
-# edits (`runtime/native/src/sailfin_runtime.c`) and shares the
-# `_runtime_obj_cache_hit` gate with the runtime-capsule path that
-# the compiler self-build uses. Driving a one-line program keeps the
-# test to seconds rather than three full `sfn build -p compiler`
-# rebuilds; the capsule-path object name shape and the key contract
-# are covered by `compiler/tests/unit/build_cache_c_source_test.sfn`.
+# Since #940 a plain `sfn build <file.sfn>` (no `[dependencies]`)
+# resolves `runtime/native/capsule.toml` as an implicit runtime
+# capsule and compiles its `c-sources` via
+# `_clang_compile_runtime_capsule_objects`, which shares the same
+# `_runtime_obj_cache_hit` / `runtime_object_cache_key` (#632) gate the
+# retired `_clang_compile_runtime_objects` path used. The object name
+# is now capsule-prefixed (`sfn__runtime-native__<basename>-<opt>.o`).
+# This test still edits the exact source the cache keys on
+# (`runtime/native/src/sailfin_runtime.c`). Driving a one-line program
+# keeps the test to seconds rather than three full `sfn build -p
+# compiler` rebuilds; the key contract is also covered by
+# `compiler/tests/unit/build_cache_c_source_test.sfn`.
 #
 # Usage:
 #   compiler/tests/e2e/test_runtime_c_cache_invalidates.sh <compiler-binary>
@@ -82,8 +86,10 @@ do_build() {
         -o "$SCRATCH/hello" --work-dir "$WORK" ) >"$SCRATCH/build.log" 2>&1
 }
 
-# The legacy runtime object compiled from sailfin_runtime.c at -O2.
-RUNTIME_OBJ="$WORK/sailfin/sailfin_runtime-O2.o"
+# The runtime-capsule object compiled from sailfin_runtime.c at -O2.
+# Name shape: `_runtime_obj_prefix("sfn/runtime-native")` +
+# `_path_basename("sailfin_runtime.c")` + opt + ".o".
+RUNTIME_OBJ="$WORK/sailfin/sfn__runtime-native__sailfin_runtime.c-O2.o"
 
 # ---- Build 1: populate the cache ----
 if ! do_build; then
