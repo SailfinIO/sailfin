@@ -108,6 +108,26 @@ jobs:
           sudo apt-get install -y clang-18 llvm-18 jq
           echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
+      # Cache priming for PR CI. This job runs on push:main, so the
+      # caches it saves land in the default-branch scope that every PR
+      # can restore from (GitHub scopes caches to the current branch +
+      # base/default branch). Keys mirror `.github/actions/sailfin-build`
+      # exactly (target=linux-x86_64) so the PR action's restore-keys
+      # prefix-match them. See that action for the content-addressed
+      # cache-key rationale.
+      #
+      # The seed is restored+saved here (harmless to the gates below).
+      # The build cache is deliberately NOT restored here: this job's
+      # determinism gate must build cold so a latent nondeterminism bug
+      # can't be masked by warm cached artifacts. The build cache is
+      # instead SAVED after the gates pass (save-only, no `if:`), so a
+      # failed gate never poisons the cache PRs consume.
+      - name: Restore seed cache
+        uses: actions/cache@v4
+        with:
+          path: build/seed
+          key: sailfin-seed-linux-x86_64-${{ steps.seed.outputs.seed_version }}
+
       - name: Fetch released seed compiler
         shell: bash
         env:
@@ -115,7 +135,11 @@ jobs:
           SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
         run: |
           set -euo pipefail
-          make fetch-seed SEED_VERSION="$SEED_VERSION"
+          if [ -x build/seed/bin/sailfin ] && build/seed/bin/sailfin version >/dev/null 2>&1; then
+            echo "[ci] seed cache hit ($SEED_VERSION) — skipping fetch"
+          else
+            make fetch-seed SEED_VERSION="$SEED_VERSION"
+          fi
           build/seed/bin/sailfin version
 
       - name: Self-host the compiler (make compile)
@@ -210,6 +234,20 @@ jobs:
             exit 1
           fi
           echo "[hit-rate] gate passed"
+
+      # Save the validated, fully-warm build cache for PR CI to restore.
+      # Save-only (no `if:`) so it runs only when every prior step —
+      # including both gates — succeeded; a failed gate leaves the
+      # previous (good) cache in place. `make compile` + both
+      # determinism passes have populated `build/cache/` by now. The key
+      # matches `.github/actions/sailfin-build`'s exact key; if it
+      # already exists (no source change since the last main run) the
+      # save is a no-op.
+      - name: Save build cache for PR CI
+        uses: actions/cache/save@v4
+        with:
+          path: build/cache
+          key: sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', '.seed-version') }}
 
       # Failure-mode wiring (issue #782). Identifying which gate failed
       # has to happen in the gate job (only it can see per-step
