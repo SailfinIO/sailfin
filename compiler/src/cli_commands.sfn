@@ -2211,7 +2211,6 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     let staging = "build/sailfin/.installer-staging";
     let staging_bin = staging + "/bin";
     let staging_runtime = staging + "/runtime";
-    let staging_runtime_obj = staging + "/runtime/native/obj";
     process.run(["rm", "-rf", staging]);
     process.run(["mkdir", "-p", staging_bin]);
     process.run(["mkdir", "-p", staging_runtime]);
@@ -2242,199 +2241,44 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         return 1;
     }
 
-    // Pre-built prelude object — preferred from the selfhost
-    // tree (which the active build wrote), falling back to a
-    // legacy build/native/obj path. Optional: a clean checkout
-    // without a prior `make compile` won't have either.
-    let prelude_a = "build/selfhost/native/obj/runtime/prelude.o";
-    let prelude_b = "build/native/obj/runtime/prelude.o";
-    let mut prelude_src: string = "";
-    if fs.exists(prelude_a) { prelude_src = prelude_a; } else {
-        if fs.exists(prelude_b) { prelude_src = prelude_b; }
+    // Bundle the runtime Sailfin sources. Post-#940 the install
+    // link path emits the prelude + every runtime `sfn-source` from
+    // disk via the child compiler (see
+    // `assemble_runtime_capsule_link_inputs` in cli_main.sfn). Those
+    // sources resolve to `<root>/runtime/prelude.sfn` and
+    // `<root>/runtime/sfn/**` relative to the bundled
+    // `runtime/native/capsule.toml`, so without them a fresh install
+    // cannot link any program that touches the runtime (every program
+    // pulls in the arena via prelude). They are REQUIRED, not optional
+    // — a failed copy is a hard error. This replaces the former
+    // per-`.o` bundle staging (prelude/clock/process/type_meta/
+    // filesystem/io/string/array): those pre-built objects were never
+    // consumed by the post-#940 link path, which always emits the
+    // runtime from source. Shipping the sources is both necessary and
+    // sufficient; the `.o` were dead weight.
+    if !fs.exists("runtime/prelude.sfn") {
+        print("sfn package: missing runtime/prelude.sfn (was the build run from the repo root?)");
+        process.run(["rm", "-rf", staging]);
+        return 1;
     }
-    if prelude_src.length > 0 {
-        // The prelude object's INCLUSION is conditional (it
-        // doesn't exist on a fresh checkout), but once we've
-        // committed to including it, a `mkdir`/`cp` failure is
-        // a bug — fail loudly rather than silently shipping
-        // an installer missing the expected `prelude.o`.
-        let mk_obj_dir = process.run(["mkdir", "-p", staging_runtime_obj]);
-        if mk_obj_dir != 0 {
-            print("sfn package: failed to create runtime obj staging dir");
-            process.run(["rm", "-rf", staging]);
-            return 1;
-        }
-        let cp_prelude = process.run(["cp", "-f", prelude_src, staging_runtime_obj
-            + "/prelude.o"]);
-        if cp_prelude != 0 {
-            print("sfn package: failed to stage prelude object from "
-                + prelude_src);
-            process.run(["rm", "-rf", staging]);
-            return 1;
-        }
+    let cp_prelude_src = process.run(["cp", "-f", "runtime/prelude.sfn", staging_runtime
+        + "/prelude.sfn"]);
+    if cp_prelude_src != 0 {
+        print("sfn package: failed to copy runtime/prelude.sfn");
+        process.run(["rm", "-rf", staging]);
+        return 1;
     }
-
-    // Pre-built clock object — Sailfin-native `@sfn_sleep`
-    // definition added in PR 2 of the sleep migration (issue #397).
-    // Same staging convention as the prelude: optional on a fresh
-    // checkout, hard fail once we commit to including it. Without
-    // this the installer link path resolves `@sfn_sleep` from
-    // nowhere and any program calling `sleep()` fails at link time.
-    let clock_a = "build/selfhost/native/obj/runtime/clock.o";
-    let clock_b = "build/native/obj/runtime/clock.o";
-    let mut clock_src: string = "";
-    if fs.exists(clock_a) { clock_src = clock_a; } else {
-        if fs.exists(clock_b) { clock_src = clock_b; }
+    if !fs.exists("runtime/sfn") {
+        print("sfn package: missing runtime/sfn (was the build run from the repo root?)");
+        process.run(["rm", "-rf", staging]);
+        return 1;
     }
-    if clock_src.length > 0 {
-        let mk_obj_dir = process.run(["mkdir", "-p", staging_runtime_obj]);
-        if mk_obj_dir != 0 {
-            print("sfn package: failed to create runtime obj staging dir");
-            process.run(["rm", "-rf", staging]);
-            return 1;
-        }
-        let cp_clock = process.run(["cp", "-f", clock_src, staging_runtime_obj
-            + "/clock.o"]);
-        if cp_clock != 0 {
-            print("sfn package: failed to stage clock object from " + clock_src);
-            process.run(["rm", "-rf", staging]);
-            return 1;
-        }
-    }
-
-    // Pre-built process object — Sailfin-native `@sfn_process_run`
-    // definition added in M2.9 (issue #405). Mirrors the clock.o
-    // staging above: optional on a fresh checkout, hard fail once
-    // staged. Without this the installer link path resolves
-    // `@sfn_process_run` from nowhere on POSIX targets and any
-    // program calling `process.run(...)` fails at link time.
-    // (Windows installers don't need this — the `_WIN32` C wrapper
-    // in `sailfin_runtime.c` provides the symbol there.)
-    let process_a = "build/selfhost/native/obj/runtime/process.o";
-    let process_b = "build/native/obj/runtime/process.o";
-    let mut process_src: string = "";
-    if fs.exists(process_a) { process_src = process_a; } else {
-        if fs.exists(process_b) { process_src = process_b; }
-    }
-    if process_src.length > 0 {
-        let mk_obj_dir = process.run(["mkdir", "-p", staging_runtime_obj]);
-        if mk_obj_dir != 0 {
-            print("sfn package: failed to create runtime obj staging dir");
-            process.run(["rm", "-rf", staging]);
-            return 1;
-        }
-        let cp_process = process.run(["cp", "-f", process_src, staging_runtime_obj
-            + "/process.o"]);
-        if cp_process != 0 {
-            print("sfn package: failed to stage process object from "
-                + process_src);
-            process.run(["rm", "-rf", staging]);
-            return 1;
-        }
-    }
-
-    // Pre-built type-meta object — Sailfin-native type-metadata
-    // registry added in M2.10 (issue #402). Mirrors the clock.o /
-    // process.o staging above: optional on a fresh checkout, hard
-    // fail once staged. Without this the installer link path
-    // resolves `@sfn_type_register` from nowhere, and every program
-    // compiled by the installed binary fails at link time the moment
-    // any module ships a named struct/enum/interface (the new
-    // compiler's per-module `@__sfn_module_type_init__*` constructor
-    // is unconditional).
-    let type_meta_a = "build/selfhost/native/obj/runtime/type_meta.o";
-    let type_meta_b = "build/native/obj/runtime/type_meta.o";
-    let mut type_meta_src: string = "";
-    if fs.exists(type_meta_a) { type_meta_src = type_meta_a; } else {
-        if fs.exists(type_meta_b) { type_meta_src = type_meta_b; }
-    }
-    if type_meta_src.length > 0 {
-        let mk_obj_dir = process.run(["mkdir", "-p", staging_runtime_obj]);
-        if mk_obj_dir != 0 {
-            print("sfn package: failed to create runtime obj staging dir");
-            process.run(["rm", "-rf", staging]);
-            return 1;
-        }
-        let cp_type_meta = process.run(["cp", "-f", type_meta_src, staging_runtime_obj
-            + "/type_meta.o"]);
-        if cp_type_meta != 0 {
-            print("sfn package: failed to stage type_meta object from "
-                + type_meta_src);
-            process.run(["rm", "-rf", staging]);
-            return 1;
-        }
-    }
-
-    // Pre-built filesystem object — Sailfin-native `@sfn_fs_read_file`
-    // / `@sfn_fs_write_file` / `@sfn_fs_append_file` definitions
-    // added in M3.1a (issue #814). Mirrors the clock.o / process.o /
-    // type_meta.o staging above: optional on a fresh checkout, hard
-    // fail once staged. Without this the installer link path resolves
-    // `@sfn_fs_read_file` from nowhere and every installed user
-    // program that calls `fs.readFile` / `fs.writeFile` /
-    // `fs.appendFile` fails at link time.
-    let filesystem_a = "build/selfhost/native/obj/runtime/filesystem.o";
-    let filesystem_b = "build/native/obj/runtime/filesystem.o";
-    let mut filesystem_src: string = "";
-    if fs.exists(filesystem_a) { filesystem_src = filesystem_a; } else {
-        if fs.exists(filesystem_b) { filesystem_src = filesystem_b; }
-    }
-    if filesystem_src.length > 0 {
-        let mk_obj_dir = process.run(["mkdir", "-p", staging_runtime_obj]);
-        if mk_obj_dir != 0 {
-            print("sfn package: failed to create runtime obj staging dir");
-            process.run(["rm", "-rf", staging]);
-            return 1;
-        }
-        let cp_filesystem = process.run(["cp", "-f", filesystem_src, staging_runtime_obj
-            + "/filesystem.o"]);
-        if cp_filesystem != 0 {
-            print("sfn package: failed to stage filesystem object from "
-                + filesystem_src);
-            process.run(["rm", "-rf", staging]);
-            return 1;
-        }
-    }
-
-    // Pre-built io / string / array objects — Sailfin-native Cat-C
-    // ports added in #925 (epic #390). Mirrors the clock.o / process.o
-    // / type_meta.o / filesystem.o staging above: optional on a fresh
-    // checkout, hard fail once staged. The prelude's `logExecution` /
-    // `to_debug_string` / `array_map` / `array_filter` / `array_reduce`
-    // wrappers reference `@sfn_log_execution` / `@sfn_to_debug_string`
-    // / `@sfn_array_sfn_*` unconditionally, so without these objects
-    // every program compiled by the installed binary fails at link.
-    let cat_c_mods: string[] = ["io", "string", "array"];
-    let mut cci: int = 0;
-    loop {
-        if cci >= cat_c_mods.length { break; }
-        let mod_name = cat_c_mods[cci];
-        cci += 1;
-        let cat_c_a = "build/selfhost/native/obj/runtime/" + mod_name + ".o";
-        let cat_c_b = "build/native/obj/runtime/" + mod_name + ".o";
-        let mut cat_c_src: string = "";
-        if fs.exists(cat_c_a) { cat_c_src = cat_c_a; } else {
-            if fs.exists(cat_c_b) { cat_c_src = cat_c_b; }
-        }
-        if cat_c_src.length > 0 {
-            let mk_obj_dir = process.run(["mkdir", "-p", staging_runtime_obj]);
-            if mk_obj_dir != 0 {
-                print("sfn package: failed to create runtime obj staging dir");
-                process.run(["rm", "-rf", staging]);
-                return 1;
-            }
-            let cp_cat_c = process.run(["cp", "-f", cat_c_src, staging_runtime_obj
-                + "/"
-                + mod_name
-                + ".o"]);
-            if cp_cat_c != 0 {
-                print("sfn package: failed to stage " + mod_name
-                    + " object from "
-                    + cat_c_src);
-                process.run(["rm", "-rf", staging]);
-                return 1;
-            }
-        }
+    let cp_sfn_src = process.run(["cp", "-R", "runtime/sfn", staging_runtime
+        + "/sfn"]);
+    if cp_sfn_src != 0 {
+        print("sfn package: failed to copy runtime/sfn sources");
+        process.run(["rm", "-rf", staging]);
+        return 1;
     }
 
     // Staged import-context — only present after a self-host

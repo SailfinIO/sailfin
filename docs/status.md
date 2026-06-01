@@ -193,16 +193,32 @@ feature availability.
     `<out>/<sanitised-name>-<target>-<version>.tar.gz`. Falls
     over with a clear error when the sidecar is missing
     (hint: `sfn build -p <path>` first). **C4 v1 (#265).**
-  - **Installer mode (`--installer`, this PR):** bundles the
-    compiler + `runtime/native/` + (when available) the
-    pre-built prelude `.o` + (when available) the staged
-    `import-context/` into `<out>/installer-<target>.tar.gz`.
-    No version in the tarball name (matches the historical
-    `tools/package.sh` shape consumed by `release-tag.yml` +
-    `ci.yml`); manifest carries `kind = "installer"`. Mutually
-    exclusive with `-p`. Replaces the second half of
-    `tools/package.sh` — after this lands, every output of the
-    shell script has a Sailfin-native equivalent.
+  - **Installer mode (`--installer`):** bundles the compiler +
+    `runtime/native/` + the runtime Sailfin sources
+    (`runtime/prelude.sfn` + `runtime/sfn/`) + (when available)
+    the staged `import-context/` into
+    `<out>/installer-<target>.tar.gz`. No version in the tarball
+    name (matches the historical `tools/package.sh` shape
+    consumed by `release-tag.yml` + `ci.yml`); manifest carries
+    `kind = "installer"`. Mutually exclusive with `-p`. Replaces
+    the second half of `tools/package.sh` — after this lands,
+    every output of the shell script has a Sailfin-native
+    equivalent.
+    - **#941:** the runtime `.sfn` sources are now **required**
+      bundle contents (previously absent). Post-#940 a fresh
+      install relinks user programs by emitting the prelude +
+      every runtime `sfn-source` from disk via the
+      runtime-capsule path
+      (`assemble_runtime_capsule_link_inputs`), so the install
+      tree must ship `runtime/prelude.sfn` + `runtime/sfn/**`
+      relative to the bundled `runtime/native/capsule.toml`;
+      without them a fresh install could not link any
+      runtime-touching program. The former per-`.o` bundle
+      staging (prelude/clock/process/type_meta/filesystem/io/
+      string/array) was **removed** — those objects were never
+      read by the post-#940 link path (it always emits from
+      source). The same applies to the `make ci-cross-windows`
+      Windows installer.
   - **Manifest** is schema-versioned via
     `dist_manifest.sfn::DistManifest` (`schema_version: "1"`)
     — adds `kind` (compiler / installer / binary / library),
