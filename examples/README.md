@@ -10,6 +10,8 @@ This directory showcases the evolving Sailfin language surface implemented by th
 
 Always check `docs/status.md` before relying on an example in production code. Examples stay limited to the bootstrap feature set unless noted; future-facing snippets include inline comments.
 
+> **Undefined function calls are a compile error.** Calling a bare function name that resolves to no in-scope binding, builtin, runtime global, or imported function fails typecheck with `error[E0420]: undefined function \`name\`` — define or import the function before calling it. See [§5 Expressions](https://sailfin.dev/docs/reference/spec/05-expressions/) for the full resolution order.
+
 Where you see effect lists (e.g. `![io, model]`), remember the runtime backing is partially stubbed: capability enforcement will harden through the self-hosted toolchain. Richer AI functionality (model declarations, prompt composition, tool dispatch) is being delivered as a post-1.0 `sfn/ai` library capsule rather than language syntax; the `![model]` effect is the only AI-specific construct that stays in the language.
 
 ## Categories
