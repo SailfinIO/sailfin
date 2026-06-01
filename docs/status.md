@@ -620,6 +620,31 @@ feature availability.
   fits the surface. All `capsules/sfn/*/capsule.toml` manifests
   were already correct against their declared effects — no
   changes needed.
+- **Undefined free-function rejection (`E0420` — shipped 2026-05-28).**
+  A `Call` whose callee is a bare `Identifier` that resolves to none of
+  the in-scope bindings, the builtin/runtime envelope, or the localized
+  import table now fails typecheck with `error[E0420]: undefined
+  function \`name\``, caret-ed at the callee (`#616`, enforcement flip in
+  `#812`). The walker (`walk_expression` in `compiler/src/typecheck.sfn`)
+  resolves a callee against, in order: **(1)** `bindings` — parameters,
+  locals, every top-level `fn`/`extern fn`, and import-specifier names
+  seeded into the resolution scope; **(2)** the fixed builtin envelope
+  `is_builtin_call_name` (`typecheck_types.sfn`) — `print`, `console`,
+  `assert`, `spawn`, `sleep`, `serve`, `channel`, `send`, `receive`,
+  `await`, and the six atomic intrinsics `atomic_load` / `atomic_store`
+  / `atomic_add` / `atomic_sub` / `atomic_cas` / `atomic_fence` (kept in
+  sync with `is_atomic_builtin`); **(3)** implicit prelude/runtime
+  globals — the top-level declarations of `runtime/prelude.sfn` and the
+  `runtime/sfn/**` tree, scanned via `prelude_globals.sfn` and joined
+  with the compiler-known runtime-helper builtins, so unimported runtime
+  calls (`strings_equal`, `number_to_string`, the `runtime_*_fn` family,
+  …) resolve at link time without tripping E0420; **(4)** the
+  localized effect import table (`lookup_imported_function`). Only a miss
+  on all four emits the diagnostic. Out of scope: member/method callees
+  (`obj.method()` recurse through the `Member` arm and never inspect the
+  member name), undefined *variable* references, and argument type
+  checking. `make check` self-hosts with zero E0420 across the
+  compiler's own ~121 modules, proving the envelope is complete.
 - Experimental LLVM JIT execution is available for targeted backend coverage.
 - CI uses the native build workflow (`.github/workflows/ci.yml`) to build, test,
   and attach release assets.
@@ -654,6 +679,7 @@ feature availability.
 | Effect enforcement as compilation gate | **Shipped (Phase D, 2026-04-26)** | `validate_and_render_effects` runs after typecheck in every `compile_to_*` entry; default severity is `error` so undeclared effects fail the build. `SAILFIN_EFFECT_ENFORCE=warning` opt-in for capsule authors mid-migration; `=off` build-path escape hatch (proposal §4.7) |
 | Cross-module effect propagation | **Shipped (Phase E, 2026-04-26)** | A caller of an imported function inherits the callee's declared effects; missing propagation fails the build with `E0402`. Aliased imports (`import { foo as bar }`) resolve under the local name. E1 covers direct `Identifier` calls; `Member`-callee resolution and decorator-implied transitives deferred to Phase E2 |
 | Capsule capability cross-check | **Shipped (Phase F, 2026-04-26)** | `[capabilities] required = [...]` in `capsule.toml` is a real compile-time contract; functions declaring an effect outside the surface fail with `E0403`. Empty surface skips the check (standalone .sfn unchanged). Phase G (post-1.0) replaces the text-pattern checker with name-resolution detection and adds effect polymorphism |
+| Undefined free-function rejection (`E0420`) | **Shipped (#616/#812, 2026-05-28)** | A bare-`Identifier` callee that resolves to none of {in-scope bindings (params/locals/top-level `fn`/import names), the builtin envelope (`print`, `console`, `assert`, `spawn`, `sleep`, `serve`, `channel`, `send`, `receive`, `await`, `atomic_load/store/add/sub/cas/fence`), the implicit prelude/`runtime/sfn/**` globals, the localized import table} fails typecheck with `error[E0420]: undefined function \`name\``, caret-ed at the callee. Member callees (`obj.method()`), undefined *variable* refs, and argument *type* checks are out of scope. `make check` self-hosts with zero E0420 across the compiler's ~121 modules |
 | Generic type inference | Partial | Type params captured; inference coverage is limited |
 | Interface conformance validation | Partial | Basic checks; variance not yet enforced |
 | `Affine<T>` / `Linear<T>` | Parsed only | Ownership wrappers accepted; move/consume rules not enforced |

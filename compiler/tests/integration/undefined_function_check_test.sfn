@@ -1,0 +1,97 @@
+// compiler/tests/integration/undefined_function_check_test.sfn
+//
+// Regression corpus for the E0420 undefined-function policy (#813,
+// closing the documentation/test half of #616). The enforcement flip
+// landed in #812: a `Call` whose callee is a bare `Identifier` that
+// resolves to neither an in-scope binding, an imported function, nor a
+// builtin/runtime envelope name produces
+// `error[E0420]: undefined function \`name\``.
+//
+// This test pins the *envelope* end-to-end by driving the shipped
+// `sfn check` binary over a fixture (not by calling the typechecker
+// internals), so the auto-injection allowlist can't silently drift
+// without a red integration run. Two cases: a bare undefined callee
+// must exit non-zero with the `E0420` string, and a locally-defined
+// callee must check clean.
+//
+// Runs from the repo root (`make test-integration` invokes
+// `build/native/sailfin test compiler/tests/integration`), so the
+// `build/native/sailfin` binary resolves relative to that cwd. The
+// child is launched with an *empty* environment on purpose: the binary
+// is named by an explicit slashed path (so `posix_spawnp` never
+// consults `PATH`), the runtime root is resolved exe-relative rather
+// than via the environment, and `sfn check`'s only env knobs
+// (`SAILFIN_EFFECT_ENFORCE` / `SAILFIN_USE_ARENA`) must stay unset so
+// the test exercises the shipped defaults deterministically instead of
+// inheriting an ambient shell setting.
+fn _contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if needle.length > haystack.length { return false; }
+    let mut i: int = 0;
+    let limit = haystack.length - needle.length;
+    loop {
+        if i > limit { break; }
+        if substring(haystack, i, i + needle.length) == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Mint a collision-free fixture. `fs.mkdtemp` returns a kernel-unique
+// `0700` scratch dir (anchored under `$TMPDIR` / `/tmp`), so parallel
+// `sfn test` invocations never share a fixture path. The fs surface
+// has no `rmdir` primitive, so the caller deletes the fixture file and
+// only the empty unique dir is left behind — strictly less residue
+// than a fixed `/tmp/<name>` path.
+fn _mint_fixture(name: string, source: string) -> string ![io] {
+    let dir = fs.mkdtemp("sfn-e0420-");
+    assert dir.length > 0;
+    let path = dir + "/" + name;
+    fs.writeFile(path, source);
+    return path;
+}
+
+// Run `build/native/sailfin check <path>` capturing both streams, and
+// return the combined stdout+stderr so a case can assert on diagnostic
+// text regardless of which stream the renderer used.
+fn _check_output(path: string) -> string ![io] {
+    let _rc = process.run_capture(["build/native/sailfin", "check", path], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return out + err;
+}
+
+fn _check_exit(path: string) -> i64 ![io] {
+    let rc = process.run_capture(["build/native/sailfin", "check", path], []);
+    // Drain the stashed capture buffers so a later `_check_output` /
+    // `capture_take_*` call doesn't hand back this run's streams.
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return rc;
+}
+
+test "E0420: undefined free-function callee exits non-zero with the diagnostic" ![io] {
+    let fixture = _mint_fixture("undef.sfn", "fn main() {\n    notarealfunction_813(\"hi\");\n}\n");
+
+    let rc = _check_exit(fixture);
+    assert rc != 0;
+
+    let combined = _check_output(fixture);
+    assert _contains(combined, "E0420");
+    assert _contains(combined, "undefined function");
+    assert _contains(combined, "notarealfunction_813");
+
+    fs.deleteFile(fixture);
+}
+
+test "E0420: locally-defined callee checks clean (envelope negative case)" ![io] {
+    let fixture = _mint_fixture("ok.sfn", "fn greet() {}\nfn main() {\n    greet();\n}\n");
+
+    let rc = _check_exit(fixture);
+    assert rc == 0;
+
+    let combined = _check_output(fixture);
+    assert ! _contains(combined, "E0420");
+
+    fs.deleteFile(fixture);
+}

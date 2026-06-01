@@ -30,6 +30,17 @@ A function declaring `![net]` inside a capsule that lists only
 `["io"]` fails the build. Empty surface (no `[capabilities]`
 section, or standalone .sfn outside any capsule) skips the check.
 
+Undefined function calls are a compile error (diagnostic code
+`E0420`). A call whose callee is a bare identifier must resolve to an
+in-scope binding (parameter, local, top-level `fn`/`extern fn`, or
+import name), a builtin (`print`, `console`, `assert`, `spawn`,
+`sleep`, `serve`, `channel`, `send`, `receive`, `await`, the six
+`atomic_*` intrinsics), an implicit prelude/`runtime/sfn/**` global,
+or an imported free function — otherwise typecheck fails with
+`error[E0420]: undefined function \`name\``. Member/method callees
+(`obj.method()`), undefined variable references, and argument type
+checks are out of scope for this rule.
+
     fn read_config(path: string) -> string ![io] {
         return fs.readFile(path);
     }
