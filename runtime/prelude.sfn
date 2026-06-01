@@ -37,12 +37,9 @@
 //     exports to the bare form). The prelude-side flip also needs
 //     a follow-up boundary cast (string ↔ `* u8`, int ↔ `float`)
 //     deferred per the issue's audit-only `In:` list.
-//   * `console`, `fs`, `http`, `websocket`,
-//     `runtime_create_capability_grant`,
-//     `runtime_create_filesystem_bridge`,
-//     `runtime_create_http_bridge` — capability-bridge surfaces with
-//     no Sailfin-native definitions today; M3 ships them alongside the
-//     filesystem / HTTP adapter rewrites.
+//   * `console`, `fs`, `http`, `websocket` — runtime namespace handles
+//     with no Sailfin-native definitions today; M3 ships them alongside
+//     the filesystem / HTTP adapter rewrites.
 // With M2.12b shipped, the audit invariant "every M2-replaced symbol's
 // emitted call lands on the canonical `sfn_*` symbol name" holds via
 // either direct sfn import (the type-meta cluster) or the helper
@@ -80,9 +77,6 @@ let fs = runtime.fs;
 let http = runtime.http;
 let websocket = runtime.websocket;
 
-let runtime_create_capability_grant = runtime.create_capability_grant;
-let runtime_create_filesystem_bridge = runtime.create_filesystem_bridge;
-let runtime_create_http_bridge = runtime.create_http_bridge;
 let runtime_sleep_fn = sfn_sleep;
 let runtime_monotonic_millis_fn = runtime.monotonic_millis;
 let runtime_log_execution_fn = sfn_log_execution;
@@ -112,18 +106,6 @@ let runtime_array_filter_fn = runtime.array_filter;
 let runtime_array_reduce_fn = runtime.array_reduce;
 let runtime_grapheme_count_fn = runtime.grapheme_count;
 let runtime_grapheme_at_fn = runtime.grapheme_at;
-
-fn capability_grant(effects: string[]) -> any {
-    return runtime_create_capability_grant(effects);
-}
-
-fn fs_bridge(grant: any) -> any {
-    return runtime_create_filesystem_bridge(grant);
-}
-
-fn http_bridge(grant: any) -> any {
-    return runtime_create_http_bridge(grant);
-}
 
 struct EnumField {
     name: string;
@@ -719,9 +701,6 @@ fn grapheme_at(text: string, index: int) -> string {
 }
 
 export {
-    capability_grant,
-    fs_bridge,
-    http_bridge,
     clamp,
     substring,
     find_char,
