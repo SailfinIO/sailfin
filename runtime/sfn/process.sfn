@@ -453,6 +453,13 @@ fn _drain_two_pipes(out_fd_in: i32, err_fd_in: i32, gb_out: * GrowBuf, gb_err: *
             }
         }
     }
+    // Close any fds still open when the loop exits early (a non-EINTR
+    // `poll` error breaks with one or both fds live). On the normal
+    // both-EOF exit they are already `-1`, so the guards no-op. Mirrors
+    // the C `_sfn_drain_pipes` close-on-return contract — without this
+    // an erroring drain leaks the pipe read ends.
+    if out_fd >= 0 { close(out_fd); }
+    if err_fd >= 0 { close(err_fd); }
     free(pbuf);
 }
 

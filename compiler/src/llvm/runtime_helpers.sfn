@@ -547,9 +547,12 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // Issue #365: stdout/stderr-capturing process APIs. argv and
     // env_flat are SfnArray<string>; env_flat carries `"KEY=VALUE"`
     // entries. `run_capture` returns the exit code; captured streams
-    // are retrieved via the `_take_*` helpers from thread-local
-    // storage. `spawn_with_env` returns a malloc'd handle (cast to
-    // int64); 0 indicates failure.
+    // are retrieved via the `_take_*` helpers from a stash the
+    // `run_capture` body fills. The C runtime used `__thread` TLS; the
+    // Sailfin-native body (#928) uses two process-global module stash
+    // globals instead, since Sailfin has no TLS surface yet (see
+    // `runtime/sfn/process.sfn`). `spawn_with_env` returns a malloc'd
+    // handle (cast to int64); 0 indicates failure.
     //
     // M3 (#928, epic #390): `exit`, `run_capture`, both `capture_take_*`,
     // and the four `handle_{write,close_stdin,read_stdout,read_stderr,
