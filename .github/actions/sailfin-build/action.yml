@@ -27,6 +27,27 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # Restore the fetched seed binary keyed on target + pinned version.
+    # The key is exact (no restore-keys): a hit guarantees the binary
+    # matches `.seed-version`, so the fetch step below can safely skip
+    # the download. Saved automatically in the job's post phase.
+    #
+    # Gated to a concrete pin: with `seed_version` unset/`latest` the key
+    # (`...-latest`) never changes as the moving `latest` tag advances,
+    # so a cache hit + the skip-download guard below would pin the runner
+    # to a stale seed forever. All current callers pass a resolved
+    # `.seed-version` pin; this `if:` keeps a future `latest` caller
+    # correct (it just re-downloads every run). The build cache below is
+    # not gated — it is self-protecting because `cache_key_for`
+    # (compiler/src/build_cache.sfn) embeds the real seed/compiler
+    # version in the on-disk digest, so a stale-seed entry simply misses.
+    - name: Restore seed cache
+      if: ${{ inputs.seed_version != '' && inputs.seed_version != 'latest' }}
+      uses: actions/cache@v4
+      with:
+        path: build/seed
+        key: sailfin-seed-${{ inputs.target }}-${{ inputs.seed_version }}
+
     - name: Fetch released seed compiler
       shell: bash {0}
       run: |
@@ -36,12 +57,38 @@ runs:
         if [ -z "$seed_version" ]; then
           seed_version="latest"
         fi
-        make fetch-seed \
-            SEED_REPO="${{ inputs.seed_repo }}" \
-            SEED_VERSION="$seed_version" \
-            SEED_EXCLUDE_TAG="$seed_exclude_tag"
+        # Skip the download on a seed-cache hit. The cache key pins the
+        # exact version, so a present + invokable binary is the right one.
+        if [ -x build/seed/bin/sailfin ] && build/seed/bin/sailfin version >/dev/null 2>&1; then
+          echo "[ci] seed cache hit ($seed_version) — skipping fetch"
+        else
+          make fetch-seed \
+              SEED_REPO="${{ inputs.seed_repo }}" \
+              SEED_VERSION="$seed_version" \
+              SEED_EXCLUDE_TAG="$seed_exclude_tag"
+        fi
         echo "[ci] seed binary: build/seed/bin/sailfin"
         build/seed/bin/sailfin version
+
+    # Restore the content-addressed module IR cache (`build/cache/`,
+    # written by `<seed> build -p compiler`). Keys are content-safe:
+    # `cache_key_for` (compiler/src/build_cache.sfn) hashes source
+    # content + sorted dep-manifest hashes + compiler version + flags —
+    # no absolute paths or mtimes — so a restored cache is reusable
+    # across runners and runs. Changed modules simply miss and re-emit;
+    # stale entries are never looked up (and LRU-evicted by GitHub).
+    # restore-keys fall back to the most recent cache for this
+    # target+seed (then any cache for this target), so a PR warms from
+    # main's cache (primed by build-quality.yml) and from its own
+    # earlier pushes.
+    - name: Restore build cache (content-addressed module IR)
+      uses: actions/cache@v4
+      with:
+        path: build/cache
+        key: sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', '.seed-version') }}
+        restore-keys: |
+          sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-
+          sailfin-buildcache-${{ inputs.target }}-
 
     - name: Build native compiler (selfhost from released seed)
       shell: bash {0}
