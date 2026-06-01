@@ -46,7 +46,12 @@ restore() {
         rm -rf "$STAGING"
         mv "$HIDDEN/runtime" "$STAGING"
     fi
-    rm -rf "$SCRATCH" "$HIDDEN"
+    # Only rm non-empty paths — in the "staging already absent" case
+    # HIDDEN stays empty and must not be passed to rm.
+    rm -rf "$SCRATCH"
+    if [ -n "$HIDDEN" ]; then
+        rm -rf "$HIDDEN"
+    fi
 }
 trap restore EXIT
 

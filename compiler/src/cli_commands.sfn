@@ -48,7 +48,7 @@ import {
 // here forms the `cli_main <-> cli_commands` cycle (`cli_main` already
 // imports `handle_test_command` from this module). Sailfin resolves
 // function-level import cycles, so the reverse edge is safe.
-import { RuntimeLinkInputs, assemble_runtime_capsule_link_inputs } from "./cli_main";
+import { assemble_runtime_capsule_link_inputs } from "./cli_main";
 import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "./dist_manifest";
 import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import { lock_add_entry, lock_get_version } from "./lock";

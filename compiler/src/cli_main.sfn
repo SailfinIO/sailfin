@@ -1000,19 +1000,15 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
             success: true
         };
     }
-    // Quick path: nothing to do unless some capsule declares
-    // `sfn_sources` or a `prelude-entry` (#940 — the prelude is now
-    // consumed here too, so a capsule with only `prelude-entry` must
-    // still take the emit path).
+    // Quick path: nothing to do if no capsule declares sfn_sources.
+    // (`prelude-entry` is handled separately by
+    // `assemble_runtime_capsule_link_inputs`, independent of the
+    // disable gate above — see #940.)
     let mut has_any: boolean = false;
     let mut probe: int = 0;
     loop {
         if probe >= runtime_capsules.length { break; }
         if runtime_capsules[probe].sfn_sources.length > 0 {
-            has_any = true;
-            break;
-        }
-        if runtime_capsules[probe].prelude_entry.length > 0 {
             has_any = true;
             break;
         }
@@ -1047,21 +1043,6 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
             objects.push(obj_path);
             si += 1;
         }
-        // #940: consume the capsule's `prelude-entry` (Stage D PR1
-        // transitional bridge) on the SAME emit path as the
-        // `sfn_sources` above. The slug resolves to `runtime/prelude`
-        // (prefix kept → symbols stay unmangled), exactly matching the
-        // Makefile-staged `prelude.o` this replaces. Linked exactly
-        // once: the standalone `_runtime_prelude_path` append in
-        // `_clang_link_multi_with_opt` was removed atomically with this
-        // (Risk R1 — no double-link).
-        if cap.prelude_entry.length > 0 {
-            let prelude_obj = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag);
-            if prelude_obj.length == 0 {
-                return _failed_runtime_link_inputs();
-            }
-            objects.push(prelude_obj);
-        }
         i += 1;
     }
     return RuntimeLinkInputs {
@@ -1095,6 +1076,51 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
         if soi >= sfn_inputs.object_paths.length { break; }
         objects.push(sfn_inputs.object_paths[soi]);
         soi += 1;
+    }
+    // #940: emit each capsule's `prelude-entry` on the same
+    // child-compiler path as `sfn-sources`, but deliberately OUTSIDE
+    // `_compile_runtime_sfn_sources` so the prelude is NOT gated by
+    // `SAILFIN_DISABLE_RUNTIME_SFN_SOURCES`. The prelude predates the
+    // sfn-sources migration and must always link (its `sleep` wrapper
+    // emits `@sfn_sleep` unconditionally, etc.); the rollback flag is
+    // only meant to short-circuit the migrated runtime modules. The
+    // slug resolves to `runtime/prelude` (prefix kept → symbols stay
+    // unmangled), matching the Makefile-staged `prelude.o` this
+    // replaces. Linked exactly once — the standalone
+    // `_runtime_prelude_path` append was removed atomically (Risk R1).
+    let mut has_prelude: boolean = false;
+    let mut pp: int = 0;
+    loop {
+        if pp >= runtime_capsules.length { break; }
+        if runtime_capsules[pp].prelude_entry.length > 0 {
+            has_prelude = true;
+            break;
+        }
+        pp += 1;
+    }
+    if has_prelude {
+        let self_path = _resolve_self_path(binary_dir);
+        if self_path.length == 0 {
+            print("sfn build: cannot resolve self path for runtime prelude-entry emit");
+            print("           tried: <binary_dir>/sailfin (binary_dir=\""
+                + binary_dir
+                + "\"), then readlink -f /proc/self/exe");
+            return _failed_runtime_link_inputs();
+        }
+        let mut pi: int = 0;
+        loop {
+            if pi >= runtime_capsules.length { break; }
+            let cap = runtime_capsules[pi];
+            if cap.prelude_entry.length > 0 {
+                let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
+                let prelude_obj = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag);
+                if prelude_obj.length == 0 {
+                    return _failed_runtime_link_inputs();
+                }
+                objects.push(prelude_obj);
+            }
+            pi += 1;
+        }
     }
     return RuntimeLinkInputs {
         object_paths: objects,
@@ -1136,10 +1162,14 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     let mut runtime_objs: string[] = [];
     let mut runtime_link_libs: string[] = [];
     if runtime_capsules.length == 0 {
-        print("sfn build: runtime bundle/manifest missing — no runtime capsule resolved");
-        print("           expected " + runtime_root
+        // Reached by `sfn build` / `sfn run` (and indirectly `sfn test`
+        // via the shared assembly), so the diagnostic is command-neutral.
+        let mut root_display = runtime_root;
+        if root_display.length == 0 { root_display = "<runtime-root>"; }
+        print("sfn: runtime bundle/manifest missing — no runtime capsule resolved");
+        print("     expected " + root_display
             + "/native/capsule.toml (kind = \"runtime\")");
-        print("           hint: ensure the runtime bundle ships alongside the compiler binary");
+        print("     hint: ensure the runtime bundle ships alongside the compiler binary");
         return 1;
     }
     let inputs = assemble_runtime_capsule_link_inputs(runtime_capsules, cache_dir, opt_flag, binary_dir);
