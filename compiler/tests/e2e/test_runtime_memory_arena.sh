@@ -244,6 +244,22 @@ void sfn_type_register(void *desc) {
     (void)desc;
 }
 
+/* #927: arena.sfn's mark/rewind pair reads the process-global arena
+ * via the C `sfn_arena_enabled` / `sfn_arena_global`, so the emitted
+ * arena.ll now `declare`s both. This lifecycle harness exercises only
+ * the five core allocator entry points (mark/rewind have their own
+ * roundtrip in test_runtime_memory_arena_mark.sh against the real C
+ * arena), so a disabled-arena stub for `sfn_arena_enabled` and a NULL
+ * `sfn_arena_global` keep the link self-contained — neither is reached
+ * on the allocator path under test. */
+int sfn_arena_enabled(void) {
+    return 0;
+}
+
+void *sfn_arena_global(void) {
+    return NULL;
+}
+
 int main(void) {
     /* Phase 1: create + small alloc + write-read roundtrip.
      * 4096-byte pages so subsequent assertions can cross the page

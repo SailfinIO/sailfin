@@ -361,8 +361,10 @@ calls to it in current code paths.
 | `sailfin_runtime_byte_at` / `find_byte_index` | ✅ | memchr-backed |
 | `sailfin_runtime_char_code` | ✅ | Handles immediate-codepoint and legacy C strings |
 | `sailfin_runtime_is_decimal_digit/whitespace_char/alpha_char` | ✅ | |
-| `sailfin_runtime_copy_bytes`, `bounds_check` | ✅ | |
-| `sailfin_runtime_get_field` | ✅ | Only implemented for `.variant` on boxed enums — everything else returns NULL |
+| `sailfin_runtime_copy_bytes`, `bounds_check` | ✅ | **Ported to Sailfin** (#927): `sfn_mem_copy_bytes` / `sfn_mem_bounds_check` in `runtime/sfn/memory/mem.sfn`. Descriptors flipped; C bodies retained for seed-built IR until M3. |
+| `sailfin_runtime_get_field` | ✅ | **Ported to Sailfin** (#927): `sfn_mem_get_field` in `runtime/sfn/memory/mem.sfn`. Returns a lazily-allocated zeroed 4 KB safe buffer (reads as empty string / zero array / `0`/`false`); statically-resolvable members + `.variant` are handled ahead of this fallback by the GEP-replacement pass in `core_member_lowering.sfn`. |
+| `sailfin_runtime_free` | ✅ | **Ported to Sailfin** (#927): `sfn_mem_free` in `runtime/sfn/memory/mem.sfn`. Null-safe; arena-mode no-op guard (`sfn_arena_enabled`) preserved so a `runtime.free` under arena mode never hands an arena pointer to libc `free`. |
+| `sailfin_intrinsic_runtime_arena_mark` / `_rewind` | ✅ | **Ported to Sailfin** (#927): `sfn_arena_sfn_mark` / `sfn_arena_sfn_rewind` in `runtime/sfn/memory/arena.sfn`. Double-encoded `(page_index << 32) \| used` mark over the process-global arena (`sfn_arena_global`). Uses the `sfn_arena_sfn_*` infix to coexist with the live C `sfn_arena_mark`/`_rewind` until M3. |
 
 **Concat-reuse optimization.** A single-slot cache
 (`_concat_reuse_ptr/_cap/_len/_seq`) lets `string_concat` append in place when

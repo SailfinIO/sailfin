@@ -107,7 +107,12 @@ ll-sources = ["ir/runtime_globals.ll"]
 # `_filter` / `_reduce` (array.sfn). All three modules are required
 # here or the link fails with "undefined reference to
 # `sfn_log_execution`" / `sfn_to_debug_string` / `sfn_array_sfn_filter`.
-sfn-sources = ["../sfn/test_marker.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/io.sfn", "../sfn/string.sfn", "../sfn/array.sfn"]
+# #927 (epic #390) flipped the get_field / copy_bytes / bounds_check /
+# free descriptors to `@sfn_mem_*` (mem.sfn); prelude.o (and any boxed
+# local / array index in the linked IR) now references them, so mem.sfn
+# is required too or the link fails with "undefined reference to
+# `sfn_mem_bounds_check`".
+sfn-sources = ["../sfn/test_marker.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/io.sfn", "../sfn/string.sfn", "../sfn/array.sfn", "../sfn/memory/mem.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm"]
 prelude-entry = "../prelude.sfn"
@@ -149,6 +154,11 @@ EOF
     ln -s "$REPO_ROOT/runtime/sfn/string.sfn" "$ws/runtime/sfn/string.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/array.sfn" "$ws/runtime/sfn/array.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/platform/libc.sfn" "$ws/runtime/sfn/platform/libc.sfn"
+    # #927 dep — prelude.o + linked IR reference `@sfn_mem_*` (mem.sfn
+    # lives under runtime/sfn/memory/). No imports of its own (inlines
+    # its externs), so a bare symlink suffices.
+    mkdir -p "$ws/runtime/sfn/memory"
+    ln -s "$REPO_ROOT/runtime/sfn/memory/mem.sfn" "$ws/runtime/sfn/memory/mem.sfn"
 
     # The sfn-source under test. Tiny self-contained module.
     cat > "$ws/runtime/sfn/test_marker.sfn" <<'EOF'

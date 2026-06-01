@@ -356,3 +356,143 @@ fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usiz
     memcpy(new_ptr, ptr, old_size_i as usize);
     return new_ptr;
 }
+
+// ====================================================================
+// Mark / rewind over the process-global arena (#927, sub-issue of
+// #390). Port of the double-encoding wrappers
+// `sailfin_intrinsic_runtime_arena_mark` /
+// `sailfin_intrinsic_runtime_arena_rewind`
+// (`runtime/native/src/sailfin_runtime.c:7811,7834`), NOT the
+// low-level struct-returning `sfn_arena_mark` /  `sfn_arena_rewind`
+// (`sailfin_arena.c:94,104`). The runtime-helper descriptors flip
+// `sailfin_intrinsic_runtime_arena_mark` →
+// `native_signature: "sfn_arena_sfn_mark"` and `…_rewind` →
+// `"sfn_arena_sfn_rewind"`, so the in-process `sfn check` / `sfn test`
+// scratch loop (the only caller) routes here.
+//
+// Export naming: the directed `sfn_arena_mark` / `sfn_arena_rewind`
+// names in the issue collide with the C arena's *live* exports of
+// exactly those names (`nm` shows `T sfn_arena_mark` /
+// `T sfn_arena_rewind`; they retire only at M3). Defining Sailfin
+// bodies under those names would be a duplicate-symbol link failure.
+// We therefore use this module's established `sfn_arena_sfn_*` infix —
+// the same collision-avoidance the five core arena exports use.
+//
+// The mark is encoded as a Sailfin `number` (LLVM `double`): the C
+// wrapper packs `(page_index << 32) | (used & 0xFFFFFFFF)` into the
+// low 53 mantissa bits and round-trips it through `double`. Bit-shift
+// / mask / `i64 ⇄ f64` round-tripping is verified to lower and execute
+// correctly on the seed.
+//
+// Semantics of the encoded value `0` (matching the C wrapper exactly):
+//   - When the arena is **disabled** (`!sfn_arena_enabled()`),
+//     `sfn_arena_sfn_mark` returns `0.0` and `sfn_arena_sfn_rewind`
+//     early-returns before decoding — so a mark/rewind pair around a
+//     disabled arena is a genuine no-op.
+//   - When the arena is **enabled**, `0` decodes to `page_index = 0,
+//     used = 0`, i.e. "rewind the first page to offset 0 and zero
+//     every later page." That is a real *partial reset to the chain
+//     head*, NOT a no-op. A caller that took a mark *after* allocating
+//     on page 0 and then rewinds `0` will discard those allocations.
+//     Callers must therefore pair a rewind with the value an actual
+//     `sfn_arena_sfn_mark` returned, never a hardcoded `0`, unless a
+//     reset-to-head is the intent.
+//
+// The global-arena C structs are read by raw field offset (the
+// `_addr` discipline this module already uses):
+//   SfnArena      { current@0, first@8, default_page_size@16,
+//                   total_allocated@24, total_pages@32 }
+//   SfnArenaPage  { data@0, capacity@8, used@16, next@24 }
+// matching `runtime/native/include/sailfin_arena.h`. `_runtime_enter`
+// (a `static inline` call-sequence counter in the C runtime) has no
+// bearing on mark/rewind semantics and is intentionally not ported.
+// arena-mode probe + process-global arena handle, both exported from
+// `runtime/native/src/sailfin_arena.c`.
+extern fn sfn_arena_enabled() -> bool;
+
+extern fn sfn_arena_global() -> * u8;
+
+// `sfn_arena_sfn_mark()` snapshots the global arena's current page +
+// used offset, encoded as `(page_index << 32) | used` cast to a
+// `number`. Returns `0.0` when the arena is disabled or has no current
+// page (round-trips to a no-op rewind). Faithful port of
+// `sailfin_intrinsic_runtime_arena_mark`. Descriptor ABI: `() ->
+// double`.
+fn sfn_arena_sfn_mark() -> number {
+    if !sfn_arena_enabled() { return 0.0; }
+
+    let arena_ptr: * u8 = sfn_arena_global();
+    if arena_ptr as i64 == 0 { return 0.0; }
+
+    let arena: * Arena = arena_ptr as * Arena;
+    let current_addr: i64 = arena.current_addr;
+    if current_addr == 0 { return 0.0; }
+
+    // Snapshot the current page's used offset.
+    let current_page: * ArenaPage = current_addr as * ArenaPage;
+    let used: i64 = current_page.used;
+
+    // Index of the current page within the first→next chain.
+    let mut page_index: i64 = 0;
+    let mut walker: i64 = arena.first_addr;
+    loop {
+        if walker == 0 { break; }
+        if walker == current_addr { break; }
+        let p: * ArenaPage = walker as * ArenaPage;
+        walker = p.next_addr;
+        page_index = page_index + 1;
+    }
+
+    let encoded: i64 = (page_index << 32) | (used & 4294967295);
+    return encoded as number;
+}
+
+// `sfn_arena_sfn_rewind(encoded_mark)` walks back to the marked page,
+// zeroes `used` on every page strictly after it, rewinds the marked
+// page to its snapshot offset, and re-parks `current` there. Out-of-
+// range / corrupt marks bail silently (better than crashing). No-op
+// when the arena is disabled or empty. Faithful port of
+// `sailfin_intrinsic_runtime_arena_rewind`. Descriptor ABI: `(double)
+// -> void`.
+fn sfn_arena_sfn_rewind(encoded_mark: number) -> void {
+    if !sfn_arena_enabled() { return; }
+
+    let arena_ptr: * u8 = sfn_arena_global();
+    if arena_ptr as i64 == 0 { return; }
+    let arena: * Arena = arena_ptr as * Arena;
+    if arena.first_addr == 0 { return; }
+
+    let encoded: i64 = encoded_mark as i64;
+    let page_index: i64 = encoded >> 32;
+    let used: i64 = encoded & 4294967295;
+
+    // Walk to the marked page. If page_index runs off the end (arena
+    // reset between mark and rewind, corrupt mark, etc.) bail.
+    let mut walker: i64 = arena.first_addr;
+    let mut i: i64 = 0;
+    loop {
+        if walker == 0 { break; }
+        if i >= page_index { break; }
+        let p: * ArenaPage = walker as * ArenaPage;
+        walker = p.next_addr;
+        i = i + 1;
+    }
+    if walker == 0 { return; }
+
+    let mark_page: * ArenaPage = walker as * ArenaPage;
+
+    // Zero `used` on every page strictly after the marked page so the
+    // next burst reuses their capacity instead of growing the chain.
+    let mut after_addr: i64 = mark_page.next_addr;
+    loop {
+        if after_addr == 0 { break; }
+        let after_page: * ArenaPage = after_addr as * ArenaPage;
+        after_page.used = 0;
+        after_addr = after_page.next_addr;
+    }
+
+    // Rewind the marked page to the snapshot offset and make it the
+    // current allocation target.
+    mark_page.used = used;
+    arena.current_addr = walker;
+}

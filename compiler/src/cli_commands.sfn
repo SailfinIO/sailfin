@@ -308,6 +308,24 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
             }
             ari += 1;
         }
+        // #927: companion to the array.o staging above. The descriptor
+        // flip routes `get_field` / `copy_bytes` / `runtime.bounds_check`
+        // / `runtime.free` to `@sfn_mem_*` (defined in
+        // `runtime/sfn/memory/mem.sfn`); nearly every test binary indexes
+        // an array or drops a scope local, so without this `.o` it fails
+        // at link with "undefined reference to `sfn_mem_bounds_check`".
+        let mem_paths: string[] = ["build/selfhost/native/obj/runtime/mem.o", "build/native/obj/runtime/mem.o", "build/native/obj/mem.o", runtime_root
+            + "/native/obj/runtime/mem.o", runtime_root
+            + "/native/obj/mem.o",];
+        let mut memi: int = 0;
+        loop {
+            if memi >= mem_paths.length { break; }
+            if fs.exists(mem_paths[memi]) {
+                args.push(mem_paths[memi]);
+                break;
+            }
+            memi += 1;
+        }
     }
     args.push("-lm");
     args.push("-pthread");

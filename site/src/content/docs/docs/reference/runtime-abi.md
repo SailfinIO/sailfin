@@ -192,8 +192,17 @@ malloc-based lifetime contract.
 
 | Symbol | Signature | When emitted | Pairs with | Arena | Off-arena |
 | --- | --- | --- | --- | --- | --- |
-| `sailfin_runtime_alloc_struct` | `i8* (i64 size_bytes)` | string-literal materialization, struct/array literal boxing, scalar→`i8*` coercion | `sailfin_runtime_free` (or arena bulk reclaim) | `_rt_calloc` → arena | `calloc(1, size)` |
-| `sailfin_runtime_free` | `void (i8*)` | await-unboxing of a boxed-struct future return | `sailfin_runtime_alloc_struct` | no-op (arena reclaims at rewind / exit) | `free(ptr)` |
+| `sailfin_runtime_alloc_struct` | `i8* (i64 size_bytes)` | string-literal materialization, struct/array literal boxing, scalar→`i8*` coercion | `sfn_mem_free` (or arena bulk reclaim) | `_rt_calloc` → arena | `calloc(1, size)` |
+| `sfn_mem_free` | `void (i8*)` | await-unboxing of a boxed-struct future return; scope-exit drop of a boxed local | `sailfin_runtime_alloc_struct` | no-op (arena reclaims at rewind / exit) | `free(ptr)` |
+
+> **#927:** `runtime.free` now lowers to the Sailfin-native
+> `@sfn_mem_free` (`runtime/sfn/memory/mem.sfn`), not the legacy C
+> `sailfin_runtime_free`. `sfn_mem_free` is the canonical emitted
+> symbol for fresh IR; it preserves the arena-mode no-op guard
+> (`sfn_arena_enabled`) and the libc-`free` off-arena fallback. The
+> C `sailfin_runtime_free` body stays exported for seed-built IR
+> that predates the flip, and retires at M3. (`alloc_struct` keeps
+> its legacy C symbol — that primitive's port is a separate issue.)
 
 **Alignment.** Both helpers guarantee 8-byte alignment — the arena
 path passes `align=8` to `sfn_arena_alloc`, and `calloc` aligns to
@@ -206,10 +215,11 @@ the default, only an explicit `0`/`""`/`"false"` opts out. Arena
 allocations live until the next `sfn_arena_rewind` to a prior mark
 or until process exit; the compiler does not emit per-allocation
 drops for arena-routed pointers (M1.5.5 escape promotion is not yet
-on). Off-arena, `sailfin_runtime_free` fires only at sites with
+on). Off-arena, `sfn_mem_free` fires only at sites with
 unambiguous ownership (today: `await` unboxing of boxed-struct
-future returns), must only be paired with `_rt_calloc`-routed
-pointers, and would otherwise leak or corrupt libc metadata. The
+future returns and scope-exit drops of boxed locals), must only be
+paired with `_rt_calloc`-routed pointers, and would otherwise leak
+or corrupt libc metadata. The
 async-context calloc/free pair in
 [`emission_async.sfn`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/llvm/lowering/emission_async.sfn)
 intentionally stays on raw `@calloc` / `@free` because both ends
