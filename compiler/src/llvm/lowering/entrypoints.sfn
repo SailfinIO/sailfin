@@ -100,6 +100,7 @@ import {
 import { emit_llvm_function } from "./emission";
 import {
     compile_native_text_to_llvm_file,
+    compile_native_text_to_llvm_file_with_context,
     has_fatal_lowering_diagnostic,
     lower_to_llvm_lines_with_parsed_context,
     lower_to_llvm_lines_with_parsed_context_for_tests
@@ -340,6 +341,19 @@ fn write_llvm_ir(native_module: NativeModule, out_path: string) -> boolean ![io]
 // bug that had forced the 0.5.7-era recovery-parser fallback).
 fn write_llvm_ir_from_native_text(native_text: string, module_name: string, out_path: string) -> boolean ![io] {
     return compile_native_text_to_llvm_file(native_text, module_name, out_path);
+}
+
+// Context-carrying variant of `write_llvm_ir_from_native_text` for the
+// `-p` per-module build path (#999). Threads the staged direct-import
+// `.sfn-asm` bodies (from `load_imported_interfaces_from_paths`, e.g. the
+// walk-excluded entry's exported signatures) into lowering so a sibling
+// module's call sites resolve cross-module callee return types instead of
+// hitting the `[fatal]` unresolved-callee gate. The underlying
+// `compile_native_text_to_llvm_file_with_context` UNIONS these texts with
+// the module's embedded-import context — mirrors the tests path
+// (`write_llvm_ir_for_tests_from_text_with_context`).
+fn write_llvm_ir_from_native_text_with_context(native_text: string, module_name: string, out_path: string, imported_native_texts: string[]) -> boolean ![io] {
+    return compile_native_text_to_llvm_file_with_context(native_text, module_name, out_path, imported_native_texts);
 }
 
 fn lower_to_llvm_with_manifests(native_module: NativeModule, imported_manifests: LayoutManifest[]) -> LoweredLLVMResult {

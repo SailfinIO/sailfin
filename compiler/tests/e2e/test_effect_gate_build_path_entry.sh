@@ -174,40 +174,47 @@ test_bad_sibling_e0402() {
 }
 run_test "build path emits E0402 + exits non-zero for orphan sibling->entry ![io]" test_bad_sibling_e0402
 
-# ---- Test 3: a clean -p build still exits 0 (issue #991 guard) ----
-# Pins acceptance criterion 3: the #991 driver guard returns non-zero
-# only when a module actually failed to compile. A `-p` build where
-# every module emits cleanly must still link and exit 0 — the
-# empty-vs-failed `ll_paths` distinction must not regress a legitimate
-# build into a failure.
+# ---- Test 3: cross-module good sibling emits + links, exits 0 (#999) ----
+# Pins #999 acceptance: a correctly-annotated `-p` sibling that imports an
+# entry-exported fn (`do_io`, void `![io]`) FROM THE WALK-EXCLUDED ENTRY
+# must resolve the entry's exported signature during its own per-module
+# lowering and emit cleanly, so the build links and exits 0. (The
+# value-returning variant is covered end-to-end in
+# `test_cross_module_signature_resolution.sh`.)
 #
-# This uses a SELF-CONTAINED sibling (no cross-module import) rather
-# than the good-case `write_sib " ![io]"` fixture: a sibling that
-# imports the entry's `do_io` currently can't resolve the entry's
-# return-type signature during its own per-module lowering (a separate
-# latent limitation of cross-module `-p` emit), so that "good" sibling
-# does not in fact emit cleanly. An orphan sibling with no imports and
-# declared effects is the clean-emit case this criterion needs.
-test_clean_build_exits_zero() {
+# Before #999 this exact fixture (`write_sib " ![io]"`) failed: the build
+# path loaded the entry's staged `.sfn-asm` only for the E0402 effect
+# gate, then discarded `loaded.native_texts` before lowering. The
+# sibling's per-module emit re-derived import context from its own embedded
+# `import` directives only, never saw the entry body, and hit the
+# `cannot resolve return type for call to do_io` `[fatal]` — which #991's
+# driver guard then surfaced as a non-zero build. #999 threads the staged
+# bodies into lowering so the callee signature resolves. This is the real
+# cross-module case (not the self-contained orphan the pre-#999 test used
+# to dodge the bug).
+test_cross_module_sibling_builds() {
     cd "$SCRATCH" || return 1
     rm -rf "$SCRATCH/build"
-    cat > "$SCRATCH/src/util/sib.sfn" <<'EOF'
-fn use_dep() ![io] {
-    print.info("sibling side effect");
-}
-
-export { use_dep };
-EOF
+    write_sib " ![io]"  # use_dep() ![io] imports + calls the entry's do_io()
     local rc=0
     "$BINARY" build -p . > "$SCRATCH/good2.stdout" 2>&1 || rc=$?
+    # Pin the SPECIFIC #999 callee (`do_io`) rather than the generic phrase:
+    # lowering the imported io-void body can surface a non-blocking
+    # "...call to `write`..." diagnostic while the build still links and
+    # exits 0, which is the authoritative signal here.
+    if grep -qE "cannot resolve return type for call to .do_io." "$SCRATCH/good2.stdout"; then
+        echo "[test]   cross-module sibling hit the #999 unresolved-callee fatal:" >&2
+        cat "$SCRATCH/good2.stdout" >&2
+        return 1
+    fi
     if [ "$rc" -ne 0 ]; then
-        echo "[test]   expected exit 0 for clean -p build; got exit $rc" >&2
+        echo "[test]   expected exit 0 for cross-module good sibling; got exit $rc" >&2
         cat "$SCRATCH/good2.stdout" >&2
         return 1
     fi
     return 0
 }
-run_test "clean -p build exits 0 (no-failure path not regressed)" test_clean_build_exits_zero
+run_test "cross-module good sibling resolves entry signature + exits 0 (#999)" test_cross_module_sibling_builds
 
 # ---- Summary ----
 echo ""

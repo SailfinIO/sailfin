@@ -361,13 +361,21 @@ fn resolve_import_module_slug_for_module(module: string, current_module_slug: st
 
     let mut slug = join_with_separator(resolved, "/");
 
-    // compiler/tests often import compiler sources via "../../src/<name>".
-    // Our import-context artifacts are rooted at build/native/import-context/<name>.*
-    // (no "src/" dir), so strip that prefix to keep imports and artifact layout
-    // consistent.
-    if starts_with(slug, "src/") {
-        slug = substring(slug, 4, slug.length);
-    }
+    // compiler/tests often import compiler sources via "../../src/<name>",
+    // which resolves to "compiler/src/<name>". Our import-context artifacts
+    // are rooted at build/native/import-context/<name>.* (the compiler's own
+    // sources are staged with the `compiler/src/` prefix stripped, mirroring
+    // `module_name_from_path`), so strip that prefix to keep imports and
+    // artifact layout consistent.
+    //
+    // A plain leading `src/` is NOT stripped here (#999): generic
+    // `src/`-rooted binary capsules stage their modules WITH the `src/`
+    // prefix (`module_name_from_path` only roots at `compiler/src/` and
+    // `runtime/`, and the sibling-side `_cr_relative_slug` keeps `src/`).
+    // Stripping `src/` here made `../main` resolve to bare `main` while the
+    // entry was staged + emitted as `src/main`, so the importing sibling's
+    // mangled call (`do_io__main`) never matched the entry's definition
+    // (`do_io__src__main`) and the link failed with an undefined reference.
     if starts_with(slug, "compiler/src/") {
         slug = substring(slug, 13, slug.length);
     }
