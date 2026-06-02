@@ -17,7 +17,7 @@ import {
     empty_runtime_call_overrides
 } from "./native/runtime_call";
 
-fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: int) -> ExpressionResult {
+fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: int) -> ExpressionResult ![io] {
     let mut current_lines = lines;
     let mut current_temp = temp_index;
     let mut diagnostics: string[] = [];

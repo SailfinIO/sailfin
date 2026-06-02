@@ -77,7 +77,7 @@ fn _format_literal_span(span: NativeSourceSpan) -> string {
     return start + "-" + end;
 }
 
-fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
+fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -727,7 +727,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
 // `line:col` instead of firing bare. Pre-#540 callers (every `lower_expression`
 // fan-out) thread `null` until they pick up an enclosing span — see the
 // issue's `Out:` section for the deferred plumbing.
-fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
+fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult ![io] {
     let mut diagnostics: string[] = parse.diagnostics;
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -963,7 +963,7 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
     };
 }
 
-fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, temp_index: int, lines: string[], context: TypeContext) -> HeapBoxResult {
+fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, temp_index: int, lines: string[], context: TypeContext) -> HeapBoxResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -1060,7 +1060,7 @@ fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, te
 
 // Slice E.2 follow-up (#540): `span` mirrors the threading in
 // `lower_struct_literal`. Pre-#540 callers pass `null`.
-fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
+fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult ![io] {
     let mut diagnostics: string[] = parse.diagnostics;
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;
@@ -1418,7 +1418,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
     };
 }
 
-fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
+fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
     let mut diagnostics = parse.diagnostics;
     let empty_constants = empty_string_constant_set();
     if !parse.success {
@@ -1677,7 +1677,7 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     };
 }
 
-fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? {
+fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
     let content = unescape_string_literal(literal);
     if find_substring_from(content, "{{", 0) < 0 { return null; }
     if find_substring_from(content, "}}", 0) < 0 { return null; }

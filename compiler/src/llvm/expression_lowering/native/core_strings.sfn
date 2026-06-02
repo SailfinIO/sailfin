@@ -9,7 +9,7 @@ import { coerce_operand_to_type, harmonise_operands } from "./core_operands";
 import { unescape_string_literal } from "./core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
-fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> ExpressionResult {
+fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
     // M1.A — String literal lowering to {i8*, i64} aggregate.
     //
     // The literal materializes in three layers:
@@ -98,7 +98,7 @@ fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> Ex
     };
 }
 
-fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
+fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
     let harmonised = harmonise_operands(left, right, temp_index, lines);
     let mut _if121: boolean = false;
     if harmonised.left == null { _if121 = true; }
@@ -189,7 +189,7 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
     };
 }
 
-fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult {
+fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
     let empty_constants = empty_string_constant_set();
     if operand.llvm_type == "i8*" {
         return ExpressionResult {

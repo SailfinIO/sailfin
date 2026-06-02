@@ -339,7 +339,7 @@ fn collapse_type_spaces(value: string) -> string {
 
 // Numeric primitive coercion: handles conversions between double/i64/i32/i8/i1.
 // Returns null if neither type is a numeric primitive — caller should try other coercion paths.
-fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
+fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? ![io] {
     let mut current_lines: string[] = lines;
     let mut diagnostics: string[] = [];
 
@@ -802,7 +802,7 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
 
 // Pointer/struct coercion: handles bitcasts, boxing, unboxing, pointer derefs.
 // Returns null if no pointer coercion applies.
-fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
+fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? ![io] {
     let mut current_lines: string[] = lines;
     let mut diagnostics: string[] = [];
 
@@ -1289,7 +1289,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
 }
 
 // General coercion fallbacks: boxing, union construction, pointer variance, null handling.
-fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? {
+fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: string, temp_index: int, lines: string[]) -> CoercionResult? ![io] {
     let mut current_lines: string[] = lines;
     let mut diagnostics: string[] = [];
 

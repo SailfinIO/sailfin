@@ -247,7 +247,7 @@ fn collect_available_import_module_names(imported_native_texts: string[]) -> str
     return names;
 }
 
-fn resolve_import_provider_module_name(import_path: string, current_module_slug: string, available_module_names: string[]) -> string {
+fn resolve_import_provider_module_name(import_path: string, current_module_slug: string, available_module_names: string[]) -> string ![io] {
     let base = resolve_import_module_slug_for_module(import_path, current_module_slug);
     if base.length == 0 { return base; }
     let resolved = resolve_import_artifact_slug(base);
