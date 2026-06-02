@@ -38,7 +38,10 @@
 //                     style_for_stream, style_with_mode,
 //                     style_resolve, paint, paint_* helpers,
 //                     _esc, _ansi_wrap, _no_color_from_value
-//   - print.sfn       print_error, print_warn, print_success, print_hint
+//   - print.sfn       print_error, print_warn, print_success, print_hint,
+//                     print_diag, print_status (+ pure builders
+//                     diag_prefix, diag_line, status_line, importable
+//                     directly from ./print for tests)
 //   - exit_codes.sfn  EXIT_OK, EXIT_BUILD_FAIL, EXIT_USAGE,
 //                     EXIT_NOT_FOUND, EXIT_INTERNAL
 //
@@ -137,7 +140,9 @@ export {
     print_error,
     print_warn,
     print_success,
-    print_hint
+    print_hint,
+    print_diag,
+    print_status
 } from "./print";
 
 // ---- Exit code constants ----

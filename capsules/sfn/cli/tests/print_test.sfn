@@ -1,0 +1,117 @@
+// Tests for sfn/cli — print_diag / print_status (issue #793 / 1.4).
+//
+// Covers:
+//   - `diag_prefix` maps each accepted severity to the canonical
+//     severity word used by `compiler/src/diagnostics_render.sfn`
+//     (`error`, `warning`, `info`, `hint`) and passes unknown
+//     severities through verbatim (plain prefix).
+//   - `diag_line` composes "<word>: <message>" and honors the
+//     disabled-style plain-text contract.
+//   - `status_line` renders the "[step/total] message" shape.
+//   - `print_diag` / `print_status` are exported from the barrel and
+//     run end-to-end under `![io]` (smoke coverage; the bytes are
+//     asserted via the pure builders above).
+//
+// The pure builders are imported directly from `../src/print` so the
+// public `mod.sfn` surface stays narrowed to `print_diag` /
+// `print_status` (per proposal §4.1) while the byte-level contract
+// stays testable.
+import { print_diag, print_status, style_resolve } from "../src/mod";
+import { diag_line, diag_prefix, status_line } from "../src/print";
+
+// ── diag_prefix: severity word matches diagnostics_render.sfn ─────
+//
+// `render_diagnostic` builds its header as `d.severity + "[" + ...`,
+// so the leading severity token is "error" / "warning". The CLI's
+// "warn" alias normalizes to "warning" so the two prefixes match
+// byte-for-byte ahead of the Phase 5 (Issue 5.3) unification.
+test "print: diag_prefix(error) is the renderer's error token" {
+    assert strings_equal(diag_prefix("error"), "error");
+}
+
+test "print: diag_prefix(warn) normalizes to the renderer's warning token" {
+    assert strings_equal(diag_prefix("warn"), "warning");
+}
+
+test "print: diag_prefix(info) is info" {
+    assert strings_equal(diag_prefix("info"), "info");
+}
+
+test "print: diag_prefix(hint) is hint" {
+    assert strings_equal(diag_prefix("hint"), "hint");
+}
+
+test "print: diag_prefix passes unknown severities through verbatim" {
+    assert strings_equal(diag_prefix("debug"), "debug");
+}
+
+// ── diag_line: composes "<word>: <message>" (plain when disabled) ──
+test "print: diag_line(error) renders error prefix" {
+    let s = style_resolve("stderr", "never", "");
+    assert strings_equal(diag_line(s, "error", "boom"), "error: boom");
+}
+
+test "print: diag_line(warn) renders warning prefix" {
+    let s = style_resolve("stderr", "never", "");
+    assert strings_equal(diag_line(s, "warn", "careful"), "warning: careful");
+}
+
+test "print: diag_line(info) renders info prefix" {
+    let s = style_resolve("stdout", "never", "");
+    assert strings_equal(diag_line(s, "info", "fyi"), "info: fyi");
+}
+
+test "print: diag_line(hint) renders hint prefix" {
+    let s = style_resolve("stderr", "never", "");
+    assert strings_equal(diag_line(s, "hint", "try --help"), "hint: try --help");
+}
+
+test "print: diag_line with empty severity yields the bare message" {
+    let s = style_resolve("stderr", "never", "");
+    assert strings_equal(diag_line(s, "", "just text"), "just text");
+}
+
+// ── diag_line: enabled style is plain too (bootstrap _esc() is "") ──
+//
+// Mirrors style_test's contract lock: an enabled Style still produces
+// plain text today because `_esc()` returns "". This assertion starts
+// exercising the ANSI path automatically once a real ESC byte lands.
+test "print: diag_line(error) enabled matches disabled today" {
+    let on = style_resolve("stderr", "always", "");
+    let off = style_resolve("stderr", "never", "");
+    assert strings_equal(diag_line(on, "error", "x"), diag_line(off, "error", "x"));
+}
+
+// ── status_line: "[step/total] message" shape ────────────────────
+test "print: status_line renders the [step/total] counter" {
+    let s = style_resolve("stdout", "never", "");
+    assert strings_equal(status_line(s, 2, 5, "Compiling"), "[2/5] Compiling");
+}
+
+test "print: status_line handles single-step progress" {
+    let s = style_resolve("stdout", "never", "");
+    assert strings_equal(status_line(s, 1, 1, "Done"), "[1/1] Done");
+}
+
+test "print: status_line enabled matches disabled today" {
+    let on = style_resolve("stdout", "always", "");
+    let off = style_resolve("stdout", "never", "");
+    assert strings_equal(status_line(on, 3, 7, "go"), status_line(off, 3, 7, "go"));
+}
+
+// ── smoke: exported print_diag / print_status run under ![io] ─────
+test "print: print_diag runs for each severity" ![io] {
+    print_diag("error", "smoke error", "");
+    print_diag("warn", "smoke warn", "");
+    print_diag("info", "smoke info", "");
+    print_diag("hint", "smoke hint", "");
+    print_diag("error", "with hint", "do the thing");
+    print_diag("unknown", "plain", "");
+    assert true;
+}
+
+test "print: print_status runs" ![io] {
+    print_status(1, 3, "Starting");
+    print_status(3, 3, "Finished");
+    assert true;
+}
