@@ -1,0 +1,116 @@
+// sfn/test — matcher core (issue #847, epic #840 Phase 1, sub-issue 1.4).
+//
+// `MatchResult` is the value every matcher returns: `ok == true` is the
+// "passed" case, `ok == false` carries a human-readable `message`
+// describing the mismatch. It mirrors the `present`/`message` shape of
+// `AssertFailure` in `mod.sfn` (just inverted: `ok` is the success
+// discriminator, `present` is the failure discriminator) and the
+// `MatchResult` sketched in `docs/proposals/test-infra-epic/
+// 03-capsule-api.md`. When `Result<T, E>` lands (1.0 critical path
+// Phase 1) the matcher tier folds into `Result<(), AssertFailure>`
+// alongside the `pure_assert_*` tier — `ok == true` maps to `Ok(())`
+// and `ok == false` to `Err(failure)` with no call-site change.
+//
+// Every function here is `![pure]`: matchers never print. Consumers
+// (a `expect(...).to_be(...)` call site today; 1.4's runner tomorrow)
+// inspect `.ok` and decide how to surface the failure. This keeps a
+// test calling only `expect`/matchers `![pure]` even though the capsule
+// manifest keeps `required = ["io"]` for the legacy `assert_*` tier.
+//
+// The generic `Expectation<T>` / `Matcher<T>` surface in the proposal
+// (`fn Expectation<T>.to_be(...) where T: Equatable`) is NOT buildable
+// today: the frontend has no `where` clauses and does not monomorphize
+// generic structs (issue #847 scope note). So matchers fan out per
+// concrete type, exactly like the `pure_assert_eq_*` family in
+// `mod.sfn` — `int`, `string`, `boolean`, and `int[]`.
+import { find } from "sfn/strings";
+
+// Integer formatting reuses the runtime intrinsic `number_to_string`
+// (the single numeric formatter used across this capsule — see the
+// `mod.sfn` header). `_match_bool_to_string` is a file-local copy of
+// `mod.sfn`'s `_bool_to_string`: the two files do not cross-import to
+// keep `matcher.sfn` free of any dependency on the legacy tier (and to
+// avoid an import cycle, since `mod.sfn` re-exports from here).
+fn _match_bool_to_string(value: boolean) -> string {
+    if value { return "true"; }
+    return "false";
+}
+
+// ---------------------------------------------------------------------------
+// MatchResult
+// ---------------------------------------------------------------------------
+struct MatchResult {
+    ok: boolean;
+    message: string;
+}
+
+fn match_ok() -> MatchResult {
+    return MatchResult { ok: true, message: "" };
+}
+
+fn match_fail(message: string) -> MatchResult {
+    return MatchResult { ok: false, message: message };
+}
+
+// ---------------------------------------------------------------------------
+// Equality matchers (per-type fan-out)
+// ---------------------------------------------------------------------------
+fn matcher_eq_int(actual: int, expected: int) -> MatchResult ![pure] {
+    if actual == expected { return match_ok(); }
+    return match_fail("expected: " + number_to_string(expected) + "; actual: "
+        + number_to_string(actual));
+}
+
+fn matcher_eq_string(actual: string, expected: string) -> MatchResult ![pure] {
+    if actual == expected { return match_ok(); }
+    return match_fail("expected: \"" + expected + "\"; actual: \"" + actual
+        + "\"");
+}
+
+fn matcher_eq_bool(actual: boolean, expected: boolean) -> MatchResult ![pure] {
+    if actual == expected { return match_ok(); }
+    return match_fail("expected: " + _match_bool_to_string(expected)
+        + "; actual: "
+        + _match_bool_to_string(actual));
+}
+
+fn matcher_eq_int_array(actual: int[], expected: int[]) -> MatchResult ![pure] {
+    if actual.length != expected.length {
+        return match_fail("expected length: " + number_to_string(expected.length)
+            + "; actual length: "
+            + number_to_string(actual.length));
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= actual.length { break; }
+        if actual[i] != expected[i] {
+            return match_fail("mismatch at index " + number_to_string(i)
+                + "; expected: "
+                + number_to_string(expected[i])
+                + "; actual: "
+                + number_to_string(actual[i]));
+        }
+        i += 1;
+    }
+    return match_ok();
+}
+
+// ---------------------------------------------------------------------------
+// Containment matchers
+// ---------------------------------------------------------------------------
+fn matcher_contains_string(haystack: string, needle: string) -> MatchResult ![pure] {
+    if find(haystack, needle, 0) >= 0 { return match_ok(); }
+    return match_fail("expected to contain: \"" + needle + "\"; actual: \""
+        + haystack
+        + "\"");
+}
+
+fn matcher_contains_int_array(haystack: int[], needle: int) -> MatchResult ![pure] {
+    let mut i: int = 0;
+    loop {
+        if i >= haystack.length { break; }
+        if haystack[i] == needle { return match_ok(); }
+        i += 1;
+    }
+    return match_fail("expected to contain: " + number_to_string(needle));
+}

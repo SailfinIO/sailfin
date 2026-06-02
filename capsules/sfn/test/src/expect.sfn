@@ -1,0 +1,143 @@
+// sfn/test — `expect()` fluent builder (issue #847, epic #840 Phase 1,
+// sub-issue 1.4).
+//
+// Vitest-style assertions for capsule authors. Because the frontend has
+// no generic-struct monomorphization, no `where` clauses, and no
+// `fn Type.method` free-method dispatch, the generic `Expectation<T>`
+// surface in `docs/proposals/test-infra-epic/03-capsule-api.md` is not
+// buildable today. This module ships the concrete per-type fan-out the
+// issue scope mandates — `IntExpectation`, `StrExpectation`,
+// `BoolExpectation`, `IntArrayExpectation` — mirroring the
+// `pure_assert_eq_*` family in `mod.sfn`.
+//
+// Usage (the builder + matcher are a single chained expression OR a
+// two-step `let`; both lower correctly):
+//
+//   assert expect_int(2 + 2).to_be(4).ok;
+//   assert expect_str("hello world").to_contain("world").ok;
+//   let r = expect_bool(flag).to_be(true);
+//   assert r.ok;
+//
+// Matchers are methods on the per-type structs and return `MatchResult`
+// (`![pure]`): `.ok == true` passed, `.ok == false` carries `.message`.
+// The caller decides how to surface a failure — typically
+// `assert e.to_be(x).ok;` — so a test calling only `expect` stays
+// `![pure]`.
+//
+// Throwing matchers are FREE functions, not methods. A thunk
+// (`fn() -> int`) cannot be stored in a struct field and then called
+// (the frontend cannot resolve a call through a function-typed struct
+// field), so the fluent `expect(thunk).to_throw()` form does not lower.
+// `expect_to_throw` / `expect_to_throw_with` take the thunk directly and
+// run it under `try`/`catch`, which works in a `![pure]` body (the
+// effect checker treats `try`/`catch`/`throw` as effect-free).
+import { find } from "sfn/strings";
+
+import {
+    MatchResult,
+    match_fail,
+    match_ok,
+    matcher_contains_int_array,
+    matcher_contains_string,
+    matcher_eq_bool,
+    matcher_eq_int,
+    matcher_eq_int_array,
+    matcher_eq_string
+} from "./matcher";
+
+// ---------------------------------------------------------------------------
+// Integer expectations
+// ---------------------------------------------------------------------------
+struct IntExpectation {
+    actual: int;
+    fn to_be(self: IntExpectation, expected: int) -> MatchResult ![pure] {
+        return matcher_eq_int(self.actual, expected);
+    }
+}
+
+fn expect_int(actual: int) -> IntExpectation {
+    return IntExpectation { actual: actual };
+}
+
+// ---------------------------------------------------------------------------
+// String expectations
+// ---------------------------------------------------------------------------
+struct StrExpectation {
+    actual: string;
+    fn to_be(self: StrExpectation, expected: string) -> MatchResult ![pure] {
+        return matcher_eq_string(self.actual, expected);
+    }
+
+    fn to_contain(self: StrExpectation, needle: string) -> MatchResult ![pure] {
+        return matcher_contains_string(self.actual, needle);
+    }
+}
+
+fn expect_str(actual: string) -> StrExpectation {
+    return StrExpectation { actual: actual };
+}
+
+// ---------------------------------------------------------------------------
+// Boolean expectations
+// ---------------------------------------------------------------------------
+struct BoolExpectation {
+    actual: boolean;
+    fn to_be(self: BoolExpectation, expected: boolean) -> MatchResult ![pure] {
+        return matcher_eq_bool(self.actual, expected);
+    }
+}
+
+fn expect_bool(actual: boolean) -> BoolExpectation {
+    return BoolExpectation { actual: actual };
+}
+
+// ---------------------------------------------------------------------------
+// Integer-array expectations
+// ---------------------------------------------------------------------------
+struct IntArrayExpectation {
+    actual: int[];
+    fn to_be(self: IntArrayExpectation, expected: int[]) -> MatchResult ![pure] {
+        return matcher_eq_int_array(self.actual, expected);
+    }
+
+    fn to_contain(self: IntArrayExpectation, needle: int) -> MatchResult ![pure] {
+        return matcher_contains_int_array(self.actual, needle);
+    }
+}
+
+fn expect_int_array(actual: int[]) -> IntArrayExpectation {
+    return IntArrayExpectation { actual: actual };
+}
+
+// ---------------------------------------------------------------------------
+// Throwing matchers (free functions — see the module header)
+// ---------------------------------------------------------------------------
+// `expect_to_throw(thunk)` passes iff `thunk` throws. The return value
+// of `thunk` is ignored; on the no-throw path the matcher fails. The
+// thunk type is `fn() -> int` (the frontend's function-pointer surface
+// needs a concrete return type and lacks `()`/void thunks here); test
+// bodies that need to throw simply `return 0` after the throwing call.
+fn expect_to_throw(thunk: fn () -> int) -> MatchResult ![pure] {
+    try {
+        let _ = thunk();
+        return match_fail("expected the thunk to throw, but it returned");
+    } catch (e) { return match_ok(); }
+}
+
+// `expect_to_throw_with(thunk, pattern)` passes iff `thunk` throws AND
+// the thrown message contains `pattern` (substring match via
+// `sfn/strings::find`). A throw whose message does not contain the
+// pattern fails with a diagnostic showing both.
+fn expect_to_throw_with(thunk: fn () -> int, pattern: string) -> MatchResult ![pure] {
+    try {
+        let _ = thunk();
+        return match_fail("expected the thunk to throw \"" + pattern
+            + "\", but it returned");
+    } catch (e) {
+        if find(e, pattern, 0) >= 0 { return match_ok(); }
+        return match_fail("expected thrown message to contain: \"" + pattern
+            + "\"; actual message: \""
+            + e
+            + "\"");
+    }
+}

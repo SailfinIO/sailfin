@@ -336,3 +336,27 @@ fn pure_assert_false(value: boolean, label: string) -> AssertFailure ![pure] {
         + "; expected: false; actual: true";
     return _pure_fail(message);
 }
+
+// ---------------------------------------------------------------------------
+// `expect()` fluent builder + matchers (issue #847, proposal §1.4)
+// ---------------------------------------------------------------------------
+// The fluent assertion surface lives in `expect.sfn` (the per-type
+// `Expectation` builders + throwing matchers) and `matcher.sfn` (the
+// `MatchResult` core + comparison/containment logic). This barrel
+// re-exports their public surface so consumers import everything from
+// `sfn/test`. The legacy `assert_*` and `pure_assert_*` tiers above are
+// retained unchanged (deprecation is Phase 3 / issue 3.3).
+export { MatchResult, match_fail, match_ok } from "./matcher";
+
+export {
+    BoolExpectation,
+    IntArrayExpectation,
+    IntExpectation,
+    StrExpectation,
+    expect_bool,
+    expect_int,
+    expect_int_array,
+    expect_str,
+    expect_to_throw,
+    expect_to_throw_with
+} from "./expect";
