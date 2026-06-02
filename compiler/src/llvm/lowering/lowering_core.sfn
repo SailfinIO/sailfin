@@ -377,6 +377,20 @@ fn native_text_passes_lowering_gate(native_text: string, module_name: string) ->
         }
         return false;
     }
+    // Mirror the remaining non-fatal rejection conditions in
+    // `compile_native_text_to_llvm_file` above so `emit native` matches
+    // `emit llvm` exactly, not just on `[fatal]`: lowering that produces
+    // lines but no defined function symbols, or no output lines at all, is
+    // a hard error there and must be one here too.
+    let lowered_count = lowered_lines.lines.length;
+    if lowered_count > 0 {
+        let defined = collect_defined_function_symbols(lowered_lines.lines);
+        if defined.length == 0 { return false; }
+    }
+    if lowered_lines.lines.length == 0 {
+        print.err("emit-native: lowering produced no output lines");
+        return false;
+    }
     return true;
 }
 
