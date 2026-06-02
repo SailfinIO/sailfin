@@ -19,8 +19,24 @@
 // lowering pipeline non-reentrantly, which the resolver avoids by
 // running every module compile in a fresh subprocess. Spawning the
 // real binary matches production exactly and keeps this test light.
-// `process.run_capture(argv, env)`'s second argument seeds the child's
-// environment (same mechanism `undefined_function_check_test` uses).
+//
+// `process.run_capture(argv, env)` REPLACES the child environment
+// (`runtime/sfn/process.sfn`: an empty array means the empty
+// environment), so a child seeded with only `SAILFIN_INJECT_FAULT`
+// loses PATH — and the `--validate` cascade's `command -v llvm-as` /
+// `clang` lookups (and `sh` itself) would then resolve only via the
+// kernel/shell default path, which omits CI's versioned `llvm-18`
+// dir. Hand the child the parent's real PATH, captured via `system()`
+// (which inherits the real env). Effect knobs (`SAILFIN_EFFECT_*`)
+// stay unset, so the child still exercises shipped defaults.
+extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+
+fn _host_path() -> string ![io] {
+    let p = sailfin_runtime_shell_capture("printf '%s' \"$PATH\"");
+    if p.length == 0 { return "/usr/local/bin:/usr/bin:/bin"; }
+    return p;
+}
+
 // A minimal pure module the emitter can lower without any effect
 // plumbing, so each (re-)emit attempt in the child stays cheap.
 fn _retry_fixture() -> string ![io] {
@@ -46,7 +62,8 @@ fn _emit_with_faults(src: string, out: string, attempts: string, validate: boole
     argv.push(out);
     argv.push("llvm");
     argv.push(src);
-    let rc = process.run_capture(argv, ["SAILFIN_INJECT_FAULT=" + faults]);
+    let rc = process.run_capture(argv, ["SAILFIN_INJECT_FAULT=" + faults, "PATH="
+        + _host_path()]);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     return rc;

@@ -74,21 +74,28 @@ fn emit_parse_nonneg_int(value: string) -> int {
         if ch == "8" { digit = 8; }
         if ch == "9" { digit = 9; }
         if digit < 0 {
-            if ch == " " {
-                i += 1;
-                continue;
-            }
-            if ch == "\t" {
-                i += 1;
-                continue;
-            }
-            if ch == "\n" {
-                i += 1;
-                continue;
-            }
-            if ch == "\r" {
-                i += 1;
-                continue;
+            // Skip whitespace ONLY before the first digit (e.g. a
+            // `printf`-captured value with a leading space). Once
+            // digits have started, any non-digit — whitespace
+            // included — terminates the parse, so "1 2" parses as 1
+            // and "12x" as 12 instead of silently splicing to 12/12.
+            if !any_digit {
+                if ch == " " {
+                    i += 1;
+                    continue;
+                }
+                if ch == "\t" {
+                    i += 1;
+                    continue;
+                }
+                if ch == "\n" {
+                    i += 1;
+                    continue;
+                }
+                if ch == "\r" {
+                    i += 1;
+                    continue;
+                }
             }
             break;
         }
@@ -131,18 +138,22 @@ fn _eh_trace(trace: boolean, module_name: string, attempt: int, max_attempts: in
 // clang, and the single-shot `sfn emit` callers opt into validation
 // explicitly via `--validate`.
 fn validate_llvm_ir(ll_path: string) -> boolean ![io] {
-    let validate_cmd = "( command -v llvm-as >/dev/null 2>&1 && llvm-as < "
+    // `ll_path` is double-quoted in every leg so an `-o` target with
+    // spaces (single-shot `sfn emit --validate llvm -o "<user path>"`)
+    // survives the `sh -c` tokenization. Mirrors the parallel worker's
+    // `"$2"` quoting.
+    let validate_cmd = "( command -v llvm-as >/dev/null 2>&1 && llvm-as < \""
         + ll_path
-        + " > /dev/null 2>&1 ) "
-        + "|| ( command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < "
+        + "\" > /dev/null 2>&1 ) "
+        + "|| ( command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < \""
         + ll_path
-        + " > /dev/null 2>&1 ) "
-        + "|| ( command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir "
+        + "\" > /dev/null 2>&1 ) "
+        + "|| ( command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir \""
         + ll_path
-        + " -o /dev/null > /dev/null 2>&1 ) "
-        + "|| ( command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir "
+        + "\" -o /dev/null > /dev/null 2>&1 ) "
+        + "|| ( command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir \""
         + ll_path
-        + " -o /dev/null > /dev/null 2>&1 )";
+        + "\" -o /dev/null > /dev/null 2>&1 )";
     let validate_rc = process.run(["sh", "-c", validate_cmd]);
     return validate_rc == 0;
 }
