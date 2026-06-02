@@ -45,7 +45,7 @@
 # Usage:
 #   compiler/tests/e2e/test_effect_gate_build_path_entry.sh <compiler-binary>
 
-set -uo pipefail
+set -euo pipefail
 
 BINARY="${1:?usage: test_effect_gate_build_path_entry.sh <compiler-binary>}"
 BINARY="$(realpath "$BINARY")"
@@ -124,8 +124,11 @@ test_sidecar_lists_entry() {
     write_sib " ![io]"
     "$BINARY" build -p . > "$SCRATCH/good.stdout" 2>&1 || true
 
+    # `|| true`: under `set -euo pipefail` a missing build/ makes `find`
+    # exit non-zero and pipefail would abort before the explicit empty
+    # check below can report a useful diagnostic.
     local sidecar
-    sidecar=$(find "$SCRATCH/build" -name '*sib*.import-deps' 2>/dev/null | head -n1)
+    sidecar=$(find "$SCRATCH/build" -name '*sib*.import-deps' 2>/dev/null | head -n1 || true)
     if [ -z "$sidecar" ]; then
         echo "[test]   no sibling .import-deps sidecar found under build/" >&2
         find "$SCRATCH/build" -name '*.import-deps' >&2 2>/dev/null || true

@@ -1456,13 +1456,19 @@ fn _cr_direct_import_slugs_for(src: CapsuleSource, sources: CapsuleSource[]) -> 
 // For each source, compute the manifest paths of its direct imports.
 // Result is a parallel array — index i is the dep manifest list for
 // `sources[i]`.
-fn _cr_collect_per_source_dep_manifests(sources: CapsuleSource[], work_dir: string) -> string[][] ![io] {
+//
+// #984: slug resolution runs against `universe` (= `sources ++`
+// the staged `-p` entry), not `sources`, so a sibling's direct import
+// of the walk-excluded entry contributes the entry's `.layout-manifest`
+// to its dep list — feeding both the cache key and the in-process
+// enforcement fallback. Manifests are still emitted only for `sources`.
+fn _cr_collect_per_source_dep_manifests(sources: CapsuleSource[], universe: CapsuleSource[], work_dir: string) -> string[][] ![io] {
     let context_root = _cr_import_context_root(work_dir);
     let mut out: string[][] = [];
     let mut i: int = 0;
     loop {
         if i >= sources.length { break; }
-        let dep_slugs = _cr_direct_import_slugs_for(sources[i], sources);
+        let dep_slugs = _cr_direct_import_slugs_for(sources[i], universe);
         let mut paths: string[] = [];
         let mut j: int = 0;
         loop {
@@ -1812,23 +1818,15 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     let scratch_root = _cr_scratch_root();
     _cr_ensure_dir(scratch_root);
     _cr_ensure_dir(scratch_root + "/capsules");
-    // Per-source dep manifests (PR1e): each `_cr_compile_one` call
-    // sees only the manifests of modules it directly imports, so an
-    // unrelated capsule changing busts only the modules that
-    // transitively import it. Result is a parallel array — index i
-    // is the manifest list for `sources[i]`. Cost is one read per
-    // source plus a few linear scans; for the typical N≈30-130 the
-    // total is dominated by the per-module compile path the cache
-    // would otherwise trigger.
-    let per_source_dep_manifests = _cr_collect_per_source_dep_manifests(sources, work_dir);
-    // #957: stage the per-module `.import-deps` sidecars the
-    // `emit --import-context` subprocess reads to enforce cross-module
-    // effect transitivity on the build path. Written before any
-    // (serial or parallel) emit so every worker sees its sidecar.
-    // #984: resolve slugs against `sources ++ slug_universe_extra` so a
-    // `-p` build's staged-but-excluded entry module is visible to
-    // sibling import resolution (sidecars are still written only for
-    // `sources`). `slug_universe_extra` is `[]` for non-`-p` paths.
+    // #984: resolve every per-source import against `sources ++
+    // slug_universe_extra` so a `-p` build's staged-but-excluded entry
+    // module is visible to sibling import resolution. Built once and
+    // shared by both the dep-manifest collection (cache key + in-process
+    // enforcement) and the `.import-deps` sidecar staging (subprocess
+    // enforcement). `slug_universe_extra` is `[]` for non-`-p` paths, so
+    // `slug_universe == sources` there. A fresh array is built (never
+    // aliasing `sources`) so the caller's `resolved.sources` is never
+    // mutated.
     let mut slug_universe: CapsuleSource[] = [];
     let mut _su: int = 0;
     loop {
@@ -1842,6 +1840,29 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
         slug_universe.push(slug_universe_extra[_ue]);
         _ue += 1;
     }
+    // Per-source dep manifests (PR1e): each `_cr_compile_one` call
+    // sees only the manifests of modules it directly imports, so an
+    // unrelated capsule changing busts only the modules that
+    // transitively import it. Result is a parallel array — index i
+    // is the manifest list for `sources[i]`. Cost is one read per
+    // source plus a few linear scans; for the typical N≈30-130 the
+    // total is dominated by the per-module compile path the cache
+    // would otherwise trigger.
+    // #984: resolved against `slug_universe` (not `sources`) so a
+    // sibling's direct import of the `-p` entry contributes the entry's
+    // `.layout-manifest` to the cache key (entry changes bust dependent
+    // caches; a pre-fix `.ll` can't be reused without re-running the
+    // gate) and the in-process enforcement fallback
+    // (`_cr_manifests_to_asm_paths` → `compile_to_llvm_file_with_module_imports`)
+    // loads the entry's effect surface — matching the subprocess sidecar
+    // path below.
+    let per_source_dep_manifests = _cr_collect_per_source_dep_manifests(sources, slug_universe, work_dir);
+    // #957: stage the per-module `.import-deps` sidecars the
+    // `emit --import-context` subprocess reads to enforce cross-module
+    // effect transitivity on the build path. Written before any
+    // (serial or parallel) emit so every worker sees its sidecar.
+    // #984: sidecars are still written only for `sources`; only the slug
+    // resolution universe is widened.
     _cr_stage_import_deps(sources, slug_universe, work_dir);
     let cache_root_path = cache_root();
     if config.clean {
