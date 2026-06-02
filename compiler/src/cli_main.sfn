@@ -1888,6 +1888,16 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
             if binary_dir.length > 0 { sailfin_exe = binary_dir + "/sailfin"; }
         }
         let capsule_result = prepare_project_capsules(input_path, cache_config, consumer, sailfin_exe, work_dir);
+        // Issue #991: a per-module emit failure (e.g. an effect-gate
+        // `E0402` on an unimported sibling) leaves `ll_paths` empty and
+        // silently drops the offending module from the link. Without
+        // this guard the driver would link the survivors and print
+        // `built:` with exit 0, swallowing the failure. The resolver /
+        // per-module helper has already printed the diagnostic, so
+        // exit non-zero here without re-reporting. A legitimate "no
+        // capsule deps" project returns `success = true` with an empty
+        // `ll_paths`, so dependency-free builds still link and succeed.
+        if !capsule_result.success { return 1; }
         let capsule_lls = capsule_result.ll_paths;
 
         let ll_path = sailfin_cache_dir + "/program.ll";

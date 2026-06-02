@@ -206,6 +206,15 @@ struct CompileCapsuleResult {
 // compile loop.
 struct ProjectCapsuleResult {
     ll_paths: string[];
+    // Issue #991: distinguishes a legitimate empty `ll_paths` (the
+    // project declares no capsule dependencies — `success = true`)
+    // from a resolver/compile failure that left `ll_paths` empty
+    // (slug collision, stage-write failure, or a per-module emit
+    // failure such as an effect-gate `E0402` — `success = false`).
+    // The build driver consults this before linking so a dropped
+    // module exits non-zero instead of silently linking the
+    // survivors and reporting success.
+    success: boolean;
     stats: CacheStats;
     module_events: ModuleCacheEvent[];
     // Stage D PR2: every `kind = "runtime"` capsule the project's
@@ -3789,11 +3798,14 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
 // `input_path`. Returns a `ProjectCapsuleResult` carrying the dep
 // `.ll` paths and the per-build cache stats. `ll_paths` is empty
 // when no dependencies are needed AND on slug collision or stage
-// failure — `sfn build`'s call sites do not currently distinguish
-// those cases from "no deps", since clang link will surface any
-// missing-symbol follow-up downstream. Inspect `stats` (and any
-// `print.err` output the helpers emitted) for setup failures vs.
-// genuinely-empty dep graphs.
+// failure. Issue #991: the `success` flag disambiguates the two —
+// `success = true` with empty `ll_paths` means "no deps" (a consumer
+// can safely link the entry alone), while `success = false` means a
+// collision/stage/compile failure left `ll_paths` empty. The `-p`
+// build driver (`cli_main.sfn`) consults this flag and exits non-zero
+// instead of linking the survivors. Other consumers that read only
+// `ll_paths` (e.g. the `sfn run` path) do not yet check it and would
+// need the same guard to propagate emit failures.
 fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string, work_dir: string) -> ProjectCapsuleResult ![io] {
     let empty_paths: string[] = [];
     let empty_events: ModuleCacheEvent[] = [];
@@ -3801,8 +3813,11 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
     let entry_paths: string[] = [input_path];
     let resolved = _cr_resolve_and_dedupe(entry_paths, consumer);
     if resolved.has_collision {
+        // Slug collision is a setup error (already reported by
+        // `_cr_resolve_and_dedupe`), not a "no deps" build.
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
+            success: false,
             stats: empty_cache_stats(),
             module_events: empty_events,
             runtime_capsules: empty_runtime_capsules
@@ -3823,8 +3838,11 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
         }
     }
     if resolved.sources.length == 0 {
+        // Legitimate "no capsule dependencies" — empty `ll_paths`
+        // here is success, not a compile failure.
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
+            success: true,
             stats: empty_cache_stats(),
             module_events: empty_events,
             runtime_capsules: runtime_capsules
@@ -3836,6 +3854,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
+            success: false,
             stats: empty_cache_stats(),
             module_events: empty_events,
             runtime_capsules: runtime_capsules
@@ -3877,6 +3896,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
                     + entry_path);
                 return ProjectCapsuleResult {
                     ll_paths: empty_paths,
+                    success: false,
                     stats: empty_cache_stats(),
                     module_events: empty_events,
                     runtime_capsules: runtime_capsules
@@ -3888,8 +3908,13 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
 
     let result = compile_capsule_modules(resolved.sources, slug_universe_extra, config, sailfin_exe, work_dir);
     if !result.success {
+        // A per-module emit failed (e.g. an effect-gate `E0402`).
+        // The helper has already printed the diagnostic; surface the
+        // failure so the driver exits non-zero instead of linking the
+        // surviving modules.
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
+            success: false,
             stats: result.stats,
             module_events: result.module_events,
             runtime_capsules: runtime_capsules
@@ -3897,6 +3922,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
     }
     return ProjectCapsuleResult {
         ll_paths: result.ll_paths,
+        success: true,
         stats: result.stats,
         module_events: result.module_events,
         runtime_capsules: runtime_capsules
