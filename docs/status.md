@@ -511,6 +511,27 @@ feature availability.
   retired. Fresh-clone bootstrap is now
   `install.sh && sfn build -p compiler` per
   `docs/proposals/build-architecture.md` Stage D exit criteria.
+- **Emit retry + validator cascade shared helper (#515, shipped).**
+  The per-module emit retry and the `llvm-as` → `llvm-as-18` →
+  `clang -c -emit-llvm` → `clang-18` validator cascade — previously
+  inlined only in the resolver's multi-source path (`_cr_compile_one`
+  + the parallel worker) — are lifted into
+  `compiler/src/emit_helpers.sfn`: `validate_llvm_ir` (the one place
+  the tool-discovery order lives), `emit_llvm_with_retry` (in-process,
+  for the CLI), and `emit_subprocess_with_retry` (subprocess, fresh
+  arena per child, used by `_cr_compile_one` and now `_cr_stage_one`).
+  Single-shot `sfn emit llvm -o <out>` now routes through the cascade
+  by default (3 attempts + validation), so a seed IR-corruption flake
+  on a single-file emit is caught before it escapes into a downstream
+  `.o` compile. New `sfn emit` flags: `--attempts N`, `--no-retry`
+  (= `--attempts 1`), `--validate` / `--no-validate`. The resolver's
+  own subprocess/worker emits pass `--attempts 1 --no-validate` so the
+  resolver layer stays the single retry/validate authority (no
+  compounding). `SAILFIN_INJECT_FAULT=N` simulates N leading
+  retry-eligible failures for deterministic recovery testing
+  (`compiler/tests/integration/emit_retry_test.sfn`). The
+  `ci-cross-windows` Makefile target's hand-inlined bash retry loop is
+  replaced by a single `$(NATIVE_OUT) emit --validate llvm` call.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
