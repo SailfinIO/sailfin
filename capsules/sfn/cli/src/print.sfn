@@ -2,6 +2,27 @@
 //
 // Prefixed status helpers for CLI output: errors and warnings go to
 // stderr; success and hints follow the same prefix convention.
+//
+// `print_diag` / `print_status` (issue #793 / 1.4) build on the
+// `Style` policy from issue #792 / 1.3: they resolve a stream-aware
+// `Style` via `style_for_stream` and apply ANSI color through the
+// `paint*` helpers, which degrade to plain text when the style is
+// disabled (`NO_COLOR`, `--color=never`, or a non-TTY stream). The
+// severity word produced by `diag_prefix` matches the leading
+// `severity` token rendered by `compiler/src/diagnostics_render.sfn`
+// (`<severity>[<code>]: <message>`) byte-for-byte, so Phase 5 Issue
+// 5.3 can fold the two code paths together without a wire-format
+// change.
+import {
+    paint_blue,
+    paint_cyan,
+    paint_dim,
+    paint_red,
+    paint_yellow,
+    style_for_stream
+} from "./style";
+import { Style } from "./types";
+
 fn print_error(message: string) -> void ![io] {
     // Print an error message to stderr, prefixed with "error: ".
     print.err("error: " + message);
@@ -20,4 +41,106 @@ fn print_success(message: string) -> void ![io] {
 fn print_hint(message: string) -> void ![io] {
     // Print a hint message to stderr, prefixed with "hint: ".
     print.err("hint: " + message);
+}
+
+// ── print_diag / print_status (issue #793, proposal §7 Issue 1.4) ─────
+fn _int_to_string(value: int) -> string {
+    // Minimal base-10 int formatter. The prelude has no int->string
+    // intrinsic exposed to capsules yet; this mirrors the private
+    // helper in `parser.sfn` (kept local to honor the issue's
+    // Files-Affected scope).
+    if value == 0 { return "0"; }
+    let table = "0123456789";
+    let mut n = value;
+    let mut negative = false;
+    if n < 0 {
+        negative = true;
+        n = 0 - n;
+    }
+    let mut digits = "";
+    loop {
+        if n == 0 { break; }
+        let d = n - (n / 10) * 10;
+        digits = substring(table, d, d + 1) + digits;
+        n = n / 10;
+    }
+    if negative { return "-" + digits; }
+    return digits;
+}
+
+fn diag_prefix(severity: string) -> string {
+    // Canonical severity word for a diagnostic line. Matches the
+    // leading `severity` token rendered by
+    // `compiler/src/diagnostics_render.sfn` byte-for-byte so the two
+    // code paths can be unified in Phase 5 (Issue 5.3): the renderer
+    // emits "error" / "warning"; the CLI's "warn" alias normalizes to
+    // "warning" here. Unknown severities pass through verbatim so the
+    // caller still gets a plain, un-styled prefix and execution
+    // continues.
+    if strings_equal(severity, "error") { return "error"; }
+    if strings_equal(severity, "warn") { return "warning"; }
+    if strings_equal(severity, "info") { return "info"; }
+    if strings_equal(severity, "hint") { return "hint"; }
+    return severity;
+}
+
+fn _diag_paint(s: Style, severity: string, label: string) -> string {
+    // Color the severity word per its level. Unknown severities are
+    // left un-colored (plain). When the style is disabled the paint*
+    // helpers already return plain text, so this is a no-op then.
+    if strings_equal(severity, "error") { return paint_red(s, label); }
+    if strings_equal(severity, "warn") { return paint_yellow(s, label); }
+    if strings_equal(severity, "info") { return paint_blue(s, label); }
+    if strings_equal(severity, "hint") { return paint_cyan(s, label); }
+    return label;
+}
+
+fn _diag_stream(severity: string) -> string {
+    // info goes to stdout (progress/informational); error, warn, hint
+    // (and unknown) go to stderr, matching the existing print_* split.
+    if strings_equal(severity, "info") { return "stdout"; }
+    return "stderr";
+}
+
+fn diag_line(s: Style, severity: string, message: string) -> string {
+    // Pure builder for a single diagnostic line. An empty severity
+    // (or any severity that maps to an empty word) yields the bare
+    // message with no prefix; everything else is "<word>: <message>"
+    // with the word optionally colored via `s`.
+    let label = diag_prefix(severity);
+    if label.length == 0 { return message; }
+    return _diag_paint(s, severity, label) + ": " + message;
+}
+
+fn status_line(s: Style, step: int, total: int, message: string) -> string {
+    // Pure builder for a progress line: "[<step>/<total>] <message>".
+    // The "[step/total]" counter is dimmed when the style is enabled.
+    let counter = "[" + _int_to_string(step) + "/" + _int_to_string(total) + "]";
+    return paint_dim(s, counter) + " " + message;
+}
+
+fn print_diag(severity: string, message: string, hint: string) -> void ![io] {
+    // Print a diagnostic line for `severity`, optionally followed by a
+    // "hint: <hint>" line when `hint` is non-empty. Color and stream
+    // are derived from the severity; styling degrades to plain text
+    // under `NO_COLOR` / non-TTY via `style_for_stream`.
+    let stream = _diag_stream(severity);
+    let s = style_for_stream(stream);
+    let line = diag_line(s, severity, message);
+    if strings_equal(stream, "stdout") { print(line); } else {
+        print.err(line);
+    }
+    if hint.length > 0 {
+        let hint_line = diag_line(s, "hint", hint);
+        if strings_equal(stream, "stdout") { print(hint_line); } else {
+            print.err(hint_line);
+        }
+    }
+}
+
+fn print_status(step: int, total: int, message: string) -> void ![io] {
+    // Print a "[step/total] message" progress line to stdout, dimming
+    // the counter when stdout supports color.
+    let s = style_for_stream("stdout");
+    print(status_line(s, step, total, message));
 }
