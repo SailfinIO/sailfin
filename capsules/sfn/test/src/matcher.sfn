@@ -12,10 +12,10 @@
 // and `ok == false` to `Err(failure)` with no call-site change.
 //
 // Every function here is `![pure]`: matchers never print. Consumers
-// (a `expect(...).to_be(...)` call site today; 1.4's runner tomorrow)
-// inspect `.ok` and decide how to surface the failure. This keeps a
-// test calling only `expect`/matchers `![pure]` even though the capsule
-// manifest keeps `required = ["io"]` for the legacy `assert_*` tier.
+// (an `expect_*(...).ok` call site today; 1.4's runner tomorrow) inspect
+// `.ok` and decide how to surface the failure. This keeps a test calling
+// only `expect_*`/matchers `![pure]` even though the capsule manifest
+// keeps `required = ["io"]` for the legacy `assert_*` tier.
 //
 // The generic `Expectation<T>` / `Matcher<T>` surface in the proposal
 // (`fn Expectation<T>.to_be(...) where T: Equatable`) is NOT buildable
