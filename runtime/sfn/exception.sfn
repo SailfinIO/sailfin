@@ -139,6 +139,15 @@ extern fn longjmp(env: * u8, val: i32) -> void;
 // while M2.7a coexists with TLS polling).
 extern fn abort() -> void;
 
+// libc `write(fd, buf, count)` and `strlen` back the value-error
+// diagnostic path at the bottom of this module. Same inline-extern
+// rationale as the setjmp/malloc trio above and
+// `runtime/sfn/memory/mem.sfn`'s bounds-check abort path, which
+// writes its diagnostic to fd 2 the same way.
+extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+
+extern fn strlen(s: * u8) -> usize;
+
 // `SfnExceptionFrame` lays out the per-`try` bookkeeping. Field
 // offsets are pinned by the IR-shape assertions in
 // `test_runtime_exception_frames.sh`. All slots are `i64` —
@@ -361,4 +370,106 @@ fn sfn_take_exception(frame: * SfnExceptionFrame) -> * u8 {
     let msg = frame.message_addr as * u8;
     frame.message_addr = 0;
     return msg;
+}
+
+// =============================================================================
+// Live TLS message-slot exception API (M3 — #929, epic #390, tracker #821)
+// =============================================================================
+//
+// The trio (`sfn_set_exception` / `sfn_clear_exception` /
+// `sfn_has_exception`) plus `sfn_raise_value_error` port the C runtime's
+// live TLS-polling exception path (`sailfin_runtime_*` set/clear/has and
+// the value-error raiser in `runtime/native/src/sailfin_runtime.c`) into
+// Sailfin. This is a SEPARATE surface from the setjmp/frame API above:
+// the frame API (`sfn_throw` / `sfn_try_enter` / `sfn_take_exception`)
+// backs `try`/`throw` lowering, while this message-slot API backs the
+// `runtime.*` value-error path and the TLS-polling declares that
+// `compiler/src/llvm/effects.sfn` still emits for seed-compiled call
+// sites.
+//
+// All four share the single process-global slot below — the reason
+// `sfn_raise_value_error` ships in lockstep with the trio (#929). The
+// slot mirrors the C runtime's `_Thread_local char *` message global; it
+// rides as an `i64` (not a `* u8`) for the same seed-compiler
+// pointer-drop reason the chain head and every struct pointer field in
+// this module do (see the file-header "Frame layout" and "TLS" notes).
+// The flip to `thread_local let mut` lands with the same post-seed
+// follow-up that upgrades the chain head. The legacy C symbols stay
+// exported in `runtime/native/` for seed-built IR until the M3 seed cut
+// retires them.
+let mut sfn_exception_message_addr: i64 = 0;
+
+// Lazily-allocated, process-lifetime empty C string reused for every
+// `sfn_set_exception(null)` call. `0` means "not yet allocated". Mirrors
+// the C runtime's static `""` literal: allocated at most once and never
+// freed, so repeated null sets do not leak.
+let mut sfn_exception_empty_addr: i64 = 0;
+
+// `_sfn_exception_empty()` returns the shared empty C string, allocating
+// it on first use. A 1-byte `malloc` (matching
+// `runtime/sfn/process.sfn`'s `_process_empty_cstr`) rather than a
+// `"" as * u8` literal, which the current seed can mis-lower to a null
+// pointer in a `let` binding (see the cast-quirk note in
+// `runtime/sfn/platform/exec.sfn`). If `malloc` fails the cache stays
+// `0` and the next call retries.
+fn _sfn_exception_empty() -> * u8 {
+    if sfn_exception_empty_addr == 0 {
+        let e = malloc(1 as usize);
+        if e as i64 != 0 { memset(e, 0, 1 as usize); }
+        sfn_exception_empty_addr = e as i64;
+    }
+    return sfn_exception_empty_addr as * u8;
+}
+
+// `sfn_set_exception(message)` records `message` in the shared slot.
+// Mirrors the C `message ? message : ""` guard: a null argument stores
+// the shared non-null empty C string (see `_sfn_exception_empty`) so
+// `sfn_has_exception()` still reports true without leaking per call.
+fn sfn_set_exception(message: * u8) -> void {
+    if message as i64 == 0 {
+        sfn_exception_message_addr = _sfn_exception_empty() as i64;
+        return;
+    }
+    sfn_exception_message_addr = message as i64;
+}
+
+// `sfn_clear_exception()` resets the shared slot to "no exception".
+fn sfn_clear_exception() -> void { sfn_exception_message_addr = 0; }
+
+// `sfn_has_exception()` reports whether the shared slot holds a pending
+// message. Returns `bool` (`i1` at the descriptor ABI).
+fn sfn_has_exception() -> bool { return sfn_exception_message_addr != 0; }
+
+// `sfn_raise_value_error(message)` records `message` in the shared slot
+// (parity with `sfn_set_exception` — the reason this ships in lockstep
+// with the trio, #929: all four touch one slot), surfaces the message on
+// stderr (fd 2), then `abort()`s — mirrors the C value-error raiser's
+// fatal semantics. The fd-2 write + abort follows the same
+// primitive-layer discipline as `runtime/sfn/memory/mem.sfn`'s
+// bounds-check failure path.
+//
+// No string literals here. A `string`/`"lit" as * u8` literal would emit
+// `sailfin_runtime_alloc_struct` (the string-aggregate allocator), which
+// this below-I/O-layer module's standalone link surface — exercised by
+// `compiler/tests/e2e/test_runtime_exception_frames.sh` — does not
+// provide, and which the current seed also mis-lowers in a `let` binding
+// (see the cast-quirk note in `runtime/sfn/platform/exec.sfn`). So the
+// `message` (a real `* u8` param, no allocation) is written directly,
+// and the trailing newline rides a 1-byte `memset` buffer (`10` = LF).
+// The fixed `"[value_error] "` prefix the C raiser printed is therefore
+// deferred — same reduced-diagnostic tradeoff `sfn_throw` makes above —
+// until this module can reference a constant byte string without the
+// allocator pull. The trailing `abort()` does not return, so no `ret`
+// is reachable; LLVM keeps the trailing block until noreturn metadata
+// propagates (same note as `sfn_throw`).
+fn sfn_raise_value_error(message: * u8) -> void {
+    sfn_set_exception(message);
+    if message as i64 != 0 { write(2, message, strlen(message)); }
+    let nl = malloc(1 as usize);
+    if nl as i64 != 0 {
+        memset(nl, 10, 1 as usize);
+        write(2, nl, 1 as usize);
+        free(nl);
+    }
+    abort();
 }

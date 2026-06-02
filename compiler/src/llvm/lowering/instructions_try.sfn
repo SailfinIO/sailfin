@@ -185,10 +185,12 @@ fn lower_throw_instruction(function_name: string, instruction: NativeInstruction
     // the `ret` that the legacy TLS-polling path emitted after
     // `set_exception` would be dead anyway (longjmp does not return),
     // so we follow with `unreachable` to make that explicit and to
-    // let LLVM's branch folding prune the trailing block. The legacy
-    // `sailfin_runtime_set_exception` symbol stays declared via the
-    // helper registry so seed-compiled call sites still link; M2.7c
-    // retires the C body once every emission site has cut over.
+    // let LLVM's branch folding prune the trailing block. The
+    // `set_exception` declare now resolves to `@sfn_set_exception` via
+    // the helper registry's `native_signature` — M3 (#929) ported the
+    // TLS message-slot family to `runtime/sfn/exception.sfn`. The legacy
+    // C body stays exported for seed-compiled call sites until the M3
+    // seed cut.
     let throw_operands: LLVMOperand[] = [coerced.operand];
     let throw_call = emit_runtime_call("sfn_throw_frame", throw_operands, empty_runtime_call_overrides(), current_temp, current_lines);
     let mut _ci_se: int = 0;

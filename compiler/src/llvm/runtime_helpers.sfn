@@ -442,7 +442,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "runtime_to_debug_string_fn", symbol: "sfn_to_debug_string", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: "sfn_to_debug_string", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_raise_value_error_fn", symbol: "sailfin_runtime_raise_value_error", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "runtime_raise_value_error_fn", symbol: "sfn_raise_value_error", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: "sfn_raise_value_error", c_abi_return_type: null
     });
     // Issue #364: structured assertion failure record. The desugared
     // `assert e;` lowering routes through this trampoline so the test
@@ -961,15 +961,23 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "runtime.free", symbol: "sfn_mem_free", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: "sfn_mem_free", c_abi_return_type: null
     });
 
-    // Exceptions (stage2-native minimal)
+    // Exceptions — live TLS message-slot API.
+    //
+    // M3 (#929, epic #390): the set/clear/has trio and the value-error
+    // raiser (the `runtime_raise_value_error_fn` descriptor above) flip
+    // their `symbol` + `native_signature` to the Sailfin-native bodies in
+    // `runtime/sfn/exception.sfn`, which share one process-global message
+    // slot. The legacy C bodies stay exported in `runtime/native/` for
+    // seed-built IR until the M3 seed cut, but every fresh emission now
+    // resolves through `effective_symbol` to the `sfn_*` exports.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "set_exception", symbol: "sailfin_runtime_set_exception", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "set_exception", symbol: "sfn_set_exception", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: "sfn_set_exception", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "clear_exception", symbol: "sailfin_runtime_clear_exception", return_type: "void", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+        target: "clear_exception", symbol: "sfn_clear_exception", return_type: "void", parameter_types: [], effects: [], native_signature: "sfn_clear_exception", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "has_exception", symbol: "sailfin_runtime_has_exception", return_type: "i1", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+        target: "has_exception", symbol: "sfn_has_exception", return_type: "i1", parameter_types: [], effects: [], native_signature: "sfn_has_exception", c_abi_return_type: null
     });
 
     // M2.7b (#404) replaced the legacy TLS-polling exception primitives
