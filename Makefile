@@ -875,10 +875,6 @@ ci-cross-windows:
 		-o "$$WIN_OBJ/sailfin_arena.o"; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_runtime.c \
 		-o "$$WIN_OBJ/sailfin_runtime.o"; \
-	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_sha256.c \
-		-o "$$WIN_OBJ/sailfin_sha256.o"; \
-	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_base64.c \
-		-o "$$WIN_OBJ/sailfin_base64.o"; \
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/native/ir/runtime_globals.ll \
 		-o "$$WIN_OBJ/runtime_globals.o"; \
 	\
@@ -895,8 +891,6 @@ ci-cross-windows:
 	$(MINGW_CC) -static -o "$$WIN_OUT" \
 		"$$WIN_OBJ/sailfin_arena.o" \
 		"$$WIN_OBJ/sailfin_runtime.o" \
-		"$$WIN_OBJ/sailfin_sha256.o" \
-		"$$WIN_OBJ/sailfin_base64.o" \
 		"$$WIN_OBJ/runtime_globals.o" \
 		"$$WIN_OBJ/native.linked.o" \
 		$$RUNTIME_OBJS \
