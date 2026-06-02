@@ -2184,16 +2184,84 @@ int64_t sailfin_runtime_string_length(char *text);
 
 char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end);
 
+/* #716: Immediate-codepoint pseudo-pointer guard for the `sfn_str_*`
+ * trampoline family.
+ *
+ * `char_at(text, i)` (and other single-grapheme readers) sometimes
+ * returns a codepoint *tagged into the pointer itself* rather than a
+ * heap/literal `i8*` — the legacy `(codepoint << 32)` encoding, plus a
+ * near-null ASCII form, both classified by
+ * `_is_immediate_codepoint_string` above. A trampoline that dereferences
+ * its operand directly (via `_safe_strlen_asan`, `memchr`, `s[i]`,
+ * `strtod`, …) will SIGSEGV on such a value: `_safe_strlen_asan` rejects
+ * the near-null form but the `(cp << 32)` form has zero high bits and
+ * sails through into an unmapped read (this is exactly the
+ * `0x6800000000` crash from #714). Any body that does NOT trampoline
+ * through a legacy `sailfin_runtime_*` entry that already decodes MUST
+ * route its operand through one of these helpers first.
+ *
+ * `_sfn_str_decode_immediate` writes the 1-4 UTF-8 bytes (+ NUL) into a
+ * caller-owned 5-byte scratch buffer and is for within-call consumption.
+ * Retires with the M1.A.2 type-mapping flip that eliminates the encoding
+ * entirely. */
+static const char *_sfn_str_decode_immediate(const char *s, unsigned char scratch[5])
+{
+    uint32_t cp = 0;
+    if (_is_immediate_codepoint_string(s, &cp))
+    {
+        _utf8_encode(cp, scratch); /* NUL-terminates the buffer */
+        return (const char *)scratch;
+    }
+    return s;
+}
+
+/* #716: Owning variant for the identity ABI bridges (`sfn_str_to_cstr` /
+ * `sfn_str_from_cstr`) whose result outlives the call, so a stack
+ * scratch buffer cannot back it. Materializes an immediate codepoint
+ * into a tracked `_rt_malloc` buffer; genuine pointers pass through
+ * untouched (preserving the identity-bridge contract for real strings).
+ * On allocation failure it returns the original operand — no worse than
+ * today's behaviour, and OOM is already fatal elsewhere. */
+static const char *_sfn_str_decode_immediate_owned(const char *s)
+{
+    uint32_t cp = 0;
+    if (!_is_immediate_codepoint_string(s, &cp))
+    {
+        return s;
+    }
+    unsigned char buf[5];
+    size_t n = _utf8_encode(cp, buf);
+    char *out = (char *)_rt_malloc(n + 1);
+    if (!out)
+    {
+        return s;
+    }
+    memcpy(out, buf, n);
+    out[n] = '\0';
+    _track_owned_string(out);
+    return (const char *)out;
+}
+
+/* #716 audit: safe by delegation — `sailfin_runtime_string_length`
+ * (line ~2803) opens with an `_is_immediate_codepoint_string` guard and
+ * returns the decoded grapheme count, so the immediate pseudo-pointer
+ * never reaches a raw dereference here. */
 int64_t sfn_str_len(const char *s)
 {
     return sailfin_runtime_string_length((char *)s);
 }
 
+/* #716 audit: safe by delegation — `_strings_equal_fast` (line ~576)
+ * decodes BOTH operands via `_is_immediate_codepoint_string` before any
+ * byte compare, so immediate ⇄ immediate and immediate ⇄ real pointer
+ * mixes are all handled. */
 bool sfn_str_eq(const char *a, const char *b)
 {
     return _strings_equal_fast(a, b);
 }
 
+/* #716 audit: safe by delegation — `sailfin_runtime_substring_unchecked`
+ * (line ~2987) guards immediate codepoints before slicing. */
 char *sfn_str_slice(const char *text, double start, double end)
 {
     /* Route through `_clamp_to_i64` (defined later in this file,
@@ -2208,17 +2276,25 @@ char *sfn_str_slice(const char *text, double start, double end)
  * the M2.4a wave: the legacy `i8*` ABI's data pointer is itself
  * NUL-terminated (the literal lowering in `core_strings.sfn`
  * always writes a trailing 0 past the byte payload), so the
- * boundary is the identity function. M2.4b replaces these with
- * arena-routed copies once SfnString stops carrying its
- * NUL-termination guarantee. */
+ * boundary is the identity function for real pointers. M2.4b
+ * replaces these with arena-routed copies once SfnString stops
+ * carrying its NUL-termination guarantee.
+ *
+ * #716: because these are identity (they delegate to no legacy
+ * decoder), an immediate-codepoint pseudo-pointer would pass
+ * straight through and crash the *caller* the moment it treats the
+ * result as a C string. `_sfn_str_decode_immediate_owned`
+ * materializes such inputs into a real, tracked NUL-terminated
+ * buffer so the returned pointer is always dereferenceable; genuine
+ * pointers are still returned unchanged. */
 const char *sfn_str_to_cstr(const char *s)
 {
-    return s;
+    return _sfn_str_decode_immediate_owned(s);
 }
 
 const char *sfn_str_from_cstr(const char *s)
 {
-    return s;
+    return _sfn_str_decode_immediate_owned(s);
 }
 
 /* M2.5 (#403): wave-2 trampolines for the canonical sfn_str_* / sfn_*_to_str
@@ -2248,11 +2324,17 @@ char *sailfin_runtime_number_to_string(double value);
  * the coercion machinery; the eventual Sailfin body retires the
  * double-return convention alongside the wider `int`/`float`
  * landing. */
+/* #716 audit: safe by delegation — `sailfin_runtime_grapheme_count`
+ * (line ~5872) guards immediate codepoints (counts them as a single
+ * grapheme) before any dereference. */
 double sfn_str_grapheme_count(const char *s)
 {
     return sailfin_runtime_grapheme_count((char *)s);
 }
 
+/* #716 audit: safe by delegation — `sailfin_runtime_grapheme_at`
+ * (line ~5877) returns the immediate pseudo-pointer itself at index 0
+ * and never dereferences it. */
 char *sfn_str_grapheme_at(const char *s, double idx)
 {
     return sailfin_runtime_grapheme_at((char *)s, idx);
@@ -2270,6 +2352,13 @@ int64_t sfn_str_byte_at(const char *s, int64_t idx)
     {
         return -1;
     }
+    /* #716: this body dereferences its operand directly
+     * (`_safe_strlen_asan` + `s[idx]`), so an immediate-codepoint
+     * pseudo-pointer must be materialized into real UTF-8 bytes first
+     * or the length probe / index read would fault on a tagged
+     * address. */
+    unsigned char imm_scratch[5];
+    s = _sfn_str_decode_immediate(s, imm_scratch);
     /* Upper-bound check via the same `_safe_strlen_asan` length probe
      * `sfn_str_find_byte` uses, so out-of-range indexes return -1
      * instead of dereferencing past the buffer (Copilot review on
@@ -2298,6 +2387,11 @@ int64_t sfn_str_find_byte(const char *s, int64_t byte_value, int64_t start_index
     {
         return -1;
     }
+    /* #716: `_safe_strlen_asan` + `memchr(s + start, ...)` dereference
+     * the operand, so decode immediate codepoints into real bytes
+     * before scanning. */
+    unsigned char imm_scratch[5];
+    s = _sfn_str_decode_immediate(s, imm_scratch);
     int64_t start = start_index < 0 ? 0 : start_index;
     bool truncated = false;
     int64_t len = (int64_t)_safe_strlen_asan((char *)s, &truncated);
@@ -2318,7 +2412,11 @@ int64_t sfn_str_find_byte(const char *s, int64_t byte_value, int64_t start_index
  * the immediate-codepoint pseudo-string fast path and reads the first byte
  * of a NUL-terminated UTF-8 buffer; the architect spec name is
  * `sfn_str_codepoint` (§2.2.2). Returns `double` to match the legacy
- * register class — same rationale as `sfn_str_grapheme_count` above. */
+ * register class — same rationale as `sfn_str_grapheme_count` above.
+ *
+ * #716 audit: safe by delegation — `sailfin_runtime_char_code`
+ * (line ~7085) carries the immediate-codepoint fast path and returns
+ * the tagged value's codepoint without dereferencing it. */
 double sfn_str_codepoint(const char *s)
 {
     return sailfin_runtime_char_code((char *)s);
@@ -2381,8 +2479,16 @@ char *sfn_str_from_codepoint(int64_t cp)
     return out;
 }
 
+/* #716: unlike the other delegators, `sailfin_runtime_string_to_number`
+ * (line ~3871) does NOT guard immediate codepoints — it hands the
+ * operand straight to `strtod`, which would dereference a tagged
+ * pseudo-pointer. Decode inline before delegating. A single decoded
+ * codepoint that isn't a digit parses to 0.0, exactly as `strtod` would
+ * yield for the equivalent real one-char string. */
 double sfn_str_to_number(const char *s)
 {
+    unsigned char imm_scratch[5];
+    s = _sfn_str_decode_immediate(s, imm_scratch);
     return sailfin_runtime_string_to_number((char *)s);
 }
 
