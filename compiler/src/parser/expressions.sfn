@@ -1374,4 +1374,4 @@ fn append_parameter(parameters: Parameter[], parameter: Parameter) -> Parameter[
 fn append_string_local(values: string[], value: string) -> string[] {
     values.push(value);
     return values;
-}  // Lambda bodies are parsed through the structured `parse_block` in  // statements.sfn (imported above), so `body.statements` is populated  // at parse time. The earlier token-collecting placeholder is gone;  // see issue #520.
+}  // Lambda bodies are parsed through the structured `parse_block` in  // statements.sfn (imported above), so `body.statements` is populated at  // parse time. The earlier token-collecting placeholder is gone; see  // issue #520.

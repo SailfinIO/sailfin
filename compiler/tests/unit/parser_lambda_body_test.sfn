@@ -15,16 +15,19 @@
 // declaration's initializer (the same path the capture analysis relies
 // on). Block-scoped `let` is still parsed into an opaque statement and is
 // deliberately avoided here — its migration is tracked separately.
-import { Block, Expression, Statement } from "../../src/ast";
+import { Block, Expression } from "../../src/ast";
 import { parse_program } from "../../src/parser/mod";
 
 // Unwrap the body block of a lambda expression. The early-return null
-// guard narrows `expr` to a non-optional `Expression`, after which the
-// duck-typed union field access reaches the Lambda's `body`.
+// guard narrows `expr` to a non-optional `Expression`; the variant
+// assertion then pins that the initializer is actually a `Lambda` so a
+// shape change fails here with a clear message instead of trapping on
+// the duck-typed `body` access.
 fn lambda_body(expr: Expression?) -> Block {
     if expr == null {
         return Block { tokens: [], text: "", statements: [] };
     }
+    assert expr.variant == "Lambda";
     return expr.body;
 }
 
@@ -32,6 +35,7 @@ fn lambda_body(expr: Expression?) -> Block {
 fn first_let_lambda_body(source: string) -> Block ![io] {
     let program = parse_program(source);
     let stmt = program.statements[0];
+    assert stmt.variant == "VariableDeclaration";
     return lambda_body(stmt.initializer);
 }
 
