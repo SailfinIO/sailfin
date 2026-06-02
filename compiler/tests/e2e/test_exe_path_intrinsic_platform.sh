@@ -249,7 +249,11 @@ test_windows_no_other_symbol() {
 
 test_no_sentinel_leak() {
     local n
-    n="$(grep -cE '(call|declare) .*@sailfin_intrinsic_exe_path' "$LL_LINUX" "$LL_DARWIN" "$LL_WINDOWS" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')"
+    # `grep -c` exits 1 when there are zero matches (the success case here).
+    # The trailing `|| true` keeps that expected non-match from tripping
+    # `set -euo pipefail` so this helper is safe to call in any context, not
+    # only inside `run_test`'s `if` (which would otherwise suppress errexit).
+    n="$(grep -cE '(call|declare) .*@sailfin_intrinsic_exe_path' "$LL_LINUX" "$LL_DARWIN" "$LL_WINDOWS" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}' || true)"
     if [ "$n" != "0" ]; then
         echo "[test]   expected 0 call/declare of the sentinel symbol, found $n:"
         grep -nE '(call|declare) .*@sailfin_intrinsic_exe_path' "$LL_LINUX" "$LL_DARWIN" "$LL_WINDOWS" || true
