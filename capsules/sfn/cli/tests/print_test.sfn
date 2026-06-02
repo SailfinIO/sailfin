@@ -16,7 +16,13 @@
 // public `mod.sfn` surface stays narrowed to `print_diag` /
 // `print_status` (per proposal §4.1) while the byte-level contract
 // stays testable.
-import { print_diag, print_status, style_resolve } from "../src/mod";
+import {
+    paint_dim,
+    paint_red,
+    print_diag,
+    print_status,
+    style_resolve
+} from "../src/mod";
 import { diag_line, diag_prefix, status_line } from "../src/print";
 
 // ── diag_prefix: severity word matches diagnostics_render.sfn ─────
@@ -71,15 +77,18 @@ test "print: diag_line with empty severity yields the bare message" {
     assert strings_equal(diag_line(s, "", "just text"), "just text");
 }
 
-// ── diag_line: enabled style is plain too (bootstrap _esc() is "") ──
+// ── diag_line: enabled style composes the painted prefix ─────────
 //
-// Mirrors style_test's contract lock: an enabled Style still produces
-// plain text today because `_esc()` returns "". This assertion starts
-// exercising the ANSI path automatically once a real ESC byte lands.
-test "print: diag_line(error) enabled matches disabled today" {
+// Assert against the composition `diag_line` actually performs
+// (painted severity word + ": " + message) rather than against the
+// disabled output. This stays correct both today (where `_esc()`
+// returns "" so `paint_red` is a no-op) and once a real ESC byte
+// lands and the prefix gains ANSI codes. Mirrors style_test's
+// forward-compatible `paint_* == legacy` lock.
+test "print: diag_line(error) enabled composes the painted prefix" {
     let on = style_resolve("stderr", "always", "");
-    let off = style_resolve("stderr", "never", "");
-    assert strings_equal(diag_line(on, "error", "x"), diag_line(off, "error", "x"));
+    assert strings_equal(diag_line(on, "error", "x"), paint_red(on, "error")
+        + ": x");
 }
 
 // ── status_line: "[step/total] message" shape ────────────────────
@@ -93,10 +102,13 @@ test "print: status_line handles single-step progress" {
     assert strings_equal(status_line(s, 1, 1, "Done"), "[1/1] Done");
 }
 
-test "print: status_line enabled matches disabled today" {
+test "print: status_line enabled composes the dimmed counter" {
+    // Like the diag_line case above, assert against the actual
+    // composition (dimmed counter + " " + message) so the test holds
+    // both before and after `_esc()` returns a real ESC byte.
     let on = style_resolve("stdout", "always", "");
-    let off = style_resolve("stdout", "never", "");
-    assert strings_equal(status_line(on, 3, 7, "go"), status_line(off, 3, 7, "go"));
+    assert strings_equal(status_line(on, 3, 7, "go"), paint_dim(on, "[3/7]")
+        + " go");
 }
 
 // ── smoke: exported print_diag / print_status run under ![io] ─────
