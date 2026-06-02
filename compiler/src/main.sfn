@@ -24,7 +24,8 @@ import {
     lower_to_llvm_ir_from_text,
     print_llvm_ir_from_text,
     write_llvm_ir,
-    write_llvm_ir_from_native_text
+    write_llvm_ir_from_native_text,
+    write_llvm_ir_from_native_text_with_context
 } from "./llvm/lowering/entrypoints";
 import { lower_to_llvm_for_tests } from "./llvm/lowering/entrypoints_tests";
 import { write_llvm_ir_for_tests_from_text_with_context } from "./llvm/lowering/entrypoints_tests_writer";
@@ -101,6 +102,21 @@ fn module_name_from_path(source_path: string) -> string {
             normalized = normalized + ch;
         }
         index += 1;
+    }
+
+    // Canonicalise a leading `./` so an entry passed as `./src/main.sfn`
+    // produces the same slug (`src/main`) as the sibling-side
+    // `_cr_relative_slug`, which canonicalises via `_cr_canonicalise_path`
+    // before calling here. Without this, the `-p` binary entry kept its
+    // `./` (slug `./src/main`) and emitted `do_io_____src__main`, while
+    // importing siblings (and the import resolver) mangle the same callee
+    // to a `src/main`-rooted symbol — leaving an undefined reference at
+    // link time (#999). A single `./` is the common case; loop to be
+    // defensive about `././`.
+    loop {
+        if normalized.length < 2 { break; }
+        if substring(normalized, 0, 2) != "./" { break; }
+        normalized = substring(normalized, 2, normalized.length);
     }
 
     // Prefer stable module names rooted at compiler/src or runtime.
@@ -571,9 +587,15 @@ fn compile_to_llvm_file_with_module_imports(source: string, module_name: string,
     }
     if _reject_reexport_violations(program) { return false; }
     let mut imports = empty_import_symbols();
+    // Staged direct-import `.sfn-asm` bodies (including the walk-excluded
+    // `-p` entry, #984). The loader returns these in the same pass that
+    // builds the E0402 effect table, so the read already happens — we
+    // keep the bodies instead of discarding them (#999).
+    let mut imported_native_texts: string[] = [];
     if import_asm_paths.length > 0 {
         let loaded = load_imported_interfaces_from_paths(import_asm_paths);
         imports = loaded.function_effects;
+        imported_native_texts = loaded.native_texts;
     }
     if validate_and_render_effects(program, source, module_name, imports) > 0 {
         return false;
@@ -587,6 +609,14 @@ fn compile_to_llvm_file_with_module_imports(source: string, module_name: string,
         // that only stats `out_path` cannot mistake it for fresh output.
         if fs.exists(out_path) { fs.deleteFile(out_path); }
         return false;
+    }
+    // `-p` cross-module path: thread the staged import bodies into
+    // lowering so sibling call sites resolve the entry's exported
+    // function signatures (#999). The empty-import / in-process path
+    // (`import_asm_paths.length == 0`) keeps routing through the
+    // context-free writer — no behavior change there.
+    if import_asm_paths.length > 0 {
+        return write_llvm_ir_from_native_text_with_context(native_text, module_name, out_path, imported_native_texts);
     }
     return write_llvm_ir_from_native_text(native_text, module_name, out_path);
 }

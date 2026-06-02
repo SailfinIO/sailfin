@@ -63,6 +63,7 @@ import {
     number_to_string,
     sanitize_symbol,
     starts_with,
+    string_array_contains,
     trim_text
 } from "../utils";
 import {
@@ -280,14 +281,49 @@ fn make_native_module_for_emit(module_name: string, native_text: string) -> Nati
 }
 
 fn compile_native_text_to_llvm_file(native_text: string, module_name: string, out_path: string) -> boolean ![io] {
+    // In-module-only path: no staged sibling/entry bodies to thread.
+    // Delegates to the context-carrying variant with an empty set so
+    // there is a single lowering implementation (#999).
+    let no_texts: string[] = [];
+    return compile_native_text_to_llvm_file_with_context(native_text, module_name, out_path, no_texts);
+}
+
+// Context-carrying variant for the `-p` per-module build path (#999).
+// The build driver stages each module's direct-import `.sfn-asm` bodies
+// — including the walk-excluded entry (#984) — and loads them via
+// `load_imported_interfaces_from_paths`. The plain
+// `compile_native_text_to_llvm_file` re-derives import context solely
+// from this module's own embedded `import` directives, so a sibling
+// that imports a value-returning fn from the walk-excluded entry could
+// not resolve the callee's return type and hit the `[fatal]`
+// unresolved-callee gate (`core_call_emission.sfn:362`). This variant
+// UNIONS the staged `imported_native_texts` with the
+// embedded-import-derived `collect_imported_module_context_for_module`
+// texts (the module's own imports AND the staged bodies are both
+// needed) so cross-module callee signatures resolve. The `[fatal]` gate
+// is preserved unchanged — this supplies the missing input, it does not
+// weaken the gate (#306).
+fn compile_native_text_to_llvm_file_with_context(native_text: string, module_name: string, out_path: string, imported_native_texts: string[]) -> boolean ![io] {
     if native_text.length == 0 {
         print.err("emit-llvm: empty native text for module " + module_name);
         return false;
     }
     let parse = parse_native_artifact(native_text);
     let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
+    let mut combined_texts: string[] = import_context.native_texts;
+    let mut _it: int = 0;
+    loop {
+        if _it >= imported_native_texts.length { break; }
+        let staged = imported_native_texts[_it];
+        if staged.length > 0 {
+            if !string_array_contains(combined_texts, staged) {
+                combined_texts.push(staged);
+            }
+        }
+        _it += 1;
+    }
     let dummy_module = make_native_module_for_emit(module_name, native_text);
-    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, native_text);
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, combined_texts, import_context.diagnostics, true, native_text);
     if lowered_lines.lines == null {
         print.err("emit-llvm: lowered lines null");
         return false;
