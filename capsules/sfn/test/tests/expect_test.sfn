@@ -1,0 +1,136 @@
+// Tests for the sfn/test `expect()` matchers (#847).
+//
+// Exercises every matcher on both the pass path (`.ok == true`) and the
+// fail path (`.ok == false` with a non-empty diagnostic). Also imports a
+// legacy `pure_assert_*` helper to confirm the barrel still exports the
+// pre-existing tiers after the `expect`/`matcher` re-exports were added.
+//
+// Every test is `![pure]`: the matchers and `pure_assert_*` are `![pure]`,
+// and a caller of a `![pure]` function must itself declare `![pure]`
+// (the effect row is a required capability, not the absence of effects).
+import {
+    expect_contains_int_array,
+    expect_contains_str,
+    expect_eq_bool,
+    expect_eq_int,
+    expect_eq_int_array,
+    expect_eq_str,
+    expect_to_throw,
+    expect_to_throw_with,
+    pure_assert_eq_int
+} from "../src/mod";
+
+// Top-level thunks for the throwing matchers — lambdas cannot capture
+// locals today, so the thunk closes over these top-level functions.
+fn _boom() -> int ![pure] {
+    throw "kaboom: integer overflow";
+    return 0;
+}
+
+fn _no_throw() -> int ![pure] { return 42; }
+
+// -- to_be: int --
+test "expect: eq_int pass" ![pure] { assert expect_eq_int(2 + 2, 4).ok; }
+
+test "expect: eq_int fail" ![pure] {
+    let r = expect_eq_int(2 + 2, 5);
+    assert ! r.ok;
+    assert r.message.length > 0;
+}
+
+// -- to_be: string --
+test "expect: eq_str pass" ![pure] {
+    assert expect_eq_str("hello", "hello").ok;
+}
+
+test "expect: eq_str fail" ![pure] {
+    let r = expect_eq_str("hello", "world");
+    assert ! r.ok;
+    assert r.message.length > 0;
+}
+
+// -- to_be: boolean --
+test "expect: eq_bool pass" ![pure] {
+    assert expect_eq_bool(true, true).ok;
+}
+
+test "expect: eq_bool fail" ![pure] {
+    let r = expect_eq_bool(true, false);
+    assert ! r.ok;
+    assert r.message.length > 0;
+}
+
+// -- to_be: int array --
+test "expect: eq_int_array pass" ![pure] {
+    assert expect_eq_int_array([1, 2, 3], [1, 2, 3]).ok;
+}
+
+test "expect: eq_int_array fail (length)" ![pure] {
+    let r = expect_eq_int_array([1, 2], [1, 2, 3]);
+    assert ! r.ok;
+    assert r.message.length > 0;
+}
+
+test "expect: eq_int_array fail (element)" ![pure] {
+    let r = expect_eq_int_array([1, 2, 3], [1, 9, 3]);
+    assert ! r.ok;
+    assert r.message.length > 0;
+}
+
+// -- to_contain: string --
+test "expect: contains_str pass" ![pure] {
+    assert expect_contains_str("hello world", "world").ok;
+}
+
+test "expect: contains_str fail" ![pure] {
+    let r = expect_contains_str("hello world", "xyz");
+    assert ! r.ok;
+    assert r.message.length > 0;
+}
+
+// -- to_contain: int array --
+test "expect: contains_int_array pass" ![pure] {
+    assert expect_contains_int_array([1, 2, 3], 2).ok;
+}
+
+test "expect: contains_int_array fail" ![pure] {
+    let r = expect_contains_int_array([1, 2, 3], 9);
+    assert ! r.ok;
+    assert r.message.length > 0;
+}
+
+// -- to_throw --
+test "expect: to_throw pass" ![pure] {
+    assert expect_to_throw(() -> int { return _boom(); }).ok;
+}
+
+test "expect: to_throw fail (no throw)" ![pure] {
+    let r = expect_to_throw(() -> int { return _no_throw(); });
+    assert ! r.ok;
+    assert r.message.length > 0;
+}
+
+// -- to_throw_with --
+test "expect: to_throw_with pass" ![pure] {
+    assert expect_to_throw_with(() -> int { return _boom(); }, "overflow").ok;
+}
+
+test "expect: to_throw_with fail (wrong message)" ![pure] {
+    let r = expect_to_throw_with(() -> int { return _boom(); }, "disk full");
+    assert ! r.ok;
+    assert r.message.length > 0;
+}
+
+test "expect: to_throw_with fail (no throw)" ![pure] {
+    let r = expect_to_throw_with(() -> int { return _no_throw(); }, "overflow");
+    assert ! r.ok;
+    assert r.message.length > 0;
+}
+
+// -- legacy tier still exported through the barrel --
+test "expect: legacy pure_assert_eq_int still re-exported" ![pure] {
+    let ok = pure_assert_eq_int(3, 3, "legacy ok");
+    assert ! ok.present;
+    let bad = pure_assert_eq_int(3, 4, "legacy bad");
+    assert bad.present;
+}

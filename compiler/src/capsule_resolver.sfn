@@ -984,6 +984,16 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
     let workspace_root = discover_workspace_root(project_root);
     let empty_specs: string[] = [];
     let mut runtime_cap_names: string[] = [];
+    // Workspace member map (e.g. "sfn/strings" -> capsules/sfn/strings/src).
+    // Empty outside a workspace, which keeps end-user `sfn build`/`sfn add`
+    // flows byte-identical. Inside a workspace it is the authoritative
+    // resolver for a *declared* sibling-capsule dep: `_cr_locate_capsule_src`
+    // below only checks `<project_root>/capsules/...` and `~/.sfn/cache`,
+    // neither of which finds a workspace sibling, so a declared
+    // capsule→capsule dep (the first real case being `sfn/test` →
+    // `sfn/strings`, #847/#846) would otherwise be reported "could not
+    // locate" and its `.sfn-asm` never staged for import-signature lowering.
+    let mut members: WorkspaceMember[] = [];
     if workspace_root.length > 0 {
         let runtime_caps = enumerate_runtime_capsule_artifacts(workspace_root, empty_specs);
         let mut rci: int = 0;
@@ -992,6 +1002,7 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
             runtime_cap_names.push(runtime_caps[rci].capsule_name);
             rci += 1;
         }
+        members = load_workspace_members(workspace_root);
     }
 
     let mut i: int = 0;
@@ -1002,7 +1013,19 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
         // Stage D PR2: skip runtime capsule deps — handled
         // separately by `enumerate_runtime_capsule_artifacts`.
         if contains_string(runtime_cap_names, entry.spec) { continue; }
-        let src_dir = _cr_locate_capsule_src(project_root, entry.spec, entry.version);
+        // Prefer the workspace member map for a declared sibling dep;
+        // fall back to the project-relative + `~/.sfn/cache` locator for
+        // end-user (non-workspace) builds. `_cr_collect_capsule_sources`
+        // produces the same canonical `<scope>/<name>/mod` slug for either
+        // src_dir, so the staged artifact path matches `imports.sfn`'s
+        // expectation regardless of which lookup supplied it.
+        let mut src_dir: string = "";
+        if members.length > 0 {
+            src_dir = workspace_member_for_spec(members, entry.spec);
+        }
+        if src_dir.length == 0 {
+            src_dir = _cr_locate_capsule_src(project_root, entry.spec, entry.version);
+        }
         if src_dir.length > 0 {
             let found = _cr_collect_capsule_sources(src_dir, entry.spec);
             let mut fi: int = 0;

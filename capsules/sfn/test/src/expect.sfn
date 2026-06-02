@@ -1,0 +1,106 @@
+// sfn/test — `expect()` matcher entry points (issue #847, epic #840
+// Phase 1, sub-issue 1.4).
+//
+// Vitest-style assertions for capsule authors, as a per-type free-function
+// fan-out mirroring the `pure_assert_eq_*` family in `mod.sfn`. Each
+// `expect_*` returns a `MatchResult` (`![pure]`): `.ok == true` passed,
+// `.ok == false` carries `.message`. The caller surfaces a failure,
+// typically `assert expect_eq_int(x, y).ok;`, so a test calling only
+// these stays `![pure]`.
+//
+//   assert expect_eq_int(2 + 2, 4).ok;
+//   assert expect_contains_str("hello world", "world").ok;
+//   assert expect_to_throw(thunk).ok;
+//
+// Why free functions and not a fluent `expect(x).to_be(y)` builder:
+//   1. The generic `Expectation<T>` surface in
+//      `docs/proposals/test-infra-epic/03-capsule-api.md` needs generic
+//      monomorphization + `where` clauses, which the frontend lacks.
+//   2. A concrete per-type `struct Expectation { fn to_be(self, ...) }`
+//      builder needs cross-module struct-method dispatch — and that is
+//      currently miscompiled: a method's `self` is passed incorrectly
+//      when the call crosses a module boundary (and a test is always a
+//      separate module from the capsule under test), so `self.field`
+//      reads garbage. Until that compiler bug is fixed, the fluent
+//      method form cannot ship. Free functions pass all arguments
+//      correctly across modules, so the matcher *behavior* ships now and
+//      the fluent sugar is a drop-in follow-up once the ABI bug lands.
+//
+// The throwing matchers run a thunk (`fn() -> int`) under `try`/`catch`.
+// A thunk cannot be stored in a struct field and called (another
+// frontend gap), but a free function calling its `fn`-typed parameter
+// works, and `try`/`catch`/`throw` are effect-free, so these stay
+// `![pure]`. Test bodies that need to throw `return 0` after the
+// throwing call; the return value is ignored.
+import { find } from "sfn/strings";
+
+import {
+    MatchResult,
+    match_fail,
+    match_ok,
+    matcher_contains_int_array,
+    matcher_contains_string,
+    matcher_eq_bool,
+    matcher_eq_int,
+    matcher_eq_int_array,
+    matcher_eq_string
+} from "./matcher";
+
+// ---------------------------------------------------------------------------
+// Equality matchers (`to_be`)
+// ---------------------------------------------------------------------------
+fn expect_eq_int(actual: int, expected: int) -> MatchResult ![pure] {
+    return matcher_eq_int(actual, expected);
+}
+
+fn expect_eq_str(actual: string, expected: string) -> MatchResult ![pure] {
+    return matcher_eq_string(actual, expected);
+}
+
+fn expect_eq_bool(actual: boolean, expected: boolean) -> MatchResult ![pure] {
+    return matcher_eq_bool(actual, expected);
+}
+
+fn expect_eq_int_array(actual: int[], expected: int[]) -> MatchResult ![pure] {
+    return matcher_eq_int_array(actual, expected);
+}
+
+// ---------------------------------------------------------------------------
+// Containment matchers (`to_contain`)
+// ---------------------------------------------------------------------------
+fn expect_contains_str(haystack: string, needle: string) -> MatchResult ![pure] {
+    return matcher_contains_string(haystack, needle);
+}
+
+fn expect_contains_int_array(haystack: int[], needle: int) -> MatchResult ![pure] {
+    return matcher_contains_int_array(haystack, needle);
+}
+
+// ---------------------------------------------------------------------------
+// Throwing matchers (`to_throw` / `to_throw_with`)
+// ---------------------------------------------------------------------------
+// `expect_to_throw(thunk)` passes iff `thunk` throws. The return value of
+// `thunk` is ignored; on the no-throw path the matcher fails.
+fn expect_to_throw(thunk: fn () -> int) -> MatchResult ![pure] {
+    try {
+        let _ = thunk();
+        return match_fail("expected the thunk to throw, but it returned");
+    } catch (e) { return match_ok(); }
+}
+
+// `expect_to_throw_with(thunk, pattern)` passes iff `thunk` throws AND the
+// thrown message contains `pattern` (substring match via
+// `sfn/strings::find`).
+fn expect_to_throw_with(thunk: fn () -> int, pattern: string) -> MatchResult ![pure] {
+    try {
+        let _ = thunk();
+        return match_fail("expected the thunk to throw \"" + pattern
+            + "\", but it returned");
+    } catch (e) {
+        if find(e, pattern, 0) >= 0 { return match_ok(); }
+        return match_fail("expected thrown message to contain: \"" + pattern
+            + "\"; actual message: \""
+            + e
+            + "\"");
+    }
+}
