@@ -32,11 +32,13 @@
 #                    `readlink("/proc/self/exe")` Linux happy path
 #                    end-to-end.
 #
-# Platform coverage. macOS and Windows are out of scope for the
-# round-trip (`exe_path` returns the empty string on those
-# platforms today — see the body comments in `exec.sfn` for the
-# follow-up plan). The first four checks still pass cross-
-# platform because they only exercise compile-time shape.
+# Platform coverage. Since #968 `exe_path()` resolves on every
+# platform via the host-aware `sailfin_intrinsic_exe_path` sentinel,
+# so the compile-time shape checks (1–4) pass cross-platform —
+# criterion 3 now asserts the host's primitive (`readlink` on Linux,
+# `_NSGetExecutablePath` on Darwin). The end-to-end round-trip (5)
+# stays Linux-gated here; the dedicated macOS-arm64 e2e acceptance
+# gate (the bare-PATH-name `sfn run` reproduction) is issue #3.
 
 set -euo pipefail
 
@@ -119,10 +121,30 @@ test_emit_define_shape() {
     # Bodies must actually call the systems primitives — the whole
     # point of the M5.3 prereq is replacing native_driver.c's C-side
     # `readlink` / `realpath` / `getenv` / `strrchr` calls.
-    if ! grep -qE '^[[:space:]]+%[^ ]+ = call i64 @readlink\(' "$ll"; then
-        echo "[test]   missing 'call i64 @readlink(...)' in exec.sfn body"
-        missing=$((missing + 1))
-    fi
+    #
+    # `exe_path()` now calls the host-aware `sailfin_intrinsic_exe_path`
+    # sentinel (#967/#968), which the compiler lowers to the host's
+    # concrete primitive at emit time — `readlink` on Linux,
+    # `_NSGetExecutablePath` on Darwin. This emit has no `uname` shim,
+    # so it reflects the *build host*; assert the host's primitive
+    # accordingly. (The full per-target sentinel shape across all three
+    # legs is pinned host-independently by `test_exe_path_reader.sh`.)
+    # `binary_dir` / `resolve_runtime_root` still call `strrchr` /
+    # `realpath` / `getenv` directly on every host — pinned below.
+    case "$(uname -s)" in
+        Darwin)
+            if ! grep -qE '^[[:space:]]+%[^ ]+ = call i32 @_NSGetExecutablePath\(' "$ll"; then
+                echo "[test]   missing 'call i32 @_NSGetExecutablePath(...)' in exec.sfn body (Darwin host)"
+                missing=$((missing + 1))
+            fi
+            ;;
+        *)
+            if ! grep -qE '^[[:space:]]+%[^ ]+ = call i64 @readlink\(' "$ll"; then
+                echo "[test]   missing 'call i64 @readlink(...)' in exec.sfn body (Linux host)"
+                missing=$((missing + 1))
+            fi
+            ;;
+    esac
     if ! grep -qE '^[[:space:]]+%[^ ]+ = call i8\* @strrchr\(' "$ll"; then
         echo "[test]   missing 'call i8* @strrchr(...)' in exec.sfn body"
         missing=$((missing + 1))
@@ -189,14 +211,15 @@ test_fixture_round_trip() {
     # End-to-end Linux round-trip: build the probe binary via
     # `sfn build`, run it, and confirm the printed path's
     # `realpath` matches the just-built binary's `realpath`.
-    # macOS / Windows: `exe_path` returns "" today on those
-    # platforms (see the module header), so this round-trip is
-    # gated to Linux. The shape-only checks above still run
+    # `exe_path` now resolves on macOS too (since #968), but the
+    # macOS-arm64 end-to-end acceptance gate is owned by issue #3
+    # (a dedicated install-layout reproduction), so this round-trip
+    # stays Linux-gated here. The shape-only checks above run
     # cross-platform.
     case "$(uname -s)" in
         Linux) ;;
         *)
-            echo "[test]   skipping round-trip on $(uname -s) (Linux-only today; see exec.sfn header)"
+            echo "[test]   skipping round-trip on $(uname -s) (Linux-gated here; macOS e2e gate is issue #3)"
             return 0
             ;;
     esac
