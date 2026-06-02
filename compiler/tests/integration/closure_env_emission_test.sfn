@@ -231,7 +231,7 @@ test "closure_env: single-capture alloc emits size-via-GEP-null + alloc + popula
     assert result.lines.length == 6;
     assert result.lines[0] == "  %t0 = getelementptr %sfn_closure_env_0, %sfn_closure_env_0* null, i32 1";
     assert result.lines[1] == "  %t1 = ptrtoint %sfn_closure_env_0* %t0 to i64";
-    assert result.lines[2] == "  %t2 = call noalias i8* @sailfin_runtime_alloc_struct(i64 %t1)";
+    assert result.lines[2] == "  %t2 = call noalias i8* @sfn_alloc_struct(i64 %t1)";
     assert result.lines[3] == "  %t3 = bitcast i8* %t2 to %sfn_closure_env_0*";
     assert result.lines[4] == "  %t4 = getelementptr inbounds %sfn_closure_env_0, %sfn_closure_env_0* %t3, i32 0, i32 0";
     assert result.lines[5] == "  store i64 %x_local, i64* %t4";

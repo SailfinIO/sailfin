@@ -175,22 +175,34 @@ void free(void *ptr) {
 }
 
 /* Arena-mode probe stub: report arena OFF so sfn_mem_free forwards to
- * the counting free() shim above. */
+ * the counting free() shim above, and so the module-defined
+ * `sfn_alloc_struct` (see below) takes its libc-calloc path. */
 int sfn_arena_enabled(void) { return 0; }
 
-/* Runtime hooks the seed compiler installs in emitted IR that the
- * harness must satisfy at link time but does not exercise:
- *   - `sailfin_runtime_mark_persistent` — persistent-pointer
- *     bookkeeping the seed emits on every heap return (the
- *     get_field malloc'd buffer). No-op stub.
- *   - `sailfin_runtime_alloc_struct` — arena/calloc-backed boxing
- *     the seed emits for the string literal in bounds_check's abort
- *     diagnostic. Forward to calloc so the literal is materialized
- *     correctly when the abort path runs in the forked child. */
-void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }
-void *sailfin_runtime_alloc_struct(int64_t size) {
-    return calloc(1, (size_t)size);
+/* Arena trampolines referenced by the module-defined `sfn_alloc_struct`
+ * (#930). The arena-allocation branch is unreachable here because
+ * `sfn_arena_enabled()` returns 0, but the two calls are still present
+ * in the emitted IR, so the harness must satisfy them at link time.
+ * `sfn_arena_global` returns NULL and `sfn_arena_alloc` forwards to
+ * calloc — faithful to the arena-off contract even though neither runs. */
+void *sfn_arena_global(void) { return NULL; }
+void *sfn_arena_alloc(void *arena, size_t size, size_t align) {
+    (void)arena;
+    (void)align;
+    return calloc(1, size);
 }
+
+/* Runtime hook the seed compiler installs in emitted IR that the harness
+ * must satisfy at link time but does not exercise:
+ *   - `sailfin_runtime_mark_persistent` — persistent-pointer bookkeeping
+ *     the seed emits on every heap return (the get_field malloc'd
+ *     buffer). No-op stub.
+ * The boxed-struct allocator the seed previously emitted for the
+ * bounds_check abort-diagnostic string literal
+ * (`sailfin_runtime_alloc_struct`) is, as of #930, the module-defined
+ * `sfn_alloc_struct` above — it is no longer an external the harness
+ * provides. */
+void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }
 
 extern char *sfn_mem_get_field(char *base, char *field);
 extern void  sfn_mem_copy_bytes(char *dest, char *src, int64_t length);
