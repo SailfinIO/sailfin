@@ -86,12 +86,16 @@ fn _local_build_effect_message(routine_name: string, missing_effects: string[]) 
 // EffectRequirement[])`; the error code is derived from the
 // requirement descriptions, so we wrap one description into a flat,
 // single-level struct literal (`trigger: null`) to stay clear of the
-// nested-struct-literal segfault caveat.
-fn _code_for_desc(desc: string) -> string {
+// nested-struct-literal segfault caveat. `effect` is threaded into both
+// the requirement's `effect` field and the `missing` array so the
+// fixture stays self-consistent with the description (e.g. an
+// `![net]` description carries `effect: "net"`) — future-proofing the
+// test if `code_for_missing_effect` ever consults those fields too.
+fn _code_for_desc(effect: string, desc: string) -> string {
     let reqs: EffectRequirement[] = [EffectRequirement {
-        effect: "io", description: desc, trigger: null
+        effect: effect, description: desc, trigger: null
     }];
-    let missing: string[] = ["io"];
+    let missing: string[] = [effect];
     return code_for_missing_effect(missing, reqs);
 }
 
@@ -180,17 +184,17 @@ test "check: effect message suggests fix" {
 // Tests — error-code classification
 // -------------------------------------------------------------------
 test "check: plain missing-effect requirement is E0400" {
-    assert strings_equal(_code_for_desc("http.get"), "E0400");
-    assert strings_equal(_code_for_desc("fs.readFile"), "E0400");
+    assert strings_equal(_code_for_desc("net", "http.get"), "E0400");
+    assert strings_equal(_code_for_desc("io", "fs.readFile"), "E0400");
 }
 
 test "check: decorator-implied effect is E0401" {
-    assert strings_equal(_code_for_desc("@trace decorator"), "E0401");
-    assert strings_equal(_code_for_desc("@logExecution"), "E0401");
+    assert strings_equal(_code_for_desc("io", "@trace decorator"), "E0401");
+    assert strings_equal(_code_for_desc("io", "@logExecution"), "E0401");
 }
 
 test "check: empty description defaults to E0400" {
-    assert strings_equal(_code_for_desc(""), "E0400");
+    assert strings_equal(_code_for_desc("io", ""), "E0400");
 }
 
 test "check: cross-module imported description is E0402" {
@@ -200,16 +204,16 @@ test "check: cross-module imported description is E0402" {
     // → E0402 mapping so a refactor that "tidies" the description
     // string (e.g. drops the backtick or capitalises) doesn't
     // silently regress the cross-module diagnostic to E0400.
-    assert strings_equal(_code_for_desc("imported `fetch` declares ![net]"), "E0402");
-    assert strings_equal(_code_for_desc("imported `read_file` declares ![io]"), "E0402");
+    assert strings_equal(_code_for_desc("net", "imported `fetch` declares ![net]"), "E0402");
+    assert strings_equal(_code_for_desc("io", "imported `read_file` declares ![io]"), "E0402");
 }
 
 test "check: imported substring without prefix stays E0400" {
     // Defensive — make sure the prefix check doesn't false-match
     // descriptions that merely contain the word "imported" later
     // in the string (e.g. an in-module helper named "use_imported").
-    assert strings_equal(_code_for_desc("use_imported_helper requires ![io]"), "E0400");
-    assert strings_equal(_code_for_desc("filesystem helper usage"), "E0400");
+    assert strings_equal(_code_for_desc("io", "use_imported_helper requires ![io]"), "E0400");
+    assert strings_equal(_code_for_desc("io", "filesystem helper usage"), "E0400");
 }
 
 test "check: decorator precedence wins over cross-module import" {
