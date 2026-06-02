@@ -55,10 +55,10 @@ import { lock_add_entry, lock_get_version } from "./lock";
 import {
     compile_tests_to_llvm_file_with_module_imports,
     compile_to_llvm_file_with_module,
-    module_name_from_path,
-    number_to_string
+    module_name_from_path
 } from "./main";
 import { LayoutManifest } from "./native_ir";
+import { number_to_string } from "./num_format";
 import { parse_program } from "./parser/mod";
 import { runtime_capsule_from_root } from "./runtime_capsule_resolver";
 import { find_char_local, substring } from "./string_utils";

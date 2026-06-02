@@ -1,0 +1,46 @@
+// compiler/src/num_format.sfn
+//
+// Leaf integer→string formatting helper, extracted from `main.sfn` (#986).
+//
+// `number_to_string` previously lived in `main.sfn`, so any module that
+// imported it (`tools/check.sfn`, `cli_commands.sfn`) transitively dragged
+// `main.sfn`'s full ~130-module backend closure. That made the `sfn check`
+// summary helpers (`render_summary`, `number_to_string`) impossible to link
+// from a standalone unit test, forcing `check_tool_test.sfn` to keep
+// hand-mirrored `_local_*` copies (see #619, #613, and
+// `docs/proposals/unit-test-import-envelope.md`).
+//
+// This module's only dependency is `substring` from the runtime prelude,
+// which the test runner links into every test via
+// `assemble_runtime_capsule_link_inputs`. Its import closure therefore does
+// NOT include `main.sfn`, so importing `number_to_string` from here is
+// unit-test-linkable.
+import { substring } from "runtime/prelude";
+
+fn number_to_string(value: int) -> string {
+    if value == 0 { return "0"; }
+    let mut working: int = value;
+    let mut negative: boolean = false;
+    if working < 0 {
+        negative = true;
+        working = 0 - working;
+    }
+    let digits = "0123456789";
+    let mut remaining: int = working;
+    let mut output: string = "";
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    if negative { output = "-" + output; }
+    return output;
+}

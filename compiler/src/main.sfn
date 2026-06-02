@@ -30,6 +30,7 @@ import { lower_to_llvm_for_tests } from "./llvm/lowering/entrypoints_tests";
 import { write_llvm_ir_for_tests_from_text_with_context } from "./llvm/lowering/entrypoints_tests_writer";
 import { runtime_helper_call_names } from "./llvm/runtime_helpers";
 import { LayoutManifest } from "./native_ir";
+import { number_to_string } from "./num_format";
 import { parse_program } from "./parser/mod";
 import { load_prelude_global_names } from "./prelude_globals";
 import { substring } from "./string_utils";
@@ -616,34 +617,6 @@ fn _emit_typecheck_diagnostics(entries: Diagnostic[], source: string, file_path:
         print.err(rendered);
         index += 1;
     }
-}
-
-fn number_to_string(value: int) -> string {
-    if value == 0 { return "0"; }
-    let mut working: int = value;
-    let mut negative: boolean = false;
-    if working < 0 {
-        negative = true;
-        working = 0 - working;
-    }
-    let digits = "0123456789";
-    let mut remaining: int = working;
-    let mut output: string = "";
-    loop {
-        if remaining <= 0 { break; }
-        let mut temp: int = remaining;
-        let mut quotient: int = 0;
-        loop {
-            if temp < 10 { break; }
-            temp -= 10;
-            quotient += 1;
-        }
-        let ch = substring(digits, temp, temp + 1);
-        output = ch + output;
-        remaining = quotient;
-    }
-    if negative { output = "-" + output; }
-    return output;
 }
 
 fn repeat_character(ch: string, count: int) -> string {
