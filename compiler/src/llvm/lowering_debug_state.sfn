@@ -88,6 +88,13 @@ let mut _skip_module_globals_value: boolean = false;
 // on Windows/mingw-w64). See `errno_locator_symbol` below.
 let mut _errno_locator_initialized: boolean = false;
 let mut _errno_locator_value: string = "";
+// Cache for the resolved executable-path leg tag (#967, epic #390).
+// `_exe_path_locator_initialized` flips to true after the one-time
+// resolution (the `SAILFIN_TARGET_OS` override or the `uname -s`
+// host probe); `_exe_path_locator_value` holds the short leg tag
+// (`linux`, `darwin`, or `mingw`). See `exe_path_locator` below.
+let mut _exe_path_locator_initialized: boolean = false;
+let mut _exe_path_locator_value: string = "";
 
 // True when the user requested LLVM-lowering stderr trace via
 // `SAILFIN_TRACE_LOWERING=1` (or the legacy `.trace_lowering` file).
@@ -168,4 +175,29 @@ fn errno_locator_symbol() -> string ![io] {
         _errno_locator_initialized = true;
     }
     return _errno_locator_value;
+}
+
+// Resolve which executable-path leg the call-emission dispatcher
+// (`core_call_emission.sfn`) should emit for the `sailfin_intrinsic_exe_path`
+// sentinel (#967, epic #390). Same resolution order and lazy-init cache as
+// `errno_locator_symbol` above:
+//   1. `SAILFIN_TARGET_OS` env override — the *target* OS, for the Windows
+//      cross-compile from a Linux host (`make ci-cross-windows`).
+//   2. `uname -s` host probe — the native-build path.
+// Returns a short leg tag so the dispatcher switches on the *leg* while the
+// concrete symbol names live in the registry rows:
+//   "Darwin"  -> "darwin"   (`_NSGetExecutablePath`)
+//   "Windows" -> "mingw"    (`GetModuleFileNameA`)
+//   otherwise -> "linux"    (`readlink`), so the dominant Linux leg is the
+//                            default and is never wrong.
+fn exe_path_locator() -> string ![io] {
+    if !_exe_path_locator_initialized {
+        let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
+        if os.length == 0 { os = _shell_read_cmd("uname -s"); }
+        if os == "Darwin" { _exe_path_locator_value = "darwin"; } else if os == "Windows" {
+            _exe_path_locator_value = "mingw";
+        } else { _exe_path_locator_value = "linux"; }
+        _exe_path_locator_initialized = true;
+    }
+    return _exe_path_locator_value;
 }

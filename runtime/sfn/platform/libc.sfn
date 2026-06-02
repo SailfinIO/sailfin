@@ -69,6 +69,18 @@ extern fn memchr(s: * u8, c: i32, n: usize) -> * u8;
 // `0..255` as `i32`.
 extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
 
+// `strlen(s)` returns the byte length of the NUL-terminated string
+// `s` (libc prototype `size_t strlen(const char *s)`). Canonical home
+// (#967) for a symbol previously re-externed ad hoc in
+// `runtime/sfn/process.sfn`, `exception.sfn`, `adapters/filesystem.sfn`,
+// and `adapters/http.sfn`. The host-aware executable-path sentinel's
+// Darwin leg (`core_call_emission.sfn`) emits `call i64 @strlen(i8*)` to
+// recover the path length after `_NSGetExecutablePath`, so `exec.sfn`
+// (which imports this module) carries the matching `declare`. `strlen`
+// is a pure POSIX symbol present on every target, so declaring/calling
+// it never triggers the cross-platform unresolved-symbol link problem.
+extern fn strlen(s: * u8) -> usize;
+
 // `strrchr(s, c)` scans the NUL-terminated string `s` for the
 // last occurrence of the byte `c` (passed as i32 per the libc
 // prototype `char *strrchr(const char *s, int c)`), returning a

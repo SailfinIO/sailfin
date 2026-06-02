@@ -5,8 +5,12 @@
 import { NativeFunction, NativeParameter } from "../../../native_ir";
 import { find_last_index_of_char, substring } from "../../../string_utils";
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
-import { errno_locator_symbol, trace_lowering } from "../../lowering_debug_state";
-import { merge_string_constants } from "../../strings";
+import { errno_locator_symbol, exe_path_locator, trace_lowering } from "../../lowering_debug_state";
+import {
+    append_string_constant,
+    find_string_constant_by_name,
+    merge_string_constants
+} from "../../strings";
 import { find_interface_info_by_name } from "../../type_context_queries";
 import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
 import {
@@ -673,6 +677,194 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                 diagnostics: result_diagnostics,
                 string_constants: collected_string_constants
             };
+        }
+    }
+
+    // executable-path sentinel (#967, epic #390): lower to a per-target
+    // emission *sequence* (not a symbol swap) chosen at emit time via
+    // `exe_path_locator`. Only the host's leg is emitted, so only one of
+    // `readlink` (Linux), `_NSGetExecutablePath`+`strlen` (Darwin), or
+    // `GetModuleFileNameA` (Windows) ever appears in the IR — the same
+    // cross-platform link guarantee the errno sentinel provides. The uniform
+    // sentinel signature is the Linux shape `(i8* buf, i64 size) -> i64`
+    // (byte count written, -1 on failure); the Darwin/Windows legs normalize
+    // their differing primitives to it. `final_operands[0]` is `buf` (`i8*`),
+    // `final_operands[1]` is `size` (`i64`). The concrete symbol's `declare`
+    // is emitted via its registry descriptor when the post-lowering
+    // call-target scan sees the emitted call line.
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_exe_path" {
+            if final_operands.length < 2 {
+                result_diagnostics.push("llvm lowering: sailfin_intrinsic_exe_path requires (buf: i8*, size: i64) operands");
+            } else {
+                let _ep_leg = exe_path_locator();
+                let _ep_buf = final_operands[0].value;
+                let _ep_size = final_operands[1].value;
+                let mut _ep_constants = collected_string_constants;
+                if _ep_leg == "darwin" {
+                    // _NSGetExecutablePath(i8* buf, i32* size_inout); rc==0 ok.
+                    // `strlen` is computed ONLY on the success path — on
+                    // failure `buf` contents are unspecified, so scanning it
+                    // would read undefined memory.
+                    let _ep_id = number_to_string(result_temp);
+                    let _ep_slot = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _ep_sz32 = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _ep_rc = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _ep_ok = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _ep_len = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _ep_out = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _ep_ok_lbl = "exe_path_ok_" + _ep_id;
+                    let _ep_fail_lbl = "exe_path_fail_" + _ep_id;
+                    let _ep_done_lbl = "exe_path_done_" + _ep_id;
+                    result_lines.push("  " + _ep_slot + " = alloca i32");
+                    result_lines.push("  " + _ep_sz32 + " = trunc i64 "
+                        + _ep_size
+                        + " to i32");
+                    result_lines.push("  store i32 " + _ep_sz32 + ", i32* "
+                        + _ep_slot);
+                    result_lines.push("  " + _ep_rc
+                        + " = call i32 @_NSGetExecutablePath(i8* "
+                        + _ep_buf
+                        + ", i32* "
+                        + _ep_slot
+                        + ")");
+                    result_lines.push("  " + _ep_ok + " = icmp eq i32 " + _ep_rc
+                        + ", 0");
+                    result_lines.push("  br i1 " + _ep_ok + ", label %"
+                        + _ep_ok_lbl
+                        + ", label %"
+                        + _ep_fail_lbl);
+                    result_lines.push("");
+                    result_lines.push(_ep_ok_lbl + ":");
+                    result_lines.push("  " + _ep_len
+                        + " = call i64 @strlen(i8* "
+                        + _ep_buf
+                        + ")");
+                    result_lines.push("  br label %" + _ep_done_lbl);
+                    result_lines.push("");
+                    result_lines.push(_ep_fail_lbl + ":");
+                    result_lines.push("  br label %" + _ep_done_lbl);
+                    result_lines.push("");
+                    result_lines.push(_ep_done_lbl + ":");
+                    result_lines.push("  " + _ep_out + " = phi i64 [ " + _ep_len
+                        + ", %"
+                        + _ep_ok_lbl
+                        + " ], [ -1, %"
+                        + _ep_fail_lbl
+                        + " ]");
+                    let _ep_operand = LLVMOperand {
+                        llvm_type: "i64",
+                        value: _ep_out
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _ep_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: _ep_constants
+                    };
+                } else if _ep_leg == "mingw" {
+                    // GetModuleFileNameA(NULL, buf, size); n==0 => failure.
+                    let _ep_sz32 = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _ep_n = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _ep_fail = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _ep_n64 = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _ep_out = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _ep_sz32 + " = trunc i64 "
+                        + _ep_size
+                        + " to i32");
+                    result_lines.push("  " + _ep_n
+                        + " = call i32 @GetModuleFileNameA(i8* null, i8* "
+                        + _ep_buf
+                        + ", i32 "
+                        + _ep_sz32
+                        + ")");
+                    result_lines.push("  " + _ep_fail + " = icmp eq i32 "
+                        + _ep_n
+                        + ", 0");
+                    result_lines.push("  " + _ep_n64 + " = sext i32 " + _ep_n
+                        + " to i64");
+                    result_lines.push("  " + _ep_out + " = select i1 "
+                        + _ep_fail
+                        + ", i64 -1, i64 "
+                        + _ep_n64);
+                    let _ep_operand = LLVMOperand {
+                        llvm_type: "i64",
+                        value: _ep_out
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _ep_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: _ep_constants
+                    };
+                } else {
+                    // Linux (default): readlink("/proc/self/exe", buf, size).
+                    // Intern the `/proc/self/exe` literal as a private global
+                    // and pass its `i8*` as the first arg, keeping the
+                    // sentinel signature uniform (2-arg) across targets. Build
+                    // the `@.`-prefixed name in two parts so the selfhost
+                    // text scan never sees the full global name as one literal
+                    // (same guard as `lower_dynamic_member_access`).
+                    let _ep_name = "@.str" + ".exe_path_proc_self_exe";
+                    let _ep_content = "/proc/self/exe";
+                    let mut _ep_const = StringConstant {
+                        name: _ep_name,
+                        content: _ep_content,
+                        byte_count: _ep_content.length
+                    };
+                    let _ep_existing = find_string_constant_by_name(_ep_constants, _ep_name);
+                    if _ep_existing != null { _ep_const = _ep_existing; } else {
+                        _ep_constants = append_string_constant(_ep_constants, _ep_const);
+                    }
+                    let _ep_arr = "[" + number_to_string(_ep_const.byte_count
+                        + 1)
+                        + " x i8]";
+                    let _ep_ptr = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _ep_ptr
+                        + " = getelementptr inbounds "
+                        + _ep_arr
+                        + ", "
+                        + _ep_arr
+                        + "* "
+                        + _ep_name
+                        + ", i32 0, i32 0");
+                    let _ep_n = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _ep_n
+                        + " = call i64 @readlink(i8* "
+                        + _ep_ptr
+                        + ", i8* "
+                        + _ep_buf
+                        + ", i64 "
+                        + _ep_size
+                        + ")");
+                    let _ep_operand = LLVMOperand {
+                        llvm_type: "i64",
+                        value: _ep_n
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _ep_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: _ep_constants
+                    };
+                }
+            }
         }
     }
 

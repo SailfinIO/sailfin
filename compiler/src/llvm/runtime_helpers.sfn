@@ -278,6 +278,47 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "intrinsic.errno_location.mingw", symbol: "_errno", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
     });
 
+    // executable-path sentinel (#967, epic #390). Resolves the running
+    // binary's own absolute path. Unlike errno (a pure symbol swap across
+    // three same-shape locators), the per-target primitives differ in arity
+    // and semantics — Linux `readlink("/proc/self/exe", …)`, Darwin
+    // `_NSGetExecutablePath(buf, *size)`, Windows
+    // `GetModuleFileNameA(NULL, buf, size)` — so the call-emission
+    // dispatcher (`coerce_and_emit_call` in `core_call_emission.sfn`)
+    // lowers the sentinel to a per-target emission *sequence* (modeled on
+    // `pointer_read`, not the errno symbol-swap), choosing the host leg via
+    // `exe_path_locator` at emit time. The uniform Sailfin-visible signature
+    // is the Linux shape `(i8* buf, i64 size) -> i64` (byte count written,
+    // -1 on failure); the Darwin/Windows legs normalize to it in IR. The
+    // declare loop in `rendering.sfn` skips the sentinel target; whichever
+    // concrete symbol the dispatcher emits a `call` to gets its `declare`
+    // from the post-lowering call-target scan via the concrete rows below.
+    // `effects: ["io"]` — observing the process path is an environment read,
+    // gated like the rest of `exec.sfn` (`![io]`), unlike errno which is not
+    // a capability.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_exe_path", symbol: "sailfin_intrinsic_exe_path", return_type: "i64", parameter_types: ["i8*", "i64"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    // Concrete exe-path primitives backing the sentinel above. Exactly like
+    // the errno concrete rows, these exist only so the post-lowering
+    // call-target scan (`collect_runtime_helper_targets_from_lines`) emits a
+    // matching `declare` for whichever symbol the sentinel branch actually
+    // calls on the resolved target. Their `target`s are deliberately dotted
+    // (member-style) so `runtime_helper_call_names()` does NOT seed
+    // `readlink` / `_NSGetExecutablePath` / `GetModuleFileNameA` as bare
+    // source-level globals — only the host's selected leg is ever declared
+    // or called, so the non-host symbols cannot trigger a cross-platform
+    // unresolved-symbol link error.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "intrinsic.exe_path.linux", symbol: "readlink", return_type: "i64", parameter_types: ["i8*", "i8*", "i64"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "intrinsic.exe_path.darwin", symbol: "_NSGetExecutablePath", return_type: "i32", parameter_types: ["i8*", "i32*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "intrinsic.exe_path.mingw", symbol: "GetModuleFileNameA", return_type: "i32", parameter_types: ["i8*", "i8*", "i32"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+
     // Network intrinsics.
     // `http.get` / `http.post` member calls flipped (#912) to the
     // Sailfin-native socket client in `runtime/sfn/adapters/http.sfn`:

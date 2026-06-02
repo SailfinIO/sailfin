@@ -202,6 +202,18 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             if descriptor.target == "sailfin_intrinsic_errno_location" {
                 _preamble_inlined = true;
             }
+            // #967: the executable-path sentinel never appears as a real
+            // `call @sailfin_intrinsic_exe_path(` — the lowering branch
+            // (`core_call_emission.sfn`) emits the host's concrete primitive
+            // (`readlink` / `_NSGetExecutablePath` / `GetModuleFileNameA`)
+            // instead. The source-text walker still picks the sentinel target
+            // up from the call expression, so skip it here to avoid a bogus
+            // `declare` to a symbol that does not exist. The concrete leg's
+            // declare is emitted via its own descriptor row when the line
+            // scan sees the call.
+            if descriptor.target == "sailfin_intrinsic_exe_path" {
+                _preamble_inlined = true;
+            }
             if _preamble_inlined {
                 index += 1;
                 continue;
