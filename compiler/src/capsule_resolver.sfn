@@ -3799,10 +3799,13 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
 // `.ll` paths and the per-build cache stats. `ll_paths` is empty
 // when no dependencies are needed AND on slug collision or stage
 // failure. Issue #991: the `success` flag disambiguates the two —
-// `success = true` with empty `ll_paths` means "no deps" (the build
-// proceeds and links the entry alone), while `success = false` means
-// a collision/stage/compile failure left `ll_paths` empty and the
-// driver must exit non-zero rather than linking the survivors.
+// `success = true` with empty `ll_paths` means "no deps" (a consumer
+// can safely link the entry alone), while `success = false` means a
+// collision/stage/compile failure left `ll_paths` empty. The `-p`
+// build driver (`cli_main.sfn`) consults this flag and exits non-zero
+// instead of linking the survivors. Other consumers that read only
+// `ll_paths` (e.g. the `sfn run` path) do not yet check it and would
+// need the same guard to propagate emit failures.
 fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string, work_dir: string) -> ProjectCapsuleResult ![io] {
     let empty_paths: string[] = [];
     let empty_events: ModuleCacheEvent[] = [];
