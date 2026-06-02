@@ -26,7 +26,7 @@ fn _count_e0420(diagnostics: Diagnostic[]) -> int {
     return count;
 }
 
-fn _e0420_for(source: string) -> int {
+fn _e0420_for(source: string) -> int ![io] {
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     return _count_e0420(diagnostics);
@@ -39,7 +39,7 @@ test "E0420: undefined free-function callee is flagged" {
     assert _e0420_for("fn main() { notarealfunction(\"hi\"); }") == 1;
 }
 
-test "E0420: carries the undefined-function message and code" {
+test "E0420: carries the undefined-function message and code" ![io] {
     let program = parse_program("fn main() { notarealfunction(\"hi\"); }");
     let diagnostics = typecheck_diagnostics(program);
     let mut found: boolean = false;
@@ -117,7 +117,7 @@ fn _imports_with_helper() -> ImportSymbolTable {
     return append_import_function(table, "imported_helper", effects);
 }
 
-test "E0420: imported callee resolves via effect table + specifier" {
+test "E0420: imported callee resolves via effect table + specifier" ![io] {
     let source = "import { imported_helper } from \"./helpers\";\nfn main() { imported_helper(\"hi\"); }";
     let program = parse_program(source);
     let imports = _imports_with_helper();
@@ -134,7 +134,7 @@ test "E0420: imported callee resolves on the empty-table path via specifier" {
     assert _e0420_for(source) == 0;
 }
 
-test "E0420: un-imported name that only exists globally is flagged" {
+test "E0420: un-imported name that only exists globally is flagged" ![io] {
     // No `import` specifier for `imported_helper`; the localized table
     // drops it, so the call is undefined.
     let source = "fn main() { imported_helper(\"hi\"); }";

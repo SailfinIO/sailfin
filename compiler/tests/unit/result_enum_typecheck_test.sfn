@@ -14,7 +14,7 @@ import {
     validate_enum_annotation
 } from "../../src/typecheck_types";
 
-fn _enum_decl(source: string, name: string) -> Statement? {
+fn _enum_decl(source: string, name: string) -> Statement? ![io] {
     let program = parse_program(source);
     let mut index: int = 0;
     loop {

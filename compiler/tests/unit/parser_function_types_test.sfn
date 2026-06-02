@@ -47,7 +47,7 @@ fn _first_variable_decl(block: Block) -> Statement {
 // Acceptance criterion (a): `let f: fn(int) -> int = ...` parses and
 // the annotation text round-trips into `TypeAnnotation.text`.
 // -------------------------------------------------------------------
-test "fn-types: let-binding with fn(int) -> int annotation parses" {
+test "fn-types: let-binding with fn(int) -> int annotation parses" ![io] {
     let source = "fn main() { let f: fn(int) -> int = fn(x: int) -> int { return x + 1; }; }";
     let program = parse_program(source);
     let body = _function_body(program, "main");
@@ -69,7 +69,7 @@ test "fn-types: let-binding with fn(int) -> int annotation parses" {
 // `(int)` paren pair does not prematurely terminate the parameter
 // list.
 // -------------------------------------------------------------------
-test "fn-types: parameter typed as fn(int) -> int parses" {
+test "fn-types: parameter typed as fn(int) -> int parses" ![io] {
     let source = "fn apply(cb: fn(int) -> int, x: int) -> int { return cb(x); }";
     let program = parse_program(source);
     let decl = _find_function(program, "apply");
@@ -94,7 +94,7 @@ test "fn-types: parameter typed as fn(int) -> int parses" {
 // — the return-type capture must itself accept an fn-type, so the
 // `->` token between the two arrows is not greedy.
 // -------------------------------------------------------------------
-test "fn-types: nested fn() -> fn(int) -> int annotation parses" {
+test "fn-types: nested fn() -> fn(int) -> int annotation parses" ![io] {
     let source = "fn main() { let f: fn() -> fn(int) -> int = 0; }";
     let program = parse_program(source);
     let body = _function_body(program, "main");
@@ -108,7 +108,7 @@ test "fn-types: nested fn() -> fn(int) -> int annotation parses" {
 // empty arg list is a balanced `()` pair that must not be mistaken
 // for a function call or trailing parenthesised expression).
 // -------------------------------------------------------------------
-test "fn-types: zero-arg fn() -> int annotation parses" {
+test "fn-types: zero-arg fn() -> int annotation parses" ![io] {
     let source = "fn main() { let f: fn() -> int = 0; }";
     let program = parse_program(source);
     let body = _function_body(program, "main");

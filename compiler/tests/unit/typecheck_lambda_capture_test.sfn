@@ -32,7 +32,7 @@ fn _has_capture(record: LambdaCaptureRecord, name: string) -> boolean {
 // Acceptance criterion: existing lambda tests still pass / no
 // regression for lambdas without free variables.
 // -------------------------------------------------------------------
-test "captures: empty body produces no captures" {
+test "captures: empty body produces no captures" ![io] {
     let source = "let f = fn() -> int { return 0; };";
     let program = parse_program(source);
     let records = analyze_lambda_captures(program);
@@ -41,7 +41,7 @@ test "captures: empty body produces no captures" {
     assert records[0].parameter_names.length == 0;
 }
 
-test "captures: lambda referencing only its parameter produces no captures" {
+test "captures: lambda referencing only its parameter produces no captures" ![io] {
     let source = "let inc = fn(x: int) -> int { return x; };";
     let program = parse_program(source);
     let records = analyze_lambda_captures(program);
@@ -51,7 +51,7 @@ test "captures: lambda referencing only its parameter produces no captures" {
     assert strings_equal(records[0].parameter_names[0], "x");
 }
 
-test "captures: top-level function reference is not a capture" {
+test "captures: top-level function reference is not a capture" ![io] {
     // `helper` is a top-level fn, not a let-binding, so referencing
     // it from a lambda body must not register as a capture — stage A2
     // resolves named functions through the module symbol table, not
@@ -68,7 +68,7 @@ test "captures: top-level function reference is not a capture" {
 // enclosing scope, one identifier reference inside the lambda body,
 // one Capture with the binding's annotation echoed back.
 // -------------------------------------------------------------------
-test "captures: lambda captures a single enclosing let-binding" {
+test "captures: lambda captures a single enclosing let-binding" ![io] {
     let source = "let x: int = 1; let f = fn() -> int { return x; };";
     let program = parse_program(source);
     let records = analyze_lambda_captures(program);
@@ -80,7 +80,7 @@ test "captures: lambda captures a single enclosing let-binding" {
     assert records[0].captures[0].by_value;
 }
 
-test "captures: type annotation is echoed onto the Capture" {
+test "captures: type annotation is echoed onto the Capture" ![io] {
     let source = "let label: string = \"hi\"; let f = fn() -> string { return label; };";
     let program = parse_program(source);
     let records = analyze_lambda_captures(program);
@@ -89,7 +89,7 @@ test "captures: type annotation is echoed onto the Capture" {
     assert strings_equal(records[0].captures[0].type_text, "string");
 }
 
-test "captures: mutability of the enclosing binding is recorded" {
+test "captures: mutability of the enclosing binding is recorded" ![io] {
     let source = "let mut counter: int = 0; let inc = fn() -> int { return counter; };";
     let program = parse_program(source);
     let records = analyze_lambda_captures(program);
@@ -103,7 +103,7 @@ test "captures: mutability of the enclosing binding is recorded" {
 // binding of the same name. Acceptance criterion calls this case
 // out by name.
 // -------------------------------------------------------------------
-test "captures: lambda parameter shadows enclosing let-binding" {
+test "captures: lambda parameter shadows enclosing let-binding" ![io] {
     let source = "let x: int = 1; let f = fn(x: int) -> int { return x; };";
     let program = parse_program(source);
     let records = analyze_lambda_captures(program);
@@ -121,7 +121,7 @@ test "captures: lambda parameter shadows enclosing let-binding" {
 // the shadowing case is exercised via parameter shadowing instead,
 // which is the same scoping rule applied at the parameter slot.)
 // -------------------------------------------------------------------
-test "captures: only outer-resolved free names become captures" {
+test "captures: only outer-resolved free names become captures" ![io] {
     // The lambda references `outer_val` (in scope) and `not_in_scope`
     // (truly free — likely an imported helper or a typo). Only the
     // resolved name lands in the capture set; truly-free names are
@@ -140,7 +140,7 @@ test "captures: only outer-resolved free names become captures" {
 // Use return-position lambdas because that path produces structured
 // AST through both layers.
 // -------------------------------------------------------------------
-test "captures: nested lambdas both capture an outer let" {
+test "captures: nested lambdas both capture an outer let" ![io] {
     // The outer lambda returns the inner lambda directly (not via
     // IIFE — the IIFE pattern is a separate-issue parser path that
     // bites on the `;` inside the nested body). The inner lambda
@@ -155,7 +155,7 @@ test "captures: nested lambdas both capture an outer let" {
     assert _has_capture(records[1], "x");
 }
 
-test "captures: nested lambda's parameter doesn't bleed into outer capture set" {
+test "captures: nested lambda's parameter doesn't bleed into outer capture set" ![io] {
     // Inner lambda takes `x` as a parameter; outer lambda doesn't
     // reference `x` at all. The walk must NOT mark `x` as a capture
     // on either lambda — the inner's parameter binds it locally and
@@ -176,7 +176,7 @@ test "captures: nested lambda's parameter doesn't bleed into outer capture set" 
 // Stage A2 indexes by position in the env struct, so any reorder
 // is a soundness break.
 // -------------------------------------------------------------------
-test "captures: multiple captures preserve first-use order" {
+test "captures: multiple captures preserve first-use order" ![io] {
     let source = "let a: int = 1; let b: int = 2; let f = fn() -> int { return a + b; };";
     let program = parse_program(source);
     let records = analyze_lambda_captures(program);
@@ -186,7 +186,7 @@ test "captures: multiple captures preserve first-use order" {
     assert strings_equal(records[0].captures[1].name, "b");
 }
 
-test "captures: repeated reference to same name produces one Capture" {
+test "captures: repeated reference to same name produces one Capture" ![io] {
     let source = "let x: int = 1; let f = fn() -> int { return x + x + x; };";
     let program = parse_program(source);
     let records = analyze_lambda_captures(program);
@@ -195,7 +195,7 @@ test "captures: repeated reference to same name produces one Capture" {
     assert strings_equal(records[0].captures[0].name, "x");
 }
 
-test "captures: capture order follows source-use order, not declaration order" {
+test "captures: capture order follows source-use order, not declaration order" ![io] {
     // `b` declared before `a` in the let block, but the lambda body
     // uses `a` first. Stage A2 wants source-use-order indexing so
     // the test pins it explicitly.
@@ -215,7 +215,7 @@ test "captures: capture order follows source-use order, not declaration order" {
 // bound, not as a capture from the enclosing scope. Mirrors review
 // feedback on PR #512.
 // -------------------------------------------------------------------
-test "captures: catch-name shadows outer binding for lambdas inside catch" {
+test "captures: catch-name shadows outer binding for lambdas inside catch" ![io] {
     // Top-level `let err: int = 0` is in scope at the lambda
     // site (annotated `: int`). The `catch (err) { ... }` handler
     // re-binds `err` as a fresh local with no annotation. A lambda
@@ -242,7 +242,7 @@ test "captures: catch-name shadows outer binding for lambdas inside catch" {
 // .Lambda` walk back to the inferred record without depending on
 // pre-order indexing alone. Mirrors review feedback on PR #512.
 // -------------------------------------------------------------------
-test "captures: record carries the body's opening-brace line and column" {
+test "captures: record carries the body's opening-brace line and column" ![io] {
     let source = "let f = fn() -> int { return 0; };";
     let program = parse_program(source);
     let records = analyze_lambda_captures(program);
@@ -256,7 +256,7 @@ test "captures: record carries the body's opening-brace line and column" {
     assert records[0].body_start_column != 0;
 }
 
-test "captures: nested lambdas carry distinct body-span identifiers" {
+test "captures: nested lambdas carry distinct body-span identifiers" ![io] {
     // Two lambdas with identical parameter shapes (both 0-arity)
     // must still be distinguishable via body span — that's the
     // point of carrying the identifier alongside `parameter_names`.
