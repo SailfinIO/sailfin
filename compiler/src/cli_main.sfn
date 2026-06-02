@@ -69,12 +69,12 @@ import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_with_module,
     compile_to_llvm_with_module_timed,
-    compile_to_native_text_with_module,
     compile_to_sailfin,
     module_name_from_path,
     number_to_string,
     print_llvm_with_module,
-    write_native_text_file_with_module
+    print_native_text_with_module_gated,
+    write_native_text_file_with_module_gated
 } from "./main";
 import { RuntimeCapsuleArtifacts, runtime_capsule_from_root } from "./runtime_capsule_resolver";
 import {
@@ -1499,6 +1499,11 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
         // round-trip.
         let mut emit_attempts: int = 1;
         let mut emit_validate: boolean = false;
+        // #906: build-internal per-module native emits set this (via
+        // `--no-resolve-gate`) to skip the lowering dry-run gate, which
+        // would otherwise reject legitimate cross-module calls that the
+        // import-context-free native stage cannot resolve in isolation.
+        let mut skip_resolve_gate: boolean = false;
         let mut base_index = 1;
         // Parse optional flags: --timing, --module-name <slug>,
         // -o <path>, --attempts N, --no-retry, --validate,
@@ -1577,6 +1582,12 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
                 consumed_flag = true;
                 continue;
             }
+            if strings_equal(args[base_index], "--no-resolve-gate") {
+                skip_resolve_gate = true;
+                base_index += 1;
+                consumed_flag = true;
+                continue;
+            }
         }
         let _expected_args = base_index + 2;
         if args.length != _expected_args {
@@ -1635,11 +1646,24 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
             return 0;
         }
         if strings_equal(mode, "native") {
+            // #906: gate the native emit on the same lowering `[fatal]`
+            // that `build` / `emit llvm` reject, so `emit native` fails
+            // closed (rc != 0, no `.sfn-asm`) on unresolved-callee inputs
+            // instead of writing an artifact and exiting 0. The build's
+            // per-module subprocess emit passes `--no-resolve-gate`
+            // (`skip_resolve_gate`) to opt out: that stage emits
+            // intermediate `.sfn-asm` with no cross-module import context,
+            // so it must not gate here — the build stays fail-closed via
+            // its later LLVM lowering stage (#631).
+            let run_gate = !skip_resolve_gate;
             if has_out {
-                let ok = write_native_text_file_with_module(source, module_name, out_path);
-                if !ok { return 1; }
+                if !write_native_text_file_with_module_gated(source, module_name, out_path, run_gate) {
+                    return 1;
+                }
             } else {
-                print(compile_to_native_text_with_module(source, module_name));
+                if !print_native_text_with_module_gated(source, module_name, run_gate) {
+                    return 1;
+                }
             }
             return 0;
         }

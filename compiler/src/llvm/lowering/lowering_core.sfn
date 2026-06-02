@@ -332,6 +332,54 @@ fn compile_native_text_to_llvm_file(native_text: string, module_name: string, ou
     return write_llvm_lines_chunked(out_path, lines);
 }
 
+// Dry-run the lowering gate over already-emitted native text WITHOUT
+// writing any artifact. Used by `sfn emit native` (issue #906) so that
+// command fails closed on the same unresolved-callee inputs that
+// `sfn build` / `sfn emit llvm` reject via `compile_native_text_to_llvm_file`.
+// `emit native` stops at the native-IR stage (stage 5), before LLVM
+// lowering (stage 6) where the `cannot resolve return type for call to
+// ...` `[fatal]` is produced — so it never participated in return-type
+// resolution and false-greened. This reuses the exact same lowering
+// path and `[fatal]` scan as the `build` / `emit llvm` gate, guaranteeing
+// byte-for-byte parity, but discards the lowered IR and writes nothing.
+// Returns true when the native text lowers clean (no fatal), false on a
+// fatal, empty/null input, or a lowering failure.
+//
+// NOTE: this lives off the self-host build path. The build's per-module
+// stage-5 emit (`capsule_resolver.sfn`) calls the native-emit workers
+// directly and never invokes this gate, so adding it cannot break
+// self-hosting (cross-module signature resolution still happens later at
+// the LLVM stage as before).
+fn native_text_passes_lowering_gate(native_text: string, module_name: string) -> boolean ![io] {
+    if native_text.length == 0 {
+        // No text to gate: the native emitter already failed upstream
+        // (typecheck / effect / re-export error) and produced nothing.
+        return false;
+    }
+    let parse = parse_native_artifact(native_text);
+    let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
+    let dummy_module = make_native_module_for_emit(module_name, native_text);
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, native_text);
+    if lowered_lines.lines == null {
+        print.err("emit-native: lowered lines null");
+        return false;
+    }
+    // Same fatal contract as `compile_native_text_to_llvm_file` above:
+    // print every `[fatal]` so the user sees the underlying cause, then
+    // refuse the emit.
+    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
+        let mut _fdi: int = 0;
+        loop {
+            if _fdi >= lowered_lines.diagnostics.length { break; }
+            let _diag = lowered_lines.diagnostics[_fdi];
+            if index_of(_diag, "[fatal]") >= 0 { print.err(_diag); }
+            _fdi += 1;
+        }
+        return false;
+    }
+    return true;
+}
+
 // Returns true if any diagnostic in the list carries the `[fatal]`
 // sentinel tag. Lowering passes use this prefix to escalate a
 // diagnostic from "warning the user sees on stderr" to "the build

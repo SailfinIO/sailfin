@@ -31,6 +31,11 @@
 # diagnostic the moment lowering tries to compile a call to a
 # now-unknown name.
 #
+# As of #631 `sfn build` and `sfn emit llvm` both fail closed on these
+# inputs; as of #906 `sfn emit native` joins them (it previously stopped at
+# stage 5, before lowering, and false-greened with a `.sfn-asm` at rc=0).
+# All three surfaces now reject the identical unresolved-callee programs.
+#
 # The typed `spawn_*` / `await_*` runtime variants below are not
 # exercised here — they have working pthread implementations and
 # are unaffected by this change.
@@ -207,6 +212,67 @@ assert_emit_llvm_rejects() {
     return 0
 }
 
+# `sfn emit native` stops at the native-IR stage (stage 5), BEFORE the
+# LLVM lowering (stage 6) that produces the `cannot resolve return type
+# for call to ...` `[fatal]`. Pre-#906 it therefore never participated in
+# return-type resolution: it wrote a `.sfn-asm` and exited 0 even for the
+# unresolved-callee inputs `build` / `emit llvm` reject — a false green for
+# any tool gating on its exit code. #906 added a CLI-level lowering dry-run
+# gate (`native_text_passes_lowering_gate`) that reuses the exact same
+# `[fatal]` machinery, so `emit native` now fails closed (rc != 0, no
+# `.sfn-asm`) in parity with the other two surfaces. The gate lives only on
+# the `emit native` command path, never on the self-host build's per-module
+# stage-5 emit, so it cannot affect bootstrapping. (When #616 lands a shared
+# typecheck-layer gate, this dry-run becomes redundant and can be removed
+# without touching the build path — keep the two from diverging.)
+#
+# Note the argument order: `emit -o OUT native FILE` (mode follows the
+# output flag), matching the CLI dispatch in `cli_main.sfn`.
+assert_emit_native_rejects() {
+    local label="$1"
+    local source="$2"
+    local symbol="$3"
+
+    local src_path="$SCRATCH/${label}.sfn"
+    local out_path="$SCRATCH/${label}.sfn-asm"
+    local log_path="$SCRATCH/${label}.emitnative.log"
+    printf '%s\n' "$source" > "$src_path"
+
+    local rc=0
+    ( cd "$SCRATCH" && "$BINARY" emit -o "$out_path" native "$src_path" ) \
+        > "$log_path" 2>&1 || rc=$?
+
+    if [ "$rc" -eq 0 ]; then
+        echo "[test]   emit native of ${label}.sfn exited 0 — expected non-zero (fail-closed)" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if [ -e "$out_path" ]; then
+        echo "[test]   emit native of ${label}.sfn produced a .sfn-asm at ${out_path} — expected none" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if ! grep -q "cannot resolve" "$log_path"; then
+        echo "[test]   emit native diagnostic for ${label}.sfn did not mention 'cannot resolve'" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if ! grep -q "\`${symbol}\`" "$log_path"; then
+        echo "[test]   emit native diagnostic for ${label}.sfn did not name '\`${symbol}\`'" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 test_channel_via_sfn_sync_rejected() {
     assert_build_rejects "channel_import_caller" \
 'import { channel } from "sfn/sync";
@@ -288,6 +354,30 @@ test_emit_llvm_spawn_rejected() {
         "spawn"
 }
 
+# Issue #906: `sfn emit native` must fail closed on the same unresolved
+# callees as `build` / `emit llvm`. Cover both shapes from the issue
+# reproduction:
+#   - value-returning unresolved call (`let _ = channel(0)`), and
+#   - void-returning unresolved call (`spawn(0, "worker")`).
+# Each must exit non-zero AND leave no `.sfn-asm` behind.
+test_emit_native_channel_rejected() {
+    assert_emit_native_rejects "channel_emit_native_caller" \
+'import { channel } from "sfn/sync";
+
+fn main() ![io] {
+    let _ch = channel(0);
+}' \
+        "channel"
+}
+
+test_emit_native_spawn_rejected() {
+    assert_emit_native_rejects "spawn_emit_native_caller" \
+'fn main() ![io] {
+    spawn(0, "worker");
+}' \
+        "spawn"
+}
+
 run_test "sfn build rejects sfn/sync.channel import (#617)" test_channel_via_sfn_sync_rejected
 run_test "sfn build rejects sfn/sync.parallel import (#617)" test_parallel_via_sfn_sync_rejected
 run_test "sfn build rejects sfn/sync.spawn import (#617)" test_spawn_via_sfn_sync_rejected
@@ -295,6 +385,8 @@ run_test "sfn build rejects bare prelude channel() (#617)" test_channel_via_prel
 run_test "sfn build rejects bare prelude spawn() (#617)" test_spawn_via_prelude_name_rejected
 run_test "sfn build fails closed on unknown void helper (#631)" test_unknown_void_helper_rejected
 run_test "sfn emit llvm fails closed on void spawn() (#631)" test_emit_llvm_spawn_rejected
+run_test "sfn emit native fails closed on value channel() (#906)" test_emit_native_channel_rejected
+run_test "sfn emit native fails closed on void spawn() (#906)" test_emit_native_spawn_rejected
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
