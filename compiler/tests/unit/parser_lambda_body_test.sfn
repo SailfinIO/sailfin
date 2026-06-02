@@ -1,0 +1,83 @@
+// Unit tests for structured lambda-body parsing (issue #520).
+//
+// Before #520 the expression-side lambda parser used a placeholder
+// (`parse_block_for_lambda`) that only collected raw tokens, leaving
+// `Expression.Lambda.body.statements` empty; downstream passes had to
+// re-parse `body.tokens` to recover structure. The parser now delegates
+// to the structured `parse_block` in statements.sfn, so a lambda body
+// arrives with its `statements` list populated. These tests pin that:
+// every lambda whose source has at least one parsed statement exposes a
+// non-empty `body.statements`, and nested blocks / nested lambdas parse
+// into structured nodes too.
+//
+// Sources use a top-level `let f = fn(...) { ... };` binding because that
+// parse path produces a structured `Expression.Lambda` in the
+// declaration's initializer (the same path the capture analysis relies
+// on). Block-scoped `let` is still parsed into an opaque statement and is
+// deliberately avoided here — its migration is tracked separately.
+import { Block, Expression, Statement } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+// Unwrap the body block of a lambda expression. The early-return null
+// guard narrows `expr` to a non-optional `Expression`, after which the
+// duck-typed union field access reaches the Lambda's `body`.
+fn lambda_body(expr: Expression?) -> Block {
+    if expr == null {
+        return Block { tokens: [], text: "", statements: [] };
+    }
+    return expr.body;
+}
+
+// Body of the lambda bound by the first top-level `let` in `source`.
+fn first_let_lambda_body(source: string) -> Block ![io] {
+    let program = parse_program(source);
+    let stmt = program.statements[0];
+    return lambda_body(stmt.initializer);
+}
+
+// -------------------------------------------------------------------
+// Empty body — boundary case: a lambda with no statements parses to an
+// empty (but structured) statement list, not a token blob.
+// -------------------------------------------------------------------
+test "lambda body: empty body has zero structured statements" ![io] {
+    let body = first_let_lambda_body("let f = fn() -> int { };");
+    assert body.statements.length == 0;
+}
+
+// -------------------------------------------------------------------
+// Single statement — the core acceptance criterion: a lambda whose
+// source has one statement exposes exactly one structured statement.
+// -------------------------------------------------------------------
+test "lambda body: single return parses to one structured statement" ![io] {
+    let body = first_let_lambda_body("let f = fn() -> int { return 0; };");
+    assert body.statements.length == 1;
+    assert body.statements[0].variant == "ReturnStatement";
+}
+
+// -------------------------------------------------------------------
+// Nested block — a `{ ... }` inside the lambda body parses to a
+// `BlockStatement` carrying its own structured statement list.
+// -------------------------------------------------------------------
+test "lambda body: nested block parses to a structured BlockStatement" ![io] {
+    let body = first_let_lambda_body("let f = fn() -> int { { return 0; } };");
+    assert body.statements.length == 1;
+    let inner = body.statements[0];
+    assert inner.variant == "BlockStatement";
+    assert inner.body.statements.length == 1;
+    assert inner.body.statements[0].variant == "ReturnStatement";
+}
+
+// -------------------------------------------------------------------
+// Nested lambda — a lambda returned from another lambda's body also
+// arrives with structured statements, so future passes can walk the
+// whole tree without re-parsing any level.
+// -------------------------------------------------------------------
+test "lambda body: nested lambda body is itself structured" ![io] {
+    let body = first_let_lambda_body("let f = fn() -> int { return fn() -> int { return 1; }; };");
+    assert body.statements.length == 1;
+    let ret = body.statements[0];
+    assert ret.variant == "ReturnStatement";
+    let inner_body = lambda_body(ret.expression);
+    assert inner_body.statements.length == 1;
+    assert inner_body.statements[0].variant == "ReturnStatement";
+}

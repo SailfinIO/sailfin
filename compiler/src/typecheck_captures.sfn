@@ -42,8 +42,6 @@ import {
     Statement,
     TypeAnnotation
 } from "./ast";
-import { parse_block } from "./parser/statements";
-import { Parser } from "./parser/types";
 import { strings_equal } from "./string_utils";
 
 // One scope-visible binding the walk has accumulated so far.
@@ -366,22 +364,13 @@ fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWal
 // record is appended ahead of any nested-lambda records so the
 // pre-order property holds.
 //
-// Lambda bodies arrive with `body.statements == []` because the
-// expression-side `parse_block_for_lambda` only collects raw tokens
-// (the comment in the parser says the structural pass "will be in
-// statements.sfn" — it never landed). Re-parse the body's tokens
-// through the real `parse_block` here so we can walk structured
-// statements; without this every lambda body would look empty and
-// every reference to an outer name would be invisible. Stage A2
-// will need the same shape and may eventually push this re-parse
-// into the parser, retiring the workaround.
+// Lambda bodies now arrive fully parsed: the expression-side lambda
+// parser delegates to the structured `parse_block` in statements.sfn
+// (issue #520), so `body.statements` is populated and we walk it
+// directly — no re-parse of `body.tokens` is needed.
 fn analyze_lambda(outer_scope: LocalBinding[], lambda: Expression) -> CaptureWalkResult {
-    let body_parser = Parser { tokens: lambda.body.tokens, index: 0 };
-    let parsed_block_result = parse_block(body_parser);
-    let parsed_body = parsed_block_result.block;
-
     let inner_scope = extend_with_parameters(outer_scope, lambda.parameters);
-    let body_result = walk_block(inner_scope, parsed_body);
+    let body_result = walk_block(inner_scope, lambda.body);
 
     let param_names = parameter_names(lambda.parameters);
     let lambda_free = subtract_names(body_result.free, param_names);

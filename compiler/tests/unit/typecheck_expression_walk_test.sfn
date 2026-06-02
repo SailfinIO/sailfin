@@ -82,15 +82,13 @@ test "typecheck walker: undefined callee in match arm still flagged" {
     assert _e0420_for("fn main() { match shape { Other.Run { task }: notbound() } }") == 1;
 }
 
-test "typecheck walker: lambda body callee is not yet flagged" {
-    // Deliberately documents a deferred gap (outside #812's acceptance
-    // criteria, pre-existing from the #809 walker): undefined callees
-    // inside lambda bodies are not surfaced. `walk_expression` has a
-    // Lambda branch that calls `walk_block_expressions`, but in practice
-    // the body emits nothing — verified to hold for the canonical Sailfin
-    // lambda form `fn() { ... }` (not the `=>` arrow, which the parser
-    // reserves for match arms). Pinned at `== 0` so a future fix that
-    // wires lambda-body traversal flips this to `== 1` deliberately
-    // rather than silently regressing coverage.
-    assert _e0420_for("fn main() { let f = fn() { notarealfunction(); }; }") == 0;
+test "typecheck walker: lambda body callee is flagged (E0420)" {
+    // The deferred gap the #809 walker left open is now closed. Since
+    // #520 the lambda parser delegates to the structured `parse_block`,
+    // so `Expression.Lambda.body.statements` is populated and the
+    // `walk_expression` Lambda branch (via `walk_block_expressions`)
+    // reaches the body. The undefined callee inside the canonical
+    // `fn() { ... }` lambda form now surfaces E0420 — this assertion is
+    // the intentional `0 -> 1` flip the prior pin anticipated.
+    assert _e0420_for("fn main() { let f = fn() { notarealfunction(); }; }") == 1;
 }

@@ -9,10 +9,11 @@
 //   1. Synthesises a top-level `Statement.FunctionDeclaration`
 //      named `sfn_lambda_<N>` with a hidden `__env: i8*` first
 //      parameter (unused) followed by the lambda's own parameters.
-//      The body is re-parsed from `lambda.body.tokens` because the
-//      expression-side `parse_block_for_lambda` only collects raw
-//      tokens (see `typecheck_captures.sfn:analyze_lambda` for the
-//      same workaround).
+//      The body is re-parsed from `lambda.body.tokens` here to
+//      rebuild the statement list this pass mutates. Since #520 the
+//      parser populates `lambda.body.statements` directly, so this
+//      re-parse is now redundant and can be retired in a follow-up
+//      that reads `body.statements` instead.
 //   2. Replaces the in-tree `Expression.Lambda` with
 //      `Expression.Raw { text: "<closure_pair @sfn_lambda_<N> null>" }`.
 //      The Raw marker rides through `format_expression` verbatim
