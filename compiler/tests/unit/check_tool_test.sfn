@@ -1,16 +1,36 @@
 // Regression tests for the `sfn check` analysis orchestrator's pure
 // string-building helpers.
 //
-// Kept minimal and self-contained (no imports, no struct literals)
-// because the test runner cannot link against `char_code` via the
-// string_utils → runtime chain from standalone tests, and some
-// compiler versions segfault on nested struct-literal initialisers in
-// test bodies. Mirrors the pattern used by `fmt_test.sfn`,
-// `capsule_dep_resolution_test.sfn`, and `stdlib_capsule_allowlist_test.sfn`.
+// Import envelope (corrects this file's prior header):
+// The blocker for importing real `compiler/src` symbols here is
+// *import-closure size*, NOT a linker incapacity and NOT the
+// `char_code` / `string_utils → runtime` chain the old comment blamed.
+// The `sfn test` runner links `runtime/prelude` (which exports
+// `char_code`) into every test via `assemble_runtime_capsule_link_inputs`
+// (`compiler/src/cli_commands.sfn:51,176`), so the runtime chain always
+// resolves. What costs is the transitive `from "..."` closure the
+// resolver must compile + link for an imported symbol's home module.
 //
-// The helpers below mirror the logic in compiler/src/tools/check.sfn —
-// keep them in sync when that file changes. See
-// docs/proposals/check-architecture.md for the overall design.
+//   - `join_effects` and `code_for_missing_effect` live in
+//     `diagnostics_render.sfn`, whose closure is light (~8 modules:
+//     effect_checker, string_utils, token, typecheck_types). These are
+//     imported below and exercised against the REAL exported symbols.
+//   - `_local_num_to_string` / `_local_render_summary` are kept local:
+//     their real peers (`number_to_string` @ main.sfn, `render_summary`
+//     @ tools/check.sfn) anchor the full ~130-module `main.sfn` backend
+//     closure — too heavy to link into a one-line string-rendering unit
+//     test. Extracting them is the structural follow-up #986, NOT a
+//     linker-capability limitation.
+//
+// See docs/conventions/unit-test-import-envelope.md for the supported
+// test-import envelope, and docs/proposals/unit-test-import-envelope.md
+// for the full root-cause analysis (#619).
+// -------------------------------------------------------------------
+// Imports — real exported symbols (light closure via diagnostics_render)
+// -------------------------------------------------------------------
+import { code_for_missing_effect, join_effects } from "../../src/diagnostics_render";
+import { EffectRequirement } from "../../src/effect_checker";
+
 // -------------------------------------------------------------------
 // Local helpers
 // -------------------------------------------------------------------
@@ -41,20 +61,14 @@ fn _contains(haystack: string, needle: string) -> boolean {
     return _index_of(haystack, needle) >= 0;
 }
 
-fn _local_join_effects(effects: string[]) -> string {
-    if effects.length == 0 { return ""; }
-    let mut out = effects[0];
-    let mut i: int = 1;
-    loop {
-        if i >= effects.length { break; }
-        out = out + ", " + effects[i];
-        i += 1;
-    }
-    return out;
-}
-
+// `_local_build_effect_message` has no exported peer — the build-path
+// message is inlined inside `effect_violation_to_diagnostic`
+// (`diagnostics_render.sfn:92`), not a standalone export. It is kept
+// local but now composes the REAL `join_effects` import rather than a
+// mirrored copy, so the "joins multiple missing effects" assertion
+// below exercises the live separator logic transitively.
 fn _local_build_effect_message(routine_name: string, missing_effects: string[]) -> string {
-    let effects_text = _local_join_effects(missing_effects);
+    let effects_text = join_effects(missing_effects);
     let mut message = "function `" + routine_name
         + "` is missing required effects: !["
         + effects_text
@@ -66,19 +80,23 @@ fn _local_build_effect_message(routine_name: string, missing_effects: string[]) 
     return message;
 }
 
-fn _local_code_for_first_description(first_desc: string) -> string {
-    if first_desc.length == 0 { return "E0400"; }
-    if substring(first_desc, 0, 1) == "@" { return "E0401"; }
-    // Phase E: cross-module call resolution attaches descriptions
-    // of the form `imported \`<name>\` declares !\[…\]` so the
-    // diagnostic code promotes from in-module E0400 to E0402.
-    let imported_prefix = "imported `";
-    if first_desc.length >= imported_prefix.length {
-        if substring(first_desc, 0, imported_prefix.length) == imported_prefix {
-            return "E0402";
-        }
-    }
-    return "E0400";
+// Drives the REAL `code_for_missing_effect` (diagnostics_render.sfn:54)
+// through a single flat `EffectRequirement` carrying `desc`. The real
+// signature is `(missing_effects: string[], requirements:
+// EffectRequirement[])`; the error code is derived from the
+// requirement descriptions, so we wrap one description into a flat,
+// single-level struct literal (`trigger: null`) to stay clear of the
+// nested-struct-literal segfault caveat. `effect` is threaded into both
+// the requirement's `effect` field and the `missing` array so the
+// fixture stays self-consistent with the description (e.g. an
+// `![net]` description carries `effect: "net"`) — future-proofing the
+// test if `code_for_missing_effect` ever consults those fields too.
+fn _code_for_desc(effect: string, desc: string) -> string {
+    let reqs: EffectRequirement[] = [EffectRequirement {
+        effect: effect, description: desc, trigger: null
+    }];
+    let missing: string[] = [effect];
+    return code_for_missing_effect(missing, reqs);
 }
 
 fn _local_num_to_string(value: int) -> string {
@@ -130,16 +148,16 @@ fn _local_render_summary(files_checked: int, total_errors: int) -> string {
 // -------------------------------------------------------------------
 test "check: join_effects empty" {
     let empty: string[] = [];
-    assert strings_equal(_local_join_effects(empty), "");
+    assert strings_equal(join_effects(empty), "");
 }
 
 test "check: join_effects single" {
-    assert strings_equal(_local_join_effects(["io"]), "io");
+    assert strings_equal(join_effects(["io"]), "io");
 }
 
 test "check: join_effects multiple" {
-    assert strings_equal(_local_join_effects(["io", "net"]), "io, net");
-    assert strings_equal(_local_join_effects(["io", "net", "clock"]), "io, net, clock");
+    assert strings_equal(join_effects(["io", "net"]), "io, net");
+    assert strings_equal(join_effects(["io", "net", "clock"]), "io, net, clock");
 }
 
 // -------------------------------------------------------------------
@@ -166,17 +184,17 @@ test "check: effect message suggests fix" {
 // Tests — error-code classification
 // -------------------------------------------------------------------
 test "check: plain missing-effect requirement is E0400" {
-    assert strings_equal(_local_code_for_first_description("http.get"), "E0400");
-    assert strings_equal(_local_code_for_first_description("fs.readFile"), "E0400");
+    assert strings_equal(_code_for_desc("net", "http.get"), "E0400");
+    assert strings_equal(_code_for_desc("io", "fs.readFile"), "E0400");
 }
 
 test "check: decorator-implied effect is E0401" {
-    assert strings_equal(_local_code_for_first_description("@trace decorator"), "E0401");
-    assert strings_equal(_local_code_for_first_description("@logExecution"), "E0401");
+    assert strings_equal(_code_for_desc("io", "@trace decorator"), "E0401");
+    assert strings_equal(_code_for_desc("io", "@logExecution"), "E0401");
 }
 
 test "check: empty description defaults to E0400" {
-    assert strings_equal(_local_code_for_first_description(""), "E0400");
+    assert strings_equal(_code_for_desc("io", ""), "E0400");
 }
 
 test "check: cross-module imported description is E0402" {
@@ -186,16 +204,30 @@ test "check: cross-module imported description is E0402" {
     // → E0402 mapping so a refactor that "tidies" the description
     // string (e.g. drops the backtick or capitalises) doesn't
     // silently regress the cross-module diagnostic to E0400.
-    assert strings_equal(_local_code_for_first_description("imported `fetch` declares ![net]"), "E0402");
-    assert strings_equal(_local_code_for_first_description("imported `read_file` declares ![io]"), "E0402");
+    assert strings_equal(_code_for_desc("net", "imported `fetch` declares ![net]"), "E0402");
+    assert strings_equal(_code_for_desc("io", "imported `read_file` declares ![io]"), "E0402");
 }
 
 test "check: imported substring without prefix stays E0400" {
     // Defensive — make sure the prefix check doesn't false-match
     // descriptions that merely contain the word "imported" later
     // in the string (e.g. an in-module helper named "use_imported").
-    assert strings_equal(_local_code_for_first_description("use_imported_helper requires ![io]"), "E0400");
-    assert strings_equal(_local_code_for_first_description("filesystem helper usage"), "E0400");
+    assert strings_equal(_code_for_desc("io", "use_imported_helper requires ![io]"), "E0400");
+    assert strings_equal(_code_for_desc("io", "filesystem helper usage"), "E0400");
+}
+
+test "check: decorator precedence wins over cross-module import" {
+    // Real `code_for_missing_effect` scans ALL requirements and the
+    // decorator (`@`) prefix outranks the `imported \`` prefix
+    // (diagnostics_render.sfn:65-77). Build two flat requirements to
+    // exercise the multi-requirement scan the old single-string mirror
+    // could not reach.
+    let reqs: EffectRequirement[] = [EffectRequirement {
+        effect: "net", description: "imported `fetch` declares ![net]", trigger: null
+    }, EffectRequirement {
+        effect: "io", description: "@logExecution", trigger: null
+    }];
+    assert strings_equal(code_for_missing_effect(["io", "net"], reqs), "E0401");
 }
 
 // -------------------------------------------------------------------
