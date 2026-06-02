@@ -9,6 +9,20 @@ fn _safe_divide(a: int, b: int) -> int | DivisionError {
     return a / b;
 }
 
+// Distinguishes the success and error variants of `_safe_divide` by matching
+// on the union return type. The error arm surfaces the carried message; the
+// wildcard arm reports success. Swapping the branches in `_safe_divide` flips
+// the outcome of these helpers, which is what makes the assertions below
+// catch a regression rather than passing unconditionally.
+fn _describe_divide(a: int, b: int) -> string {
+    let result = _safe_divide(a, b);
+    match result {
+        DivisionError { message }
+        : return "error: " + message,
+        _: return "ok"
+    }
+}
+
 struct ParseError {
     message: string;
 }
@@ -20,29 +34,27 @@ fn _parse_non_negative(n: int) -> int | ParseError {
     return n;
 }
 
-// NOTE: match on union return types (e.g. `number | DivisionError`) causes
-// a compiler segfault during LLVM lowering. These tests verify that union
-// return types compile and can be called, but cannot yet inspect the result
-// via match destructuring.
-// See: https://github.com/SailfinIO/sailfin/issues/50
+fn _describe_parse(n: int) -> string {
+    let result = _parse_non_negative(n);
+    match result {
+        ParseError { message }
+        : return "error: " + message,
+        _: return "ok"
+    }
+}
+
 test "error_handling: union return function compiles and runs (success path)" {
-    let result = _safe_divide(10, 2);
-    // Once match on union types is supported, assert the numeric result here
-    assert 1 == 1;
+    assert _describe_divide(10, 2) == "ok";
 }
 
 test "error_handling: union return function compiles and runs (error path)" {
-    let result = _safe_divide(10, 0);
-    // Once match on union types is supported, assert the error message here
-    assert 1 == 1;
+    assert _describe_divide(10, 0) == "error: division by zero";
 }
 
 test "error_handling: parse_positive compiles and runs (success path)" {
-    let result = _parse_non_negative(42);
-    assert 1 == 1;
+    assert _describe_parse(42) == "ok";
 }
 
 test "error_handling: parse_positive compiles and runs (error path)" {
-    let result = _parse_non_negative(-5);
-    assert 1 == 1;
+    assert _describe_parse(-5) == "error: expected non-negative number";
 }
