@@ -12,8 +12,10 @@ Effect validation is Sailfin's flagship safety guarantee — the compile-time
 proof that a function declares every capability it actually uses. Today the
 checker (`compiler/src/effect_checker.sfn`) exists and is wired into
 `sfn check` from `check_source_with_imports` in
-`compiler/src/tools/check.sfn`. **It is not wired into the build path**:
-`make compile`, `sfn build`, `sfn run`, and `sfn test` all bypass it.
+`compiler/src/tools/check.sfn`. **(Historical framing — see the status
+banner below; as of #957 the build path enforces effects too.)** When
+this proposal was written it was not wired into the build path:
+`make compile`, `sfn build`, `sfn run`, and `sfn test` all bypassed it.
 Roughly 8% of compiler functions carry `![effect]` annotations; the
 remaining 92% have never been audited because no compile run has ever
 forced them to be. This proposal lays out a seven-phase migration that
@@ -24,6 +26,23 @@ plus capability cross-checking against `capsule.toml`. Phase G (effect
 polymorphism + name-resolution-driven detection) is post-1.0.
 
 ## Implementation Status
+
+> **Status banner (updated 2026-06-02).** The "What exists today" /
+> "What does not exist" snapshot below is the *original pre-migration*
+> framing and is retained for historical context. Phases A–F have since
+> shipped (see `docs/status.md` → Effect system). In particular: effect
+> enforcement is a hard build gate (Phase D), cross-module `E0402`
+> propagation is live (Phase E), and capability cross-check `E0403` is
+> live (Phase F). **#957** closed the last build-path gap: the codegen
+> path (`compile_to_llvm_file_with_module`) previously ran the gate with
+> an empty import table, so cross-module `E0402` was inert during
+> `make compile` / `make check`; it now loads the real per-module
+> import-effect table (via the resolver's `<slug>.import-deps` sidecar +
+> the `sailfin emit --import-context <root>` flag) and enforces the same
+> violations `sfn check` does. No seed bump was required (the released
+> seed never runs the new gate; enforcement first fires in the
+> firstpass→seedcheck build). The §2.1 / §2.6 problem statements below
+> are therefore **resolved**.
 
 **What exists today:**
 
@@ -206,6 +225,11 @@ on a single `Program` AST.
 
 ### 2.1 The build path bypasses effect validation
 
+> **Resolved (Phase D + #957).** Effect enforcement is a hard build gate
+> as of Phase D, and #957 wired the cross-module table into the codegen
+> path so `E0402` is enforced during `make compile` / `make check`, not
+> just `sfn check`. The original problem statement follows.
+
 The most consequential problem. Every production usage of the compiler —
 `sfn build`, `sfn run`, `sfn test`, `make compile`, CI selfhost — produces
 artifacts that have not been effect-checked. Effect violations land only in
@@ -290,6 +314,10 @@ not contract. Differentiator #2 (capability-based security) requires this
 gap to close.
 
 ### 2.6 No cross-module effect propagation
+
+> **Resolved (Phase E + #957).** Cross-module propagation ships as
+> Phase E (`E0402`), and #957 made it live on the codegen build path in
+> addition to `sfn check`. The original problem statement follows.
 
 Even if function `A` in capsule `foo` declares `![net]`, a caller `B` in
 capsule `bar` that imports and calls `A` is not required to declare `![net]`.

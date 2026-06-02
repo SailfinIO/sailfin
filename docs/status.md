@@ -621,6 +621,25 @@ feature availability.
   entry's effects. E1 covers direct `Identifier` callees;
   `Member`-callee resolution (`mod.fn()`) and decorator-implied
   transitives are deferred to a follow-up Phase E2.
+
+  **Build-path enforcement (#957, shipped 2026-06-02).** Phase E was
+  initially live only on the `sfn check` and test-compile paths; the
+  codegen build path (`compile_to_llvm_file_with_module`, driven by the
+  resolver's per-module `sailfin emit ... llvm` subprocess) ran the gate
+  with `empty_import_symbols()`, so cross-module `E0402` was inert
+  during `make compile` / `make check` — a compiler-source function
+  could call an imported `![io]` helper without declaring `![io]` and
+  the build stayed green. `compile_to_llvm_file_with_module_imports`
+  now loads the real import-effect table for each module: the resolver
+  stages a per-module `<slug>.import-deps` sidecar (the module's direct
+  imports' staged `.sfn-asm`) under the import-context root and passes
+  `--import-context <root>` to the emit subprocess, which reads its
+  sidecar and feeds the table to `validate_and_render_effects`. The
+  in-process resolver fallback threads the same paths directly. The
+  first pass to enforce is the firstpass→seedcheck build (the released
+  seed never runs the new gate, so no seed bump was required); the
+  compiler tree is clean under this enforcement as of #956/#961.
+  Regression-guarded by `compiler/tests/e2e/test_effect_gate_build_path.sh`.
 - **Capsule capability cross-check (Phase F — shipped 2026-04-26).**
   The capsule manifest's `[capabilities] required = [...]` list is
   now a real compile-time contract. Any function declaring an

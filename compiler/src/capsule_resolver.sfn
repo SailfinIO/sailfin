@@ -59,6 +59,7 @@ import {
 } from "./capsule_artifact";
 import {
     compile_to_llvm_file_with_module,
+    compile_to_llvm_file_with_module_imports,
     module_name_from_path,
     number_to_string,
     write_native_text_file_with_module
@@ -533,10 +534,16 @@ struct ParallelEmitTask {
 // the script was retired in Stage E PR7 / #383). With
 // `jobs == 1`, the helper sequentialises to keep the
 // regression-bisect path simple.
-fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: string, jobs: int) -> boolean ![io] {
+fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: string, jobs: int, import_context_root: string) -> boolean ![io] {
     if tasks.length == 0 { return true; }
     let mut effective_jobs = jobs;
     if effective_jobs <= 0 { effective_jobs = 1; }
+
+    // #957: when an import-context root is supplied (llvm-emit path),
+    // each worker passes `--import-context <root>` so the emit
+    // subprocess loads the cross-module effect table. Native staging
+    // emits pass "" and skip the flag.
+    let use_import_context = import_context_root.length > 0;
 
     // Sequential fallback: keeps regression bisects (and any
     // SAILFIN_BUILD_JOBS=1 invocations) on the simple
@@ -546,7 +553,14 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
         loop {
             if i >= tasks.length { break; }
             let t = tasks[i];
-            let rc = process.run([sailfin_exe, "emit", "--module-name", t.slug, "-o", t.output_path, mode, t.source_path]);
+            let mut emit_args: string[] = [sailfin_exe, "emit", "--module-name", t.slug, "-o", t.output_path];
+            if use_import_context {
+                emit_args.push("--import-context");
+                emit_args.push(import_context_root);
+            }
+            emit_args.push(mode);
+            emit_args.push(t.source_path);
+            let rc = process.run(emit_args);
             if rc != 0 { return false; }
             i += 1;
         }
@@ -585,9 +599,19 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
     // corruption flake. `native` mode (used by
     // `stage_capsule_imports`) skips validation — the staged
     // `.sfn-asm` doesn't need to round-trip through llvm-as.
+    // #957: when an import-context root is set, the worker passes
+    // `--import-context "$SAILFIN_PE_IMPORT_CTX"` to the emit; the env
+    // var is only exported below when `use_import_context` holds, so
+    // the native staging path (root == "") emits the flag-free form.
+    let mut worker_import_arg = "";
+    if use_import_context {
+        worker_import_arg = "--import-context \"$SAILFIN_PE_IMPORT_CTX\" ";
+    }
     let worker_script = "attempt=0; while [ $attempt -lt 3 ]; do "
         + "attempt=$((attempt + 1)); "
-        + "\"$SAILFIN_PE_SEED\" emit --module-name \"$1\" -o \"$2\" \"$SAILFIN_PE_MODE\" \"$3\" || continue; "
+        + "\"$SAILFIN_PE_SEED\" emit --module-name \"$1\" -o \"$2\" "
+        + worker_import_arg
+        + "\"$SAILFIN_PE_MODE\" \"$3\" || continue; "
         + "[ -s \"$2\" ] || continue; "
         + "if [ \"$SAILFIN_PE_MODE\" != llvm ]; then exit 0; fi; "
         + "if (command -v llvm-as >/dev/null 2>&1 && llvm-as < \"$2\" >/dev/null 2>&1) "
@@ -632,7 +656,8 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
     // `process.run` doesn't take an env map; routing through
     // `env` keeps the env propagation explicit + visible.
     let rc = process.run(["env", "SAILFIN_PE_SEED=" + sailfin_exe, "SAILFIN_PE_MODE="
-        + mode, "sh", driver_path]);
+        + mode, "SAILFIN_PE_IMPORT_CTX="
+        + import_context_root, "sh", driver_path]);
 
     process.run(["rm", "-f", driver_path]);
     process.run(["rm", "-f", worker_path]);
@@ -1276,7 +1301,7 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
     }
 
     if needs_emit.length > 0 {
-        let emit_ok = _cr_run_parallel_emit(needs_emit, "native", sailfin_exe, jobs);
+        let emit_ok = _cr_run_parallel_emit(needs_emit, "native", sailfin_exe, jobs, "");
         if !emit_ok {
             print.err("capsule-resolver: one or more parallel stage emits failed");
             return false;
@@ -1451,6 +1476,57 @@ fn _cr_collect_per_source_dep_manifests(sources: CapsuleSource[], work_dir: stri
     return out;
 }
 
+// #957: map each `<root>/<slug>.layout-manifest` path to the sibling
+// `<root>/<slug>.sfn-asm` the effect-import loader reads. The two are
+// staged together by `stage_capsule_imports`, so a suffix swap yields
+// the dependency's staged native-IR artifact without re-resolving the
+// capsule graph.
+fn _cr_manifests_to_asm_paths(manifests: string[]) -> string[] {
+    let mut out: string[] = [];
+    let suffix = ".layout-manifest";
+    let mut i: int = 0;
+    loop {
+        if i >= manifests.length { break; }
+        let m = manifests[i];
+        if _cr_ends_with(m, suffix) {
+            out.push(substring(m, 0, m.length - suffix.length) + ".sfn-asm");
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// #957: stage a per-module `.import-deps` sidecar (one direct-import
+// `.sfn-asm` path per line) under the import-context root. The
+// `<sailfin> emit --import-context <root>` subprocess reads
+// `<root>/<slug>.import-deps` to load the cross-module effect table,
+// so callee-effect transitivity (`E0402`) is enforced on the build
+// path — the in-process compile path passes the same paths directly.
+// Direct imports suffice: an imported callee's `.sfn-asm` already
+// carries the (transitively-complete) effects its own signature
+// declares, and `localize_import_symbols_for_program` scopes the
+// loaded table to this program's import declarations.
+fn _cr_stage_import_deps(sources: CapsuleSource[], work_dir: string) -> void ![io] {
+    let context_root = _cr_import_context_root(work_dir);
+    let mut i: int = 0;
+    loop {
+        if i >= sources.length { break; }
+        let dep_slugs = _cr_direct_import_slugs_for(sources[i], sources);
+        let mut content: string = "";
+        let mut j: int = 0;
+        loop {
+            if j >= dep_slugs.length { break; }
+            content = content + context_root + "/" + dep_slugs[j] + ".sfn-asm"
+                + "\n";
+            j += 1;
+        }
+        let deps_path = context_root + "/" + sources[i].slug + ".import-deps";
+        _cr_ensure_dir(_cr_dirname(deps_path));
+        fs.writeFile(deps_path, content);
+        i += 1;
+    }
+}
+
 // One module's cache outcome. Returned from `_cr_compile_one` so
 // the caller (`compile_capsule_modules`) can fold per-module
 // outcomes into the per-build `CacheStats` struct without needing
@@ -1522,6 +1598,9 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
     }
     let ll_dir = _cr_dirname(src.ll_path);
     _cr_ensure_dir(ll_dir);
+    // #957: import-context root carries the cross-module effect table
+    // into the emit subprocess (which reads `<root>/<slug>.import-deps`).
+    let context_root = _cr_import_context_root(work_dir);
 
     // Cache lookup. Suffix the slug-derived name to keep
     // `_sha256_of_string`'s tmp paths unique across the dep-list
@@ -1589,7 +1668,7 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
             if ok { break; }
             if attempt >= max_attempts { break; }
             attempt += 1;
-            let rc = process.run([sailfin_exe, "emit", "--module-name", src.slug, "-o", src.ll_path, "llvm", src.source_path]);
+            let rc = process.run([sailfin_exe, "emit", "--module-name", src.slug, "-o", src.ll_path, "--import-context", context_root, "llvm", src.source_path]);
             if rc != 0 {
                 if config.trace {
                     print.err("[emit retry] " + src.slug + " attempt "
@@ -1666,7 +1745,11 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
         }
     } else {
         let source = fs.readFile(src.source_path);
-        ok = compile_to_llvm_file_with_module(source, src.slug, src.ll_path, work_dir);
+        // #957: in-process path enforces the same cross-module effects
+        // as the subprocess path, using the direct-import `.sfn-asm`
+        // derived from this module's dep manifests.
+        let import_asm_paths = _cr_manifests_to_asm_paths(dep_manifests);
+        ok = compile_to_llvm_file_with_module_imports(source, src.slug, src.ll_path, work_dir, import_asm_paths);
     }
     if !ok {
         print.err("capsule-resolver: failed to lower " + src.slug
@@ -1729,6 +1812,11 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, s
     // total is dominated by the per-module compile path the cache
     // would otherwise trigger.
     let per_source_dep_manifests = _cr_collect_per_source_dep_manifests(sources, work_dir);
+    // #957: stage the per-module `.import-deps` sidecars the
+    // `emit --import-context` subprocess reads to enforce cross-module
+    // effect transitivity on the build path. Written before any
+    // (serial or parallel) emit so every worker sees its sidecar.
+    _cr_stage_import_deps(sources, work_dir);
     let cache_root_path = cache_root();
     if config.clean {
         // `--clean` is a destructive opt-in. If the wipe fails
@@ -1869,7 +1957,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, s
 
         // Pass 2: parallel emit for misses.
         if needs_emit.length > 0 {
-            let emit_ok = _cr_run_parallel_emit(needs_emit, "llvm", sailfin_exe, jobs);
+            let emit_ok = _cr_run_parallel_emit(needs_emit, "llvm", sailfin_exe, jobs, _cr_import_context_root(work_dir));
             if !emit_ok {
                 print.err("capsule-resolver: one or more parallel module emits failed");
                 return CompileCapsuleResult {
