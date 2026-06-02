@@ -175,10 +175,12 @@ test_bad_sibling_e0402() {
 run_test "build path emits E0402 + exits non-zero for orphan sibling->entry ![io]" test_bad_sibling_e0402
 
 # ---- Test 3: cross-module good sibling emits + links, exits 0 (#999) ----
-# Pins #999 acceptance: a correctly-annotated `-p` sibling that imports a
-# value-returning fn FROM THE WALK-EXCLUDED ENTRY must resolve the entry's
-# exported signature during its own per-module lowering and emit cleanly,
-# so the build links and exits 0.
+# Pins #999 acceptance: a correctly-annotated `-p` sibling that imports an
+# entry-exported fn (`do_io`, void `![io]`) FROM THE WALK-EXCLUDED ENTRY
+# must resolve the entry's exported signature during its own per-module
+# lowering and emit cleanly, so the build links and exits 0. (The
+# value-returning variant is covered end-to-end in
+# `test_cross_module_signature_resolution.sh`.)
 #
 # Before #999 this exact fixture (`write_sib " ![io]"`) failed: the build
 # path loaded the entry's staged `.sfn-asm` only for the E0402 effect

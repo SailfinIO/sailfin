@@ -94,7 +94,7 @@ fn answer() -> number {
 
 fn main() ![io] {
     let v = compute();
-    print.info(number_to_string(v));
+    print.info("xmod-result=" + number_to_string(v));
 }
 
 export { answer };
@@ -138,9 +138,12 @@ test_runtime_output() {
         cat "$SCRATCH/program.stdout" >&2
         return 1
     fi
-    # answer() == 42, compute() == answer() + 1 == 43.
-    if ! grep -q '43' "$SCRATCH/program.stdout"; then
-        echo "[test]   expected '43' in output; got:" >&2
+    # answer() == 42, compute() == answer() + 1 == 43. Assert the whole
+    # sentinel line (`print.info` prefixes with `[info] `) rather than a
+    # bare `43` substring, which would also match `143`/`430` or an
+    # incidental log line.
+    if ! grep -qx '\[info\] xmod-result=43' "$SCRATCH/program.stdout"; then
+        echo "[test]   expected line '[info] xmod-result=43' in output; got:" >&2
         cat "$SCRATCH/program.stdout" >&2
         return 1
     fi
