@@ -640,6 +640,19 @@ feature availability.
   seed never runs the new gate, so no seed bump was required); the
   compiler tree is clean under this enforcement as of #956/#961.
   Regression-guarded by `compiler/tests/e2e/test_effect_gate_build_path.sh`.
+  **Entry-module gap closed (#984, 2026-06-02).** On `-p`
+  (`walk_project_src`) builds the entry module is staged but excluded
+  from `resolved.sources` (its `.ll` is produced separately), so
+  `_cr_stage_import_deps` resolved sibling import slugs against a
+  universe that omitted the entry — a `sibling→entry` import resolved
+  to no slug and the sidecar left out the entry's `.sfn-asm`, so
+  effects declared in the entry went unenforced cross-module on the
+  build path. `compile_capsule_modules` now takes a
+  `slug_universe_extra` (the staged entry on `-p` builds, `[]`
+  otherwise) and resolves sidecar slugs against `sources ++
+  slug_universe_extra` while still writing sidecars only for
+  `sources`. Regression-guarded by
+  `compiler/tests/e2e/test_effect_gate_build_path_entry.sh`.
 - **Capsule capability cross-check (Phase F — shipped 2026-04-26).**
   The capsule manifest's `[capabilities] required = [...]` list is
   now a real compile-time contract. Any function declaring an

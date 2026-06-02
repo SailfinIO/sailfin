@@ -1506,12 +1506,21 @@ fn _cr_manifests_to_asm_paths(manifests: string[]) -> string[] {
 // carries the (transitively-complete) effects its own signature
 // declares, and `localize_import_symbols_for_program` scopes the
 // loaded table to this program's import declarations.
-fn _cr_stage_import_deps(sources: CapsuleSource[], work_dir: string) -> void ![io] {
+//
+// #984: slug resolution runs against `universe`, not `sources`. On
+// `-p` (`walk_project_src`) builds the entry module is staged but
+// excluded from `sources` (its `.ll` is produced separately), so an
+// import of the entry would resolve to no slug and the sibling's
+// sidecar would omit the entry's `.sfn-asm` — leaving `sibling→entry`
+// effects unenforced on the build path. `universe` re-adds the staged
+// entry for resolution while sidecars are still written only for
+// `sources` (the modules `compile_capsule_modules` actually emits).
+fn _cr_stage_import_deps(sources: CapsuleSource[], universe: CapsuleSource[], work_dir: string) -> void ![io] {
     let context_root = _cr_import_context_root(work_dir);
     let mut i: int = 0;
     loop {
         if i >= sources.length { break; }
-        let dep_slugs = _cr_direct_import_slugs_for(sources[i], sources);
+        let dep_slugs = _cr_direct_import_slugs_for(sources[i], universe);
         let mut content: string = "";
         let mut j: int = 0;
         loop {
@@ -1799,7 +1808,7 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
 // env-driven behaviour. Honours `config.clean` by wiping the cache
 // root before any per-module work — done once per build, not per
 // module, so a single `--clean` run can't double-wipe.
-fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, sailfin_exe: string, work_dir: string) -> CompileCapsuleResult ![io] {
+fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: CapsuleSource[], config: BuildCacheConfig, sailfin_exe: string, work_dir: string) -> CompileCapsuleResult ![io] {
     let scratch_root = _cr_scratch_root();
     _cr_ensure_dir(scratch_root);
     _cr_ensure_dir(scratch_root + "/capsules");
@@ -1816,7 +1825,24 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, s
     // `emit --import-context` subprocess reads to enforce cross-module
     // effect transitivity on the build path. Written before any
     // (serial or parallel) emit so every worker sees its sidecar.
-    _cr_stage_import_deps(sources, work_dir);
+    // #984: resolve slugs against `sources ++ slug_universe_extra` so a
+    // `-p` build's staged-but-excluded entry module is visible to
+    // sibling import resolution (sidecars are still written only for
+    // `sources`). `slug_universe_extra` is `[]` for non-`-p` paths.
+    let mut slug_universe: CapsuleSource[] = [];
+    let mut _su: int = 0;
+    loop {
+        if _su >= sources.length { break; }
+        slug_universe.push(sources[_su]);
+        _su += 1;
+    }
+    let mut _ue: int = 0;
+    loop {
+        if _ue >= slug_universe_extra.length { break; }
+        slug_universe.push(slug_universe_extra[_ue]);
+        _ue += 1;
+    }
+    _cr_stage_import_deps(sources, slug_universe, work_dir);
     let cache_root_path = cache_root();
     if config.clean {
         // `--clean` is a destructive opt-in. If the wipe fails
@@ -3809,6 +3835,13 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
     // / etc. from `main.sfn`. Staging the entry separately keeps
     // the entry out of `compile_capsule_modules` (no double-
     // emit) while making its import-context available.
+    // #984: the staged entry doubles as the extra slug universe for
+    // `.import-deps` resolution, so siblings that import the entry get
+    // its `.sfn-asm` listed in their sidecar and `sibling→entry`
+    // effects are enforced on the build path. `[]` when the entry isn't
+    // walk-excluded (non-`-p` builds resolve the entry as a normal
+    // source already).
+    let mut slug_universe_extra: CapsuleSource[] = [];
     if consumer.walk_project_src {
         let entry_path = entry_paths[0];
         if fs.exists(entry_path) {
@@ -3828,10 +3861,11 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
                     runtime_capsules: runtime_capsules
                 };
             }
+            slug_universe_extra = entry_src;
         }
     }
 
-    let result = compile_capsule_modules(resolved.sources, config, sailfin_exe, work_dir);
+    let result = compile_capsule_modules(resolved.sources, slug_universe_extra, config, sailfin_exe, work_dir);
     if !result.success {
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
@@ -4013,7 +4047,10 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     // env-driven default. When the test runner grows `--no-cache`
     // / `--clean`, thread the resolved config in here.
     let test_config = empty_build_cache_config();
-    let result = compile_capsule_modules(resolved.sources, test_config, sailfin_exe, work_dir);
+    // #984: `sfn test` resolves the entry as a normal source (no
+    // walk-exclusion), so there is no extra slug universe to thread.
+    let test_slug_universe_extra: CapsuleSource[] = [];
+    let result = compile_capsule_modules(resolved.sources, test_slug_universe_extra, test_config, sailfin_exe, work_dir);
     // Surface a compile failure as `staging_failed = true` so the
     // test runner exits 2 instead of trying to link against
     // missing helper objects. (The PR1c stats are dropped on this
