@@ -45,8 +45,24 @@ extern fn abort() -> void;
 
 // arena-mode probe (C `sfn_arena_enabled`, exported from
 // `runtime/native/src/sailfin_arena.c`). Backs the `sfn_mem_free`
-// arena-mode no-op guard below.
+// arena-mode no-op guard below and the `sfn_alloc_struct` routing.
 extern fn sfn_arena_enabled() -> bool;
+
+// process-global arena handle + bump allocator, both exported from
+// `runtime/native/src/sailfin_arena.c`. Back the arena path of
+// `sfn_alloc_struct`. `sfn_arena_alloc(arena, size, align)` returns an
+// **uninitialised** slice of the current page (see `sailfin_arena.c:144`),
+// so the port zero-fills via `memset` to match `_rt_calloc`'s contract.
+extern fn sfn_arena_global() -> * u8;
+
+extern fn sfn_arena_alloc(arena: * u8, size: usize, align: usize) -> * u8;
+
+// `calloc(count, size)` backs the libc fallback (arena disabled).
+extern fn calloc(count: usize, size: usize) -> * u8;
+
+// `memset(ptr, value, n)` zero-fills the arena slice (the libc fallback
+// uses `calloc`, which zeroes for free).
+extern fn memset(ptr: * u8, value: i32, n: usize) -> * u8;
 
 // `_get_field_safe_buf` head. The C original (`sailfin_runtime.c:373`)
 // keeps a 4096-byte static, 16-byte aligned, zero-initialised buffer
@@ -154,4 +170,30 @@ fn sfn_mem_free(ptr: * u8) -> void {
     if ptr as i64 == 0 { return; }
     if sfn_arena_enabled() { return; }
     free(ptr);
+}
+
+// `sfn_alloc_struct(size_bytes)` — faithful port of
+// `sailfin_runtime_alloc_struct` (`sailfin_runtime.c:4109`), the hottest
+// Category-C primitive (15 descriptor-routed emission sites across array,
+// closure, and operand lowering, plus the hand-spelled env-capture call in
+// `compiler/src/llvm/closures.sfn`). Returns a pointer to zero-initialised
+// memory of the requested size; callers GEP+store fields and hand the
+// pointer back as `%Struct*` (the 0.5.8+ boxed-struct ABI that replaced
+// first-class aggregate returns).
+//
+// Routing mirrors the C `_rt_calloc(1, size_bytes)` (`sailfin_runtime.c:779`):
+// under arena mode the allocation comes from the process-global arena and is
+// zero-filled here (the bump allocator returns uninitialised page memory);
+// otherwise it falls through to libc `calloc`, which zeroes for free. The
+// `size_bytes <= 0` guard returns NULL, exactly as the C body does. Descriptor
+// ABI is `(i64) -> i8*` with a `noalias` return attribute preserved at the
+// call site through `RuntimeCallOverrides.return_attributes`.
+fn sfn_alloc_struct(size_bytes: i64) -> * u8 {
+    if size_bytes <= 0 { return 0 as * u8; }
+    if sfn_arena_enabled() {
+        let p: * u8 = sfn_arena_alloc(sfn_arena_global(), size_bytes as usize, 8 as usize);
+        if p as i64 != 0 { memset(p, 0, size_bytes as usize); }
+        return p;
+    }
+    return calloc(1 as usize, size_bytes as usize);
 }

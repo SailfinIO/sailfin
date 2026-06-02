@@ -121,7 +121,7 @@ test "emit_runtime_call: alloc_struct with noalias return attribute renders attr
     };
     let result = emit_runtime_call("alloc_struct", operands, overrides, 0, []);
     assert result.lines.length == 1;
-    assert result.lines[0] == "  %t0 = call noalias i8* @sailfin_runtime_alloc_struct(i64 %size)";
+    assert result.lines[0] == "  %t0 = call noalias i8* @sfn_alloc_struct(i64 %size)";
     assert result.temp_index == 1;
     assert result.operand != null;
     assert result.diagnostics.length == 0;
@@ -132,7 +132,7 @@ test "emit_runtime_call: alloc_struct without override renders no return attribu
     let operands: LLVMOperand[] = [size];
     let result = emit_runtime_call("alloc_struct", operands, empty_runtime_call_overrides(), 0, []);
     assert result.lines.length == 1;
-    assert result.lines[0] == "  %t0 = call i8* @sailfin_runtime_alloc_struct(i64 %size)";
+    assert result.lines[0] == "  %t0 = call i8* @sfn_alloc_struct(i64 %size)";
     assert result.temp_index == 1;
     assert result.operand != null;
     assert result.diagnostics.length == 0;
