@@ -31,49 +31,57 @@ fn arg_optional(name: string, description: string, default_value: string) -> Arg
 // ---- Flag builders ----
 fn flag(long_name: string, description: string) -> Flag {
     // Create a boolean flag (e.g. --verbose).
+    let no_choices: string[] = [];
     return Flag {
         long_name: long_name,
         short_name: "",
         description: description,
         takes_value: false,
         required: false,
-        value_kind: "string"
+        value_kind: "string",
+        choices: no_choices
     };
 }
 
 fn flag_value(long_name: string, description: string) -> Flag {
     // Create a flag that takes a value (e.g. --output FILE).
+    let no_choices: string[] = [];
     return Flag {
         long_name: long_name,
         short_name: "",
         description: description,
         takes_value: true,
         required: false,
-        value_kind: "string"
+        value_kind: "string",
+        choices: no_choices
     };
 }
 
 fn flag_short(long_name: string, short_name: string, description: string) -> Flag {
     // Create a boolean flag with a short alias (e.g. --verbose / -v).
+    let no_choices: string[] = [];
     return Flag {
         long_name: long_name,
         short_name: short_name,
         description: description,
         takes_value: false,
         required: false,
-        value_kind: "string"
+        value_kind: "string",
+        choices: no_choices
     };
 }
 
 fn flag_value_short(long_name: string, short_name: string, description: string) -> Flag {
     // Create a value flag with a short alias (e.g. --output / -o FILE).
+    let no_choices: string[] = [];
     return Flag {
         long_name: long_name,
         short_name: short_name,
         description: description,
         takes_value: true,
         required: false,
-        value_kind: "string"
+        value_kind: "string",
+        choices: no_choices
     };
 }
 
@@ -82,13 +90,15 @@ fn flag_int(long_name: string, description: string) -> Flag {
     // `parse()` validates the value as a base-10 i64 and emits a
     // `ParseError { kind: "type_error" }` on non-numeric input or
     // i64 overflow. Read the parsed value with `get_int`.
+    let no_choices: string[] = [];
     return Flag {
         long_name: long_name,
         short_name: "",
         description: description,
         takes_value: true,
         required: false,
-        value_kind: "int"
+        value_kind: "int",
+        choices: no_choices
     };
 }
 
@@ -97,13 +107,15 @@ fn flag_float(long_name: string, description: string) -> Flag {
     // 0.5). `parse()` validates the value as a decimal number and
     // emits a `ParseError { kind: "type_error" }` on non-numeric
     // input. Read the parsed value with `get_float`.
+    let no_choices: string[] = [];
     return Flag {
         long_name: long_name,
         short_name: "",
         description: description,
         takes_value: true,
         required: false,
-        value_kind: "float"
+        value_kind: "float",
+        choices: no_choices
     };
 }
 
@@ -112,13 +124,32 @@ fn flag_path(long_name: string, description: string) -> Flag {
     // `parse()` validates string shape only (non-empty); existence
     // and permission checks are the caller's responsibility. Read the
     // value with `get_path`.
+    let no_choices: string[] = [];
     return Flag {
         long_name: long_name,
         short_name: "",
         description: description,
         takes_value: true,
         required: false,
-        value_kind: "path"
+        value_kind: "path",
+        choices: no_choices
+    };
+}
+
+fn flag_choice(long_name: string, description: string, choices: string[]) -> Flag {
+    // Create a flag whose value must be one of `choices` (e.g.
+    // --color always|auto|never). `parse()` validates the supplied
+    // value against the list and emits `ParseError { kind:
+    // "invalid_choice" }` on a mismatch. Matching is case-sensitive.
+    // Read the value with `get_choice`.
+    return Flag {
+        long_name: long_name,
+        short_name: "",
+        description: description,
+        takes_value: true,
+        required: false,
+        value_kind: "choice",
+        choices: choices
     };
 }
 
@@ -133,7 +164,8 @@ fn flag_required(f: Flag) -> Flag {
         description: f.description,
         takes_value: f.takes_value,
         required: true,
-        value_kind: f.value_kind
+        value_kind: f.value_kind,
+        choices: f.choices
     };
 }
 
