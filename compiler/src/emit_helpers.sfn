@@ -1,0 +1,285 @@
+// Shared emit retry + LLVM-IR validator cascade (#515).
+//
+// Lifts the robustness the multi-source `sfn build` path already
+// enjoyed — the resolver's per-module emit retry and the
+// `llvm-as → llvm-as-18 → clang -c -emit-llvm → clang-18` validator
+// cascade — into a single source of truth, so that single-shot
+// `sfn emit --validate llvm -o`, the resolver's `_cr_compile_one` /
+// `_cr_stage_one` subprocess loops, and the Makefile cross-build
+// staging all defend against the alpha.6+ seed's intermittent
+// IR-corruption flake (stray non-ASCII bytes mid-IR, e.g.
+// `define void 嘆name()`, which clang rejects as "expected function
+// name"). The retry contract was historically owned by the prior
+// `scripts/build.sh` (`EMIT_RETRIES=3`, retired in Stage E PR7 /
+// #383); the resolver inherited it for multi-source builds, but the
+// other emit entry points never got the upgrade — this module closes
+// that gap.
+//
+// Three entry points:
+//   - `validate_llvm_ir(path)`          — the cascade; the ONE place
+//     the `llvm-as`/`clang` discovery order lives. Every other caller
+//     (the resolver loops, the in-process retry, the parallel worker's
+//     shell mirror) must agree with it.
+//   - `emit_llvm_with_retry(...)`       — in-process emit + empty-file
+//     probe + validate + up-to-`max_attempts` retries.
+//   - `emit_subprocess_with_retry(...)` — subprocess emit (fresh arena
+//     per child) + probe + validate + retries.
+//
+// Fault injection: `SAILFIN_INJECT_FAULT=N` makes the first N attempts
+// of a retry loop report a simulated retry-eligible failure, so the
+// recovery path is exercised deterministically. Sailfin's runtime has
+// no `setenv`, so the in-process helper also accepts the count as an
+// explicit parameter (`emit_llvm_with_retry_injected`) for unit tests
+// that can't mutate their own environment.
+import {
+    compile_to_llvm_file_with_module,
+    compile_to_llvm_file_with_module_imports,
+    number_to_string
+} from "./main";
+import { substring } from "./string_utils";
+
+// Same extern the resolver and `cli_commands_utils` declare; repeating
+// it here keeps this module a leaf (no new cross-module import just to
+// read one env var).
+extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+
+fn _eh_shell_read(cmd: string) -> string ![io] {
+    let captured = sailfin_runtime_shell_capture(cmd);
+    if captured.length == 0 { return ""; }
+    return captured;
+}
+
+// Parse a leading non-negative integer; non-digit input (incl. an
+// empty env var) yields 0. Whitespace is skipped so a `printf '%s'`
+// wrapper that picked up a stray newline still parses. Exported so
+// `cli_main`'s `--attempts N` flag shares one parse with the
+// `SAILFIN_INJECT_FAULT` reader (one definition, no drift).
+fn emit_parse_nonneg_int(value: string) -> int {
+    if value.length == 0 { return 0; }
+    let mut n: int = 0;
+    let mut i: int = 0;
+    let mut any_digit: boolean = false;
+    loop {
+        if i >= value.length { break; }
+        let ch = substring(value, i, i + 1);
+        let mut digit: int = -1;
+        if ch == "0" { digit = 0; }
+        if ch == "1" { digit = 1; }
+        if ch == "2" { digit = 2; }
+        if ch == "3" { digit = 3; }
+        if ch == "4" { digit = 4; }
+        if ch == "5" { digit = 5; }
+        if ch == "6" { digit = 6; }
+        if ch == "7" { digit = 7; }
+        if ch == "8" { digit = 8; }
+        if ch == "9" { digit = 9; }
+        if digit < 0 {
+            // Skip whitespace ONLY before the first digit (e.g. a
+            // `printf`-captured value with a leading space). Once
+            // digits have started, any non-digit — whitespace
+            // included — terminates the parse, so "1 2" parses as 1
+            // and "12x" as 12 instead of silently splicing to 12/12.
+            if !any_digit {
+                if ch == " " {
+                    i += 1;
+                    continue;
+                }
+                if ch == "\t" {
+                    i += 1;
+                    continue;
+                }
+                if ch == "\n" {
+                    i += 1;
+                    continue;
+                }
+                if ch == "\r" {
+                    i += 1;
+                    continue;
+                }
+            }
+            break;
+        }
+        any_digit = true;
+        n = n * 10 + digit;
+        i += 1;
+    }
+    if !any_digit { return 0; }
+    return n;
+}
+
+// Resolve `SAILFIN_INJECT_FAULT` once. Unset / non-numeric → 0 (no
+// injection), so production builds are byte-for-byte unaffected.
+fn _eh_resolve_inject() -> int ![io] {
+    return emit_parse_nonneg_int(_eh_shell_read("printf '%s' \"$SAILFIN_INJECT_FAULT\""));
+}
+
+fn _eh_trace(trace: boolean, module_name: string, attempt: int, max_attempts: int, reason: string) -> void ![io] {
+    if !trace { return; }
+    print.err("[emit retry] " + module_name + " attempt " + number_to_string(attempt)
+        + "/"
+        + number_to_string(max_attempts)
+        + " — "
+        + reason);
+}
+
+// The validator cascade. Returns true iff some available LLVM tool
+// accepts the IR at `ll_path`. Tries `llvm-as` (cheapest — no
+// codegen), then the versioned `llvm-as-18` (CI's `llvm-18` ships
+// `/usr/bin/llvm-as-18` with no unversioned symlink), then
+// `clang -c -emit-llvm -x ir`, then `clang-18`. The `command -v`
+// guards distinguish "tool missing" (fall through to the next) from
+// "tool ran and rejected the IR" (the whole chain exits non-zero).
+//
+// Semantics are byte-identical to the cascade `_cr_compile_one`
+// inlined before #515: a zero exit is a pass, non-zero is a fail. On
+// a host with NONE of the four tools the chain exits non-zero, which
+// the caller treats as a validation failure — acceptable because
+// every build/link environment that reaches an emit already requires
+// clang, and the single-shot `sfn emit` callers opt into validation
+// explicitly via `--validate`.
+fn validate_llvm_ir(ll_path: string) -> boolean ![io] {
+    // `ll_path` is double-quoted in every leg so an `-o` target with
+    // spaces (single-shot `sfn emit --validate llvm -o "<user path>"`)
+    // survives the `sh -c` tokenization. Mirrors the parallel worker's
+    // `"$2"` quoting.
+    let validate_cmd = "( command -v llvm-as >/dev/null 2>&1 && llvm-as < \""
+        + ll_path
+        + "\" > /dev/null 2>&1 ) "
+        + "|| ( command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < \""
+        + ll_path
+        + "\" > /dev/null 2>&1 ) "
+        + "|| ( command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir \""
+        + ll_path
+        + "\" -o /dev/null > /dev/null 2>&1 ) "
+        + "|| ( command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir \""
+        + ll_path
+        + "\" -o /dev/null > /dev/null 2>&1 )";
+    let validate_rc = process.run(["sh", "-c", validate_cmd]);
+    return validate_rc == 0;
+}
+
+// In-process LLVM emit with retry + validation. `import_asm_paths`
+// selects the cross-module effect table (#957): empty → the legacy
+// in-module-only gate (`compile_to_llvm_file_with_module`), non-empty
+// → `compile_to_llvm_file_with_module_imports`. `validate` gates the
+// `validate_llvm_ir` round-trip; `max_attempts` bounds the loop.
+//
+// Note: the in-process emitter is deterministic, so retry here does
+// not recover the *seed*'s non-deterministic flake (that lives on the
+// subprocess path). Its value on this path is (a) catching invalid IR
+// before it escapes into a downstream `.o` compile, and (b) a
+// fault-injection seam for the retry regression test.
+fn emit_llvm_with_retry(source_path: string, module_name: string, out_path: string, import_asm_paths: string[], max_attempts: int, validate: boolean, trace: boolean) -> boolean ![io] {
+    return emit_llvm_with_retry_injected(source_path, module_name, out_path, import_asm_paths, max_attempts, validate, trace, _eh_resolve_inject());
+}
+
+// Explicit-injection variant. `inject_faults` simulates that many
+// leading retry-eligible failures before letting the real
+// emit/validate proceed. Production callers route through
+// `emit_llvm_with_retry` (which resolves the count from the
+// environment); tests call this directly because the runtime has no
+// `setenv` to stage the env var from inside a `.sfn` test process.
+fn emit_llvm_with_retry_injected(source_path: string, module_name: string, out_path: string, import_asm_paths: string[], max_attempts: int, validate: boolean, trace: boolean, inject_faults: int) -> boolean ![io] {
+    let mut ok: boolean = false;
+    let mut attempt: int = 0;
+    loop {
+        if ok { break; }
+        if attempt >= max_attempts { break; }
+        attempt += 1;
+        let source = fs.readFile(source_path);
+        let mut emitted: boolean = false;
+        if import_asm_paths.length > 0 {
+            emitted = compile_to_llvm_file_with_module_imports(source, module_name, out_path, "", import_asm_paths);
+        } else {
+            emitted = compile_to_llvm_file_with_module(source, module_name, out_path, "");
+        }
+        if !emitted {
+            _eh_trace(trace, module_name, attempt, max_attempts, "in-process emit returned false");
+            continue;
+        }
+        if !fs.exists(out_path) {
+            _eh_trace(trace, module_name, attempt, max_attempts, "missing output");
+            continue;
+        }
+        let probe = fs.readFile(out_path);
+        if probe.length == 0 {
+            _eh_trace(trace, module_name, attempt, max_attempts, "empty output");
+            continue;
+        }
+        if attempt <= inject_faults {
+            _eh_trace(trace, module_name, attempt, max_attempts, "injected fault (SAILFIN_INJECT_FAULT)");
+            continue;
+        }
+        if validate {
+            if !validate_llvm_ir(out_path) {
+                _eh_trace(trace, module_name, attempt, max_attempts, "IR validation rejected output");
+                continue;
+            }
+        }
+        ok = true;
+    }
+    return ok;
+}
+
+// Subprocess emit with retry. Runs
+// `<sailfin_exe> emit --module-name <module_name> -o <out_path>
+// [--import-context <ctx>] <mode> <source_path>` in a fresh child
+// (the arena-isolation property that makes a 138-module self-build fit
+// in 8 GB), probes for a non-empty output, and — when `validate` —
+// round-trips the result through `validate_llvm_ir`. `native` callers
+// (`.sfn-asm` staging) pass `validate=false`; that text doesn't need
+// to parse as LLVM IR. Unlike the in-process path, re-running the
+// subprocess re-rolls the seed's non-determinism, so this is the path
+// that actually recovers the IR-corruption flake.
+fn emit_subprocess_with_retry(sailfin_exe: string, module_name: string, source_path: string, out_path: string, mode: string, import_context_root: string, max_attempts: int, validate: boolean, trace: boolean) -> boolean ![io] {
+    let inject = _eh_resolve_inject();
+    let mut ok: boolean = false;
+    let mut attempt: int = 0;
+    loop {
+        if ok { break; }
+        if attempt >= max_attempts { break; }
+        attempt += 1;
+        // `--attempts 1 --no-validate` pins the inner emit to the
+        // pre-#515 single-shot contract: this OUTER loop owns the
+        // retry + validation, so without these flags the inner emit
+        // (whose default is now 3 attempts + validate) would compound
+        // to 9 attempts and a double `llvm-as` per success. `sailfin_exe`
+        // is always the same-generation binary (`<binary_dir>/sailfin`),
+        // so it understands these flags; the seed never executes this
+        // helper (pass 1 of `make compile` runs the seed's own resolver).
+        let mut emit_args: string[] = [sailfin_exe, "emit", "--module-name", module_name, "--attempts", "1", "--no-validate", "-o", out_path];
+        if import_context_root.length > 0 {
+            emit_args.push("--import-context");
+            emit_args.push(import_context_root);
+        }
+        emit_args.push(mode);
+        emit_args.push(source_path);
+        let rc = process.run(emit_args);
+        if rc != 0 {
+            _eh_trace(trace, module_name, attempt, max_attempts, "exit="
+                + number_to_string(rc));
+            continue;
+        }
+        if !fs.exists(out_path) {
+            _eh_trace(trace, module_name, attempt, max_attempts, "missing output");
+            continue;
+        }
+        let probe = fs.readFile(out_path);
+        if probe.length == 0 {
+            _eh_trace(trace, module_name, attempt, max_attempts, "empty output");
+            continue;
+        }
+        if attempt <= inject {
+            _eh_trace(trace, module_name, attempt, max_attempts, "injected fault (SAILFIN_INJECT_FAULT)");
+            continue;
+        }
+        if validate {
+            if !validate_llvm_ir(out_path) {
+                _eh_trace(trace, module_name, attempt, max_attempts, "IR validation rejected output");
+                continue;
+            }
+        }
+        ok = true;
+    }
+    return ok;
+}

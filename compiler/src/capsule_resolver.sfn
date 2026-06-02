@@ -57,6 +57,7 @@ import {
     is_safe_scope_name,
     parse_scope_name
 } from "./capsule_artifact";
+import { emit_subprocess_with_retry } from "./emit_helpers";
 import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_file_with_module_imports,
@@ -562,7 +563,13 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
         loop {
             if i >= tasks.length { break; }
             let t = tasks[i];
-            let mut emit_args: string[] = [sailfin_exe, "emit", "--module-name", t.slug, "-o", t.output_path];
+            // #515: `--attempts 1 --no-validate` pins the child to a
+            // single bare emit. `sfn emit`'s new default (3 attempts +
+            // validate) is owned at the resolver layer, not delegated
+            // to the child — this serial fallback preserves its
+            // pre-#515 single-shot contract exactly. `sailfin_exe` is
+            // the same-generation binary, so it accepts the flags.
+            let mut emit_args: string[] = [sailfin_exe, "emit", "--module-name", t.slug, "--attempts", "1", "--no-validate", "-o", t.output_path];
             if use_import_context {
                 emit_args.push("--import-context");
                 emit_args.push(import_context_root);
@@ -612,13 +619,26 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
     // `--import-context "$SAILFIN_PE_IMPORT_CTX"` to the emit; the env
     // var is only exported below when `use_import_context` holds, so
     // the native staging path (root == "") emits the flag-free form.
+    //
+    // #515 chose option (b) for this path: the inlined cascade below
+    // is a deliberate hand mirror of `emit_helpers.validate_llvm_ir`,
+    // NOT a shell-out to `sfn emit --validate`. The child emit is
+    // pinned to `--attempts 1 --no-validate` so this worker's own
+    // `while [ $attempt -lt 3 ]` + cascade stays the single retry/
+    // validate authority; without those flags the child's new default
+    // (3 attempts + validate) would compound to 9 attempts and a
+    // double `llvm-as` per task on the hottest (fanned-out) build
+    // path. The tradeoff: any change to the tool-discovery order in
+    // `validate_llvm_ir` MUST be mirrored here (and vice versa). A
+    // follow-up could unify via `sfn emit --attempts 1 --validate` if
+    // the per-task overhead proves acceptable.
     let mut worker_import_arg = "";
     if use_import_context {
         worker_import_arg = "--import-context \"$SAILFIN_PE_IMPORT_CTX\" ";
     }
     let worker_script = "attempt=0; while [ $attempt -lt 3 ]; do "
         + "attempt=$((attempt + 1)); "
-        + "\"$SAILFIN_PE_SEED\" emit --module-name \"$1\" -o \"$2\" "
+        + "\"$SAILFIN_PE_SEED\" emit --module-name \"$1\" --attempts 1 --no-validate -o \"$2\" "
         + worker_import_arg
         + "\"$SAILFIN_PE_MODE\" \"$3\" || continue; "
         + "[ -s \"$2\" ] || continue; "
@@ -1164,18 +1184,16 @@ fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string, work_dir: string) -> b
         // capsule deps whose slug is `<scope>/<name>/<sub>`,
         // which `module_name_from_path` would NOT derive).
         //
-        // Validation is `rc == 0 && file exists` only — no probe
-        // read here. The block below already reads the asm to
-        // extract `.layout` lines; doubling the read would
-        // re-allocate the same string in the parent's arena and
-        // undermine the memory bounds this whole subprocess path
-        // is for. An empty asm produces an empty manifest, which
-        // downstream callers tolerate (the import-context loader
-        // just sees no layout lines for that slug).
-        let rc = process.run([sailfin_exe, "emit", "--module-name", src.slug, "-o", asm_path, "native", src.source_path]);
-        if rc == 0 {
-            if fs.exists(asm_path) { ok = true; }
-        }
+        // #515: route through the shared subprocess retry helper so
+        // a seed-emit flake on a `.sfn-asm` stage gets the same up-to-
+        // 3 re-emit recovery the `.ll` path (`_cr_compile_one`) has.
+        // `native` mode passes `validate=false` — the staged
+        // `.sfn-asm` is not LLVM IR and must not round-trip through
+        // `llvm-as` — so the helper's check stays "rc == 0 && non-
+        // empty output", matching the prior single-attempt contract
+        // on its success path. No import-context for the native stage
+        // (`""`), and `trace=false` (this path has no `config`).
+        ok = emit_subprocess_with_retry(sailfin_exe, src.slug, src.source_path, asm_path, "native", "", 3, false, false);
     } else {
         let source = fs.readFile(src.source_path);
         ok = write_native_text_file_with_module(source, src.slug, asm_path);
@@ -1682,91 +1700,13 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
         // `scripts/build.sh` (since retired in Stage E PR7 / #383)
         // historically applied the same retry shape
         // (`EMIT_RETRIES=3`) for exactly this reason; the driver
-        // inherits that contract. Validation runs `llvm-as` on the
-        // emitted file as a cheap mid-file IR check; the empty-
-        // file probe survives as a fast pre-`llvm-as` filter so
-        // we don't pay parser cost on an obviously-broken output.
-        let max_attempts: int = 3;
-        let mut attempt: int = 0;
-        loop {
-            if ok { break; }
-            if attempt >= max_attempts { break; }
-            attempt += 1;
-            let rc = process.run([sailfin_exe, "emit", "--module-name", src.slug, "-o", src.ll_path, "--import-context", context_root, "llvm", src.source_path]);
-            if rc != 0 {
-                if config.trace {
-                    print.err("[emit retry] " + src.slug + " attempt "
-                        + number_to_string(attempt)
-                        + "/"
-                        + number_to_string(max_attempts)
-                        + " — exit="
-                        + number_to_string(rc));
-                }
-                continue;
-            }
-            if !fs.exists(src.ll_path) {
-                if config.trace {
-                    print.err("[emit retry] " + src.slug + " attempt "
-                        + number_to_string(attempt)
-                        + "/"
-                        + number_to_string(max_attempts)
-                        + " — missing output");
-                }
-                continue;
-            }
-            let probe = fs.readFile(src.ll_path);
-            if probe.length == 0 {
-                if config.trace {
-                    print.err("[emit retry] " + src.slug + " attempt "
-                        + number_to_string(attempt)
-                        + "/"
-                        + number_to_string(max_attempts)
-                        + " — empty output");
-                }
-                continue;
-            }
-            // Mid-file validation: parse the .ll to catch the
-            // seed-corruption flake (stray non-ASCII bytes
-            // mid-IR). Try `llvm-as` first (cheapest — no
-            // codegen), then fall back to `clang -c -emit-llvm
-            // -x ir` (always available on builds that have
-            // already required clang). The shell `command -v`
-            // probe distinguishes "tool missing" (try the next)
-            // from "tool ran and rejected the IR" (retry the
-            // emit).
-            //
-            // CI on Linux installs `llvm-18` which provides
-            // `/usr/bin/llvm-as-18` but no unversioned symlink,
-            // so the shell tries `llvm-as`, `llvm-as-18`, etc.
-            // in order. macOS Homebrew installs `llvm-as` as the
-            // unversioned name. The clang fallback covers the
-            // case where neither version-suffixed nor
-            // unversioned `llvm-as` is on PATH.
-            let validate_cmd = "( command -v llvm-as >/dev/null 2>&1 && llvm-as < "
-                + src.ll_path
-                + " > /dev/null 2>&1 ) "
-                + "|| ( command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < "
-                + src.ll_path
-                + " > /dev/null 2>&1 ) "
-                + "|| ( command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir "
-                + src.ll_path
-                + " -o /dev/null > /dev/null 2>&1 ) "
-                + "|| ( command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir "
-                + src.ll_path
-                + " -o /dev/null > /dev/null 2>&1 )";
-            let validate_rc = process.run(["sh", "-c", validate_cmd]);
-            if validate_rc != 0 {
-                if config.trace {
-                    print.err("[emit retry] " + src.slug + " attempt "
-                        + number_to_string(attempt)
-                        + "/"
-                        + number_to_string(max_attempts)
-                        + " — IR validation rejected output");
-                }
-                continue;
-            }
-            ok = true;
-        }
+        // inherits that contract. #515 lifted the emit+probe+
+        // validate+retry body into `emit_subprocess_with_retry`
+        // so `_cr_stage_one`, single-shot `sfn emit --validate`,
+        // and the Makefile cross-build staging share one cascade.
+        // `validate=true` here runs the `llvm-as`/`clang` round-
+        // trip; the empty-file probe lives inside the helper.
+        ok = emit_subprocess_with_retry(sailfin_exe, src.slug, src.source_path, src.ll_path, "llvm", context_root, 3, true, config.trace);
     } else {
         let source = fs.readFile(src.source_path);
         // #957: in-process path enforces the same cross-module effects

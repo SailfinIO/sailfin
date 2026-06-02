@@ -64,9 +64,9 @@ import {
     _shell_read_cmd,
     _shell_single_quote_arg
 } from "./cli_commands_utils";
+import { emit_llvm_with_retry, emit_parse_nonneg_int } from "./emit_helpers";
 import {
     compile_to_llvm_file_with_module,
-    compile_to_llvm_file_with_module_imports,
     compile_to_llvm_with_module,
     compile_to_llvm_with_module_timed,
     compile_to_native_text_with_module,
@@ -1482,9 +1482,27 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
         // cross-module effect table so callee-effect transitivity
         // (`E0402`) is enforced on the build path.
         let mut import_context_root: string = "";
+        // #515: single-shot `sfn emit llvm -o` can route through
+        // `emit_llvm_with_retry` (the same emit+probe+validate+retry
+        // cascade the resolver's multi-source path uses). Validation +
+        // retry are OPT-IN here (default: 1 attempt, no validate) so the
+        // bare CLI stays byte-for-byte behaviour-preserving — a
+        // single-file emit may legitimately reference runtime-provided
+        // externs that don't self-assemble in isolation, and forcing
+        // `llvm-as` on every emit would surface those as spurious
+        // failures (e.g. the exe-path test's Darwin leg). Callers that
+        // KNOW their IR is self-contained opt in: the Makefile
+        // cross-build staging passes `--validate`, and the resolver
+        // validates at its own layer. Flags: `--attempts N` (N >= 1)
+        // sets the count; `--no-retry` == `--attempts 1`;
+        // `--validate` / `--no-validate` toggle the `llvm-as`/`clang`
+        // round-trip.
+        let mut emit_attempts: int = 1;
+        let mut emit_validate: boolean = false;
         let mut base_index = 1;
-        // Parse optional flags: --timing, --module-name <slug>, and
-        // -o <path> in any order.
+        // Parse optional flags: --timing, --module-name <slug>,
+        // -o <path>, --attempts N, --no-retry, --validate,
+        // --no-validate in any order.
         let mut consumed_flag: boolean = true;
         loop {
             if !consumed_flag { break; }
@@ -1529,6 +1547,36 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
                 consumed_flag = true;
                 continue;
             }
+            if strings_equal(args[base_index], "--attempts") {
+                base_index += 1;
+                if base_index >= args.length {
+                    print(_usage());
+                    return 2;
+                }
+                let parsed = emit_parse_nonneg_int(args[base_index]);
+                if parsed >= 1 { emit_attempts = parsed; }
+                base_index += 1;
+                consumed_flag = true;
+                continue;
+            }
+            if strings_equal(args[base_index], "--no-retry") {
+                emit_attempts = 1;
+                base_index += 1;
+                consumed_flag = true;
+                continue;
+            }
+            if strings_equal(args[base_index], "--validate") {
+                emit_validate = true;
+                base_index += 1;
+                consumed_flag = true;
+                continue;
+            }
+            if strings_equal(args[base_index], "--no-validate") {
+                emit_validate = false;
+                base_index += 1;
+                consumed_flag = true;
+                continue;
+            }
         }
         let _expected_args = base_index + 2;
         if args.length != _expected_args {
@@ -1553,17 +1601,23 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
         if strings_equal(mode, "llvm") {
             if has_out {
                 if timing {
+                    // --timing keeps the single-attempt, no-validate
+                    // path: it reports per-phase emit timings, which a
+                    // retry loop would distort.
                     let llvm = compile_to_llvm_with_module_timed(source, module_name);
                     _write_llvm_text(out_path, llvm);
                 } else {
+                    // #515: route through the shared retry+validator
+                    // cascade. Empty `import_asm_paths` degrades to the
+                    // legacy in-module-only effect gate (same as the
+                    // bare `compile_to_llvm_file_with_module` call this
+                    // replaced).
+                    let mut import_asm_paths: string[] = [];
                     if import_context_root.length > 0 {
-                        let import_asm_paths = _read_import_deps(import_context_root, module_name);
-                        let ok = compile_to_llvm_file_with_module_imports(source, module_name, out_path, "", import_asm_paths);
-                        if !ok { return 1; }
-                    } else {
-                        let ok = compile_to_llvm_file_with_module(source, module_name, out_path, "");
-                        if !ok { return 1; }
+                        import_asm_paths = _read_import_deps(import_context_root, module_name);
                     }
+                    let ok = emit_llvm_with_retry(path, module_name, out_path, import_asm_paths, emit_attempts, emit_validate, false);
+                    if !ok { return 1; }
                 }
             } else {
                 if timing {

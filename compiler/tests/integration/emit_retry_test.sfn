@@ -1,0 +1,113 @@
+// compiler/tests/integration/emit_retry_test.sfn
+//
+// Regression coverage for the shared emit retry + validator cascade
+// (#515, `compiler/src/emit_helpers.sfn`). The cascade lifts the
+// robustness the multi-source `sfn build` path already had — up-to-3
+// re-emits + an `llvm-as`/`clang` IR round-trip — into one helper so
+// single-shot `sfn emit --validate llvm`, the resolver's
+// `_cr_compile_one` / `_cr_stage_one` loops, and the Makefile cross-
+// build staging all defend against the seed's intermittent IR-
+// corruption flake.
+//
+// The retry path is driven end-to-end through the *shipped*
+// `build/native/sailfin` binary, seeded with `SAILFIN_INJECT_FAULT=N`
+// (the production fault-injection env var `emit_llvm_with_retry`
+// reads). This is deliberate: the alternative — importing
+// `emit_helpers` and calling the in-process emitter from inside this
+// test — both drags the whole compiler into the test binary (cold-
+// compile memory pressure under the 8 GB cap) and re-enters the LLVM
+// lowering pipeline non-reentrantly, which the resolver avoids by
+// running every module compile in a fresh subprocess. Spawning the
+// real binary matches production exactly and keeps this test light.
+//
+// `process.run_capture(argv, env)` REPLACES the child environment
+// (`runtime/sfn/process.sfn`: an empty array means the empty
+// environment), so a child seeded with only `SAILFIN_INJECT_FAULT`
+// loses PATH — and the `--validate` cascade's `command -v llvm-as` /
+// `clang` lookups (and `sh` itself) would then resolve only via the
+// kernel/shell default path, which omits CI's versioned `llvm-18`
+// dir. Hand the child the parent's real PATH, captured via `system()`
+// (which inherits the real env). Effect knobs (`SAILFIN_EFFECT_*`)
+// stay unset, so the child still exercises shipped defaults.
+extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+
+fn _host_path() -> string ![io] {
+    let p = sailfin_runtime_shell_capture("printf '%s' \"$PATH\"");
+    if p.length == 0 { return "/usr/local/bin:/usr/bin:/bin"; }
+    return p;
+}
+
+// A minimal pure module the emitter can lower without any effect
+// plumbing, so each (re-)emit attempt in the child stays cheap.
+fn _retry_fixture() -> string ![io] {
+    let dir = fs.mkdtemp("sfn-emit-retry-");
+    assert dir.length > 0;
+    let path = dir + "/sample.sfn";
+    fs.writeFile(path, "fn add(a: int, b: int) -> int {\n    return a + b;\n}\n");
+    return path;
+}
+
+// Spawn the shipped compiler's `emit llvm` with `--attempts attempts`,
+// optional `--validate`, and `SAILFIN_INJECT_FAULT=faults`, returning
+// the child exit code. Streams are drained so a later capture can't
+// hand back this run's buffers.
+fn _emit_with_faults(src: string, out: string, attempts: string, validate: boolean, faults: string) -> i64 ![io] {
+    let mut argv: string[] = ["build/native/sailfin", "emit"];
+    if validate { argv.push("--validate"); } else {
+        argv.push("--no-validate");
+    }
+    argv.push("--attempts");
+    argv.push(attempts);
+    argv.push("-o");
+    argv.push(out);
+    argv.push("llvm");
+    argv.push(src);
+    let rc = process.run_capture(argv, ["SAILFIN_INJECT_FAULT=" + faults, "PATH="
+        + _host_path()]);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return rc;
+}
+
+test "emit_retry: injection below the cap recovers within attempts" ![io] {
+    let src = _retry_fixture();
+    let out = src + ".ll";
+    // 2 injected faults across 3 attempts → attempts 1 and 2 simulate a
+    // retry-eligible failure, attempt 3 lands clean → exit 0.
+    let rc = _emit_with_faults(src, out, "3", false, "2");
+    assert rc == 0;
+    assert fs.exists(out);
+    fs.deleteFile(out);
+    fs.deleteFile(src);
+}
+
+test "emit_retry: recovery still validates the IR on the clean attempt" ![io] {
+    let src = _retry_fixture();
+    let out = src + ".ll";
+    // Same recovery, but with the validator cascade on: attempt 3's IR
+    // must round-trip through llvm-as / clang for the emit to exit 0.
+    let rc = _emit_with_faults(src, out, "3", true, "2");
+    assert rc == 0;
+    assert fs.exists(out);
+    fs.deleteFile(out);
+    fs.deleteFile(src);
+}
+
+test "emit_retry: injected faults at the cap exhaust retries (nonzero exit)" ![io] {
+    let src = _retry_fixture();
+    let out = src + ".ll";
+    // 3 faults across 3 attempts → never reaches a clean attempt → exit nonzero.
+    let rc = _emit_with_faults(src, out, "3", false, "3");
+    assert rc != 0;
+    fs.deleteFile(src);
+}
+
+test "emit_retry: zero injection succeeds and validates on the first attempt" ![io] {
+    let src = _retry_fixture();
+    let out = src + ".ll";
+    let rc = _emit_with_faults(src, out, "3", true, "0");
+    assert rc == 0;
+    assert fs.exists(out);
+    fs.deleteFile(out);
+    fs.deleteFile(src);
+}

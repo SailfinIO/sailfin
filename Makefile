@@ -841,33 +841,21 @@ ci-cross-windows:
 		ll="$$WIN_OBJ/runtime/$$mod.ll"; \
 		obj="$$WIN_OBJ/runtime/$$mod.o"; \
 		echo "[cross-windows] emitting + compiling $$mod ($$src)..."; \
-		: "Emit with retry + IR validation (mirrors the prelude staging"; \
-		: "the former 'make rebuild' block used). A single-shot 'emit'"; \
-		: "doesn't go through the resolver's retry+validator cascade, so a"; \
-		: "seed-emit flake (invalid IR) would otherwise escape straight"; \
-		: "into clang. Up to 3 attempts; each validated via the same"; \
-		: "llvm-as / clang -emit-llvm cascade the resolver uses."; \
-		attempt=0; ok=0; \
-		while [ $$attempt -lt 3 ]; do \
-			attempt=$$((attempt + 1)); \
-			rm -f "$$ll"; \
-			if [ "$$mod" = "clock" ] || [ "$$mod" = "exec" ]; then \
-				SAILFIN_TARGET_OS=Windows $(NATIVE_OUT) emit -o "$$ll" llvm "$$src" >/dev/null || continue; \
-			else \
-				$(NATIVE_OUT) emit -o "$$ll" llvm "$$src" >/dev/null || continue; \
-			fi; \
-			[ -s "$$ll" ] || continue; \
-			if (command -v llvm-as >/dev/null 2>&1 && llvm-as < "$$ll" >/dev/null 2>&1) \
-				|| (command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < "$$ll" >/dev/null 2>&1) \
-				|| (command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir "$$ll" -o /dev/null >/dev/null 2>&1) \
-				|| (command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir "$$ll" -o /dev/null >/dev/null 2>&1); then \
-				ok=1; break; \
-			fi; \
-			echo "[cross-windows][warn] $$mod IR validation rejected output (attempt $$attempt/3)" >&2; \
-		done; \
-		if [ "$$ok" -ne 1 ]; then \
-			echo "[cross-windows][error] failed to emit valid $$mod IR after 3 attempts" >&2; \
-			exit 1; \
+		: "#515: the emit retry + llvm-as/clang validator cascade now"; \
+		: "lives in the compiler (emit_helpers.sfn). 'emit --validate llvm'"; \
+		: "runs up to 3 in-compiler attempts, each round-tripped through"; \
+		: "the same cascade the resolver uses, so a seed-emit flake can no"; \
+		: "longer escape into the mingw clang. This replaces the hand-"; \
+		: "inlined shell retry loop that mirrored the resolver. clock + exec"; \
+		: "re-emit with SAILFIN_TARGET_OS=Windows (see the RUNTIME_MODS"; \
+		: "comment above for the per-module target-override rationale)."; \
+		rm -f "$$ll"; \
+		if [ "$$mod" = "clock" ] || [ "$$mod" = "exec" ]; then \
+			SAILFIN_TARGET_OS=Windows $(NATIVE_OUT) emit --attempts 3 --validate -o "$$ll" llvm "$$src" >/dev/null || { \
+				echo "[cross-windows][error] failed to emit valid $$mod IR" >&2; exit 1; }; \
+		else \
+			$(NATIVE_OUT) emit --attempts 3 --validate -o "$$ll" llvm "$$src" >/dev/null || { \
+				echo "[cross-windows][error] failed to emit valid $$mod IR" >&2; exit 1; }; \
 		fi; \
 		$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
 			-c "$$ll" -o "$$obj"; \

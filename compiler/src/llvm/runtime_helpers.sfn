@@ -318,6 +318,22 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "intrinsic.exe_path.mingw", symbol: "GetModuleFileNameA", return_type: "i32", parameter_types: ["i8*", "i8*", "i32"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    // `strlen` backs the Darwin leg's success-path length recovery:
+    // `_NSGetExecutablePath` fills a NUL-terminated path but reports no
+    // length, so the leg calls `strlen` on the buffer (see the
+    // `exe_path_ok_` block in `core_call_emission.sfn`). Registered as a
+    // concrete row so the post-lowering call-target scan emits
+    // `declare i64 @strlen(i8*)` whenever that leg's `call @strlen` is
+    // present — without it an isolated `sfn emit llvm` of an exe-path
+    // module produces IR that `llvm-as` rejects ("use of undefined
+    // value '@strlen'"). The dotted target keeps `strlen` out of
+    // `runtime_helper_call_names()`'s source-global seed, and `strlen`
+    // has no other emitted call site (string length is carried in the
+    // `{i8*, i64}` aggregate), so this is the sole declare — no
+    // duplication risk.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "intrinsic.exe_path.darwin.strlen", symbol: "strlen", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
 
     // Network intrinsics.
     // `http.get` / `http.post` member calls flipped (#912) to the
