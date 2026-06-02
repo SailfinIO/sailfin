@@ -67,7 +67,7 @@ fn _nth_variable_declaration(block: Block, n: int) -> Statement {
 // -------------------------------------------------------------------
 // Tests
 // -------------------------------------------------------------------
-test "parser block let: simple `let` inside fn body produces VariableDeclaration" {
+test "parser block let: simple `let` inside fn body produces VariableDeclaration" ![io] {
     let source = "fn main() { let x = 1; }";
     let program = parse_program(source);
     let body = _find_function_body(program, "main");
@@ -77,7 +77,7 @@ test "parser block let: simple `let` inside fn body produces VariableDeclaration
     assert decl.mutable == false;
 }
 
-test "parser block let: `let mut` inside fn body preserves mutable flag" {
+test "parser block let: `let mut` inside fn body preserves mutable flag" ![io] {
     // Pre-fix this fell through to parse_expression_statement and lost
     // the mutable flag — only top-level `let` carried it because only
     // top-level routed through `parse_variable`.
@@ -90,7 +90,7 @@ test "parser block let: `let mut` inside fn body preserves mutable flag" {
     assert decl.mutable == true;
 }
 
-test "parser block let: multiple block-scoped lets parse to structured statements" {
+test "parser block let: multiple block-scoped lets parse to structured statements" ![io] {
     // The acceptance-criteria example from issue #521. Pre-fix the
     // lambda buried inside `let f = fn(){...}` was invisible to any
     // capture-analysis walk over `main`'s body — the outer `let`
@@ -107,7 +107,7 @@ test "parser block let: multiple block-scoped lets parse to structured statement
     assert second.name == "f";
 }
 
-test "parser block let: typed let with explicit annotation parses" {
+test "parser block let: typed let with explicit annotation parses" ![io] {
     // `let x: number = 1` previously round-tripped through raw text  // alias-coverage: parser fixture exercises legacy : number syntax
     // inside a block. The structured path must preserve the type
     // annotation for the typechecker to consume.
@@ -120,7 +120,7 @@ test "parser block let: typed let with explicit annotation parses" {
     assert decl.type_annotation != null;
 }
 
-test "parser block let: top-level let path is unchanged" {
+test "parser block let: top-level let path is unchanged" ![io] {
     // Anchor existing behaviour — the new branch must not regress the
     // top-level `let` path that was already shipping a structured
     // VariableDeclaration.
@@ -139,7 +139,7 @@ test "parser block let: top-level let path is unchanged" {
     assert found;
 }
 
-test "parser block let: nested block lets parse independently" {
+test "parser block let: nested block lets parse independently" ![io] {
     // Block-scoped lets inside an `if` body must also flow through the
     // structured path — `parse_block_statement` recurses into nested
     // blocks via `parse_block`, so the fix automatically extends.

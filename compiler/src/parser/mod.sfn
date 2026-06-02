@@ -47,7 +47,7 @@ import { Parser, StatementParseResult } from "./types";
 // like `compiler/tests/unit/struct_large_return_test`). A short heap-allocated
 // pad string at function entry shifts subsequent allocations past the corrupted
 // bucket. Remove this once the 0.5.8 seed is released and adopted.
-fn parse_program(source: string) -> Program {
+fn parse_program(source: string) -> Program ![io] {
     // Force a runtime heap allocation pattern that 0.5.7 can't fold away.
     // `substring(source, 0, 1)` is a runtime intrinsic over `source` (a
     // function parameter, not a compile-time value), so the seed cannot

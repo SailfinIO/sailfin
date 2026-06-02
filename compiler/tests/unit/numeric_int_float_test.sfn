@@ -17,12 +17,12 @@ import { index_of } from "../../src/string_utils";
 import { typecheck_diagnostics } from "../../src/typecheck";
 import { Diagnostic } from "../../src/typecheck_types";
 
-fn _emit(source: string) -> string {
+fn _emit(source: string) -> string ![io] {
     let program = parse_program(source);
     return emit_native_text_with_module_name(program, "numeric_test");
 }
 
-fn _diagnostics(source: string) -> Diagnostic[] {
+fn _diagnostics(source: string) -> Diagnostic[] ![io] {
     let program = parse_program(source);
     return typecheck_diagnostics(program);
 }

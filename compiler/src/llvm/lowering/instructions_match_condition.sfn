@@ -39,7 +39,7 @@ import {
 import { number_to_string, trim_text } from "../utils";
 import { lower_condition_to_i1 } from "./instructions_condition";
 
-fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperand, subject_type_annotation: string, case: MatchCaseStructure, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchCaseCondition {
+fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperand, subject_type_annotation: string, case: MatchCaseStructure, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchCaseCondition ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;

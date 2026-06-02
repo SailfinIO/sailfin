@@ -22,7 +22,7 @@ fn _contains(haystack: string, needle: string) -> boolean {
 }
 
 // ── The headline correctness bug: `> =` must not collapse to `>=` ────
-test "fmt generic: let-binding type does not fuse close with assign" {
+test "fmt generic: let-binding type does not fuse close with assign" ![io] {
     let src = "fn make() -> int {\n    let x: Box<int> = Box { value: 5 };\n    return x.value;\n}\n";
     let out = format_source(src);
     // The generic close + assignment stays a generic close + assign.
@@ -33,7 +33,7 @@ test "fmt generic: let-binding type does not fuse close with assign" {
 }
 
 // ── Idempotency: a second pass changes nothing ───────────────────────
-test "fmt generic: let-binding type is idempotent" {
+test "fmt generic: let-binding type is idempotent" ![io] {
     let src = "fn make() -> int {\n    let x: Box<int> = Box { value: 5 };\n    return x.value;\n}\n";
     let once = format_source(src);
     let twice = format_source(once);
@@ -41,7 +41,7 @@ test "fmt generic: let-binding type is idempotent" {
 }
 
 // ── Two-argument generic in let position (the #832 Result case) ──────
-test "fmt generic: Result<int, string> let-binding round-trips" {
+test "fmt generic: Result<int, string> let-binding round-trips" ![io] {
     let src = "fn g() -> int {\n    let r: Result<int, string> = parse();\n    return 0;\n}\n";
     let out = format_source(src);
     assert _contains(out, "let r: Result<int, string> = parse");
@@ -49,7 +49,7 @@ test "fmt generic: Result<int, string> let-binding round-trips" {
 }
 
 // ── Struct type-parameter clause ─────────────────────────────────────
-test "fmt generic: struct type-parameter clause stays tight" {
+test "fmt generic: struct type-parameter clause stays tight" ![io] {
     let src = "struct Box<T> {\n    value: T\n}\n";
     let out = format_source(src);
     assert _contains(out, "struct Box<T>");
@@ -57,7 +57,7 @@ test "fmt generic: struct type-parameter clause stays tight" {
 }
 
 // ── Enum type-parameter clause with multiple parameters ──────────────
-test "fmt generic: enum multi-parameter clause keeps comma spacing" {
+test "fmt generic: enum multi-parameter clause keeps comma spacing" ![io] {
     let src = "enum Foo<T, E> {\n    A(T)\n}\n";
     let out = format_source(src);
     assert _contains(out, "enum Foo<T, E>");
@@ -65,7 +65,7 @@ test "fmt generic: enum multi-parameter clause keeps comma spacing" {
 }
 
 // ── Parameter type and return type positions ─────────────────────────
-test "fmt generic: parameter and return generic types stay tight" {
+test "fmt generic: parameter and return generic types stay tight" ![io] {
     let src = "fn f(p: Foo<int>) -> int {\n    return 0;\n}\n";
     let out = format_source(src);
     assert _contains(out, "fn f(p: Foo<int>) -> int");
@@ -73,27 +73,27 @@ test "fmt generic: parameter and return generic types stay tight" {
 }
 
 // ── Generic return type (no params after) ────────────────────────────
-test "fmt generic: generic return type formats tight" {
+test "fmt generic: generic return type formats tight" ![io] {
     let src = "fn h() -> Result<int, string> {\n    return parse();\n}\n";
     let out = format_source(src);
     assert _contains(out, "-> Result<int, string>");
 }
 
 // ── Comparison expressions are NOT mistaken for generics ─────────────
-test "fmt generic: less-than comparison keeps surrounding spaces" {
+test "fmt generic: less-than comparison keeps surrounding spaces" ![io] {
     let src = "fn cmp() -> boolean {\n    let a = 1;\n    let b = 2;\n    return a < b;\n}\n";
     let out = format_source(src);
     assert _contains(out, "a < b");
     assert _contains(out, "a<b") == false;
 }
 
-test "fmt generic: greater-or-equal comparison is unaffected" {
+test "fmt generic: greater-or-equal comparison is unaffected" ![io] {
     let src = "fn cmp() -> boolean {\n    let a = 1;\n    let b = 2;\n    return a >= b;\n}\n";
     let out = format_source(src);
     assert _contains(out, "a >= b");
 }
 
-test "fmt generic: right-shift expression is unaffected" {
+test "fmt generic: right-shift expression is unaffected" ![io] {
     let src = "fn sh() -> int {\n    let a = 4;\n    return a >> 1;\n}\n";
     let out = format_source(src);
     assert _contains(out, "a >> 1");

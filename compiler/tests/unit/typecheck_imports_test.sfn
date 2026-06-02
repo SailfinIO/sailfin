@@ -323,7 +323,7 @@ test "typecheck walker: empty import table resolves nothing" {
     assert ! typecheck_walker_resolves_import("imported_helper", imports);
 }
 
-test "typecheck walker: import-symbol-aware path emits no diagnostics for actually-imported callee" {
+test "typecheck walker: import-symbol-aware path emits no diagnostics for actually-imported callee" ![io] {
     // Pre-enforcement state: even with the import table threaded
     // through, the walker discards its resolution result. The source
     // includes an `import { imported_helper }` specifier so the
@@ -338,7 +338,7 @@ test "typecheck walker: import-symbol-aware path emits no diagnostics for actual
     assert diagnostics.length == 0;
 }
 
-test "typecheck walker: import-symbol-aware path flags unresolved callee (E0420)" {
+test "typecheck walker: import-symbol-aware path flags unresolved callee (E0420)" ![io] {
     // Companion to the test above — `not_imported` is neither imported
     // nor declared nor a builtin, so #812 surfaces E0420.
     let source = "fn main() { not_imported(\"hi\"); }";
@@ -349,7 +349,7 @@ test "typecheck walker: import-symbol-aware path flags unresolved callee (E0420)
     assert _count_e0420(diagnostics) == 1;
 }
 
-test "typecheck walker: localization drops globally-present but un-imported names (E0420)" {
+test "typecheck walker: localization drops globally-present but un-imported names (E0420)" ![io] {
     // Regression guard for the localization step — without the
     // `localize_import_symbols_for_program` call inside
     // `typecheck_diagnostics_with_import_symbols`, any function
@@ -365,7 +365,7 @@ test "typecheck walker: localization drops globally-present but un-imported name
     assert _count_e0420(diagnostics) == 1;
 }
 
-test "typecheck walker: 2-arg back-compat path flags an undefined callee (E0420)" {
+test "typecheck walker: 2-arg back-compat path flags an undefined callee (E0420)" ![io] {
     // The legacy 2-arg `typecheck_diagnostics_with_imports` keeps
     // working — it delegates to the 3-arg variant with an empty import
     // table. With no `import` specifier and no local declaration,

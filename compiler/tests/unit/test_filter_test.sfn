@@ -13,7 +13,7 @@
 import { parse_program } from "../../src/parser/mod";
 import { set_test_filters, test_decl_matches_filters, test_filters_active } from "../../src/test_runner_state";
 
-fn _count_matches(source: string) -> int {
+fn _count_matches(source: string) -> int ![io] {
     let program = parse_program(source);
     let mut count: int = 0;
     let mut i: int = 0;

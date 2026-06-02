@@ -346,7 +346,7 @@ fn lower_to_llvm_with_manifests(native_module: NativeModule, imported_manifests:
     return lower_to_llvm_with_context(native_module, imported_manifests, [], []);
 }
 
-fn lower_to_llvm_with_parsed_context(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMResult {
+fn lower_to_llvm_with_parsed_context(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMResult ![io] {
     let _art = select_text_artifact(native_module.artifacts);
     let mut _native_text: string = "";
     if _art != null { _native_text = _art.contents; }

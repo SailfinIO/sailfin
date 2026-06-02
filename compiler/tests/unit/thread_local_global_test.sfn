@@ -50,7 +50,7 @@ fn _has_variable(program: Program, name: string) -> boolean {
     return false;
 }
 
-test "parser thread_local: top-level `thread_local let mut` sets is_thread_local" {
+test "parser thread_local: top-level `thread_local let mut` sets is_thread_local" ![io] {
     let source = "thread_local let mut frame_head: i64 = 0;";
     let program = parse_program(source);
     assert _has_variable(program, "frame_head");
@@ -60,7 +60,7 @@ test "parser thread_local: top-level `thread_local let mut` sets is_thread_local
     assert decl.name == "frame_head";
 }
 
-test "parser thread_local: ordinary `let mut` leaves is_thread_local false" {
+test "parser thread_local: ordinary `let mut` leaves is_thread_local false" ![io] {
     // Anchor the default — every existing module global today still
     // lowers to `internal global`, not `internal thread_local global`.
     let source = "let mut counter: i64 = 0;";
@@ -70,7 +70,7 @@ test "parser thread_local: ordinary `let mut` leaves is_thread_local false" {
     assert decl.mutable == true;
 }
 
-test "parser thread_local: ordinary immutable `let` leaves is_thread_local false" {
+test "parser thread_local: ordinary immutable `let` leaves is_thread_local false" ![io] {
     let source = "let pi: float = 3.14;";
     let program = parse_program(source);
     let decl = _find_variable(program, "pi");
@@ -78,7 +78,7 @@ test "parser thread_local: ordinary immutable `let` leaves is_thread_local false
     assert decl.mutable == false;
 }
 
-test "parser thread_local: preserves type annotation through the prefix" {
+test "parser thread_local: preserves type annotation through the prefix" ![io] {
     // The keyword must not consume tokens that belong to the type
     // annotation — i.e. `thread_local` is a pure prefix, not a
     // pseudo-type wrapper.
@@ -90,7 +90,7 @@ test "parser thread_local: preserves type annotation through the prefix" {
     assert decl.type_annotation.text == "i64";
 }
 
-test "parser thread_local: rejects bare `thread_local` without `let`" {
+test "parser thread_local: rejects bare `thread_local` without `let`" ![io] {
     // `thread_local fn ...` (and any other non-`let` follower) must
     // not silently turn into a VariableDeclaration. Today the
     // dispatcher falls through to `parse_unknown`, which yields a

@@ -1553,7 +1553,7 @@ fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
 // ═══════════════════════════════════════════════════════════════════
 // Public entry point
 // ═══════════════════════════════════════════════════════════════════
-fn format_source(source: string) -> string {
+fn format_source(source: string) -> string ![io] {
     if source.length == 0 { return ""; }
     let tokens = lex(source);
     let fmt_tokens = strip_and_classify(tokens);

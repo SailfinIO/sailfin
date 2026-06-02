@@ -131,7 +131,7 @@ test "test_runner_json: assertion message escapes backslashes" {
 // --------------------------------------------------------------
 // Pre-run pass: collect_test_entries
 // --------------------------------------------------------------
-test "test_runner_json: collect_test_entries finds every test in source order" {
+test "test_runner_json: collect_test_entries finds every test in source order" ![io] {
     let source = "test \"first\" { assert true; }\n"
         + "test \"second\" ![io] { assert true; }\n"
         + "fn helper() { return; }\n"
@@ -151,7 +151,7 @@ test "test_runner_json: collect_test_entries finds every test in source order" {
     assert entries[2].line == 4;
 }
 
-test "test_runner_json: collect_test_entries returns empty when no tests" {
+test "test_runner_json: collect_test_entries returns empty when no tests" ![io] {
     let source = "fn nothing_to_see() -> int { return 0; }\n";
     let program: Program = parse_program(source);
     let entries = collect_test_entries(program, "no_tests.sfn");
@@ -161,7 +161,7 @@ test "test_runner_json: collect_test_entries returns empty when no tests" {
 // --------------------------------------------------------------
 // locate_failing_test attribution rule
 // --------------------------------------------------------------
-test "test_runner_json: locate_failing_test picks closest preceding test" {
+test "test_runner_json: locate_failing_test picks closest preceding test" ![io] {
     let source = "test \"a\" { assert true; }\n"
         + "test \"b\" { assert true; }\n"
         + "test \"c\" { assert true; }\n";
@@ -178,7 +178,7 @@ test "test_runner_json: locate_failing_test returns -1 when failure absent" {
     assert locate_failing_test(entries, nothing) == -1;
 }
 
-test "test_runner_json: locate_failing_test returns -1 when no test precedes line 0" {
+test "test_runner_json: locate_failing_test returns -1 when no test precedes line 0" ![io] {
     let source = "test \"only\" { assert true; }\n";
     let program: Program = parse_program(source);
     let entries = collect_test_entries(program, "f.sfn");

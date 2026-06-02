@@ -27,7 +27,7 @@ fn allocate_block_label(prefix: string, counter: int) -> BlockLabelResult {
     };
 }
 
-fn lower_condition_to_i1(function_name: string, expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ConditionConversion {
+fn lower_condition_to_i1(function_name: string, expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ConditionConversion ![io] {
     let mut diagnostics: string[] = detect_suspension_conflicts(expression, locals, bindings, function_name, null);
     let lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions, context, "");
     let mut _ci11: int = 0;

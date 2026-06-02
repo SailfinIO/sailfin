@@ -26,7 +26,7 @@ import { lower_expression } from "./core";
 import { coerce_operand_to_type } from "./core_operands";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
-fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
+fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
     let mut diagnostics: string[] = base_result.diagnostics;
     let mut collected_string_constants: StringConstant[] = base_result.string_constants;

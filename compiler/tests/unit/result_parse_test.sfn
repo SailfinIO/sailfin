@@ -46,7 +46,7 @@ fn _first_variable_declaration(block: Block) -> Statement {
 // -------------------------------------------------------------------
 // Tests
 // -------------------------------------------------------------------
-test "parser try-op: `read()?` wraps the call in a TryOperator" {
+test "parser try-op: `read()?` wraps the call in a TryOperator" ![io] {
     let source = "fn main() { let x = read()?; }";
     let program = parse_program(source);
     let body = _find_function_body(program, "main");
@@ -59,7 +59,7 @@ test "parser try-op: `read()?` wraps the call in a TryOperator" {
     assert init.operand.variant == "Call";
 }
 
-test "parser try-op: `a()?.b()?` left-associates to `((a()?).b())?`" {
+test "parser try-op: `a()?.b()?` left-associates to `((a()?).b())?`" ![io] {
     let source = "fn main() { let v = a()?.b()?; }";
     let program = parse_program(source);
     let body = _find_function_body(program, "main");
@@ -87,7 +87,7 @@ test "parser try-op: `a()?.b()?` left-associates to `((a()?).b())?`" {
     assert inner_try.operand.variant == "Call";
 }
 
-test "parser try-op: nullable type annotation is NOT a TryOperator" {
+test "parser try-op: nullable type annotation is NOT a TryOperator" ![io] {
     // `let x: Config?` parses the `?` as part of the type annotation,
     // not as a postfix expression operator. The declaration carries a
     // type annotation and has no TryOperator initializer.

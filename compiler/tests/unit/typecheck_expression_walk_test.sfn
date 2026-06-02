@@ -27,7 +27,7 @@ fn _count_e0420(diagnostics: Diagnostic[]) -> int {
     return count;
 }
 
-fn _e0420_for(source: string) -> int {
+fn _e0420_for(source: string) -> int ![io] {
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     return _count_e0420(diagnostics);
