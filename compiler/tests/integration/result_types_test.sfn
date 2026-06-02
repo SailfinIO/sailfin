@@ -51,10 +51,10 @@ test "error_handling: union return function compiles and runs (error path)" {
     assert _describe_divide(10, 0) == "error: division by zero";
 }
 
-test "error_handling: parse_positive compiles and runs (success path)" {
+test "error_handling: parse_non_negative compiles and runs (success path)" {
     assert _describe_parse(42) == "ok";
 }
 
-test "error_handling: parse_positive compiles and runs (error path)" {
+test "error_handling: parse_non_negative compiles and runs (error path)" {
     assert _describe_parse(-5) == "error: expected non-negative number";
 }
