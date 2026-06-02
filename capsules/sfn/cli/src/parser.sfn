@@ -97,15 +97,27 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
                         + " requires a value", flag_name, "");
                 }
                 fl_values.push(argv[idx]);
-                let detail = _validate_typed_value(f.value_kind, argv[idx]);
-                if detail.length > 0 {
-                    return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "type_error", _with_hint(cmd.name, subcmd_name, "error: flag --"
-                        + flag_name
-                        + " "
-                        + detail
-                        + " (argv["
-                        + _int_to_string(idx)
-                        + "])"), f.long_name, "");
+                if strings_equal(f.value_kind, "choice") {
+                    if !_value_in_choices(f.choices, argv[idx]) {
+                        return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "invalid_choice", _with_hint(cmd.name, subcmd_name, "error: flag --"
+                            + flag_name
+                            + " "
+                            + _choice_detail(f.choices, argv[idx])
+                            + " (argv["
+                            + _int_to_string(idx)
+                            + "])"), f.long_name, "");
+                    }
+                } else {
+                    let detail = _validate_typed_value(f.value_kind, argv[idx]);
+                    if detail.length > 0 {
+                        return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "type_error", _with_hint(cmd.name, subcmd_name, "error: flag --"
+                            + flag_name
+                            + " "
+                            + detail
+                            + " (argv["
+                            + _int_to_string(idx)
+                            + "])"), f.long_name, "");
+                    }
                 }
             } else { fl_values.push("true"); }
         } else if _starts_with(token, "-") && token.length > 1 {
@@ -126,15 +138,27 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
                         + " requires a value", short, "");
                 }
                 fl_values.push(argv[idx]);
-                let detail = _validate_typed_value(f.value_kind, argv[idx]);
-                if detail.length > 0 {
-                    return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "type_error", _with_hint(cmd.name, subcmd_name, "error: flag -"
-                        + short
-                        + " "
-                        + detail
-                        + " (argv["
-                        + _int_to_string(idx)
-                        + "])"), f.long_name, "");
+                if strings_equal(f.value_kind, "choice") {
+                    if !_value_in_choices(f.choices, argv[idx]) {
+                        return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "invalid_choice", _with_hint(cmd.name, subcmd_name, "error: flag -"
+                            + short
+                            + " "
+                            + _choice_detail(f.choices, argv[idx])
+                            + " (argv["
+                            + _int_to_string(idx)
+                            + "])"), f.long_name, "");
+                    }
+                } else {
+                    let detail = _validate_typed_value(f.value_kind, argv[idx]);
+                    if detail.length > 0 {
+                        return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "type_error", _with_hint(cmd.name, subcmd_name, "error: flag -"
+                            + short
+                            + " "
+                            + detail
+                            + " (argv["
+                            + _int_to_string(idx)
+                            + "])"), f.long_name, "");
+                    }
                 }
             } else { fl_values.push("true"); }
         } else {
@@ -285,13 +309,15 @@ fn _find_flag_long(cmd: Command, name: string) -> Flag {
         }
         i += 1;
     }
+    let no_choices: string[] = [];
     return Flag {
         long_name: "",
         short_name: "",
         description: "",
         takes_value: false,
         required: false,
-        value_kind: "string"
+        value_kind: "string",
+        choices: no_choices
     };
 }
 
@@ -304,13 +330,15 @@ fn _find_flag_short(cmd: Command, name: string) -> Flag {
         }
         i += 1;
     }
+    let no_choices: string[] = [];
     return Flag {
         long_name: "",
         short_name: "",
         description: "",
         takes_value: false,
         required: false,
-        value_kind: "string"
+        value_kind: "string",
+        choices: no_choices
     };
 }
 
@@ -359,6 +387,34 @@ fn _validate_typed_value(value_kind: string, value: string) -> string {
         if value.length == 0 { return "expects a non-empty path"; }
     }
     return "";
+}
+
+fn _value_in_choices(choices: string[], value: string) -> boolean {
+    // True when `value` exactly matches one of the allowed `choices`.
+    // Matching is case-sensitive (see Issue #795 — case-insensitive
+    // matching is an open question deferred for now).
+    let mut i: int = 0;
+    loop {
+        if i >= choices.length { break; }
+        if strings_equal(choices[i], value) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _choice_detail(choices: string[], value: string) -> string {
+    // Build the `invalid_choice` detail: `expected one of {a, b, c},
+    // got 'd'`. `parse()` wraps this in the standard `error: flag
+    // --<name> ... (argv[N])` + usage-hint envelope.
+    let mut allowed = "";
+    let mut i: int = 0;
+    loop {
+        if i >= choices.length { break; }
+        if i > 0 { allowed = allowed + ", "; }
+        allowed = allowed + choices[i];
+        i += 1;
+    }
+    return "expected one of {" + allowed + "}, got '" + value + "'";
 }
 
 fn _is_valid_int(value: string) -> boolean {

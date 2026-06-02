@@ -520,18 +520,25 @@ feature availability.
   the tool-discovery order lives), `emit_llvm_with_retry` (in-process,
   for the CLI), and `emit_subprocess_with_retry` (subprocess, fresh
   arena per child, used by `_cr_compile_one` and now `_cr_stage_one`).
-  Single-shot `sfn emit llvm -o <out>` now routes through the cascade
-  by default (3 attempts + validation), so a seed IR-corruption flake
-  on a single-file emit is caught before it escapes into a downstream
-  `.o` compile. New `sfn emit` flags: `--attempts N`, `--no-retry`
-  (= `--attempts 1`), `--validate` / `--no-validate`. The resolver's
+  Single-shot `sfn emit llvm -o <out>` can opt into the cascade via new
+  flags: `--attempts N`, `--no-retry` (= `--attempts 1`), `--validate` /
+  `--no-validate`. Validation + retry are **opt-in** (default: 1
+  attempt, no validate) so the bare CLI stays behaviour-preserving — a
+  single-file emit may legitimately reference runtime-provided externs
+  that don't self-assemble in isolation, so forcing `llvm-as` on every
+  emit would surface spurious failures. Callers that know their IR is
+  self-contained opt in: the `ci-cross-windows` Makefile staging passes
+  `--attempts 3 --validate` (replacing its hand-inlined bash retry
+  loop), and the resolver validates at its own layer. The resolver's
   own subprocess/worker emits pass `--attempts 1 --no-validate` so the
   resolver layer stays the single retry/validate authority (no
   compounding). `SAILFIN_INJECT_FAULT=N` simulates N leading
   retry-eligible failures for deterministic recovery testing
-  (`compiler/tests/integration/emit_retry_test.sfn`). The
-  `ci-cross-windows` Makefile target's hand-inlined bash retry loop is
-  replaced by a single `$(NATIVE_OUT) emit --validate llvm` call.
+  (`compiler/tests/integration/emit_retry_test.sfn`).
+  Side effect: enabling `--validate` surfaced that the Darwin exe-path
+  leg (`core_call_emission.sfn`) emitted `call @strlen` without a
+  `declare` — `strlen` is now a concrete `runtime_helpers` row so the
+  post-lowering scan declares it (`intrinsic.exe_path.darwin.strlen`).
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —

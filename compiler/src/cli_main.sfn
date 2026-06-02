@@ -1482,20 +1482,23 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
         // cross-module effect table so callee-effect transitivity
         // (`E0402`) is enforced on the build path.
         let mut import_context_root: string = "";
-        // #515: single-shot `sfn emit llvm -o` now routes through
+        // #515: single-shot `sfn emit llvm -o` can route through
         // `emit_llvm_with_retry` (the same emit+probe+validate+retry
-        // cascade the resolver's multi-source path uses), so a seed
-        // IR-corruption flake on a single-file emit is caught before
-        // it escapes into a downstream `.o` compile instead of
-        // silently writing bad IR. Defaults: 3 attempts, validation
-        // on. `--attempts N` (N >= 1) overrides the count;
-        // `--no-retry` is shorthand for `--attempts 1`;
+        // cascade the resolver's multi-source path uses). Validation +
+        // retry are OPT-IN here (default: 1 attempt, no validate) so the
+        // bare CLI stays byte-for-byte behaviour-preserving — a
+        // single-file emit may legitimately reference runtime-provided
+        // externs that don't self-assemble in isolation, and forcing
+        // `llvm-as` on every emit would surface those as spurious
+        // failures (e.g. the exe-path test's Darwin leg). Callers that
+        // KNOW their IR is self-contained opt in: the Makefile
+        // cross-build staging passes `--validate`, and the resolver
+        // validates at its own layer. Flags: `--attempts N` (N >= 1)
+        // sets the count; `--no-retry` == `--attempts 1`;
         // `--validate` / `--no-validate` toggle the `llvm-as`/`clang`
-        // round-trip (e.g. `--no-validate` on a host without LLVM
-        // tooling). The `--validate` spelling exists so the Makefile
-        // cross-build staging can opt in explicitly.
-        let mut emit_attempts: int = 3;
-        let mut emit_validate: boolean = true;
+        // round-trip.
+        let mut emit_attempts: int = 1;
+        let mut emit_validate: boolean = false;
         let mut base_index = 1;
         // Parse optional flags: --timing, --module-name <slug>,
         // -o <path>, --attempts N, --no-retry, --validate,

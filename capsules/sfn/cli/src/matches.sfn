@@ -99,6 +99,15 @@ fn get_path(m: Matches, name: string) -> string {
     return get(m, name);
 }
 
+fn get_choice(m: Matches, name: string) -> string {
+    // Get a `flag_choice` value. Returns the sentinel "" when the flag
+    // was not provided. The value is returned verbatim — `parse()` has
+    // already validated it against the flag's allowed set (an invalid
+    // value surfaces as `ParseError { kind: "invalid_choice" }` and
+    // never reaches `Matches`).
+    return get(m, name);
+}
+
 fn _string_to_int(value: string) -> int {
     // Parse a base-10 integer (optional leading sign). Stops at the
     // first non-digit; returns 0 for empty input. Validation lives in

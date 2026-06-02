@@ -1,0 +1,77 @@
+// Tests for sfn/cli choice flags — the `flag_choice` builder, its
+// `get_choice` accessor, and the `invalid_choice` ParseError path added
+// in Issue #795 (Issue 1.6 of the CLI Modularization Epic, #351).
+//
+// Choice flags reuse the value-flag plumbing: `parse()` validates the
+// argv value against the flag's allowed `choices` and returns a
+// structured `ParseError { kind: "invalid_choice", flag_name, message }`
+// on a mismatch rather than calling `process.exit`. Matching is
+// case-sensitive (case-insensitive matching is a deferred open
+// question).
+import {
+    command,
+    flag_choice,
+    get_choice,
+    parse,
+    with_flag
+} from "../src/mod";
+
+// ---- happy path: a valid choice parses and reads back ----
+test "choice: flag_choice accepts an allowed value" {
+    let choices: string[] = ["red", "green", "blue"];
+    let cmd = with_flag(command("app", "desc"), flag_choice("color", "Pick a color", choices));
+    let argv: string[] = ["app", "--color", "green"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert strings_equal(get_choice(r.matches, "color"), "green");
+}
+
+test "choice: flag_choice accepts the first allowed value" {
+    let choices: string[] = ["red", "green", "blue"];
+    let cmd = with_flag(command("app", "desc"), flag_choice("color", "Pick a color", choices));
+    let argv: string[] = ["app", "--color", "red"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert strings_equal(get_choice(r.matches, "color"), "red");
+}
+
+// ---- invalid_choice: a value outside the set is rejected ----
+test "choice: value outside the set yields invalid_choice" {
+    let choices: string[] = ["red", "green", "blue"];
+    let cmd = with_flag(command("app", "desc"), flag_choice("color", "Pick a color", choices));
+    let argv: string[] = ["app", "--color", "mauve"];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "invalid_choice");
+    assert strings_equal(r.error.flag_name, "color");
+}
+
+// ---- invalid_choice: message reports the allowed set and the value ----
+test "choice: invalid_choice message lists the allowed set" {
+    let choices: string[] = ["red", "green", "blue"];
+    let cmd = with_flag(command("app", "desc"), flag_choice("color", "Pick a color", choices));
+    let argv: string[] = ["app", "--color", "mauve"];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert string_starts_with(r.error.message, "error: flag --color expected one of {red, green, blue}, got 'mauve'");
+}
+
+// ---- case-sensitivity: matching is exact (open question deferred) ----
+test "choice: matching is case-sensitive" {
+    let choices: string[] = ["red", "green", "blue"];
+    let cmd = with_flag(command("app", "desc"), flag_choice("color", "Pick a color", choices));
+    let argv: string[] = ["app", "--color", "GREEN"];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "invalid_choice");
+}
+
+// ---- absent optional choice flag returns the documented sentinel ----
+test "choice: get_choice returns empty sentinel when flag absent" {
+    let choices: string[] = ["red", "green", "blue"];
+    let cmd = with_flag(command("app", "desc"), flag_choice("color", "Pick a color", choices));
+    let argv: string[] = ["app"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert strings_equal(get_choice(r.matches, "color"), "");
+}
