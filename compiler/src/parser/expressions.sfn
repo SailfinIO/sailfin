@@ -3,7 +3,6 @@
 // Expression parsing - Pratt parser implementation for expressions including
 // literals, binary/unary operators, member access, calls, lambdas, and more.
 import {
-    Block,
     Capture,
     Expression,
     ObjectField,
@@ -17,6 +16,7 @@ import {
     substring
 } from "../string_utils";
 import { Token, TokenKind } from "../token";
+import { parse_block } from "./statements";
 import {
     append_token,
     filter_trivia,
@@ -34,7 +34,6 @@ import {
 } from "./token_utils";
 import {
     ArrayLiteralParseResult,
-    BlockParseResult,
     CallArgumentsParseResult,
     ExpressionBlockParseResult,
     ExpressionCollectResult,
@@ -1006,7 +1005,7 @@ fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
         kind: TokenKind.EndOfFile(), lexeme: "", line: 0, column: 0
     });
     let block_parser = Parser { tokens: block_tokens, index: 0 };
-    let parsed_block = parse_block_for_lambda(block_parser);
+    let parsed_block = parse_block(block_parser);
     let body = parsed_block.block;
 
     let empty_captures: Capture[] = [];
@@ -1375,51 +1374,4 @@ fn append_parameter(parameters: Parameter[], parameter: Parameter) -> Parameter[
 fn append_string_local(values: string[], value: string) -> string[] {
     values.push(value);
     return values;
-}
-
-// ============================================================================
-// Block Parsing for Lambda (forward declaration placeholder)
-// This needs to be provided by statements.sfn but we need it here for lambdas.
-// We'll use a simple implementation that creates an empty block for now,
-// and the actual implementation will be in statements.sfn
-// ============================================================================
-fn parse_block_for_lambda(parser: Parser) -> BlockParseResult {
-    let mut current = parser;
-    current = skip_trivia(current);
-    let token = parser_peek_raw(current);
-    if !symbol_matches(token, "{") {
-        return BlockParseResult {
-            parser: current,
-            block: Block { tokens: [], text: "", statements: [] }
-        };
-    }
-
-    let start_index = current.index;
-    let mut block_end_index: int = start_index;
-    current = parser_advance_raw(current);
-
-    // Simple block collection - just collect tokens until matching }
-    let mut depth: int = 1;
-    loop {
-        current = skip_trivia(current);
-        let tok = parser_peek_raw(current);
-        if symbol_matches(tok, "}") {
-            depth -= 1;
-            if depth == 0 {
-                block_end_index = current.index + 1;
-                current = parser_advance_raw(current);
-                break;
-            }
-        }
-        if symbol_matches(tok, "{") { depth += 1; }
-        if tok.kind.variant == "EndOfFile" { break; }
-        current = parser_advance_raw(current);
-    }
-
-    let mut end_index = current.index;
-    if block_end_index > start_index { end_index = block_end_index; }
-    let block_tokens = token_slice(parser.tokens, start_index, end_index);
-    let text = tokens_to_text(block_tokens);
-    let block = Block { tokens: block_tokens, text: text, statements: [] };
-    return BlockParseResult { parser: skip_trivia(current), block: block };
-}
+}  // Lambda bodies are parsed through the structured `parse_block` in  // statements.sfn (imported above), so `body.statements` is populated at  // parse time. The earlier token-collecting placeholder is gone; see  // issue #520.
