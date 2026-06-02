@@ -827,8 +827,12 @@ ci-cross-windows:
 	: "(compiler/tests/e2e/test_cross_windows_runtime_modules.sh) asserts"; \
 	: "this list stays in sync with the manifest (Risk R4). clock is"; \
 	: "re-emitted with SAILFIN_TARGET_OS=Windows for the errno->_errno"; \
-	: "fix (#877); the rest are target-independent IR compiled for"; \
-	: "mingw. Each <module>:<source> pair is space-separated."; \
+	: "fix (#877), and exec for the exe-path intrinsic leg (#967/#971):"; \
+	: "without the target override exe_path_locator() probes 'uname -s'"; \
+	: "on the Linux host and emits the readlink leg, leaving an undefined"; \
+	: "readlink reference once the MinGW stub is gone; Windows selects the"; \
+	: "GetModuleFileNameA leg instead. The rest are target-independent IR"; \
+	: "compiled for mingw. Each <module>:<source> pair is space-separated."; \
 	RUNTIME_MODS="prelude:runtime/prelude.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn"; \
 	RUNTIME_OBJS=""; \
 	for pair in $$RUNTIME_MODS; do \
@@ -847,7 +851,7 @@ ci-cross-windows:
 		while [ $$attempt -lt 3 ]; do \
 			attempt=$$((attempt + 1)); \
 			rm -f "$$ll"; \
-			if [ "$$mod" = "clock" ]; then \
+			if [ "$$mod" = "clock" ] || [ "$$mod" = "exec" ]; then \
 				SAILFIN_TARGET_OS=Windows $(NATIVE_OUT) emit -o "$$ll" llvm "$$src" >/dev/null || continue; \
 			else \
 				$(NATIVE_OUT) emit -o "$$ll" llvm "$$src" >/dev/null || continue; \

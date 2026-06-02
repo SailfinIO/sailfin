@@ -59,41 +59,21 @@ extern char **environ;
 #endif
 
 #if defined(_WIN32)
-/* MinGW does not ship POSIX `readlink` / `realpath`, but
- * `runtime/sfn/platform/exec.sfn` declares and calls them
- * unconditionally (the Sailfin module lacks a `cfg(target_os)` to
- * gate the body). Provide Windows definitions so the cross-compile
- * link succeeds. The retired C driver covered the same gap via
- * platform-conditional `#define` macros inside its translation unit;
- * exec.sfn's compiled .ll cannot apply those, so the definitions
- * live here instead.
+/* MinGW does not ship POSIX `realpath`, but
+ * `runtime/sfn/platform/exec.sfn::exe_path()` calls it on every
+ * platform to canonicalize the path returned by the
+ * `sailfin_intrinsic_exe_path` sentinel. Forward to `_fullpath`
+ * (matching the retired C driver's macro). The Sailfin callers in
+ * `exe_path` / `resolve_runtime_root` pass NULL for `resolved`, so
+ * `_fullpath` mallocs the buffer.
  *
- * `readlink` always returns -1 — exec.sfn's `exe_path()` treats that
- * as a lookup failure and returns "", which the
- * `compiler/src/cli_main.sfn::main` argv[0] fallback handles.
- *
- * `realpath` forwards to `_fullpath` (matching the C driver's
- * macro). The Sailfin caller in `resolve_runtime_root` passes
- * NULL for `resolved`, so `_fullpath` mallocs the buffer.
- *
- * Return type for `readlink` is `int64_t` to match the LLVM `i64`
- * declaration exec.sfn emits — POSIX `ssize_t` would be 64-bit on
- * mingw-w64/x86_64 too but pinning the width sidesteps any future
- * 32-bit cross-compile surprise. Symbols are *not* declared weak:
- * MinGW's COFF linker treats weak external symbols inconsistently
- * with ELF, and we know the mingw CRT does not provide either
- * name. A follow-up to #468 / #473 wires `GetModuleFileNameA` into
- * `exec.sfn` properly and retires these stubs. */
+ * The Windows `readlink` stub that previously lived here is gone:
+ * the exe-path lowering now emits `GetModuleFileNameA` on the
+ * Windows target (#967) rather than `readlink`, and `exec.sfn` no
+ * longer declares or calls `readlink` directly (#968), so nothing
+ * references the symbol on this platform anymore (#971). */
 #include <windows.h>
 #include <stdlib.h>
-
-int64_t readlink(const char *path, char *buf, size_t bufsize)
-{
-    (void)path;
-    (void)buf;
-    (void)bufsize;
-    return -1;
-}
 
 char *realpath(const char *path, char *resolved)
 {
