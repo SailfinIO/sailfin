@@ -114,7 +114,7 @@ scoped issue rather than letting it block the easy win.
 | Local helper | Real symbol | Closure | Signature parity | Decision |
 |---|---|---|---|---|
 | `_local_join_effects` | `join_effects(string[])` @ `diagnostics_render.sfn:42` | light (~8) | **exact** | **Migrate** — direct import, delete local |
-| `_local_code_for_first_description(string)` | `code_for_missing_effect(string[], EffectRequirement[])` @ `:54` | light (~8) | **mismatch** (struct args, not desc string) | **Migrate via struct literals** — build `EffectRequirement { effect, description, trigger: null }` and assert the E0400/E0401/E0402 contract on the real fn |
+| `_local_code_for_first_description(string)` | `code_for_missing_effect(string[], EffectRequirement[])` @ `:54` | light (~8) | **mismatch** (struct args, not desc string) | **Migrate via struct literals** — build `EffectRequirement { effect: "...", description: "...", trigger: null }` and assert the E0400/E0401/E0402 contract on the real fn |
 | `_local_build_effect_message` | no standalone peer; logic inlined in `effect_violation_to_diagnostic(EffectViolation)` @ `:92-115` | light (~8) | n/a (no peer) | **Optional / defer** — only reachable by constructing an `EffectViolation` (nested arrays); higher struct-literal segfault risk. Keep local OR add as stretch |
 | `_local_num_to_string` | `number_to_string(int)` @ `main.sfn:621` | **heavy (~130)** | exact | **Keep local** — heavy closure; follow-up issue |
 | `_local_render_summary(int,int)` | `render_summary(CheckSummary)` @ `tools/check.sfn:212` | **heavy (~130)** | **mismatch** (struct arg) + heavy | **Keep local** — heavy closure; follow-up issue |
