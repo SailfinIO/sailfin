@@ -10,8 +10,12 @@
 //
 // Module surface
 //   - `exe_path() -> string ![io]` — absolute path of the
-//     currently-running binary. Uses `readlink("/proc/self/exe")`
-//     on Linux. Returns `""` when the lookup fails (callers
+//     currently-running binary. Calls the host-aware
+//     `sailfin_intrinsic_exe_path` sentinel (#967), which the
+//     compiler lowers to the host's concrete primitive at emit
+//     time (`readlink` on Linux, `_NSGetExecutablePath` on
+//     Darwin, `GetModuleFileNameA` on Windows), then canonicalizes
+//     via `realpath`. Returns `""` when the lookup fails (callers
 //     layer their own fallback, typically `realpath(argv[0])`).
 //   - `binary_dir(exe: string) -> string` — pure dirname: the
 //     prefix of `exe` up to (but excluding) the final `/`.
@@ -29,22 +33,20 @@
 //     retired C driver documented the same walk.
 //
 // Platform coverage
-//   Linux is the only platform validated end-to-end in this PR.
-//   The macOS path requires `_NSGetExecutablePath` (declared in
-//   `runtime/sfn/platform/libc.sfn` as criterion 4 of #468 but
-//   not called from this body) and the Windows path requires
-//   `GetModuleFileNameA` (same disposition). Sailfin lacks
-//   `cfg(target_os)` (issue #468 `Out:` scope) and a static link
-//   against an unresolved macOS / Windows symbol from a Linux
-//   build fails immediately, so adding the call here would break
-//   the Linux CI link. A follow-up issue wires macOS support
-//   once one of three things lands: (1) a per-OS C stub library
-//   that resolves the missing symbols to noop returns on the
-//   other platform, (2) Sailfin weak-symbol attributes, or
-//   (3) `cfg(target_os)`. macOS users in the interim set
-//   `SAILFIN_RUNTIME_ROOT` explicitly — `resolve_runtime_root`
-//   honors the override before walking, so the runtime resolves
-//   without `exe_path`.
+//   `exe_path()` now resolves on every platform via the
+//   `sailfin_intrinsic_exe_path` sentinel (#967): the compiler
+//   chooses the host's primitive at emit time and only ever
+//   emits a `call`/`declare` for that one symbol, so the Linux
+//   self-host link is unaffected and the macOS / Windows
+//   primitives never appear in a Linux build. This replaces the
+//   prior Linux-only `readlink` body — Sailfin still lacks
+//   `cfg(target_os)` (issue #468 `Out:` scope), but the sentinel
+//   sidesteps it by selecting the symbol inside the lowering
+//   dispatcher rather than in this source. The macOS arm64
+//   end-to-end behavior is gated on CI (issue #3); Linux is
+//   validated locally. `SAILFIN_RUNTIME_ROOT` remains an
+//   operator override honored by `resolve_runtime_root` before
+//   any `exe_path`-derived walk.
 //
 // Naming
 //   No `_sfn_` infix on the canonical `exe_path` / `binary_dir`
@@ -113,8 +115,6 @@ extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
 extern fn strrchr(s: * u8, c: i32) -> * u8;
 
 extern fn getenv(name: * u8) -> * u8;
-
-extern fn readlink(path: * u8, buf: * u8, bufsize: usize) -> i64;
 
 extern fn realpath(path: * u8, resolved: * u8) -> * u8;
 
@@ -192,41 +192,73 @@ fn binary_dir(exe: string) -> string {
 }
 
 // `exe_path()` returns the absolute path of the currently
-// running binary, or `""` if the lookup fails. Today's body
-// uses Linux's `/proc/self/exe` symlink — the most reliable
-// source on Linux because it works even when `argv[0]` is a
-// bare `$PATH` name (the user typed `sailfin` rather than
-// `./sailfin` or `/usr/local/bin/sailfin`).
+// running binary, or `""` if the lookup fails. It calls the
+// host-aware `sailfin_intrinsic_exe_path` registry sentinel
+// (#967), which the compiler lowers at emit time to the host's
+// concrete primitive — `readlink("/proc/self/exe", …)` on
+// Linux, `_NSGetExecutablePath(…)` on Darwin,
+// `GetModuleFileNameA(…)` on Windows — so this single body
+// resolves the path on every platform without referencing a
+// non-host symbol that would break the cross-platform link.
+// See `docs/proposals/host-aware-exe-path-intrinsic.md` §4.7.
 //
-// macOS / Windows: see the module header. Both platforms have
-// their externs declared in `runtime/sfn/platform/libc.sfn` for
-// the follow-up wire-up; this body returns `""` on those
-// platforms today and callers fall back to
-// `SAILFIN_RUNTIME_ROOT` (honored by `resolve_runtime_root`).
+// The sentinel's uniform contract (the Linux shape): it writes
+// up to `size` bytes of the path into `buf` (NUL-terminated
+// when it fits) and returns the byte length written excluding
+// the NUL, or a value `<= 0` on failure. `exec.sfn` keeps
+// ownership of `buf`.
 //
 // Buffer sizing: 4096 covers Linux's `PATH_MAX`. macOS uses
 // `PATH_MAX = 1024` but the larger Linux constant subsumes it
 // and the few extra kilobytes are negligible at the single
 // call site (program startup). The buffer is zero-initialized
 // so the returned `* u8 as string` views a properly
-// NUL-terminated byte sequence regardless of how many bytes
-// `readlink` actually wrote.
+// NUL-terminated byte sequence.
 fn exe_path() -> string ![io] {
     let buf_size: usize = 4096 as usize;
     let buf: * u8 = malloc(buf_size);
     if buf as i64 == 0 { return ""; }
     memset(buf, 0, buf_size);
-    // The seed mis-lowers `let proc_self_exe: * u8 = "/proc/self/
-    // exe" as * u8;` to `store i8* null` (the literal aggregate
-    // is built but the cast then zeros the pointer). Passing
-    // the literal directly to `readlink` triggers the correct
-    // `extractvalue` lowering at the call site — see the cast-
-    // quirk note in the module header.
-    let s_proc: string = "/proc/self/exe";
-    let n: i64 = readlink(s_proc as * u8, buf, buf_size);
-    if n > 0 { return buf as string; }
-    free(buf);
-    return "";
+    // Reserve the final byte as a guaranteed NUL terminator by
+    // passing `buf_size - 1` as the usable size: `readlink`
+    // never NUL-terminates and writes up to `size` bytes, while
+    // `_NSGetExecutablePath` / `GetModuleFileNameA` count the
+    // terminator in their sizing. Capping one byte short of the
+    // allocation means the zero-filled last byte always
+    // terminates, so `buf as string` can never read past the
+    // allocation even when the path fills the buffer.
+    let usable: i64 = (buf_size as i64) - 1;
+    let n: i64 = sailfin_intrinsic_exe_path(buf, usable);
+    if n <= 0 {
+        free(buf);
+        return "";
+    }
+    // `n >= usable` means the path was (or may have been)
+    // truncated — `readlink` truncates silently, returning
+    // exactly `size`. Treat it as failure so callers fall back
+    // (`SAILFIN_RUNTIME_ROOT`, the `binary_dir` walk) rather
+    // than acting on a partial path. A path longer than 4095
+    // bytes is pathological.
+    if n >= usable {
+        free(buf);
+        return "";
+    }
+    // Darwin's `_NSGetExecutablePath` may return a non-canonical
+    // / symlinked path; `realpath` is portable POSIX (already
+    // used by `resolve_runtime_root`) and idempotent on Linux's
+    // already-canonical `/proc/self/exe`, so canonicalizing here
+    // once is correct on every target. On success `realpath`
+    // allocates and returns ownership of `canon`; we leak it at
+    // this single startup call site, matching the documented
+    // leak contract in `resolve_runtime_root`.
+    let canon: * u8 = realpath(buf, null);
+    if canon as i64 != 0 {
+        free(buf);
+        return canon as string;
+    }
+    // `realpath` failed; the raw path from the sentinel is still
+    // usable, so return it rather than dropping a valid result.
+    return buf as string;
 }
 
 // `resolve_runtime_root(exe_path)` finds the runtime bundle for
