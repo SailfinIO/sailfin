@@ -247,19 +247,39 @@ dispatcher's job to "fill buf, return length-or-(-1)".
 store i32 %sz32, i32* %szslot
 %rc     = call i32 @_NSGetExecutablePath(i8* %buf, i32* %szslot)
 ; rc == 0 => success; buf now holds a NUL-terminated path.
-; Compute length via strlen so the contract (bytes excluding NUL) holds.
-%failed = icmp ne i32 %rc, 0
-%len    = call i64 @strlen(i8* %buf)        ; strlen already externed in libc.sfn
-%neg1   = i64 -1
-%out    = select i1 %failed, i64 %neg1, i64 %len
+; rc != 0 => buffer too small; *szslot holds the required size and buf
+;            contents are UNSPECIFIED — do NOT read buf on this path.
+%ok     = icmp eq i32 %rc, 0
+br i1 %ok, label %exe_ok, label %exe_fail
+exe_ok:
+  ; strlen is computed ONLY on the success path, where buf is a defined,
+  ; NUL-terminated C string. Emitting it unconditionally (e.g. via a flat
+  ; `select`) would execute `call @strlen` even on failure, scanning a
+  ; buffer with unspecified contents.
+  %len = call i64 @strlen(i8* %buf)
+  br label %exe_done
+exe_fail:
+  br label %exe_done
+exe_done:
+  %out = phi i64 [ %len, %exe_ok ], [ -1, %exe_fail ]
 ; operand: { llvm_type: "i64", value: %out }
 ```
 
-`strlen` extern: confirm it is declared in `libc.sfn`; if not, add it to the
-`libc.sfn` accept-list as part of the Darwin-leg issue (it is a pure POSIX
-symbol present on every target, so it is safe to `call` unconditionally — it is
-*not* platform-specific and does not trigger the cross-platform link problem).
-`select`/`icmp`/`alloca`/`trunc`/`store` are plain LLVM and target-neutral.
+`strlen` extern: it is **not** currently declared in `libc.sfn` (only mentioned
+in a comment there); it is separately re-externed as `extern fn strlen(s: * u8)
+-> usize` in `process.sfn`, `exception.sfn`, `adapters/filesystem.sfn`, and
+`adapters/http.sfn`. The Darwin leg therefore must ensure a `declare i64
+@strlen(i8*)` is emitted alongside its `call` (add `strlen` to `libc.sfn` as the
+canonical home — issue #967 — and optionally dedupe the four ad-hoc re-externs
+in a later cleanup). `strlen` is a pure POSIX symbol present on every target, so
+declaring/calling it does not trigger the cross-platform link problem; it is
+gated into the success block above purely for memory-safety, not linkage.
+`phi`/`br`/`icmp`/`alloca`/`trunc`/`store` are plain LLVM and target-neutral.
+
+> Note: `exec.sfn` zero-fills `buf` before the sentinel call (§4.7), so in
+> practice a stray `strlen` on the failure path would still terminate within the
+> allocation. The success-only structure above does not rely on that — it keeps
+> the dispatcher correct independent of caller behavior.
 
 **Windows** (`os == "Windows"`, via `SAILFIN_TARGET_OS`):
 
@@ -310,8 +330,24 @@ fn exe_path() -> string ![io] {
     let buf: *u8 = malloc(buf_size);
     if buf as i64 == 0 { return ""; }
     memset(buf, 0, buf_size);
-    let n: i64 = sailfin_intrinsic_exe_path(buf, buf_size as i64);
+    // Reserve the final byte as a guaranteed NUL terminator: pass
+    // buf_size - 1 as the usable size. readlink() never NUL-terminates
+    // and writes up to `size` bytes; _NSGetExecutablePath / GetModuleFileNameA
+    // include the terminator in their size accounting. Capping the usable
+    // size one byte short of the allocation means the zero-filled last byte
+    // always terminates the string, so `buf as string` can never read past
+    // the allocation even when the path fills the buffer.
+    let usable: i64 = (buf_size as i64) - 1;
+    let n: i64 = sailfin_intrinsic_exe_path(buf, usable);
     if n <= 0 { free(buf); return ""; }
+    // n == usable means the path was (or may have been) truncated: readlink
+    // truncates silently, returning exactly `size`. Treat it as failure so
+    // callers fall back rather than acting on a partial path. (A path longer
+    // than 4095 bytes is pathological; a future revision could retry with a
+    // larger buffer — _NSGetExecutablePath even reports the required size in
+    // *szslot — but failing here is safe because callers layer their own
+    // fallback, e.g. SAILFIN_RUNTIME_ROOT and the binary_dir path.)
+    if n >= usable { free(buf); return ""; }
     // Darwin's _NSGetExecutablePath may return a non-canonical /
     // symlinked path; realpath is portable POSIX and already used by
     // resolve_runtime_root. Linux's /proc/self/exe is already canonical
