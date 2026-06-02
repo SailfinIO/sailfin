@@ -28,7 +28,7 @@
 //   %size_ptr = getelementptr %sfn_closure_env_<id>,
 //                              %sfn_closure_env_<id>* null, i32 1
 //   %size_i64 = ptrtoint %sfn_closure_env_<id>* %size_ptr to i64
-//   %env_raw  = call noalias i8* @sailfin_runtime_alloc_struct(i64 %size_i64)
+//   %env_raw  = call noalias i8* @sfn_alloc_struct(i64 %size_i64)
 //   %env_ptr  = bitcast i8* %env_raw to %sfn_closure_env_<id>*
 //   %field0_ptr = getelementptr inbounds %sfn_closure_env_<id>,
 //                              %sfn_closure_env_<id>* %env_ptr,
@@ -233,7 +233,7 @@ struct ClosureCaptureOperand {
 }
 
 // Result of `emit_closure_env_alloc`. `env_raw_var` is the i8*
-// returned by `sailfin_runtime_alloc_struct` (handed to the
+// returned by `sfn_alloc_struct` (handed to the
 // closure pair as the `env*` slot in A3). `env_typed_var` is the
 // bitcast `%sfn_closure_env_<id>*` used by the GEP+store walk.
 struct ClosureEnvAllocResult {
@@ -402,8 +402,7 @@ fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOper
 
     let env_raw = format_temp_name(current_temp);
     current_temp += 1;
-    lines.push("  " + env_raw
-        + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
+    lines.push("  " + env_raw + " = call noalias i8* @sfn_alloc_struct(i64 "
         + size_i64
         + ")");
 

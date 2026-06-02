@@ -939,21 +939,28 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
 
     // M1.7.2a (issue #496): heap allocation primitive registered for
-    // `emit_runtime_call` dispatch. The seed already emits the matching
-    // `declare noalias i8* @sailfin_runtime_alloc_struct(i64)` line via
-    // `lowering_phase_render.sfn:164`, so adding this descriptor only
-    // unblocks the migration of the ~21 hand-spelled call sites — it
-    // does not introduce a new declare. The `noalias` return attribute
-    // is preserved at the call site through `RuntimeCallOverrides.return_attributes`
+    // `emit_runtime_call` dispatch. The `noalias` return attribute is
+    // preserved at the call site through `RuntimeCallOverrides.return_attributes`
     // because the descriptor schema deliberately has no slot for
     // call-site attributes (epic #494 forbids extending it).
+    //
+    // M3 (#930, epic #390): the hottest Category-C primitive flips its
+    // `symbol` + `native_signature` to the Sailfin-native `@sfn_alloc_struct`
+    // body in `runtime/sfn/memory/mem.sfn` (a faithful port of the legacy C
+    // alloc-struct body's `_rt_calloc(1, size)` routing). The
+    // descriptor is in the `_preamble_inlined` skip-list in `rendering.sfn`,
+    // so the declare-render loop does NOT emit its declare; the sole declare
+    // is the preamble line in `lowering_phase_render.sfn`, flipped to the
+    // `sfn_alloc_struct` symbol in lockstep. The legacy C body stays exported
+    // in `runtime/native/` for seed-built IR until the M3 seed cut, but every
+    // fresh emission now resolves through `effective_symbol` to `@sfn_alloc_struct`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "alloc_struct", symbol: "sailfin_runtime_alloc_struct", return_type: "i8*", parameter_types: ["i64"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "alloc_struct", symbol: "sfn_alloc_struct", return_type: "i8*", parameter_types: ["i64"], effects: [], native_signature: "sfn_alloc_struct", c_abi_return_type: null
     });
 
     // M1.7.2a (issue #496): arena-aware free for boxed return values.
     // Today's only call site is `core.sfn:698`, where an awaited async
-    // result allocated through `sailfin_runtime_alloc_struct` is freed
+    // result allocated through `sfn_alloc_struct` is freed
     // after the unboxing load. Plain `@free` corrupts arena chunk
     // metadata; the runtime exposes the matching arena-aware entrypoint
     // here. Already declared via `lowering_phase_render.sfn:167`.

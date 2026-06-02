@@ -159,18 +159,24 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
         lines.push("declare void @free(i8*)");
     }
     // Arena-aware allocation primitive. The expression-lowering pass
-    // emits `@sailfin_runtime_alloc_struct` instead of raw `@calloc`
-    // for string-literal materialization, struct/array literal boxes,
-    // and scalar→i8* coercions so that in-process multi-module drivers
-    // (`sfn check <dir>`, `sfn test`, future `sfn lsp`) can reclaim
-    // per-iteration scratch via Phase 5a's `runtime.arena_rewind`.
-    // Without this routing the rewind primitive cannot reach libc-
-    // owned literal storage and peak RSS climbs unbounded across the
-    // per-file loop. The runtime helper falls back to libc calloc when
-    // the arena is disabled, so behaviour for `SAILFIN_USE_ARENA=0`
+    // emits `@sfn_alloc_struct` instead of raw `@calloc` for string-literal
+    // materialization, struct/array literal boxes, and scalar→i8* coercions
+    // so that in-process multi-module drivers (`sfn check <dir>`, `sfn test`,
+    // future `sfn lsp`) can reclaim per-iteration scratch via Phase 5a's
+    // `runtime.arena_rewind`. Without this routing the rewind primitive
+    // cannot reach libc-owned literal storage and peak RSS climbs unbounded
+    // across the per-file loop. The runtime helper falls back to libc calloc
+    // when the arena is disabled, so behaviour for `SAILFIN_USE_ARENA=0`
     // is unchanged.
-    if find_function_by_name(context_functions, "sailfin_runtime_alloc_struct") == null {
-        lines.push("declare noalias i8* @sailfin_runtime_alloc_struct(i64)");
+    //
+    // M3 (#930, epic #390): the `alloc_struct` descriptor flipped its
+    // `symbol` / `native_signature` from the legacy C
+    // `sailfin_runtime_alloc_struct` to the Sailfin-native `@sfn_alloc_struct`
+    // (`runtime/sfn/memory/mem.sfn`). The descriptor sits in the
+    // `_preamble_inlined` skip-list in `rendering.sfn`, so this preamble line
+    // is the sole declare — it must match the flipped symbol.
+    if find_function_by_name(context_functions, "sfn_alloc_struct") == null {
+        lines.push("declare noalias i8* @sfn_alloc_struct(i64)");
     }
     // #927: the `runtime.free` descriptor is in the `_preamble_inlined`
     // skip-list in `rendering.sfn` (the descriptor render loop does NOT
@@ -180,8 +186,8 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     // Sailfin-native `@sfn_mem_free` (`runtime/sfn/memory/mem.sfn`), and
     // both the scope-exit drop path AND the await-unbox path emit
     // `call void @sfn_mem_free(...)`, so this declare must match. (The
-    // `alloc_struct` declare above stays on the legacy C symbol: that
-    // primitive's port is a separate issue.)
+    // `alloc_struct` declare above is likewise flipped to
+    // `@sfn_alloc_struct` as of #930.)
     if find_function_by_name(context_functions, "sfn_mem_free") == null {
         lines.push("declare void @sfn_mem_free(i8*)");
     }

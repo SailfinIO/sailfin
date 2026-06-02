@@ -1068,7 +1068,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                                 + "* "
                                 + typed_ptr_temp);
                             // Arena-aware free: the impl function's return
-                            // box is allocated via `@sailfin_runtime_alloc_struct`
+                            // box is allocated via `@sfn_alloc_struct`
                             // (Phase 5a follow-up), so this must route through
                             // the matching arena-aware free. Plain `@free` on
                             // an arena pointer corrupts glibc chunk metadata.
