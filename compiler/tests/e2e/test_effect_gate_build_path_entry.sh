@@ -35,12 +35,17 @@
 #     `.sfn-asm` was never referenced — so asserting on E0402 cleanly
 #     distinguishes fixed from unfixed.
 #
-# Note: this fixture's `main()` does NOT call the sibling, so the `-p`
-# driver's module-drop leniency (a module whose emit fails is silently
-# dropped from the link, cli_main.sfn) keeps the overall exit code at 0
-# — we assert on the E0402 diagnostic, not the exit code. In the real
-# compiler self-build every module IS linked, so the same E0402 breaks
-# the link and genuinely fails `make check` (acceptance criterion 1).
+# Note: this fixture's `main()` does NOT call the sibling, so the
+# sibling is an "orphan" — no linked module references it. Before #991
+# the `-p` driver's module-drop leniency (a module whose emit fails was
+# silently dropped from the link, cli_main.sfn) kept the overall exit
+# code at 0 for exactly this shape, so Test 2 asserted only on the
+# E0402 diagnostic. #991 surfaced the `compile_capsule_modules` failure
+# to the driver, so the build now exits non-zero even when the failing
+# module is an orphan — Test 2 asserts both the diagnostic and the
+# non-zero exit. In the real compiler self-build every module IS
+# linked, so the same E0402 breaks the link and fails `make check`
+# (acceptance criterion 1) by the linker path as well.
 #
 # Usage:
 #   compiler/tests/e2e/test_effect_gate_build_path_entry.sh <compiler-binary>
@@ -150,15 +155,59 @@ test_bad_sibling_e0402() {
     cd "$SCRATCH" || return 1
     rm -rf "$SCRATCH/build"
     write_sib ""  # use_dep() calls do_io() without declaring ![io]
-    "$BINARY" build -p . > "$SCRATCH/bad.stdout" 2>&1 || true
+    local rc=0
+    "$BINARY" build -p . > "$SCRATCH/bad.stdout" 2>&1 || rc=$?
     if ! grep -q "E0402" "$SCRATCH/bad.stdout"; then
         echo "[test]   expected E0402 on the build path; full output:" >&2
         cat "$SCRATCH/bad.stdout" >&2
         return 1
     fi
+    # Issue #991: the orphan sibling's emit failure must propagate to a
+    # non-zero build exit. Pre-#991 the failing module was silently
+    # dropped from the link and the build reported `built:` with exit 0.
+    if [ "$rc" -eq 0 ]; then
+        echo "[test]   expected non-zero exit for orphan E0402 build; got exit 0" >&2
+        cat "$SCRATCH/bad.stdout" >&2
+        return 1
+    fi
     return 0
 }
-run_test "build path emits E0402 for under-declared sibling->entry ![io]" test_bad_sibling_e0402
+run_test "build path emits E0402 + exits non-zero for orphan sibling->entry ![io]" test_bad_sibling_e0402
+
+# ---- Test 3: a clean -p build still exits 0 (issue #991 guard) ----
+# Pins acceptance criterion 3: the #991 driver guard returns non-zero
+# only when a module actually failed to compile. A `-p` build where
+# every module emits cleanly must still link and exit 0 — the
+# empty-vs-failed `ll_paths` distinction must not regress a legitimate
+# build into a failure.
+#
+# This uses a SELF-CONTAINED sibling (no cross-module import) rather
+# than the good-case `write_sib " ![io]"` fixture: a sibling that
+# imports the entry's `do_io` currently can't resolve the entry's
+# return-type signature during its own per-module lowering (a separate
+# latent limitation of cross-module `-p` emit), so that "good" sibling
+# does not in fact emit cleanly. An orphan sibling with no imports and
+# declared effects is the clean-emit case this criterion needs.
+test_clean_build_exits_zero() {
+    cd "$SCRATCH" || return 1
+    rm -rf "$SCRATCH/build"
+    cat > "$SCRATCH/src/util/sib.sfn" <<'EOF'
+fn use_dep() ![io] {
+    print.info("sibling side effect");
+}
+
+export { use_dep };
+EOF
+    local rc=0
+    "$BINARY" build -p . > "$SCRATCH/good2.stdout" 2>&1 || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "[test]   expected exit 0 for clean -p build; got exit $rc" >&2
+        cat "$SCRATCH/good2.stdout" >&2
+        return 1
+    fi
+    return 0
+}
+run_test "clean -p build exits 0 (no-failure path not regressed)" test_clean_build_exits_zero
 
 # ---- Summary ----
 echo ""
