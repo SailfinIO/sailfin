@@ -114,6 +114,23 @@ extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
 
 extern fn strrchr(s: * u8, c: i32) -> * u8;
 
+// `strlen` backs the Darwin leg of the `sailfin_intrinsic_exe_path`
+// sentinel: on macOS the lowering dispatcher emits a success-path
+// `call i64 @strlen(buf)` to recover the path length that
+// `_NSGetExecutablePath` writes (the Linux leg's `readlink`
+// returns the count directly, so it never references `strlen`).
+// `exec.sfn` inlines its externs rather than importing `libc.sfn`
+// (the #306 cross-module workaround documented in the module
+// header), so the `strlen` declaration must live here too —
+// otherwise the Darwin module emits `call @strlen` with no
+// matching `declare`, and clang rejects the IR with
+// `use of undefined value '@strlen'` (the only platform that
+// exercises this leg). Mirrors the same re-extern in
+// `runtime/sfn/process.sfn` / `exception.sfn` / `adapters/*`.
+// Unused on the Linux/Windows legs — a bare `declare` for a libc
+// symbol present on every target is harmless.
+extern fn strlen(s: * u8) -> usize;
+
 extern fn getenv(name: * u8) -> * u8;
 
 extern fn realpath(path: * u8, resolved: * u8) -> * u8;
@@ -203,10 +220,15 @@ fn binary_dir(exe: string) -> string {
 // See `docs/proposals/host-aware-exe-path-intrinsic.md` §4.7.
 //
 // The sentinel's uniform contract (the Linux shape): it writes
-// up to `size` bytes of the path into `buf` (NUL-terminated
-// when it fits) and returns the byte length written excluding
-// the NUL, or a value `<= 0` on failure. `exec.sfn` keeps
-// ownership of `buf`.
+// up to `size` bytes of the path into `buf` and returns the
+// byte length written, or a value `<= 0` on failure. `exec.sfn`
+// keeps ownership of `buf`. The intrinsic does **not** guarantee
+// NUL-termination on every leg — the Linux leg is a raw
+// `readlink`, which never terminates and returns exactly the
+// byte count; only `_NSGetExecutablePath` / `GetModuleFileNameA`
+// terminate. This body provides termination itself (zero-fill +
+// a reserved trailing byte, below), so callers must not assume
+// the intrinsic terminates `buf`.
 //
 // Buffer sizing: 4096 covers Linux's `PATH_MAX`. macOS uses
 // `PATH_MAX = 1024` but the larger Linux constant subsumes it

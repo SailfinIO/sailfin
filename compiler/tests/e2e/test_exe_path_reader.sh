@@ -175,6 +175,21 @@ test_darwin_strlen() {
     return 0
 }
 
+test_darwin_strlen_declare() {
+    # The Darwin leg's `call @strlen` must be backed by a matching
+    # `declare i64 @strlen(...)` in the same module — exec.sfn inlines its
+    # externs rather than importing libc.sfn, so a missing source extern
+    # leaves the call undefined and clang rejects the IR with
+    # `use of undefined value '@strlen'`. This only surfaces when the
+    # Darwin IR is actually compiled (the macOS CI leg), so pin the
+    # declare here, host-independently, on the Linux runner.
+    if ! grep -qE 'declare .*@strlen\(' "$LL_DARWIN"; then
+        echo "[test]   missing 'declare @strlen(' to back the Darwin-leg call"
+        return 1
+    fi
+    return 0
+}
+
 test_darwin_realpath() {
     if ! grep -qE 'call i8\* @realpath\(' "$LL_DARWIN"; then
         echo "[test]   missing 'call i8* @realpath(' (canonicalization) on the Darwin leg"
@@ -245,6 +260,7 @@ run_test "Linux leg canonicalizes via @realpath" test_linux_realpath
 run_test "Linux leg omits Darwin/Windows primitives" test_linux_no_other_symbol
 run_test "Darwin leg calls @_NSGetExecutablePath" test_darwin_call
 run_test "Darwin leg recovers length via @strlen" test_darwin_strlen
+run_test "Darwin leg declares @strlen to back the call" test_darwin_strlen_declare
 run_test "Darwin leg canonicalizes via @realpath" test_darwin_realpath
 run_test "Darwin leg omits Linux/Windows primitives" test_darwin_no_other_symbol
 run_test "Windows-target leg calls @GetModuleFileNameA" test_windows_call
