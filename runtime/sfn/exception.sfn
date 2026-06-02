@@ -399,19 +399,35 @@ fn sfn_take_exception(frame: * SfnExceptionFrame) -> * u8 {
 // retires them.
 let mut sfn_exception_message_addr: i64 = 0;
 
-// `sfn_set_exception(message)` records `message` in the shared slot.
-// Mirrors the C `message ? message : ""` guard: a null argument stores
-// a non-null empty C string so `sfn_has_exception()` still reports true.
-// The empty buffer is a fresh 1-byte `malloc` (matching
+// Lazily-allocated, process-lifetime empty C string reused for every
+// `sfn_set_exception(null)` call. `0` means "not yet allocated". Mirrors
+// the C runtime's static `""` literal: allocated at most once and never
+// freed, so repeated null sets do not leak.
+let mut sfn_exception_empty_addr: i64 = 0;
+
+// `_sfn_exception_empty()` returns the shared empty C string, allocating
+// it on first use. A 1-byte `malloc` (matching
 // `runtime/sfn/process.sfn`'s `_process_empty_cstr`) rather than a
 // `"" as * u8` literal, which the current seed can mis-lower to a null
 // pointer in a `let` binding (see the cast-quirk note in
-// `runtime/sfn/platform/exec.sfn`).
+// `runtime/sfn/platform/exec.sfn`). If `malloc` fails the cache stays
+// `0` and the next call retries.
+fn _sfn_exception_empty() -> * u8 {
+    if sfn_exception_empty_addr == 0 {
+        let e = malloc(1 as usize);
+        if e as i64 != 0 { memset(e, 0, 1 as usize); }
+        sfn_exception_empty_addr = e as i64;
+    }
+    return sfn_exception_empty_addr as * u8;
+}
+
+// `sfn_set_exception(message)` records `message` in the shared slot.
+// Mirrors the C `message ? message : ""` guard: a null argument stores
+// the shared non-null empty C string (see `_sfn_exception_empty`) so
+// `sfn_has_exception()` still reports true without leaking per call.
 fn sfn_set_exception(message: * u8) -> void {
     if message as i64 == 0 {
-        let empty = malloc(1 as usize);
-        if empty as i64 != 0 { memset(empty, 0, 1 as usize); }
-        sfn_exception_message_addr = empty as i64;
+        sfn_exception_message_addr = _sfn_exception_empty() as i64;
         return;
     }
     sfn_exception_message_addr = message as i64;
