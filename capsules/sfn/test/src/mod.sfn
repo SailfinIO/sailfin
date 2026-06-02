@@ -338,25 +338,30 @@ fn pure_assert_false(value: boolean, label: string) -> AssertFailure ![pure] {
 }
 
 // ---------------------------------------------------------------------------
-// `expect()` fluent builder + matchers (issue #847, proposal §1.4)
+// `expect()` matchers (issue #847, proposal §1.4)
 // ---------------------------------------------------------------------------
-// The fluent assertion surface lives in `expect.sfn` (the per-type
-// `Expectation` builders + throwing matchers) and `matcher.sfn` (the
-// `MatchResult` core + comparison/containment logic). This barrel
-// re-exports their public surface so consumers import everything from
-// `sfn/test`. The legacy `assert_*` and `pure_assert_*` tiers above are
-// retained unchanged (deprecation is Phase 3 / issue 3.3).
+// The matcher surface lives in `expect.sfn` (the per-type `expect_*`
+// entry points) and `matcher.sfn` (the `MatchResult` core + comparison/
+// containment logic). This barrel re-exports their public surface so
+// consumers import everything from `sfn/test`. The legacy `assert_*` and
+// `pure_assert_*` tiers above are retained unchanged (deprecation is
+// Phase 3 / issue 3.3).
+//
+// Matchers are free functions (not a fluent `expect(x).to_be(y)` builder):
+// the fluent method form needs cross-module struct-method dispatch, which
+// is currently miscompiled (a method's `self` is passed incorrectly across
+// a module boundary). Free functions pass arguments correctly across
+// modules, so the matcher behavior ships now; the fluent sugar is a
+// follow-up once that compiler ABI bug is fixed. See `expect.sfn`.
 export { MatchResult, match_fail, match_ok } from "./matcher";
 
 export {
-    BoolExpectation,
-    IntArrayExpectation,
-    IntExpectation,
-    StrExpectation,
-    expect_bool,
-    expect_int,
-    expect_int_array,
-    expect_str,
+    expect_contains_int_array,
+    expect_contains_str,
+    expect_eq_bool,
+    expect_eq_int,
+    expect_eq_int_array,
+    expect_eq_str,
     expect_to_throw,
     expect_to_throw_with
 } from "./expect";

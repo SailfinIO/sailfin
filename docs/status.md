@@ -272,6 +272,19 @@ feature availability.
     workspace members so the legacy `_cr_locate_capsule_src`
     lookup doesn't false-positive on runtime capsule names
     and emit "could not locate source" diagnostics.
+- **Capsule-to-capsule import resolution in workspace builds (#847,
+  2026-06-02).** `enumerate_capsule_sources` in
+  `compiler/src/capsule_resolver.sfn` now resolves a *declared*
+  sibling-capsule dependency through the workspace member map
+  (`load_workspace_members` / `workspace_member_for_spec`) before
+  falling back to the project-relative + `~/.sfn/cache` locator
+  (`_cr_locate_capsule_src`). Before this fix, a declared
+  capsule-to-capsule dep (first real case: `sfn/test` depending on
+  `sfn/strings` for `find`, from #846) was reported "could not locate
+  source" and its `.sfn-asm` was never staged, so import signatures
+  failed to lower ("callee signature is not known"). Self-host
+  (`make compile`) stays green; resolver behaviour outside a workspace
+  is unchanged.
   - The (since-retired) `scripts/build.sh` orchestrator gained a
     transitional one-line bridge to skip the `sfn/runtime-native`
     dep when iterating `[dependencies]` (it lived at
@@ -757,6 +770,7 @@ The following capsules ship as part of the Sailfin standard library under
 | `sfn/nn` | `"nn"` | Shipped (CPU) | `gpu` (planned) | Activations, normalization, argmax, one_hot |
 | `sfn/losses` | `"losses"` | Shipped | None | MSE, MAE, Huber, hinge loss functions |
 | `sfn/cli` | `"cli"` | Shipped | `io` | CLI arg parsing, subcommands, help generation, terminal styling |
+| `sfn/test` | `"test"` | Partial (#847) | None (pure tier) / `io` (legacy tier) | Assertion library for capsule tests. Legacy `assert_*` (`![io]`) and `pure_assert_*` (`![pure]`) tiers ship unchanged. New free-function `expect_*` tier (issue 1.4 in `docs/proposals/test-infra-epic/02-phases.md`): `expect_eq_int`, `expect_eq_str`, `expect_eq_bool`, `expect_eq_int_array`, `expect_contains_str`, `expect_contains_int_array`, `expect_to_throw(thunk)`, `expect_to_throw_with(thunk, pattern)` — all `![pure]`, returning `MatchResult { ok: boolean; message: string }`. Re-exported from `mod.sfn`; covered by `capsules/sfn/test/tests/expect_test.sfn` (19 tests). **Not shipped:** fluent `expect(x).to_be(y)` builder form deferred pending (a) generic-struct monomorphization / `where` clauses and (b) cross-module struct-method dispatch ABI fix (self passed incorrectly across module boundary). Depends on `sfn/strings` via workspace capsule-to-capsule import (fixed by #847 capsule resolver). |
 
 ## Runtime (Current)
 

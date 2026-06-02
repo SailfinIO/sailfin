@@ -24,6 +24,34 @@ capsules/sfn/test/
 
 ## Core: matchers and expectations
 
+> **Shipped (issue 1.4, #847, 2026-06-02) — free-function form only.**
+> The section below documents the aspirational generic `Expectation<T>` surface
+> that remains the Phase 3 completion target. What ships today is a per-type
+> free-function fan-out in `capsules/sfn/test/src/expect.sfn`:
+>
+> ```sfn
+> fn expect_eq_int(actual: int, expected: int) -> MatchResult ![pure];
+> fn expect_eq_str(actual: string, expected: string) -> MatchResult ![pure];
+> fn expect_eq_bool(actual: boolean, expected: boolean) -> MatchResult ![pure];
+> fn expect_eq_int_array(actual: int[], expected: int[]) -> MatchResult ![pure];
+> fn expect_contains_str(haystack: string, needle: string) -> MatchResult ![pure];
+> fn expect_contains_int_array(haystack: int[], needle: int) -> MatchResult ![pure];
+> fn expect_to_throw(thunk: fn() -> int) -> MatchResult ![pure];
+> fn expect_to_throw_with(thunk: fn() -> int, pattern: string) -> MatchResult ![pure];
+> ```
+>
+> `MatchResult { ok: boolean; message: string }` — caller asserts:
+> `assert expect_eq_int(x, y).ok;`. Re-exported from `mod.sfn`.
+> Covered by `capsules/sfn/test/tests/expect_test.sfn` (19 tests).
+>
+> **Two frontend gaps block the fluent `expect(x).to_be(y)` form below:**
+> (a) no generic-struct monomorphization / `where` clauses — the compiler cannot
+> instantiate `Expectation<T>` for each concrete type; (b) cross-module
+> struct-method dispatch is miscompiled — `self` is passed incorrectly when a
+> method call crosses a module boundary. The generic surface below is aspirational
+> until both gaps close. Track progress in
+> `docs/proposals/test-infra-epic/02-phases.md` issue 1.4.
+
 ```sfn
 fn expect<T>(value: T) -> Expectation<T>;
 
