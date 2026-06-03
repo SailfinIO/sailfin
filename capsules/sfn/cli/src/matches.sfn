@@ -174,7 +174,20 @@ fn subcommand(m: Matches) -> string {
     return m.subcommand_name;
 }
 
-fn positionals(m: Matches) -> string[] {
-    // Returns all positional argument values in order.
-    return m.positional_values;
+fn positionals(m: Matches, name: string) -> string[] {
+    // Returns the values collected under positional argument `name`, in
+    // command-line order. For a variadic positional (built via
+    // `arg_variadic`) this is the full tail it accumulated; for an
+    // ordinary positional it is the single matched value (length 0 or
+    // 1). Returns `[]` when `name` matched nothing.
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= m.positional_names.length { break; }
+        if strings_equal(m.positional_names[i], name) {
+            out.push(m.positional_values[i]);
+        }
+        i += 1;
+    }
+    return out;
 }

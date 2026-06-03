@@ -14,7 +14,8 @@ fn arg(name: string, description: string) -> Arg {
         name: name,
         description: description,
         is_optional: false,
-        default_value: ""
+        default_value: "",
+        is_variadic: false
     };
 }
 
@@ -24,7 +25,25 @@ fn arg_optional(name: string, description: string, default_value: string) -> Arg
         name: name,
         description: description,
         is_optional: true,
-        default_value: default_value
+        default_value: default_value,
+        is_variadic: false
+    };
+}
+
+fn arg_variadic(name: string, description: string) -> Arg {
+    // Create a variadic positional that collects every remaining
+    // positional token after named flags and earlier positionals.
+    // Zero matches are allowed — `positionals(matches, name)` returns
+    // `[]` in that case. A variadic positional must be the last
+    // positional on a `Command`; `with_arg` enforces this at builder
+    // time. Callers that require "at least one" should validate
+    // `positionals(matches, name).length` themselves.
+    return Arg {
+        name: name,
+        description: description,
+        is_optional: true,
+        default_value: "",
+        is_variadic: true
     };
 }
 
@@ -198,11 +217,22 @@ fn with_version(cmd: Command, version: string) -> Command {
 }
 
 fn with_arg(cmd: Command, a: Arg) -> Command {
-    // Add a positional argument to the command.
+    // Add a positional argument to the command. A variadic positional
+    // must be the last positional, so adding any argument after one is
+    // a builder-time error: `throw` raises a catchable error if `cmd`
+    // already declares a variadic positional. (`assert` would abort the
+    // process uncatchably, which callers and tests cannot recover from.)
     let mut new_args: Arg[] = [];
     let mut i: int = 0;
     loop {
         if i >= cmd.args.length { break; }
+        if cmd.args[i].is_variadic {
+            throw "cli: a variadic positional must be the last argument; cannot add '"
+                + a.name
+                + "' after variadic '"
+                + cmd.args[i].name
+                + "'";
+        }
         new_args.push(cmd.args[i]);
         i += 1;
     }

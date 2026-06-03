@@ -7,6 +7,12 @@ struct Arg {
     description: string;
     is_optional: boolean;
     default_value: string;
+    // `is_variadic` marks a positional that collects every remaining
+    // positional token under one name (built via `arg_variadic`). Only
+    // the last positional on a `Command` may be variadic; `with_arg`
+    // rejects adding any argument after a variadic one at builder time.
+    // Read the collected tail with `positionals(matches, name)`.
+    is_variadic: boolean;
 }
 
 struct Flag {

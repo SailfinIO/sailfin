@@ -164,9 +164,13 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
         } else {
             // Positional argument.
             if pos_idx < active.args.length {
-                pos_names.push(active.args[pos_idx].name);
+                let cur = active.args[pos_idx];
+                pos_names.push(cur.name);
                 pos_values.push(token);
-                pos_idx += 1;
+                // A variadic positional collects every remaining token
+                // under its own name, so keep `pos_idx` parked on it
+                // rather than advancing to the next slot.
+                if !cur.is_variadic { pos_idx += 1; }
             } else {
                 return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "unexpected_positional", _with_hint(cmd.name, subcmd_name, "error: unexpected argument '"
                     + token
@@ -180,6 +184,12 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
     loop {
         if pos_idx >= active.args.length { break; }
         let a = active.args[pos_idx];
+        if a.is_variadic {
+            // Zero variadic matches are allowed: leave the name absent
+            // so `positionals(matches, name)` reports `[]`.
+            pos_idx += 1;
+            continue;
+        }
         if a.is_optional {
             pos_names.push(a.name);
             pos_values.push(a.default_value);
