@@ -2031,9 +2031,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
             };
             if stored { stats.stores = stats.stores + 1; }
             if invalid_key { stats.invalid_keys = stats.invalid_keys + 1; }
-            if copy_failed {
-                stats.copy_failures = stats.copy_failures + 1;
-            }
+            if copy_failed { stats.copy_failures = stats.copy_failures + 1; }
             ei += 1;
         }
 
@@ -2080,9 +2078,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
         }
         if evt.stored { stats.stores = stats.stores + 1; }
         if evt.invalid_key { stats.invalid_keys = stats.invalid_keys + 1; }
-        if evt.copy_failed {
-            stats.copy_failures = stats.copy_failures + 1;
-        }
+        if evt.copy_failed { stats.copy_failures = stats.copy_failures + 1; }
         out.push(sources[i].ll_path);
         events.push(evt);
         i += 1;
@@ -2496,9 +2492,7 @@ fn collect_relative_import_specs(source: string) -> string[] {
                         if substring(spec, 0, 2) == "./" { is_relative = true; }
                     }
                     if spec.length >= 3 {
-                        if substring(spec, 0, 3) == "../" {
-                            is_relative = true;
-                        }
+                        if substring(spec, 0, 3) == "../" { is_relative = true; }
                     }
                     if is_relative { out.push(spec); }
                 }
@@ -3006,9 +3000,7 @@ fn collect_scoped_import_specs(source: string) -> string[] {
                         if substring(spec, 0, 2) == "./" { is_relative = true; }
                     }
                     if spec.length >= 3 {
-                        if substring(spec, 0, 3) == "../" {
-                            is_relative = true;
-                        }
+                        if substring(spec, 0, 3) == "../" { is_relative = true; }
                     }
                     let mut is_runtime: boolean = false;
                     if spec.length >= 8 {
