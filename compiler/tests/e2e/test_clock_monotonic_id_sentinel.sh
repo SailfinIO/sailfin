@@ -13,9 +13,8 @@
 # clk_id probe shipped in #905/#819.
 #
 # The test is host-independent: it forces both platform paths via a
-# `uname` shim on PATH (and the `SAILFIN_TARGET_OS` override), so it
-# asserts the same thing whether CI runs it on Linux or macOS hardware.
-# For each forced platform it pins:
+# `uname` shim on PATH, so it asserts the same thing whether CI runs it
+# on Linux or macOS hardware. For each forced platform it pins:
 #
 #   1. typecheck      — `sfn check <fixture>` reports `ok` (the sentinel
 #                       is seeded into the resolution scope; no extern
@@ -23,7 +22,12 @@
 #   2. clk_id immediate — emitted IR contains
 #                       `call i32 @clock_gettime(i32 1,` on Linux and
 #                       `call i32 @clock_gettime(i32 6,` on Darwin.
-#   3. no sentinel leak — no `call`/`declare` targets the sentinel name
+#   3. override wins  — with `uname -s` forced to Linux but
+#                       `SAILFIN_TARGET_OS=Darwin`, the emitted clk_id
+#                       follows the target override (6), proving the
+#                       cross-compile precedence the intrinsic relies on
+#                       (mirrors the #890 errno sentinel precedence fix).
+#   4. no sentinel leak — no `call`/`declare` targets the sentinel name
 #                       (`sailfin_intrinsic_clock_monotonic_id`); it must
 #                       vanish into the inline immediate.
 
@@ -113,9 +117,31 @@ emit_for_os() {
 
 LL_LINUX="$SCRATCH/clock_linux.ll"
 LL_DARWIN="$SCRATCH/clock_darwin.ll"
+LL_OVERRIDE="$SCRATCH/clock_override.ll"
 
 test_emit_linux() { emit_for_os "Linux" "$LL_LINUX"; }
 test_emit_darwin() { emit_for_os "Darwin" "$LL_DARWIN"; }
+
+# Emit with `uname -s` forced to Linux but the `SAILFIN_TARGET_OS=Darwin`
+# target override set. `clock_monotonic_id_value` consults the override
+# first and only falls back to `uname -s` when it is empty, so the
+# override must win over the host probe — the cross-compilation path
+# (#908, mirroring the #890 errno sentinel precedence fix). The `uname`
+# shim is left forcing the *opposite* OS precisely to prove precedence
+# regardless of what the host reports.
+emit_override_darwin_over_linux() {
+    local shimdir="$SCRATCH/shim-override"
+    local log="$SCRATCH/emit-override.log"
+    make_uname_shim "$shimdir" "Linux"
+    if ! SAILFIN_TARGET_OS="Darwin" PATH="$shimdir:$PATH" "$BINARY" emit -o "$LL_OVERRIDE" llvm "$FIXTURE" > "$log" 2>&1; then
+        echo "[test]   sfn emit llvm failed (SAILFIN_TARGET_OS=Darwin over uname=Linux):"
+        cat "$log"
+        return 1
+    fi
+    return 0
+}
+
+test_emit_override() { emit_override_darwin_over_linux; }
 
 # --- Linux path: clk_id immediate is 1 ---
 
@@ -157,14 +183,34 @@ test_darwin_no_linux_clkid() {
     return 0
 }
 
+# --- Override precedence: SAILFIN_TARGET_OS wins over uname -s ---
+
+test_override_clkid() {
+    if ! grep -qE 'call i32 @clock_gettime\(i32 6,' "$LL_OVERRIDE"; then
+        echo "[test]   SAILFIN_TARGET_OS=Darwin did not override uname=Linux (expected clk_id 6)"
+        grep -nE '@clock_gettime' "$LL_OVERRIDE" || true
+        return 1
+    fi
+    return 0
+}
+
+test_override_no_host_clkid() {
+    if grep -qE 'call i32 @clock_gettime\(i32 1,' "$LL_OVERRIDE"; then
+        echo "[test]   uname=Linux clk_id (1) leaked despite SAILFIN_TARGET_OS=Darwin override:"
+        grep -nE 'call i32 @clock_gettime\(i32 1,' "$LL_OVERRIDE"
+        return 1
+    fi
+    return 0
+}
+
 # --- The sentinel name must never appear as a real symbol ---
 
 test_no_sentinel_leak() {
     local n
-    n="$(grep -cE '(call|declare) .*@sailfin_intrinsic_clock_monotonic_id' "$LL_LINUX" "$LL_DARWIN" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')"
+    n="$(grep -cE '(call|declare) .*@sailfin_intrinsic_clock_monotonic_id' "$LL_LINUX" "$LL_DARWIN" "$LL_OVERRIDE" 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')"
     if [ "$n" != "0" ]; then
         echo "[test]   expected 0 call/declare of the sentinel symbol, found $n:"
-        grep -nE '(call|declare) .*@sailfin_intrinsic_clock_monotonic_id' "$LL_LINUX" "$LL_DARWIN" || true
+        grep -nE '(call|declare) .*@sailfin_intrinsic_clock_monotonic_id' "$LL_LINUX" "$LL_DARWIN" "$LL_OVERRIDE" || true
         return 1
     fi
     return 0
@@ -173,10 +219,13 @@ test_no_sentinel_leak() {
 run_test "sfn check passes on the clk_id fixture" test_check_clean
 run_test "sfn emit llvm produces IR (uname=Linux)" test_emit_linux
 run_test "sfn emit llvm produces IR (uname=Darwin)" test_emit_darwin
+run_test "sfn emit llvm produces IR (SAILFIN_TARGET_OS=Darwin over uname=Linux)" test_emit_override
 run_test "Linux path feeds clk_id immediate 1" test_linux_clkid
 run_test "Linux path omits clk_id 6" test_linux_no_darwin_clkid
 run_test "Darwin path feeds clk_id immediate 6" test_darwin_clkid
 run_test "Darwin path omits clk_id 1" test_darwin_no_linux_clkid
+run_test "SAILFIN_TARGET_OS=Darwin overrides uname=Linux (clk_id 6)" test_override_clkid
+run_test "override path omits host clk_id 1" test_override_no_host_clkid
 run_test "sentinel symbol never emitted as call/declare" test_no_sentinel_leak
 
 echo "[summary] $PASS passed, $FAIL failed"
