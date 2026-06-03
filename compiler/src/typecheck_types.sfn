@@ -14,6 +14,7 @@ import {
 } from "./ast";
 import {
     contains_string,
+    ends_with,
     starts_with,
     strings_equal,
     strip_prefix
@@ -354,11 +355,15 @@ fn validate_enum_annotation(usage_name: string, enum_decl: Statement, annotation
 // the #829 substitution primitives they are directly callable and driven
 // by `result_question_typecheck_test.sfn`; the rule orchestration lives in
 // `typecheck.sfn` (`check_try_operator` / `try_operator_result_type`).
-// True when `type_text` names a `Result<T, E>` instantiation: the head
-// identifier is `Result` and exactly two type arguments are present.
+// True when `type_text` names a bare `Result<T, E>` instantiation: the
+// head identifier is exactly `Result`, exactly two type arguments are
+// present, and the closing `>` is the final token. The trailing-`>` check
+// rejects a nullable `Result<T, E>?` — an optional `Result` is not a
+// `Result`, so `?` applied to it must still trip E0810.
 fn type_is_result(type_text: string) -> boolean {
     let trimmed = trim_text(type_text);
     if !starts_with(trimmed, "Result<") { return false; }
+    if !ends_with(trimmed, ">") { return false; }
     return parse_type_arguments(trimmed).length == 2;
 }
 

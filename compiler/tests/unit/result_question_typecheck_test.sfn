@@ -68,3 +68,12 @@ test "try op: both rules fire when operand and fn are non-Result" {
     assert strings_equal(diags[0].code, "E0810");
     assert strings_equal(diags[1].code, "E0811");
 }
+
+test "try op: a nullable `Result<T, E>?` operand is not a Result (E0810)" {
+    // An optional `Result` is not a `Result`: `?` must still trip E0810,
+    // and the unwrapped type is null (the trailing `?` is not stripped).
+    let diags = check_try_operator("Result<int, Error>?", "Result<int, Error>", null);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0810");
+    assert strings_equal(_result_type("Result<int, Error>?"), "<not-result>");
+}
