@@ -40,6 +40,7 @@ import {
     cache_stats_is_empty,
     canonicalize_flags,
     cache_key_for,
+    cache_compiler_identity,
     empty_build_cache_config,
     empty_cache_stats,
     is_valid_digest
@@ -561,4 +562,84 @@ test "is_valid_digest: 64 uppercase chars rejected" {
 test "is_valid_digest: 64 chars with non-hex letter rejected" {
     // 'g' is outside [0-9a-f].
     assert ! is_valid_digest("g123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+}
+
+// ----------------------------------------------------------------
+// cache_compiler_identity (work-dir self-host cache poisoning fix)
+// ----------------------------------------------------------------
+//
+// A `.dirty` build stamp is shared by every uncommitted working tree
+// at the same commit, so the per-module cache (keyed partly on the
+// stamp) used to serve IR emitted by a DIFFERENT dirty build. The
+// identity helper mixes the emitting binary's content hash into the
+// `.dirty` key so a rebuilt compiler busts the cache; tagged and
+// clean-commit stamps stay hash-free (reproducible across machines).
+fn _identity_tmp(label: string, bytes: string) -> string ![io] {
+    let path = "/tmp/sfn_identity_test_" + label;
+    process.run(["rm", "-rf", path]);
+    fs.writeFile(path, bytes);
+    return path;
+}
+
+test "cache_compiler_identity: dirty stamp mixes in the binary hash" ![io] {
+    let bin = _identity_tmp("dirty_bin", "fake-compiler-bytes-v1\n");
+    let raw = "0.7.0-alpha.21+dev.abc1234.dirty";
+    let identity = cache_compiler_identity(raw, bin);
+    // The dirty identity must differ from the raw stamp (so two dirty
+    // builds at the same commit get distinct cache keys).
+    assert identity != raw;
+    process.run(["rm", "-rf", bin]);
+}
+
+test "cache_compiler_identity: different binaries yield different identities" ![io] {
+    let bin_a = _identity_tmp("dirty_a", "fake-compiler-bytes-A\n");
+    let bin_b = _identity_tmp("dirty_b", "fake-compiler-bytes-B\n");
+    let raw = "0.7.0-alpha.21+dev.abc1234.dirty";
+    let id_a = cache_compiler_identity(raw, bin_a);
+    let id_b = cache_compiler_identity(raw, bin_b);
+    // Same stamp, same commit, but different binary content ⇒ the
+    // cache identities must diverge. This is the exact poisoning the
+    // fix prevents: a rebuilt compiler must not reuse the prior
+    // build's cached IR.
+    assert id_a != id_b;
+    process.run(["rm", "-rf", bin_a]);
+    process.run(["rm", "-rf", bin_b]);
+}
+
+test "cache_compiler_identity: identical binary content is stable" ![io] {
+    let bin_a = _identity_tmp("stable_a", "same-bytes\n");
+    let bin_b = _identity_tmp("stable_b", "same-bytes\n");
+    let raw = "0.7.0-alpha.21+dev.abc1234.dirty";
+    // Content-addressed, not path/mtime-addressed: identical bytes at
+    // two paths must produce the same identity so a clean rebuild that
+    // reproduces the binary still hits the cache.
+    assert cache_compiler_identity(raw, bin_a) == cache_compiler_identity(raw, bin_b);
+    process.run(["rm", "-rf", bin_a]);
+    process.run(["rm", "-rf", bin_b]);
+}
+
+test "cache_compiler_identity: tagged stamp is left unchanged" ![io] {
+    let bin = _identity_tmp("tagged_bin", "whatever\n");
+    let raw = "0.7.0-alpha.21";
+    // A tagged (release) stamp is reproducible from provenance, so the
+    // identity must stay hash-free — CI cache sharing across machines
+    // depends on this.
+    assert cache_compiler_identity(raw, bin) == raw;
+    process.run(["rm", "-rf", bin]);
+}
+
+test "cache_compiler_identity: clean-commit dev stamp is left unchanged" ![io] {
+    let bin = _identity_tmp("clean_bin", "whatever\n");
+    let raw = "0.7.0-alpha.21+dev.abc1234";
+    // `+dev.<hash>` without `.dirty` is reproducible from the commit,
+    // so it stays hash-free too.
+    assert cache_compiler_identity(raw, bin) == raw;
+    process.run(["rm", "-rf", bin]);
+}
+
+test "cache_compiler_identity: empty binary path falls back to raw stamp" ![io] {
+    let raw = "0.7.0-alpha.21+dev.abc1234.dirty";
+    // No binary to hash (in-process serial fallback) ⇒ keep the raw
+    // stamp; no worse than the prior behaviour.
+    assert cache_compiler_identity(raw, "") == raw;
 }

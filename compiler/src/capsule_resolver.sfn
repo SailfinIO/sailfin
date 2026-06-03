@@ -39,6 +39,7 @@ import {
     CacheKey,
     CacheStats,
     cache_clean,
+    cache_compiler_identity,
     cache_copy_artifact_to,
     cache_key_for,
     cache_lookup_artifact,
@@ -1841,7 +1842,14 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     // compile-time `__version_fallback__` — which is stable per
     // binary, so cache keys stay coherent for any single binary
     // even when running outside the workspace.
-    let compiler_version = resolve_compiler_version_for_cache("");
+    // For a `.dirty` dev stamp the build-stamp string alone does not
+    // distinguish two compiler binaries built at the same commit, so
+    // mix the emitting binary's content hash into the cache identity
+    // (no-op for tagged / clean-commit stamps). `sailfin_exe` is the
+    // binary doing the per-module emit on this path; an empty value
+    // (in-process serial fallback) keeps the raw stamp. See
+    // `build_cache.cache_compiler_identity`.
+    let compiler_version = cache_compiler_identity(resolve_compiler_version_for_cache(""), sailfin_exe);
     // Flag canonicalization is empty for now — `sfn build -p` does
     // not yet take build flags. Constructing via `canonicalize_flags`
     // keeps the empty form a single source of truth: if the encoder
