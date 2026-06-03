@@ -596,6 +596,45 @@ fn cache_key_for(source_path: string, dep_layout_manifest_paths: string[], compi
     return CacheKey { digest: final_digest };
 }
 
+fn _ends_with_suffix(text: string, suffix: string) -> boolean {
+    if suffix.length > text.length { return false; }
+    return substring(text, text.length - suffix.length, text.length) == suffix;
+}
+
+// Augment the raw `compiler_version` cache-key component with the
+// emitting compiler binary's content hash when — and only when — the
+// build stamp is `.dirty`.
+//
+// Why: the cache key uses `compiler_version` as its sole
+// compiler-identity input (§4.12), trusting the build stamp to change
+// whenever the compiler's codegen changes. That holds for tagged
+// (`<version>`) and clean-commit (`<version>+dev.<hash>`) stamps —
+// both reproducible from the binary's provenance — but NOT for
+// `<version>+dev.<hash>.dirty`: `.dirty` is a bare boolean
+// (`build_stamp.sfn`), so every uncommitted working tree at the same
+// commit produces the identical stamp. During iterative compiler
+// development that means a `.ll` emitted by one dirty build is served
+// to a DIFFERENT dirty build at the same commit — the cache serves
+// stale codegen after a rebuild that was supposed to change it.
+//
+// Mixing the binary's SHA-256 into the identity for `.dirty` stamps
+// makes a rebuilt compiler bust the cache (the binary content changed
+// ⇒ the key changes). Tagged / clean-commit stamps are left untouched
+// so their keys stay reproducible across machines and CI cache
+// sharing is unaffected. The caller resolves `compiler_version` once
+// per build, so the single `_sha256_of_file_cmd` here is paid once,
+// not per module. An empty or unhashable `compiler_binary_path`
+// falls back to the raw stamp (no worse than the prior behaviour).
+fn cache_compiler_identity(compiler_version: string, compiler_binary_path: string) -> string ![io] {
+    if !_ends_with_suffix(compiler_version, ".dirty") {
+        return compiler_version;
+    }
+    if compiler_binary_path.length == 0 { return compiler_version; }
+    let bin_hash = _sha256_of_file_cmd(compiler_binary_path);
+    if bin_hash.length == 0 { return compiler_version; }
+    return compiler_version + "+bin." + bin_hash;
+}
+
 export {
     CacheKey,
     CacheEntryPaths,
@@ -613,6 +652,7 @@ export {
     cache_store_artifact,
     canonicalize_flags,
     cache_key_for,
+    cache_compiler_identity,
     sha256_of_file,
     runtime_object_cache_key,
     empty_cache_stats,
