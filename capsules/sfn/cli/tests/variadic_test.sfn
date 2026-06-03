@@ -10,10 +10,25 @@ import {
     arg,
     arg_variadic,
     command,
+    help,
     parse,
     positionals,
     with_arg
 } from "../src/mod";
+
+fn _contains(text: string, needle: string) -> boolean {
+    if needle.length > text.length { return false; }
+    let limit = text.length - needle.length;
+    let mut i: int = 0;
+    loop {
+        if i > limit { break; }
+        if strings_equal(substring(text, i, i + needle.length), needle) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
 
 // ---- Builder ----
 test "arg_variadic: sets is_variadic and a sane default shape" {
@@ -103,4 +118,16 @@ test "variadic: adding any positional after a variadic fails at builder time" {
         assert _bad.args.length >= 0;
     } catch (err) { threw = true; }
     assert threw == true;
+}
+
+// ---- Help rendering ----
+test "variadic: help renders an ellipsis and a (variadic) marker, not a default" {
+    let cmd = with_arg(with_arg(command("app", "Test app"), arg("src", "Source")), arg_variadic("files", "Input files"));
+    let text = help(cmd);
+    // Usage line uses the ellipsis form.
+    assert _contains(text, "[files...]");
+    // Arguments table marks it variadic and omits the empty default.
+    assert _contains(text, "<files>...");
+    assert _contains(text, "(variadic)");
+    assert ! _contains(text, "(default: )");
 }

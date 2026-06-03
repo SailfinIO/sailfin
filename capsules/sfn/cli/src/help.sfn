@@ -35,9 +35,9 @@ fn _format_help(cmd: Command, program: string) -> string {
     loop {
         if ai >= cmd.args.length { break; }
         let a = cmd.args[ai];
-        if a.is_optional { out = out + " [" + a.name + "]"; } else {
-            out = out + " <" + a.name + ">";
-        }
+        if a.is_variadic { out = out + " [" + a.name + "...]"; } else if a.is_optional {
+            out = out + " [" + a.name + "]";
+        } else { out = out + " <" + a.name + ">"; }
         ai += 1;
     }
     out = out + "\n";
@@ -64,9 +64,14 @@ fn _format_help(cmd: Command, program: string) -> string {
         loop {
             if ai >= cmd.args.length { break; }
             let a = cmd.args[ai];
-            let label = "<" + a.name + ">";
+            let mut label = "<" + a.name + ">";
+            if a.is_variadic { label = label + "..."; }
             out = out + "  " + _pad(label, arg_width) + a.description;
-            if a.is_optional {
+            if a.is_variadic {
+                // Variadics have no default; annotate the kind instead of
+                // the misleading empty `(default: )`.
+                out = out + " (variadic)";
+            } else if a.is_optional {
                 out = out + " (default: " + a.default_value + ")";
             }
             out = out + "\n";
@@ -125,8 +130,9 @@ fn _max_arg_width(cmd: Command) -> int {
     let mut i: int = 0;
     loop {
         if i >= cmd.args.length { break; }
-        // +2 for the angle brackets.
-        let w = cmd.args[i].name.length + 2;
+        // +2 for the angle brackets, +3 for a variadic's `...` suffix.
+        let mut w = cmd.args[i].name.length + 2;
+        if cmd.args[i].is_variadic { w = w + 3; }
         if w > max { max = w; }
         i += 1;
     }
