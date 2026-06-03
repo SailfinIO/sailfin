@@ -65,7 +65,8 @@ export {
     trace_lowering,
     trace_call_lowering,
     skip_module_globals,
-    errno_locator_symbol
+    errno_locator_symbol,
+    clock_monotonic_id_value
 };
 
 // Per-flag cache cells. `_X_initialized` flips from false to true on
@@ -88,6 +89,14 @@ let mut _skip_module_globals_value: boolean = false;
 // on Windows/mingw-w64). See `errno_locator_symbol` below.
 let mut _errno_locator_initialized: boolean = false;
 let mut _errno_locator_value: string = "";
+// Cache for the resolved `CLOCK_MONOTONIC` `clk_id` (#908, epic #763).
+// `_clock_monotonic_id_initialized` flips to true after the one-time
+// resolution (the `SAILFIN_TARGET_OS` override or the `uname -s` host
+// probe); `_clock_monotonic_id_value` holds the resolved immediate
+// (`1` on Linux/glibc, `6` on Darwin/macOS). See
+// `clock_monotonic_id_value` below.
+let mut _clock_monotonic_id_initialized: boolean = false;
+let mut _clock_monotonic_id_value: int = 0;
 // Cache for the resolved executable-path leg tag (#967, epic #390).
 // `_exe_path_locator_initialized` flips to true after the one-time
 // resolution (the `SAILFIN_TARGET_OS` override or the `uname -s`
@@ -175,6 +184,36 @@ fn errno_locator_symbol() -> string ![io] {
         _errno_locator_initialized = true;
     }
     return _errno_locator_value;
+}
+
+// The `CLOCK_MONOTONIC` `clk_id` immediate for the host target (#908,
+// epic #763). POSIX leaves the numeric `clk_id` implementation-defined
+// and it diverges by platform — Linux/glibc `1`, Darwin/macOS `6` — so
+// the `sailfin_intrinsic_clock_monotonic_id` sentinel's lowering branch
+// (`core_call_emission.sfn`) reads this to emit a bare `i32` immediate
+// (no `call`, no `declare`), letting the same compiler source bake the
+// correct constant on either platform when built natively.
+//
+// Resolution order matches `errno_locator_symbol` above:
+//   1. `SAILFIN_TARGET_OS` env override — the *target* OS, for the
+//      cross-compile path where a bare `uname -s` reports the host.
+//   2. `uname -s` host probe — the native-build path. `Darwin` → 6,
+//      anything else → 1, so the dominant Linux leg is the default and
+//      Windows (no POSIX `CLOCK_MONOTONIC`) harmlessly falls through to
+//      the Linux value.
+//
+// Probed once and cached; mirrors the lazy-init contract of the trace
+// toggles and `errno_locator_symbol`.
+fn clock_monotonic_id_value() -> int ![io] {
+    if !_clock_monotonic_id_initialized {
+        let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
+        if os.length == 0 { os = _shell_read_cmd("uname -s"); }
+        if os == "Darwin" { _clock_monotonic_id_value = 6; } else {
+            _clock_monotonic_id_value = 1;
+        }
+        _clock_monotonic_id_initialized = true;
+    }
+    return _clock_monotonic_id_value;
 }
 
 // Resolve which executable-path leg the call-emission dispatcher

@@ -278,6 +278,29 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "intrinsic.errno_location.mingw", symbol: "_errno", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
     });
 
+    // clock-monotonic clk_id sentinel (#908, epic #763). Resolves the
+    // `CLOCK_MONOTONIC` `clk_id` immediate, which POSIX leaves
+    // implementation-defined: glibc/Linux uses `1`, Darwin/macOS uses
+    // `6`. Unlike errno (a symbol swap emitting a `call`) and
+    // pointer-read (a `load`), this sentinel lowers to a bare `i32`
+    // immediate — no symbol, no runtime call. The call-emission
+    // dispatcher (`coerce_and_emit_call` in `core_call_emission.sfn`)
+    // special-cases this symbol and returns an inline `i32 1`/`i32 6`
+    // operand chosen by `clock_monotonic_id_value` at emit time (the
+    // `SAILFIN_TARGET_OS` target override, else the `uname -s` host
+    // probe). This is the seed-gated replacement for the runtime clk_id
+    // probe shipped in #905/#819: a later PR can swap
+    // `runtime/sfn/clock.sfn`'s try-1-fall-back-to-6 probe for a single
+    // emit-time constant once this intrinsic lands in a cut+pinned seed,
+    // removing the extra macOS `clock_gettime` syscall. Empty effects:
+    // selecting a constant is not a capability — the `![clock]` effect
+    // lives on the `clock_gettime` call the constant feeds. The declare
+    // loop in `rendering.sfn` skips the sentinel target; since the
+    // lowering emits no call, there is no concrete symbol to declare.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_clock_monotonic_id", symbol: "sailfin_intrinsic_clock_monotonic_id", return_type: "i32", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+    });
+
     // executable-path sentinel (#967, epic #390). Resolves the running
     // binary's own absolute path. Unlike errno (a pure symbol swap across
     // three same-shape locators), the per-target primitives differ in arity

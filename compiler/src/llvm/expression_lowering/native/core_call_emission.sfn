@@ -5,7 +5,12 @@
 import { NativeFunction, NativeParameter } from "../../../native_ir";
 import { find_last_index_of_char, substring } from "../../../string_utils";
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
-import { errno_locator_symbol, exe_path_locator, trace_lowering } from "../../lowering_debug_state";
+import {
+    clock_monotonic_id_value,
+    errno_locator_symbol,
+    exe_path_locator,
+    trace_lowering
+} from "../../lowering_debug_state";
 import {
     append_string_constant,
     find_string_constant_by_name,
@@ -674,6 +679,30 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                 lines: result_lines,
                 temp_index: result_temp,
                 operand: _en_operand,
+                diagnostics: result_diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+    }
+
+    // clock-monotonic clk_id sentinel (#908, epic #763): lower to a bare
+    // `i32` immediate — `1` on Linux/glibc, `6` on Darwin/macOS — chosen
+    // at emit time via `clock_monotonic_id_value`. Unlike the errno
+    // sentinel (a `call`) and the pointer-read sentinel (a `load`), this
+    // is a pure inline constant: no line is pushed and `temp_index` is
+    // unchanged, so the value flows straight into the consuming call
+    // (e.g. `clock_gettime(i32 1, …)`). No symbol is emitted, so the
+    // declare loop in `rendering.sfn` has nothing to declare.
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_clock_monotonic_id" {
+            let _cm_operand = LLVMOperand {
+                llvm_type: "i32",
+                value: number_to_string(clock_monotonic_id_value())
+            };
+            return ExpressionResult {
+                lines: result_lines,
+                temp_index: result_temp,
+                operand: _cm_operand,
                 diagnostics: result_diagnostics,
                 string_constants: collected_string_constants
             };
