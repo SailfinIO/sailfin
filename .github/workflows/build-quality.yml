@@ -81,7 +81,7 @@ jobs:
       gate_name: ${{ steps.identify_failed_gate.outputs.name }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.3
 
       - name: Resolve seed version from .seed-version
         id: seed
@@ -323,7 +323,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.3
 
       - name: Download pass artifacts (best-effort)
         uses: actions/download-artifact@v8
