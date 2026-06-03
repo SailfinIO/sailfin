@@ -258,16 +258,58 @@ test-capsules:
 	fi
 	@$(NATIVE_BIN) test capsules
 
+# Sharded test execution for parallel CI legs. Phase 1 of
+# docs/proposals/ci-test-speed.md (#843 Track A): the test suite is
+# ~90% of PR CI wall time and runs serially, so we fan it across
+# concurrent CI legs. `scripts/test_shards.sh` owns the shard -> file
+# mapping (single source of truth); `test-shard-cover` asserts the union
+# of all shards equals `make test`'s surface so a rebalance can never
+# silently drop coverage. Shard names: unit-a unit-b int-e2e-caps e2e-sh.
+#   make test-shard SHARD=unit-a
+.PHONY: test-shard test-shard-cover
+SHARD ?=
+test-shard:
+	@if [ -z "$(SHARD)" ]; then \
+		echo "[test-shard] SHARD required: unit-a|unit-b|int-e2e-caps|e2e-sh" >&2; \
+		exit 1; \
+	fi
+	@if [ ! -x $(NATIVE_BIN) ]; then \
+		echo "[test-shard] missing $(NATIVE_BIN); running make compile"; \
+		$(MAKE) compile; \
+	fi
+	@# e2e-sh-* shards run their strided subset of the legacy .sh scripts
+	@# through test-e2e-sh (one banner format); every other shard is a
+	@# disjoint slice of the unified `*_test.sfn` runner.
+	@case "$(SHARD)" in \
+		e2e-sh-*) \
+			$(MAKE) test-e2e-sh \
+				E2E_SH_FILES="$$(bash scripts/test_shards.sh list "$(SHARD)" | tr '\n' ' ')" ;; \
+		*) \
+			bash scripts/test_shards.sh run "$(SHARD)" "$(NATIVE_BIN)" ;; \
+	esac
+
+# Coverage guard: fail if the shard map drops or double-counts any test
+# file relative to `make test`. Needs no compiler — pure file-tree check.
+test-shard-cover:
+	@bash scripts/test_shards.sh cover
+
 # Internal: the legacy e2e `.sh` script loop. Phase 3.1 (parent
 # epic #840) ports each `test_*.sh` to a `_test.sfn` peer and
 # deletes both this target and the source scripts. Until then it
 # emits a `═══ e2e-sh: N/M passed ═══` banner shaped like the
 # runner's own per-suite banners so log scrubbers see one format
 # across the suite.
+# E2E_SH_FILES: optional newline/space-separated subset of test_*.sh to
+# run (used by `make test-shard SHARD=e2e-sh-N`, computed by
+# scripts/test_shards.sh). Empty = discover and run the full set.
+E2E_SH_FILES ?=
 .PHONY: test-e2e-sh
 test-e2e-sh:
 	@pass=0; fail=0; failed_files=""; \
-	files=$$(find compiler/tests/e2e -name 'test_*.sh' -print | sort); \
+	files="$(E2E_SH_FILES)"; \
+	if [ -z "$$files" ]; then \
+		files=$$(find compiler/tests/e2e -name 'test_*.sh' -print | sort); \
+	fi; \
 	if [ -z "$$files" ]; then \
 		echo "[test-e2e-sh] no test_*.sh scripts found under compiler/tests/e2e"; \
 		echo ""; \

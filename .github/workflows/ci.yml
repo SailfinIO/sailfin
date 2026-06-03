@@ -38,13 +38,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cheap guard (no build): assert the shard map in scripts/test_shards.sh
+  # still covers every test file `make test` runs — no gaps, no overlaps.
+  # The whole point of sharding is parallelism; this is the only thing
+  # standing between "rebalance the shards" and "silently stop running
+  # some tests". Fails fast before the expensive build legs spin up.
+  shard-cover:
+    name: Shard-cover lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Assert shard map covers the full test surface
+        shell: bash
+        run: make test-shard-cover
+
   build:
-    name: Build + Test [${{ matrix.package_label }}]
+    name: Build + Test [${{ matrix.package_label }} / ${{ matrix.shard }}]
+    needs: shard-cover
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
+        # The PR test suite is ~90% of CI wall time and runs serially, so
+        # we fan it across `os x shard` legs that run concurrently (Phase 1
+        # of docs/proposals/ci-test-speed.md, #843 Track A). Each leg builds
+        # the compiler (warm cache: ~1.5/3 min) then runs only its shard.
+        # `primary: true` designates the one leg per OS that also runs the
+        # one-shot steps (fmt/canary/effect-gate/cross/package/upload) so
+        # they don't run 4x. Shard names live in scripts/test_shards.sh.
+        os: [macos-15, ubuntu-24.04]
+        # e2e-sh is split 4 ways: the 94 legacy .sh scripts (~18s each on
+        # macOS) were the critical path (~31 min) when run as one shard.
+        # Keep in sync with E2E_SH_SHARDS in scripts/test_shards.sh; the
+        # shard-cover job fails if they drift.
+        shard: [unit-a, unit-b, int-e2e-caps, e2e-sh-1, e2e-sh-2, e2e-sh-3, e2e-sh-4]
         include:
           # Pinned to macos-15: the `macos-latest` label migrates to macOS 26
           # starting 2026-06-15. Keep CI on the known-good image; macOS 26 is
@@ -59,6 +89,13 @@ jobs:
             asset_os: linux
             asset_arch: x86_64
             clang: clang-18
+          # Primary leg per OS: runs the one-shot non-test steps + packaging.
+          - os: macos-15
+            shard: unit-a
+            primary: true
+          - os: ubuntu-24.04
+            shard: unit-a
+            primary: true
 
     steps:
       - name: Checkout repository
@@ -104,8 +141,12 @@ jobs:
           target: ${{ matrix.package_label }}
           clang: ${{ matrix.clang }}
           seed_version: ${{ steps.seed.outputs.seed_version }}
+          # Each leg runs only its shard; package only on the primary leg.
+          shard: ${{ matrix.shard }}
+          package: ${{ matrix.primary && 'true' || 'false' }}
 
       - name: Report compiler metadata
+        if: ${{ matrix.primary }}
         shell: bash {0}
         run: |
           set -euo pipefail
@@ -124,6 +165,7 @@ jobs:
       # fixes in 027735d9 / a476bf4b. The clean-file control
       # ensures the gate is not just rejecting every input.
       - name: Effect-gate exit-code smoke (#615 / #807)
+        if: ${{ matrix.primary }}
         shell: bash {0}
         run: |
           set -euo pipefail
@@ -181,6 +223,7 @@ jobs:
           echo "[effect-gate] all assertions passed"
 
       - name: Check formatting (sfn fmt --check)
+        if: ${{ matrix.primary }}
         shell: bash {0}
         run: |
           set -euo pipefail
@@ -208,6 +251,7 @@ jobs:
       # in the imported module's `.sfn-asm` — the exact shape described
       # in docs/rca/2026-04-18-reexport-diagnostic-gep.md.
       - name: Lowering-diagnostic canary (emit + grep)
+        if: ${{ matrix.primary }}
         shell: bash {0}
         run: |
           set -euo pipefail
@@ -252,13 +296,14 @@ jobs:
       # exists as an early-feedback signal duplicated cheaply in CI.
       # See docs/rca/2026-04-18-reexport-diagnostic-gep.md.
       - name: Re-export lint (catches `export { X };` of imports)
+        if: ${{ matrix.primary }}
         shell: bash {0}
         run: |
           set -euo pipefail
           python3 scripts/lint_no_implicit_reexports.py compiler/src runtime
 
       - name: Enable test runner trace (macOS)
-        if: runner.os == 'macOS'
+        if: ${{ runner.os == 'macOS' && matrix.primary }}
         shell: bash {0}
         run: |
           set -euo pipefail
@@ -266,7 +311,7 @@ jobs:
           touch build/sailfin/.trace_test_runner
 
       - name: Preflight single unit test (macOS)
-        if: runner.os == 'macOS'
+        if: ${{ runner.os == 'macOS' && matrix.primary }}
         id: mac_test_preflight
         continue-on-error: true
         shell: bash {0}
@@ -276,6 +321,7 @@ jobs:
 
       - name: Fixed-point rebuild check (linux-x86_64, macos-arm64)
         if: >-
+          matrix.primary &&
           (matrix.package_label == 'linux-x86_64' || matrix.package_label == 'macos-arm64') &&
           (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rc')
         shell: bash {0}
@@ -331,18 +377,19 @@ jobs:
 
       # --- Cross-compile Windows binary from Linux LLVM IR ---
       - name: Install MinGW-w64 cross-compiler (Linux)
-        if: matrix.package_label == 'linux-x86_64'
+        if: ${{ matrix.package_label == 'linux-x86_64' && matrix.primary }}
         run: |
           sudo apt-get install -y mingw-w64
 
       - name: Cross-compile for Windows (Linux)
-        if: matrix.package_label == 'linux-x86_64'
+        if: ${{ matrix.package_label == 'linux-x86_64' && matrix.primary }}
         shell: bash {0}
         run: |
           set -euo pipefail
           make ci-cross-windows
 
       - name: Upload native artifacts
+        if: ${{ matrix.primary }}
         uses: actions/upload-artifact@v7
         with:
           name: ci-native-${{ matrix.package_label }}
@@ -353,6 +400,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload installer archive
+        if: ${{ matrix.primary }}
         uses: actions/upload-artifact@v7
         with:
           name: ci-installer-${{ matrix.package_label }}
@@ -360,7 +408,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Windows installer archive
-        if: matrix.package_label == 'linux-x86_64'
+        if: ${{ matrix.package_label == 'linux-x86_64' && matrix.primary }}
         uses: actions/upload-artifact@v7
         with:
           name: ci-installer-windows-x86_64

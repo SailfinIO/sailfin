@@ -24,6 +24,14 @@ inputs:
     description: "Parallel module builds (BUILD_JOBS). Empty = let the Makefile auto-detect via scripts/detect_build_jobs.sh (CPU + RAM heuristic; macOS capped at 2). Set to a specific N to pin (e.g. for a regression bisect)."
     required: false
     default: ""
+  shard:
+    description: "Test shard to run (unit-a|unit-b|int-e2e-caps|e2e-sh). Empty = run the full `make test` suite. See scripts/test_shards.sh."
+    required: false
+    default: ""
+  package:
+    description: "Build + upload dist/ packages ('true'/'false'). Set 'false' on non-primary shard legs so packaging runs once per OS."
+    required: false
+    default: "true"
 runs:
   using: "composite"
   steps:
@@ -122,9 +130,40 @@ runs:
       shell: bash {0}
       run: |
         set -euo pipefail
-        make test
+        # Memory cap (.claude/rules/compiler-safety.md): on Linux, cap each
+        # compiler invocation at 8 GB virtual so a runaway compile (e.g. a
+        # #892 corruption hitting a bad allocation) fails *cleanly* per-test
+        # instead of OOM-killing the whole hosted runner ("runner received
+        # shutdown signal"). ulimit is inherited by `make` and every test
+        # child it forks. Darwin does not honor RLIMIT_AS, so skip on macOS.
+        if [ "${RUNNER_OS:-}" = "Linux" ]; then
+          ulimit -v 8388608 || true
+        fi
+        # Empty shard = full suite (release workflows + back-compat).
+        # A shard name runs only that disjoint slice; the union across
+        # legs equals `make test` (asserted by the shard-cover lint).
+        run_tests() {
+          if [ -n "${{ inputs.shard }}" ]; then
+            make test-shard SHARD="${{ inputs.shard }}"
+          else
+            make test
+          fi
+        }
+        # Retry-once: #892 is a live non-deterministic codegen heap bug
+        # that intermittently corrupts an *unrelated* test's compile
+        # (garbled link temp name, or a hang -> timeout). A re-run hits a
+        # different random victim and almost always passes. A *persistent*
+        # failure still fails the retry -> red, so real breakage is not
+        # masked. The ::warning:: keeps every flake hit visible/tracked
+        # in the run summary so #892's frequency stays measurable.
+        if ! run_tests; then
+          echo "::warning title=test flake (likely #892)::tests failed on attempt 1; retrying once. If this recurs, it is the non-deterministic codegen corruption tracked in #892."
+          echo "[ci] retrying tests once (attempt 2/2) — see #892"
+          run_tests
+        fi
 
     - name: Package artifacts
+      if: ${{ inputs.package == 'true' }}
       shell: bash {0}
       run: |
         set -euo pipefail
