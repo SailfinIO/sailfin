@@ -49,7 +49,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.3
       - name: Assert shard map covers the full test surface
         shell: bash
         run: make test-shard-cover
@@ -99,7 +99,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.3
 
       - name: Resolve seed version from .seed-version
         id: seed
