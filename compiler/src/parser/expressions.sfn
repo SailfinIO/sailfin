@@ -376,7 +376,15 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
     if token.kind.variant == "Identifier" {
         if identifier_matches(token, "fn") {
             let lambda_result = parse_lambda_expression(state);
-            if lambda_result.success { return lambda_result; }
+            // Run the postfix chain so an immediately-invoked lambda
+            // (`fn() { ... }()`), and any trailing call/index/member
+            // chain, parses into a structured `Call`/`Index`/`Member`
+            // over the `Lambda` instead of dropping to `Raw`. The
+            // parent precedence-climbing loop then folds in any binary
+            // operator that follows (issue #522).
+            if lambda_result.success {
+                return parse_postfix_chain(lambda_result.state, lambda_result.expression);
+            }
         }
     }
 
