@@ -318,9 +318,73 @@ test_self_path_resolves_via_binary_dir() {
     return 0
 }
 
+test_source_edit_busts_cache() {
+    # Regression for #969: `_emit_runtime_sfn_to_obj` used to reuse a
+    # cached `.o` on existence alone, so a runtime sfn-source that
+    # GAINED a function after its `.o` was first cached kept linking
+    # against the stale object — undefined symbols at link. That is
+    # exactly how the real additions of `sfn_clock_millis` (#905) and
+    # `sfn_log_execution` / `sfn_to_debug_string` / `sfn_is_void`
+    # (#935) broke `sfn run` on macOS: the prelude called five symbols
+    # the stale May-29 runtime objects never defined. The content-key
+    # cache (mirroring the c-source path, #632) must bust on a source
+    # edit. This test rewrites the marker source between two builds and
+    # asserts the rebuilt `.o` reflects the new symbol.
+    local ws="$SCRATCH/ws-cache-bust"
+    setup_workspace "$ws"
+    local log="$SCRATCH/ws-cache-bust.log"
+    if ! build_scratch_app "$ws" "$log"; then
+        echo "[test]   initial sfn build failed:"
+        tail -40 "$log"
+        return 1
+    fi
+    local marker_o="$ws/build/sailfin/sfn__runtime-native__test_marker.sfn-O2.o"
+    if [ ! -f "$marker_o" ]; then
+        echo "[test]   marker .o missing after first build: $marker_o"
+        return 1
+    fi
+    # Sanity: the new symbol must NOT exist before the edit.
+    if nm "$marker_o" 2>/dev/null | grep -q "rt_test_marker_v2"; then
+        echo "[test]   unexpected: rt_test_marker_v2 present before edit"
+        return 1
+    fi
+    # Rewrite the marker source (a real file written by
+    # setup_workspace, not a symlink) to add a second function. The
+    # content change must change the cache key and force a re-emit.
+    cat > "$ws/runtime/sfn/test_marker.sfn" <<'EOF'
+fn rt_test_marker() -> i64 ![io] {
+    return 42;
+}
+
+fn rt_test_marker_v2() -> i64 ![io] {
+    return 43;
+}
+EOF
+    local log2="$SCRATCH/ws-cache-bust-2.log"
+    if ! build_scratch_app "$ws" "$log2"; then
+        echo "[test]   rebuild after source edit failed:"
+        tail -40 "$log2"
+        return 1
+    fi
+    # With the old existence-only cache the marker .o would still be
+    # the stale object and this symbol would be absent.
+    if ! nm "$marker_o" 2>/dev/null | grep -q "rt_test_marker_v2"; then
+        echo "[test]   stale .o reused after source edit — cache not busted (#969):"
+        nm "$marker_o" 2>/dev/null | grep "rt_test_marker" || true
+        return 1
+    fi
+    # The content-key sidecar must exist (proves the keyed path ran).
+    if [ ! -f "$marker_o.key" ]; then
+        echo "[test]   content-key sidecar missing after rebuild: $marker_o.key"
+        return 1
+    fi
+    return 0
+}
+
 run_test "consumer fires for sfn-sources and produces cached .o" test_consumer_fires_and_produces_object
 run_test "SAILFIN_DISABLE_RUNTIME_SFN_SOURCES=1 short-circuits consumer" test_disable_gate_skips_consumer
 run_test "self-path resolution works through binary symlink (macOS-safe surface)" test_self_path_resolves_via_binary_dir
+run_test "source edit busts the runtime sfn-source object cache (#969)" test_source_edit_busts_cache
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
