@@ -14,6 +14,7 @@ import {
 } from "./ast";
 import {
     contains_string,
+    ends_with,
     starts_with,
     strings_equal,
     strip_prefix
@@ -338,6 +339,95 @@ fn validate_enum_annotation(usage_name: string, enum_decl: Statement, annotation
     }
 
     return [];
+}
+
+// === `?` operator (TryOperator) type support — issue #833, epic #371 (R.3) ===
+//
+// `?` unwraps a `Result<T, E>`: on `Ok` it yields `T`; on `Err` it early-
+// returns the error. Per the proposal §Type rules (Q2):
+//   1. the operand must be a `Result<T, E>`            -> else E0810
+//   2. the enclosing fn must return `Result<U, F>`     -> else E0811
+//   3. `E` must equal `F` exactly (no `From` coercion) -> else E0812
+//   4. the expression's type is the unwrapped `T`.
+// Types are plain strings throughout the checker (there is no expression-
+// type inferencer — #829), so these operate on type-annotation text and
+// reuse `parse_type_arguments` to split `Result<T, E>` into `[T, E]`. Like
+// the #829 substitution primitives they are directly callable and driven
+// by `result_question_typecheck_test.sfn`; the rule orchestration lives in
+// `typecheck.sfn` (`check_try_operator` / `try_operator_result_type`).
+// True when `type_text` names a bare `Result<T, E>` instantiation: the
+// head identifier is exactly `Result`, exactly two type arguments are
+// present, and the closing `>` is the final token. The trailing-`>` check
+// rejects a nullable `Result<T, E>?` — an optional `Result` is not a
+// `Result`, so `?` applied to it must still trip E0810.
+fn type_is_result(type_text: string) -> boolean {
+    let trimmed = trim_text(type_text);
+    if !starts_with(trimmed, "Result<") { return false; }
+    if !ends_with(trimmed, ">") { return false; }
+    return parse_type_arguments(trimmed).length == 2;
+}
+
+// The `[T, E]` type-argument pair of a `Result<T, E>` annotation, or an
+// empty array when `type_text` is not a 2-arg `Result`. Callers gate on
+// `type_is_result` before indexing.
+fn result_type_arguments(type_text: string) -> string[] {
+    if !type_is_result(type_text) { return []; }
+    return parse_type_arguments(trim_text(type_text));
+}
+
+// E0810 — `?` applied to a value whose type is not `Result<T, E>` (rule 1).
+fn make_try_non_result_operand_diagnostic(operand_type: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0810",
+        severity: "error",
+        message: "`?` applied to a non-`Result` value of type `" + trim_text(operand_type)
+            + "`; the `?` operator only unwraps `Result<T, E>`.",
+        file_path: "",
+        primary: token_from_name("?", span),
+        suggestion: null
+    };
+}
+
+// E0811 — `?` used in a function whose declared return type is not
+// `Result<U, F>` (rule 2). `return_type` is the surface return-type text
+// (or "void" when the function declares no return type).
+fn make_try_non_result_fn_diagnostic(return_type: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0811",
+        severity: "error",
+        message: "`?` is only valid in a function returning `Result`, but"
+            + " the enclosing function returns `"
+            + trim_text(return_type)
+            + "`. Change the return type to `Result<_, E>` or handle the"
+            + " error with `match`.",
+        file_path: "",
+        primary: token_from_name("?", span),
+        suggestion: null
+    };
+}
+
+// E0812 — the operand's error type differs from the enclosing function's
+// error type (rule 3). `?` requires an exact match — there is no `From`
+// coercion yet (Q2, deferred until generic constraints land). Both types
+// are named in the message.
+fn make_try_error_type_mismatch_diagnostic(operand_error: string, fn_error: string, span: SourceSpan?) -> Diagnostic {
+    // The message is assembled via intermediate `let` bindings rather than
+    // a single inline `+` chain to dodge a string-concatenation codegen
+    // bug (#1003) that lowers certain inline literal chains to an empty
+    // string. Keep the `let`-binding form until #1003 lands.
+    let head = "`?` error type mismatch: the operand's error type `";
+    let mid = "` differs from the enclosing function's error type `";
+    let tail = "`. `?` requires an exact match (no `From` coercion yet).";
+    let message = head + trim_text(operand_error) + mid + trim_text(fn_error)
+        + tail;
+    return Diagnostic {
+        code: "E0812",
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: token_from_name("?", span),
+        suggestion: null
+    };
 }
 
 fn extract_generic_argument_block(annotation_text: string) -> string? {

@@ -1,0 +1,79 @@
+// Unit tests for the `?` operator (`TryOperator`) type rules — issue #833,
+// epic #371 (R.3). The rules type-check a `?` against the operand's type
+// and the enclosing function's declared return type, both carried as
+// plain type-annotation strings (the checker has no expression-type
+// inferencer — see #829). Per the proposal §Type rules:
+//   1. the operand must be `Result<T, E>`            -> E0810
+//   2. the enclosing fn must return `Result<U, F>`   -> E0811
+//   3. `E` must equal `F` exactly (no `From` coercion) -> E0812
+//   4. the expression's type is the unwrapped `T`.
+// These drive the callable rule primitives directly, mirroring the #829
+// substitution tests; emitter desugaring (R.4) is #834 and out of scope.
+import { index_of } from "../../src/string_utils";
+import { check_try_operator, try_operator_result_type } from "../../src/typecheck";
+
+// Collapse the not-found case so the assert sites stay free of optional
+// narrowing.
+fn _result_type(operand_type: string) -> string {
+    let resolved = try_operator_result_type(operand_type);
+    if resolved == null { return "<not-result>"; }
+    return resolved;
+}
+
+test "try op: `?` on a non-Result operand emits E0810" {
+    let diags = check_try_operator("int", "Result<int, Error>", null);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0810");
+}
+
+test "try op: `?` in a non-Result-returning fn emits E0811" {
+    let diags = check_try_operator("Result<int, Error>", "int", null);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0811");
+}
+
+test "try op: `?` in a fn with no return type emits E0811" {
+    let diags = check_try_operator("Result<int, Error>", null, null);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0811");
+}
+
+test "try op: mismatched error type emits E0812 naming both types" {
+    let diags = check_try_operator("Result<int, Error>", "Result<string, MyError>", null);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0812");
+    // No `From` coercion (Q2): both error types are named in the message.
+    assert index_of(diags[0].message, "Error") >= 0;
+    assert index_of(diags[0].message, "MyError") >= 0;
+}
+
+test "try op: Result operand in a Result<_, Error> fn type-checks" {
+    let diags = check_try_operator("Result<int, Error>", "Result<bool, Error>", null);
+    assert diags.length == 0;
+}
+
+test "try op: the `?` expression has the unwrapped success type" {
+    // `Result<int, Error>` unwraps to `int` (acceptance criterion 4).
+    assert strings_equal(_result_type("Result<int, Error>"), "int");
+    assert strings_equal(_result_type("Result<string, Error>"), "string");
+}
+
+test "try op: unwrapped type of a non-Result operand is null" {
+    assert strings_equal(_result_type("int"), "<not-result>");
+}
+
+test "try op: both rules fire when operand and fn are non-Result" {
+    let diags = check_try_operator("int", "string", null);
+    assert diags.length == 2;
+    assert strings_equal(diags[0].code, "E0810");
+    assert strings_equal(diags[1].code, "E0811");
+}
+
+test "try op: a nullable `Result<T, E>?` operand is not a Result (E0810)" {
+    // An optional `Result` is not a `Result`: `?` must still trip E0810,
+    // and the unwrapped type is null (the trailing `?` is not stripped).
+    let diags = check_try_operator("Result<int, Error>?", "Result<int, Error>", null);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0810");
+    assert strings_equal(_result_type("Result<int, Error>?"), "<not-result>");
+}
