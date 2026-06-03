@@ -570,7 +570,14 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
             // to the child — this serial fallback preserves its
             // pre-#515 single-shot contract exactly. `sailfin_exe` is
             // the same-generation binary, so it accepts the flags.
-            let mut emit_args: string[] = [sailfin_exe, "emit", "--module-name", t.slug, "--attempts", "1", "--no-validate", "-o", t.output_path];
+            // `--no-resolve-gate` (#906): this is a per-module
+            // intermediate emit. For the `native` stage it carries no
+            // cross-module import context, so the lowering dry-run gate
+            // would falsely reject legitimate imported calls; suppress it
+            // here and let the build's LLVM lowering stage (#631) own
+            // fail-closed. The `llvm` stage ignores the flag. Mirrors
+            // `emit_helpers.emit_subprocess_with_retry`.
+            let mut emit_args: string[] = [sailfin_exe, "emit", "--module-name", t.slug, "--attempts", "1", "--no-validate", "--no-resolve-gate", "-o", t.output_path];
             if use_import_context {
                 emit_args.push("--import-context");
                 emit_args.push(import_context_root);
@@ -637,9 +644,17 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
     if use_import_context {
         worker_import_arg = "--import-context \"$SAILFIN_PE_IMPORT_CTX\" ";
     }
+    // `--no-resolve-gate` (#906): per-module intermediate emit; the
+    // `native` stage carries no cross-module import context, so the
+    // lowering dry-run gate would falsely reject legitimate imported
+    // calls. Suppress it here and let the build's LLVM lowering stage
+    // (#631) own fail-closed; the `llvm` stage ignores the flag. Mirrors
+    // `emit_helpers.emit_subprocess_with_retry` and the serial fallback
+    // above — without it, multi-job builds fail closed on every
+    // cross-module callee.
     let worker_script = "attempt=0; while [ $attempt -lt 3 ]; do "
         + "attempt=$((attempt + 1)); "
-        + "\"$SAILFIN_PE_SEED\" emit --module-name \"$1\" --attempts 1 --no-validate -o \"$2\" "
+        + "\"$SAILFIN_PE_SEED\" emit --module-name \"$1\" --attempts 1 --no-validate --no-resolve-gate -o \"$2\" "
         + worker_import_arg
         + "\"$SAILFIN_PE_MODE\" \"$3\" || continue; "
         + "[ -s \"$2\" ] || continue; "
