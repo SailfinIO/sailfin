@@ -982,36 +982,48 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
     let obj_path = _path_join(out_dir, cap_prefix + _path_basename(src)
         + opt_flag
         + ".o");
-    if !fs.exists(ll_path) {
-        // Build the `sh -c` argv. Each `KEY= ` clears that toggle for
-        // the child; everything else inherits from the parent (PATH,
-        // HOME, PWD, etc.). The shell-quote escaping here protects
-        // against paths that contain spaces or shell metacharacters.
-        let cmd = "SAILFIN_TRACE_EMIT= SAILFIN_SKIP_TYPECHECK= SAILFIN_TRACE_TEST_RUNNER= SAILFIN_DUMP_TEST_SOURCES= SAILFIN_NO_LEGACY_PROBE=1 "
-            + _shell_single_quote_arg(self_path)
-            + " emit --module-name "
-            + _shell_single_quote_arg(slug)
-            + " -o "
-            + _shell_single_quote_arg(ll_path)
-            + " llvm "
-            + _shell_single_quote_arg(src);
-        let rc = process.run(["sh", "-c", cmd]);
-        if rc != 0 {
-            print("sfn build: failed to emit runtime sfn-source " + src
-                + " (child exit="
-                + number_to_string(rc)
-                + ")");
-            return "";
-        }
+    // Content-addressed cache (#632 / #969): a previously-emitted
+    // `.o` may only be reused when its sidecar `.key` matches the
+    // current source content. The prior bare `fs.exists(ll_path)` /
+    // `fs.exists(obj_path)` checks silently reused a stale `.o`/`.ll`
+    // after the source gained new functions (e.g. #905's
+    // `sfn_clock_millis`, #935's `sfn_log_execution` /
+    // `sfn_to_debug_string` / `sfn_is_void`), so the freshly-emitted
+    // prelude called symbols the stale runtime objects never defined —
+    // surfacing as `Undefined symbols ... link failed` (#969). This
+    // mirrors the `_clang_compile_runtime_capsule_objects` c-source
+    // path so the sfn-source + prelude emit invalidates identically.
+    let key = runtime_object_cache_key(src, opt_flag);
+    if _runtime_obj_cache_hit(obj_path, key) { return obj_path; }
+    // Cache miss: regenerate the `.ll` unconditionally (a cached one
+    // is stale by definition here), then compile the `.o` and record
+    // the key. Build the `sh -c` argv: each `KEY= ` clears that toggle
+    // for the child; everything else inherits from the parent (PATH,
+    // HOME, PWD, etc.). The shell-quote escaping protects against
+    // paths that contain spaces or shell metacharacters.
+    let cmd = "SAILFIN_TRACE_EMIT= SAILFIN_SKIP_TYPECHECK= SAILFIN_TRACE_TEST_RUNNER= SAILFIN_DUMP_TEST_SOURCES= SAILFIN_NO_LEGACY_PROBE=1 "
+        + _shell_single_quote_arg(self_path)
+        + " emit --module-name "
+        + _shell_single_quote_arg(slug)
+        + " -o "
+        + _shell_single_quote_arg(ll_path)
+        + " llvm "
+        + _shell_single_quote_arg(src);
+    let rc = process.run(["sh", "-c", cmd]);
+    if rc != 0 {
+        print("sfn build: failed to emit runtime sfn-source " + src
+            + " (child exit="
+            + number_to_string(rc)
+            + ")");
+        return "";
     }
-    if !fs.exists(obj_path) {
-        let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", ll_path, "-o", obj_path]);
-        if rc2 != 0 {
-            print("sfn build: failed to compile runtime sfn-source object "
-                + obj_path);
-            return "";
-        }
+    let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", ll_path, "-o", obj_path]);
+    if rc2 != 0 {
+        print("sfn build: failed to compile runtime sfn-source object "
+            + obj_path);
+        return "";
     }
+    _runtime_obj_cache_record(obj_path, key);
     return obj_path;
 }
 
@@ -2170,11 +2182,13 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
         }
         let link_rc = _clang_link_multi(all_lls, exe_path, runtime_root, run_runtime_caps, binary_dir, "");
         if link_rc != 0 {
+            // A native link failure is a real compiler/runtime bug to
+            // fix at the source — never paper over it. The prior
+            // `process.run(["sfn", "run", input_path])` "seed fallback"
+            // re-invoked `sfn run`, so on any persistent link failure
+            // it recursed into itself forever (#969). Fail closed with
+            // the clang exit code instead.
             print("link failed (clang exit=" + number_to_string(link_rc) + ")");
-            print("run: native link failed; attempting seed fallback via `sfn run`");
-
-            let fallback_rc = process.run(["sfn", "run", input_path]);
-            if fallback_rc == 0 { return 0; }
             return link_rc;
         }
 

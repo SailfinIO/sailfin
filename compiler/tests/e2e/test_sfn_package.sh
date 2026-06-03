@@ -88,10 +88,16 @@ test_tarball_contents() {
     # Standalone compiler tarball: only bin/sailfin and bin/sfn,
     # nested under `<root>/bin/`. Locks the structure consumers
     # of the release artifact rely on.
+    # Match listings via a here-string, NOT `echo "$listing" | grep -q`:
+    # `grep -q` exits on first match and closes the pipe, so `echo` takes
+    # SIGPIPE writing the rest of a large listing. Under `set -o pipefail`
+    # that broken pipe fails the pipeline (`echo: write error: Broken
+    # pipe`), flaking the test — observed on the installer listing (large
+    # runtime/native/ tree) on macOS CI. A here-string has no pipe writer.
     local listing
     listing="$(tar -tzf "$TARBALL")"
-    echo "$listing" | grep -qE "/bin/sailfin\$" || return 1
-    echo "$listing" | grep -qE "/bin/sfn\$" || return 1
+    grep -qE "/bin/sailfin\$" <<< "$listing" || return 1
+    grep -qE "/bin/sfn\$" <<< "$listing" || return 1
 }
 run_test "tarball contains bin/sailfin + bin/sfn" test_tarball_contents
 
@@ -234,9 +240,9 @@ test_user_capsule_tarball_contents() {
     # introspect what they got.
     local listing
     listing="$(tar -tzf "$USER_TARBALL")"
-    echo "$listing" | grep -qE "/obj/mod\.o\$" || return 1
-    echo "$listing" | grep -qE "/manifest\.json\$" || return 1
-    echo "$listing" | grep -qE "/capsule\.toml\$" || return 1
+    grep -qE "/obj/mod\.o\$" <<< "$listing" || return 1
+    grep -qE "/manifest\.json\$" <<< "$listing" || return 1
+    grep -qE "/capsule\.toml\$" <<< "$listing" || return 1
 }
 run_test "user-capsule tarball contains obj/mod.o + manifest.json + capsule.toml" test_user_capsule_tarball_contents
 
@@ -305,10 +311,10 @@ test_installer_tarball_contents() {
     # archive was created with `-C <dir> .`; accept both forms.
     local listing
     listing="$(tar -tzf "$INSTALLER_TARBALL")"
-    echo "$listing" | grep -qE "^(\\./)?bin/sailfin\$" || return 1
-    echo "$listing" | grep -qE "^(\\./)?bin/sfn\$" || return 1
+    grep -qE "^(\\./)?bin/sailfin\$" <<< "$listing" || return 1
+    grep -qE "^(\\./)?bin/sfn\$" <<< "$listing" || return 1
     # Runtime tree present (any file under runtime/native/).
-    echo "$listing" | grep -qE "^(\\./)?runtime/native/" || return 1
+    grep -qE "^(\\./)?runtime/native/" <<< "$listing" || return 1
 }
 run_test "installer tarball contains bin/sailfin + bin/sfn + runtime/native/" test_installer_tarball_contents
 
