@@ -1,0 +1,117 @@
+// Unit tests for immediately-invoked lambda (IIFE) postfix chains
+// (issue #522).
+//
+// Before the fix, the expression-side prefix parser returned a
+// `Lambda` straight out of `parse_lambda_expression` without running
+// the postfix chain. A trailing `()` / `[i]` / `.field` after the
+// lambda was therefore left unconsumed, so `expression_from_tokens`
+// saw leftover tokens and dropped the whole expression to
+// `Expression.Raw`. Routing the lambda through `parse_postfix_chain`
+// makes `fn() { ... }()` parse into a structured `Call` over the
+// `Lambda`; a following binary operator then folds in via the parent
+// precedence-climbing loop.
+//
+// Coverage: IIFE + binary-op, IIFE + index, IIFE + member in return
+// position, plus the same shapes in a top-level `let` initializer. The
+// block-scoped `let` path is still opaque (separate issue), so the
+// `let` cases use top-level bindings — matching the convention in
+// parser_lambda_body_test.sfn.
+import { Expression } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+// Expression of the first `return` statement in the first top-level
+// function declaration of `source`. Asserts the shape so a structural
+// change fails here with a clear message rather than trapping on a
+// duck-typed access downstream.
+fn first_return_expression(source: string) -> Expression ![io] {
+    let program = parse_program(source);
+    let fn_stmt = program.statements[0];
+    assert fn_stmt.variant == "FunctionDeclaration";
+    let ret = fn_stmt.body.statements[0];
+    assert ret.variant == "ReturnStatement";
+    let expr = ret.expression;
+    assert expr != null;
+    return expr;
+}
+
+// Initializer of the first top-level `let` in `source`.
+fn first_let_initializer(source: string) -> Expression ![io] {
+    let program = parse_program(source);
+    let stmt = program.statements[0];
+    assert stmt.variant == "VariableDeclaration";
+    let init = stmt.initializer;
+    assert init != null;
+    return init;
+}
+
+// -------------------------------------------------------------------
+// Regression guard: a bare IIFE in return position parses to a `Call`
+// whose callee is the `Lambda` — never `Raw`. This is the shape the
+// `+`, `[]`, and `.` cases build on, so pin it on its own.
+// -------------------------------------------------------------------
+test "iife postfix: bare invocation parses to Call of Lambda" ![io] {
+    let expr = first_return_expression("fn f() -> int { return fn() { return 1; }(); }");
+    assert expr.variant == "Call";
+    assert expr.callee.variant == "Lambda";
+}
+
+// -------------------------------------------------------------------
+// IIFE + binary op: `fn() { ... }() + 2` parses to a `Binary` whose
+// left is the `Call` of the `Lambda` and whose right is the literal —
+// no `Raw` fallback.
+// -------------------------------------------------------------------
+test "iife postfix: binary op after invocation parses to Binary" ![io] {
+    let expr = first_return_expression("fn g() -> int { return fn() { return 1; }() + 2; }");
+    assert expr.variant == "Binary";
+    assert expr.left.variant == "Call";
+    assert expr.left.callee.variant == "Lambda";
+    assert expr.right.variant == "NumberLiteral";
+}
+
+// -------------------------------------------------------------------
+// IIFE + index: `fn() { ... }()[0]` parses to an `Index` over the
+// `Call` of the `Lambda`.
+// -------------------------------------------------------------------
+test "iife postfix: index after invocation parses to Index" ![io] {
+    let expr = first_return_expression("fn h() -> int { return fn() { return arr; }()[0]; }");
+    assert expr.variant == "Index";
+    assert expr.sequence.variant == "Call";
+    assert expr.sequence.callee.variant == "Lambda";
+}
+
+// -------------------------------------------------------------------
+// IIFE + member: `fn() { ... }().field` parses to a `Member` over the
+// `Call` of the `Lambda`.
+// -------------------------------------------------------------------
+test "iife postfix: member after invocation parses to Member" ![io] {
+    let expr = first_return_expression("fn i() -> int { return fn() { return obj; }().field; }");
+    assert expr.variant == "Member";
+    assert expr.object.variant == "Call";
+    assert expr.object.callee.variant == "Lambda";
+}
+
+// -------------------------------------------------------------------
+// `let` initializer path: the same IIFE + binary-op shape parses
+// identically when it is a top-level `let` initializer rather than a
+// return value.
+// -------------------------------------------------------------------
+test "iife postfix: binary op after invocation in let initializer" ![io] {
+    let expr = first_let_initializer("let b = fn() { return 1; }() + 2;");
+    assert expr.variant == "Binary";
+    assert expr.left.variant == "Call";
+    assert expr.left.callee.variant == "Lambda";
+    assert expr.right.variant == "NumberLiteral";
+}
+
+// -------------------------------------------------------------------
+// No regression: a non-IIFE binary expression (`a() + b`) keeps its
+// ordinary `Binary` / `Call` shape — the lambda postfix change does
+// not perturb the common path.
+// -------------------------------------------------------------------
+test "iife postfix: ordinary call-plus-identifier is unaffected" ![io] {
+    let expr = first_return_expression("fn j() -> int { return a() + b; }");
+    assert expr.variant == "Binary";
+    assert expr.left.variant == "Call";
+    assert expr.left.callee.variant == "Identifier";
+    assert expr.right.variant == "Identifier";
+}
