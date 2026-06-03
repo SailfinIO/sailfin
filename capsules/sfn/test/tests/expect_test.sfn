@@ -116,6 +116,11 @@ test "expect: eq_bool_array pass" ![pure] {
     assert expect_eq_bool_array([true, false, true], [true, false, true]).ok;
 }
 
+test "expect: eq_bool_array empty pass" ![pure] {
+    let empty: boolean[] = [];
+    assert expect_eq_bool_array(empty, []).ok;
+}
+
 test "expect: eq_bool_array fail (length)" ![pure] {
     let r = expect_eq_bool_array([true], [true, false]);
     assert ! r.ok;
