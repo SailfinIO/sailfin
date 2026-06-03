@@ -12,9 +12,11 @@ import {
     expect_contains_int_array,
     expect_contains_str,
     expect_eq_bool,
+    expect_eq_bool_array,
     expect_eq_int,
     expect_eq_int_array,
     expect_eq_str,
+    expect_eq_str_array,
     expect_to_throw,
     expect_to_throw_with,
     pure_assert_eq_int
@@ -75,6 +77,75 @@ test "expect: eq_int_array fail (element)" ![pure] {
     let r = expect_eq_int_array([1, 2, 3], [1, 9, 3]);
     assert ! r.ok;
     assert r.message.length > 0;
+}
+
+// -- to_be: string array --
+test "expect: eq_str_array pass" ![pure] {
+    assert expect_eq_str_array(["a", "b", "c"], ["a", "b", "c"]).ok;
+}
+
+test "expect: eq_str_array empty pass" ![pure] {
+    let empty: string[] = [];
+    assert expect_eq_str_array(empty, []).ok;
+}
+
+test "expect: eq_str_array fail (length)" ![pure] {
+    let r = expect_eq_str_array(["a", "b"], ["a", "b", "c"]);
+    assert ! r.ok;
+    // Length mismatch reports lengths, not an index.
+    assert expect_contains_str(r.message, "length").ok;
+}
+
+test "expect: eq_str_array fail (element)" ![pure] {
+    let r = expect_eq_str_array(["a", "b", "c"], ["a", "x", "c"]);
+    assert ! r.ok;
+    // Element mismatch reports the first differing index — distinct from
+    // the length-mismatch message.
+    assert expect_contains_str(r.message, "index 1").ok;
+}
+
+test "expect: eq_str_array fail (empty vs nonempty)" ![pure] {
+    let empty: string[] = [];
+    let r = expect_eq_str_array(empty, ["a"]);
+    assert ! r.ok;
+    assert expect_contains_str(r.message, "length").ok;
+}
+
+// -- to_be: boolean array --
+test "expect: eq_bool_array pass" ![pure] {
+    assert expect_eq_bool_array([true, false, true], [true, false, true]).ok;
+}
+
+test "expect: eq_bool_array fail (length)" ![pure] {
+    let r = expect_eq_bool_array([true], [true, false]);
+    assert ! r.ok;
+    assert expect_contains_str(r.message, "length").ok;
+}
+
+test "expect: eq_bool_array fail (element)" ![pure] {
+    let r = expect_eq_bool_array([true, true], [true, false]);
+    assert ! r.ok;
+    assert expect_contains_str(r.message, "index 1").ok;
+}
+
+test "expect: eq_bool_array fail (empty vs nonempty)" ![pure] {
+    let empty: boolean[] = [];
+    let r = expect_eq_bool_array(empty, [true]);
+    assert ! r.ok;
+    assert expect_contains_str(r.message, "length").ok;
+}
+
+// -- prelude record-equality helper (issue #973) --
+test "prelude: record_eq_flag_message equal" ![pure] {
+    assert record_eq_flag_message(true, "boom", true, "boom");
+}
+
+test "prelude: record_eq_flag_message flag differs" ![pure] {
+    assert ! record_eq_flag_message(true, "boom", false, "boom");
+}
+
+test "prelude: record_eq_flag_message message differs" ![pure] {
+    assert ! record_eq_flag_message(true, "boom", true, "bang");
 }
 
 // -- to_contain: string --

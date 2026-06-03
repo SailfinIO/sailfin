@@ -650,6 +650,20 @@ fn strings_equal(left: string, right: string) -> boolean {
     return true;
 }
 
+// Pure-Sailfin record equality for the test runner's MatchResult /
+// AssertFailure records (sfn/test, issue #973). Both records reduce to a
+// (boolean discriminator, string message) pair for equality purposes —
+// MatchResult { ok, message } and AssertFailure { present, file, line,
+// col, message } (file/line/col stay "" / 0 today; see sfn/test mod.sfn).
+// A *generic* `_struct_eq` / `to_equal_record` needs the generic-struct
+// monomorphization the frontend lacks, so it is deferred to the
+// generic-constraints epic; this concrete helper is the pre-generics
+// interim the runner needs.
+fn record_eq_flag_message(left_flag: boolean, left_message: string, right_flag: boolean, right_message: string) -> boolean {
+    if left_flag != right_flag { return false; }
+    return strings_equal(left_message, right_message);
+}
+
 fn find_char(text: string, character: string, start: int = 0) -> int {
     let length = text.length;
     if length == 0 { return -1; }
@@ -704,6 +718,7 @@ export {
     clamp,
     substring,
     find_char,
+    record_eq_flag_message,
     grapheme_count,
     grapheme_at,
     char_code,

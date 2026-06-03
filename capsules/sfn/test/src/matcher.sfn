@@ -95,6 +95,49 @@ fn matcher_eq_int_array(actual: int[], expected: int[]) -> MatchResult ![pure] {
     return match_ok();
 }
 
+fn matcher_eq_str_array(actual: string[], expected: string[]) -> MatchResult ![pure] {
+    if actual.length != expected.length {
+        return match_fail("expected length: " + number_to_string(expected.length)
+            + "; actual length: "
+            + number_to_string(actual.length));
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= actual.length { break; }
+        if actual[i] != expected[i] {
+            return match_fail("mismatch at index " + number_to_string(i)
+                + "; expected: \""
+                + expected[i]
+                + "\"; actual: \""
+                + actual[i]
+                + "\"");
+        }
+        i += 1;
+    }
+    return match_ok();
+}
+
+fn matcher_eq_bool_array(actual: boolean[], expected: boolean[]) -> MatchResult ![pure] {
+    if actual.length != expected.length {
+        return match_fail("expected length: " + number_to_string(expected.length)
+            + "; actual length: "
+            + number_to_string(actual.length));
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= actual.length { break; }
+        if actual[i] != expected[i] {
+            return match_fail("mismatch at index " + number_to_string(i)
+                + "; expected: "
+                + _match_bool_to_string(expected[i])
+                + "; actual: "
+                + _match_bool_to_string(actual[i]));
+        }
+        i += 1;
+    }
+    return match_ok();
+}
+
 // ---------------------------------------------------------------------------
 // Containment matchers
 // ---------------------------------------------------------------------------

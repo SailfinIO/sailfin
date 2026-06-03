@@ -1180,6 +1180,9 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "string_starts_with", symbol: "string_starts_with", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "record_eq_flag_message", symbol: "record_eq_flag_message", return_type: "i1", parameter_types: ["i1", "i8*", "i1", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
 
     return descriptors;
 }
