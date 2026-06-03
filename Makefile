@@ -282,13 +282,13 @@ test-shard:
 	@if [ "$(SHARD)" = "e2e-sh" ]; then \
 		$(MAKE) test-e2e-sh; \
 	else \
-		scripts/test_shards.sh run "$(SHARD)" "$(NATIVE_BIN)"; \
+		bash scripts/test_shards.sh run "$(SHARD)" "$(NATIVE_BIN)"; \
 	fi
 
 # Coverage guard: fail if the shard map drops or double-counts any test
 # file relative to `make test`. Needs no compiler — pure file-tree check.
 test-shard-cover:
-	@scripts/test_shards.sh cover
+	@bash scripts/test_shards.sh cover
 
 # Internal: the legacy e2e `.sh` script loop. Phase 3.1 (parent
 # epic #840) ports each `test_*.sh` to a `_test.sfn` peer and

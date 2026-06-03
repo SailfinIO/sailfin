@@ -1,6 +1,7 @@
 # CI Test-Speed Plan: cutting PR feedback time
 
-Status: proposal (architecture only — no CI/runner code changes yet)
+Status: Phase 1 (CI sharding + shard-cover lint) implemented in PR #1012;
+Levers 2 (per-test binary cache) and 3 (scope trim) remain proposed.
 Author: compiler-architect
 Reconciles with: #839/#843 (test-infra epic, Phase 4), #513 (Makefile
 slim-down), #339 (build perf), #940 (multi-file runner forking), #1011
