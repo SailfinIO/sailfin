@@ -258,6 +258,38 @@ test-capsules:
 	fi
 	@$(NATIVE_BIN) test capsules
 
+# Sharded test execution for parallel CI legs. Phase 1 of
+# docs/proposals/ci-test-speed.md (#843 Track A): the test suite is
+# ~90% of PR CI wall time and runs serially, so we fan it across
+# concurrent CI legs. `scripts/test_shards.sh` owns the shard -> file
+# mapping (single source of truth); `test-shard-cover` asserts the union
+# of all shards equals `make test`'s surface so a rebalance can never
+# silently drop coverage. Shard names: unit-a unit-b int-e2e-caps e2e-sh.
+#   make test-shard SHARD=unit-a
+.PHONY: test-shard test-shard-cover
+SHARD ?=
+test-shard:
+	@if [ -z "$(SHARD)" ]; then \
+		echo "[test-shard] SHARD required: unit-a|unit-b|int-e2e-caps|e2e-sh" >&2; \
+		exit 1; \
+	fi
+	@if [ ! -x $(NATIVE_BIN) ]; then \
+		echo "[test-shard] missing $(NATIVE_BIN); running make compile"; \
+		$(MAKE) compile; \
+	fi
+	@# e2e-sh keeps its existing banner/runner; every other shard is a
+	@# disjoint slice of the unified `*_test.sfn` runner.
+	@if [ "$(SHARD)" = "e2e-sh" ]; then \
+		$(MAKE) test-e2e-sh; \
+	else \
+		scripts/test_shards.sh run "$(SHARD)" "$(NATIVE_BIN)"; \
+	fi
+
+# Coverage guard: fail if the shard map drops or double-counts any test
+# file relative to `make test`. Needs no compiler — pure file-tree check.
+test-shard-cover:
+	@scripts/test_shards.sh cover
+
 # Internal: the legacy e2e `.sh` script loop. Phase 3.1 (parent
 # epic #840) ports each `test_*.sh` to a `_test.sfn` peer and
 # deletes both this target and the source scripts. Until then it

@@ -24,6 +24,14 @@ inputs:
     description: "Parallel module builds (BUILD_JOBS). Empty = let the Makefile auto-detect via scripts/detect_build_jobs.sh (CPU + RAM heuristic; macOS capped at 2). Set to a specific N to pin (e.g. for a regression bisect)."
     required: false
     default: ""
+  shard:
+    description: "Test shard to run (unit-a|unit-b|int-e2e-caps|e2e-sh). Empty = run the full `make test` suite. See scripts/test_shards.sh."
+    required: false
+    default: ""
+  package:
+    description: "Build + upload dist/ packages ('true'/'false'). Set 'false' on non-primary shard legs so packaging runs once per OS."
+    required: false
+    default: "true"
 runs:
   using: "composite"
   steps:
@@ -122,9 +130,17 @@ runs:
       shell: bash {0}
       run: |
         set -euo pipefail
-        make test
+        # Empty shard = full suite (release workflows + back-compat).
+        # A shard name runs only that disjoint slice; the union across
+        # legs equals `make test` (asserted by the shard-cover lint).
+        if [ -n "${{ inputs.shard }}" ]; then
+          make test-shard SHARD="${{ inputs.shard }}"
+        else
+          make test
+        fi
 
     - name: Package artifacts
+      if: ${{ inputs.package == 'true' }}
       shell: bash {0}
       run: |
         set -euo pipefail
