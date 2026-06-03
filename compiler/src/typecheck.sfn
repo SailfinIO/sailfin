@@ -47,10 +47,15 @@ import {
     make_main_signature_param_type_diagnostic,
     make_removed_keyword_diagnostic,
     make_thread_local_requires_mut_diagnostic,
+    make_try_error_type_mismatch_diagnostic,
+    make_try_non_result_fn_diagnostic,
+    make_try_non_result_operand_diagnostic,
     make_undefined_function_diagnostic,
     make_unsupported_statement_keyword_diagnostic,
     register_local_symbol,
-    register_symbol
+    register_symbol,
+    result_type_arguments,
+    type_is_result
 } from "./typecheck_types";
 
 fn typecheck_diagnostics(program: Program) -> Diagnostic[] {
@@ -961,6 +966,59 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         return walk_expression(expression.operand, bindings, imports);
     }
     return [];
+}
+
+// `?` operator (TryOperator) type rules — issue #833, epic #371 (R.3).
+// See `typecheck_types.sfn` for `type_is_result` / `result_type_arguments`
+// and the E0810–E0812 factories. `operand_type` is the type of the `?`
+// operand; `enclosing_return_type` is the declared return type of the
+// function the `?` appears in (null when the function declares no return
+// type). Rules are applied per the proposal §Type rules:
+//   1. operand must be `Result<T, E>`            -> E0810
+//   2. enclosing fn must return `Result<U, F>`   -> E0811
+//   3. `E` must equal `F` exactly (no coercion)  -> E0812
+// Rules 1 and 2 are independent, so a site that violates both reports
+// both; rule 3 only applies once both sides are confirmed `Result` (else
+// there is no error type to compare and rules 1/2 already fired).
+//
+// Type representation: types are plain strings (#829). There is no
+// expression-type inferencer in the checker, so these rules are driven by
+// `result_question_typecheck_test.sfn` against explicit type strings;
+// live-walk wiring waits on operand-type inference (a larger workstream).
+fn check_try_operator(operand_type: string, enclosing_return_type: string?, span: SourceSpan?) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+
+    let operand_is_result = type_is_result(operand_type);
+    if !operand_is_result {
+        diagnostics.push(make_try_non_result_operand_diagnostic(operand_type, span));
+    }
+
+    if enclosing_return_type == null {
+        diagnostics.push(make_try_non_result_fn_diagnostic("void", span));
+        return diagnostics;
+    }
+    if !type_is_result(enclosing_return_type) {
+        diagnostics.push(make_try_non_result_fn_diagnostic(enclosing_return_type, span));
+        return diagnostics;
+    }
+
+    if operand_is_result {
+        let operand_args = result_type_arguments(operand_type);
+        let fn_args = result_type_arguments(enclosing_return_type);
+        if !strings_equal(operand_args[1], fn_args[1]) {
+            diagnostics.push(make_try_error_type_mismatch_diagnostic(operand_args[1], fn_args[1], span));
+        }
+    }
+
+    return diagnostics;
+}
+
+// The unwrapped success type of a `?` operand — rule 4. Returns the `T`
+// of a `Result<T, E>` operand, or null when the operand is not a `Result`
+// (rule 1 reports that error separately via `check_try_operator`).
+fn try_operator_result_type(operand_type: string) -> string? {
+    if !type_is_result(operand_type) { return null; }
+    return result_type_arguments(operand_type)[0];
 }
 
 // Resolution probe (issue #811). Returns whether `name` resolves to an
