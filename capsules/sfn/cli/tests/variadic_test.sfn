@@ -1,0 +1,106 @@
+// Tests for variadic positionals — Issue #800 (Issue 1.11 of the CLI
+// Modularization Epic, #351).
+//
+// Covers the `arg_variadic` builder, the parser's accumulation of the
+// trailing positional tail under one name, the `positionals(matches,
+// name)` accessor, and the builder-time guard that a variadic must be
+// the last positional. `parse()` (the pure, non-exiting variant) is
+// used throughout so error paths never call `process.exit()`.
+import {
+    arg,
+    arg_variadic,
+    command,
+    parse,
+    positionals,
+    with_arg
+} from "../src/mod";
+
+// ---- Builder ----
+test "arg_variadic: sets is_variadic and a sane default shape" {
+    let a = arg_variadic("files", "Input files");
+    assert strings_equal(a.name, "files");
+    assert strings_equal(a.description, "Input files");
+    assert a.is_variadic == true;
+    assert a.is_optional == true;
+    assert strings_equal(a.default_value, "");
+}
+
+// ---- Zero / one / three variadic args ----
+test "variadic: zero matches yields an empty list" {
+    let cmd = with_arg(command("app", "Test app"), arg_variadic("files", "Files"));
+    let argv: string[] = ["app"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    let files = positionals(r.matches, "files");
+    assert files.length == 0;
+}
+
+test "variadic: one match yields a single-element list" {
+    let cmd = with_arg(command("app", "Test app"), arg_variadic("files", "Files"));
+    let argv: string[] = ["app", "a.sfn"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    let files = positionals(r.matches, "files");
+    assert files.length == 1;
+    assert strings_equal(files[0], "a.sfn");
+}
+
+test "variadic: three matches collected in order" {
+    let cmd = with_arg(command("app", "Test app"), arg_variadic("files", "Files"));
+    let argv: string[] = ["app", "a.sfn", "b.sfn", "c.sfn"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    let files = positionals(r.matches, "files");
+    assert files.length == 3;
+    assert strings_equal(files[0], "a.sfn");
+    assert strings_equal(files[1], "b.sfn");
+    assert strings_equal(files[2], "c.sfn");
+}
+
+// ---- Fixed positional before a variadic ----
+test "variadic: a fixed positional before the tail is populated" {
+    let cmd = with_arg(with_arg(command("app", "Test app"), arg("src", "Source")), arg_variadic("rest", "Remaining"));
+    let argv: string[] = ["app", "main.sfn", "x", "y"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    let src = positionals(r.matches, "src");
+    assert src.length == 1;
+    assert strings_equal(src[0], "main.sfn");
+    let rest = positionals(r.matches, "rest");
+    assert rest.length == 2;
+    assert strings_equal(rest[0], "x");
+    assert strings_equal(rest[1], "y");
+}
+
+test "variadic: a required fixed positional before an empty tail still parses" {
+    let cmd = with_arg(with_arg(command("app", "Test app"), arg("src", "Source")), arg_variadic("rest", "Remaining"));
+    let argv: string[] = ["app", "main.sfn"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    let src = positionals(r.matches, "src");
+    assert src.length == 1;
+    assert strings_equal(src[0], "main.sfn");
+    let rest = positionals(r.matches, "rest");
+    assert rest.length == 0;
+}
+
+// ---- Builder-time guard: variadic must be the last positional ----
+test "variadic: a second variadic positional fails at builder time" {
+    let base = with_arg(command("app", "Test app"), arg_variadic("files", "Files"));
+    let mut threw = false;
+    try {
+        let _bad = with_arg(base, arg_variadic("more", "More"));
+        assert _bad.args.length >= 0;
+    } catch (err) { threw = true; }
+    assert threw == true;
+}
+
+test "variadic: adding any positional after a variadic fails at builder time" {
+    let base = with_arg(command("app", "Test app"), arg_variadic("files", "Files"));
+    let mut threw = false;
+    try {
+        let _bad = with_arg(base, arg("trailing", "Not allowed"));
+        assert _bad.args.length >= 0;
+    } catch (err) { threw = true; }
+    assert threw == true;
+}

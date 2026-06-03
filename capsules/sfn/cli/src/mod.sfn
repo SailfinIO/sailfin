@@ -72,6 +72,7 @@ export {
 export {
     arg,
     arg_optional,
+    arg_variadic,
     flag,
     flag_value,
     flag_short,
