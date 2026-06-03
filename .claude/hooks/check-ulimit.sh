@@ -17,6 +17,16 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
+# macOS (Darwin) does not honor `ulimit -v` (RLIMIT_AS): `ulimit -v
+# <n>` fails with "setrlimit failed: invalid argument", so the prefix
+# this guard demands can never succeed there. The 8GB cap exists to
+# keep runaway compiles from taking down a WSL/Linux instance; on
+# macOS it is unenforceable and the guard is pure friction. Skip
+# enforcement on Darwin (the rule remains strict on Linux/WSL).
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  exit 0
+fi
+
 input=$(cat)
 
 tool=$(printf '%s' "$input" | jq -r '.tool_name // empty')
