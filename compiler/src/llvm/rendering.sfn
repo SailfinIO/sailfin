@@ -202,6 +202,16 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             if descriptor.target == "sailfin_intrinsic_errno_location" {
                 _preamble_inlined = true;
             }
+            // #908: the clock-monotonic clk_id sentinel never appears as
+            // a real `call @sailfin_intrinsic_clock_monotonic_id(` — the
+            // lowering branch (`core_call_emission.sfn`) inlines a bare
+            // `i32 1`/`i32 6` immediate instead, so there is no symbol to
+            // declare. The source-text walker still picks the sentinel
+            // target up from the call expression, so skip it here to
+            // avoid a bogus `declare` to a symbol that does not exist.
+            if descriptor.target == "sailfin_intrinsic_clock_monotonic_id" {
+                _preamble_inlined = true;
+            }
             // #967: the executable-path sentinel never appears as a real
             // `call @sailfin_intrinsic_exe_path(` — the lowering branch
             // (`core_call_emission.sfn`) emits the host's concrete primitive
