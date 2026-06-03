@@ -359,9 +359,11 @@ export {
     expect_contains_int_array,
     expect_contains_str,
     expect_eq_bool,
+    expect_eq_bool_array,
     expect_eq_int,
     expect_eq_int_array,
     expect_eq_str,
+    expect_eq_str_array,
     expect_to_throw,
     expect_to_throw_with
 } from "./expect";

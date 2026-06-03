@@ -41,8 +41,10 @@ import {
     matcher_contains_int_array,
     matcher_contains_string,
     matcher_eq_bool,
+    matcher_eq_bool_array,
     matcher_eq_int,
     matcher_eq_int_array,
+    matcher_eq_str_array,
     matcher_eq_string
 } from "./matcher";
 
@@ -63,6 +65,14 @@ fn expect_eq_bool(actual: boolean, expected: boolean) -> MatchResult ![pure] {
 
 fn expect_eq_int_array(actual: int[], expected: int[]) -> MatchResult ![pure] {
     return matcher_eq_int_array(actual, expected);
+}
+
+fn expect_eq_str_array(actual: string[], expected: string[]) -> MatchResult ![pure] {
+    return matcher_eq_str_array(actual, expected);
+}
+
+fn expect_eq_bool_array(actual: boolean[], expected: boolean[]) -> MatchResult ![pure] {
+    return matcher_eq_bool_array(actual, expected);
 }
 
 // ---------------------------------------------------------------------------
