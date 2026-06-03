@@ -29,6 +29,7 @@ import {
 } from "./llvm/lowering/entrypoints";
 import { lower_to_llvm_for_tests } from "./llvm/lowering/entrypoints_tests";
 import { write_llvm_ir_for_tests_from_text_with_context } from "./llvm/lowering/entrypoints_tests_writer";
+import { native_text_passes_lowering_gate } from "./llvm/lowering/lowering_core";
 import { runtime_helper_call_names } from "./llvm/runtime_helpers";
 import { LayoutManifest } from "./native_ir";
 import { number_to_string } from "./num_format";
@@ -543,6 +544,60 @@ fn write_native_text_file_with_module(source: string, module_name: string, out_p
         return false;
     }
     return emit_native_text_to_file_with_module_name(program, module_name, out_path);
+}
+
+// `sfn emit native` file mode (issue #906): emit the `.sfn-asm`, then —
+// when `run_gate` is set — run the lowering dry-run gate over the
+// just-written text so the command fails closed on the same
+// unresolved-callee inputs `sfn build` / `sfn emit llvm` reject. On a gate
+// failure, delete the artifact (mirrors the stale-`.ll` cleanup in
+// `compile_native_text_to_llvm_file`) so no `.sfn-asm` survives and
+// downstream tooling that only stats the path cannot mistake it for a
+// clean build.
+//
+// `run_gate` is false for the build's per-module subprocess emit
+// (`emit_subprocess_with_retry` passes `--no-resolve-gate`): that stage
+// emits intermediate `.sfn-asm` with NO cross-module import context, so a
+// legitimate imported call is unresolvable in isolation and must not be
+// gated here — the build's load-bearing fail-closed gate is the later
+// LLVM lowering stage (#631), not this native stage.
+fn write_native_text_file_with_module_gated(source: string, module_name: string, out_path: string, run_gate: boolean) -> boolean ![io] {
+    let ok = write_native_text_file_with_module(source, module_name, out_path);
+    if !ok { return false; }
+    if !run_gate { return true; }
+    let native_text = fs.readFile(out_path);
+    if native_text_passes_lowering_gate(native_text, module_name) {
+        return true;
+    }
+    if fs.exists(out_path) { fs.deleteFile(out_path); }
+    return false;
+}
+
+// `sfn emit native` stdout mode (issue #906): when `run_gate` is set, gate
+// the native text before printing it, so a program that would fail
+// `build` / `emit llvm` does not emit `.sfn-asm` to stdout with a rc=0
+// false-green. Returns false (→ CLI exits non-zero) on emit failure or a
+// lowering fatal. An empty text means the native emitter already failed
+// upstream (typecheck / effect / re-export) and printed its own
+// diagnostics. `run_gate` is false for build-internal emits (see the file
+// wrapper above).
+fn print_native_text_with_module_gated(source: string, module_name: string, run_gate: boolean) -> boolean ![io] {
+    let native_text = compile_to_native_text_with_module(source, module_name);
+    // Empty text is this module's sentinel for an upstream failure
+    // (typecheck / effect / re-export) that already emitted diagnostics.
+    // Fail closed unconditionally — independent of `run_gate` — so stdout
+    // mode never prints an empty artifact and exits 0 (e.g. under
+    // `--no-resolve-gate`), matching the file wrapper, whose underlying
+    // `write_native_text_file_with_module` already returns false on the
+    // same sentinel.
+    if native_text.length == 0 { return false; }
+    if run_gate {
+        if !native_text_passes_lowering_gate(native_text, module_name) {
+            return false;
+        }
+    }
+    print(native_text);
+    return true;
 }
 
 // Compile and write LLVM IR directly, avoiding large return values.
