@@ -277,13 +277,16 @@ test-shard:
 		echo "[test-shard] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@# e2e-sh keeps its existing banner/runner; every other shard is a
+	@# e2e-sh-* shards run their strided subset of the legacy .sh scripts
+	@# through test-e2e-sh (one banner format); every other shard is a
 	@# disjoint slice of the unified `*_test.sfn` runner.
-	@if [ "$(SHARD)" = "e2e-sh" ]; then \
-		$(MAKE) test-e2e-sh; \
-	else \
-		bash scripts/test_shards.sh run "$(SHARD)" "$(NATIVE_BIN)"; \
-	fi
+	@case "$(SHARD)" in \
+		e2e-sh-*) \
+			$(MAKE) test-e2e-sh \
+				E2E_SH_FILES="$$(bash scripts/test_shards.sh list "$(SHARD)" | tr '\n' ' ')" ;; \
+		*) \
+			bash scripts/test_shards.sh run "$(SHARD)" "$(NATIVE_BIN)" ;; \
+	esac
 
 # Coverage guard: fail if the shard map drops or double-counts any test
 # file relative to `make test`. Needs no compiler — pure file-tree check.
@@ -296,10 +299,17 @@ test-shard-cover:
 # emits a `═══ e2e-sh: N/M passed ═══` banner shaped like the
 # runner's own per-suite banners so log scrubbers see one format
 # across the suite.
+# E2E_SH_FILES: optional newline/space-separated subset of test_*.sh to
+# run (used by `make test-shard SHARD=e2e-sh-N`, computed by
+# scripts/test_shards.sh). Empty = discover and run the full set.
+E2E_SH_FILES ?=
 .PHONY: test-e2e-sh
 test-e2e-sh:
 	@pass=0; fail=0; failed_files=""; \
-	files=$$(find compiler/tests/e2e -name 'test_*.sh' -print | sort); \
+	files="$(E2E_SH_FILES)"; \
+	if [ -z "$$files" ]; then \
+		files=$$(find compiler/tests/e2e -name 'test_*.sh' -print | sort); \
+	fi; \
 	if [ -z "$$files" ]; then \
 		echo "[test-e2e-sh] no test_*.sh scripts found under compiler/tests/e2e"; \
 		echo ""; \

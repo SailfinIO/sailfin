@@ -70,7 +70,11 @@ jobs:
         # one-shot steps (fmt/canary/effect-gate/cross/package/upload) so
         # they don't run 4x. Shard names live in scripts/test_shards.sh.
         os: [macos-15, ubuntu-24.04]
-        shard: [unit-a, unit-b, int-e2e-caps, e2e-sh]
+        # e2e-sh is split 4 ways: the 94 legacy .sh scripts (~18s each on
+        # macOS) were the critical path (~31 min) when run as one shard.
+        # Keep in sync with E2E_SH_SHARDS in scripts/test_shards.sh; the
+        # shard-cover job fails if they drift.
+        shard: [unit-a, unit-b, int-e2e-caps, e2e-sh-1, e2e-sh-2, e2e-sh-3, e2e-sh-4]
         include:
           # Pinned to macos-15: the `macos-latest` label migrates to macOS 26
           # starting 2026-06-15. Keep CI on the known-good image; macOS 26 is

@@ -11,21 +11,41 @@
 #   unit-a        odd-indexed  compiler/tests/unit/*_test.sfn
 #   unit-b        even-indexed compiler/tests/unit/*_test.sfn
 #   int-e2e-caps  integration + e2e + capsules *_test.sfn
-#   e2e-sh        compiler/tests/e2e/test_*.sh   (run via `make test-e2e-sh`)
+#   e2e-sh-1..N   the 94 legacy compiler/tests/e2e/test_*.sh, strided
+#
+# The e2e-sh scripts are far costlier per item than *_test.sfn (each does
+# a full compile+run, ~18s on macOS), so 94 in one shard was the critical
+# path (~31 min on macOS). They are split N ways (E2E_SH_SHARDS) to match
+# the ~7-min test budget of the other shards. The .sh scripts still run
+# through `make test-e2e-sh` (one banner format for log scrubbers); this
+# script only owns their *partitioning*.
 #
 # Commands:
-#   test_shards.sh names                 # print the shard names
+#   test_shards.sh names                 # all shard names (sfn + sh)
 #   test_shards.sh list  <shard>         # print the shard's files, one per line
-#   test_shards.sh run   <shard> <bin>   # run the shard's *_test.sfn via <bin>
+#   test_shards.sh run   <shard> <bin>   # run an *_test.sfn shard via <bin>
 #   test_shards.sh cover                 # assert the union == full surface
-#
-# `run` rejects e2e-sh: the legacy .sh scripts keep running through
-# `make test-e2e-sh` (one banner format for log scrubbers); this script
-# only owns their *mapping* (for the cover lint), not their execution.
 
 set -euo pipefail
 
-SHARD_NAMES="unit-a unit-b int-e2e-caps e2e-sh"
+# Number of e2e-sh sub-shards. Bump if the .sh suite grows; the cover
+# lint guarantees the strides still partition the full set exactly.
+E2E_SH_SHARDS="${E2E_SH_SHARDS:-4}"
+
+SFN_SHARDS="unit-a unit-b int-e2e-caps"
+
+_sh_shard_names() {
+	local i
+	for i in $(seq 1 "$E2E_SH_SHARDS"); do
+		printf 'e2e-sh-%s\n' "$i"
+	done
+}
+
+_all_shard_names() {
+	printf '%s ' $SFN_SHARDS
+	_sh_shard_names | tr '\n' ' '
+	printf '\n'
+}
 
 # Every *_test.sfn the unified runner discovers under `make test`'s paths.
 _all_sfn() {
@@ -34,19 +54,24 @@ _all_sfn() {
 	find capsules -path '*/tests/*_test.sfn' -print 2>/dev/null
 }
 
-# Every legacy e2e shell script (the e2e-sh shard).
+# Every legacy e2e shell script (the e2e-sh-* shards).
 _all_sh() {
 	find compiler/tests/e2e -name 'test_*.sh' -print 2>/dev/null
+}
+
+# Stride partition: emit the i-th of n lines (1-based i) from stdin.
+_stride() {
+	awk -v i="$1" -v n="$2" '(NR - 1) % n == (i - 1)'
 }
 
 list() {
 	local shard="$1"
 	case "$shard" in
 	unit-a)
-		find compiler/tests/unit -name '*_test.sfn' -print | sort | awk 'NR % 2 == 1'
+		find compiler/tests/unit -name '*_test.sfn' -print | sort | _stride 1 2
 		;;
 	unit-b)
-		find compiler/tests/unit -name '*_test.sfn' -print | sort | awk 'NR % 2 == 0'
+		find compiler/tests/unit -name '*_test.sfn' -print | sort | _stride 2 2
 		;;
 	int-e2e-caps)
 		{
@@ -54,11 +79,16 @@ list() {
 			find capsules -path '*/tests/*_test.sfn' -print
 		} | sort
 		;;
-	e2e-sh)
-		_all_sh | sort
+	e2e-sh-*)
+		local i="${shard#e2e-sh-}"
+		if ! [ "$i" -ge 1 ] 2>/dev/null || [ "$i" -gt "$E2E_SH_SHARDS" ]; then
+			echo "[test_shards] e2e-sh index out of range: $shard (1..$E2E_SH_SHARDS)" >&2
+			exit 2
+		fi
+		_all_sh | sort | _stride "$i" "$E2E_SH_SHARDS"
 		;;
 	*)
-		echo "[test_shards] unknown shard: $shard (want: $SHARD_NAMES)" >&2
+		echo "[test_shards] unknown shard: $shard (want: $(_all_shard_names))" >&2
 		exit 2
 		;;
 	esac
@@ -70,10 +100,12 @@ run() {
 		echo "[test_shards] run: missing compiler binary path" >&2
 		exit 2
 	fi
-	if [ "$shard" = "e2e-sh" ]; then
-		echo "[test_shards] e2e-sh runs via 'make test-e2e-sh', not 'run'" >&2
+	case "$shard" in
+	e2e-sh-*)
+		echo "[test_shards] $shard runs via 'make test-e2e-sh E2E_SH_FILES=...', not 'run'" >&2
 		exit 3
-	fi
+		;;
+	esac
 	local files
 	files="$(list "$shard")"
 	if [ -z "$files" ]; then
@@ -87,56 +119,66 @@ run() {
 }
 
 cover() {
-	local rc=0 union full concat dups missing extra
-	union="$( { list unit-a; list unit-b; list int-e2e-caps; } | sort)"
-	full="$(_all_sfn | sort -u)"
-	concat="$( { list unit-a; list unit-b; list int-e2e-caps; } )"
+	local rc=0
 
-	# 1. No file covered by more than one .sfn shard.
-	dups="$(printf '%s\n' "$concat" | sort | uniq -d)"
-	if [ -n "$dups" ]; then
-		echo "[shard-cover] FAIL: file(s) in more than one shard:" >&2
-		printf '  %s\n' $dups >&2
+	# --- *_test.sfn shards partition the full *_test.sfn surface. ---
+	local sfn_concat sfn_full sfn_dups sfn_missing sfn_extra
+	sfn_concat="$(for s in $SFN_SHARDS; do list "$s"; done)"
+	sfn_full="$(_all_sfn | sort -u)"
+	sfn_dups="$(printf '%s\n' "$sfn_concat" | sort | uniq -d)"
+	if [ -n "$sfn_dups" ]; then
+		echo "[shard-cover] FAIL: *_test.sfn in more than one shard:" >&2
+		printf '  %s\n' $sfn_dups >&2
+		rc=1
+	fi
+	sfn_missing="$(comm -23 <(printf '%s\n' "$sfn_full") <(printf '%s\n' "$sfn_concat" | sort -u))"
+	if [ -n "$sfn_missing" ]; then
+		echo "[shard-cover] FAIL: *_test.sfn not covered by any shard:" >&2
+		printf '  %s\n' $sfn_missing >&2
+		rc=1
+	fi
+	sfn_extra="$(comm -13 <(printf '%s\n' "$sfn_full") <(printf '%s\n' "$sfn_concat" | sort -u))"
+	if [ -n "$sfn_extra" ]; then
+		echo "[shard-cover] FAIL: shard lists *_test.sfn outside the test surface:" >&2
+		printf '  %s\n' $sfn_extra >&2
 		rc=1
 	fi
 
-	# 2. Every discovered .sfn test is in exactly one shard (no gaps).
-	missing="$(comm -23 <(printf '%s\n' "$full") <(printf '%s\n' "$union" | sort -u))"
-	if [ -n "$missing" ]; then
-		echo "[shard-cover] FAIL: discovered test(s) not covered by any shard:" >&2
-		printf '  %s\n' $missing >&2
-		rc=1
-	fi
-
-	# 3. No shard lists a file the runner would not discover.
-	extra="$(comm -13 <(printf '%s\n' "$full") <(printf '%s\n' "$union" | sort -u))"
-	if [ -n "$extra" ]; then
-		echo "[shard-cover] FAIL: shard(s) list file(s) outside the test surface:" >&2
-		printf '  %s\n' $extra >&2
-		rc=1
-	fi
-
-	# 4. The e2e-sh shard == the full legacy .sh set.
-	local sh_shard sh_full
-	sh_shard="$(list e2e-sh | sort -u)"
+	# --- e2e-sh-* shards partition the full test_*.sh set. ---
+	local sh_concat sh_full sh_dups sh_missing sh_extra
+	sh_concat="$(while IFS= read -r s; do list "$s"; done < <(_sh_shard_names))"
 	sh_full="$(_all_sh | sort -u)"
-	if [ "$sh_shard" != "$sh_full" ]; then
-		echo "[shard-cover] FAIL: e2e-sh shard does not equal the discovered test_*.sh set" >&2
+	sh_dups="$(printf '%s\n' "$sh_concat" | sort | uniq -d)"
+	if [ -n "$sh_dups" ]; then
+		echo "[shard-cover] FAIL: test_*.sh in more than one e2e-sh shard:" >&2
+		printf '  %s\n' $sh_dups >&2
+		rc=1
+	fi
+	sh_missing="$(comm -23 <(printf '%s\n' "$sh_full") <(printf '%s\n' "$sh_concat" | sort -u))"
+	if [ -n "$sh_missing" ]; then
+		echo "[shard-cover] FAIL: test_*.sh not covered by any e2e-sh shard:" >&2
+		printf '  %s\n' $sh_missing >&2
+		rc=1
+	fi
+	sh_extra="$(comm -13 <(printf '%s\n' "$sh_full") <(printf '%s\n' "$sh_concat" | sort -u))"
+	if [ -n "$sh_extra" ]; then
+		echo "[shard-cover] FAIL: e2e-sh shard lists a file outside test_*.sh:" >&2
+		printf '  %s\n' $sh_extra >&2
 		rc=1
 	fi
 
 	if [ "$rc" -eq 0 ]; then
 		local n_sfn n_sh
-		n_sfn="$(printf '%s\n' "$full" | grep -c . || true)"
+		n_sfn="$(printf '%s\n' "$sfn_full" | grep -c . || true)"
 		n_sh="$(printf '%s\n' "$sh_full" | grep -c . || true)"
-		echo "[shard-cover] ok: $n_sfn *_test.sfn across 3 shards + $n_sh test_*.sh in e2e-sh, no gaps or overlaps"
+		echo "[shard-cover] ok: $n_sfn *_test.sfn across $SFN_SHARDS; $n_sh test_*.sh across $E2E_SH_SHARDS e2e-sh shards; no gaps or overlaps"
 	fi
 	exit "$rc"
 }
 
 cmd="${1:-}"
 case "$cmd" in
-names) echo "$SHARD_NAMES" ;;
+names) _all_shard_names ;;
 list)
 	shift
 	list "${1:?usage: test_shards.sh list <shard>}"

@@ -133,10 +133,24 @@ runs:
         # Empty shard = full suite (release workflows + back-compat).
         # A shard name runs only that disjoint slice; the union across
         # legs equals `make test` (asserted by the shard-cover lint).
-        if [ -n "${{ inputs.shard }}" ]; then
-          make test-shard SHARD="${{ inputs.shard }}"
-        else
-          make test
+        run_tests() {
+          if [ -n "${{ inputs.shard }}" ]; then
+            make test-shard SHARD="${{ inputs.shard }}"
+          else
+            make test
+          fi
+        }
+        # Retry-once: #892 is a live non-deterministic codegen heap bug
+        # that intermittently corrupts an *unrelated* test's compile
+        # (garbled link temp name, or a hang -> timeout). A re-run hits a
+        # different random victim and almost always passes. A *persistent*
+        # failure still fails the retry -> red, so real breakage is not
+        # masked. The ::warning:: keeps every flake hit visible/tracked
+        # in the run summary so #892's frequency stays measurable.
+        if ! run_tests; then
+          echo "::warning title=test flake (likely #892)::tests failed on attempt 1; retrying once. If this recurs, it is the non-deterministic codegen corruption tracked in #892."
+          echo "[ci] retrying tests once (attempt 2/2) — see #892"
+          run_tests
         fi
 
     - name: Package artifacts
