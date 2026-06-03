@@ -738,8 +738,18 @@ static uint64_t _runtime_call_seq = 0; // incremented at entry to every exported
 // Call this at the top of every exported runtime function.
 static inline void _runtime_enter(void) { _runtime_call_seq++; }
 
-// Backwards compat alias used in array_push / concat / string_drop
-static inline void _invalidate_concat_reuse(void) { /* now handled by _runtime_enter */ }
+// Used by array_push / concat / string_drop to invalidate the concat-reuse
+// window. #892: this was gutted to a no-op under the assumption that EVERY
+// exported runtime fn calls _runtime_enter() (which bumps the seq and thereby
+// invalidates the window). That assumption is false — a family of exported
+// trampolines (sfn_int_to_str, sfn_str_byte_at, the array_push_slot variants,
+// ...) never entered, so a `lines.push(...)` between two `+` operations left a
+// stale in-place-append window pointing at the just-pushed buffer, eating its
+// prefix (the non-deterministic declare/body-line clobber). Bumping the seq
+// here restores invalidation for every site that already calls this, and is
+// always correctness-safe: the counter's only consumer is the reuse guard, so
+// an extra bump can only miss a reuse (alloc fresh), never produce wrong data.
+static inline void _invalidate_concat_reuse(void) { _runtime_enter(); }
 
 // =============================================================================
 // Arena-aware allocation helpers (M0.5)
@@ -2237,6 +2247,17 @@ int64_t sfn_str_len(const char *s)
  * mixes are all handled. */
 bool sfn_str_eq(const char *a, const char *b)
 {
+    // #892: sfn_str_eq is an exported runtime boundary (the lowering target of
+    // string `==`, core_operands.sfn:125). It MUST bump _runtime_call_seq at
+    // entry like every other exported helper (see the concat-reuse contract at
+    // line ~724). Without this, an equality check between two chained concats
+    // (e.g. string_array_contains scanning declared symbols mid-`declare`-line
+    // build) does NOT invalidate the in-place concat-reuse window, so a later
+    // concat stomps a buffer a live string[] element still points at — the
+    // non-deterministic 0x40→0xE7 clobber of an unrelated declare line. Reads
+    // never observe stale data, so a missing bump here is a pure correctness
+    // hole; restoring the invariant is the minimal fix.
+    _runtime_enter();
     return _strings_equal_fast(a, b);
 }
 
@@ -2328,6 +2349,7 @@ char *sfn_str_grapheme_at(const char *s, double idx)
  * canonical shape from the outset. */
 int64_t sfn_str_byte_at(const char *s, int64_t idx)
 {
+    _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
     if (!s || idx < 0)
     {
         return -1;
@@ -2363,6 +2385,7 @@ int64_t sfn_str_byte_at(const char *s, int64_t idx)
  * never round-trip through `double`. */
 int64_t sfn_str_find_byte(const char *s, int64_t byte_value, int64_t start_index)
 {
+    _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
     if (!s)
     {
         return -1;
@@ -2413,6 +2436,7 @@ double sfn_str_codepoint(const char *s)
  * UTF-8. */
 char *sfn_str_from_codepoint(int64_t cp)
 {
+    _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
     unsigned char buf[5];
     size_t len = 0;
     if (cp >= 0 && cp < 0x80)
@@ -2488,6 +2512,11 @@ char *sfn_number_to_str(double v)
  * site. */
 char *sfn_int_to_str(int64_t v)
 {
+    // #892: this is the format_temp_name backend ("%t" + number_to_string(n)),
+    // called between every concat during IR line emission. Without the seq
+    // bump, a following lines.push(...) left a stale in-place-append window
+    // that ate the "  %tN = insertval" prefix of the just-pushed line.
+    _runtime_enter();
     char buf[21];
     size_t pos = sizeof(buf);
     buf[--pos] = '\0';
@@ -4482,6 +4511,7 @@ SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
 
 SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
 {
+    _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
     if (_array_is_suspicious_ptr(a))
     {
         fprintf(
@@ -5113,6 +5143,7 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
 
 char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int64_t elem_size)
 {
+    _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
     if (!data_ptr_ptr || !len_ptr)
     {
         return NULL;
@@ -8714,6 +8745,7 @@ SfnArray *sailfin_runtime_argv_to_string_array(int argc, char **argv)
 
 SfnArray *sailfin_runtime_append_string_v2(SfnArray *a, char *text)
 {
+    _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
     if (!a)
     {
         a = _sfn_array_alloc_v2(0, sizeof(char *));
@@ -8761,6 +8793,7 @@ SfnArray *sailfin_runtime_append_string_v2(SfnArray *a, char *text)
 char *sailfin_runtime_array_push_slot_v2(void **data_ptr, int64_t *len_ptr,
                                          int64_t *cap_ptr, int64_t elem_size)
 {
+    _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
     if (!data_ptr || !len_ptr || !cap_ptr)
     {
         return NULL;
@@ -8862,7 +8895,9 @@ SfnArray *sfn_array_push_string(SfnArray *a, char *text)
 {
     /* Drop-in replacement for `sailfin_runtime_append_string_v2`;
      * emitted by `lower_array_push_in_place` for the `i8*`-element
-     * fast path. */
+     * fast path. #892: bump at this emitter boundary so the seq
+     * advances even though the delegate also enters. */
+    _runtime_enter();
     return sailfin_runtime_append_string_v2(a, text);
 }
 
@@ -8871,7 +8906,10 @@ char *sfn_array_push_slot(void **data_ptr, int64_t *len_ptr,
 {
     /* Drop-in replacement for `sailfin_runtime_array_push_slot_v2`;
      * emitted by `lower_array_push_in_place` for typed-element pushes
-     * (every non-`i8*` element type, e.g. `Token` during lexing). */
+     * (every non-`i8*` element type, e.g. `Token` during lexing).
+     * #892: bump at this emitter boundary so the seq advances even
+     * though the delegate also enters. */
+    _runtime_enter();
     return sailfin_runtime_array_push_slot_v2(data_ptr, len_ptr,
                                               cap_ptr, elem_size);
 }
@@ -8894,7 +8932,9 @@ void sfn_array_push(SfnArray *arr, void *elem_ptr, int64_t elem_size,
 {
     /* Stub. Compiler emission today routes through `sfn_array_push_slot`
      * (the slot-returning helper above); the spec-aligned by-value
-     * push lights up post-closures-with-capture. */
+     * push lights up post-closures-with-capture. #892: honor the seq-bump
+     * invariant up front so the by-value path is safe when it lights up. */
+    _runtime_enter();
     (void)arr;
     (void)elem_ptr;
     (void)elem_size;
