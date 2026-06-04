@@ -1,0 +1,21 @@
+// Fixture for test_result_prelude_discriminant.sh (#1022, epic #371 R.2).
+//
+// A bare prelude `Result` match with NO in-file `enum` and NO `import` — it
+// relies solely on the prelude being linked into every binary. Before #1021
+// (PR #1027) the prelude `Result`/`Error` declarations were never injected into
+// the per-module LLVM lowering type context, so this lowered to an `i8*` param
+// with an unconditional `matchcase0 → matchmerge` chain (no `icmp`, no payload
+// load) and the constructing call sites were silently dropped. After #1021 it
+// must emit a `%Result` layout, an `icmp eq` discriminant, a conditional
+// `br i1`, and a payload load — the same real shape an in-file generic enum
+// already produces (see result_enum_lowering_test.sfn).
+fn unwrap_or(r: Result<int, int>, fallback: int) -> int {
+    match r {
+        Result.Ok { value } => { return value; },
+        Result.Err { error } => { return fallback + error; }
+    }
+}
+
+fn main() -> int {
+    return unwrap_or(Result.Ok { value: 5 }, 0);
+}
