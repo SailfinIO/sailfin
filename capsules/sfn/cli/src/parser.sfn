@@ -220,6 +220,70 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
     return _validate_level(cmd.name, path, active, pos_idx, pos_names, pos_values, fl_names, fl_values, fl_present);
 }
 
+fn parse_with_env(cmd: Command, argv: string[]) -> ParseResult ![io] {
+    // Env-aware variant of `parse()`. Runs the pure parser first to
+    // discover the matched (leaf) command level and which flags argv
+    // supplied, then for each flag on that level bound via `flag_env`
+    // that argv did NOT supply, reads its environment variable. A
+    // non-empty env value is injected as synthetic argv tokens and the
+    // input is re-parsed, so env-supplied values flow through the exact
+    // same validation (typed/choice checks, required enforcement) as
+    // argv ones. Precedence is argv > env > default: an argv-present flag
+    // is never overridden, and an env-satisfied flag counts as present
+    // for `flag_required`. When no env binding fires, the original pure
+    // result is returned unchanged.
+    //
+    // Env fallback resolves against the matched leaf command's flags;
+    // injected tokens are appended to argv, so they validate at the same
+    // leaf level they were read from. The `env.get` read is the only
+    // reason this entry carries `![io]` — `parse()` itself stays pure.
+    let first = parse(cmd, argv);
+
+    // Help/version requests short-circuit identically on re-parse, so
+    // skip the env reads entirely and return the pure result.
+    if !first.ok {
+        if strings_equal(first.error.kind, "help_requested") { return first; }
+        if strings_equal(first.error.kind, "version_requested") { return first; }
+    }
+
+    let active = _resolve_active_path(cmd, first.matches.subcommand_path);
+
+    let mut extra: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= active.flags.length { break; }
+        let f = active.flags[i];
+        if f.env_var.length > 0 && !_flag_seen(first.matches.flag_names, f.long_name) {
+            let env_value = env.get(f.env_var);
+            if env_value.length > 0 {
+                extra.push("--" + f.long_name);
+                if f.takes_value { extra.push(env_value); }
+            }
+        }
+        i += 1;
+    }
+
+    if extra.length == 0 { return first; }
+
+    // Rebuild argv with the env-supplied tokens appended. Copy
+    // element-by-element rather than aliasing the caller's `argv`, so the
+    // injection never mutates the caller's slice.
+    let mut aug: string[] = [];
+    let mut ci: int = 0;
+    loop {
+        if ci >= argv.length { break; }
+        aug.push(argv[ci]);
+        ci += 1;
+    }
+    let mut ei: int = 0;
+    loop {
+        if ei >= extra.length { break; }
+        aug.push(extra[ei]);
+        ei += 1;
+    }
+    return parse(cmd, aug);
+}
+
 fn _validate_level(cmd_name: string, path: string[], active: Command, pos_idx: int, pos_names: string[], pos_values: string[], fl_names: string[], fl_values: string[], fl_present: boolean[]) -> ParseResult {
     // Finalize a single command level: fill optional positional
     // defaults, enforce required positionals, and enforce required
@@ -280,11 +344,14 @@ fn _validate_level(cmd_name: string, path: string[], active: Command, pos_idx: i
 }
 
 fn run(cmd: Command, argv: string[]) -> Matches ![io] {
-    // Exiting wrapper around `parse()`. Prints help/version and exits
-    // when --help/-h or --version/-V is given. Prints an error and
+    // Exiting wrapper around `parse_with_env()`. Prints help/version and
+    // exits when --help/-h or --version/-V is given. Prints an error and
     // exits with code 2 on invalid input. Cannot be wrapped in
-    // try/catch for error recovery — use `parse()` for that.
-    let result = parse(cmd, argv);
+    // try/catch for error recovery — use `parse()` (pure) or
+    // `parse_with_env()` (env-aware, `![io]`) for that. Delegating to
+    // `parse_with_env()` is why env-bound flags resolve for real CLI entry
+    // points while keeping the pure `parse()` available for embedding.
+    let result = parse_with_env(cmd, argv);
     if result.ok { return result.matches; }
 
     let path = result.matches.subcommand_path;
@@ -378,7 +445,8 @@ fn _find_flag_long(cmd: Command, name: string) -> Flag {
         takes_value: false,
         required: false,
         value_kind: "string",
-        choices: no_choices
+        choices: no_choices,
+        env_var: ""
     };
 }
 
@@ -399,7 +467,8 @@ fn _find_flag_short(cmd: Command, name: string) -> Flag {
         takes_value: false,
         required: false,
         value_kind: "string",
-        choices: no_choices
+        choices: no_choices,
+        env_var: ""
     };
 }
 

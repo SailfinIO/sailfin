@@ -88,6 +88,7 @@ fn _format_help(cmd: Command, program: string) -> string {
         let f = cmd.flags[fi];
         let label = _flag_label(f);
         out = out + "  " + _pad(label, flag_width) + f.description;
+        if f.env_var.length > 0 { out = out + " [env: " + f.env_var + "]"; }
         if f.required { out = out + " (required)"; }
         out = out + "\n";
         fi += 1;

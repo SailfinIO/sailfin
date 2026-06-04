@@ -86,6 +86,7 @@ export {
     flag_count,
     flag_count_short,
     flag_required,
+    flag_env,
     command,
     with_version,
     with_arg,
@@ -94,7 +95,7 @@ export {
 } from "./builder";
 
 // ---- Parsing ----
-export { parse, run } from "./parser";
+export { parse, parse_with_env, run } from "./parser";
 
 // ---- Match accessors ----
 export {

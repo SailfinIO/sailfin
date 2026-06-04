@@ -32,6 +32,15 @@ struct Flag {
     // `parse()` validates the supplied value against this list and
     // emits `ParseError { kind: "invalid_choice" }` on a mismatch.
     choices: string[];
+    // `env_var` names an environment variable consulted as a fallback
+    // when the flag is absent from argv (built via `flag_env`); empty
+    // when the flag has no env binding. The precedence is argv > env >
+    // default: an argv-supplied value always wins, and an env-supplied
+    // value counts as "present" for `flag_required`. `parse()` stays
+    // pure and never reads the environment — env resolution lives in the
+    // `![io]` `parse_with_env()` entry point (and therefore `run()`). Help
+    // output annotates bound flags with `[env: <env_var>]`.
+    env_var: string;
 }
 
 struct Command {
