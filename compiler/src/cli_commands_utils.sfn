@@ -7,6 +7,8 @@ import { char_code_at_text, find_char_local, substring } from "./string_utils";
 export {
     _ends_with_cmd,
     _dirname_cmd,
+    _mktemp_sibling_cmd,
+    _atomic_rename_into_place,
     _toml_trim_cmd,
     _shell_read_cmd,
     _get_env_cmd,
@@ -59,6 +61,37 @@ fn _dirname_cmd(path: string) -> string {
     if last_slash < 0 { return "."; }
     if last_slash == 0 { return "/"; }
     return substring(path, 0, last_slash);
+}
+
+// Mint a unique temp path in the SAME directory as `dst_path`, so a
+// subsequent `mv` onto `dst_path` is an atomic same-filesystem rename
+// (a `/tmp` temp would force a non-atomic cross-device copy). The
+// destination's directory must already exist. Returns the temp path,
+// or "" when `mktemp` is unavailable (callers fall back to a direct,
+// non-atomic write). The template is shell-quoted because `dst_path`
+// can derive from `$SAILFIN_BUILD_CACHE_DIR` or a capsule path
+// containing shell metacharacters.
+fn _mktemp_sibling_cmd(dst_path: string) -> string ![io] {
+    let dst_dir = _dirname_cmd(dst_path);
+    let template = _shell_single_quote_arg(dst_dir + "/.sfn_stage.XXXXXX");
+    return _shell_read_cmd("mktemp " + template + " 2>/dev/null");
+}
+
+// Atomically publish an already-written temp file as `dst_path` via
+// `mv -f`. The rename is atomic only when `tmp_path` and `dst_path`
+// share a filesystem — pair this with `_mktemp_sibling_cmd(dst_path)`
+// so the temp lives beside the destination. A concurrent reader then
+// observes `dst_path` as either the prior complete file or the new
+// complete file, never a partial write — the invariant that fixes the
+// parallel-emit staging race (#1011) and the cache race (#1034).
+// On failure the temp is removed and false returned; `mv`/`rm` go
+// through `process.run` (no shell), so no quoting is required.
+fn _atomic_rename_into_place(tmp_path: string, dst_path: string) -> boolean ![io] {
+    if process.run(["mv", "-f", tmp_path, dst_path]) != 0 {
+        process.run(["rm", "-f", tmp_path]);
+        return false;
+    }
+    return true;
 }
 
 fn _toml_trim_cmd(text: string) -> string {
