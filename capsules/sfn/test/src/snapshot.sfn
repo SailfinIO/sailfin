@@ -7,11 +7,12 @@
 //
 // Two surfaces, mirroring the `expect.sfn` / `matcher.sfn` split:
 //
-//   1. `snapshot_match_in(actual, dir, key, update)` — the pure-logic
-//      core. The snapshot directory and the update flag are explicit
-//      parameters, so the behavior is fully testable without touching
-//      process-global state (cwd or environment). This is what the
-//      capsule's own tests drive.
+//   1. `snapshot_match_in(actual, dir, key, update)` — the hermetic,
+//      explicit-args core. It is `![io]` (it reads/writes golden files),
+//      but the snapshot directory and update flag are passed in rather
+//      than read from cwd/environment, so the behavior is fully testable
+//      without touching process-global state. This is what the capsule's
+//      own tests drive.
 //   2. `expect_snapshot(actual, key)` — the ergonomic entry point. It
 //      resolves the snapshot directory (`tests/__snapshots__`, relative
 //      to the test's working directory) and reads the
@@ -21,10 +22,12 @@
 //
 // Both are `![io]`: a first run (or `--update`) writes the golden via
 // `fs.writeFile` after a recursive `fs.createDirectory`, and a compare
-// reads it back via `fs.readFile`. On mismatch the diagnostic reuses
-// #973's `matcher_eq_str_array` over `\n`-split lines to report the
-// first divergent line — the "line-by-line" diff the proposal calls for
-// until the `sfn/diff` capsule (post-1.0) supplies a unified diff. See
+// reads it back via `fs.readFile`. On mismatch the diagnostic mirrors
+// the message shape of #973's `matcher_eq_str_array` over `\n`-split
+// lines (inlined here as `_snapshot_line_diff`, not imported — see that
+// helper for why) to report the first divergent line — the "line-by-line"
+// diff the proposal calls for until the `sfn/diff` capsule (post-1.0)
+// supplies a unified diff. See
 // `docs/proposals/test-infra-epic/03-capsule-api.md` (Snapshots).
 //
 // Like the rest of the capsule, this is a free function rather than a
@@ -32,7 +35,7 @@
 // needs cross-module struct-method dispatch, which is currently
 // miscompiled (see `expect.sfn`). The behavior ships now; the fluent
 // sugar is a drop-in follow-up once that ABI bug is fixed.
-import { split } from "sfn/strings";
+import { find, split } from "sfn/strings";
 
 import { MatchResult, match_fail, match_ok } from "./matcher";
 
@@ -93,11 +96,29 @@ fn _snapshot_line_diff(actual: string, golden: string) -> string {
 // passes) when `update` is true or the golden is absent; compares
 // otherwise. The directory is created recursively first so a fresh
 // `__snapshots__` tree needs no pre-staging.
+//
+// `key` must be non-empty and free of path separators: it is interpolated
+// directly into the file path and only `dir` (not `dirname(dir/key)`) is
+// created, so a `/` in `key` would write outside the snapshot dir or fail
+// on a missing parent. `fs.writeFile` reports nothing on a failed open, so
+// a write is verified with a follow-up `fs.exists` — without it a snapshot
+// that never landed would still pass.
 fn snapshot_match_in(actual: string, dir: string, key: string, update: boolean) -> MatchResult ![io] {
+    if key.length == 0 {
+        return match_fail("snapshot key must be non-empty");
+    }
+    if find(key, "/", 0) >= 0 {
+        return match_fail("snapshot key must not contain a path separator: \""
+            + key
+            + "\"");
+    }
     fs.createDirectory(dir, true);
     let path = dir + "/" + key + ".snap";
     if update || !fs.exists(path) {
         fs.writeFile(path, actual);
+        if !fs.exists(path) {
+            return match_fail("failed to write snapshot: " + path);
+        }
         return match_ok();
     }
     let golden = fs.readFile(path);
