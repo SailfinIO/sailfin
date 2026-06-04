@@ -1,0 +1,69 @@
+// Regression coverage for #1023: a recognized struct/enum-shaped literal whose
+// type is absent from the lowering type context must fail closed with a
+// `[fatal]` diagnostic, not silently lower the enclosing statement to a default
+// value.
+//
+// Background (#1020): prelude `Result` was unregistered in the per-module
+// lowering type context, so `Result.Ok { value: 5 }` failed to resolve. The
+// brace form funnels through `lower_struct_literal`, which pushed only a
+// *non-fatal* "unknown struct" diagnostic — ignored by the emit/build `[fatal]`
+// gate — so the enclosing `assert` was elided (the #832 false-pass). #1021
+// registers prelude `Result`/`Error`; this guard catches the residual class of
+// genuinely-unresolvable literals so the failure is loud instead of silent.
+import { lower_expression } from "../../src/llvm/expression_lowering/native/core";
+import { TypeContext } from "../../src/llvm/types";
+import { index_of } from "../../src/string_utils";
+
+fn _empty_context() -> TypeContext {
+    return TypeContext {
+        structs: [],
+        enums: [],
+        interfaces: [],
+        vtables: []
+    };
+}
+
+fn _contains(text: string, needle: string) -> boolean {
+    return index_of(text, needle) >= 0;
+}
+
+fn _has_fatal_type_context_diag(diagnostics: string[]) -> boolean {
+    let mut idx: int = 0;
+    loop {
+        if idx >= diagnostics.length { break; }
+        let diag = diagnostics[idx];
+        if _contains(diag, "[fatal]") {
+            if _contains(diag, "references a type not in the lowering type context") {
+                return true;
+            }
+        }
+        idx += 1;
+    }
+    return false;
+}
+
+// -------------------------------------------------------------------
+// Fail-closed: dotted brace literal (enum-shaped) with an unknown type
+// -------------------------------------------------------------------
+test "unresolvable enum-shaped brace literal emits a fatal diagnostic" ![io] {
+    let context = _empty_context();
+    let mut lines: string[] = [];
+    let result = lower_expression("Nonexistent.Variant { value: 5 }", [], [], 0, lines, [], context, "");
+    // No operand is produced — without the guard this null operand would
+    // silently drop the enclosing statement.
+    assert result.operand == null;
+    // The diagnostic must be `[fatal]` so `has_fatal_lowering_diagnostic`
+    // refuses to emit IR (the compile fails instead of succeeding silently).
+    assert _has_fatal_type_context_diag(result.diagnostics);
+}
+
+// -------------------------------------------------------------------
+// Fail-closed: plain struct literal with an unknown type
+// -------------------------------------------------------------------
+test "unresolvable plain struct literal emits a fatal diagnostic" ![io] {
+    let context = _empty_context();
+    let mut lines: string[] = [];
+    let result = lower_expression("UnknownStruct { x: 1 }", [], [], 0, lines, [], context, "");
+    assert result.operand == null;
+    assert _has_fatal_type_context_diag(result.diagnostics);
+}
