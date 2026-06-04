@@ -58,6 +58,7 @@ import {
     is_safe_scope_name,
     parse_scope_name
 } from "./capsule_artifact";
+import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./cli_commands_utils";
 import { emit_subprocess_with_retry } from "./emit_helpers";
 import {
     compile_to_llvm_file_with_module,
@@ -577,7 +578,14 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
             // here and let the build's LLVM lowering stage (#631) own
             // fail-closed. The `llvm` stage ignores the flag. Mirrors
             // `emit_helpers.emit_subprocess_with_retry`.
-            let mut emit_args: string[] = [sailfin_exe, "emit", "--module-name", t.slug, "--attempts", "1", "--no-validate", "--no-resolve-gate", "-o", t.output_path];
+            // #1011: emit to a sibling temp + atomic rename so a peer
+            // reader never sees a partial `.sfn-asm`/`.ll`. Mirrors
+            // `emit_subprocess_with_retry`; falls back to in-place when
+            // `mktemp` is unavailable.
+            let staged = _mktemp_sibling_cmd(t.output_path);
+            let mut emit_target: string = t.output_path;
+            if staged.length > 0 { emit_target = staged; }
+            let mut emit_args: string[] = [sailfin_exe, "emit", "--module-name", t.slug, "--attempts", "1", "--no-validate", "--no-resolve-gate", "-o", emit_target];
             if use_import_context {
                 emit_args.push("--import-context");
                 emit_args.push(import_context_root);
@@ -585,7 +593,17 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
             emit_args.push(mode);
             emit_args.push(t.source_path);
             let rc = process.run(emit_args);
-            if rc != 0 { return false; }
+            if rc != 0 {
+                if staged.length > 0 {
+                    process.run(["rm", "-f", staged]);
+                }
+                return false;
+            }
+            if staged.length > 0 {
+                if !_atomic_rename_into_place(staged, t.output_path) {
+                    return false;
+                }
+            }
             i += 1;
         }
         return true;
@@ -652,18 +670,38 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
     // `emit_helpers.emit_subprocess_with_retry` and the serial fallback
     // above — without it, multi-job builds fail closed on every
     // cross-module callee.
+    // #1011: each attempt emits to a `mktemp` temp BESIDE the output
+    // (same dir → atomic same-filesystem `mv`), validates the temp, and
+    // only renames it onto `$2` on success. A peer worker reading this
+    // module's staged `.sfn-asm` (cross-module signatures) or `.ll`
+    // therefore never observes the truncate+rewrite the seed performs
+    // on each emit attempt. `pub` publishes (no-op if mktemp degraded to
+    // `tmp == $2`); `clean` drops a failed-attempt temp so retries don't
+    // litter the staging dir.
+    let pub = "if [ \"$tmp\" != \"$2\" ]; then mv -f \"$tmp\" \"$2\"; fi; ";
+    let clean = "if [ \"$tmp\" != \"$2\" ]; then rm -f \"$tmp\"; fi; ";
     let worker_script = "attempt=0; while [ $attempt -lt 3 ]; do "
         + "attempt=$((attempt + 1)); "
-        + "\"$SAILFIN_PE_SEED\" emit --module-name \"$1\" --attempts 1 --no-validate --no-resolve-gate -o \"$2\" "
+        + "tmp=$(mktemp \"$(dirname \"$2\")/.sfn_stage.XXXXXX\" 2>/dev/null) || tmp=\"$2\"; "
+        + "\"$SAILFIN_PE_SEED\" emit --module-name \"$1\" --attempts 1 --no-validate --no-resolve-gate -o \"$tmp\" "
         + worker_import_arg
-        + "\"$SAILFIN_PE_MODE\" \"$3\" || continue; "
-        + "[ -s \"$2\" ] || continue; "
-        + "if [ \"$SAILFIN_PE_MODE\" != llvm ]; then exit 0; fi; "
-        + "if (command -v llvm-as >/dev/null 2>&1 && llvm-as < \"$2\" >/dev/null 2>&1) "
-        + "|| (command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < \"$2\" >/dev/null 2>&1) "
-        + "|| (command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir \"$2\" -o /dev/null >/dev/null 2>&1) "
-        + "|| (command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir \"$2\" -o /dev/null >/dev/null 2>&1); "
-        + "then exit 0; fi; "
+        + "\"$SAILFIN_PE_MODE\" \"$3\" || { "
+        + clean
+        + "continue; }; "
+        + "[ -s \"$tmp\" ] || { "
+        + clean
+        + "continue; }; "
+        + "if [ \"$SAILFIN_PE_MODE\" != llvm ]; then "
+        + pub
+        + "exit 0; fi; "
+        + "if (command -v llvm-as >/dev/null 2>&1 && llvm-as < \"$tmp\" >/dev/null 2>&1) "
+        + "|| (command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < \"$tmp\" >/dev/null 2>&1) "
+        + "|| (command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir \"$tmp\" -o /dev/null >/dev/null 2>&1) "
+        + "|| (command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir \"$tmp\" -o /dev/null >/dev/null 2>&1); "
+        + "then "
+        + pub
+        + "exit 0; fi; "
+        + clean
         + "done; exit 1";
 
     // Write the worker script + the pipeline driver to two temp
@@ -1159,7 +1197,18 @@ fn _cr_stage_cache_hit(asm_path: string, manifest_path: string, srchash_path: st
 fn _cr_write_srchash(srchash_path: string, src_path: string) ![io] {
     let current = sha256_of_file(src_path);
     if current.length == 0 { return; }
-    fs.writeFile(srchash_path, current);
+    // #1011: publish atomically. The srchash is the entry-complete gate
+    // (`_cr_stage_cache_hit` only trusts an entry when it exists AND
+    // matches), so it MUST be renamed last and as a unit — a concurrent
+    // probe that sees a matching srchash is then guaranteed the
+    // `.sfn-asm` + `.layout-manifest` are already fully published.
+    let tmp = _mktemp_sibling_cmd(srchash_path);
+    if tmp.length == 0 {
+        fs.writeFile(srchash_path, current);
+        return;
+    }
+    fs.writeFile(tmp, current);
+    _atomic_rename_into_place(tmp, srchash_path);
 }
 
 // Stage E PR1: stage one capsule source's import-context
@@ -1254,7 +1303,15 @@ fn _cr_extract_layout_manifest(asm_path: string, manifest_path: string) ![io] {
         }
         line_start = line_end + 1;
     }
-    fs.writeFile(manifest_path, manifest);
+    // #1011: a reader resolving an imported module's struct layout must
+    // never see a half-written `.layout-manifest` — publish atomically.
+    let tmp = _mktemp_sibling_cmd(manifest_path);
+    if tmp.length == 0 {
+        fs.writeFile(manifest_path, manifest);
+        return;
+    }
+    fs.writeFile(tmp, manifest);
+    _atomic_rename_into_place(tmp, manifest_path);
 }
 
 // Stage import-context for every capsule source.
@@ -1580,7 +1637,13 @@ fn _cr_stage_import_deps(sources: CapsuleSource[], universe: CapsuleSource[], wo
         }
         let deps_path = context_root + "/" + sources[i].slug + ".import-deps";
         _cr_ensure_dir(_cr_dirname(deps_path));
-        fs.writeFile(deps_path, content);
+        // #1011: the `--import-context` worker reads this sidecar; publish
+        // atomically so a peer never reads a partial dep list.
+        let tmp = _mktemp_sibling_cmd(deps_path);
+        if tmp.length == 0 { fs.writeFile(deps_path, content); } else {
+            fs.writeFile(tmp, content);
+            _atomic_rename_into_place(tmp, deps_path);
+        }
         i += 1;
     }
 }
