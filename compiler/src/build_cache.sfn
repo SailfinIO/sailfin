@@ -59,6 +59,8 @@ import {
     _get_env_cmd,
     _sanitize_filename_cmd,
     _sha256_of_file_cmd,
+    _shell_read_cmd,
+    _shell_single_quote_arg,
     _write_text_cmd
 } from "./cli_commands_utils";
 import { char_code_at_text, substring } from "./string_utils";
@@ -309,6 +311,57 @@ fn cache_lookup_complete(root: string, key: CacheKey) -> boolean ![io] {
 }
 
 // ----------------------------------------------------------------
+// Atomic publish
+// ----------------------------------------------------------------
+// Copy `src` to a unique temp file in the *same directory* as
+// `dst`, then `mv` it into place. A rename within one filesystem is
+// atomic, so a concurrent reader (another parallel emit worker, or
+// the linker) observes `dst` as either absent or the complete file
+// — never a half-written artifact.
+//
+// Without this, the prior in-place `cp <src> <final-path>` let a
+// reader observe a truncated `mod.ll` / `ir.sfn-asm` while a peer
+// worker was still writing it. That surfaces downstream as `use of
+// undefined value …` (truncated `.ll`) or, when the signature
+// side-companion is read mid-write, `llvm lowering [fatal]: cannot
+// resolve return type for call to <X>` — the nondeterministic
+// cold-cache failures tracked in #1011. The driver fans out
+// parallel `<self> emit` subprocess workers (`cli_main.sfn`,
+// `SAILFIN_BUILD_JOBS`) that share `build/cache/<schema>`, so the
+// race fires within a single `sfn build`/`run`, not only under
+// `make test`.
+//
+// The temp lives beside `dst` (not `/tmp`) so the rename stays on
+// one filesystem; a cross-device `mv` would silently degrade to a
+// non-atomic copy. `mktemp PATTERN` with 6 trailing `X`s is
+// portable across GNU and BSD (matching `capsule_resolver.sfn`). If
+// `mktemp` fails the helper falls back to a direct in-place `cp` —
+// atomicity is lost but the build still produces the artifact.
+fn _cache_atomic_copy(src: string, dst: string) -> boolean ![io] {
+    let dst_dir = _dirname_cmd(dst);
+    // Shell-quote the template: `dst_dir` can derive from
+    // `$SAILFIN_BUILD_CACHE_DIR`, so a path containing `'` (or other
+    // shell metacharacters) would otherwise break quoting and create
+    // a command-injection surface. `cp`/`mv`/`rm` go through
+    // `process.run` (no shell) and need no quoting.
+    let template = _shell_single_quote_arg(dst_dir + "/.sfn_pub.XXXXXX");
+    let tmp = _shell_read_cmd("mktemp " + template + " 2>/dev/null");
+    if tmp.length == 0 {
+        // mktemp unavailable — degrade to a non-atomic direct copy.
+        return process.run(["cp", src, dst]) == 0;
+    }
+    if process.run(["cp", src, tmp]) != 0 {
+        process.run(["rm", "-f", tmp]);
+        return false;
+    }
+    if process.run(["mv", "-f", tmp, dst]) != 0 {
+        process.run(["rm", "-f", tmp]);
+        return false;
+    }
+    return true;
+}
+
+// ----------------------------------------------------------------
 // Store
 // ----------------------------------------------------------------
 // Copies the four source artifacts into the cache. Returns true
@@ -322,14 +375,12 @@ fn cache_store(root: string, key: CacheKey, sfn_asm_src: string, layout_manifest
     let entry_dir = _cache_entry_dir(root, key);
     _ensure_dir_recursive_cmd(entry_dir);
     let paths = cache_paths_for(root, key);
-    let cp1 = process.run(["cp", sfn_asm_src, paths.sfn_asm]);
-    if cp1 != 0 { return false; }
-    let cp2 = process.run(["cp", layout_manifest_src, paths.layout_manifest]);
-    if cp2 != 0 { return false; }
-    let cp3 = process.run(["cp", ll_src, paths.ll]);
-    if cp3 != 0 { return false; }
-    let cp4 = process.run(["cp", obj_src, paths.obj]);
-    if cp4 != 0 { return false; }
+    if !_cache_atomic_copy(sfn_asm_src, paths.sfn_asm) { return false; }
+    if !_cache_atomic_copy(layout_manifest_src, paths.layout_manifest) {
+        return false;
+    }
+    if !_cache_atomic_copy(ll_src, paths.ll) { return false; }
+    if !_cache_atomic_copy(obj_src, paths.obj) { return false; }
     return true;
 }
 
@@ -378,8 +429,7 @@ fn cache_copy_artifact_to(root: string, key: CacheKey, kind: string, dst_path: s
     if !fs.exists(src) { return false; }
     let dst_dir = _dirname_cmd(dst_path);
     if dst_dir.length > 0 { _ensure_dir_recursive_cmd(dst_dir); }
-    let cp = process.run(["cp", src, dst_path]);
-    return cp == 0;
+    return _cache_atomic_copy(src, dst_path);
 }
 
 // Copy `src_path` into the cache as the artifact of `kind` for
@@ -393,8 +443,7 @@ fn cache_store_artifact(root: string, key: CacheKey, kind: string, src_path: str
     let entry_dir = _cache_entry_dir(root, key);
     _ensure_dir_recursive_cmd(entry_dir);
     let dst = cache_artifact_path(root, key, kind);
-    let cp = process.run(["cp", src_path, dst]);
-    return cp == 0;
+    return _cache_atomic_copy(src_path, dst);
 }
 
 // ----------------------------------------------------------------

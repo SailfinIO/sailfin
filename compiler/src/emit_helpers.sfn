@@ -31,6 +31,7 @@
 // no `setenv`, so the in-process helper also accepts the count as an
 // explicit parameter (`emit_llvm_with_retry_injected`) for unit tests
 // that can't mutate their own environment.
+import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./cli_commands_utils";
 import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_file_with_module_imports,
@@ -254,39 +255,73 @@ fn emit_subprocess_with_retry(sailfin_exe: string, module_name: string, source_p
         // let the build's LLVM lowering stage (#631) own fail-closed. The
         // `llvm` stage ignores the flag. The same-generation `sailfin_exe`
         // understands it; the seed never executes this helper.
-        let mut emit_args: string[] = [sailfin_exe, "emit", "--module-name", module_name, "--attempts", "1", "--no-validate", "--no-resolve-gate", "-o", out_path];
+        // #1011: emit to a sibling temp in the destination's directory,
+        // then atomically rename on success. The subprocess truncates +
+        // rewrites its `-o` target in place on every retry; a peer
+        // parallel-emit worker reading this module's staged `.sfn-asm`
+        // (for cross-module signature resolution) or `.ll` must never
+        // observe that mid-emit partial state. Writing to a temp and
+        // renaming means a reader sees the prior complete file or the
+        // new complete file — never a torn write. If `mktemp` is
+        // unavailable, fall back to the legacy in-place emit.
+        let staged = _mktemp_sibling_cmd(out_path);
+        let mut emit_target: string = out_path;
+        if staged.length > 0 { emit_target = staged; }
+        let mut emit_args: string[] = [sailfin_exe, "emit", "--module-name", module_name, "--attempts", "1", "--no-validate", "--no-resolve-gate", "-o", emit_target];
         if import_context_root.length > 0 {
             emit_args.push("--import-context");
             emit_args.push(import_context_root);
         }
         emit_args.push(mode);
         emit_args.push(source_path);
+        let mut attempt_ok: boolean = true;
         let rc = process.run(emit_args);
         if rc != 0 {
             _eh_trace(trace, module_name, attempt, max_attempts, "exit="
                 + number_to_string(rc));
-            continue;
+            attempt_ok = false;
         }
-        if !fs.exists(out_path) {
-            _eh_trace(trace, module_name, attempt, max_attempts, "missing output");
-            continue;
-        }
-        let probe = fs.readFile(out_path);
-        if probe.length == 0 {
-            _eh_trace(trace, module_name, attempt, max_attempts, "empty output");
-            continue;
-        }
-        if attempt <= inject {
-            _eh_trace(trace, module_name, attempt, max_attempts, "injected fault (SAILFIN_INJECT_FAULT)");
-            continue;
-        }
-        if validate {
-            if !validate_llvm_ir(out_path) {
-                _eh_trace(trace, module_name, attempt, max_attempts, "IR validation rejected output");
-                continue;
+        if attempt_ok {
+            if !fs.exists(emit_target) {
+                _eh_trace(trace, module_name, attempt, max_attempts, "missing output");
+                attempt_ok = false;
             }
         }
-        ok = true;
+        if attempt_ok {
+            let probe = fs.readFile(emit_target);
+            if probe.length == 0 {
+                _eh_trace(trace, module_name, attempt, max_attempts, "empty output");
+                attempt_ok = false;
+            }
+        }
+        if attempt_ok {
+            if attempt <= inject {
+                _eh_trace(trace, module_name, attempt, max_attempts, "injected fault (SAILFIN_INJECT_FAULT)");
+                attempt_ok = false;
+            }
+        }
+        if attempt_ok {
+            if validate {
+                if !validate_llvm_ir(emit_target) {
+                    _eh_trace(trace, module_name, attempt, max_attempts, "IR validation rejected output");
+                    attempt_ok = false;
+                }
+            }
+        }
+        if attempt_ok {
+            // Publish atomically (no-op when the in-place fallback ran).
+            if staged.length > 0 {
+                if !_atomic_rename_into_place(staged, out_path) {
+                    _eh_trace(trace, module_name, attempt, max_attempts, "atomic publish failed");
+                    attempt_ok = false;
+                }
+            }
+            if attempt_ok { ok = true; }
+        } else {
+            // Failed attempt — drop the temp so retries don't accumulate
+            // `.sfn_stage.*` litter in the staging directory.
+            if staged.length > 0 { process.run(["rm", "-f", staged]); }
+        }
     }
     return ok;
 }
