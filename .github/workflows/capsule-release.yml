@@ -119,9 +119,21 @@ jobs:
             # Update capsule.toml
             sed -i "s/^version = \"$current_version\"/version = \"$new_version\"/" "$capsule_dir/capsule.toml"
 
-            # Publish
+            # Publish. Treat an "already exists" (HTTP 409) as success: a prior run
+            # published this version but lost the push race below, so the bump never
+            # landed in git. Committing the bump now resyncs git with the registry
+            # instead of hard-failing every subsequent run.
             echo "Publishing $capsule_name@$new_version..."
-            (cd "$capsule_dir" && sailfin publish)
+            if publish_out="$(cd "$capsule_dir" && sailfin publish 2>&1)"; then
+              echo "$publish_out"
+            elif echo "$publish_out" | grep -qiE 'already exists|HTTP 409'; then
+              echo "$publish_out"
+              echo "::warning::$capsule_name@$new_version already published; committing bump to resync git with registry."
+            else
+              echo "$publish_out"
+              echo "::error::Failed to publish $capsule_name@$new_version."
+              exit 1
+            fi
 
             echo "::endgroup::"
             committed=true
@@ -137,5 +149,25 @@ jobs:
               ver="$(grep -oP '^version\s*=\s*\"\K[^\"]+' "$capsule_dir/capsule.toml")"
               echo "  - $name@$ver"
             done)"
-            git push origin main
+            # `main` is written concurrently (merged PRs, release.yml). Rebase our
+            # bump commit onto the latest origin/main and retry; we only touch
+            # capsules/*/capsule.toml, so the replay is conflict-free in practice.
+            for attempt in 1 2 3 4 5; do
+              git fetch origin main
+              if ! git rebase origin/main; then
+                git rebase --abort || true
+                echo "::error::Rebase onto origin/main hit a conflict (attempt ${attempt})."
+                exit 1
+              fi
+              if git push origin HEAD:main; then
+                echo "Pushed capsule version bump on attempt ${attempt}."
+                break
+              fi
+              if [ "$attempt" -eq 5 ]; then
+                echo "::error::Failed to push capsule version bump after 5 attempts."
+                exit 1
+              fi
+              echo "Push rejected (attempt ${attempt}); main moved — retrying after rebase."
+              sleep 5
+            done
           fi
