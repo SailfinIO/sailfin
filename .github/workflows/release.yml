@@ -235,7 +235,7 @@ jobs:
             exit 1
           fi
 
-      - name: Commit & tag
+      - name: Commit version bump
         if: inputs.dry_run != true
         env:
           TAG: ${{ steps.bump.outputs.tag }}
@@ -243,16 +243,36 @@ jobs:
           set -euo pipefail
           git add compiler/capsule.toml compiler/src/version.sfn
           git commit -m "chore(release): ${TAG#v}"
-          git tag -a "$TAG" -m "Release ${TAG}"
 
-      - name: Push commit & tag
+      - name: Rebase, tag & push
         if: inputs.dry_run != true
         env:
           TAG: ${{ steps.bump.outputs.tag }}
         run: |
           set -euo pipefail
-          git push origin HEAD
-          git push origin "$TAG"
+          # main is written to concurrently (e.g. capsule-release.yml auto-commits
+          # `chore(capsules): bump versions`). Rebase our version-bump commit onto the
+          # latest origin/main and retry, re-pointing the tag to the rebased commit.
+          # Paths are disjoint (we touch compiler/*, capsule bot touches capsules/*),
+          # so the rebase replays without conflicts; abort defensively if one occurs.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            if ! git rebase origin/main; then
+              git rebase --abort || true
+              echo "::error::Rebase onto origin/main hit a conflict (attempt ${attempt})."
+              exit 1
+            fi
+            # Re-create the tag on the (possibly) rebased commit before pushing.
+            git tag -fa "$TAG" -m "Release ${TAG}"
+            if git push origin HEAD && git push origin --force "$TAG"; then
+              echo "Pushed ${TAG} on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push rejected (attempt ${attempt}); main moved — retrying after rebase."
+            sleep 5
+          done
+          echo "::error::Failed to push release commit + tag after 5 attempts."
+          exit 1
 
       - name: Create GitHub Release
         if: inputs.dry_run != true
