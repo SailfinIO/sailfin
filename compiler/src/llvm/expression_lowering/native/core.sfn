@@ -1406,9 +1406,12 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     // `enum_info == null`) has no behavioral `else` on purpose — the bare
     // `X.Y` shape is indistinguishable from member access (`obj.field`), which
     // parse_enum_literal also "recognizes", so failing here would break member
-    // access. The brace shape `X.Y { ... }` instead funnels into the struct
-    // dispatch below (parse_struct_literal recognizes the dotted name), where
-    // the fail-closed guard catches an unresolvable enum/struct type.
+    // access. Note parse_enum_literal recognizes the brace shape `X.Y { ... }`
+    // too: when its enum type DOES resolve, the `enum_info != null` branch
+    // above already lowered and returned it, so only the *unresolvable* brace
+    // form (enum parse unsuccessful, or `enum_info == null`) falls through to
+    // the struct dispatch below (parse_struct_literal recognizes the dotted
+    // name), where the fail-closed guard catches the unresolvable type.
     let struct_parse = parse_struct_literal(stripped);
     if struct_parse.recognized {
         if !struct_parse.success {
