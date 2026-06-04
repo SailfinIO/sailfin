@@ -52,16 +52,22 @@ fn remove_all(path: string) -> boolean ![io] {
     // dir). Returns true when the path is gone afterward — including
     // the no-op case where it never existed.
     //
-    // Removing a missing path is a no-op success: fixture teardown
-    // should not care whether a previous run already cleaned up.
-    if !fs.exists(path) { return true; }
-
     // Try the file path first. `deleteFile` (unlink) removes regular
-    // files and symlinks directly and fails on a real directory
-    // (EISDIR). Unlinking a symlink rather than recursing through it
-    // is the correct `rm -rf` behavior — we never follow a
-    // symlink-to-directory into the tree it points at.
+    // files and symlinks — including *dangling* symlinks — directly,
+    // and fails on a real directory (EISDIR). Unlinking a symlink
+    // rather than recursing through it is the correct `rm -rf`
+    // behavior: we never follow a symlink-to-directory into the tree
+    // it points at. This must precede the existence probe below —
+    // `fs.exists` is `stat(2)`-based and follows symlinks, so a
+    // dangling link reads as "missing" and would otherwise be left
+    // behind (blocking the parent `rmdir`).
     if fs.deleteFile(path) { return true; }
+
+    // `deleteFile` failed: the path is either a real directory or
+    // already gone. A missing path is an idempotent no-op success —
+    // fixture teardown should not care whether a previous run already
+    // cleaned up.
+    if !fs.exists(path) { return true; }
 
     // It's a directory: clear every child, then remove the now-empty
     // directory itself.
