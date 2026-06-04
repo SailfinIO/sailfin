@@ -168,6 +168,7 @@ struct TestDeclaration {
     body: Block;
     effects: string[];
     decorators: Decorator[];
+    hook_kind: string;
 }
 
 struct Decorator {
@@ -225,6 +226,7 @@ enum Statement {
         body: Block;
         effects: string[];
         decorators: Decorator[];
+        hook_kind: string;
     },
     FunctionDeclaration {
         signature: FunctionSignature;

@@ -240,12 +240,16 @@ fn collect_test_entries(program: Program, file_path: string) -> TestEntry[] {
         if i >= program.statements.length { break; }
         let stmt = program.statements[i];
         if stmt.variant == "TestDeclaration" {
-            let mut line: int = 0;
-            if stmt.name_span != null {
-                let span: SourceSpan? = stmt.name_span;
-                line = span.start_line;
+            // Lifecycle hooks (#975) are not tests — exclude them from the
+            // JSON `total` count and per-test event stream.
+            if stmt.hook_kind == "" {
+                let mut line: int = 0;
+                if stmt.name_span != null {
+                    let span: SourceSpan? = stmt.name_span;
+                    line = span.start_line;
+                }
+                out.push(_trj_make_test_entry(stmt.name, file_path, line, stmt.effects));
             }
-            out.push(_trj_make_test_entry(stmt.name, file_path, line, stmt.effects));
         }
         i += 1;
     }

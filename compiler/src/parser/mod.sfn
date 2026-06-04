@@ -21,6 +21,7 @@ import {
     parse_function,
     parse_import,
     parse_interface,
+    parse_lifecycle_hook,
     parse_struct,
     parse_test,
     parse_type_alias,
@@ -133,6 +134,22 @@ fn parse_statement(initial_parser: Parser) -> StatementParseResult {
         // infers effects from them, and `emit_test` lowers them as
         // metadata. The `--tag` discovery filter (issue #849) reads them.
         return parse_test(parser, decorators);
+    }
+    // Lifecycle-hook blocks (#975). Recognized as contextual statement
+    // introducers (not keywords) so `before_each` et al. remain usable as
+    // ordinary identifiers. Each lowers to a `TestDeclaration` whose
+    // `hook_kind` drives harness ordering during LLVM lowering.
+    if identifier_matches(token, "before_each") {
+        return parse_lifecycle_hook(parser, decorators, "before_each");
+    }
+    if identifier_matches(token, "after_each") {
+        return parse_lifecycle_hook(parser, decorators, "after_each");
+    }
+    if identifier_matches(token, "before_all") {
+        return parse_lifecycle_hook(parser, decorators, "before_all");
+    }
+    if identifier_matches(token, "after_all") {
+        return parse_lifecycle_hook(parser, decorators, "after_all");
     }
     if identifier_matches(token, "fn") {
         return parse_function(parser, false, decorators);
@@ -451,6 +468,7 @@ export {
 
     // Test declaration
     parse_test,
+    parse_lifecycle_hook,
 
     // Unknown statement (fallback)
     parse_unknown

@@ -662,7 +662,8 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
                 name_span: statement.name_span,
                 body: body_result.block,
                 effects: statement.effects,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                hook_kind: statement.hook_kind
             }
         };
     }
