@@ -116,6 +116,28 @@ import { _parse_lowered_fn_string_constants, split_lines_local } from "./lowerin
 import { lower_module_bindings_to_globals } from "./module_globals";
 import { emit_type_descriptors } from "./type_descriptors";
 
+// Resolve the mangled call symbol for a lifecycle-hook function (#975).
+// Hooks emit under a `hook:<kind>` symbol (emit_native.sfn). Returns the
+// harness-call symbol — mangled with the module suffix exactly like the
+// `test:` symbols — or "" when no hook of that kind exists in the module.
+fn _hook_call_symbol(functions: NativeFunction[], kind: string, module_suffix: string) -> string {
+    let target = "hook:" + kind;
+    let mut i: int = 0;
+    loop {
+        if i >= functions.length { break; }
+        if functions[i].name == target {
+            let bare = sanitize_symbol(target);
+            // Mirror the test-symbol mangling guard: a sanitized name that
+            // already contains `__` is left unmangled to avoid double
+            // qualification (apply_module_symbol_mangling does the same).
+            if index_of(bare, "__") < 0 { return bare + "__" + module_suffix; }
+            return bare;
+        }
+        i += 1;
+    }
+    return "";
+}
+
 fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult {
     let mut native_text_for_recovery: string = "";
     if native_module.artifacts != null {
@@ -175,6 +197,39 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
     let harness_module_suffix = sanitize_module_suffix(native_module.module_name);
     let mut harness_globals: string[] = [];
     let mut harness: string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:"];
+
+    // Lifecycle hooks (#975). Resolve each kind's mangled call symbol (or ""
+    // when absent). `before_all` runs once before the test loop, `after_all`
+    // once after it, and `before_each`/`after_each` wrap each test call below.
+    let before_all_sym = _hook_call_symbol(parse.functions, "before_all", harness_module_suffix);
+    let before_each_sym = _hook_call_symbol(parse.functions, "before_each", harness_module_suffix);
+    let after_each_sym = _hook_call_symbol(parse.functions, "after_each", harness_module_suffix);
+    let after_all_sym = _hook_call_symbol(parse.functions, "after_all", harness_module_suffix);
+
+    // before_all: emit an attributable `HOOK before_all` stderr marker (no RUN
+    // line precedes it, so a failing before_all would otherwise be unascribed)
+    // then call the hook once.
+    if before_all_sym.length > 0 {
+        let ba_msg = "  HOOK before_all";
+        let ba_esc = escape_string_for_llvm(ba_msg);
+        let ba_len = number_to_string(ba_msg.length + 1);
+        let ba_blen = number_to_string(ba_msg.length);
+        harness_globals = extend_string_lines(harness_globals, ["@.hba = private unnamed_addr constant ["
+            + ba_len
+            + " x i8] c\""
+            + ba_esc
+            + "\\00\"",]);
+        harness = extend_string_lines(harness, ["  %hba = getelementptr ["
+            + ba_len
+            + " x i8], ["
+            + ba_len
+            + " x i8]* @.hba, i64 0, i64 0", "  %hba.agg0 = insertvalue {i8*, i64} undef, i8* %hba, 0", "  %hba.agg1 = insertvalue {i8*, i64} %hba.agg0, i64 "
+            + ba_blen
+            + ", 1", "  call void @sfn_print_err({i8*, i64} %hba.agg1)", "  call void @"
+            + before_all_sym
+            + "()",]);
+    }
+
     let mut ti: int = 0;
     let mut test_idx: int = 0;
     loop {
@@ -230,14 +285,51 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
                     + msg_byte_len
                     + ", 1", "  call void @sfn_print_err({i8*, i64} %tn"
                     + idx_s
-                    + ".agg1)", "  call void @"
-                    + sym
+                    + ".agg1)",]);
+                // Lifecycle wrapping (#975): before_each -> test -> after_each.
+                // A failing before_each/after_each is attributable via the RUN
+                // line just emitted above for this test.
+                if before_each_sym.length > 0 {
+                    harness = extend_string_lines(harness, ["  call void @"
+                        + before_each_sym
+                        + "()",]);
+                }
+                harness = extend_string_lines(harness, ["  call void @" + sym
                     + "()",]);
+                if after_each_sym.length > 0 {
+                    harness = extend_string_lines(harness, ["  call void @"
+                        + after_each_sym
+                        + "()",]);
+                }
                 test_idx += 1;
             }
         }
         ti += 1;
     }
+    // after_all: emit an attributable `HOOK after_all` stderr marker (the last
+    // RUN line belongs to the final test, not this hook) then call it once,
+    // after every test has run and before the suite-pass summary.
+    if after_all_sym.length > 0 {
+        let aa_msg = "  HOOK after_all";
+        let aa_esc = escape_string_for_llvm(aa_msg);
+        let aa_len = number_to_string(aa_msg.length + 1);
+        let aa_blen = number_to_string(aa_msg.length);
+        harness_globals = extend_string_lines(harness_globals, ["@.haa = private unnamed_addr constant ["
+            + aa_len
+            + " x i8] c\""
+            + aa_esc
+            + "\\00\"",]);
+        harness = extend_string_lines(harness, ["  %haa = getelementptr ["
+            + aa_len
+            + " x i8], ["
+            + aa_len
+            + " x i8]* @.haa, i64 0, i64 0", "  %haa.agg0 = insertvalue {i8*, i64} undef, i8* %haa, 0", "  %haa.agg1 = insertvalue {i8*, i64} %haa.agg0, i64 "
+            + aa_blen
+            + ", 1", "  call void @sfn_print_err({i8*, i64} %haa.agg1)", "  call void @"
+            + after_all_sym
+            + "()",]);
+    }
+
     let pass_msg = "  PASS  (all " + number_to_string(test_idx)
         + " tests passed)";
     let pass_escaped = escape_string_for_llvm(pass_msg);

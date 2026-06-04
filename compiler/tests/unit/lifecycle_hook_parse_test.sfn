@@ -1,0 +1,86 @@
+// Regression coverage for lifecycle-hook block parsing (#975).
+//
+// `before_each` / `after_each` / `before_all` / `after_all` blocks are
+// recognized as contextual statement introducers (not keywords) and lower
+// to a `TestDeclaration` carrying a non-empty `hook_kind`. Ordinary `test`
+// blocks keep `hook_kind == ""`. The harness-ordering pin (before -> body
+// -> after across >=2 tests) lives in
+// `compiler/tests/e2e/test_lifecycle_hook_ordering.sh`; this unit test
+// deliberately stays at the parser/AST surface, independent of LLVM
+// lowering.
+import { Program, Statement } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+fn _first_test(program: Program) -> Statement {
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "TestDeclaration" { return stmt; }
+        index += 1;
+    }
+    return program.statements[0];
+}
+
+fn _hook_of_kind(program: Program, kind: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "TestDeclaration" {
+            if stmt.hook_kind == kind { return true; }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+test "parser hooks: before_each block sets hook_kind" ![io] {
+    let source = "before_each ![io] { print.info(\"setup\"); }";
+    let program = parse_program(source);
+    let decl = _first_test(program);
+    assert decl.variant == "TestDeclaration";
+    assert decl.hook_kind == "before_each";
+}
+
+test "parser hooks: all four hook kinds parse with their kind" ![io] {
+    let source = "before_all ![io] { print.info(\"ba\"); }\n"
+        + "before_each ![io] { print.info(\"be\"); }\n"
+        + "after_each ![io] { print.info(\"ae\"); }\n"
+        + "after_all ![io] { print.info(\"aa\"); }\n";
+    let program = parse_program(source);
+    assert _hook_of_kind(program, "before_all");
+    assert _hook_of_kind(program, "before_each");
+    assert _hook_of_kind(program, "after_each");
+    assert _hook_of_kind(program, "after_all");
+}
+
+test "parser hooks: ordinary test keeps empty hook_kind" ![io] {
+    let source = "test \"plain\" ![io] { print.info(\"body\"); }";
+    let program = parse_program(source);
+    let decl = _first_test(program);
+    assert decl.variant == "TestDeclaration";
+    assert decl.name == "plain";
+    assert decl.hook_kind == "";
+}
+
+test "parser hooks: hook coexists with an ordinary test in one file" ![io] {
+    let source = "before_each ![io] { print.info(\"setup\"); }\n"
+        + "test \"real\" ![io] { print.info(\"body\"); }\n";
+    let program = parse_program(source);
+    assert _hook_of_kind(program, "before_each");
+    // The ordinary test is still present and unmarked.
+    let mut found_plain: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "TestDeclaration" {
+            if stmt.name == "real" {
+                if stmt.hook_kind == "" { found_plain = true; }
+            }
+        }
+        index += 1;
+    }
+    assert found_plain == true;
+}

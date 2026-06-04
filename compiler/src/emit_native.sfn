@@ -429,7 +429,13 @@ fn emit_test(state: NativeState, statement: Statement) -> NativeState {
     // Reason: some selfhosted stage2 builds have historically misparsed `.test`
     // directives in the native IR parser, causing tests to be dropped before
     // LLVM lowering and resulting in missing `main` at link time.
-    let test_symbol = test_function_symbol(statement.name);
+    // Lifecycle hooks (#975) emit under a distinct `hook:<kind>` symbol so the
+    // harness synthesizer can find them by kind and wrap test calls in order —
+    // and so they never appear in the `test:` RUN/PASS test count.
+    let mut test_symbol: string = test_function_symbol(statement.name);
+    if statement.hook_kind != "" {
+        test_symbol = hook_function_symbol(statement.hook_kind);
+    }
     return emit_function(state, FunctionSignature {
         name: test_symbol, is_async: false, parameters: [], return_type: null, effects: statement.effects, type_parameters: [], name_span: statement.name_span
     }, statement.body, statement.decorators);
@@ -729,7 +735,11 @@ fn collect_entry_points(program: Program) -> string[] {
             entries = append_unique(entries, statement.signature.name);
         }
         if statement.variant == "TestDeclaration" {
-            entries = append_unique(entries, test_function_symbol(statement.name));
+            if statement.hook_kind != "" {
+                entries = append_unique(entries, hook_function_symbol(statement.hook_kind));
+            } else {
+                entries = append_unique(entries, test_function_symbol(statement.name));
+            }
         }
         index += 1;
     }
@@ -782,6 +792,14 @@ fn test_function_symbol(test_name: string) -> string {
     // Keep the `test:` prefix stable so LLVM lowering can synthesize a harness
     // by scanning `NativeFunction.name`.
     return "test:" + sanitize_test_name_for_symbol(test_name);
+}
+
+fn hook_function_symbol(hook_kind: string) -> string {
+    // Lifecycle hooks (#975) carry a stable `hook:<kind>` symbol. The harness
+    // synthesizer looks these up by exact name to order before_all/before_each/
+    // after_each/after_all around the `test:` calls. The `hook:` prefix keeps
+    // them out of the `test:` RUN/PASS scan.
+    return "hook:" + hook_kind;
 }
 
 fn count_exported_symbols(program: Program) -> int {

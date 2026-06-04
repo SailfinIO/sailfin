@@ -169,6 +169,9 @@ fn _decorators_have_tag(decorators: Decorator[], tag: string) -> boolean {
 // sees at least one constraint.
 fn test_decl_matches_filters(statement: Statement) -> boolean {
     if statement.variant != "TestDeclaration" { return false; }
+    // Lifecycle hooks (#975) are not tests; they must survive `-k`/`--tag`
+    // filtering so the surviving tests still get their setup/teardown.
+    if statement.hook_kind != "" { return true; }
     if _filter_name.length > 0 {
         if index_of(statement.name, _filter_name) < 0 { return false; }
     }

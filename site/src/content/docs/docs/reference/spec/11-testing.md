@@ -49,6 +49,51 @@ sfn test -k auth --tag slow # both filters compose (a test must match both)
 
 ---
 
+## Lifecycle hooks
+
+A test file may declare lifecycle-hook blocks that run setup/teardown
+around its tests. They use the same block form as `test`, introduced by a
+hook keyword instead of a quoted name:
+
+```sfn
+before_all ![io]  { print.info("once, before any test"); }
+before_each ![io] { print.info("before every test"); }
+after_each ![io]  { print.info("after every test"); }
+after_all ![io]   { print.info("once, after every test"); }
+
+test "alpha" ![io] { print.info("body"); }
+test "beta"  ![io] { print.info("body"); }
+```
+
+Within a file the runner wraps each test in the order:
+
+```
+before_all → (before_each → test → after_each)* → after_all
+```
+
+- `before_all` / `after_all` run **once per file**, around the whole set
+  of tests.
+- `before_each` / `after_each` run **once per test**, immediately around
+  each test body.
+- Hooks are not tests: they carry no name, are excluded from the
+  `-k` / `--tag` filters (they always run for the surviving tests), and
+  do **not** count toward the `all N tests passed` summary.
+- Hook bodies declare effects exactly like tests and functions.
+
+**Limitations (current):**
+
+- **One hook per kind per file.** Declaring two `before_each` blocks in
+  one file is a duplicate-symbol error. (Composition across imported
+  files and multiple hooks per kind are planned.)
+- **A failing hook aborts the suite.** Like a failing assertion, an error
+  inside a hook aborts the test process; a `HOOK before_all` / `HOOK
+  after_all` marker is printed to stderr so the failure is attributable to
+  the hook rather than a test. The richer "mark dependent tests `fail`
+  (not `error`)" classification requires a recoverable per-test harness
+  and is not yet available.
+
+---
+
 ## Test runner JSON output
 
 `sfn test --json` emits a machine-readable [JSON Lines](https://jsonlines.org/)

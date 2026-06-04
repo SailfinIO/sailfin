@@ -595,7 +595,7 @@ fn canonical_type_layouts() -> CanonicalTypeLayout[] {
         name: "FunctionSignature", size: 56, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "TestDeclaration", size: 48, align: 8
+        name: "TestDeclaration", size: 64, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
         name: "Decorator", size: 16, align: 8
