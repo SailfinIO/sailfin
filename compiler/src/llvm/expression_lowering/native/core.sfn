@@ -1402,6 +1402,16 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         }
     }
 
+    // #1023: the enum dead-end above (enum_parse recognized + success but
+    // `enum_info == null`) has no behavioral `else` on purpose — the bare
+    // `X.Y` shape is indistinguishable from member access (`obj.field`), which
+    // parse_enum_literal also "recognizes", so failing here would break member
+    // access. Note parse_enum_literal recognizes the brace shape `X.Y { ... }`
+    // too: when its enum type DOES resolve, the `enum_info != null` branch
+    // above already lowered and returned it, so only the *unresolvable* brace
+    // form (enum parse unsuccessful, or `enum_info == null`) falls through to
+    // the struct dispatch below (parse_struct_literal recognizes the dotted
+    // name), where the fail-closed guard catches the unresolvable type.
     let struct_parse = parse_struct_literal(stripped);
     if struct_parse.recognized {
         if !struct_parse.success {
@@ -1411,6 +1421,27 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 diagnostics.push(struct_parse.diagnostics[_ci3]);
                 _ci3 += 1;
             }
+            return ExpressionResult {
+                lines: lines,
+                temp_index: temp_index,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: empty_constants
+            };
+        }
+        // #1023: fail-closed on a recognized struct/enum-shaped literal whose
+        // type is absent from the lowering type context. Without this guard,
+        // lower_struct_literal returns a null operand carrying only a
+        // *non-fatal* "unknown struct" diagnostic, which the emit/build
+        // `[fatal]` gate ignores — so the enclosing statement silently lowers
+        // to a default value (the #1020 assert-elision; why the #832 asserts
+        // vanished). Escalate to a `[fatal]` diagnostic so the compile refuses
+        // to emit IR. After #1021, prelude `Result` resolves through the enum
+        // path above and never reaches this guard.
+        if resolve_struct_info_for_literal(context, struct_parse.type_name) == null {
+            diagnostics.push("llvm lowering [fatal]: struct/enum literal `"
+                + struct_parse.type_name
+                + "` references a type not in the lowering type context");
             return ExpressionResult {
                 lines: lines,
                 temp_index: temp_index,
