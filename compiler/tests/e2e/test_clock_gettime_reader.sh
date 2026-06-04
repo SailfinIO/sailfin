@@ -17,8 +17,10 @@
 #
 #   1. typecheck   — `sfn check clock.sfn` reports `ok`.
 #   2. fmt         — `sfn fmt --check clock.sfn` is canonical.
-#   3. call shape  — emitted IR contains `call i32 @clock_gettime(...)`
-#                    and `declare i32 @clock_gettime(...)`.
+#   3. call shape  — emitted IR contains exactly one
+#                    `call i32 @clock_gettime(...)` (the #909 sentinel
+#                    swap collapsed the #905 two-call clk_id probe into a
+#                    single call) plus a `declare i32 @clock_gettime(...)`.
 #   4. two reads   — the adapter body contains >= 2 local-pointer
 #                    `load i64, i64* %…` instructions (the field reads).
 #   5. STALE-READ GUARD — both `load i64, i64* %…` field reads appear
@@ -97,8 +99,15 @@ test_clock_gettime_call() {
         echo "[test]   missing 'declare i32 @clock_gettime(...)'"
         return 1
     fi
-    if ! grep -qE 'call i32 @clock_gettime\(' "$BODY"; then
-        echo "[test]   missing 'call i32 @clock_gettime(...)' in adapter body"
+    # Exactly one call: the #909 sentinel swap folds the platform clk_id
+    # to an emit-time immediate, collapsing the #905 try-1-fall-back-to-6
+    # runtime probe into a single syscall. Two calls means the probe was
+    # reintroduced.
+    local calls
+    calls="$(grep -cE 'call i32 @clock_gettime\(' "$BODY" || true)"
+    if [ "$calls" -ne 1 ]; then
+        echo "[test]   expected exactly one 'call i32 @clock_gettime(...)' in adapter body (the #909 sentinel swap), found $calls"
+        cat "$BODY"
         return 1
     fi
     return 0
@@ -169,14 +178,13 @@ test_no_call_sentinel() {
 }
 
 test_monotonic_advance() {
-    # Runs on every platform. `sfn_clock_monotonic_nanos` probes the
-    # `CLOCK_MONOTONIC` clk_id at runtime — Linux `1`, falling back to
-    # Darwin `6` on `EINVAL` (issue #819 follow-up to the #878 reader) —
-    # so the monotonic clock reads correctly on both Linux x86_64 and
-    # macOS arm64. The earlier Linux-only skip (epic #763) is gone: the
-    # runtime probe makes the off-Linux smoke meaningful, and the eventual
-    # emit-time clk_id sentinel (which needs a fresh seed) will keep it
-    # passing.
+    # Runs on every platform. `sfn_clock_monotonic_nanos` reads the
+    # `CLOCK_MONOTONIC` clk_id via the `sailfin_intrinsic_clock_monotonic_id()`
+    # emit-time sentinel (#908) — it folds to Linux `1` / Darwin `6` at
+    # emit time (#909 swapped out the #905 runtime probe) — so the
+    # monotonic clock reads correctly on both Linux x86_64 and macOS arm64
+    # with a single syscall. The earlier Linux-only skip (epic #763) is
+    # gone: the off-Linux smoke is meaningful on every target.
 
     # `sfn_clock_monotonic_nanos` is compiled into the runtime via
     # `runtime/native/capsule.toml` sfn-sources, so a user program can
