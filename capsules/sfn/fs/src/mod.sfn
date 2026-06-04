@@ -38,6 +38,44 @@ fn read_dir(path: string) -> string[] ![io] {
     return fs.listDirectory(path);
 }
 
+fn remove_dir(path: string) -> boolean ![io] {
+    // Remove an *empty* directory. Returns true on success; false if
+    // the directory is non-empty, the path is a regular file, or it
+    // does not exist. For a recursive delete use `remove_all`.
+    return fs.removeDirectory(path);
+}
+
+fn remove_all(path: string) -> boolean ![io] {
+    // Recursively remove `path` and everything beneath it (`rm -rf`
+    // semantics), composed in pure Sailfin from `deleteFile` (files),
+    // `listDirectory` (children), and `removeDirectory` (the emptied
+    // dir). Returns true when the path is gone afterward — including
+    // the no-op case where it never existed.
+    //
+    // Removing a missing path is a no-op success: fixture teardown
+    // should not care whether a previous run already cleaned up.
+    if !fs.exists(path) { return true; }
+
+    // Try the file path first. `deleteFile` (unlink) removes regular
+    // files and symlinks directly and fails on a real directory
+    // (EISDIR). Unlinking a symlink rather than recursing through it
+    // is the correct `rm -rf` behavior — we never follow a
+    // symlink-to-directory into the tree it points at.
+    if fs.deleteFile(path) { return true; }
+
+    // It's a directory: clear every child, then remove the now-empty
+    // directory itself.
+    let entries = fs.listDirectory(path);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let child = path + "/" + entries[i];
+        remove_all(child);
+        i += 1;
+    }
+    return fs.removeDirectory(path);
+}
+
 // ---------------------------------------------------------------------
 // P5 (#366): Phase 0 precondition — five POSIX primitives the test
 // infrastructure epic (#362) relies on. Until the canonical
