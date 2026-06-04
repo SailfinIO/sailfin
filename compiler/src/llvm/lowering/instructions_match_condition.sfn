@@ -195,11 +195,22 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                     if llvm_field_type.length == 0 {
                                         llvm_field_type = "i8*";
                                     }
-                                    if layout_annotation_represents_user_value(resolved_annotation) {
-                                        if ends_with_pointer_suffix(llvm_field_type) {
-                                            let stripped = strip_pointer_suffix(llvm_field_type);
-                                            if stripped.length > 0 {
-                                                llvm_field_type = stripped;
+                                    // #830: a generic-substituted payload is stored
+                                    // BOXED — the constructor writes the `%T*` heap
+                                    // pointer into the variant payload slot (0.5.8+
+                                    // boxed aggregate ABI). Stripping the pointer
+                                    // here would make the matcher `load %T` by value
+                                    // from a slot that actually holds a `%T*`,
+                                    // corrupting the binding. Only strip for
+                                    // non-substituted, in-file value payloads stored
+                                    // inline.
+                                    if !substituted {
+                                        if layout_annotation_represents_user_value(resolved_annotation) {
+                                            if ends_with_pointer_suffix(llvm_field_type) {
+                                                let stripped = strip_pointer_suffix(llvm_field_type);
+                                                if stripped.length > 0 {
+                                                    llvm_field_type = stripped;
+                                                }
                                             }
                                         }
                                     }

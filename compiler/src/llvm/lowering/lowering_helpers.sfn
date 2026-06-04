@@ -5,6 +5,10 @@ import { NativeArtifact, NativeModule } from "../../emit_native";
 import {
     LayoutManifest,
     NativeEnum,
+    NativeEnumLayout,
+    NativeEnumVariant,
+    NativeEnumVariantField,
+    NativeEnumVariantLayout,
     NativeFunction,
     NativeImport,
     NativeImportSpecifier,
@@ -92,6 +96,109 @@ fn extend_native_enums(values: NativeEnum[], extras: NativeEnum[]) -> NativeEnum
         out = out.push(extras[index]);
         index += 1;
     }
+    return out;
+}
+
+// #1021: inject the prelude `Result<T, E>` enum into a module's combined enum
+// set when it is not already present via an in-file declaration or explicit
+// import. The prelude is linked into every Sailfin binary, so a bare user file
+// can write `Result.Ok` / `Result.Err` + `match` without importing `Result` —
+// but the LLVM lowering type context only ever saw enums from the module's own
+// `.sfn-asm` or its imports, so the prelude `Result` never reached
+// `build_type_context` and `match` silently miscompiled to `i8*` with no
+// discriminant test. We construct the `NativeEnum` literal directly here rather
+// than reading `runtime/prelude.sfn` because the native-IR parsers cannot parse
+// Sailfin source and no prelude `.sfn-asm` artifact is staged for the
+// single-file `emit llvm` path. The shape below is byte-identical to what the
+// emitter produces for an in-file `enum Result<T, E>` (verified against
+// `sailfin emit native`): a non-null, pointer-erased base layout (size-8 generic
+// payloads) that the per-instantiation monomorphisation (#830) specialises just
+// like any in-file generic payload enum. Source of truth: runtime/prelude.sfn
+// (`enum Result<T, E>`). The name guard means an in-file or imported `Result`
+// always wins — preserving `result_enum_lowering_test.sfn`'s in-file semantics
+// and preventing a duplicate `%Result` type definition if a real prelude
+// artifact is ever staged.
+fn inject_prelude_result_enum(enums: NativeEnum[]) -> NativeEnum[] {
+    let mut out = enums;
+    if out == null { out = []; }
+    let mut index: int = 0;
+    loop {
+        if index >= out.length { break; }
+        let existing = out[index];
+        if existing != null {
+            if existing.name == "Result" { return out; }
+        }
+        index += 1;
+    }
+    let result_enum = NativeEnum {
+        name: "Result",
+        type_parameters: ["T", "E"],
+        variants: [NativeEnumVariant {
+            name: "Ok", fields: [NativeEnumVariantField {
+                name: "value", type_annotation: "T", mutable: false
+            }]
+        }, NativeEnumVariant {
+            name: "Err", fields: [NativeEnumVariantField {
+                name: "error", type_annotation: "E", mutable: false
+            }]
+        }],
+        layout: NativeEnumLayout {
+            size: 16,
+            align: 8,
+            tag_type: "i32",
+            tag_size: 4,
+            tag_align: 4,
+            variants: [NativeEnumVariantLayout {
+                name: "Ok", tag: 0, offset: 8, size: 8, align: 8, fields: [NativeStructLayoutField {
+                    name: "value", type_annotation: "T", offset: 8, size: 8, align: 8
+                }]
+            }, NativeEnumVariantLayout {
+                name: "Err", tag: 1, offset: 8, size: 8, align: 8, fields: [NativeStructLayoutField {
+                    name: "error", type_annotation: "E", offset: 8, size: 8, align: 8
+                }]
+            }]
+        }
+    };
+    out = out.push(result_enum);
+    return out;
+}
+
+// #1021: inject the prelude default `Error` struct, mirroring
+// `inject_prelude_result_enum`. `Result<string, Error>` uses this as its `Err`
+// payload, so a bare user file matching on a prelude `Result` whose error type
+// is the default `Error` needs the struct layout in the type context too. The
+// shape matches the emitter output for `struct Error { message: string }`
+// (`sailfin emit native`): one pointer-sized `string` field at offset 0. Source
+// of truth: runtime/prelude.sfn (`struct Error`). In-file/imported `Error` wins
+// via the name guard.
+fn inject_prelude_error_struct(structs: NativeStruct[]) -> NativeStruct[] {
+    let mut out = structs;
+    if out == null { out = []; }
+    let mut index: int = 0;
+    loop {
+        if index >= out.length { break; }
+        let existing = out[index];
+        if existing != null {
+            if existing.name == "Error" { return out; }
+        }
+        index += 1;
+    }
+    let error_struct = NativeStruct {
+        name: "Error",
+        fields: [NativeStructField {
+            name: "message", type_annotation: "string", mutable: false
+        }],
+        methods: [],
+        implements: [],
+        layout: NativeStructLayout {
+            size: 8,
+            align: 8,
+            fields: [NativeStructLayoutField {
+                name: "message", type_annotation: "string", offset: 0, size: 8, align: 8
+            }]
+        }
+    };
+    out = out.push(error_struct);
     return out;
 }
 

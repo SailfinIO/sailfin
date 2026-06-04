@@ -72,6 +72,8 @@ import {
     extend_native_enums,
     extend_native_interfaces,
     extend_native_structs,
+    inject_prelude_error_struct,
+    inject_prelude_result_enum,
     is_test_module_slug,
     sanitize_module_suffix,
     seed_default_runtime_helpers
@@ -569,8 +571,14 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     if debug_lowering { print.err("emit-llvm: phase=imports"); }
 
     // ── Phase 3: Combine types, build type context ──────────────────
-    let combined_structs = extend_native_structs(module_structs, imported_structs);
-    let combined_enums = extend_native_enums(module_enums, imported_enums);
+    let mut combined_structs = extend_native_structs(module_structs, imported_structs);
+    let mut combined_enums = extend_native_enums(module_enums, imported_enums);
+    // #1021: surface the prelude `Result<T, E>` / `Error` decls so bare user
+    // files (no in-file enum, no explicit import) lower `Result.Ok` / `.Err` +
+    // `match` to a real `%Result` layout + discriminant test instead of `i8*`.
+    // No-op when an in-file or imported decl already provides the name.
+    combined_enums = inject_prelude_result_enum(combined_enums);
+    combined_structs = inject_prelude_error_struct(combined_structs);
     let mut combined_interfaces = extend_native_interfaces(safe_interfaces, imported_interfaces);
     if is_test_module {
         combined_interfaces = [];
