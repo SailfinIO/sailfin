@@ -1,0 +1,18 @@
+// Regression test for #960: cross-module struct-method dispatch.
+// Before the fix, the consumer re-emitted the imported method as a
+// body-less `ret 0` stub (garbage `self`) instead of calling the
+// provider's `Counter.value` / `Counter.snapshot`. Value-returning and
+// struct-returning methods are both exercised.
+import { make_counter } from "./fixtures/cross_module_method/mod";
+
+test "cross_module_method: value-returning method reads self" ![pure] {
+    let c = make_counter(7);
+    let v = c.value();
+    assert v == 7;
+}
+
+test "cross_module_method: struct-returning method preserves fields" ![pure] {
+    let c = make_counter(42);
+    let snap = c.snapshot();
+    assert snap.captured == 42;
+}

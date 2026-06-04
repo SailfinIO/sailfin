@@ -34,6 +34,7 @@ import {
     apply_symbol_substitutions,
     collect_available_import_module_names,
     collect_defined_function_symbols,
+    extract_module_name_from_native_text,
     find_declare_signature,
     insert_before_llvm_footer,
     render_function_shim,
@@ -41,6 +42,82 @@ import {
     sanitize_module_suffix,
     should_keep_unmangled_abi_symbol
 } from "./lowering_helpers";
+
+// #960: scan a `.sfn-asm` native text for struct-method symbols.
+// `flatten_struct_methods` names each method `<StructName><MethodName>`, so a
+// consumer's call site for an imported method appears as the bare symbol
+// `@<StructName><MethodName>`. The imported method is NOT listed in any
+// `.import { specifiers }` line (only the free symbols are), so the mangling
+// pass can't learn it from the import directives — it must be discovered by
+// walking the provider's native text. Returns the sanitized bare symbols
+// (e.g. `ProbeEget_actual`) defined by every `.struct`/`.method` pair.
+fn _collect_struct_method_symbols(native_text: string) -> string[] {
+    let mut result: string[] = [];
+    if native_text.length == 0 { return result; }
+    let mut current_struct: string = "";
+    let mut scan_pos: int = 0;
+    let len = native_text.length;
+    loop {
+        if scan_pos >= len { break; }
+        let mut line_end: int = scan_pos;
+        loop {
+            if line_end >= len { break; }
+            if native_text[line_end] == "\n" { break; }
+            line_end += 1;
+        }
+        let line = trim_text(substring(native_text, scan_pos, line_end));
+        scan_pos = line_end + 1;
+
+        if starts_with(line, ".struct ") {
+            let tail = trim_text(substring(line, 8, line.length));
+            // Stop at the first `<` (generic params) or space (`implements
+            // ...`). `flatten_struct_methods` builds the lowered symbol from
+            // the bare struct name, so `.struct Foo<T> implements Bar` must
+            // resolve to `Foo`, not `Foo<T>`.
+            let mut name_end: int = 0;
+            loop {
+                if name_end >= tail.length { break; }
+                let ch = tail[name_end];
+                if ch == " " { break; }
+                if ch == "<" { break; }
+                name_end += 1;
+            }
+            current_struct = substring(tail, 0, name_end);
+            continue;
+        }
+        if starts_with(line, ".endstruct") {
+            current_struct = "";
+            continue;
+        }
+        if current_struct.length == 0 { continue; }
+        if starts_with(line, ".method ") {
+            let mut tail = trim_text(substring(line, 8, line.length));
+            // The lowered symbol uses the bare method name, so drop an
+            // `async ` prefix and any `<...>` generic parameter list:
+            // `.method async foo<T>(...)` → `foo`.
+            if starts_with(tail, "async ") {
+                tail = trim_text(substring(tail, 6, tail.length));
+            }
+            let mut name_end: int = 0;
+            loop {
+                if name_end >= tail.length { break; }
+                let ch = tail[name_end];
+                if ch == "(" { break; }
+                if ch == "<" { break; }
+                name_end += 1;
+            }
+            if name_end >= tail.length { continue; }
+            let method_name = trim_text(substring(tail, 0, name_end));
+            if method_name.length == 0 { continue; }
+            let symbol = sanitize_symbol(current_struct + method_name);
+            if symbol.length == 0 { continue; }
+            if !string_array_contains(result, symbol) {
+                result.push(symbol);
+            }
+        }
+    }
+    return result;
+}
 
 fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], native_text_path: string) -> MangledModuleResult ![io] {
     let mut diagnostics: string[] = [];
@@ -230,6 +307,54 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
         }
     }
 
+    // 2b) #960: rewrite imported struct-method call sites to the home-module
+    // symbol. `flatten_struct_methods` names methods `<Struct><Method>`, and a
+    // consumer references an imported method as the bare `@<Struct><Method>(`.
+    // These never appear in `.import { specifiers }` (only free symbols do), so
+    // the directive loop above can't map them. Discover them by walking each
+    // provider's native text: when THIS module calls a method it does not
+    // define locally, map `@<sym>` → `@<sym>__<provider_suffix>` and remember
+    // the target so an external declare is injected below. Without this the
+    // call would bind to a bodyless local stub (the #960 garbage-`self` bug) or
+    // — once that stub is gone — to an undefined symbol.
+    let mut imm_targets: string[] = [];
+    let mut imm_signatures: DeclareSignature[] = [];
+    let mut imm_ti: int = 0;
+    loop {
+        if imm_ti >= imported_native_texts.length { break; }
+        let imm_text = imported_native_texts[imm_ti];
+        imm_ti += 1;
+        if imm_text == null { continue; }
+        if imm_text.length == 0 { continue; }
+        let provider_slug = extract_module_name_from_native_text(imm_text);
+        if provider_slug.length == 0 { continue; }
+        // Runtime modules keep stable, unmangled ABI symbols.
+        if starts_with(provider_slug, "runtime/") { continue; }
+        let provider_suffix = sanitize_module_suffix(provider_slug);
+        let method_symbols = _collect_struct_method_symbols(imm_text);
+        let mut ms_i: int = 0;
+        loop {
+            if ms_i >= method_symbols.length { break; }
+            let bare = method_symbols[ms_i];
+            ms_i += 1;
+            if should_keep_unmangled_abi_symbol(bare) { continue; }
+            // Already qualified, locally defined, or already mapped: leave it.
+            if index_of(bare, "__") >= 0 { continue; }
+            if string_array_contains(defined, bare) { continue; }
+            if string_array_contains(import_olds, bare) { continue; }
+            // Only act when this module actually references the method (the
+            // signature is recovered from the bare call site, which still
+            // exists in `rewritten` at this point — before substitution).
+            let signature = find_declare_signature(rewritten, bare);
+            if signature == null { continue; }
+            let target = bare + "__" + provider_suffix;
+            import_olds.push(bare);
+            import_news.push(target);
+            imm_targets.push(target);
+            imm_signatures.push(signature);
+        }
+    }
+
     rewritten = apply_symbol_substitutions(rewritten, import_olds, import_news);
     if debug_lowering {
         print.err("emit-llvm: mangle import_subs=" + number_to_string(import_olds.length));
@@ -273,6 +398,22 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
         }
         shim_lines.push("");
         shim_index += 1;
+    }
+    // #960: external declares for imported struct-method targets rewritten in
+    // step 2b. Their bodies live in the provider module's `.ll`; this consumer
+    // only needs a `declare` so the rewritten call sites resolve at link time.
+    let mut imm_di: int = 0;
+    loop {
+        if imm_di >= imm_targets.length { break; }
+        if imm_di >= imm_signatures.length { break; }
+        let imm_target = imm_targets[imm_di];
+        let imm_sig = imm_signatures[imm_di];
+        imm_di += 1;
+        if string_array_contains(injected_declares, imm_target) { continue; }
+        if _has_declare_or_define(rewritten, imm_target) { continue; }
+        shim_lines.push(_render_declare_line(imm_target, imm_sig));
+        shim_lines.push("");
+        injected_declares.push(imm_target);
     }
     rewritten = insert_before_llvm_footer(rewritten, shim_lines);
     if debug_lowering {

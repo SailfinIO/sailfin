@@ -665,8 +665,16 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     if debug_lowering { print.err("emit-llvm: phase=imports"); }
 
     // ── Phase 3: Combine types, build type context ──────────────────
-    let mut combined_structs = extend_native_structs(module_structs, imported_structs);
-    let mut combined_enums = extend_native_enums(module_enums, imported_enums);
+    // #960: build `combined_structs`/`combined_enums` from a FRESH array so
+    // `extend_native_structs`/`extend_native_enums` (which alias + mutate
+    // their first arg in place via `.push`) do not contaminate
+    // `module_structs`/`module_enums` with imported declarations. Without the
+    // fresh seed, the in-place append leaked imported structs into
+    // `module_structs`, and the later `flatten_struct_methods(module_structs)`
+    // re-emitted imported (body-less) methods as local `ret 0` stubs that
+    // shadowed the real cross-module method symbol (garbage `self`).
+    let mut combined_structs = extend_native_structs(extend_native_structs([], module_structs), imported_structs);
+    let mut combined_enums = extend_native_enums(extend_native_enums([], module_enums), imported_enums);
     // #1021: surface the prelude `Result<T, E>` / `Error` decls so bare user
     // files (no in-file enum, no explicit import) lower `Result.Ok` / `.Err` +
     // `match` to a real `%Result` layout + discriminant test instead of `i8*`.
