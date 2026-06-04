@@ -35,6 +35,7 @@ import { number_to_string } from "../num_format";
 import { parse_program } from "../parser/mod";
 import { load_prelude_global_names } from "../prelude_globals";
 import { substring } from "../string_utils";
+import { Token } from "../token";
 import { typecheck_diagnostics_with_import_symbols_prelude } from "../typecheck";
 import { Diagnostic } from "../typecheck_types";
 
@@ -71,6 +72,32 @@ fn _is_sfn_file(path: string) -> boolean {
     if path.length < 4 { return false; }
     let start = path.length - 4;
     return substring(path, start, path.length) == ".sfn";
+}
+
+// Build the `E0500` parse diagnostic for a top-level `Statement.Unknown`
+// node. The parser recovers from unrecognized syntax by emitting an
+// `Unknown` statement (carrying the consumed tokens) rather than a
+// diagnostic, so `sfn check` historically reported genuinely malformed
+// input as clean. Anchor the diagnostic at the first consumed token when
+// one exists; the `near `<lexeme>`` hint points the reader at the offending
+// token. Severity is always `error` — unrecognized syntax is never a
+// warning — independent of the `SAILFIN_EFFECT_ENFORCE` knob that steers
+// effect diagnostics.
+fn _parse_diagnostic_for_unknown(stmt: Statement, file_path: string) -> Diagnostic {
+    let mut anchor: Token? = null;
+    let mut near: string = "";
+    if stmt.tokens.length > 0 {
+        anchor = stmt.tokens[0];
+        near = " near `" + stmt.tokens[0].lexeme + "`";
+    }
+    return Diagnostic {
+        code: "E0500",
+        severity: "error",
+        message: "parse error: unrecognized syntax" + near,
+        file_path: file_path,
+        primary: anchor,
+        suggestion: null
+    };
 }
 
 fn check_source(source: string, file_path: string) -> CheckResult ![io] {
@@ -118,6 +145,30 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
     let mut rendered: string[] = [];
     let mut errors: int = 0;
     let mut warnings: int = 0;
+
+    // Parse-error surfacing (#974). The parser emits `Statement.Unknown`
+    // for unrecognized top-level constructs instead of recording a parse
+    // diagnostic, so `sfn check` used to report syntactically broken
+    // input (e.g. `@@@ !!!`, a stray `}`) as clean. Walk the top-level
+    // statements and mint an `E0500` parse diagnostic for each `Unknown`
+    // node before typechecking. Limitation: malformed-but-dispatched
+    // declarations (e.g. a function with a broken parameter list) parse
+    // into a recognized declaration node, not an `Unknown`, so they are
+    // not yet flagged — that requires parser-level error recovery,
+    // tracked as a follow-up.
+    let mut ui: int = 0;
+    loop {
+        if ui >= program.statements.length { break; }
+        let stmt = program.statements[ui];
+        if stmt.variant == "Unknown" {
+            let pdiag = _parse_diagnostic_for_unknown(stmt, file_path);
+            combined.push(pdiag);
+            producers.push("parse");
+            rendered.push(render_diagnostic(pdiag, source_lines, "parse"));
+            errors += 1;
+        }
+        ui += 1;
+    }
 
     // Stamp the originating module path onto each typecheck diagnostic
     // and render it in one pass. Factories mint diagnostics with an

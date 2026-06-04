@@ -101,6 +101,13 @@ fn main() ![io] {
 export { noisy_helper };
 EOF
 
+# A file with unrecognized top-level syntax — the parser lowers this to
+# a `Statement.Unknown`, which `sfn check` now surfaces as an `E0500`
+# parse diagnostic (#974).
+cat > "$SCRATCH/src/garbage.sfn" <<'EOF'
+@@@ !!!
+EOF
+
 cd "$SCRATCH"
 
 # ---- Test 1: clean file emits empty events + clean summary ----
@@ -387,6 +394,54 @@ test_b3_suggestion_anchored_at_brace() {
     return 0
 }
 run_test "B3: suggestion edit anchored at the function body's '{'" test_b3_suggestion_anchored_at_brace
+
+# ---- Test 15 (#974): parse error surfaces as an E0500 parse event ----
+test_parse_error_event() {
+    local out
+    out="$("$BINARY" check --json src/garbage.sfn 2>/dev/null || true)"
+    if [ -z "$out" ]; then
+        echo "[test]   no JSON output produced"
+        return 1
+    fi
+    local exit_code; exit_code=$(jq -r '.exit_code' <<<"$out")
+    if [ "$exit_code" != "1" ]; then
+        echo "[test]   expected exit_code 1 on parse error, got: $exit_code"
+        return 1
+    fi
+    local errors; errors=$(jq -r '.summary.errors' <<<"$out")
+    if [ "$errors" -lt 1 ]; then
+        echo "[test]   expected summary.errors >= 1, got: $errors"
+        return 1
+    fi
+    # Exactly the E0500 parse event: code, producer, severity, kind, primary.
+    local n; n=$(jq -r '[.events[] | select(.code == "E0500")] | length' <<<"$out")
+    if [ "$n" -lt 1 ]; then
+        echo "[test]   expected at least one E0500 event"
+        return 1
+    fi
+    local producer; producer=$(jq -r '[.events[] | select(.code == "E0500")][0].producer' <<<"$out")
+    if [ "$producer" != "parse" ]; then
+        echo "[test]   expected producer=parse, got: $producer"
+        return 1
+    fi
+    local severity; severity=$(jq -r '[.events[] | select(.code == "E0500")][0].severity' <<<"$out")
+    if [ "$severity" != "error" ]; then
+        echo "[test]   expected severity=error, got: $severity"
+        return 1
+    fi
+    local kind; kind=$(jq -r '[.events[] | select(.code == "E0500")][0].kind' <<<"$out")
+    if [ "$kind" != "diagnostic" ]; then
+        echo "[test]   expected kind=diagnostic, got: $kind"
+        return 1
+    fi
+    local primary; primary=$(jq -r '[.events[] | select(.code == "E0500")][0].primary' <<<"$out")
+    if [ "$primary" = "null" ]; then
+        echo "[test]   expected non-null primary token on E0500"
+        return 1
+    fi
+    return 0
+}
+run_test "parse error surfaces as E0500 parse event" test_parse_error_event
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -ne 0 ]; then

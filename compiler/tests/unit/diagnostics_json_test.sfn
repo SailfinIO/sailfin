@@ -77,12 +77,18 @@ test "classify_producer: W0002 maps to load" {
     assert classify_producer("W0002") == "load";
 }
 
+test "classify_producer: E0500 maps to parse" {
+    // Parse diagnostics (#974) ride the `E05xx` range; `sfn check`
+    // mints `E0500` for unrecognized top-level syntax.
+    assert classify_producer("E0500") == "parse";
+}
+
 test "classify_producer: unknown codes fall through to unknown" {
     // Regression-guard the "fall through" branch — a future code
-    // range outside E00xx/E03xx/E04xx/W01xx must surface as
+    // range outside E00xx/E03xx/E04xx/E05xx/W01xx must surface as
     // `unknown` so a producer mismatch is visible.
     assert classify_producer("X9999") == "unknown";
-    assert classify_producer("E0500") == "unknown";
+    assert classify_producer("E0600") == "unknown";
 }
 
 // -------------------------------------------------------------------

@@ -46,6 +46,18 @@ feature availability.
   conformance (E0301) is now live for end users without any textual
   import inlining — covered by
   `compiler/tests/e2e/test_check_cross_module_conformance.sh`.
+- **`sfn check` surfaces parse errors** (#974): unrecognized top-level
+  syntax (which the parser lowers to an `Statement.Unknown`) is now
+  reported as an `E0500` diagnostic with `producer: "parse"` instead of
+  being silently treated as a clean file. `check_source_with_imports`
+  walks the parsed top-level statements and mints one `E0500` per
+  unknown node, anchored at its first token; `classify_producer` maps
+  the `E05xx` range to `"parse"`. Limitation: malformed-but-dispatched
+  declarations (e.g. `fn broken( {`, which recovers into a
+  `FunctionDeclaration`) are not yet flagged — that needs parser-level
+  error recovery. Covered by the `E0500` case in
+  `compiler/tests/e2e/test_check_json_schema.sh` and the `sfn/test`
+  `assert_compiles`/`assert_does_not_compile` helpers.
 - **Diagnostic infrastructure Phase 1** (A3): the `Diagnostic` struct
   now carries `severity` ("error" | "warning" | "hint" | "info") and
   `file_path`; the renderer reads both from the struct rather than

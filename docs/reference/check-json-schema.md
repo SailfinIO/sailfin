@@ -80,8 +80,8 @@ distinguishes program-analysis findings from infrastructure warnings.
 
 | Field | Type | Notes |
 |---|---|---|
-| `kind` | string | `"diagnostic"` for typecheck / effect / capability findings. `"load_warning"` for W01xx import-context loader output. |
-| `code` | string | The diagnostic code. `Exxxx` errors, `Wxxxx` warnings. Locked code ranges (today): `E00xx` (typecheck), `E03xx` (interface), `E04xx` (effect), `W01xx` (load). |
+| `kind` | string | `"diagnostic"` for parse / typecheck / effect / capability findings. `"load_warning"` for W01xx import-context loader output. |
+| `code` | string | The diagnostic code. `Exxxx` errors, `Wxxxx` warnings. Locked code ranges (today): `E00xx` (typecheck), `E03xx` (interface), `E04xx` (effect), `E05xx` (parse), `W01xx` (load). |
 | `severity` | string | One of `"error"`, `"warning"`, `"hint"`, `"info"`. The compiler emits `"error"` and `"warning"` today; `"hint"` and `"info"` are reserved for `sfn vet`. |
 | `producer` | string | Which analysis pass minted the event. One of `"typecheck"`, `"effect"`, `"parse"`, `"load"`, `"unknown"`. The classifier maps code ranges to producers; new codes that fall outside the known ranges report `"unknown"` so a future code addition shows up rather than silently claiming the wrong producer. |
 | `file_path` | string | Path of the analyzed module. Empty string for diagnostics that genuinely have no source anchor (none today; reserved). |
@@ -131,8 +131,25 @@ land in:
 | `E00xx` | `typecheck` |
 | `E03xx` | `typecheck` |
 | `E04xx` | `effect` |
+| `E05xx` | `parse` |
 | `W01xx` | `load` |
 | (anything else) | `unknown` |
+
+### Parse diagnostics (`E05xx`)
+
+`sfn check` reports unrecognized **top-level** syntax as an `E0500` parse
+diagnostic (`producer: "parse"`, `severity: "error"`), anchored at the first
+token of the offending construct. The parser recovers from such input by
+lowering it to an internal "unknown statement", so a file like `@@@ !!!` or a
+stray `}` now yields one `E0500` event and `exit_code: 1` instead of being
+reported as clean.
+
+**Known limitation.** Only constructs the parser cannot dispatch at all become
+unknown statements. Malformed-but-recognized declarations — e.g. a function
+with a broken parameter list (`fn broken( {`) — parse into a recovered
+declaration node and are **not yet** flagged. Catching those requires
+parser-level error recovery (a threaded diagnostics channel), tracked
+separately; `E05xx` is reserved for the full range as that lands.
 
 ## Examples
 

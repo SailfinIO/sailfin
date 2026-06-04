@@ -241,6 +241,7 @@ fn render_check_json_envelope(events: CheckJsonEvent[], summary: CheckJsonSummar
 // allocation locked in `docs/proposals/check-architecture.md`:
 //   E00xx, E03xx -> typecheck
 //   E04xx        -> effect
+//   E05xx        -> parse
 //   W00xx        -> load
 // Anything else falls back to "unknown" so a future code range
 // shows up as an obvious-to-track default rather than silently
@@ -253,6 +254,7 @@ fn render_check_json_envelope(events: CheckJsonEvent[], summary: CheckJsonSummar
 fn classify_producer(code: string) -> string {
     if _starts_with(code, "E04") { return "effect"; }
     if _starts_with(code, "W00") { return "load"; }
+    if _starts_with(code, "E05") { return "parse"; }
     if _starts_with(code, "E00") { return "typecheck"; }
     if _starts_with(code, "E03") { return "typecheck"; }
     return "unknown";
