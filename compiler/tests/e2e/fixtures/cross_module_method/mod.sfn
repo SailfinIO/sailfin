@@ -1,0 +1,24 @@
+// Fixture for cross-module struct-method dispatch (#960).
+// A consumer importing `make_counter` and calling methods on the returned
+// value must dispatch to THIS module's `Counter` methods, not a body-less
+// local stub. Covers a value-returning method (`value`) and a
+// struct-returning method (`snapshot`).
+struct Snapshot {
+    captured: int;
+}
+
+struct Counter {
+    count: int;
+
+    fn value(self: Counter) -> int ![pure] { return self.count; }
+
+    fn snapshot(self: Counter) -> Snapshot ![pure] {
+        return Snapshot { captured: self.count };
+    }
+}
+
+fn make_counter(start: int) -> Counter {
+    return Counter { count: start };
+}
+
+export { make_counter, Counter, Snapshot };
