@@ -154,14 +154,13 @@ test_pthread_isolation_roundtrip() {
     # TLS, sibling increments leak in and the return value exceeds
     # N on at least one thread.
     #
-    # We drive the fixture (not `runtime/sfn/exception.sfn`) because
-    # the runtime module's `let mut sfn_exception_frame_head_addr`
-    # cannot flip to `thread_local` in this PR — the pinned seed
-    # 0.7.0-alpha.8 compiles every entry in
-    # `runtime/native/capsule.toml`'s `sfn-sources` and predates the
-    # keyword. The runtime flip lands in a follow-up PR after the
-    # next seed pin (the audit-able one-liner the issue's #3
-    # criterion calls for).
+    # This fixture-driven roundtrip is the smaller-surface unit-level
+    # pin: it exercises the `thread_local` lowering in isolation
+    # without dragging in exception.sfn's struct-init constructor or
+    # type_meta linkage. The exception.sfn-driven companion below
+    # (test_exception_tls_isolation_roundtrip, #827) proves the same
+    # isolation against the real runtime chain head now that the flip
+    # has landed; this one stays as the lighter regression gate.
     #
     # Skipped when `clang` or pthread linkage is unavailable —
     # mirrors the cross-frame roundtrip skip in
@@ -294,6 +293,181 @@ CHARNESS
     return 0
 }
 
+test_exception_tls_isolation_roundtrip() {
+    # End-to-end TLS-isolation check against the *real* runtime chain
+    # head (#827). Mirrors test_pthread_isolation_roundtrip but drives
+    # `runtime/sfn/exception.sfn`'s `sfn_exception_push_frame` /
+    # `sfn_exception_frame_head` instead of the fixture, proving the
+    # `thread_local let mut sfn_exception_frame_head_addr` flip gives
+    # each thread its own chain head.
+    #
+    # Two pthreads each alloc a frame, push it onto the chain, then —
+    # after an atomic barrier guarantees BOTH have pushed — read the
+    # head back. Under TLS each thread's head is its own frame and the
+    # main thread (which never pushed) still sees NULL. Without TLS the
+    # global is shared: both workers (and main) observe whichever frame
+    # was pushed last, so at least one observed_head != my_frame.
+    #
+    # Skipped when clang or pthread linkage is unavailable — mirrors
+    # the cross-frame roundtrip skip in test_runtime_exception_frames.sh;
+    # the IR-shape assertion in that file still pins the contract.
+    local clang_bin
+    clang_bin="${CLANG:-clang}"
+    if ! command -v "$clang_bin" >/dev/null 2>&1; then
+        echo "[test]   clang not available — skipping exception TLS roundtrip"
+        return 0
+    fi
+
+    local repo_root
+    repo_root="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+    local module="$repo_root/runtime/sfn/exception.sfn"
+    local ll="$SCRATCH/exception_tls.ll"
+    if ! "$BINARY" emit -o "$ll" llvm "$module" > /dev/null 2>&1; then
+        echo "[test]   sfn emit llvm failed for exception.sfn"
+        return 1
+    fi
+
+    # exception.sfn defines the `SfnExceptionFrame` struct, so M2.10
+    # (#402) emits an `@__sfn_module_type_init__*` constructor that
+    # calls `@sfn_type_register`. Stage a type_meta object so the
+    # standalone link resolves it (mirrors the cross-frame roundtrip
+    # in test_runtime_exception_frames.sh). Skip if it can't be built.
+    local type_meta_ll="$SCRATCH/type_meta.ll"
+    local type_meta_o="$SCRATCH/type_meta.o"
+    if ! { "$BINARY" emit -o "$type_meta_ll" llvm "$repo_root/runtime/sfn/type_meta.sfn" >/dev/null 2>&1 \
+            && "$clang_bin" -Wno-override-module -c "$type_meta_ll" -o "$type_meta_o" 2>/dev/null; }; then
+        echo "[test]   could not emit type_meta object — skipping exception TLS roundtrip"
+        return 0
+    fi
+
+    local harness="$SCRATCH/exception_tls_harness.c"
+    cat > "$harness" <<'CHARNESS'
+/* TLS-isolation harness for runtime/sfn/exception.sfn's per-thread
+ * chain head (#827). Each pthread pushes its own frame and, after an
+ * atomic barrier, verifies sfn_exception_frame_head() returns that
+ * frame. Under thread_local storage each thread is isolated and the
+ * never-pushing main thread still sees NULL. */
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <sched.h>
+#include <stdatomic.h>
+
+struct SfnExceptionFrame {
+    int64_t prev_addr;
+    int64_t jmp_buf_addr;
+    int64_t message_addr;
+};
+
+extern struct SfnExceptionFrame *sfn_exception_alloc_frame(void);
+extern void sfn_exception_free_frame(struct SfnExceptionFrame *frame);
+extern struct SfnExceptionFrame *sfn_exception_frame_head(void);
+extern void sfn_exception_push_frame(struct SfnExceptionFrame *frame);
+
+/* Sailfin's heap-return marker — no-op stub so the standalone link
+ * doesn't pull in the C runtime (matches the cross-frame harness). */
+void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }
+
+static atomic_int pushed_count = 0;
+
+struct WorkerArgs {
+    int id;
+    struct SfnExceptionFrame *my_frame;
+    struct SfnExceptionFrame *observed_head;
+};
+
+static void *worker(void *raw) {
+    struct WorkerArgs *args = (struct WorkerArgs *)raw;
+    struct SfnExceptionFrame *f = sfn_exception_alloc_frame();
+    if (!f) {
+        args->my_frame = NULL;
+        args->observed_head = (struct SfnExceptionFrame *)-1;
+        atomic_fetch_add(&pushed_count, 1);
+        return NULL;
+    }
+    args->my_frame = f;
+    sfn_exception_push_frame(f);
+    /* Barrier: spin until both workers have pushed, so a shared
+     * (non-TLS) head is guaranteed to hold the *last* push by the
+     * time anyone reads — making the bleed deterministically
+     * detectable rather than timing-dependent. */
+    atomic_fetch_add(&pushed_count, 1);
+    while (atomic_load(&pushed_count) < 2) {
+        sched_yield();
+    }
+    args->observed_head = sfn_exception_frame_head();
+    return NULL;
+}
+
+int main(void) {
+    pthread_t t1, t2;
+    struct WorkerArgs a1 = { .id = 1, .my_frame = NULL, .observed_head = NULL };
+    struct WorkerArgs a2 = { .id = 2, .my_frame = NULL, .observed_head = NULL };
+
+    if (pthread_create(&t1, NULL, worker, &a1) != 0) {
+        fprintf(stderr, "pthread_create #1 failed\n");
+        return 1;
+    }
+    if (pthread_create(&t2, NULL, worker, &a2) != 0) {
+        fprintf(stderr, "pthread_create #2 failed\n");
+        return 2;
+    }
+    pthread_join(t1, NULL);
+    pthread_join(t2, NULL);
+
+    if (a1.my_frame == NULL || a2.my_frame == NULL) {
+        fprintf(stderr, "alloc_frame returned NULL in a worker\n");
+        return 3;
+    }
+    if (a1.observed_head != a1.my_frame) {
+        fprintf(stderr,
+                "TLS bleed: worker 1 expected head=%p, got %p\n",
+                (void *)a1.my_frame, (void *)a1.observed_head);
+        return 4;
+    }
+    if (a2.observed_head != a2.my_frame) {
+        fprintf(stderr,
+                "TLS bleed: worker 2 expected head=%p, got %p\n",
+                (void *)a2.my_frame, (void *)a2.observed_head);
+        return 5;
+    }
+    /* The main thread never pushed — under TLS its head is still
+     * NULL; a shared global would show a worker's frame here. */
+    if (sfn_exception_frame_head() != NULL) {
+        fprintf(stderr,
+                "TLS bleed: main thread head=%p, expected NULL\n",
+                (void *)sfn_exception_frame_head());
+        return 6;
+    }
+
+    sfn_exception_free_frame(a1.my_frame);
+    sfn_exception_free_frame(a2.my_frame);
+    return 0;
+}
+CHARNESS
+
+    local bin="$SCRATCH/exception_tls_roundtrip"
+    if ! "$clang_bin" -Wno-override-module "$harness" "$ll" "$type_meta_o" \
+            -o "$bin" -lm -lpthread 2>"$SCRATCH/exc_clang.log"; then
+        if grep -q "cannot find -lpthread" "$SCRATCH/exc_clang.log"; then
+            echo "[test]   -lpthread unavailable — skipping exception TLS roundtrip"
+            return 0
+        fi
+        echo "[test]   clang failed to link exception TLS roundtrip:"
+        cat "$SCRATCH/exc_clang.log"
+        return 1
+    fi
+
+    if ! "$bin" > "$SCRATCH/exc_run.log" 2>&1; then
+        local rc=$?
+        echo "[test]   exception TLS roundtrip exited non-zero (rc=$rc):"
+        cat "$SCRATCH/exc_run.log"
+        return 1
+    fi
+    return 0
+}
+
 run_test "thread_local let mut lowers to 'internal thread_local global'" \
     test_lowering_emits_thread_local_qualifier
 run_test "thread_local globals share the @global.<name> symbol at use sites" \
@@ -304,6 +478,8 @@ run_test "thread_local let mut is accepted by typecheck" \
     test_mutable_thread_local_accepted
 run_test "two pthreads bumping a thread_local i64 head do not interfere" \
     test_pthread_isolation_roundtrip
+run_test "two pthreads pushing exception.sfn frames see isolated chain heads" \
+    test_exception_tls_isolation_roundtrip
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
