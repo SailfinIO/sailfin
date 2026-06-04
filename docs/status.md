@@ -47,7 +47,7 @@ feature availability.
   import inlining — covered by
   `compiler/tests/e2e/test_check_cross_module_conformance.sh`.
 - **`sfn check` surfaces parse errors** (#974): unrecognized top-level
-  syntax (which the parser lowers to an `Statement.Unknown`) is now
+  syntax (which the parser lowers to a `Statement.Unknown`) is now
   reported as an `E0500` diagnostic with `producer: "parse"` instead of
   being silently treated as a clean file. `check_source_with_imports`
   walks the parsed top-level statements and mints one `E0500` per

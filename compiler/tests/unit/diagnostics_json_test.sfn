@@ -85,7 +85,7 @@ test "classify_producer: E0500 maps to parse" {
 
 test "classify_producer: unknown codes fall through to unknown" {
     // Regression-guard the "fall through" branch — a future code
-    // range outside E00xx/E03xx/E04xx/E05xx/W01xx must surface as
+    // range outside E00xx/E03xx/E04xx/E05xx/W00xx must surface as
     // `unknown` so a producer mismatch is visible.
     assert classify_producer("X9999") == "unknown";
     assert classify_producer("E0600") == "unknown";

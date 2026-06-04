@@ -34,7 +34,6 @@ import {
     get_number,
     get_object,
     get_string,
-    has_key,
     parse
 } from "sfn/json";
 import { find } from "sfn/strings";
@@ -117,10 +116,12 @@ fn _build_program(source: string, effects: string[]) -> string {
 // ---------------------------------------------------------------------------
 // `sfn check --json` writes exactly one `sailfin-check/1` object to
 // stdout. Skip any leading whitespace/newline by anchoring on the first
-// `{` before parsing; a missing `{`, a parse miss, or an envelope without
-// the `schema_version` marker all collapse to a non-`ran` outcome so the
-// assertion fails loudly rather than silently treating "no envelope" as
-// "compiled".
+// `{` before parsing; a missing `{`, a parse miss, or an envelope whose
+// `schema_version` is absent or not the expected `sailfin-check/1` all
+// collapse to a non-`ran` outcome so the assertion fails loudly rather
+// than silently treating "no/unknown envelope" as "compiled". The schema
+// contract (`docs/reference/check-json-schema.md`) requires consumers to
+// hard-fail on an unknown version rather than misinterpret its fields.
 fn _parse_outcome(stdout: string, stderr: string) -> _CheckOutcome {
     let brace = find(stdout, "{", 0);
     if brace < 0 {
@@ -128,8 +129,14 @@ fn _parse_outcome(stdout: string, stderr: string) -> _CheckOutcome {
             + stderr);
     }
     let envelope = parse(substring(stdout, brace, stdout.length));
-    if !has_key(envelope, "schema_version") {
-        return _outcome_failed("sfn check output was not a sailfin-check envelope: "
+    // `get_string` returns "" for an absent key, so this single check
+    // rejects both a missing `schema_version` and an unexpected version.
+    let schema = get_string(envelope, "schema_version");
+    if schema != "sailfin-check/1" {
+        return _outcome_failed("sfn check envelope has unexpected schema_version (want "
+            + "sailfin-check/1, got \""
+            + schema
+            + "\"): "
             + stdout);
     }
     let summary = get_object(envelope, "summary");
@@ -237,11 +244,19 @@ fn assert_compiles(source: string, expect: CompileExpect) -> MatchResult ![io] {
 }
 
 // `assert_does_not_compile(source, pattern)` passes iff `sfn check`
-// produces at least one diagnostic whose message contains `pattern`
-// (substring via `sfn/strings::find`).
+// reports at least one error AND a diagnostic message contains `pattern`
+// (substring via `sfn/strings::find`). The `errors >= 1` guard keeps the
+// function honest to its name: a snippet that compiles cleanly does not
+// "not compile" just because a non-error diagnostic (e.g. a future
+// warning) happens to contain the pattern.
 fn assert_does_not_compile(source: string, pattern: string) -> MatchResult ![io] {
     let outcome = _run_compile_check(source, []);
     if !outcome.ran { return match_fail(outcome.raw); }
+    if outcome.errors < 1 {
+        return match_fail("expected source NOT to compile, but sfn check reported "
+            + "0 errors; messages: "
+            + _join_messages(outcome.messages));
+    }
     if _messages_contain(outcome.messages, pattern) { return match_ok(); }
     return match_fail("expected a diagnostic matching \"" + pattern
         + "\"; sfn check reported "
