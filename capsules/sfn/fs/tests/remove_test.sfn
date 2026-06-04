@@ -1,0 +1,133 @@
+// Tests for sfn/fs recursive directory removal (#976).
+//
+// `remove_all` is `rm -rf` composed in pure Sailfin from the existing
+// `deleteFile` / `listDirectory` / `removeDirectory` primitives;
+// `remove_dir` is the single empty-directory `rmdir` surface it builds
+// on. Each test mints a per-run scratch tree under `mkdtemp` so the
+// suite stays hermetic — no fixed paths, no cross-run races.
+//
+// Every test asserts `scratch.length > 0` immediately after `mkdtemp`:
+// the wrapper returns an empty string on failure, and an empty
+// `scratch` would turn `scratch + "/x"` into the absolute path `"/x"`,
+// which must never be created or removed by a test.
+import {
+    mkdtemp,
+    mkdir,
+    write,
+    exists,
+    symlink,
+    remove_dir,
+    remove_all
+} from "../src/mod";
+
+// ── remove_dir (single empty directory) ────────────────────────────
+test "fs: remove_dir removes an empty directory" ![io] {
+    let scratch = mkdtemp("sfn-fs-rmdir-");
+    assert scratch.length > 0;
+    let dir = scratch + "/empty";
+    mkdir(dir);
+    assert exists(dir);
+
+    assert remove_dir(dir);
+    assert exists(dir) == false;
+
+    remove_all(scratch);
+}
+
+test "fs: remove_dir returns false on a non-empty directory" ![io] {
+    let scratch = mkdtemp("sfn-fs-rmdir-nonempty-");
+    assert scratch.length > 0;
+    write(scratch + "/keep.txt", "occupant");
+
+    // rmdir(2) refuses a non-empty directory (ENOTEMPTY).
+    assert remove_dir(scratch) == false;
+    assert exists(scratch);
+
+    remove_all(scratch);
+}
+
+// ── remove_all (rm -rf) ────────────────────────────────────────────
+test "fs: remove_all clears an empty directory" ![io] {
+    let scratch = mkdtemp("sfn-fs-rmall-empty-");
+    assert scratch.length > 0;
+    assert exists(scratch);
+
+    assert remove_all(scratch);
+    assert exists(scratch) == false;
+}
+
+test "fs: remove_all clears a directory containing files" ![io] {
+    let scratch = mkdtemp("sfn-fs-rmall-files-");
+    assert scratch.length > 0;
+    write(scratch + "/a.txt", "one");
+    write(scratch + "/b.txt", "two");
+    assert exists(scratch + "/a.txt");
+
+    assert remove_all(scratch);
+    assert exists(scratch) == false;
+}
+
+test "fs: remove_all clears a nested directory tree" ![io] {
+    let scratch = mkdtemp("sfn-fs-rmall-nested-");
+    assert scratch.length > 0;
+    // scratch/
+    //   top.txt
+    //   a/
+    //     a.txt
+    //     b/
+    //       deep.txt
+    mkdir(scratch + "/a/b");
+    write(scratch + "/top.txt", "root");
+    write(scratch + "/a/a.txt", "mid");
+    write(scratch + "/a/b/deep.txt", "leaf");
+    assert exists(scratch + "/a/b/deep.txt");
+
+    assert remove_all(scratch);
+    assert exists(scratch) == false;
+}
+
+test "fs: remove_all clears a tree containing a dangling symlink" ![io] {
+    // Regression: `fs.exists` is stat(2)-based and follows symlinks,
+    // so a dangling link reads as "missing". `remove_all` must unlink
+    // the link itself (deleteFile-first ordering) rather than skipping
+    // it — otherwise the link survives and the parent `rmdir` fails
+    // with ENOTEMPTY, leaving the whole tree behind.
+    let scratch = mkdtemp("sfn-fs-rmall-dangling-");
+    assert scratch.length > 0;
+    let link = scratch + "/dangling";
+    let never_created = scratch + "/never-created";
+
+    assert symlink(never_created, link);
+    // The link exists on disk even though its target does not; through
+    // `fs.exists` (which follows it) the link reads as non-existent.
+    assert exists(link) == false;
+
+    assert remove_all(scratch);
+    assert exists(scratch) == false;
+}
+
+test "fs: remove_all on a missing path is a no-op success" ![io] {
+    let scratch = mkdtemp("sfn-fs-rmall-missing-");
+    assert scratch.length > 0;
+    // Tear it down once...
+    assert remove_all(scratch);
+    assert exists(scratch) == false;
+    // ...then again: a second teardown of an already-gone path must
+    // report success, not failure (idempotent fixture cleanup).
+    assert remove_all(scratch);
+}
+
+test "fs: remove_all on a single regular file removes the file" ![io] {
+    let scratch = mkdtemp("sfn-fs-rmall-file-");
+    assert scratch.length > 0;
+    let file = scratch + "/lonely.txt";
+    write(file, "byte");
+    assert exists(file);
+
+    // Pointed at a file rather than a directory, remove_all still
+    // unlinks it (the deleteFile-first path).
+    assert remove_all(file);
+    assert exists(file) == false;
+
+    remove_all(scratch);
+}

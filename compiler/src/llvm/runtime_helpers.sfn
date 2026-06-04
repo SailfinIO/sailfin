@@ -726,6 +726,12 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs.createDirectory", symbol: "sfn_fs_mkdir", return_type: "i1", parameter_types: ["i8*", "i1"], effects: ["io"], native_signature: "sfn_fs_mkdir", c_abi_return_type: null
     });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs_remove_directory", symbol: "sfn_fs_rmdir", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_rmdir", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "fs.removeDirectory", symbol: "sfn_fs_rmdir", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_rmdir", c_abi_return_type: null
+    });
 
     // P5 (#366): filesystem stdlib gap-fill. Permission ops, temp-dir
     // creation, exec-bit probing, and symlinks — the five POSIX

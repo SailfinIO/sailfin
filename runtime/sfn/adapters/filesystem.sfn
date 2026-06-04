@@ -164,6 +164,8 @@ extern fn unlink(path: * u8) -> i32;
 
 extern fn mkdir(path: * u8, mode: i32) -> i32;
 
+extern fn rmdir(path: * u8) -> i32;
+
 // M3.1c (#926): legacy C adapters the seven extended-fs flips
 // trampoline through. Each carries the production POSIX behaviour
 // *and* a `#if defined(_WIN32)` stub in `runtime/native/src/
@@ -326,6 +328,19 @@ fn sfn_fs_append_file(path: * u8, contents: * u8) -> void ![io] {
 fn sfn_fs_delete(path: * u8) -> bool ![io] {
     if path as i64 == 0 { return false; }
     return unlink(path) == 0;
+}
+
+// `sfn_fs_rmdir(path)` — remove the *empty* directory named by
+// `path`. Pure Sailfin: `rmdir(2)` returns 0 on success, -1 on error
+// (non-empty directory `ENOTEMPTY`, a non-directory `ENOTDIR`, or a
+// missing path `ENOENT` all surface as `false`). The recursive
+// `rm -rf` composition lives one layer up in the `sfn/fs` capsule
+// (`capsules/sfn/fs/src/mod.sfn`), which clears a directory's
+// children before calling this — mirroring the `sfn_fs_delete` /
+// `unlink` shape exactly (`unlink` for files, `rmdir` for dirs).
+fn sfn_fs_rmdir(path: * u8) -> bool ![io] {
+    if path as i64 == 0 { return false; }
+    return rmdir(path) == 0;
 }
 
 // `sfn_fs_exists(path)` — true iff `path` resolves on disk (files
