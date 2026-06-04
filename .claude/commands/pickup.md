@@ -66,9 +66,23 @@ fi
 ```
 
 Parse the issue body for the `## Required in pinned seed` section.
-Extract every `#N` reference. For each:
+Extract every `#N` reference. A reference MAY carry an optional inline
+expectation of the form `#N (expect: <symbol> in <path>)` — e.g.
+`#511 (expect: emit_runtime_call in compiler/src/llvm/expression_lowering/native/runtime_call.sfn)`.
+Parse `<symbol>` and `<path>` when present; treat any form you can't
+parse as a bare `#N` (back-compat — plain `#N` references stay valid).
+The expectation is consumed only here, by the content-based fallback
+below; `/groom` need not emit it.
+
+For each predecessor:
 
 ```bash
+# Per-predecessor expectation parsed from the section above; both empty
+# when the reference is a bare `#N`. Consumed only by the content-based
+# fallback (Probe 1) when SHA ancestry fails.
+EXPECT_SYMBOL=""   # e.g. emit_runtime_call
+EXPECT_PATH=""     # e.g. compiler/src/llvm/.../runtime_call.sfn
+
 # Detect PR vs issue up front. `gh pr view <issue-number>` errors,
 # while `gh issue view <pr-number>` succeeds but returns null
 # closedByPullRequestsReferences. PR-first avoids both ambiguity
@@ -104,8 +118,61 @@ for PR in $PRS; do
   fi
 done
 
+# --- Content-based fallback -------------------------------------------
+# SHA ancestry is the fast happy path. It can yield a FALSE NEGATIVE
+# when `main` is rebased/linearised between a predecessor's merge and
+# the seed cut: the recorded merge SHA gets orphaned even though the
+# predecessor's code is present in the seed tree (motivating example:
+# #499 / PR #703 — see Context / Background). ONLY when SHA ancestry
+# fails for EVERY candidate merge commit do we fall back to comparing
+# the predecessor's content against the seed tree.
+FALLBACK_NOTE=""
+if [ "$ANCESTOR_FOUND" -eq 0 ]; then
+  # Probe 1 — symbol match (opt-in, tightest). Honored only when the
+  #   issue pinned `#N (expect: <symbol> in <path>)` for this predecessor.
+  if [ -n "$EXPECT_SYMBOL" ] && [ -n "$EXPECT_PATH" ]; then
+    if git show "$SEED_TAG:$EXPECT_PATH" 2>/dev/null | grep -q "$EXPECT_SYMBOL"; then
+      ANCESTOR_FOUND=1
+      FALLBACK_NOTE="content match: '$EXPECT_SYMBOL' present in $SEED_TAG:$EXPECT_PATH"
+    else
+      echo "Predecessor #$N: expected symbol '$EXPECT_SYMBOL' NOT found in $SEED_TAG:$EXPECT_PATH"
+    fi
+  fi
+
+  # Probe 2 — path match (cheap, default). Every non-removed file any
+  #   candidate PR touched must resolve at $SEED_TAG. Correct for the
+  #   common additive predecessor (e.g. #511 adding runtime_call.sfn).
+  if [ "$ANCESTOR_FOUND" -eq 0 ]; then
+    for PR in $PRS; do
+      FILES=$(gh api "repos/SailfinIO/sailfin/pulls/$PR/files" --paginate \
+               --jq '.[] | select(.status != "removed") | .filename' 2>/dev/null)
+      [ -z "$FILES" ] && continue
+      ALL_PRESENT=1
+      MISSING=""
+      while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        git cat-file -e "$SEED_TAG:$f" 2>/dev/null && continue
+        ALL_PRESENT=0
+        MISSING="$MISSING $f"
+      done <<< "$FILES"
+      if [ "$ALL_PRESENT" -eq 1 ]; then
+        ANCESTOR_FOUND=1
+        FALLBACK_NOTE="content match: all files from PR #$PR present at $SEED_TAG"
+        break
+      fi
+      echo "Predecessor #$N (PR #$PR): files missing at $SEED_TAG:$MISSING"
+    done
+  fi
+
+  if [ "$ANCESTOR_FOUND" -eq 1 ]; then
+    echo "Predecessor #$N: merge SHA not an ancestor of $SEED_TAG, but $FALLBACK_NOTE."
+    echo "Proceeding via content-based fallback — record this in the Phase 6 report."
+  fi
+fi
+
 if [ "$ANCESTOR_FOUND" -eq 0 ]; then
   echo "Predecessor #$N (last checked merge $LAST_MERGE) is NOT in the pinned seed $SEED_TAG."
+  echo "  (SHA ancestry failed AND the content-based fallback found missing files/symbols.)"
   echo "Cut a fresh seed before pickup:"
   echo "  gh workflow run release.yml --repo SailfinIO/sailfin --ref main \\"
   echo "    -f channel=alpha -f bump=prerelease"
@@ -113,6 +180,25 @@ if [ "$ANCESTOR_FOUND" -eq 0 ]; then
   exit 1
 fi
 ```
+
+**Why the content-based fallback exists.** The SHA-ancestor check is
+fast and correct on a stable history, but it produces a *false negative*
+when `main` is rebased or linearised between a predecessor's merge and
+the seed cut. The recorded merge SHA is then orphaned — not an ancestor
+of the seed tag — even though the predecessor's code is sitting in the
+seed tree. Motivating example (#499 / PR #703): predecessor #495
+(PR #511) merged 2026-05-08 and is present in seed `v0.6.0` (cut
+2026-05-19) — `compiler/src/llvm/expression_lowering/native/runtime_call.sfn`
+exists at `v0.6.0` with `emit_runtime_call` exported — yet
+`git merge-base --is-ancestor 00e10692 v0.6.0` reports false because the
+original merge SHA was orphaned. The strict SHA check stays the happy
+path; the content probes fire only after it fails for every candidate
+merge commit, so happy-path performance is unchanged. Probe 1
+(symbol) is the tightest and is opt-in via `#N (expect: <symbol> in
+<path>)`; Probe 2 (path) is the cheap default that covers additive
+predecessors. A predecessor whose content is *genuinely* absent
+(added file missing at `$SEED_TAG`, or expected symbol not found) still
+halts with the original diagnostic.
 
 **Legacy fallback** for issues groomed before the
 `## Required in pinned seed` section existed: if the issue does NOT
@@ -124,8 +210,16 @@ The legacy fallback only triggers when the section is **missing
 entirely**. Issues groomed under the new contract include the
 section even when it's empty (see `/groom` body skeleton), and an
 empty section means "no seed dependency" — pickup proceeds.
-If any blocker's merge commit is not an ancestor of the seed tag,
-halt with the same diagnostic.
+Apply the **same SHA-then-content check** to each `## Blocked by`
+blocker: try `git merge-base --is-ancestor` first, and only when that
+fails for every candidate merge commit, run the content-based fallback
+(Probes 1 & 2 above) before halting. The orphaned-SHA false negative
+applies identically to legacy issues, so a blocker whose code is in the
+seed tree must not block pickup just because its merge SHA was rebased
+away. Legacy `## Blocked by` references are bare `#N` (no `(expect: …)`
+expectation), so legacy blockers rely on the path-based Probe 2.
+If a blocker fails both the SHA check and the content fallback, halt
+with the same diagnostic.
 
 If the precheck fails, comment on the issue and stop — do NOT claim
 or branch:
@@ -273,6 +367,10 @@ Report to the user:
 - PR opened: <URL>
 - Branch: claude/<N>-<slug>
 - Verification results
+- Seed freshness: if any predecessor was accepted via the Phase 1.5
+  content-based fallback (merge SHA orphaned but content present in the
+  seed), note it explicitly with the probe used (`$FALLBACK_NOTE`) — a
+  human may want to investigate why the SHA fell out of seed ancestry.
 - Anything that surprised you during implementation (worth recording for future grooming)
 
 If anything was deferred or scope was adjusted mid-flight, surface it explicitly.
