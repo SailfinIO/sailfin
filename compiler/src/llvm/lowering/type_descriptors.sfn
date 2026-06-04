@@ -227,12 +227,23 @@ fn _already_seen(seen: string[], name: string) -> boolean {
 // linkage handles cross-module duplicates at link time but
 // llvm-as still rejects within-module duplicates. We dedupe by
 // type name before emission so the IR is always self-consistent.
-fn emit_type_descriptors(type_context: TypeContext, module_name: string) -> TypeDescriptorEmission {
+fn emit_type_descriptors(type_context: TypeContext, module_name: string, skip_names: string[]) -> TypeDescriptorEmission {
     if type_context == null { return _empty_emission(); }
 
     let mut preamble_lines: string[] = [];
     let mut ctor_calls: string[] = [];
     let mut seen_names: string[] = [];
+
+    // #1021: names to exclude from descriptor + `sfn_type_register` emission.
+    // The lowering core passes the prelude `Result`/`Error` names it injected
+    // into the type context for layout purposes; those are owned/registered by
+    // the prelude module, so emitting their descriptors here would add an
+    // undefined `sfn_type_register` reference to modules that define no other
+    // types (breaking standalone-link roundtrip tests). A name only lands here
+    // when the module did NOT define/import it itself, so a user's own
+    // `Result`/`Error` still registers normally.
+    let mut safe_skip = skip_names;
+    if safe_skip == null { safe_skip = []; }
 
     // Structs.
     let mut si: int = 0;
@@ -247,6 +258,7 @@ fn emit_type_descriptors(type_context: TypeContext, module_name: string) -> Type
             if nm == null { continue; }
             if nm.length == 0 { continue; }
             if _is_synthetic_name(nm) { continue; }
+            if _already_seen(safe_skip, nm) { continue; }
             if _already_seen(seen_names, nm) { continue; }
             seen_names.push(nm);
             let one = _emit_one_type(nm, _kind_struct());
@@ -273,6 +285,7 @@ fn emit_type_descriptors(type_context: TypeContext, module_name: string) -> Type
             if enm == null { continue; }
             if enm.length == 0 { continue; }
             if _is_synthetic_name(enm) { continue; }
+            if _already_seen(safe_skip, enm) { continue; }
             if _already_seen(seen_names, enm) { continue; }
             seen_names.push(enm);
             let one = _emit_one_type(enm, _kind_enum());

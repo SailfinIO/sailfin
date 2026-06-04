@@ -72,7 +72,11 @@ import {
     extend_native_enums,
     extend_native_interfaces,
     extend_native_structs,
+    inject_prelude_error_struct,
+    inject_prelude_result_enum,
     is_test_module_slug,
+    native_enums_have_name,
+    native_structs_have_name,
     sanitize_module_suffix,
     seed_default_runtime_helpers
 } from "./lowering_helpers";
@@ -661,8 +665,30 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     if debug_lowering { print.err("emit-llvm: phase=imports"); }
 
     // ── Phase 3: Combine types, build type context ──────────────────
-    let combined_structs = extend_native_structs(module_structs, imported_structs);
-    let combined_enums = extend_native_enums(module_enums, imported_enums);
+    let mut combined_structs = extend_native_structs(module_structs, imported_structs);
+    let mut combined_enums = extend_native_enums(module_enums, imported_enums);
+    // #1021: surface the prelude `Result<T, E>` / `Error` decls so bare user
+    // files (no in-file enum, no explicit import) lower `Result.Ok` / `.Err` +
+    // `match` to a real `%Result` layout + discriminant test instead of `i8*`.
+    // No-op when an in-file or imported decl already provides the name.
+    // Record whether each was absent BEFORE injection: a name we inject must
+    // have its type-descriptor registration suppressed (see below), but a name
+    // the module already defines/imports must still register normally.
+    let prelude_result_present = native_enums_have_name(combined_enums, "Result");
+    let prelude_error_present = native_structs_have_name(combined_structs, "Error");
+    combined_enums = inject_prelude_result_enum(combined_enums);
+    combined_structs = inject_prelude_error_struct(combined_structs);
+    // Names actually injected here. `emit_type_descriptors` skips registering
+    // them so modules that don't define `Result`/`Error` themselves don't gain
+    // an undefined `sfn_type_register` reference — the prelude module owns that
+    // registration. Without this, every module emitting zero other types went
+    // from "no descriptors" to a `@llvm.global_ctors` entry calling
+    // `sfn_type_register`, breaking standalone-link roundtrip tests (#1021 CI).
+    let mut injected_prelude_type_names: string[] = [];
+    if !prelude_result_present {
+        injected_prelude_type_names.push("Result");
+    }
+    if !prelude_error_present { injected_prelude_type_names.push("Error"); }
     let mut combined_interfaces = extend_native_interfaces(safe_interfaces, imported_interfaces);
     if is_test_module {
         combined_interfaces = [];
@@ -824,7 +850,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     // lines participate in the post-lowering helper scan and the
     // descriptor globals + name strings ride along in the preamble
     // section we hand to the renderer below.
-    let type_descriptor_emission = emit_type_descriptors(type_context, native_module.module_name);
+    let type_descriptor_emission = emit_type_descriptors(type_context, native_module.module_name, injected_prelude_type_names);
 
     // ── Assemble the body before rendering the preamble so the
     // helper-target scan covers every `call @<sym>(` emitted by the

@@ -94,3 +94,40 @@ test "enum_match: all priority labels" {
     assert _priority_label(Priority.High) == "P1";
     assert _priority_label(Priority.Critical) == "P0";
 }
+
+// ---------------------------------------------------------------------------
+// Monomorphic enum with an INLINE struct payload (#830 / #1021 regression).
+//
+// A non-generic enum stores a user-struct variant payload INLINE (by value),
+// so the `match` binding must load the struct by value. This is the
+// non-generic (`!substituted`) branch of the pointer-strip in
+// `instructions_match_condition.sfn`: the boxed-payload fix (#830) only diverts
+// the GENERIC, monomorphised path (where the payload is stored boxed as `%T*`)
+// to keep the pointer — the non-generic inline path here must keep stripping to
+// a by-value load. Without this test, a future change to that branch could
+// silently regress non-generic struct payloads with no coverage to catch it.
+struct Letter {
+    sender: string;
+    weight: int;
+}
+
+enum Mail {
+    Empty,
+    Parcel { item: Letter }
+}
+
+fn _parcel_weight(m: Mail, fallback: int) -> int {
+    match m {
+        Mail.Empty => { return fallback; },
+        Mail.Parcel { item } => {
+            return item.weight + item.sender.length;
+        }
+    }
+}
+
+test "enum_match: monomorphic inline struct payload binds by value" {
+    assert _parcel_weight(Mail.Empty, 7) == 7;
+    assert _parcel_weight(Mail.Parcel {
+        item: Letter { sender: "ann", weight: 12 }
+    }, 0) == 15;
+}
