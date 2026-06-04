@@ -2,6 +2,7 @@
 //
 // Let binding instruction lowering.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
+import { index_of } from "../../string_utils";
 import { analyze_value_ownership, detect_borrow_conflicts, lower_expression } from "../expression_lowering/native/core";
 import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
@@ -503,6 +504,31 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                     if callee.return_type.length > 0 {
                         local_type_annotation = callee.return_type;
                     }
+                }
+            }
+        }
+    }
+    // #830 (inferred scrutinee gap): an un-annotated `let tmp = make_ok();`
+    // carries no source annotation, so a later `match tmp` cannot recover the
+    // concrete `Result<int, Error>` instantiation needed to monomorphize
+    // generic enum payloads. When the initializer is a direct call, adopt the
+    // callee's declared return type as the local's annotation — the same
+    // instantiation a typed local would carry. Gated on an empty annotation so
+    // explicitly-typed lets are untouched; only the recorded annotation
+    // changes (llvm_type / alloca are unaffected).
+    if local_type_annotation.length == 0 {
+        let inferred_call_target = _extract_leading_call_target(instruction.value);
+        if inferred_call_target.length > 0 {
+            let inferred_callee = find_function_by_name_or_import(functions, inferred_call_target);
+            if inferred_callee != null {
+                // Generic instantiations only. The payload monomorphization
+                // gap this enables (#830) is generic-only; adopting a
+                // non-generic struct return type (e.g. `SymbolCollectionResult`)
+                // would mis-route later method-call resolution
+                // (`.diagnostics.concat`) and break the self-host build
+                // (test_work_dir_parity).
+                if index_of(inferred_callee.return_type, "<") >= 0 {
+                    local_type_annotation = inferred_callee.return_type;
                 }
             }
         }
