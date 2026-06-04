@@ -111,11 +111,12 @@ fn sfn_clock_monotonic_nanos() -> i64 ![clock] {
     let mut ts: Timespec = Timespec { tv_sec: 0, tv_nsec: 0 };
     let ts_ptr: * Timespec = & ts;
 
-    // Read the monotonic clock. `CLOCK_MONOTONIC`'s `clk_id` is a
-    // steadily-advancing clock unaffected by wall-clock adjustments — the
-    // correct source for elapsed-time measurement — but its numeric value
-    // diverges by platform: Linux x86_64 spells it `1`, macOS arm64
-    // (Darwin) spells it `6`. `sailfin_intrinsic_clock_monotonic_id()`
+    // Read the monotonic clock. `CLOCK_MONOTONIC` is a steadily-advancing
+    // clock unaffected by wall-clock adjustments — the correct source for
+    // elapsed-time measurement. Its `clk_id` — the numeric constant that
+    // selects it in `clock_gettime` — diverges by platform: Linux x86_64
+    // spells it `1`, macOS arm64 (Darwin) spells it `6`.
+    // `sailfin_intrinsic_clock_monotonic_id()`
     // (#908) folds to the right `i32` immediate per target at emit time,
     // chosen from the same `SAILFIN_TARGET_OS` / `uname -s` probe the
     // errno-locator sentinel (#887) uses. It emits no `call` and no
