@@ -1,0 +1,138 @@
+// Tests for multi-level subcommand parsing in sfn/cli (Issue #803,
+// Issue 1.14 of the CLI Modularization Epic, #351).
+//
+// `parse()` walks `with_subcommand(with_subcommand(...))` trees of
+// arbitrary depth. These tests cover two- and three-level descent, the
+// leaf positional case (`sfn config get <key>`), per-level flag scoping,
+// and the `unknown_subcommand` error at each level. They assert on the
+// non-exiting ParseResult so failures never trigger `process.exit()`.
+import {
+    arg,
+    command,
+    flag,
+    get,
+    has_flag,
+    parse,
+    subcommand,
+    subcommand_path,
+    with_arg,
+    with_flag,
+    with_subcommand
+} from "../src/mod";
+
+// ---- depth descent ----
+test "parse: no subcommand yields empty path" {
+    let root = with_arg(command("app", "App"), arg("file", "Source"));
+    let argv: string[] = ["app", "main.sfn"];
+    let r = parse(root, argv);
+    assert r.ok == true;
+    assert subcommand_path(r.matches).length == 0;
+    assert strings_equal(subcommand(r.matches), "");
+}
+
+test "parse: single level path has one element" {
+    let build = command("build", "Build");
+    let root = with_subcommand(command("app", "App"), build);
+    let argv: string[] = ["app", "build"];
+    let r = parse(root, argv);
+    assert r.ok == true;
+    let p = subcommand_path(r.matches);
+    assert p.length == 1;
+    assert strings_equal(p[0], "build");
+    assert strings_equal(subcommand(r.matches), "build");
+}
+
+test "parse: descends two subcommand levels" {
+    let leaf = command("b", "Leaf b");
+    let mid = with_subcommand(command("a", "Mid a"), leaf);
+    let root = with_subcommand(command("app", "Root"), mid);
+    let argv: string[] = ["app", "a", "b"];
+    let r = parse(root, argv);
+    assert r.ok == true;
+    assert strings_equal(subcommand(r.matches), "b");
+    let p = subcommand_path(r.matches);
+    assert p.length == 2;
+    assert strings_equal(p[0], "a");
+    assert strings_equal(p[1], "b");
+}
+
+test "parse: descends three subcommand levels" {
+    let c = command("c", "Leaf c");
+    let b = with_subcommand(command("b", "Mid b"), c);
+    let a = with_subcommand(command("a", "Mid a"), b);
+    let root = with_subcommand(command("app", "Root"), a);
+    let argv: string[] = ["app", "a", "b", "c"];
+    let r = parse(root, argv);
+    assert r.ok == true;
+    let p = subcommand_path(r.matches);
+    assert p.length == 3;
+    assert strings_equal(p[0], "a");
+    assert strings_equal(p[1], "b");
+    assert strings_equal(p[2], "c");
+    assert strings_equal(subcommand(r.matches), "c");
+}
+
+// ---- leaf positional (`sfn config get <key>`) ----
+test "parse: leaf positional after nested subcommands" {
+    let get_cmd = with_arg(command("get", "Get a key"), arg("key", "Config key"));
+    let config = with_subcommand(command("config", "Config"), get_cmd);
+    let root = with_subcommand(command("sfn", "Sailfin"), config);
+    let argv: string[] = ["sfn", "config", "get", "mykey"];
+    let r = parse(root, argv);
+    assert r.ok == true;
+    assert strings_equal(subcommand(r.matches), "get");
+    let p = subcommand_path(r.matches);
+    assert p.length == 2;
+    assert strings_equal(p[0], "config");
+    assert strings_equal(p[1], "get");
+    assert strings_equal(get(r.matches, "key"), "mykey");
+}
+
+// ---- per-level flag scoping ----
+test "parse: flags scoped per level both match" {
+    let get_cmd = with_flag(command("get", "Get"), flag("leaf", "Leaf flag"));
+    let config = with_flag(with_subcommand(command("config", "Config"), get_cmd), flag("root", "Root flag"));
+    let root = with_subcommand(command("app", "App"), config);
+    let argv: string[] = ["app", "config", "--root", "get", "--leaf"];
+    let r = parse(root, argv);
+    assert r.ok == true;
+    assert has_flag(r.matches, "root") == true;
+    assert has_flag(r.matches, "leaf") == true;
+    assert strings_equal(subcommand(r.matches), "get");
+}
+
+test "parse: parent flag not visible in child level" {
+    let get_cmd = with_flag(command("get", "Get"), flag("leaf", "Leaf flag"));
+    let config = with_flag(with_subcommand(command("config", "Config"), get_cmd), flag("root", "Root flag"));
+    let root = with_subcommand(command("app", "App"), config);
+    let argv: string[] = ["app", "config", "get", "--root"];
+    let r = parse(root, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "unknown_flag");
+}
+
+// ---- unknown subcommand at each level ----
+test "parse: unknown subcommand at first level" {
+    let config = command("config", "Config");
+    let root = with_subcommand(command("app", "App"), config);
+    let argv: string[] = ["app", "bogus"];
+    let r = parse(root, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "unknown_subcommand");
+}
+
+test "parse: unknown subcommand at second level reports path" {
+    let get_cmd = command("get", "Get");
+    let config = with_subcommand(command("config", "Config"), get_cmd);
+    let root = with_subcommand(command("app", "App"), config);
+    let argv: string[] = ["app", "config", "bogus"];
+    let r = parse(root, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "unknown_subcommand");
+    // The path descended so far is recorded so run() targets the right
+    // help level, and the usage hint reflects the full path.
+    let p = subcommand_path(r.matches);
+    assert p.length == 1;
+    assert strings_equal(p[0], "config");
+    assert strings_equal(r.error.message, "error: unknown subcommand 'bogus'\nrun 'app config --help' for usage");
+}
