@@ -1,0 +1,888 @@
+// compiler/src/emit_native_desugar_try.sfn
+//
+// Desugaring of the postfix `?` operator (Expression.TryOperator, epic #371
+// R.4) into a `match` + early `return Result.Err { error }` AST form, run as a
+// Block -> Block pre-pass before native emission. `?` is pure control flow: it
+// lowers through the existing enum-`match` + `ret` paths with no new IR opcode
+// and no exception-runtime involvement.
+//
+// The AST/native-IR have no match-EXPRESSION form (only Statement.MatchStatement,
+// no `let x = match`), so a `?` in a statement is rewritten continuation-style:
+// hoist its operand into a `match`, bind the unwrapped value, and carry the
+// REMAINDER of the enclosing block into the `Ok` arm; the `Err` arm performs the
+// early `return Result.Err { error }`.
+//
+//   let x = f()?;          match f() {
+//   rest...          =>        Result.Ok { value }: {
+//                                  let __try_0 = value;
+//                                  let x = __try_0;
+//                                  rest...
+//                              }
+//                              Result.Err { error }: { return Result.Err { error: error }; }
+//                          }
+//
+// The unwrapped value is aliased to a fresh `__try_N` per `?` so that multiple
+// `?` in one expression (`a()? + b()?`) don't collide: the match parser forces
+// the arm binding to the enum field name (`value`), so the rename must happen
+// via the alias, not the pattern. Chained / nested `?` fall out of the
+// recursion on the Ok-arm continuation block.
+import {
+    Block,
+    ElseBranch,
+    Expression,
+    ForClause,
+    MatchCase,
+    ObjectField,
+    Statement,
+    WithClause
+} from "./ast";
+import { number_to_string } from "./emit_native_state";
+
+// Result of replacing the leftmost TryOperator in an expression tree.
+struct TryReplace {
+    expression: Expression;
+    operand: Expression;
+    found: boolean;
+}
+
+struct TryListReplace {
+    items: Expression[];
+    operand: Expression;
+    found: boolean;
+}
+
+struct TryFieldReplace {
+    fields: ObjectField[];
+    operand: Expression;
+    found: boolean;
+}
+
+struct TryStmtReplace {
+    statement: Statement;
+    operand: Expression;
+    found: boolean;
+}
+
+struct TryClauseReplace {
+    clauses: WithClause[];
+    operand: Expression;
+    found: boolean;
+}
+
+// Counter-threaded results so fresh `__try_N` names stay unique across the
+// whole function body.
+struct DtBlock {
+    block: Block;
+    next_id: int;
+}
+
+struct DtStmt {
+    statement: Statement;
+    next_id: int;
+}
+
+struct DtElse {
+    else_branch: ElseBranch?;
+    next_id: int;
+}
+
+struct DtCases {
+    cases: MatchCase[];
+    next_id: int;
+}
+
+// ── Public entry point ───────────────────────────────────────────────
+// Rewrite a function/test body, turning every supported `?` into a match.
+// Fast path: a body with no `?` anywhere is returned untouched (no
+// allocation), so `?`-free modules — i.e. the entire compiler source — pay
+// only a read-only walk.
+fn desugar_try_in_block(block: Block) -> Block {
+    if !block_contains_try(block) { return block; }
+    let result = dt_block(block, 0);
+    return result.block;
+}
+
+// ── Detection ────────────────────────────────────────────────────────
+fn expression_contains_try(expression: Expression) -> boolean {
+    if expression.variant == "TryOperator" { return true; }
+    if expression.variant == "Unary" {
+        return expression_contains_try(expression.operand);
+    }
+    if expression.variant == "Binary" {
+        if expression_contains_try(expression.left) { return true; }
+        return expression_contains_try(expression.right);
+    }
+    if expression.variant == "Member" {
+        return expression_contains_try(expression.object);
+    }
+    if expression.variant == "Call" {
+        if expression_contains_try(expression.callee) { return true; }
+        return expr_list_contains_try(expression.arguments);
+    }
+    if expression.variant == "Index" {
+        if expression_contains_try(expression.sequence) { return true; }
+        return expression_contains_try(expression.index);
+    }
+    if expression.variant == "Array" {
+        return expr_list_contains_try(expression.elements);
+    }
+    if expression.variant == "Object" {
+        return field_list_contains_try(expression.fields);
+    }
+    if expression.variant == "Struct" {
+        return field_list_contains_try(expression.fields);
+    }
+    if expression.variant == "Range" {
+        if expression_contains_try(expression.start) { return true; }
+        return expression_contains_try(expression.end);
+    }
+    if expression.variant == "Cast" {
+        return expression_contains_try(expression.operand);
+    }
+    // Lambda is opaque: a `?` inside a lambda body belongs to the lambda's
+    // own function scope, not the enclosing one.
+    return false;
+}
+
+fn expr_list_contains_try(items: Expression[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= items.length { break; }
+        if expression_contains_try(items[index]) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn field_list_contains_try(fields: ObjectField[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= fields.length { break; }
+        if expression_contains_try(fields[index].value) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn block_contains_try(block: Block) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        if statement_contains_try_deep(block.statements[index]) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn statement_contains_try_deep(statement: Statement) -> boolean {
+    if statement.variant == "VariableDeclaration" {
+        let initializer = statement.initializer;
+        if initializer == null { return false; }
+        return expression_contains_try(initializer);
+    }
+    if statement.variant == "ReturnStatement" {
+        let expression = statement.expression;
+        if expression == null { return false; }
+        return expression_contains_try(expression);
+    }
+    if statement.variant == "ExpressionStatement" {
+        return expression_contains_try(statement.expression);
+    }
+    if statement.variant == "ThrowStatement" {
+        return expression_contains_try(statement.expression);
+    }
+    if statement.variant == "IfStatement" {
+        if expression_contains_try(statement.condition) { return true; }
+        if block_contains_try(statement.then_block) { return true; }
+        return else_contains_try(statement.else_branch);
+    }
+    if statement.variant == "ForStatement" {
+        if expression_contains_try(statement.clause.iterable) { return true; }
+        return block_contains_try(statement.body);
+    }
+    if statement.variant == "LoopStatement" {
+        return block_contains_try(statement.body);
+    }
+    if statement.variant == "WithStatement" {
+        if clauses_contain_try(statement.clauses) { return true; }
+        return block_contains_try(statement.body);
+    }
+    if statement.variant == "BlockStatement" {
+        return block_contains_try(statement.body);
+    }
+    if statement.variant == "MatchStatement" {
+        if expression_contains_try(statement.expression) { return true; }
+        return cases_contain_try(statement.cases);
+    }
+    return false;
+}
+
+fn else_contains_try(else_branch: ElseBranch?) -> boolean {
+    if else_branch == null { return false; }
+    let body = else_branch.body;
+    if body != null { return block_contains_try(body); }
+    let nested = else_branch.statement;
+    if nested == null { return false; }
+    return statement_contains_try_deep(nested);
+}
+
+fn cases_contain_try(cases: MatchCase[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= cases.length { break; }
+        if block_contains_try(cases[index].body) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn clauses_contain_try(clauses: WithClause[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= clauses.length { break; }
+        if expression_contains_try(clauses[index].expression) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+// ── Replacement (leftmost-first) ──────────────────────────────────────
+fn replace_first_try(expression: Expression, bind_name: string) -> TryReplace {
+    if expression.variant == "TryOperator" {
+        return TryReplace {
+            expression: Expression.Identifier { name: bind_name, span: null },
+            operand: expression.operand,
+            found: true
+        };
+    }
+    if expression.variant == "Unary" {
+        let inner = replace_first_try(expression.operand, bind_name);
+        if inner.found {
+            return TryReplace {
+                expression: Expression.Unary {
+                    operator: expression.operator,
+                    operand: inner.expression
+                },
+                operand: inner.operand,
+                found: true
+            };
+        }
+        return try_not_found(expression);
+    }
+    if expression.variant == "Binary" {
+        let left = replace_first_try(expression.left, bind_name);
+        if left.found {
+            return TryReplace {
+                expression: Expression.Binary {
+                    operator: expression.operator,
+                    left: left.expression,
+                    right: expression.right
+                },
+                operand: left.operand,
+                found: true
+            };
+        }
+        let right = replace_first_try(expression.right, bind_name);
+        if right.found {
+            return TryReplace {
+                expression: Expression.Binary {
+                    operator: expression.operator,
+                    left: expression.left,
+                    right: right.expression
+                },
+                operand: right.operand,
+                found: true
+            };
+        }
+        return try_not_found(expression);
+    }
+    if expression.variant == "Member" {
+        let inner = replace_first_try(expression.object, bind_name);
+        if inner.found {
+            return TryReplace {
+                expression: Expression.Member {
+                    object: inner.expression,
+                    member: expression.member,
+                    span: expression.span
+                },
+                operand: inner.operand,
+                found: true
+            };
+        }
+        return try_not_found(expression);
+    }
+    if expression.variant == "Call" {
+        let callee = replace_first_try(expression.callee, bind_name);
+        if callee.found {
+            return TryReplace {
+                expression: Expression.Call {
+                    callee: callee.expression,
+                    arguments: expression.arguments,
+                    span: expression.span
+                },
+                operand: callee.operand,
+                found: true
+            };
+        }
+        let args = replace_first_try_in_list(expression.arguments, bind_name);
+        if args.found {
+            return TryReplace {
+                expression: Expression.Call {
+                    callee: expression.callee,
+                    arguments: args.items,
+                    span: expression.span
+                },
+                operand: args.operand,
+                found: true
+            };
+        }
+        return try_not_found(expression);
+    }
+    if expression.variant == "Index" {
+        let seq = replace_first_try(expression.sequence, bind_name);
+        if seq.found {
+            return TryReplace {
+                expression: Expression.Index {
+                    sequence: seq.expression,
+                    index: expression.index
+                },
+                operand: seq.operand,
+                found: true
+            };
+        }
+        let idx = replace_first_try(expression.index, bind_name);
+        if idx.found {
+            return TryReplace {
+                expression: Expression.Index {
+                    sequence: expression.sequence,
+                    index: idx.expression
+                },
+                operand: idx.operand,
+                found: true
+            };
+        }
+        return try_not_found(expression);
+    }
+    if expression.variant == "Array" {
+        let elems = replace_first_try_in_list(expression.elements, bind_name);
+        if elems.found {
+            return TryReplace {
+                expression: Expression.Array { elements: elems.items },
+                operand: elems.operand,
+                found: true
+            };
+        }
+        return try_not_found(expression);
+    }
+    if expression.variant == "Object" {
+        let fields = replace_first_try_in_fields(expression.fields, bind_name);
+        if fields.found {
+            return TryReplace {
+                expression: Expression.Object { fields: fields.fields },
+                operand: fields.operand,
+                found: true
+            };
+        }
+        return try_not_found(expression);
+    }
+    if expression.variant == "Struct" {
+        let fields = replace_first_try_in_fields(expression.fields, bind_name);
+        if fields.found {
+            return TryReplace {
+                expression: Expression.Struct {
+                    type_name: expression.type_name,
+                    fields: fields.fields
+                },
+                operand: fields.operand,
+                found: true
+            };
+        }
+        return try_not_found(expression);
+    }
+    if expression.variant == "Range" {
+        let start = replace_first_try(expression.start, bind_name);
+        if start.found {
+            return TryReplace {
+                expression: Expression.Range {
+                    start: start.expression,
+                    end: expression.end
+                },
+                operand: start.operand,
+                found: true
+            };
+        }
+        let end = replace_first_try(expression.end, bind_name);
+        if end.found {
+            return TryReplace {
+                expression: Expression.Range {
+                    start: expression.start,
+                    end: end.expression
+                },
+                operand: end.operand,
+                found: true
+            };
+        }
+        return try_not_found(expression);
+    }
+    if expression.variant == "Cast" {
+        let inner = replace_first_try(expression.operand, bind_name);
+        if inner.found {
+            return TryReplace {
+                expression: Expression.Cast {
+                    operand: inner.expression,
+                    target_type: expression.target_type
+                },
+                operand: inner.operand,
+                found: true
+            };
+        }
+        return try_not_found(expression);
+    }
+    return try_not_found(expression);
+}
+
+fn try_not_found(expression: Expression) -> TryReplace {
+    return TryReplace {
+        expression: expression,
+        operand: Expression.NullLiteral,
+        found: false
+    };
+}
+
+fn replace_first_try_in_list(items: Expression[], bind_name: string) -> TryListReplace {
+    let mut out: Expression[] = [];
+    let mut operand: Expression = Expression.NullLiteral;
+    let mut found: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= items.length { break; }
+        if found { out.push(items[index]); } else {
+            let replaced = replace_first_try(items[index], bind_name);
+            out.push(replaced.expression);
+            if replaced.found {
+                operand = replaced.operand;
+                found = true;
+            }
+        }
+        index += 1;
+    }
+    return TryListReplace { items: out, operand: operand, found: found };
+}
+
+fn replace_first_try_in_fields(fields: ObjectField[], bind_name: string) -> TryFieldReplace {
+    let mut out: ObjectField[] = [];
+    let mut operand: Expression = Expression.NullLiteral;
+    let mut found: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= fields.length { break; }
+        let field = fields[index];
+        if found { out.push(field); } else {
+            let replaced = replace_first_try(field.value, bind_name);
+            out.push(ObjectField {
+                name: field.name, value: replaced.expression
+            });
+            if replaced.found {
+                operand = replaced.operand;
+                found = true;
+            }
+        }
+        index += 1;
+    }
+    return TryFieldReplace { fields: out, operand: operand, found: found };
+}
+
+// ── Statement-level support ──────────────────────────────────────────
+// A `?` is hoisted at this block level when it appears in a statement HEADER
+// expression we can lift: a let initializer, a return/throw value, an
+// expression statement, an if condition, a for iterable, or a with clause.
+// Only the HEADER is checked here — a `?` nested inside a child block
+// (then/else/loop body/match arm) is handled by recursing into that block via
+// `dt_nested`, where its own rest-of-block continuation applies. The hoisted
+// statement keeps its child blocks intact; the recursion on the Ok-arm
+// continuation desugars any `?` they contain.
+fn statement_has_hoistable_try(statement: Statement) -> boolean {
+    if statement.variant == "VariableDeclaration" {
+        let initializer = statement.initializer;
+        if initializer == null { return false; }
+        return expression_contains_try(initializer);
+    }
+    if statement.variant == "ReturnStatement" {
+        let expression = statement.expression;
+        if expression == null { return false; }
+        return expression_contains_try(expression);
+    }
+    if statement.variant == "ExpressionStatement" {
+        return expression_contains_try(statement.expression);
+    }
+    if statement.variant == "ThrowStatement" {
+        return expression_contains_try(statement.expression);
+    }
+    if statement.variant == "IfStatement" {
+        return expression_contains_try(statement.condition);
+    }
+    if statement.variant == "ForStatement" {
+        return expression_contains_try(statement.clause.iterable);
+    }
+    if statement.variant == "WithStatement" {
+        return clauses_contain_try(statement.clauses);
+    }
+    return false;
+}
+
+fn replace_first_try_in_statement(statement: Statement, bind_name: string) -> TryStmtReplace {
+    if statement.variant == "VariableDeclaration" {
+        let initializer = statement.initializer;
+        if initializer == null { return stmt_not_found(statement); }
+        let replaced = replace_first_try(initializer, bind_name);
+        return TryStmtReplace {
+            statement: Statement.VariableDeclaration {
+                name: statement.name,
+                mutable: statement.mutable,
+                is_thread_local: statement.is_thread_local,
+                type_annotation: statement.type_annotation,
+                initializer: replaced.expression,
+                span: statement.span,
+                initializer_span: statement.initializer_span
+            },
+            operand: replaced.operand,
+            found: replaced.found
+        };
+    }
+    if statement.variant == "ReturnStatement" {
+        let expression = statement.expression;
+        if expression == null { return stmt_not_found(statement); }
+        let replaced = replace_first_try(expression, bind_name);
+        return TryStmtReplace {
+            statement: Statement.ReturnStatement {
+                expression: replaced.expression,
+                span: statement.span
+            },
+            operand: replaced.operand,
+            found: replaced.found
+        };
+    }
+    if statement.variant == "ExpressionStatement" {
+        let replaced = replace_first_try(statement.expression, bind_name);
+        return TryStmtReplace {
+            statement: Statement.ExpressionStatement {
+                expression: replaced.expression,
+                span: statement.span
+            },
+            operand: replaced.operand,
+            found: replaced.found
+        };
+    }
+    if statement.variant == "ThrowStatement" {
+        let replaced = replace_first_try(statement.expression, bind_name);
+        return TryStmtReplace {
+            statement: Statement.ThrowStatement {
+                expression: replaced.expression,
+                span: statement.span
+            },
+            operand: replaced.operand,
+            found: replaced.found
+        };
+    }
+    if statement.variant == "IfStatement" {
+        let replaced = replace_first_try(statement.condition, bind_name);
+        return TryStmtReplace {
+            statement: Statement.IfStatement {
+                condition: replaced.expression,
+                then_block: statement.then_block,
+                else_branch: statement.else_branch,
+                decorators: statement.decorators
+            },
+            operand: replaced.operand,
+            found: replaced.found
+        };
+    }
+    if statement.variant == "ForStatement" {
+        let replaced = replace_first_try(statement.clause.iterable, bind_name);
+        return TryStmtReplace {
+            statement: Statement.ForStatement {
+                clause: ForClause {
+                    target: statement.clause.target,
+                    iterable: replaced.expression,
+                    tokens: statement.clause.tokens
+                },
+                body: statement.body,
+                decorators: statement.decorators
+            },
+            operand: replaced.operand,
+            found: replaced.found
+        };
+    }
+    if statement.variant == "WithStatement" {
+        let replaced = replace_first_try_in_clauses(statement.clauses, bind_name);
+        return TryStmtReplace {
+            statement: Statement.WithStatement {
+                clauses: replaced.clauses,
+                body: statement.body,
+                decorators: statement.decorators
+            },
+            operand: replaced.operand,
+            found: replaced.found
+        };
+    }
+    return stmt_not_found(statement);
+}
+
+fn replace_first_try_in_clauses(clauses: WithClause[], bind_name: string) -> TryClauseReplace {
+    let mut out: WithClause[] = [];
+    let mut operand: Expression = Expression.NullLiteral;
+    let mut found: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= clauses.length { break; }
+        if found { out.push(clauses[index]); } else {
+            let replaced = replace_first_try(clauses[index].expression, bind_name);
+            out.push(WithClause { expression: replaced.expression });
+            if replaced.found {
+                operand = replaced.operand;
+                found = true;
+            }
+        }
+        index += 1;
+    }
+    return TryClauseReplace { clauses: out, operand: operand, found: found };
+}
+
+fn stmt_not_found(statement: Statement) -> TryStmtReplace {
+    return TryStmtReplace {
+        statement: statement,
+        operand: Expression.NullLiteral,
+        found: false
+    };
+}
+
+// ── Block transform (counter-threaded) ───────────────────────────────
+fn dt_block(block: Block, start_id: int) -> DtBlock {
+    let statements = block.statements;
+    let mut prefix: Statement[] = [];
+    let mut next_id: int = start_id;
+    let mut index: int = 0;
+    loop {
+        if index >= statements.length { break; }
+        let statement = statements[index];
+        if statement_has_hoistable_try(statement) {
+            let rest = slice_statements_from(statements, index + 1);
+            let built = dt_build_match(statement, rest, next_id);
+            prefix.push(built.statement);
+            return DtBlock {
+                block: Block {
+                    tokens: block.tokens,
+                    text: block.text,
+                    statements: prefix
+                },
+                next_id: built.next_id
+            };
+        }
+        let nested = dt_nested(statement, next_id);
+        prefix.push(nested.statement);
+        next_id = nested.next_id;
+        index += 1;
+    }
+    return DtBlock {
+        block: Block {
+            tokens: block.tokens,
+            text: block.text,
+            statements: prefix
+        },
+        next_id: next_id
+    };
+}
+
+fn slice_statements_from(statements: Statement[], start: int) -> Statement[] {
+    let mut out: Statement[] = [];
+    let mut index: int = start;
+    loop {
+        if index >= statements.length { break; }
+        out.push(statements[index]);
+        index += 1;
+    }
+    return out;
+}
+
+fn dt_build_match(statement: Statement, rest: Statement[], id: int) -> DtStmt {
+    let bind_name = "__try_" + number_to_string(id);
+    let replaced = replace_first_try_in_statement(statement, bind_name);
+
+    // `let __try_<id> = value;` aliases the forced `value` arm binding to a
+    // fresh name so multiple `?` never collide.
+    let alias = Statement.VariableDeclaration {
+        name: bind_name,
+        mutable: false,
+        is_thread_local: false,
+        type_annotation: null,
+        initializer: Expression.Identifier { name: "value", span: null },
+        span: null,
+        initializer_span: null
+    };
+
+    let mut ok_statements: Statement[] = [];
+    ok_statements.push(alias);
+    ok_statements.push(replaced.statement);
+    let mut index: int = 0;
+    loop {
+        if index >= rest.length { break; }
+        ok_statements.push(rest[index]);
+        index += 1;
+    }
+    // Recurse so chained / nested `?` in the continuation desugar too.
+    let ok_result = dt_block(Block {
+        tokens: [], text: "", statements: ok_statements
+    }, id + 1);
+
+    let err_return = Statement.ReturnStatement {
+        expression: Expression.Struct {
+            type_name: ["Result", "Err"],
+            fields: [ObjectField {
+                name: "error", value: Expression.Identifier {
+                    name: "error", span: null
+                }
+            }]
+        },
+        span: null
+    };
+    let err_block = Block {
+        tokens: [],
+        text: "",
+        statements: [err_return]
+    };
+
+    let ok_case = MatchCase {
+        pattern: Expression.Raw { text: "Result.Ok { value }" },
+        guard: null,
+        body: ok_result.block
+    };
+    let err_case = MatchCase {
+        pattern: Expression.Raw { text: "Result.Err { error }" },
+        guard: null,
+        body: err_block
+    };
+
+    return DtStmt {
+        statement: Statement.MatchStatement {
+            expression: replaced.operand,
+            cases: [ok_case, err_case],
+            decorators: []
+        },
+        next_id: ok_result.next_id
+    };
+}
+
+// Recurse into the child blocks of a compound statement so a `?` nested inside
+// an if/for/loop/with/block/match arm is desugared relative to its own block.
+fn dt_nested(statement: Statement, id: int) -> DtStmt {
+    if statement.variant == "IfStatement" {
+        let then_result = dt_block(statement.then_block, id);
+        let else_result = dt_else(statement.else_branch, then_result.next_id);
+        return DtStmt {
+            statement: Statement.IfStatement {
+                condition: statement.condition,
+                then_block: then_result.block,
+                else_branch: else_result.else_branch,
+                decorators: statement.decorators
+            },
+            next_id: else_result.next_id
+        };
+    }
+    if statement.variant == "ForStatement" {
+        let body_result = dt_block(statement.body, id);
+        return DtStmt {
+            statement: Statement.ForStatement {
+                clause: statement.clause,
+                body: body_result.block,
+                decorators: statement.decorators
+            },
+            next_id: body_result.next_id
+        };
+    }
+    if statement.variant == "LoopStatement" {
+        let body_result = dt_block(statement.body, id);
+        return DtStmt {
+            statement: Statement.LoopStatement {
+                body: body_result.block,
+                decorators: statement.decorators
+            },
+            next_id: body_result.next_id
+        };
+    }
+    if statement.variant == "WithStatement" {
+        let body_result = dt_block(statement.body, id);
+        return DtStmt {
+            statement: Statement.WithStatement {
+                clauses: statement.clauses,
+                body: body_result.block,
+                decorators: statement.decorators
+            },
+            next_id: body_result.next_id
+        };
+    }
+    if statement.variant == "BlockStatement" {
+        let body_result = dt_block(statement.body, id);
+        return DtStmt {
+            statement: Statement.BlockStatement { body: body_result.block },
+            next_id: body_result.next_id
+        };
+    }
+    if statement.variant == "MatchStatement" {
+        let cases_result = dt_cases(statement.cases, id);
+        return DtStmt {
+            statement: Statement.MatchStatement {
+                expression: statement.expression,
+                cases: cases_result.cases,
+                decorators: statement.decorators
+            },
+            next_id: cases_result.next_id
+        };
+    }
+    return DtStmt { statement: statement, next_id: id };
+}
+
+fn dt_else(else_branch: ElseBranch?, id: int) -> DtElse {
+    if else_branch == null {
+        return DtElse { else_branch: null, next_id: id };
+    }
+    let body = else_branch.body;
+    if body != null {
+        let body_result = dt_block(body, id);
+        return DtElse {
+            else_branch: ElseBranch {
+                statement: else_branch.statement,
+                body: body_result.block
+            },
+            next_id: body_result.next_id
+        };
+    }
+    let nested = else_branch.statement;
+    if nested == null {
+        return DtElse { else_branch: else_branch, next_id: id };
+    }
+    let nested_result = dt_nested(nested, id);
+    return DtElse {
+        else_branch: ElseBranch {
+            statement: nested_result.statement,
+            body: null
+        },
+        next_id: nested_result.next_id
+    };
+}
+
+fn dt_cases(cases: MatchCase[], id: int) -> DtCases {
+    let mut out: MatchCase[] = [];
+    let mut next_id: int = id;
+    let mut index: int = 0;
+    loop {
+        if index >= cases.length { break; }
+        let case = cases[index];
+        let body_result = dt_block(case.body, next_id);
+        out.push(MatchCase {
+            pattern: case.pattern, guard: case.guard, body: body_result.block
+        });
+        next_id = body_result.next_id;
+        index += 1;
+    }
+    return DtCases { cases: out, next_id: next_id };
+}

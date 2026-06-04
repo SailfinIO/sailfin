@@ -1,0 +1,85 @@
+// Unit tests for the `?` desugar pre-pass primitives (epic #371, R.4 — #834).
+//
+// These drive the Block->Block rewrite directly (mirroring the #833 typecheck
+// primitive tests) so the two load-bearing contracts are regression-locked:
+//   1. a `?` in a SUPPORTED position (let-init / return / expr-stmt) is rewritten
+//      into a `MatchStatement` and no `TryOperator` survives.
+//   2. a `?` in an UNSUPPORTED position (e.g. a `throw` expression) is left in
+//      place so `emit_function` raises its diagnostic instead of silently
+//      emitting `<TryOperator>` garbage.
+import { Block, Expression, Statement } from "../../src/ast";
+import { block_contains_try, desugar_try_in_block, expression_contains_try } from "../../src/emit_native_desugar_try";
+
+fn _try_of(name: string) -> Expression {
+    return Expression.TryOperator {
+        operand: Expression.Identifier { name: name, span: null },
+        span: null
+    };
+}
+
+fn _let_try(name: string, operand: string) -> Statement {
+    return Statement.VariableDeclaration {
+        name: name,
+        mutable: false,
+        is_thread_local: false,
+        type_annotation: null,
+        initializer: _try_of(operand),
+        span: null,
+        initializer_span: null
+    };
+}
+
+fn _block(statements: Statement[]) -> Block {
+    return Block { tokens: [], text: "", statements: statements };
+}
+
+test "desugar: detects `?` in an expression tree" {
+    assert expression_contains_try(_try_of("r"));
+    assert ! expression_contains_try(Expression.Identifier {
+        name: "r", span: null
+    });
+}
+
+test "desugar: supported `?` becomes a MatchStatement with no leftover" {
+    let input = _block([_let_try("x", "r")]);
+    assert block_contains_try(input);
+
+    let output = desugar_try_in_block(input);
+    assert ! block_contains_try(output);
+    assert output.statements.length == 1;
+    assert output.statements[0].variant == "MatchStatement";
+    // Two arms: Result.Ok continuation + Result.Err early return.
+    assert output.statements[0].cases.length == 2;
+}
+
+test "desugar: `?`-free block is returned untouched" {
+    let plain = Statement.ReturnStatement {
+        expression: Expression.Identifier { name: "x", span: null },
+        span: null
+    };
+    let input = _block([plain]);
+    assert ! block_contains_try(input);
+
+    let output = desugar_try_in_block(input);
+    assert ! block_contains_try(output);
+    assert output.statements.length == 1;
+    assert output.statements[0].variant == "ReturnStatement";
+}
+
+test "desugar: unsupported `?` position survives for the emitter diagnostic" {
+    // `match r? { }` — a `?` in match-SUBJECT position is not hoistable (unlike
+    // let/return/expr/throw/if-condition/for-iterable/with-clause, which the
+    // desugar lifts), so it must remain after desugaring; emit_function then
+    // raises the unsupported-position diagnostic rather than emitting
+    // `<TryOperator>`.
+    let match_try = Statement.MatchStatement {
+        expression: _try_of("r"),
+        cases: [],
+        decorators: []
+    };
+    let input = _block([match_try]);
+    assert block_contains_try(input);
+
+    let output = desugar_try_in_block(input);
+    assert block_contains_try(output);
+}

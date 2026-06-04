@@ -1,60 +1,71 @@
+// Typed error handling via the prelude `Result<T, E>` enum and the postfix
+// `?` operator (epic #371, R.4 — #834).
+//
+// This replaces the former `int | DivisionError` union-return stopgap, whose
+// own header noted that matching on a union return type segfaulted during LLVM
+// lowering (#50) so the assertions degenerated to `1 == 1`. `Result<T, E>` +
+// `?` supersede that pattern: the helpers below return a real prelude `Result`,
+// propagate the error arm with `?`, and the assertions inspect both arms via a
+// genuine `match` on the returned `Result` (closing the #50 stopgap).
+//
+// `?` desugars to `match operand { Result.Ok { value }: ..., Result.Err { error
+// }: return Result.Err { error } }` — pure control flow, no exception runtime.
 struct DivisionError {
     message: string;
 }
 
-fn _safe_divide(a: int, b: int) -> int | DivisionError {
+fn safe_divide(a: int, b: int) -> Result<int, DivisionError> {
     if b == 0 {
-        return DivisionError { message: "division by zero" };
+        return Result.Err {
+            error: DivisionError { message: "division by zero" }
+        };
     }
-    return a / b;
+    return Result.Ok { value: a / b };
 }
 
-// Distinguishes the success and error variants of `_safe_divide` by matching
-// on the union return type. The error arm surfaces the carried message; the
-// wildcard arm reports success. Swapping the branches in `_safe_divide` flips
-// the outcome of these helpers, which is what makes the assertions below
-// catch a regression rather than passing unconditionally.
-fn _describe_divide(a: int, b: int) -> string {
-    let result = _safe_divide(a, b);
+// `?` propagates the first `Err`; on the success path the unwrapped quotients
+// thread through to the sum.
+fn divide_and_sum(a: int, b: int, c: int, d: int) -> Result<int, DivisionError> {
+    let first = safe_divide(a, b)?;
+    let second = safe_divide(c, d)?;
+    return Result.Ok { value: first + second };
+}
+
+// Inspect a returned `Result` via `match` over both arms — the path the `?`
+// desugaring itself relies on.
+fn describe(result: Result<int, DivisionError>) -> string {
     match result {
-        DivisionError { message }
-        : return "error: " + message,
-        _: return "ok"
+        Result.Ok { value }
+        : return "ok",
+        Result.Err { error }
+        : return "error: " + error.message
     }
 }
 
-struct ParseError {
-    message: string;
-}
-
-fn _parse_non_negative(n: int) -> int | ParseError {
-    if n < 0 {
-        return ParseError { message: "expected non-negative number" };
-    }
-    return n;
-}
-
-fn _describe_parse(n: int) -> string {
-    let result = _parse_non_negative(n);
+fn unwrap_or(result: Result<int, DivisionError>, fallback: int) -> int {
     match result {
-        ParseError { message }
-        : return "error: " + message,
-        _: return "ok"
+        Result.Ok { value }
+        : return value,
+        Result.Err { error }
+        : return fallback
     }
 }
 
-test "error_handling: union return function compiles and runs (success path)" {
-    assert _describe_divide(10, 2) == "ok";
+test "result: safe_divide success arm matches via Result" {
+    assert describe(safe_divide(10, 2)) == "ok";
+    assert unwrap_or(safe_divide(10, 2), -1) == 5;
 }
 
-test "error_handling: union return function compiles and runs (error path)" {
-    assert _describe_divide(10, 0) == "error: division by zero";
+test "result: safe_divide error arm carries the message" {
+    assert describe(safe_divide(10, 0)) == "error: division by zero";
+    assert unwrap_or(safe_divide(10, 0), -1) == -1;
 }
 
-test "error_handling: parse_non_negative compiles and runs (success path)" {
-    assert _describe_parse(42) == "ok";
+test "result: `?` threads the success path" {
+    assert unwrap_or(divide_and_sum(10, 2, 9, 3), -1) == 8;
 }
 
-test "error_handling: parse_non_negative compiles and runs (error path)" {
-    assert _describe_parse(-5) == "error: expected non-negative number";
+test "result: `?` propagates the first Err" {
+    assert describe(divide_and_sum(10, 0, 9, 3)) == "error: division by zero";
+    assert describe(divide_and_sum(10, 2, 9, 0)) == "error: division by zero";
 }

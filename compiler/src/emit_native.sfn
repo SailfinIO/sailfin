@@ -25,6 +25,7 @@ import {
     Statement,
     TypeAnnotation
 } from "./ast";
+import { block_contains_try, desugar_try_in_block } from "./emit_native_desugar_try";
 import {
     append_optional_initializer,
     append_optional_type_annotation,
@@ -416,8 +417,19 @@ fn emit_function(state: NativeState, signature: FunctionSignature, body: Block, 
     current = state_emit_line(current, ".fn " + format_function_signature(signature));
     current = emit_signature_metadata(current, signature);
     current = emit_parameter_metadata(current, signature.parameters);
+    // Postfix `?` desugaring pre-pass (epic #371 R.4): rewrite every supported
+    // `TryOperator` into a `match` + early `return Result.Err`. A `?`-free body
+    // (the entire compiler source) takes a single read-only walk and is emitted
+    // untouched.
+    let mut effective_body: Block = body;
+    if block_contains_try(body) {
+        effective_body = desugar_try_in_block(body);
+        if block_contains_try(effective_body) {
+            current = state_add_diagnostic(current, "native backend: `?` operator is only supported in let-initializer, return, and expression-statement positions");
+        }
+    }
     current = state_push_indent(current);
-    current = emit_block(current, body);
+    current = emit_block(current, effective_body);
     current = state_pop_indent(current);
     return state_emit_line(current, ".endfn");
 }

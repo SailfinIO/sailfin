@@ -2,6 +2,7 @@
 //
 // Control flow handler: match instruction lowering.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
+import { index_of, substring } from "../../string_utils";
 import { lower_expression } from "../expression_lowering/native/core";
 import { append_match_arm_mutations } from "../expression_lowering/native/core_match_helpers";
 import { emit_boolean_and, emit_comparison_instruction, harmonise_operands } from "../expression_lowering/native/core_operands";
@@ -14,6 +15,7 @@ import {
 import { find_local_binding } from "../expressions_bindings";
 import { format_temp_name } from "../expressions_helpers";
 import { make_child_scope_id } from "../lifetime";
+import { find_function_by_name_or_import } from "../rendering_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
     find_enum_info_by_llvm_type,
@@ -51,6 +53,8 @@ import {
 import {
     copy_string_array,
     extend_string_array,
+    is_identifier_part_char,
+    is_identifier_start_char,
     merge_parameter_bindings,
     number_to_string,
     trim_text
@@ -114,6 +118,49 @@ fn resolve_match_subject_annotation(subject_name: string, bindings: ParameterBin
         i += 1;
     }
     return "";
+}
+
+// Extract the leading call target from a subject expression, i.e. `make_ok`
+// from `make_ok()`. Returns "" when the expression is not a direct call of a
+// simple identifier (mirrors `_extract_leading_call_target` in
+// instructions_let.sfn). Used so a `match <call>()` scrutinee can recover the
+// callee's declared `Result<int, Error>` return type for #830 generic payload
+// monomorphization, exactly as a typed local/param already does.
+fn _match_extract_call_target(expression: string) -> string {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 { return ""; }
+    let first = substring(trimmed, 0, 1);
+    if !is_identifier_start_char(first) { return ""; }
+    let mut index: int = 1;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        if !is_identifier_part_char(ch) { break; }
+        index += 1;
+    }
+    if index >= trimmed.length { return ""; }
+    if substring(trimmed, index, index + 1) != "(" { return ""; }
+    return substring(trimmed, 0, index);
+}
+
+// #830 (call/inferred scrutinee gap): when the match subject is a direct call
+// expression (e.g. `match make_ok()`), resolve its concrete instantiation from
+// the callee's declared return type so generic enum payloads monomorphize the
+// same way they do for a typed local/parameter scrutinee. Returns "" when the
+// subject is not a direct call or the callee has no return type.
+fn resolve_match_subject_call_annotation(subject_expression: string, functions: NativeFunction[]) -> string {
+    let call_target = _match_extract_call_target(subject_expression);
+    if call_target.length == 0 { return ""; }
+    let callee = find_function_by_name_or_import(functions, call_target);
+    if callee == null { return ""; }
+    if callee.return_type.length == 0 { return ""; }
+    // Generic instantiations only. The payload monomorphization gap this
+    // recovers from (#830) is generic-only; adopting a non-generic struct
+    // return type (e.g. `SymbolCollectionResult`) as the subject annotation
+    // would mis-route later member/method-call resolution and break the
+    // self-host build (test_work_dir_parity).
+    if index_of(callee.return_type, "<") == -1 { return ""; }
+    return callee.return_type;
 }
 
 fn collect_match_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> MatchStructure {
@@ -281,7 +328,14 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
     // #830: capture the match subject's declared source annotation (e.g.
     // `Foo<int, Error>`) so payload field types can be resolved per
     // instantiation. Empty for non-identifier subjects / monomorphic enums.
-    let subject_type_annotation = resolve_match_subject_annotation(subject_name, bindings, current_locals);
+    let mut subject_type_annotation = resolve_match_subject_annotation(subject_name, bindings, current_locals);
+    // #830 (call/inferred scrutinee gap): a direct `match <call>()` subject
+    // is not a simple identifier, so the name-based lookup above returns "".
+    // Recover its concrete instantiation from the callee's declared return
+    // type so generic enum payloads monomorphize as they do for typed locals.
+    if subject_type_annotation.length == 0 {
+        subject_type_annotation = resolve_match_subject_call_annotation(subject_instruction.expression, functions);
+    }
 
     let union_payload_types = parse_union_payload_types(subject_operand.llvm_type);
     let mut matched_union_variants: int[] = [];

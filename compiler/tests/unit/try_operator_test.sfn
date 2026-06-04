@@ -1,0 +1,79 @@
+// Postfix `?` operator desugaring (epic #371, R.4 — #834).
+//
+// Covers the emitter's `TryOperator` -> `match` + early `return Result.Err`
+// rewrite end-to-end (run, not just emit), with emphasis on the subtle cases:
+// embedded `?` inside a larger expression, and multiple `?` in a single
+// expression (which must NOT collide — each `?` aliases the forced `value`
+// binding to a fresh `__try_N`).
+struct Error {
+    message: string;
+}
+
+fn ok(n: int) -> Result<int, Error> {
+    return Result.Ok { value: n };
+}
+
+fn fail(msg: string) -> Result<int, Error> {
+    return Result.Err {
+        error: Error { message: msg }
+    };
+}
+
+fn unwrap_or(r: Result<int, Error>, fallback: int) -> int {
+    match r {
+        Result.Ok { value }
+        : return value,
+        Result.Err { error }
+        : return fallback
+    }
+}
+
+fn msg_or(r: Result<int, Error>, fallback: string) -> string {
+    match r {
+        Result.Ok { value }
+        : return fallback,
+        Result.Err { error }
+        : return error.message
+    }
+}
+
+// Single `?` in a let initializer (the worked-example shape).
+fn add_one(r: Result<int, Error>) -> Result<int, Error> {
+    let x = r?;
+    return Result.Ok { value: x + 1 };
+}
+
+// Two `?` in ONE expression — the fresh-name aliasing keeps them distinct.
+// If both reused `value`, this would compute `b + b` instead of `a + b`.
+fn sum_two(a: Result<int, Error>, b: Result<int, Error>) -> Result<int, Error> {
+    return Result.Ok { value: a? + b? };
+}
+
+// `?` embedded in a nested call argument, not at statement top level.
+fn double_first(a: Result<int, Error>) -> Result<int, Error> {
+    return Result.Ok { value: identity(a?) * 2 };
+}
+
+fn identity(n: int) -> int { return n; }
+
+test "try: single `?` unwraps on Ok" {
+    assert unwrap_or(add_one(ok(41)), -1) == 42;
+}
+
+test "try: single `?` propagates Err" {
+    assert msg_or(add_one(fail("boom")), "ok") == "boom";
+}
+
+test "try: two `?` in one expression stay distinct" {
+    assert unwrap_or(sum_two(ok(3), ok(4)), -1) == 7;
+}
+
+test "try: two `?` propagate the leftmost Err first" {
+    assert msg_or(sum_two(fail("left"), fail("right")), "ok") == "left";
+    assert msg_or(sum_two(ok(3), fail("right")), "ok") == "right";
+}
+
+test "try: embedded `?` inside a call argument" {
+    assert unwrap_or(double_first(ok(21)), -1) == 42;
+    assert msg_or(double_first(fail("nope")), "ok") == "nope";
+}
