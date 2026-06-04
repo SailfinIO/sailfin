@@ -120,9 +120,9 @@ jobs:
             sed -i "s/^version = \"$current_version\"/version = \"$new_version\"/" "$capsule_dir/capsule.toml"
 
             # Publish. Treat an "already exists" (HTTP 409) as success: a prior run
-            # published this version but lost the `git push origin main` race, so the
-            # bump never landed in git. Committing the bump now resyncs git with the
-            # registry instead of hard-failing every subsequent run.
+            # published this version but lost the push race below, so the bump never
+            # landed in git. Committing the bump now resyncs git with the registry
+            # instead of hard-failing every subsequent run.
             echo "Publishing $capsule_name@$new_version..."
             if publish_out="$(cd "$capsule_dir" && sailfin publish 2>&1)"; then
               echo "$publish_out"
