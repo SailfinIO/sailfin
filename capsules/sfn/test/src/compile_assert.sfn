@@ -1,0 +1,364 @@
+// sfn/test — compile-as-test assertions (issue #974, epic #841
+// test-infra Phase 2, sub-issue 2.6).
+//
+// `assert_compiles` / `assert_does_not_compile` let a test assert how a
+// snippet of Sailfin *source* behaves under the frontend (lex → parse →
+// typecheck → effect-check) without compiling and linking a binary. Both
+// shell out to the already-shipped `sfn check --json`
+// (`compiler/src/cli_check.sfn`, schema `sailfin-check/1` encoded by
+// `compiler/src/diagnostics_json.sfn`), capture stdout via
+// `process.run_capture`, and read the three fields they need out of the
+// `sailfin-check/1` envelope (`schema_version`, `summary.errors`, and each
+// event's `message`).
+//
+// Envelope reading is a small inline scanner over `sfn/strings`, not the
+// `sfn/json` capsule: depending on `sfn/json` pulls its full recursive-
+// parser closure into *every* `sfn/test` test binary, which exceeds the
+// unit-test import/link envelope (#619) and fails to link in CI. The
+// envelope is a single, fixed-shape line, so a targeted field reader is
+// both lighter and sufficient. `process.run_capture`
+// (`runtime/sfn/process.sfn`) and `fs.*` are runtime builtins.
+//
+// Like the rest of the capsule these are free functions returning a
+// `MatchResult` (`.ok == true` passed, `.ok == false` carries
+// `.message`) rather than a fluent builder — cross-module struct-method
+// dispatch is currently miscompiled (see `expect.sfn`). They are `![io]`:
+// running a child process and writing the temp source file both require
+// `io`.
+//
+// Hermeticity: the `sfn` binary is resolved from `$SAILFIN_BIN` with a
+// documented fallback of `build/native/sailfin` (the self-hosted binary,
+// relative to the repo root the test runs from), so CI can point the
+// assertions at any compiler without editing the test. The child is
+// spawned with an empty environment — `sfn check` on an import-free
+// snippet reads no environment variables — so the result does not depend
+// on the parent process's ambient env.
+//
+// Scope (per the issue): a single temp *file* is created under a fresh
+// `fs.mkdtemp` directory and removed afterward; there is no recursive
+// directory teardown (only one file is ever written).
+import { find } from "sfn/strings";
+
+import { MatchResult, match_fail, match_ok } from "./matcher";
+
+// ---------------------------------------------------------------------------
+// CompileExpect
+// ---------------------------------------------------------------------------
+// The expectation passed to `assert_compiles`:
+//   - `effects`: when non-empty, the `source` is treated as a function
+//     *body* and wrapped in `fn __sfn_compile_probe() ![<effects>] { … }`
+//     so a caller can probe whether a body type-/effect-checks under a
+//     given effect row. When empty, `source` is checked verbatim as a
+//     complete file.
+//   - `ok`: `true` requires the snippet to compile with zero errors;
+//     `false` requires at least one error.
+//   - `diagnostic_pattern`: when non-empty, at least one diagnostic
+//     message must contain it (substring via `sfn/strings::find`).
+struct CompileExpect {
+    effects: string[];
+    ok: boolean;
+    diagnostic_pattern: string;
+}
+
+// ---------------------------------------------------------------------------
+// Internal: the outcome of one `sfn check --json` run
+// ---------------------------------------------------------------------------
+// `ran` is the discriminator: `false` means the child produced no
+// parseable `sailfin-check/1` envelope (spawn failure, crash, or garbage
+// on stdout), in which case `raw` carries the captured output for the
+// failure diagnostic. When `ran` is `true`, `errors` is the envelope's
+// `summary.errors` and `messages` is every event's `message` string.
+struct _CheckOutcome {
+    ran: boolean;
+    errors: int;
+    messages: string[];
+    raw: string;
+}
+
+fn _outcome_failed(raw: string) -> _CheckOutcome {
+    return _CheckOutcome {
+        ran: false,
+        errors: 0,
+        messages: [],
+        raw: raw
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Binary resolution + program assembly
+// ---------------------------------------------------------------------------
+fn _resolve_sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _join_effects(effects: string[]) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= effects.length { break; }
+        if i > 0 { out = out + ", "; }
+        out = out + effects[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn _build_program(source: string, effects: string[]) -> string {
+    if effects.length == 0 { return source; }
+    return "fn __sfn_compile_probe() ![" + _join_effects(effects) + "] {\n"
+        + source
+        + "\n}\n";
+}
+
+// ---------------------------------------------------------------------------
+// Inline `sailfin-check/1` envelope reader (over `sfn/strings`)
+// ---------------------------------------------------------------------------
+// Result of reading one JSON string literal: the unescaped `value` and the
+// index just past the closing quote. `ok` is false when the closing quote
+// was never found (truncated input).
+struct _StrRead {
+    value: string;
+    end: int;
+    ok: boolean;
+}
+
+// Read the JSON string whose opening quote is at `open`. Escape-aware: it
+// honors `\n`/`\t`/`\r` and passes every other escaped character through
+// literally (so `\"` → `"`, `\\` → `\`, `\/` → `/`), which is exactly the
+// escape set `diagnostics_json.sfn` emits.
+fn _read_json_string(text: string, open: int) -> _StrRead {
+    let mut i: int = open + 1;
+    let mut out: string = "";
+    loop {
+        if i >= text.length {
+            return _StrRead { value: out, end: i, ok: false };
+        }
+        let ch = text[i];
+        if ch == "\\" {
+            i += 1;
+            if i >= text.length {
+                return _StrRead { value: out, end: i, ok: false };
+            }
+            let nx = text[i];
+            if nx == "n" { out = out + "\n"; } else if nx == "t" {
+                out = out + "\t";
+            } else if nx == "r" { out = out + "\r"; } else { out = out + nx; }
+            i += 1;
+        } else if ch == "\"" {
+            return _StrRead { value: out, end: i + 1, ok: true };
+        } else {
+            out = out + ch;
+            i += 1;
+        }
+    }
+}
+
+// Read the string value of the first `"<key>":"..."` at or after `from`.
+// Returns "" when the key is absent.
+fn _json_string_field(text: string, key: string, from: int) -> string {
+    let needle = "\"" + key + "\":\"";
+    let at = find(text, needle, from);
+    if at < 0 { return ""; }
+    // The opening quote of the value is the last character of `needle`.
+    let open = at + needle.length - 1;
+    return _read_json_string(text, open).value;
+}
+
+// Parse the (optionally signed) integer beginning at `start`, skipping
+// leading spaces. Stops at the first non-digit. Returns 0 when no digits
+// are present.
+fn _parse_int_at(text: string, start: int) -> int {
+    let mut i: int = start;
+    loop {
+        if i >= text.length { break; }
+        if text[i] == " " { i += 1; } else { break; }
+    }
+    let mut negative: boolean = false;
+    if i < text.length && text[i] == "-" {
+        negative = true;
+        i += 1;
+    }
+    let mut value: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let code = char_code(text[i]) - 48;
+        if code < 0 || code > 9 { break; }
+        value = value * 10 + code;
+        i += 1;
+    }
+    if negative { return 0 - value; }
+    return value;
+}
+
+// `summary.errors` — anchored after the `"summary"` key so an `"errors"`
+// elsewhere can't be read by mistake.
+fn _extract_errors(envelope: string) -> int {
+    let summary_at = find(envelope, "\"summary\"", 0);
+    let mut from: int = 0;
+    if summary_at >= 0 { from = summary_at; }
+    let errors_at = find(envelope, "\"errors\":", from);
+    if errors_at < 0 { return 0; }
+    return _parse_int_at(envelope, errors_at + 9);
+}
+
+// Every event's (and suggestion's) `message`. Including suggestion text is
+// harmless for substring assertions and keeps the scan single-pass; an
+// inner `"message":"` inside a value is escaped as `\"message\":\"`, so it
+// never false-matches the unescaped needle.
+fn _extract_messages(envelope: string) -> string[] {
+    let needle = "\"message\":\"";
+    let mut out: string[] = [];
+    let mut from: int = 0;
+    loop {
+        let at = find(envelope, needle, from);
+        if at < 0 { break; }
+        let open = at + needle.length - 1;
+        let r = _read_json_string(envelope, open);
+        out.push(r.value);
+        if !r.ok { break; } from = r.end;
+    }
+    return out;
+}
+
+// `sfn check --json` writes exactly one `sailfin-check/1` object to
+// stdout. Anchor on the first `{` (skipping any leading whitespace);
+// a missing `{`, or an envelope whose `schema_version` is absent or not
+// the expected `sailfin-check/1`, collapses to a non-`ran` outcome so the
+// assertion fails loudly rather than silently treating "no/unknown
+// envelope" as "compiled". The schema contract
+// (`docs/reference/check-json-schema.md`) requires consumers to hard-fail
+// on an unknown version rather than misinterpret its fields.
+fn _parse_outcome(stdout: string, stderr: string) -> _CheckOutcome {
+    let brace = find(stdout, "{", 0);
+    if brace < 0 {
+        return _outcome_failed("sfn check produced no JSON on stdout; stderr: "
+            + stderr);
+    }
+    let envelope = substring(stdout, brace, stdout.length);
+    // `_json_string_field` returns "" for an absent key, so this single
+    // check rejects both a missing and an unexpected `schema_version`.
+    let schema = _json_string_field(envelope, "schema_version", 0);
+    if schema != "sailfin-check/1" {
+        return _outcome_failed("sfn check envelope has unexpected schema_version (want "
+            + "sailfin-check/1, got \""
+            + schema
+            + "\"): "
+            + stdout);
+    }
+    return _CheckOutcome {
+        ran: true,
+        errors: _extract_errors(envelope),
+        messages: _extract_messages(envelope),
+        raw: stdout
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Run `sfn check --json` over `source`
+// ---------------------------------------------------------------------------
+fn _run_compile_check(source: string, effects: string[]) -> _CheckOutcome ![io] {
+    let program = _build_program(source, effects);
+    let dir = fs.mkdtemp("sfn-compile-assert-");
+    if dir.length == 0 {
+        return _outcome_failed("failed to create temp dir for compile assertion");
+    }
+    let path = dir + "/probe.sfn";
+    fs.writeFile(path, program);
+
+    let bin = _resolve_sfn_bin();
+    let argv: string[] = [bin, "check", "--json", path];
+    let child_env: string[] = [];
+    let _exit = process.run_capture(argv, child_env);
+    let stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+
+    // Single temp file only (no recursive teardown — see header).
+    fs.deleteFile(path);
+    fs.removeDirectory(dir);
+
+    return _parse_outcome(stdout, stderr);
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic matching
+// ---------------------------------------------------------------------------
+fn _messages_contain(messages: string[], pattern: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= messages.length { break; }
+        if find(messages[i], pattern, 0) >= 0 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _join_messages(messages: string[]) -> string {
+    if messages.length == 0 { return "(none)"; }
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= messages.length { break; }
+        if i > 0 { out = out + " | "; }
+        out = out + messages[i];
+        i += 1;
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Public assertions
+// ---------------------------------------------------------------------------
+// `assert_compiles(source, expect)` runs `sfn check --json` over `source`
+// (optionally wrapped in `expect.effects`) and returns a `MatchResult`
+// reflecting the envelope:
+//   - `expect.ok == true`  passes iff the envelope reports zero errors.
+//   - `expect.ok == false` passes iff the envelope reports ≥1 error.
+//   - when `expect.diagnostic_pattern` is non-empty, a diagnostic message
+//     must additionally contain it.
+fn assert_compiles(source: string, expect: CompileExpect) -> MatchResult ![io] {
+    let outcome = _run_compile_check(source, expect.effects);
+    if !outcome.ran { return match_fail(outcome.raw); }
+
+    let compiled = outcome.errors == 0;
+    if expect.ok && !compiled {
+        return match_fail("expected source to compile, but sfn check reported "
+            + number_to_string(outcome.errors)
+            + " error(s): "
+            + _join_messages(outcome.messages));
+    }
+    if !expect.ok && compiled {
+        return match_fail("expected source NOT to compile, but it compiled cleanly");
+    }
+    if expect.diagnostic_pattern.length > 0 {
+        if !_messages_contain(outcome.messages, expect.diagnostic_pattern) {
+            return match_fail("expected a diagnostic matching \"" + expect.diagnostic_pattern
+                + "\"; messages: "
+                + _join_messages(outcome.messages));
+        }
+    }
+    return match_ok();
+}
+
+// `assert_does_not_compile(source, pattern)` passes iff `sfn check`
+// reports at least one error AND a diagnostic message contains `pattern`
+// (substring via `sfn/strings::find`). The `errors >= 1` guard keeps the
+// function honest to its name: a snippet that compiles cleanly does not
+// "not compile" just because a non-error diagnostic (e.g. a future
+// warning) happens to contain the pattern.
+fn assert_does_not_compile(source: string, pattern: string) -> MatchResult ![io] {
+    let outcome = _run_compile_check(source, []);
+    if !outcome.ran { return match_fail(outcome.raw); }
+    if outcome.errors < 1 {
+        return match_fail("expected source NOT to compile, but sfn check reported "
+            + "0 errors; messages: "
+            + _join_messages(outcome.messages));
+    }
+    if _messages_contain(outcome.messages, pattern) { return match_ok(); }
+    return match_fail("expected a diagnostic matching \"" + pattern
+        + "\"; sfn check reported "
+        + number_to_string(outcome.errors)
+        + " error(s): "
+        + _join_messages(outcome.messages));
+}

@@ -376,3 +376,12 @@ export {
 // is the testable core with the directory + update flag passed explicitly.
 // See `snapshot.sfn`.
 export { expect_snapshot, snapshot_match_in } from "./snapshot";
+
+// ---------------------------------------------------------------------------
+// Compile-as-test assertions (issue #974, proposal §2.6)
+// ---------------------------------------------------------------------------
+// `assert_compiles` / `assert_does_not_compile` shell out to the
+// shipped `sfn check --json` via `process.run_capture` and parse the
+// `sailfin-check/1` envelope with `sfn/json`. Both are `![io]` and
+// return a `MatchResult`. See `compile_assert.sfn`.
+export { CompileExpect, assert_compiles, assert_does_not_compile } from "./compile_assert";

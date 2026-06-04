@@ -1,0 +1,81 @@
+// Tests for the sfn/test compile-as-test assertions (#974).
+//
+// Each test shells out to the real `sfn check --json` (resolved via
+// `$SAILFIN_BIN`, falling back to `build/native/sailfin`) over a snippet
+// written to a fresh temp file, then asserts on the returned
+// `MatchResult`. They are `![io]`: `assert_compiles` /
+// `assert_does_not_compile` spawn a child process and write a temp file.
+//
+// The four required cases (issue acceptance criteria):
+//   1. a compiling snippet (exercising the `effects` wrapper),
+//   2. a missing-effect snippet (`print.info` without `![io]`),
+//   3. a parse-error snippet,
+//   4. a pattern-mismatch negative (the assertion itself must fail).
+import { CompileExpect, assert_compiles, assert_does_not_compile } from "../src/mod";
+
+// 1. A snippet that compiles. `effects: ["io"]` wraps the body in
+//    `fn __sfn_compile_probe() ![io] { … }`, so `print.info` is allowed
+//    and the envelope reports zero errors.
+test "compile_assert: compiling snippet passes" ![io] {
+    let result = assert_compiles("print.info(\"hello from probe\");", CompileExpect {
+        effects: ["io"], ok: true, diagnostic_pattern: ""
+    });
+    assert result.ok;
+}
+
+// 2. `print.info` inside a function that does NOT declare `![io]` is an
+//    effect violation. `assert_does_not_compile` passes iff a diagnostic
+//    message contains the pattern — here the effect checker's
+//    "missing required effects" headline.
+test "compile_assert: missing effect does not compile" ![io] {
+    let source = "fn probe() { print.info(\"oops\"); }";
+    let result = assert_does_not_compile(source, "missing required effects");
+    assert result.ok;
+}
+
+// `assert_compiles` with `ok: false` plus a pattern reflects the same
+// failing envelope: at least one error AND the pattern present.
+test "compile_assert: missing effect via assert_compiles ok=false" ![io] {
+    let source = "fn probe() { print.info(\"oops\"); }";
+    let result = assert_compiles(source, CompileExpect {
+        effects: [], ok: false, diagnostic_pattern: "missing required effects"
+    });
+    assert result.ok;
+}
+
+// 3. A parse error: unrecognized top-level syntax. `sfn check` reports it
+//    as an `E0500` parse diagnostic ("parse error: unrecognized syntax"),
+//    so the snippet does not compile and the pattern matches.
+//
+//    Note: `sfn check` detects unrecognized top-level constructs (which
+//    the parser lowers to `Statement.Unknown`). Malformed-but-dispatched
+//    declarations — e.g. `fn broken( {`, which parses into a recovered
+//    `FunctionDeclaration` — are not yet flagged; that needs parser-level
+//    error recovery (tracked as a follow-up). Use a top-level garbage
+//    snippet here.
+test "compile_assert: parse error does not compile" ![io] {
+    let source = "@@@ !!!\n";
+    let result = assert_does_not_compile(source, "parse error");
+    assert result.ok;
+}
+
+// 4. Pattern-mismatch negative: a snippet that compiles cleanly produces
+//    no diagnostics, so `assert_does_not_compile` must NOT pass — its
+//    `MatchResult.ok` is false and carries a non-empty diagnostic.
+test "compile_assert: pattern mismatch fails the assertion" ![io] {
+    let source = "fn probe() ![io] { print.info(\"fine\"); }";
+    let result = assert_does_not_compile(source, "this pattern never appears");
+    assert ! result.ok;
+    assert result.message.length > 0;
+}
+
+// `assert_compiles` expecting success must also fail (return ok=false)
+// when the snippet has an error — the inverse of test 1.
+test "compile_assert: expected-compile fails on a broken snippet" ![io] {
+    let source = "@@@ !!!\n";
+    let result = assert_compiles(source, CompileExpect {
+        effects: [], ok: true, diagnostic_pattern: ""
+    });
+    assert ! result.ok;
+    assert result.message.length > 0;
+}
