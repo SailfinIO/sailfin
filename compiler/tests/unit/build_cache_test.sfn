@@ -433,6 +433,74 @@ test "build_cache: cache_copy_artifact_to creates dst dir on demand" ![io] {
     _cleanup(scratch);
 }
 
+// --------------------------------------------------------------
+// Atomic publish (#1011 — cold-cache parallel-worker race)
+// --------------------------------------------------------------
+// `cache_store_artifact` / `cache_store` / `cache_copy_artifact_to`
+// publish via a temp file in the destination dir + `mv` (atomic
+// rename), so a concurrent reader never observes a half-written
+// artifact. The two guarantees a unit test can lock without a real
+// race are: (1) the published file is complete, and (2) no
+// `.sfn_pub.*` temp survives in the directory — a leftover temp
+// would be a partial sibling a reader could mistake for the real
+// artifact, which is exactly the corruption the rename prevents.
+test "build_cache: cache_store_artifact publishes atomically, no temp residue" ![io] {
+    let scratch = _test_tmp_root("artifact_atomic");
+    let cache_root = scratch + "/cache/v1";
+    let src_dir = scratch + "/build";
+    process.run(["mkdir", "-p", src_dir]);
+    let ll = src_dir + "/mod.ll";
+    _write_file(ll, "; ModuleID = 'atomic'");
+
+    let key = CacheKey {
+        digest: "6666666666666666666666666666666666666666666666666666666666666666"
+    };
+    assert cache_store_artifact(cache_root, key, "ll", ll);
+
+    // The published artifact is the complete source content.
+    let paths = cache_paths_for(cache_root, key);
+    assert fs.exists(paths.ll);
+    assert fs.readFile(paths.ll) == "; ModuleID = 'atomic'";
+
+    // No `.sfn_pub.*` temp survives in the entry dir. `grep -q`
+    // exits 0 when it finds a match, so a non-zero exit means the
+    // temp was renamed into place rather than left behind.
+    let entry_dir = cache_root + "/66/" + key.digest;
+    let residue = process.run(["sh", "-c", "ls -a '" + entry_dir
+        + "' | grep -q sfn_pub"]);
+    assert residue != 0;
+
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_store publishes four artifacts with no temp residue" ![io] {
+    let scratch = _test_tmp_root("store_atomic");
+    let cache_root = scratch + "/cache/v1";
+    let src_dir = scratch + "/build";
+    process.run(["mkdir", "-p", src_dir]);
+    let sfn_asm = src_dir + "/ir.sfn-asm";
+    let layout = src_dir + "/layout.manifest";
+    let ll = src_dir + "/mod.ll";
+    let obj = src_dir + "/mod.o";
+    _write_file(sfn_asm, "; sfn-asm");
+    _write_file(layout, "module: foo");
+    _write_file(ll, "; ModuleID = 'foo'");
+    _write_file(obj, "OBJ");
+
+    let key = CacheKey {
+        digest: "7777777777777777777777777777777777777777777777777777777777777777"
+    };
+    assert cache_store(cache_root, key, sfn_asm, layout, ll, obj);
+    assert cache_lookup_complete(cache_root, key);
+
+    let entry_dir = cache_root + "/77/" + key.digest;
+    let residue = process.run(["sh", "-c", "ls -a '" + entry_dir
+        + "' | grep -q sfn_pub"]);
+    assert residue != 0;
+
+    _cleanup(scratch);
+}
+
 test "build_cache: cache_copy_artifact_to returns false on cache miss" ![io] {
     let scratch = _test_tmp_root("artifact_miss");
     let cache_root = scratch + "/cache/v1";
