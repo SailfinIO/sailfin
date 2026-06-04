@@ -30,9 +30,11 @@ import {
     Block,
     ElseBranch,
     Expression,
+    ForClause,
     MatchCase,
     ObjectField,
-    Statement
+    Statement,
+    WithClause
 } from "./ast";
 import { number_to_string } from "./emit_native_state";
 
@@ -57,6 +59,12 @@ struct TryFieldReplace {
 
 struct TryStmtReplace {
     statement: Statement;
+    operand: Expression;
+    found: boolean;
+}
+
+struct TryClauseReplace {
+    clauses: WithClause[];
     operand: Expression;
     found: boolean;
 }
@@ -189,12 +197,14 @@ fn statement_contains_try_deep(statement: Statement) -> boolean {
         return else_contains_try(statement.else_branch);
     }
     if statement.variant == "ForStatement" {
+        if expression_contains_try(statement.clause.iterable) { return true; }
         return block_contains_try(statement.body);
     }
     if statement.variant == "LoopStatement" {
         return block_contains_try(statement.body);
     }
     if statement.variant == "WithStatement" {
+        if clauses_contain_try(statement.clauses) { return true; }
         return block_contains_try(statement.body);
     }
     if statement.variant == "BlockStatement" {
@@ -221,6 +231,16 @@ fn cases_contain_try(cases: MatchCase[]) -> boolean {
     loop {
         if index >= cases.length { break; }
         if block_contains_try(cases[index].body) { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn clauses_contain_try(clauses: WithClause[]) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= clauses.length { break; }
+        if expression_contains_try(clauses[index].expression) { return true; }
         index += 1;
     }
     return false;
@@ -473,11 +493,14 @@ fn replace_first_try_in_fields(fields: ObjectField[], bind_name: string) -> TryF
 }
 
 // ── Statement-level support ──────────────────────────────────────────
-// A `?` is hoisted at this block level only when it appears in a statement
-// HEADER expression we can lift: a let initializer, a return value, or an
-// expression statement. A `?` nested inside a child block (if/for/loop/match
-// arm/...) is handled by recursing into that block, where its own
-// rest-of-block continuation applies.
+// A `?` is hoisted at this block level when it appears in a statement HEADER
+// expression we can lift: a let initializer, a return/throw value, an
+// expression statement, an if condition, a for iterable, or a with clause.
+// Only the HEADER is checked here — a `?` nested inside a child block
+// (then/else/loop body/match arm) is handled by recursing into that block via
+// `dt_nested`, where its own rest-of-block continuation applies. The hoisted
+// statement keeps its child blocks intact; the recursion on the Ok-arm
+// continuation desugars any `?` they contain.
 fn statement_has_hoistable_try(statement: Statement) -> boolean {
     if statement.variant == "VariableDeclaration" {
         let initializer = statement.initializer;
@@ -491,6 +514,18 @@ fn statement_has_hoistable_try(statement: Statement) -> boolean {
     }
     if statement.variant == "ExpressionStatement" {
         return expression_contains_try(statement.expression);
+    }
+    if statement.variant == "ThrowStatement" {
+        return expression_contains_try(statement.expression);
+    }
+    if statement.variant == "IfStatement" {
+        return expression_contains_try(statement.condition);
+    }
+    if statement.variant == "ForStatement" {
+        return expression_contains_try(statement.clause.iterable);
+    }
+    if statement.variant == "WithStatement" {
+        return clauses_contain_try(statement.clauses);
     }
     return false;
 }
@@ -538,7 +573,79 @@ fn replace_first_try_in_statement(statement: Statement, bind_name: string) -> Tr
             found: replaced.found
         };
     }
+    if statement.variant == "ThrowStatement" {
+        let replaced = replace_first_try(statement.expression, bind_name);
+        return TryStmtReplace {
+            statement: Statement.ThrowStatement {
+                expression: replaced.expression,
+                span: statement.span
+            },
+            operand: replaced.operand,
+            found: replaced.found
+        };
+    }
+    if statement.variant == "IfStatement" {
+        let replaced = replace_first_try(statement.condition, bind_name);
+        return TryStmtReplace {
+            statement: Statement.IfStatement {
+                condition: replaced.expression,
+                then_block: statement.then_block,
+                else_branch: statement.else_branch,
+                decorators: statement.decorators
+            },
+            operand: replaced.operand,
+            found: replaced.found
+        };
+    }
+    if statement.variant == "ForStatement" {
+        let replaced = replace_first_try(statement.clause.iterable, bind_name);
+        return TryStmtReplace {
+            statement: Statement.ForStatement {
+                clause: ForClause {
+                    target: statement.clause.target,
+                    iterable: replaced.expression,
+                    tokens: statement.clause.tokens
+                },
+                body: statement.body,
+                decorators: statement.decorators
+            },
+            operand: replaced.operand,
+            found: replaced.found
+        };
+    }
+    if statement.variant == "WithStatement" {
+        let replaced = replace_first_try_in_clauses(statement.clauses, bind_name);
+        return TryStmtReplace {
+            statement: Statement.WithStatement {
+                clauses: replaced.clauses,
+                body: statement.body,
+                decorators: statement.decorators
+            },
+            operand: replaced.operand,
+            found: replaced.found
+        };
+    }
     return stmt_not_found(statement);
+}
+
+fn replace_first_try_in_clauses(clauses: WithClause[], bind_name: string) -> TryClauseReplace {
+    let mut out: WithClause[] = [];
+    let mut operand: Expression = Expression.NullLiteral;
+    let mut found: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= clauses.length { break; }
+        if found { out.push(clauses[index]); } else {
+            let replaced = replace_first_try(clauses[index].expression, bind_name);
+            out.push(WithClause { expression: replaced.expression });
+            if replaced.found {
+                operand = replaced.operand;
+                found = true;
+            }
+        }
+        index += 1;
+    }
+    return TryClauseReplace { clauses: out, operand: operand, found: found };
 }
 
 fn stmt_not_found(statement: Statement) -> TryStmtReplace {

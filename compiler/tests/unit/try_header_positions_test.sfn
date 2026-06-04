@@ -1,0 +1,85 @@
+// `?` in statement HEADER positions (epic #371 R.4 — #834, PR review hardening).
+//
+// Beyond let-initializer / return / expression-statement, the desugar also
+// hoists `?` out of an `if` condition and a `for` iterable (and `throw` / `with`
+// clauses) so these no longer leak `<TryOperator>` into the emitted IR. Each is
+// rewritten continuation-style: the header `?` becomes a leading `match`, and
+// the original statement (header unwrapped) plus the rest of the block ride in
+// the `Ok` arm.
+struct Error {
+    message: string;
+}
+
+fn truthy(b: boolean) -> Result<boolean, Error> {
+    return Result.Ok { value: b };
+}
+
+fn fail_bool(msg: string) -> Result<boolean, Error> {
+    return Result.Err {
+        error: Error { message: msg }
+    };
+}
+
+fn ints() -> Result<int[], Error> {
+    return Result.Ok {
+        value: [1, 2, 3, 4]
+    };
+}
+
+fn fail_ints(msg: string) -> Result<int[], Error> {
+    return Result.Err {
+        error: Error { message: msg }
+    };
+}
+
+fn unwrap_or(r: Result<int, Error>, fallback: int) -> int {
+    match r {
+        Result.Ok { value }
+        : return value,
+        Result.Err { error }
+        : return fallback
+    }
+}
+
+fn msg_or(r: Result<int, Error>, fallback: string) -> string {
+    match r {
+        Result.Ok { value }
+        : return fallback,
+        Result.Err { error }
+        : return error.message
+    }
+}
+
+// `?` in an `if` condition.
+fn pick(c: Result<boolean, Error>, a: int, b: int) -> Result<int, Error> {
+    if c? {
+        return Result.Ok { value: a };
+    }
+    return Result.Ok { value: b };
+}
+
+// `?` in a `for` iterable.
+fn sum_all(source: Result<int[], Error>) -> Result<int, Error> {
+    let mut total: int = 0;
+    for x in source? {
+        total = total + x;
+    }
+    return Result.Ok { value: total };
+}
+
+test "try-header: `?` in if condition selects the true branch" {
+    assert unwrap_or(pick(truthy(true), 10, 20), -1) == 10;
+    assert unwrap_or(pick(truthy(false), 10, 20), -1) == 20;
+}
+
+test "try-header: `?` in if condition propagates Err" {
+    assert msg_or(pick(fail_bool("nope"), 10, 20), "ok") == "nope";
+}
+
+test "try-header: `?` in for iterable sums the unwrapped list" {
+    assert unwrap_or(sum_all(ints()), -1) == 10;
+}
+
+test "try-header: `?` in for iterable propagates Err" {
+    assert msg_or(sum_all(fail_ints("empty")), "ok") == "empty";
+}

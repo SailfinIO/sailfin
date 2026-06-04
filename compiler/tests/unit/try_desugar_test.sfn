@@ -67,14 +67,17 @@ test "desugar: `?`-free block is returned untouched" {
 }
 
 test "desugar: unsupported `?` position survives for the emitter diagnostic" {
-    // `throw r?` — a `?` in throw position is not hoistable, so it must remain
-    // after desugaring (emit_function then raises the unsupported-position
-    // diagnostic rather than emitting `<TryOperator>`).
-    let throw_try = Statement.ThrowStatement {
+    // `match r? { }` — a `?` in match-SUBJECT position is not hoistable (unlike
+    // let/return/expr/throw/if-condition/for-iterable/with-clause, which the
+    // desugar lifts), so it must remain after desugaring; emit_function then
+    // raises the unsupported-position diagnostic rather than emitting
+    // `<TryOperator>`.
+    let match_try = Statement.MatchStatement {
         expression: _try_of("r"),
-        span: null
+        cases: [],
+        decorators: []
     };
-    let input = _block([throw_try]);
+    let input = _block([match_try]);
     assert block_contains_try(input);
 
     let output = desugar_try_in_block(input);
