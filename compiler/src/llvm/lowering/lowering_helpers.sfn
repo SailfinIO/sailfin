@@ -99,6 +99,40 @@ fn extend_native_enums(values: NativeEnum[], extras: NativeEnum[]) -> NativeEnum
     return out;
 }
 
+// True iff a `NativeEnum` named `name` is already present. Used both by the
+// prelude injector's guard and by `lowering_core` to decide whether a prelude
+// `Result` was actually injected (so its descriptor registration can be
+// suppressed — see #1021 note below).
+fn native_enums_have_name(enums: NativeEnum[], name: string) -> boolean {
+    if enums == null { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= enums.length { break; }
+        let existing = enums[index];
+        if existing != null {
+            if existing.name == name { return true; }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+// True iff a `NativeStruct` named `name` is already present. Sibling of
+// `native_enums_have_name` for the prelude `Error` struct.
+fn native_structs_have_name(structs: NativeStruct[], name: string) -> boolean {
+    if structs == null { return false; }
+    let mut index: int = 0;
+    loop {
+        if index >= structs.length { break; }
+        let existing = structs[index];
+        if existing != null {
+            if existing.name == name { return true; }
+        }
+        index += 1;
+    }
+    return false;
+}
+
 // #1021: inject the prelude `Result<T, E>` enum into a module's combined enum
 // set when it is not already present via an in-file declaration or explicit
 // import. The prelude is linked into every Sailfin binary, so a bare user file
@@ -118,18 +152,18 @@ fn extend_native_enums(values: NativeEnum[], extras: NativeEnum[]) -> NativeEnum
 // always wins — preserving `result_enum_lowering_test.sfn`'s in-file semantics
 // and preventing a duplicate `%Result` type definition if a real prelude
 // artifact is ever staged.
+//
+// The injection is unconditional (every module gets `Result`/`Error` in its
+// LAYOUT type context) so construction/`match` lowering always resolves them.
+// Their *descriptor registration* (`sfn_type_register`) is suppressed for the
+// injected names in `lowering_core` — the prelude module owns that registration,
+// and re-emitting it in every consumer adds an undefined `sfn_type_register`
+// reference to modules that define no other types, breaking standalone-link
+// roundtrip tests (#1021 CI regression).
 fn inject_prelude_result_enum(enums: NativeEnum[]) -> NativeEnum[] {
     let mut out = enums;
     if out == null { out = []; }
-    let mut index: int = 0;
-    loop {
-        if index >= out.length { break; }
-        let existing = out[index];
-        if existing != null {
-            if existing.name == "Result" { return out; }
-        }
-        index += 1;
-    }
+    if native_enums_have_name(out, "Result") { return out; }
     let result_enum = NativeEnum {
         name: "Result",
         type_parameters: ["T", "E"],
@@ -174,15 +208,7 @@ fn inject_prelude_result_enum(enums: NativeEnum[]) -> NativeEnum[] {
 fn inject_prelude_error_struct(structs: NativeStruct[]) -> NativeStruct[] {
     let mut out = structs;
     if out == null { out = []; }
-    let mut index: int = 0;
-    loop {
-        if index >= out.length { break; }
-        let existing = out[index];
-        if existing != null {
-            if existing.name == "Error" { return out; }
-        }
-        index += 1;
-    }
+    if native_structs_have_name(out, "Error") { return out; }
     let error_struct = NativeStruct {
         name: "Error",
         fields: [NativeStructField {
