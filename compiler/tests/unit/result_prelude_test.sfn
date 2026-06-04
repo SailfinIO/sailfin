@@ -31,14 +31,27 @@ fn ok_len_or(r: Result<string, Error>, fallback: int) -> int {
     }
 }
 
+// `opaque*` are identity functions that the optimizer cannot fold: `sfn test`
+// links at -O0 (`cli_commands.sfn::_clang_link_test_cmd_with_deps`), so these
+// calls stay real boundaries and their results are runtime SSA values, not
+// literals. Routing every `Result` payload (and every expected operand) through
+// one forces the `match` to perform a genuine discriminant test + payload load
+// at runtime instead of letting a future regression const-fold or silently drop
+// the construction and elide the `assert` to an empty `ret void` body (the
+// #1020 false-pass shape). A wrong result now fails loudly. The IR-level
+// companion guard lives in `compiler/tests/e2e/test_result_prelude_discriminant.sh`.
+fn opaque(x: int) -> int { return x; }
+
+fn opaque_str(s: string) -> string { return s; }
+
 test "prelude Result: by-value int payload through both arms" {
-    assert unwrap_or(Result.Ok { value: 5 }, 0) == 5;
-    assert unwrap_or(Result.Err { error: 7 }, 100) == 107;
+    assert unwrap_or(Result.Ok { value: opaque(5) }, opaque(0)) == opaque(5);
+    assert unwrap_or(Result.Err { error: opaque(7) }, opaque(100)) == opaque(107);
 }
 
 test "prelude Result: Error struct payload round-trips" {
-    assert ok_len_or(Result.Ok { value: "hello" }, -1) == 5;
+    assert ok_len_or(Result.Ok { value: opaque_str("hello") }, opaque(-1)) == opaque(5);
     assert ok_len_or(Result.Err {
-        error: Error { message: "boom" }
-    }, 10) == 14;
+        error: Error { message: opaque_str("boom") }
+    }, opaque(10)) == opaque(14);
 }
