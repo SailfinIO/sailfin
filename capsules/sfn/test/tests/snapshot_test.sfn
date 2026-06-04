@@ -1,0 +1,79 @@
+// Tests for the sfn/test snapshot matcher (#977).
+//
+// Every behavior is exercised through `snapshot_match_in`, whose
+// directory and update flag are explicit parameters — so the tests are
+// hermetic (no cwd or environment dependence) and deterministic. Each
+// test writes under a unique subdirectory of `SAILFIN_TEST_SCRATCH` (the
+// per-file ephemeral scratch the runner provisions and tears down), so
+// runs never collide and leave nothing behind. `expect_snapshot` is the
+// thin env+default-dir wrapper over this same core (see `snapshot.sfn`).
+//
+// Tests are `![io]`: `snapshot_match_in` writes/reads golden files and
+// `env.get` reads the scratch path, both of which require `![io]`.
+import { find } from "sfn/strings";
+
+import { snapshot_match_in } from "../src/mod";
+
+// A unique, writable snapshot directory per test. Prefers the runner's
+// ephemeral `SAILFIN_TEST_SCRATCH`; falls back to `/tmp` for a direct
+// `sfn test <file>` invocation that didn't export it.
+fn _snap_dir(name: string) -> string ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch + "/snap-" + name; }
+    return "/tmp/sfn-snap-" + name;
+}
+
+// First run (golden absent) writes and passes; a second compare against
+// the just-written golden then matches.
+test "snapshot: first run writes and passes" ![io] {
+    let dir = _snap_dir("first");
+    let written = snapshot_match_in("hello\nworld", dir, "greeting", false);
+    assert written.ok;
+    let compared = snapshot_match_in("hello\nworld", dir, "greeting", false);
+    assert compared.ok;
+}
+
+// Identical content compares equal.
+test "snapshot: match on identical content" ![io] {
+    let dir = _snap_dir("match");
+    let first = snapshot_match_in("line-a\nline-b", dir, "doc", false);
+    assert first.ok;
+    let again = snapshot_match_in("line-a\nline-b", dir, "doc", false);
+    assert again.ok;
+}
+
+// A changed line fails and the diagnostic names the first divergent
+// line index (reusing #973's `matcher_eq_str_array`).
+test "snapshot: mismatch fails with line diff" ![io] {
+    let dir = _snap_dir("mismatch");
+    let written = snapshot_match_in("alpha\nbeta\ngamma", dir, "doc", false);
+    assert written.ok;
+    let changed = snapshot_match_in("alpha\nBETA\ngamma", dir, "doc", false);
+    assert ! changed.ok;
+    assert changed.message.length > 0;
+    assert find(changed.message, "index 1", 0) >= 0;
+}
+
+// A length-divergent body fails with a length-mismatch diagnostic.
+test "snapshot: length-divergent content fails" ![io] {
+    let dir = _snap_dir("lendiff");
+    let written = snapshot_match_in("one\ntwo", dir, "doc", false);
+    assert written.ok;
+    let longer = snapshot_match_in("one\ntwo\nthree", dir, "doc", false);
+    assert ! longer.ok;
+    assert find(longer.message, "length", 0) >= 0;
+}
+
+// `update == true` overwrites a stale golden; without it the same change
+// fails. After the update, a plain compare against the new golden passes.
+test "snapshot: update overwrites stale snapshot" ![io] {
+    let dir = _snap_dir("update");
+    let written = snapshot_match_in("v1", dir, "doc", false);
+    assert written.ok;
+    let stale = snapshot_match_in("v2", dir, "doc", false);
+    assert ! stale.ok;
+    let updated = snapshot_match_in("v2", dir, "doc", true);
+    assert updated.ok;
+    let after = snapshot_match_in("v2", dir, "doc", false);
+    assert after.ok;
+}

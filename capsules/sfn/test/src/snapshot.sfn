@@ -1,0 +1,119 @@
+// sfn/test — snapshot / golden-file matcher (issue #977, epic #841
+// test-infra Phase 2, sub-issue 2.4).
+//
+// A snapshot matcher writes a golden file on first run and compares
+// against it thereafter. `sfn test --update-snapshots` force-overwrites
+// the golden so an intentional change re-baselines in one pass.
+//
+// Two surfaces, mirroring the `expect.sfn` / `matcher.sfn` split:
+//
+//   1. `snapshot_match_in(actual, dir, key, update)` — the pure-logic
+//      core. The snapshot directory and the update flag are explicit
+//      parameters, so the behavior is fully testable without touching
+//      process-global state (cwd or environment). This is what the
+//      capsule's own tests drive.
+//   2. `expect_snapshot(actual, key)` — the ergonomic entry point. It
+//      resolves the snapshot directory (`tests/__snapshots__`, relative
+//      to the test's working directory) and reads the
+//      `--update-snapshots` flag from the environment
+//      (`SAILFIN_UPDATE_SNAPSHOTS=1`, threaded by `sfn test` in
+//      `cli_commands.sfn`), then delegates to the core.
+//
+// Both are `![io]`: a first run (or `--update`) writes the golden via
+// `fs.writeFile` after a recursive `fs.createDirectory`, and a compare
+// reads it back via `fs.readFile`. On mismatch the diagnostic reuses
+// #973's `matcher_eq_str_array` over `\n`-split lines to report the
+// first divergent line — the "line-by-line" diff the proposal calls for
+// until the `sfn/diff` capsule (post-1.0) supplies a unified diff. See
+// `docs/proposals/test-infra-epic/03-capsule-api.md` (Snapshots).
+//
+// Like the rest of the capsule, this is a free function rather than a
+// fluent `expect(out).to_match_snapshot(key)` builder: the method form
+// needs cross-module struct-method dispatch, which is currently
+// miscompiled (see `expect.sfn`). The behavior ships now; the fluent
+// sugar is a drop-in follow-up once that ABI bug is fixed.
+import { split } from "sfn/strings";
+
+import { MatchResult, match_fail, match_ok } from "./matcher";
+
+// ---------------------------------------------------------------------------
+// Environment / path resolution (the `expect_snapshot` glue)
+// ---------------------------------------------------------------------------
+// `--update-snapshots` is surfaced to the compiled test binary as the
+// `SAILFIN_UPDATE_SNAPSHOTS=1` environment variable (set by `sfn test`
+// in `cli_commands.sfn`, propagated to per-file children via the child
+// `env` prefix). Any other value — including unset — means "compare".
+fn _update_snapshots_enabled() -> boolean ![io] {
+    return env.get("SAILFIN_UPDATE_SNAPSHOTS") == "1";
+}
+
+// Snapshots live under `<package>/tests/__snapshots__/<key>.snap`,
+// resolved relative to the test process's working directory so they
+// persist in the repo alongside the test that produced them.
+fn _default_snapshot_dir() -> string { return "tests/__snapshots__"; }
+
+// ---------------------------------------------------------------------------
+// Line-by-line diff
+// ---------------------------------------------------------------------------
+// This mirrors #973's `matcher_eq_str_array` byte-for-byte in message
+// shape (a length mismatch, else the first divergent index, with the
+// golden as `expected` and the new output as `actual`) but is inlined
+// rather than imported: that matcher is `![pure]`, and the effect system
+// rejects `![io, pure]` as a contradiction (E0403). An `![io]` snapshot
+// function therefore cannot call the `![pure]` matcher, so the diff lives
+// here as a plain (effect-free) helper any caller can reach. Returns the
+// empty string when the line sets are equal.
+fn _snapshot_line_diff(actual: string, golden: string) -> string {
+    let actual_lines = split(actual, "\n");
+    let golden_lines = split(golden, "\n");
+    if actual_lines.length != golden_lines.length {
+        return "expected length: " + number_to_string(golden_lines.length)
+            + "; actual length: "
+            + number_to_string(actual_lines.length);
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= actual_lines.length { break; }
+        if actual_lines[i] != golden_lines[i] {
+            return "mismatch at index " + number_to_string(i) + "; expected: \""
+                + golden_lines[i]
+                + "\"; actual: \""
+                + actual_lines[i]
+                + "\"";
+        }
+        i += 1;
+    }
+    return "";
+}
+
+// ---------------------------------------------------------------------------
+// Core matcher
+// ---------------------------------------------------------------------------
+// Compare `actual` against the snapshot at `dir/key.snap`. Writes (and
+// passes) when `update` is true or the golden is absent; compares
+// otherwise. The directory is created recursively first so a fresh
+// `__snapshots__` tree needs no pre-staging.
+fn snapshot_match_in(actual: string, dir: string, key: string, update: boolean) -> MatchResult ![io] {
+    fs.createDirectory(dir, true);
+    let path = dir + "/" + key + ".snap";
+    if update || !fs.exists(path) {
+        fs.writeFile(path, actual);
+        return match_ok();
+    }
+    let golden = fs.readFile(path);
+    if actual == golden { return match_ok(); }
+    let diff = _snapshot_line_diff(actual, golden);
+    return match_fail("snapshot mismatch for \"" + key + "\" (" + path + "): "
+        + diff);
+}
+
+// ---------------------------------------------------------------------------
+// Ergonomic entry point
+// ---------------------------------------------------------------------------
+// Resolve the default snapshot directory and the `--update-snapshots`
+// flag from the environment, then delegate to `snapshot_match_in`.
+//
+//   assert expect_snapshot(render(node), "render_basic").ok;
+fn expect_snapshot(actual: string, key: string) -> MatchResult ![io] {
+    return snapshot_match_in(actual, _default_snapshot_dir(), key, _update_snapshots_enabled());
+}
