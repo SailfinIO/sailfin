@@ -169,6 +169,39 @@ fn _string_to_float(value: string) -> float {
     return result;
 }
 
+fn repeated(m: Matches, name: string) -> string[] {
+    // Collect every value recorded under a repeating value flag (built
+    // via `flag_repeat`) in command-line order. Returns `[]` when the
+    // flag was never supplied. `flag_names[i]` and `flag_values[i]` are
+    // parallel, so each occurrence contributes one value.
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= m.flag_names.length { break; }
+        if strings_equal(m.flag_names[i], name) {
+            out.push(m.flag_values[i]);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn count_flag(m: Matches, name: string) -> int {
+    // Count how many times a counted flag (built via `flag_count` /
+    // `flag_count_short`) occurred on the command line. Returns `0` when
+    // absent. Repeated long forms (`--verbose --verbose`) and clustered
+    // short forms (`-vvv`, which the parser expands to one occurrence per
+    // character) both contribute one to the count per occurrence.
+    let mut n: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= m.flag_names.length { break; }
+        if strings_equal(m.flag_names[i], name) { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
 fn subcommand(m: Matches) -> string {
     // Returns the deepest matched subcommand name, or empty string if
     // none. For a multi-level tree this is the leaf (e.g. "get" for
