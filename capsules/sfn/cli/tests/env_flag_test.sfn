@@ -1,0 +1,175 @@
+// Tests for `flag_env` — Issue #798 (Phase 1 of the CLI Modularization
+// Epic, #351, proposal §7 Issue 1.9).
+//
+// Covers the chainable `flag_env` marker, the env-aware `parse_with_env()`
+// fallback (argv > env > default precedence, required satisfaction via
+// env), the `[env: VAR]` help annotation, and the invariant that the
+// pure `parse()` never reads the environment.
+//
+// Env-reading cases use `PATH` (reliably set and non-empty in any test
+// environment) as the "env present" source and a deliberately bogus
+// name as the "env absent" source — there is no intrinsic for *setting*
+// an env var from Sailfin, so the tests read existing process state.
+import {
+    command,
+    flag,
+    flag_env,
+    flag_required,
+    flag_value,
+    get,
+    has_flag,
+    help,
+    parse,
+    parse_with_env,
+    with_flag
+} from "../src/mod";
+
+// A var name that no sane environment defines; used for "env unset".
+let UNSET_VAR: string = "SFN_CLI_ENV_FLAG_TEST_UNSET_798";
+
+fn _contains(text: string, needle: string) -> boolean {
+    if needle.length > text.length { return false; }
+    let limit = text.length - needle.length;
+    let mut i: int = 0;
+    loop {
+        if i > limit { break; }
+        if strings_equal(substring(text, i, i + needle.length), needle) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// ---- Builder ----
+test "flag_env: sets env_var and preserves other fields" {
+    let f = flag_env(flag_value("token", "API token"), "API_TOKEN");
+    assert strings_equal(f.long_name, "token");
+    assert strings_equal(f.description, "API token");
+    assert f.takes_value == true;
+    assert f.required == false;
+    assert strings_equal(f.env_var, "API_TOKEN");
+}
+
+test "flag_env: default-constructed flags have empty env_var" {
+    let f = flag_value("token", "API token");
+    assert strings_equal(f.env_var, "");
+    let b = flag("debug", "Enable debug");
+    assert strings_equal(b.env_var, "");
+}
+
+test "flag_env: chainable with flag_required (env then required)" {
+    let f = flag_required(flag_env(flag_value("token", "t"), "API_TOKEN"));
+    assert strings_equal(f.env_var, "API_TOKEN");
+    assert f.required == true;
+    assert f.takes_value == true;
+}
+
+test "flag_env: chainable with flag_required (required then env)" {
+    let f = flag_env(flag_required(flag_value("token", "t")), "API_TOKEN");
+    assert strings_equal(f.env_var, "API_TOKEN");
+    assert f.required == true;
+}
+
+// ---- Purity: parse() never reads env ----
+test "parse: pure parser ignores env binding (flag stays absent)" {
+    // `parse()` is the pure workhorse — even with an env binding whose
+    // variable (PATH) is set, the flag must NOT appear when argv omits
+    // it. Env fallback is exclusively `parse_with_env()`'s job.
+    let cmd = with_flag(command("app", "desc"), flag_env(flag_value("token", "API token"), "PATH"));
+    let argv: string[] = ["app"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert has_flag(r.matches, "token") == false;
+}
+
+// ---- parse_with_env: argv present (env must not override) ----
+test "parse_with_env: argv present with unset env yields argv value" ![io] {
+    let cmd = with_flag(command("app", "desc"), flag_env(flag_value("token", "API token"), UNSET_VAR));
+    let argv: string[] = ["app", "--token", "from-argv"];
+    let r = parse_with_env(cmd, argv);
+    assert r.ok == true;
+    assert strings_equal(get(r.matches, "token"), "from-argv");
+}
+
+test "parse_with_env: argv value wins over env when both are present" ![io] {
+    let path_value = env.get("PATH");
+    assert path_value.length > 0;
+    let cmd = with_flag(command("app", "desc"), flag_env(flag_value("token", "API token"), "PATH"));
+    let argv: string[] = ["app", "--token", "explicit"];
+    let r = parse_with_env(cmd, argv);
+    assert r.ok == true;
+    assert strings_equal(get(r.matches, "token"), "explicit");
+    assert ! strings_equal(get(r.matches, "token"), path_value);
+}
+
+// ---- parse_with_env: argv absent (env fills in) ----
+test "parse_with_env: env value used when argv is absent" ![io] {
+    let path_value = env.get("PATH");
+    assert path_value.length > 0;
+    let cmd = with_flag(command("app", "desc"), flag_env(flag_value("token", "API token"), "PATH"));
+    let argv: string[] = ["app"];
+    let r = parse_with_env(cmd, argv);
+    assert r.ok == true;
+    assert has_flag(r.matches, "token") == true;
+    assert strings_equal(get(r.matches, "token"), path_value);
+}
+
+test "parse_with_env: boolean flag marked present from env" ![io] {
+    let path_value = env.get("PATH");
+    assert path_value.length > 0;
+    let cmd = with_flag(command("app", "desc"), flag_env(flag("debug", "Enable debug"), "PATH"));
+    let argv: string[] = ["app"];
+    let r = parse_with_env(cmd, argv);
+    assert r.ok == true;
+    assert has_flag(r.matches, "debug") == true;
+}
+
+test "parse_with_env: unset env with argv absent leaves optional flag absent" ![io] {
+    let cmd = with_flag(command("app", "desc"), flag_env(flag_value("token", "API token"), UNSET_VAR));
+    let argv: string[] = ["app"];
+    let r = parse_with_env(cmd, argv);
+    assert r.ok == true;
+    assert has_flag(r.matches, "token") == false;
+}
+
+// ---- parse_with_env + flag_required ----
+test "parse_with_env: required flag satisfied by env alone" ![io] {
+    let path_value = env.get("PATH");
+    assert path_value.length > 0;
+    let cmd = with_flag(command("app", "desc"), flag_required(flag_env(flag_value("token", "API token"), "PATH")));
+    let argv: string[] = ["app"];
+    let r = parse_with_env(cmd, argv);
+    assert r.ok == true;
+    assert strings_equal(r.error.kind, "ok");
+    assert strings_equal(get(r.matches, "token"), path_value);
+}
+
+test "parse_with_env: required env flag still fails when env unset and argv absent" ![io] {
+    let cmd = with_flag(command("app", "desc"), flag_required(flag_env(flag_value("token", "API token"), UNSET_VAR)));
+    let argv: string[] = ["app"];
+    let r = parse_with_env(cmd, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "missing_required");
+    assert strings_equal(r.error.flag_name, "token");
+}
+
+// ---- Help annotation ----
+test "help: env-bound flag is annotated with [env: VAR]" {
+    let cmd = with_flag(command("app", "desc"), flag_env(flag_value("token", "API token"), "API_TOKEN"));
+    let rendered = help(cmd);
+    assert _contains(rendered, "[env: API_TOKEN]") == true;
+}
+
+test "help: non-env flag has no [env:] annotation" {
+    let cmd = with_flag(command("app", "desc"), flag_value("token", "API token"));
+    let rendered = help(cmd);
+    assert _contains(rendered, "[env:") == false;
+}
+
+test "help: env and required annotations both render" {
+    let cmd = with_flag(command("app", "desc"), flag_required(flag_env(flag_value("token", "API token"), "API_TOKEN")));
+    let rendered = help(cmd);
+    assert _contains(rendered, "[env: API_TOKEN]") == true;
+    assert _contains(rendered, "(required)") == true;
+}

@@ -58,7 +58,8 @@ fn flag(long_name: string, description: string) -> Flag {
         takes_value: false,
         required: false,
         value_kind: "string",
-        choices: no_choices
+        choices: no_choices,
+        env_var: ""
     };
 }
 
@@ -72,7 +73,8 @@ fn flag_value(long_name: string, description: string) -> Flag {
         takes_value: true,
         required: false,
         value_kind: "string",
-        choices: no_choices
+        choices: no_choices,
+        env_var: ""
     };
 }
 
@@ -86,7 +88,8 @@ fn flag_short(long_name: string, short_name: string, description: string) -> Fla
         takes_value: false,
         required: false,
         value_kind: "string",
-        choices: no_choices
+        choices: no_choices,
+        env_var: ""
     };
 }
 
@@ -100,7 +103,8 @@ fn flag_value_short(long_name: string, short_name: string, description: string) 
         takes_value: true,
         required: false,
         value_kind: "string",
-        choices: no_choices
+        choices: no_choices,
+        env_var: ""
     };
 }
 
@@ -117,7 +121,8 @@ fn flag_int(long_name: string, description: string) -> Flag {
         takes_value: true,
         required: false,
         value_kind: "int",
-        choices: no_choices
+        choices: no_choices,
+        env_var: ""
     };
 }
 
@@ -134,7 +139,8 @@ fn flag_float(long_name: string, description: string) -> Flag {
         takes_value: true,
         required: false,
         value_kind: "float",
-        choices: no_choices
+        choices: no_choices,
+        env_var: ""
     };
 }
 
@@ -151,7 +157,8 @@ fn flag_path(long_name: string, description: string) -> Flag {
         takes_value: true,
         required: false,
         value_kind: "path",
-        choices: no_choices
+        choices: no_choices,
+        env_var: ""
     };
 }
 
@@ -170,7 +177,8 @@ fn flag_repeat(long_name: string, description: string) -> Flag {
         takes_value: true,
         required: false,
         value_kind: "repeat",
-        choices: no_choices
+        choices: no_choices,
+        env_var: ""
     };
 }
 
@@ -187,7 +195,8 @@ fn flag_count(long_name: string, description: string) -> Flag {
         takes_value: false,
         required: false,
         value_kind: "count",
-        choices: no_choices
+        choices: no_choices,
+        env_var: ""
     };
 }
 
@@ -203,7 +212,8 @@ fn flag_count_short(long_name: string, short_name: string, description: string) 
         takes_value: false,
         required: false,
         value_kind: "count",
-        choices: no_choices
+        choices: no_choices,
+        env_var: ""
     };
 }
 
@@ -220,7 +230,8 @@ fn flag_choice(long_name: string, description: string, choices: string[]) -> Fla
         takes_value: true,
         required: false,
         value_kind: "choice",
-        choices: choices
+        choices: choices,
+        env_var: ""
     };
 }
 
@@ -236,7 +247,33 @@ fn flag_required(f: Flag) -> Flag {
         takes_value: f.takes_value,
         required: true,
         value_kind: f.value_kind,
-        choices: f.choices
+        choices: f.choices,
+        env_var: f.env_var
+    };
+}
+
+fn flag_env(f: Flag, var_name: string) -> Flag {
+    // Bind a flag to an environment variable as a fallback source. When
+    // the flag is absent from argv, the `![io]` `parse_with_env()` entry (and
+    // therefore `run()`) reads `var_name` and, if it is set to a
+    // non-empty value, treats the flag as present with that value. The
+    // precedence is argv > env > default: an argv-supplied value always
+    // wins. An env-satisfied flag counts as present for `flag_required`,
+    // so `flag_required(flag_env(...))` is satisfied when only the env is
+    // set. Chainable in either order with `flag_required` and on any flag
+    // constructor. Help output annotates bound flags with
+    // `[env: <var_name>]`. The pure `parse()` never consults the
+    // environment — callers that want the fallback must use `parse_with_env()`
+    // or `run()`.
+    return Flag {
+        long_name: f.long_name,
+        short_name: f.short_name,
+        description: f.description,
+        takes_value: f.takes_value,
+        required: f.required,
+        value_kind: f.value_kind,
+        choices: f.choices,
+        env_var: var_name
     };
 }
 
