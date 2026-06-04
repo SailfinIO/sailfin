@@ -60,6 +60,7 @@ import {
     _sanitize_filename_cmd,
     _sha256_of_file_cmd,
     _shell_read_cmd,
+    _shell_single_quote_arg,
     _write_text_cmd
 } from "./cli_commands_utils";
 import { char_code_at_text, substring } from "./string_utils";
@@ -338,8 +339,13 @@ fn cache_lookup_complete(root: string, key: CacheKey) -> boolean ![io] {
 // atomicity is lost but the build still produces the artifact.
 fn _cache_atomic_copy(src: string, dst: string) -> boolean ![io] {
     let dst_dir = _dirname_cmd(dst);
-    let tmp = _shell_read_cmd("mktemp '" + dst_dir
-        + "/.sfn_pub.XXXXXX' 2>/dev/null");
+    // Shell-quote the template: `dst_dir` can derive from
+    // `$SAILFIN_BUILD_CACHE_DIR`, so a path containing `'` (or other
+    // shell metacharacters) would otherwise break quoting and create
+    // a command-injection surface. `cp`/`mv`/`rm` go through
+    // `process.run` (no shell) and need no quoting.
+    let template = _shell_single_quote_arg(dst_dir + "/.sfn_pub.XXXXXX");
+    let tmp = _shell_read_cmd("mktemp " + template + " 2>/dev/null");
     if tmp.length == 0 {
         // mktemp unavailable — degrade to a non-atomic direct copy.
         return process.run(["cp", src, dst]) == 0;
