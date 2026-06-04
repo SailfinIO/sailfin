@@ -9,7 +9,10 @@
 // CI. This unit test gates the same logic in milliseconds, so the
 // e2e test now runs the canonical scenario exactly once.
 import {
+    _atomic_rename_into_place,
     _collect_test_files_cmd,
+    _dirname_cmd,
+    _mktemp_sibling_cmd,
     _strip_trailing_slashes_cmd,
     _suite_name_from_path
 } from "../../src/cli_commands_utils";
@@ -127,4 +130,47 @@ test "suite-name: dot stays dot" { assert _suite_name_from_path(".") == "."; }
 
 test "suite-name: relative prefix discarded" {
     assert _suite_name_from_path("./foo/bar") == "bar";
+}
+
+// --------------------------------------------------------------
+// Atomic-publish primitives (#1011 / #1034)
+// --------------------------------------------------------------
+// `_mktemp_sibling_cmd` + `_atomic_rename_into_place` underpin the
+// race-free staging/cache publish: write to a temp BESIDE the
+// destination (same filesystem → atomic `mv`), then rename. These
+// gate the same-directory invariant — a temp in `/tmp` would make
+// `mv` a non-atomic cross-device copy and reintroduce the torn-read
+// race. `_dirname_cmd` edge cases are locked because the temp's
+// directory is derived from it.
+test "dirname: nested path returns parent dir" {
+    assert _dirname_cmd("build/cache/v1/ab/mod.ll") == "build/cache/v1/ab";
+}
+
+test "dirname: no slash returns dot" { assert _dirname_cmd("mod.ll") == "."; }
+
+test "dirname: top-level absolute returns root" {
+    assert _dirname_cmd("/mod.ll") == "/";
+}
+
+test "atomic-publish: temp lives in dest dir and rename round-trips" ![io] {
+    let scratch = "/tmp/sfn_atomic_publish_test";
+    process.run(["rm", "-rf", scratch]);
+    process.run(["mkdir", "-p", scratch]);
+    let dst = scratch + "/artifact.ll";
+
+    // The temp MUST be a sibling of `dst` (same dir) so the later
+    // `mv` is an atomic same-filesystem rename, not a cross-device copy.
+    let tmp = _mktemp_sibling_cmd(dst);
+    assert tmp.length > 0;
+    assert _dirname_cmd(tmp) == scratch;
+
+    fs.writeFile(tmp, "; published");
+    assert _atomic_rename_into_place(tmp, dst);
+    assert fs.exists(dst);
+    assert fs.readFile(dst) == "; published";
+    // The rename consumed the temp — it must not linger as a partial
+    // sibling a concurrent reader could pick up.
+    assert ! fs.exists(tmp);
+
+    process.run(["rm", "-rf", scratch]);
 }
