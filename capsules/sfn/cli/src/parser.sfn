@@ -114,6 +114,23 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
             let short = substring(token, 1, token.length);
             let f = _find_flag_short(active, short);
             if f.long_name.length == 0 {
+                // Not a single known short flag. Try a counted-flag
+                // cluster (e.g. -vvv): every character must map to the
+                // short alias of a count flag. On success, record one
+                // occurrence per character so `count_flag` totals them.
+                let cluster = _expand_count_cluster(active, short);
+                if cluster.length > 0 {
+                    let mut ci: int = 0;
+                    loop {
+                        if ci >= cluster.length { break; }
+                        fl_names.push(cluster[ci]);
+                        fl_present.push(true);
+                        fl_values.push("true");
+                        ci += 1;
+                    }
+                    idx += 1;
+                    continue;
+                }
                 return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_flag", _with_hint(cmd.name, path, "error: unknown flag -"
                     + short), short, "");
             }
@@ -408,6 +425,30 @@ fn _find_subcmd(cmd: Command, name: string) -> Command {
         flags: empty_flags,
         subcmds: empty_subs
     };
+}
+
+fn _expand_count_cluster(active: Command, cluster: string) -> string[] {
+    // For a clustered short token like "vvv", return the long names to
+    // record — one per character — iff every character maps to the short
+    // alias of a count flag (`value_kind == "count"`). Returns `[]` when
+    // the cluster is shorter than two characters or any character is not
+    // a counted-flag short alias, signalling the caller to fall back to
+    // the unknown-flag path. Single short flags (length 1) are handled by
+    // the normal `_find_flag_short` lookup and never reach here.
+    let empty: string[] = [];
+    if cluster.length < 2 { return empty; }
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= cluster.length { break; }
+        let ch = grapheme_at(cluster, i);
+        let f = _find_flag_short(active, ch);
+        if f.long_name.length == 0 { return empty; }
+        if !strings_equal(f.value_kind, "count") { return empty; }
+        out.push(f.long_name);
+        i += 1;
+    }
+    return out;
 }
 
 fn _resolve_active_path(cmd: Command, path: string[]) -> Command {

@@ -82,6 +82,9 @@ export {
     flag_float,
     flag_path,
     flag_choice,
+    flag_repeat,
+    flag_count,
+    flag_count_short,
     flag_required,
     command,
     with_version,
@@ -103,6 +106,8 @@ export {
     get_choice,
     has_flag,
     has,
+    repeated,
+    count_flag,
     subcommand,
     subcommand_path,
     positionals
