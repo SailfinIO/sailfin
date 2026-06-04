@@ -76,24 +76,6 @@ struct Timespec {
 // platform-constants home is deferred (this issue's `Out:` scope).
 let EINTR: i32 = 4;
 
-// POSIX `CLOCK_MONOTONIC` clk_id — a steadily-advancing clock
-// unaffected by wall-clock adjustments, the correct source for
-// elapsed-time measurement. The numeric `clk_id` diverges by platform:
-// Linux x86_64 spells it `1`, while macOS arm64 (Darwin) spells it `6`.
-//
-// Pure Sailfin can't yet read the platform's header constant (a
-// target-aware platform-constant mechanism is deferred under epic
-// #763), and the clean fix — an emit-time sentinel intrinsic that folds
-// to the right `i32` per target — can't be used *here* either:
-// `make compile` recompiles this runtime module with the pinned *seed*
-// compiler, which predates any newly-added intrinsic, so a sentinel
-// would have to ship in a seed before `clock.sfn` could call it. Until
-// that lands (tracked as the #819 follow-up), `sfn_clock_monotonic_nanos`
-// probes the value at runtime: it tries the Linux clk_id first and, on
-// failure, retries with the Darwin clk_id (see below).
-let CLOCK_MONOTONIC_LINUX: i32 = 1;
-let CLOCK_MONOTONIC_DARWIN: i32 = 6;
-
 // Nanoseconds per second — the scale factor folding `tv_sec` into the
 // combined nanosecond result.
 let NANOS_PER_SEC: i64 = 1000000000;
@@ -129,16 +111,22 @@ fn sfn_clock_monotonic_nanos() -> i64 ![clock] {
     let mut ts: Timespec = Timespec { tv_sec: 0, tv_nsec: 0 };
     let ts_ptr: * Timespec = & ts;
 
-    // Read the monotonic clock. `CLOCK_MONOTONIC`'s `clk_id` differs by
-    // platform (Linux `1`, Darwin `6`), so probe the Linux value first
-    // and, on failure, retry with the Darwin value. On Linux the first
-    // call succeeds (`ret == 0`) and the fallback is never taken; on
-    // Darwin `clock_gettime(1, …)` returns `EINVAL` (non-zero, leaving
-    // `ts` untouched) and the second call with `6` populates it. The
-    // kernel writes `tv_sec` / `tv_nsec` through `ts_ptr` on whichever
-    // call succeeds.
-    let mut ret: i32 = clock_gettime(CLOCK_MONOTONIC_LINUX, ts_ptr);
-    if ret != 0 { ret = clock_gettime(CLOCK_MONOTONIC_DARWIN, ts_ptr); }
+    // Read the monotonic clock. `CLOCK_MONOTONIC` is a steadily-advancing
+    // clock unaffected by wall-clock adjustments — the correct source for
+    // elapsed-time measurement. Its `clk_id` — the numeric constant that
+    // selects it in `clock_gettime` — diverges by platform: Linux x86_64
+    // spells it `1`, macOS arm64 (Darwin) spells it `6`.
+    // `sailfin_intrinsic_clock_monotonic_id()`
+    // (#908) folds to the right `i32` immediate per target at emit time,
+    // chosen from the same `SAILFIN_TARGET_OS` / `uname -s` probe the
+    // errno-locator sentinel (#887) uses. It emits no `call` and no
+    // `declare`: the lowering replaces the call site with a bare constant,
+    // so a single syscall populates `ts` on every target. This swap (#909)
+    // replaced the earlier runtime clk_id probe (#905/#819 — try `1`, fall
+    // back to `6` on `EINVAL`) once the intrinsic shipped in a pinned seed,
+    // dropping the extra failed `clock_gettime` call on Darwin. The kernel
+    // writes `tv_sec` / `tv_nsec` through `ts_ptr` when `ret == 0`.
+    let ret: i32 = clock_gettime(sailfin_intrinsic_clock_monotonic_id(), ts_ptr);
     if ret != 0 { return 0; }
 
     // Read the fields back from the *same* allocation, after the call.
