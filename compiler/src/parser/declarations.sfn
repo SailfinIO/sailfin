@@ -1690,6 +1690,10 @@ fn parse_test(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
 fn parse_lifecycle_hook(initial_parser: Parser, decorators: Decorator[], kind: string) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
+    // Anchor diagnostics (duplicate-hook, effect errors) at the hook
+    // introducer token, since hooks carry no quoted name to span.
+    let keyword_token = parser_peek_raw(parser);
+    let name_span = source_span_from_tokens([keyword_token]);
     parser = consume_keyword(parser, kind);
 
     let effect_result = parse_effect_list(parser);
@@ -1703,7 +1707,7 @@ fn parse_lifecycle_hook(initial_parser: Parser, decorators: Decorator[], kind: s
 
     let statement = Statement.TestDeclaration {
         name: "__hook_" + kind,
-        name_span: null,
+        name_span: name_span,
         body: body,
         effects: inferred_effects,
         decorators: decorators,

@@ -105,7 +105,42 @@ EOF
     return 0
 }
 
+# Regression for the filter edge case (#975 review): a `-k` pattern that
+# matches no real test must skip a hooks-bearing file cleanly — hooks alone
+# must NOT keep the file alive and trim it to a hooks-only, main-less harness
+# that fails to link. The file from the ordering test has tests "alpha"/"beta"
+# plus four hooks; `-k zzz_nomatch` matches no test, so the file is dropped
+# and the run reports 0 tests with a clean exit.
+test_hooks_dont_keep_unmatched_file() {
+    mkdir -p "$SCRATCH/proj"
+    # reuse the fixture written by test_hook_ordering if present; otherwise
+    # write it.
+    if [ ! -f "$SCRATCH/proj/lifecycle_test.sfn" ]; then
+        cat > "$SCRATCH/proj/lifecycle_test.sfn" <<'EOF'
+before_each ![io] { print.info("BEFORE_EACH"); }
+test "alpha" ![io] { print.info("TEST_ALPHA"); }
+EOF
+    fi
+    local log="$SCRATCH/proj/filter.log"
+    pushd "$SCRATCH/proj" >/dev/null
+    if ! "$BINARY" test -k zzz_nomatch "$SCRATCH/proj" > "$log" 2>&1; then
+        popd >/dev/null
+        echo "[test]   sfn test -k zzz_nomatch should exit 0 (no matching tests), but failed:"
+        cat "$log"
+        return 1
+    fi
+    popd >/dev/null
+    # No empty-harness link failure, and no hook was counted/run as a test.
+    if grep -qiE "no main|undefined.*main|link|TEST_ALPHA|BEFORE_EACH" "$log"; then
+        echo "[test]   unexpected link failure or hook/test execution under non-matching -k:"
+        cat "$log"
+        return 1
+    fi
+    return 0
+}
+
 run_test "lifecycle hooks wrap tests in before_all/before_each/after_each/after_all order" test_hook_ordering
+run_test "non-matching -k skips hooks-bearing file without empty-harness link failure" test_hooks_dont_keep_unmatched_file
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

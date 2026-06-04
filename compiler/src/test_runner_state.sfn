@@ -182,3 +182,16 @@ fn test_decl_matches_filters(statement: Statement) -> boolean {
     }
     return true;
 }
+
+// True when `statement` is a runnable (non-hook) test matching the active
+// filters. `test_decl_matches_filters` keeps lifecycle hooks alive for the
+// program-trim path, but the "does this file have any test to run?" and
+// "how many tests?" paths must NOT count hooks: a file whose only matches
+// are hooks has nothing to run (and would synthesize an empty, main-less
+// harness), and hooks must not inflate the JSON `total`. Use this predicate
+// for those paths instead (#975).
+fn test_decl_is_matching_test(statement: Statement) -> boolean {
+    if statement.variant != "TestDeclaration" { return false; }
+    if statement.hook_kind != "" { return false; }
+    return test_decl_matches_filters(statement);
+}
