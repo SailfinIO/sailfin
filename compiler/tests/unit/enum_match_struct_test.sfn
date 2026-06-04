@@ -100,7 +100,7 @@ test "enum_match: all priority labels" {
 //
 // A non-generic enum stores a user-struct variant payload INLINE (by value),
 // so the `match` binding must load the struct by value. This is the
-// `!substituted == true` branch of the pointer-strip in
+// non-generic (`!substituted`) branch of the pointer-strip in
 // `instructions_match_condition.sfn`: the boxed-payload fix (#830) only diverts
 // the GENERIC, monomorphised path (where the payload is stored boxed as `%T*`)
 // to keep the pointer — the non-generic inline path here must keep stripping to
