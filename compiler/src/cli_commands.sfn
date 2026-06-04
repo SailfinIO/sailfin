@@ -841,19 +841,44 @@ fn _append_test_filter_args(argv: string[], name_filter: string, tag_filter: str
     return out;
 }
 
-fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: string, runtime_objdir: string, self_exe: string, path: string, name_filter: string, tag_filter: string) -> int ![io] {
+fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: string, runtime_objdir: string, self_exe: string, path: string, name_filter: string, tag_filter: string, update_snapshots: boolean) -> int ![io] {
     // #940: `SAILFIN_TEST_RUNTIME_OBJDIR` points the child's runtime
     // link at the shared, invocation-stable object dir the parent
     // warmed once, so the runtime isn't recompiled per test file.
+    // #977: when `--update-snapshots` is active, prepend
+    // `SAILFIN_UPDATE_SNAPSHOTS=1` to the child's `env` so the child —
+    // and the test binary it execs (which inherits the child's
+    // environment through its own `env` prefix) — re-baseline golden
+    // files. When false the argv is byte-identical to the pre-#977 shape.
     if timeout_cmd.length > 0 {
-        let base = [timeout_cmd, timeout_secs, "env", "SAILFIN_TEST_SCRATCH="
+        let mut base = [timeout_cmd, timeout_secs, "env", "SAILFIN_TEST_SCRATCH="
             + child_scratch, "SAILFIN_TEST_RUNTIME_OBJDIR="
-            + runtime_objdir, self_exe, "test", path];
+            + runtime_objdir];
+        if update_snapshots { base.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
+        base.push(self_exe);
+        base.push("test");
+        base.push(path);
         return process.run(_append_test_filter_args(base, name_filter, tag_filter));
     }
-    let base = ["env", "SAILFIN_TEST_SCRATCH=" + child_scratch, "SAILFIN_TEST_RUNTIME_OBJDIR="
-        + runtime_objdir, self_exe, "test", path];
+    let mut base = ["env", "SAILFIN_TEST_SCRATCH=" + child_scratch, "SAILFIN_TEST_RUNTIME_OBJDIR="
+        + runtime_objdir];
+    if update_snapshots { base.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
+    base.push(self_exe);
+    base.push("test");
+    base.push(path);
     return process.run(_append_test_filter_args(base, name_filter, tag_filter));
+}
+
+// Build the argv that execs a compiled test binary. Always pins
+// `SAILFIN_TEST_SCRATCH` (the C-runtime assert-record key); #977 adds
+// `SAILFIN_UPDATE_SNAPSHOTS=1` when `--update-snapshots` is active so
+// `sfn/test::expect_snapshot` re-baselines. When `update_snapshots` is
+// false the argv is byte-identical to the pre-#977 shape.
+fn _test_exec_argv(scratch_root: string, exe_path: string, update_snapshots: boolean) -> string[] {
+    let mut argv = ["env", "SAILFIN_TEST_SCRATCH=" + scratch_root];
+    if update_snapshots { argv.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
+    argv.push(exe_path);
+    return argv;
 }
 
 // Tear down a runner-owned ephemeral scratch tree, mirroring the
@@ -894,11 +919,19 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
     // value and compose (a test must satisfy every active filter).
     let mut name_filter: string = "";
     let mut tag_filter: string = "";
+    // `--update-snapshots` (issue #977): re-baseline golden files this
+    // run. Threaded to each compiled test binary as
+    // `SAILFIN_UPDATE_SNAPSHOTS=1` so `sfn/test::expect_snapshot`
+    // overwrites instead of comparing. Defaults false; when false every
+    // child `env` argv is byte-identical to the pre-#977 shape.
+    let mut update_snapshots: boolean = false;
     let mut ai: int = 1;
     loop {
         if ai >= args.length { break; }
         let arg = args[ai];
-        if strings_equal(arg, "--json") { json_output = true; } else if strings_equal(arg, "-k") {
+        if strings_equal(arg, "--json") { json_output = true; } else if strings_equal(arg, "--update-snapshots") {
+            update_snapshots = true;
+        } else if strings_equal(arg, "-k") {
             if ai + 1 >= args.length {
                 print("sfn test: -k requires a value");
                 return 2;
@@ -1157,13 +1190,13 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
             // this per-file dir — see `SAILFIN_TEST_RUNTIME_OBJDIR`.
             let child_scratch = sub_root + "/sub-" + number_to_string(ti);
             _ensure_dir_cmd(child_scratch);
-            let mut rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter);
+            let mut rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter, update_snapshots);
             if _should_retry_test(rc, sub_retries_disabled) {
                 print("[test] RETRY: " + _package_basename(path)
                     + " (exit code "
                     + number_to_string(rc)
                     + ", retrying once)");
-                rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter);
+                rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter, update_snapshots);
             }
             if rc == 0 { suites[suite_idx].pass_count += 1; } else {
                 suites[suite_idx].fail_count += 1;
@@ -1459,8 +1492,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         if fs.exists(fail_record_path) { fs.deleteFile(fail_record_path); }
 
         if trace_runner { print.err("test runner: exec start"); }
-        let mut run_rc = process.run(["env", "SAILFIN_TEST_SCRATCH="
-            + scratch_root, exe_path]);
+        let mut run_rc = process.run(_test_exec_argv(scratch_root, exe_path, update_snapshots));
         // Signal-kill retry (ported from `scripts/run_native_test.sh`
         // by issue #845). 137 (OOM-SIGKILL) / 139 (SIGSEGV) are
         // transient under sustained CI memory pressure on the
@@ -1490,7 +1522,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
             if fs.exists(fail_record_path) {
                 fs.deleteFile(fail_record_path);
             }
-            run_rc = process.run(["env", "SAILFIN_TEST_SCRATCH=" + scratch_root, exe_path]);
+            run_rc = process.run(_test_exec_argv(scratch_root, exe_path, update_snapshots));
         }
         if trace_runner {
             print.err("test runner: exec done (exit=" + number_to_string(run_rc)

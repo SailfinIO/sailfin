@@ -367,3 +367,12 @@ export {
     expect_to_throw,
     expect_to_throw_with
 } from "./expect";
+
+// ---------------------------------------------------------------------------
+// Snapshot / golden-file matcher (issue #977, proposal §2.4)
+// ---------------------------------------------------------------------------
+// `expect_snapshot(actual, key)` is the `![io]` entry point: write on
+// first run / `--update-snapshots`, compare thereafter. `snapshot_match_in`
+// is the testable core with the directory + update flag passed explicitly.
+// See `snapshot.sfn`.
+export { expect_snapshot, snapshot_match_in } from "./snapshot";
