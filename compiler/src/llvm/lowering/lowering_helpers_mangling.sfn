@@ -70,12 +70,16 @@ fn _collect_struct_method_symbols(native_text: string) -> string[] {
 
         if starts_with(line, ".struct ") {
             let tail = trim_text(substring(line, 8, line.length));
-            // Struct name is the first whitespace-delimited token
-            // (`.struct Foo implements Bar` → `Foo`).
+            // Stop at the first `<` (generic params) or space (`implements
+            // ...`). `flatten_struct_methods` builds the lowered symbol from
+            // the bare struct name, so `.struct Foo<T> implements Bar` must
+            // resolve to `Foo`, not `Foo<T>`.
             let mut name_end: int = 0;
             loop {
                 if name_end >= tail.length { break; }
-                if tail[name_end] == " " { break; }
+                let ch = tail[name_end];
+                if ch == " " { break; }
+                if ch == "<" { break; }
                 name_end += 1;
             }
             current_struct = substring(tail, 0, name_end);
@@ -87,11 +91,23 @@ fn _collect_struct_method_symbols(native_text: string) -> string[] {
         }
         if current_struct.length == 0 { continue; }
         if starts_with(line, ".method ") {
-            let tail = trim_text(substring(line, 8, line.length));
-            // Method name runs up to the opening parameter paren.
-            let paren = index_of(tail, "(");
-            if paren <= 0 { continue; }
-            let method_name = trim_text(substring(tail, 0, paren));
+            let mut tail = trim_text(substring(line, 8, line.length));
+            // The lowered symbol uses the bare method name, so drop an
+            // `async ` prefix and any `<...>` generic parameter list:
+            // `.method async foo<T>(...)` → `foo`.
+            if starts_with(tail, "async ") {
+                tail = trim_text(substring(tail, 6, tail.length));
+            }
+            let mut name_end: int = 0;
+            loop {
+                if name_end >= tail.length { break; }
+                let ch = tail[name_end];
+                if ch == "(" { break; }
+                if ch == "<" { break; }
+                name_end += 1;
+            }
+            if name_end >= tail.length { continue; }
+            let method_name = trim_text(substring(tail, 0, name_end));
             if method_name.length == 0 { continue; }
             let symbol = sanitize_symbol(current_struct + method_name);
             if symbol.length == 0 { continue; }
