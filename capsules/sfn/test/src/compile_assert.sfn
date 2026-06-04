@@ -1,0 +1,251 @@
+// sfn/test — compile-as-test assertions (issue #974, epic #841
+// test-infra Phase 2, sub-issue 2.6).
+//
+// `assert_compiles` / `assert_does_not_compile` let a test assert how a
+// snippet of Sailfin *source* behaves under the frontend (lex → parse →
+// typecheck → effect-check) without compiling and linking a binary. Both
+// shell out to the already-shipped `sfn check --json`
+// (`compiler/src/cli_check.sfn`, schema `sailfin-check/1` encoded by
+// `compiler/src/diagnostics_json.sfn`), capture stdout via
+// `process.run_capture`, and parse the structured diagnostic envelope
+// with `sfn/json`. No compiler change is needed — `check --json` and
+// `process.run_capture` (`runtime/sfn/process.sfn`) both already exist.
+//
+// Like the rest of the capsule these are free functions returning a
+// `MatchResult` (`.ok == true` passed, `.ok == false` carries
+// `.message`) rather than a fluent builder — cross-module struct-method
+// dispatch is currently miscompiled (see `expect.sfn`). They are `![io]`:
+// running a child process and writing the temp source file both require
+// `io`.
+//
+// Hermeticity: the `sfn` binary is resolved from `$SAILFIN_BIN` with a
+// documented fallback of `build/native/sailfin` (the self-hosted binary,
+// relative to the repo root the test runs from), so CI can point the
+// assertions at any compiler without editing the test. The child is
+// spawned with an empty environment — `sfn check` on an import-free
+// snippet reads no environment variables — so the result does not depend
+// on the parent process's ambient env.
+//
+// Scope (per the issue): a single temp *file* is created under a fresh
+// `fs.mkdtemp` directory and removed afterward; there is no recursive
+// directory teardown (only one file is ever written).
+import {
+    get_array,
+    get_number,
+    get_object,
+    get_string,
+    has_key,
+    parse
+} from "sfn/json";
+import { find } from "sfn/strings";
+
+import { MatchResult, match_fail, match_ok } from "./matcher";
+
+// ---------------------------------------------------------------------------
+// CompileExpect
+// ---------------------------------------------------------------------------
+// The expectation passed to `assert_compiles`:
+//   - `effects`: when non-empty, the `source` is treated as a function
+//     *body* and wrapped in `fn __sfn_compile_probe() ![<effects>] { … }`
+//     so a caller can probe whether a body type-/effect-checks under a
+//     given effect row. When empty, `source` is checked verbatim as a
+//     complete file.
+//   - `ok`: `true` requires the snippet to compile with zero errors;
+//     `false` requires at least one error.
+//   - `diagnostic_pattern`: when non-empty, at least one diagnostic
+//     message must contain it (substring via `sfn/strings::find`).
+struct CompileExpect {
+    effects: string[];
+    ok: boolean;
+    diagnostic_pattern: string;
+}
+
+// ---------------------------------------------------------------------------
+// Internal: the outcome of one `sfn check --json` run
+// ---------------------------------------------------------------------------
+// `ran` is the discriminator: `false` means the child produced no
+// parseable `sailfin-check/1` envelope (spawn failure, crash, or garbage
+// on stdout), in which case `raw` carries the captured output for the
+// failure diagnostic. When `ran` is `true`, `errors` is the envelope's
+// `summary.errors` and `messages` is every event's `message` string.
+struct _CheckOutcome {
+    ran: boolean;
+    errors: int;
+    messages: string[];
+    raw: string;
+}
+
+fn _outcome_failed(raw: string) -> _CheckOutcome {
+    return _CheckOutcome {
+        ran: false,
+        errors: 0,
+        messages: [],
+        raw: raw
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Binary resolution + program assembly
+// ---------------------------------------------------------------------------
+fn _resolve_sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _join_effects(effects: string[]) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= effects.length { break; }
+        if i > 0 { out = out + ", "; }
+        out = out + effects[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn _build_program(source: string, effects: string[]) -> string {
+    if effects.length == 0 { return source; }
+    return "fn __sfn_compile_probe() ![" + _join_effects(effects) + "] {\n"
+        + source
+        + "\n}\n";
+}
+
+// ---------------------------------------------------------------------------
+// Envelope parsing
+// ---------------------------------------------------------------------------
+// `sfn check --json` writes exactly one `sailfin-check/1` object to
+// stdout. Skip any leading whitespace/newline by anchoring on the first
+// `{` before parsing; a missing `{`, a parse miss, or an envelope without
+// the `schema_version` marker all collapse to a non-`ran` outcome so the
+// assertion fails loudly rather than silently treating "no envelope" as
+// "compiled".
+fn _parse_outcome(stdout: string, stderr: string) -> _CheckOutcome {
+    let brace = find(stdout, "{", 0);
+    if brace < 0 {
+        return _outcome_failed("sfn check produced no JSON on stdout; stderr: "
+            + stderr);
+    }
+    let envelope = parse(substring(stdout, brace, stdout.length));
+    if !has_key(envelope, "schema_version") {
+        return _outcome_failed("sfn check output was not a sailfin-check envelope: "
+            + stdout);
+    }
+    let summary = get_object(envelope, "summary");
+    let errors = get_number(summary, "errors");
+    let events = get_array(envelope, "events");
+    let mut messages: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= events.length { break; }
+        messages.push(get_string(events[i], "message"));
+        i += 1;
+    }
+    return _CheckOutcome {
+        ran: true,
+        errors: errors as int,
+        messages: messages,
+        raw: stdout
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Run `sfn check --json` over `source`
+// ---------------------------------------------------------------------------
+fn _run_compile_check(source: string, effects: string[]) -> _CheckOutcome ![io] {
+    let program = _build_program(source, effects);
+    let dir = fs.mkdtemp("sfn-compile-assert-");
+    if dir.length == 0 {
+        return _outcome_failed("failed to create temp dir for compile assertion");
+    }
+    let path = dir + "/probe.sfn";
+    fs.writeFile(path, program);
+
+    let bin = _resolve_sfn_bin();
+    let argv: string[] = [bin, "check", "--json", path];
+    let child_env: string[] = [];
+    let _exit = process.run_capture(argv, child_env);
+    let stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+
+    // Single temp file only (no recursive teardown — see header).
+    fs.deleteFile(path);
+    fs.removeDirectory(dir);
+
+    return _parse_outcome(stdout, stderr);
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic matching
+// ---------------------------------------------------------------------------
+fn _messages_contain(messages: string[], pattern: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= messages.length { break; }
+        if find(messages[i], pattern, 0) >= 0 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _join_messages(messages: string[]) -> string {
+    if messages.length == 0 { return "(none)"; }
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= messages.length { break; }
+        if i > 0 { out = out + " | "; }
+        out = out + messages[i];
+        i += 1;
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Public assertions
+// ---------------------------------------------------------------------------
+// `assert_compiles(source, expect)` runs `sfn check --json` over `source`
+// (optionally wrapped in `expect.effects`) and returns a `MatchResult`
+// reflecting the envelope:
+//   - `expect.ok == true`  passes iff the envelope reports zero errors.
+//   - `expect.ok == false` passes iff the envelope reports ≥1 error.
+//   - when `expect.diagnostic_pattern` is non-empty, a diagnostic message
+//     must additionally contain it.
+fn assert_compiles(source: string, expect: CompileExpect) -> MatchResult ![io] {
+    let outcome = _run_compile_check(source, expect.effects);
+    if !outcome.ran { return match_fail(outcome.raw); }
+
+    let compiled = outcome.errors == 0;
+    if expect.ok && !compiled {
+        return match_fail("expected source to compile, but sfn check reported "
+            + number_to_string(outcome.errors)
+            + " error(s): "
+            + _join_messages(outcome.messages));
+    }
+    if !expect.ok && compiled {
+        return match_fail("expected source NOT to compile, but it compiled cleanly");
+    }
+    if expect.diagnostic_pattern.length > 0 {
+        if !_messages_contain(outcome.messages, expect.diagnostic_pattern) {
+            return match_fail("expected a diagnostic matching \"" + expect.diagnostic_pattern
+                + "\"; messages: "
+                + _join_messages(outcome.messages));
+        }
+    }
+    return match_ok();
+}
+
+// `assert_does_not_compile(source, pattern)` passes iff `sfn check`
+// produces at least one diagnostic whose message contains `pattern`
+// (substring via `sfn/strings::find`).
+fn assert_does_not_compile(source: string, pattern: string) -> MatchResult ![io] {
+    let outcome = _run_compile_check(source, []);
+    if !outcome.ran { return match_fail(outcome.raw); }
+    if _messages_contain(outcome.messages, pattern) { return match_ok(); }
+    return match_fail("expected a diagnostic matching \"" + pattern
+        + "\"; sfn check reported "
+        + number_to_string(outcome.errors)
+        + " error(s): "
+        + _join_messages(outcome.messages));
+}

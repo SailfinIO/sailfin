@@ -13,6 +13,10 @@ description = "Test assertion helpers and utilities for Sailfin"
 # the same formatter `pure_assert_eq_float` already uses for fractions.
 "sfn/strings" = "*"
 
+# `sfn/json` parses the `sailfin-check/1` envelope emitted by
+# `sfn check --json` for the compile-as-test assertions (#974).
+"sfn/json" = "*"
+
 [capabilities]
 required = ["io"]
 
