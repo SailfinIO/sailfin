@@ -276,9 +276,11 @@ test "cli: get_or returns empty string when explicitly provided as empty" {
     let fn_arr: string[] = [];
     let fv: string[] = [];
     let fp: boolean[] = [];
+    let sp: string[] = [];
     let m = Matches {
         command_name: "app",
         subcommand_name: "",
+        subcommand_path: sp,
         positional_names: pn,
         positional_values: pv,
         flag_names: fn_arr,

@@ -170,8 +170,17 @@ fn _string_to_float(value: string) -> float {
 }
 
 fn subcommand(m: Matches) -> string {
-    // Returns the matched subcommand name, or empty string if none.
+    // Returns the deepest matched subcommand name, or empty string if
+    // none. For a multi-level tree this is the leaf (e.g. "get" for
+    // `sfn config get`); use `subcommand_path` for the full chain.
     return m.subcommand_name;
+}
+
+fn subcommand_path(m: Matches) -> string[] {
+    // Returns the full chain of matched subcommand names from the root
+    // down to the leaf, in descent order. `[]` when no subcommand
+    // matched, `["config", "get"]` for a two-level command.
+    return m.subcommand_path;
 }
 
 fn positionals(m: Matches, name: string) -> string[] {

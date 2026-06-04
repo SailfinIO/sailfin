@@ -47,7 +47,8 @@
 //
 // Visibility: underscore-prefixed names (`_format_help`, `_pad`, `_esc`,
 // `_ansi_wrap`, `_starts_with`, `_find_flag_long`, `_find_flag_short`,
-// `_resolve_active`, `_help_hint`, `_flag_label`, `_max_*_width`,
+// `_find_subcmd`, `_resolve_active_path`, `_help_hint`, `_flag_label`,
+// `_max_*_width`,
 // `_no_color_from_value`, `_style_disabled`, `_style_enabled`) are
 // private capsule helpers by convention and are intentionally NOT
 // re-exported from `mod.sfn`. The pre-split `mod.sfn` had no explicit
@@ -103,6 +104,7 @@ export {
     has_flag,
     has,
     subcommand,
+    subcommand_path,
     positionals
 } from "./matches";
 

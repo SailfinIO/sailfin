@@ -26,6 +26,7 @@
 import { EXIT_OK, EXIT_USAGE } from "./exit_codes";
 import { _format_help } from "./help";
 import {
+    Arg,
     Command,
     Flag,
     Matches,
@@ -41,31 +42,19 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
     let mut fl_names: string[] = [];
     let mut fl_values: string[] = [];
     let mut fl_present: boolean[] = [];
-    let mut subcmd_name: string = "";
+
+    // `path` accumulates the matched subcommand chain as we descend
+    // through nested `with_subcommand` levels; `active` is the command
+    // definition the current token is validated against. Each level is
+    // independent — flags and positionals match against `active`, so a
+    // flag declared on a parent is unknown once we descend into a child.
+    let mut path: string[] = [];
+    let mut active = cmd;
 
     // Skip argv[0] (the program name).
     let mut idx: int = 1;
-
-    // Check for subcommand at argv[1].
-    if idx < argv.length {
-        let first = argv[idx];
-        if !_starts_with(first, "-") {
-            let mut si: int = 0;
-            loop {
-                if si >= cmd.subcmds.length { break; }
-                if strings_equal(cmd.subcmds[si].name, first) {
-                    subcmd_name = first;
-                    idx += 1;
-                    break;
-                }
-                si += 1;
-            }
-        }
-    }
-
-    let active = _resolve_active(cmd, subcmd_name);
-
     let mut pos_idx: int = 0;
+
     loop {
         if idx >= argv.length { break; }
         let token = argv[idx];
@@ -73,10 +62,10 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
         // Built-in flags surface as non-ok results so the caller can
         // decide how to render help/version.
         if strings_equal(token, "--help") || strings_equal(token, "-h") {
-            return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "help_requested", "", "", "");
+            return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "help_requested", "", "", "");
         }
         if strings_equal(token, "--version") || strings_equal(token, "-V") {
-            return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "version_requested", "", "", "");
+            return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "version_requested", "", "", "");
         }
 
         if _starts_with(token, "--") {
@@ -84,7 +73,7 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
             let flag_name = substring(token, 2, token.length);
             let f = _find_flag_long(active, flag_name);
             if f.long_name.length == 0 {
-                return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_flag", _with_hint(cmd.name, subcmd_name, "error: unknown flag --"
+                return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_flag", _with_hint(cmd.name, path, "error: unknown flag --"
                     + flag_name), flag_name, "");
             }
             fl_names.push(f.long_name);
@@ -92,14 +81,14 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
             if f.takes_value {
                 idx += 1;
                 if idx >= argv.length {
-                    return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_value", "error: flag --"
+                    return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_value", "error: flag --"
                         + flag_name
                         + " requires a value", flag_name, "");
                 }
                 fl_values.push(argv[idx]);
                 if strings_equal(f.value_kind, "choice") {
                     if !_value_in_choices(f.choices, argv[idx]) {
-                        return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "invalid_choice", _with_hint(cmd.name, subcmd_name, "error: flag --"
+                        return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "invalid_choice", _with_hint(cmd.name, path, "error: flag --"
                             + flag_name
                             + " "
                             + _choice_detail(f.choices, argv[idx])
@@ -110,7 +99,7 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
                 } else {
                     let detail = _validate_typed_value(f.value_kind, argv[idx]);
                     if detail.length > 0 {
-                        return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "type_error", _with_hint(cmd.name, subcmd_name, "error: flag --"
+                        return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "type_error", _with_hint(cmd.name, path, "error: flag --"
                             + flag_name
                             + " "
                             + detail
@@ -125,7 +114,7 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
             let short = substring(token, 1, token.length);
             let f = _find_flag_short(active, short);
             if f.long_name.length == 0 {
-                return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_flag", _with_hint(cmd.name, subcmd_name, "error: unknown flag -"
+                return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_flag", _with_hint(cmd.name, path, "error: unknown flag -"
                     + short), short, "");
             }
             fl_names.push(f.long_name);
@@ -133,14 +122,14 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
             if f.takes_value {
                 idx += 1;
                 if idx >= argv.length {
-                    return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_value", "error: flag -"
+                    return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_value", "error: flag -"
                         + short
                         + " requires a value", short, "");
                 }
                 fl_values.push(argv[idx]);
                 if strings_equal(f.value_kind, "choice") {
                     if !_value_in_choices(f.choices, argv[idx]) {
-                        return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "invalid_choice", _with_hint(cmd.name, subcmd_name, "error: flag -"
+                        return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "invalid_choice", _with_hint(cmd.name, path, "error: flag -"
                             + short
                             + " "
                             + _choice_detail(f.choices, argv[idx])
@@ -151,7 +140,7 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
                 } else {
                     let detail = _validate_typed_value(f.value_kind, argv[idx]);
                     if detail.length > 0 {
-                        return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "type_error", _with_hint(cmd.name, subcmd_name, "error: flag -"
+                        return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "type_error", _with_hint(cmd.name, path, "error: flag -"
                             + short
                             + " "
                             + detail
@@ -162,6 +151,34 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
                 }
             } else { fl_values.push("true"); }
         } else {
+            // Non-flag token: descend into a subcommand when the current
+            // level defines one matching `token`, otherwise treat it as a
+            // positional argument for this level.
+            if active.subcmds.length > 0 {
+                let sub = _find_subcmd(active, token);
+                if sub.name.length > 0 {
+                    // Finalize the level we are leaving before descending:
+                    // its required positionals/flags must be satisfied
+                    // (and optional defaults filled) here, since the final
+                    // post-loop validation only sees the leaf level.
+                    let lr = _validate_level(cmd.name, path, active, pos_idx, pos_names, pos_values, fl_names, fl_values, fl_present);
+                    if !lr.ok { return lr; }
+                    path.push(token);
+                    active = sub;
+                    // Positionals are scoped per level; restart the
+                    // positional cursor for the command we descended into.
+                    pos_idx = 0;
+                    idx += 1;
+                    continue;
+                }
+                // No subcommand matched. A level that accepts no
+                // positionals can only have meant a (mistyped) subcommand.
+                if active.args.length == 0 {
+                    return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_subcommand", _with_hint(cmd.name, path, "error: unknown subcommand '"
+                        + token
+                        + "'"), "", token);
+                }
+            }
             // Positional argument.
             if pos_idx < active.args.length {
                 let cur = active.args[pos_idx];
@@ -172,7 +189,7 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
                 // rather than advancing to the next slot.
                 if !cur.is_variadic { pos_idx += 1; }
             } else {
-                return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "unexpected_positional", _with_hint(cmd.name, subcmd_name, "error: unexpected argument '"
+                return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "unexpected_positional", _with_hint(cmd.name, path, "error: unexpected argument '"
                     + token
                     + "'"), "", token);
             }
@@ -180,25 +197,42 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
         idx += 1;
     }
 
-    // Validate required positional arguments and fill optional defaults.
+    // Finalize the deepest (leaf) level: enforce its required
+    // positionals/flags and fill optional defaults. On success this
+    // returns the completed ok ParseResult.
+    return _validate_level(cmd.name, path, active, pos_idx, pos_names, pos_values, fl_names, fl_values, fl_present);
+}
+
+fn _validate_level(cmd_name: string, path: string[], active: Command, pos_idx: int, pos_names: string[], pos_values: string[], fl_names: string[], fl_values: string[], fl_present: boolean[]) -> ParseResult {
+    // Finalize a single command level: fill optional positional
+    // defaults, enforce required positionals, and enforce required
+    // flags. Mutates `pos_names`/`pos_values` in place to record filled
+    // defaults. Returns an error ParseResult on the first violation, or
+    // an ok ParseResult carrying the level's Matches when valid.
+    //
+    // Called once per visited level — on descent for each parent level
+    // being left, and at the end for the leaf — so required arguments on
+    // intermediate levels are enforced even when a deeper subcommand is
+    // selected.
+    let mut pi = pos_idx;
     loop {
-        if pos_idx >= active.args.length { break; }
-        let a = active.args[pos_idx];
+        if pi >= active.args.length { break; }
+        let a = active.args[pi];
         if a.is_variadic {
             // Zero variadic matches are allowed: leave the name absent
             // so `positionals(matches, name)` reports `[]`.
-            pos_idx += 1;
+            pi += 1;
             continue;
         }
         if a.is_optional {
             pos_names.push(a.name);
             pos_values.push(a.default_value);
         } else {
-            return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_required", _with_hint(cmd.name, subcmd_name, "error: missing required argument <"
+            return _err_result(cmd_name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_required", _with_hint(cmd_name, path, "error: missing required argument <"
                 + a.name
                 + ">"), "", a.name);
         }
-        pos_idx += 1;
+        pi += 1;
     }
 
     // Validate required flags. The kind `"missing_required"` is reused
@@ -209,15 +243,16 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
         if rfi >= active.flags.length { break; }
         let rf = active.flags[rfi];
         if rf.required && !_flag_seen(fl_names, rf.long_name) {
-            return _err_result(cmd.name, subcmd_name, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_required", _with_hint(cmd.name, subcmd_name, "error: missing required flag --"
+            return _err_result(cmd_name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_required", _with_hint(cmd_name, path, "error: missing required flag --"
                 + rf.long_name), rf.long_name, "");
         }
         rfi += 1;
     }
 
     let matches = Matches {
-        command_name: cmd.name,
-        subcommand_name: subcmd_name,
+        command_name: cmd_name,
+        subcommand_name: _leaf_name(path),
+        subcommand_path: path,
         positional_names: pos_names,
         positional_values: pos_values,
         flag_names: fl_names,
@@ -235,23 +270,22 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
     let result = parse(cmd, argv);
     if result.ok { return result.matches; }
 
-    let subcmd_name = result.matches.subcommand_name;
-    let active = _resolve_active(cmd, subcmd_name);
+    let path = result.matches.subcommand_path;
+    let active = _resolve_active_path(cmd, path);
+    let label = _command_label(cmd.name, path);
     let kind = result.error.kind;
 
     if strings_equal(kind, "help_requested") {
-        if subcmd_name.length > 0 {
-            print(_format_help(active, cmd.name + " " + subcmd_name));
-        } else { print(_format_help(cmd, cmd.name)); }
+        print(_format_help(active, label));
         process.exit(EXIT_OK);
     }
     if strings_equal(kind, "version_requested") {
-        if subcmd_name.length > 0 {
+        if path.length > 0 {
             if active.version.length > 0 {
-                print(cmd.name + " " + subcmd_name + " " + active.version);
+                print(label + " " + active.version);
             } else if cmd.version.length > 0 {
-                print(cmd.name + " " + subcmd_name + " " + cmd.version);
-            } else { print(cmd.name + " " + subcmd_name); }
+                print(label + " " + cmd.version);
+            } else { print(label); }
         } else {
             if cmd.version.length > 0 {
                 print(cmd.name + " " + cmd.version);
@@ -269,9 +303,8 @@ fn run(cmd: Command, argv: string[]) -> Matches ![io] {
     return result.matches;
 }
 
-fn _with_hint(cmd_name: string, subcmd_name: string, first_line: string) -> string {
-    return first_line + "\nrun '" + _help_hint(cmd_name, subcmd_name)
-        + "' for usage";
+fn _with_hint(cmd_name: string, path: string[], first_line: string) -> string {
+    return first_line + "\nrun '" + _help_hint(cmd_name, path) + "' for usage";
 }
 
 fn _ok_error() -> ParseError {
@@ -283,10 +316,11 @@ fn _ok_error() -> ParseError {
     };
 }
 
-fn _err_result(command_name: string, subcommand_name: string, pos_names: string[], pos_values: string[], fl_names: string[], fl_values: string[], fl_present: boolean[], kind: string, message: string, flag_name: string, arg_name: string) -> ParseResult {
+fn _err_result(command_name: string, path: string[], pos_names: string[], pos_values: string[], fl_names: string[], fl_values: string[], fl_present: boolean[], kind: string, message: string, flag_name: string, arg_name: string) -> ParseResult {
     let matches = Matches {
         command_name: command_name,
-        subcommand_name: subcommand_name,
+        subcommand_name: _leaf_name(path),
+        subcommand_path: path,
         positional_names: pos_names,
         positional_values: pos_values,
         flag_names: fl_names,
@@ -352,18 +386,64 @@ fn _find_flag_short(cmd: Command, name: string) -> Flag {
     };
 }
 
-fn _resolve_active(cmd: Command, subcmd_name: string) -> Command {
-    // Return the subcommand definition if matched, otherwise the root command.
-    if subcmd_name.length == 0 { return cmd; }
+fn _find_subcmd(cmd: Command, name: string) -> Command {
+    // Return the direct subcommand of `cmd` named `name`, or a sentinel
+    // Command with an empty `name` when no child matches.
     let mut i: int = 0;
     loop {
         if i >= cmd.subcmds.length { break; }
-        if strings_equal(cmd.subcmds[i].name, subcmd_name) {
+        if strings_equal(cmd.subcmds[i].name, name) {
             return cmd.subcmds[i];
         }
         i += 1;
     }
-    return cmd;
+    let empty_args: Arg[] = [];
+    let empty_flags: Flag[] = [];
+    let empty_subs: Command[] = [];
+    return Command {
+        name: "",
+        description: "",
+        version: "",
+        args: empty_args,
+        flags: empty_flags,
+        subcmds: empty_subs
+    };
+}
+
+fn _resolve_active_path(cmd: Command, path: string[]) -> Command {
+    // Walk `path` from the root, returning the deepest command reached.
+    // Stops early (returning the last good level) if a name is missing,
+    // which cannot happen for a path produced by a successful descent.
+    let mut active = cmd;
+    let mut i: int = 0;
+    loop {
+        if i >= path.length { break; }
+        let sub = _find_subcmd(active, path[i]);
+        if sub.name.length == 0 { break; }
+        active = sub;
+        i += 1;
+    }
+    return active;
+}
+
+fn _leaf_name(path: string[]) -> string {
+    // The deepest subcommand name in `path`, or "" when no subcommand
+    // matched. Drives `Matches.subcommand_name`.
+    if path.length == 0 { return ""; }
+    return path[path.length - 1];
+}
+
+fn _command_label(root_name: string, path: string[]) -> string {
+    // Build the space-joined invocation label (`app config get`) used in
+    // help/version output and usage hints.
+    let mut out = root_name;
+    let mut i: int = 0;
+    loop {
+        if i >= path.length { break; }
+        out = out + " " + path[i];
+        i += 1;
+    }
+    return out;
 }
 
 fn _flag_seen(fl_names: string[], long_name: string) -> boolean {
@@ -376,12 +456,10 @@ fn _flag_seen(fl_names: string[], long_name: string) -> boolean {
     return false;
 }
 
-fn _help_hint(root_name: string, subcmd_name: string) -> string {
-    // Build the help command string for error messages.
-    if subcmd_name.length > 0 {
-        return root_name + " " + subcmd_name + " --help";
-    }
-    return root_name + " --help";
+fn _help_hint(root_name: string, path: string[]) -> string {
+    // Build the help command string for error messages, joining the full
+    // subcommand path (`app config get --help`).
+    return _command_label(root_name, path) + " --help";
 }
 
 fn _validate_typed_value(value_kind: string, value: string) -> string {

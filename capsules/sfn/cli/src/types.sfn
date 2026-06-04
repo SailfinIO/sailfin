@@ -45,7 +45,16 @@ struct Command {
 
 struct Matches {
     command_name: string;
+    // `subcommand_name` is the deepest (leaf) subcommand matched, or ""
+    // when none. For multi-level trees (`sfn config get`) it holds the
+    // last path element ("get"); read the full chain via
+    // `subcommand_path`.
     subcommand_name: string;
+    // `subcommand_path` is every subcommand name matched from the root
+    // down to the leaf, in descent order. Empty when no subcommand
+    // matched; `["build"]` for a single level; `["config", "get"]` for
+    // two levels. Read it with `subcommand_path(matches)`.
+    subcommand_path: string[];
     positional_names: string[];
     positional_values: string[];
     flag_names: string[];
