@@ -157,6 +157,12 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
             if active.subcmds.length > 0 {
                 let sub = _find_subcmd(active, token);
                 if sub.name.length > 0 {
+                    // Finalize the level we are leaving before descending:
+                    // its required positionals/flags must be satisfied
+                    // (and optional defaults filled) here, since the final
+                    // post-loop validation only sees the leaf level.
+                    let lr = _validate_level(cmd.name, path, active, pos_idx, pos_names, pos_values, fl_names, fl_values, fl_present);
+                    if !lr.ok { return lr; }
                     path.push(token);
                     active = sub;
                     // Positionals are scoped per level; restart the
@@ -191,25 +197,42 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
         idx += 1;
     }
 
-    // Validate required positional arguments and fill optional defaults.
+    // Finalize the deepest (leaf) level: enforce its required
+    // positionals/flags and fill optional defaults. On success this
+    // returns the completed ok ParseResult.
+    return _validate_level(cmd.name, path, active, pos_idx, pos_names, pos_values, fl_names, fl_values, fl_present);
+}
+
+fn _validate_level(cmd_name: string, path: string[], active: Command, pos_idx: int, pos_names: string[], pos_values: string[], fl_names: string[], fl_values: string[], fl_present: boolean[]) -> ParseResult {
+    // Finalize a single command level: fill optional positional
+    // defaults, enforce required positionals, and enforce required
+    // flags. Mutates `pos_names`/`pos_values` in place to record filled
+    // defaults. Returns an error ParseResult on the first violation, or
+    // an ok ParseResult carrying the level's Matches when valid.
+    //
+    // Called once per visited level — on descent for each parent level
+    // being left, and at the end for the leaf — so required arguments on
+    // intermediate levels are enforced even when a deeper subcommand is
+    // selected.
+    let mut pi = pos_idx;
     loop {
-        if pos_idx >= active.args.length { break; }
-        let a = active.args[pos_idx];
+        if pi >= active.args.length { break; }
+        let a = active.args[pi];
         if a.is_variadic {
             // Zero variadic matches are allowed: leave the name absent
             // so `positionals(matches, name)` reports `[]`.
-            pos_idx += 1;
+            pi += 1;
             continue;
         }
         if a.is_optional {
             pos_names.push(a.name);
             pos_values.push(a.default_value);
         } else {
-            return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_required", _with_hint(cmd.name, path, "error: missing required argument <"
+            return _err_result(cmd_name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_required", _with_hint(cmd_name, path, "error: missing required argument <"
                 + a.name
                 + ">"), "", a.name);
         }
-        pos_idx += 1;
+        pi += 1;
     }
 
     // Validate required flags. The kind `"missing_required"` is reused
@@ -220,14 +243,14 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
         if rfi >= active.flags.length { break; }
         let rf = active.flags[rfi];
         if rf.required && !_flag_seen(fl_names, rf.long_name) {
-            return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_required", _with_hint(cmd.name, path, "error: missing required flag --"
+            return _err_result(cmd_name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_required", _with_hint(cmd_name, path, "error: missing required flag --"
                 + rf.long_name), rf.long_name, "");
         }
         rfi += 1;
     }
 
     let matches = Matches {
-        command_name: cmd.name,
+        command_name: cmd_name,
         subcommand_name: _leaf_name(path),
         subcommand_path: path,
         positional_names: pos_names,

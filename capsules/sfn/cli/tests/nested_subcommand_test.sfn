@@ -10,6 +10,8 @@ import {
     arg,
     command,
     flag,
+    flag_required,
+    flag_value,
     get,
     has_flag,
     parse,
@@ -135,4 +137,42 @@ test "parse: unknown subcommand at second level reports path" {
     assert p.length == 1;
     assert strings_equal(p[0], "config");
     assert strings_equal(r.error.message, "error: unknown subcommand 'bogus'\nrun 'app config --help' for usage");
+}
+
+// ---- parent-level required arguments are enforced on descent ----
+test "parse: required flag on parent level is enforced before descent" {
+    let get_cmd = command("get", "Get");
+    let config = with_subcommand(with_flag(command("config", "Config"), flag_required(flag_value("root", "Root value"))), get_cmd);
+    let root = with_subcommand(command("app", "App"), config);
+    // `app config get` descends into `get` without supplying config's
+    // required --root, which must still be reported.
+    let argv: string[] = ["app", "config", "get"];
+    let r = parse(root, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "missing_required");
+    assert strings_equal(r.error.flag_name, "root");
+}
+
+test "parse: required parent flag satisfied before subcommand" {
+    let get_cmd = command("get", "Get");
+    let config = with_subcommand(with_flag(command("config", "Config"), flag_required(flag_value("root", "Root value"))), get_cmd);
+    let root = with_subcommand(command("app", "App"), config);
+    let argv: string[] = ["app", "config", "--root", "r1", "get"];
+    let r = parse(root, argv);
+    assert r.ok == true;
+    assert strings_equal(get(r.matches, "root"), "r1");
+    assert strings_equal(subcommand(r.matches), "get");
+}
+
+test "parse: required positional on parent level is enforced on descent" {
+    let get_cmd = command("get", "Get");
+    let config = with_subcommand(with_arg(command("config", "Config"), arg("profile", "Profile")), get_cmd);
+    let root = with_subcommand(command("app", "App"), config);
+    // `get` is matched as config's subcommand (subcommands take priority),
+    // so config's required <profile> is omitted and must be reported.
+    let argv: string[] = ["app", "config", "get"];
+    let r = parse(root, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "missing_required");
+    assert strings_equal(r.error.arg_name, "profile");
 }
