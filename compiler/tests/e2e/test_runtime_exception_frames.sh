@@ -27,7 +27,9 @@
 #                   thread_local global i64 0` pins the chain-head storage
 #                   shape. The TLS flip landed (compiler-side parser in
 #                   #825; runtime-side flip in #827) so the chain head now
-#                   rides ELF TLS — each thread sees its own head without
+#                   rides platform thread-local storage (LLVM
+#                   `thread_local` → ELF TLS on Linux, Mach-O TLS on
+#                   macOS) — each thread sees its own head without
 #                   touching callers; this assertion catches a regression
 #                   that drops the `thread_local` marker, relocates the
 #                   storage, or drops the zero initializer.
@@ -349,8 +351,9 @@ test_frame_head_global() {
     # shipped in #825 and the runtime-side flip in #827 (gated on a seed
     # release including the parser — `.seed-version` >= v0.7.0-alpha.25).
     # The chain head now lowers to `internal thread_local global`, putting
-    # it on ELF TLS so each thread sees its own head, without touching
-    # callers. Pin the post-flip shape so a regression that drops the
+    # it on the platform's thread-local storage (LLVM `thread_local` → ELF
+    # TLS on Linux, Mach-O TLS on macOS) so each thread sees its own head,
+    # without touching callers. Pin the post-flip shape so a regression that drops the
     # `thread_local` marker (or the zero initializer) surfaces here.
     if ! grep -qE "^@global\.sfn_exception_frame_head_addr = internal thread_local global i64 0$" "$ll"; then
         echo "[test]   missing '@global.sfn_exception_frame_head_addr = internal thread_local global i64 0':"

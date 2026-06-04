@@ -89,8 +89,10 @@
 // i64 (the seed compiler drops pointer-typed top-level mutables
 // under the same field-layout limitation as struct pointer fields)
 // and lowers to `@global.sfn_exception_frame_head_addr = internal
-// thread_local global i64 0`, putting the binding on ELF TLS so each
-// thread sees its own chain head. The existing C runtime's try-stack
+// thread_local global i64 0`, putting the binding on the platform's
+// thread-local storage (LLVM `thread_local`, lowering to ELF TLS on
+// Linux and Mach-O TLS on macOS) so each thread sees its own chain
+// head. The existing C runtime's try-stack
 // is `_Thread_local`, so this matches it; Sailfin has no `spawn`
 // yet, so the single-threaded reality still applies, but the
 // per-thread storage is now in place for the scheduler / concurrency
