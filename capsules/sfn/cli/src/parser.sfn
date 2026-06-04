@@ -433,8 +433,11 @@ fn _expand_count_cluster(active: Command, cluster: string) -> string[] {
     // alias of a count flag (`value_kind == "count"`). Returns `[]` when
     // the cluster is shorter than two characters or any character is not
     // a counted-flag short alias, signalling the caller to fall back to
-    // the unknown-flag path. Single short flags (length 1) are handled by
-    // the normal `_find_flag_short` lookup and never reach here.
+    // the unknown-flag path. A *known* single short flag is intercepted
+    // earlier by the normal `_find_flag_short` lookup and never reaches
+    // here; an *unknown* single short flag does reach here but returns
+    // `[]` immediately via the `< 2` length guard, so the caller still
+    // falls back to the unknown-flag path.
     let empty: string[] = [];
     if cluster.length < 2 { return empty; }
     let mut out: string[] = [];
