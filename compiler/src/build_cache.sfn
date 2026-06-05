@@ -251,6 +251,11 @@ fn _filename_for_kind(kind: string) -> string {
     if kind == "layout-manifest" { return "layout.manifest"; }
     if kind == "ll" { return "mod.ll"; }
     if kind == "obj" { return "mod.o"; }
+    // Runtime C/LL/sfn object compiles (#1096). A distinct filename
+    // from the per-module `.ll` `obj` kind keeps the two layers from
+    // ever aliasing in a shared cache entry, even though their content
+    // keys are already disjoint.
+    if kind == "runtime-obj" { return "runtime.o"; }
     return "";
 }
 
@@ -623,6 +628,29 @@ fn runtime_object_cache_key(src_path: string, opt_flag: string) -> string ![io] 
     return content + "\n" + opt_flag + "\nsecsplit1";
 }
 
+// Derive a content-addressed shared-cache `CacheKey` from a
+// `runtime_object_cache_key` string (#1096). The runtime object layer
+// historically cached `.o` outputs only in the per-build work-dir (a
+// sidecar `.o.key` next to the object in `<work-dir>/sailfin/`), so a
+// second build into a *sibling* work-dir — e.g. the build-quality
+// determinism gate's pass1 → pass2 — always missed every runtime
+// object, dragging the folded summary `hit_rate` below the 0.95 gate
+// even though nothing changed. Hashing the runtime key string into a
+// 64-hex digest lets the shared-cache artifact helpers
+// (`cache_lookup_artifact` / `cache_store_artifact`, kind
+// `"runtime-obj"`) back the work-dir objects with the same
+// content-addressed `build/cache/<schema>` store the `.ll` module
+// cache already uses, so runtime objects warm across work-dirs and CI
+// cache restores. Returns an empty-digest key (rejected by
+// `_is_valid_digest`, so every shared-cache helper treats it as a
+// miss) when the runtime key was empty/unhashable.
+fn runtime_object_entry_key_from_str(key_str: string, hash_suffix: string) -> CacheKey ![io] {
+    if key_str.length == 0 {
+        return CacheKey { digest: "" };
+    }
+    return CacheKey { digest: _sha256_of_string(key_str, hash_suffix) };
+}
+
 // ----------------------------------------------------------------
 // Cache key derivation
 // ----------------------------------------------------------------
@@ -728,6 +756,7 @@ export {
     cache_compiler_identity,
     sha256_of_file,
     runtime_object_cache_key,
+    runtime_object_entry_key_from_str,
     empty_cache_stats,
     merge_cache_stats,
     cache_stats_is_empty,
