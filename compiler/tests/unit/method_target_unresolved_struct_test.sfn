@@ -16,7 +16,7 @@
 // annotation; both are excluded so the compiler still self-hosts. The two
 // negative tests below pin that boundary.
 import { lower_call_expression } from "../../src/llvm/expression_lowering/native/core_call_lowering";
-import { LocalBinding, TypeContext } from "../../src/llvm/types";
+import { InterfaceTypeInfo, LocalBinding, TypeContext } from "../../src/llvm/types";
 import { index_of } from "../../src/string_utils";
 
 fn _empty_context() -> TypeContext {
@@ -24,6 +24,21 @@ fn _empty_context() -> TypeContext {
         structs: [],
         enums: [],
         interfaces: [],
+        vtables: []
+    };
+}
+
+// A context whose only registered type is the interface `Meter`. An
+// interface-typed local carries a bare annotation (`Meter`) absent from
+// `context.structs`, so the guard must consult `context.interfaces` before
+// failing closed — otherwise valid trait dispatch is rejected.
+fn _interface_only_context() -> TypeContext {
+    return TypeContext {
+        structs: [],
+        enums: [],
+        interfaces: [InterfaceTypeInfo {
+            name: "Meter", llvm_name: "%trait.Meter", type_parameters: [], signatures: []
+        }],
         vtables: []
     };
 }
@@ -103,5 +118,19 @@ test "method base with empty (opacified) annotation does not fail closed" ![io] 
     let mut lines: string[] = [];
     let locals: LocalBinding[] = [_local_with_annotation("")];
     let result = lower_call_expression("acct.compute", [], [], locals, 0, lines, [], context);
+    assert ! _has_fatal_unresolved_base(result.diagnostics);
+}
+
+// -------------------------------------------------------------------
+// No regression (PR #1053 review): an interface-typed local carries a
+// bare annotation (`Meter`) that is absent from `context.structs` but
+// present in `context.interfaces`. The guard must not treat that as an
+// unresolved struct — `m.total()` is valid trait dispatch.
+// -------------------------------------------------------------------
+test "method base with interface-typed annotation does not fail closed" ![io] {
+    let context = _interface_only_context();
+    let mut lines: string[] = [];
+    let locals: LocalBinding[] = [_local_with_annotation("Meter")];
+    let result = lower_call_expression("acct.total", [], [], locals, 0, lines, [], context);
     assert ! _has_fatal_unresolved_base(result.diagnostics);
 }

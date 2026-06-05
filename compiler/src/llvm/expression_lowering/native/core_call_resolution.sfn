@@ -608,7 +608,16 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                     let mut _pre_fail_closed: boolean = false;
                                     if is_simple_identifier(_pre_struct) {
                                         if find_struct_info_by_name(context, _pre_struct) == null {
-                                            _pre_fail_closed = true;
+                                            // Interface-typed locals carry a bare
+                                            // annotation too (e.g. `let m: Meter`);
+                                            // their `m.total()` calls are valid trait
+                                            // dispatch handled by the downstream
+                                            // `trait_dispatch__` branch. Only fail
+                                            // closed when the name is neither a
+                                            // struct nor an interface in context.
+                                            if find_interface_info_by_name(context, _pre_struct) == null {
+                                                _pre_fail_closed = true;
+                                            }
                                         }
                                     }
                                     if _pre_fail_closed {
@@ -993,7 +1002,12 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         if _g_annotation.length > 0 {
                             if is_simple_identifier(_g_annotation) {
                                 if find_struct_info_by_name(context, _g_annotation) == null {
-                                    _g_fail_closed = true;
+                                    // Exclude interface-typed bases: `m.total()`
+                                    // on `let m: Meter` is valid trait dispatch,
+                                    // not an unresolved struct.
+                                    if find_interface_info_by_name(context, _g_annotation) == null {
+                                        _g_fail_closed = true;
+                                    }
                                 }
                             }
                         }
