@@ -14,13 +14,17 @@ capsules/sfn/test/
 │   ├── mod.sfn              # re-exports + thin shims
 │   ├── expect.sfn           # fluent Expectation<T> builder
 │   ├── matcher.sfn          # Matcher<T> interface + built-in matchers
-│   ├── lifecycle.sfn        # before_each / after_each / before_all / after_all
 │   ├── fixtures.sfn         # with_tmp_dir / with_env / with_cwd
 │   ├── snapshot.sfn         # to_match_snapshot
 │   ├── compile_assert.sfn   # assert_compiles / assert_does_not_compile
 │   └── runner.sfn           # run_tests entry point (used by sfn test)
 └── tests/                   # one *_test.sfn per src/ module
 ```
+
+> **No `lifecycle.sfn`.** Lifecycle hooks are language syntax (block
+> declarations), not a library module — see "Lifecycle hooks" below. There is
+> intentionally no `src/lifecycle.sfn`; the proof lives in
+> `tests/lifecycle_test.sfn`.
 
 ## Core: matchers and expectations
 
@@ -153,8 +157,9 @@ A `before_each(hook: fn() ![io])` register-now-call-later surface was rejected
 on three independent grounds, any one disqualifying:
 
 1. **Unbuildable today.** It requires storing a `fn` value and calling it back
-   later; the frontend cannot store+recall fn-values (see `src/expect.sfn`:
-   "a thunk cannot be stored in a struct field and called"). Shipping its
+   later; the frontend cannot store+recall fn-values (see
+   `capsules/sfn/test/src/expect.sfn`: "a thunk cannot be stored in a struct
+   field and called"). Shipping its
    signatures would be a non-functional, parsed-but-unenforced API.
 2. **Slower.** It replaces #975's static direct `call @hook__suffix()` with an
    indirect call through a runtime function-pointer table — defeating inlining

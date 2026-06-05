@@ -11,7 +11,8 @@
 // There is intentionally NO `capsules/sfn/test/src/lifecycle.sfn` registration
 // surface. A `before_each(hook: fn() ![io])` register-now-call-later API would
 // (a) need storable+callable fn-values, a current frontend gap (see
-// `src/expect.sfn` — "a thunk cannot be stored in a struct field and called");
+// `capsules/sfn/test/src/expect.sfn` — "a thunk cannot be stored in a struct
+// field and called");
 // (b) trade #975's static direct calls for indirect dispatch; and (c) make hook
 // order depend on runtime registration sequence instead of static module order.
 // See `docs/proposals/test-infra-epic/03-capsule-api.md` (Lifecycle hooks) for
