@@ -170,3 +170,51 @@ struct Style {
     mode: string;
     stream: string;
 }
+
+// HelpFlag is the help-tree view of a `Flag`: the subset of fields the
+// help renderer needs to format a flag row (label + annotations).
+// Decoupled from `Flag` so the help tree — and the future
+// `--help --json` output (Phase 5 Issue 5.1) — is a stable view that
+// does not drag along the builder-/parser-facing fields (`value_kind`,
+// `choices`) that never appear in help output.
+struct HelpFlag {
+    long_name: string;
+    short_name: string;
+    description: string;
+    takes_value: boolean;
+    required: boolean;
+    env_var: string;
+}
+
+// HelpPositional is the help-tree view of an `Arg`: every field the
+// help renderer consults to format an `arguments:` row and the usage
+// line.
+struct HelpPositional {
+    name: string;
+    description: string;
+    is_optional: boolean;
+    is_variadic: boolean;
+    default_value: string;
+}
+
+// HelpNode is the structured, render-agnostic representation of a
+// `Command`'s help. `render_help_tree` builds it from a `Command`;
+// `render_help_text` turns it back into the byte-identical `--help`
+// string. Separating the data (tree) from the formatting (text/JSON)
+// is the foundation for `--help --json` (Phase 5 Issue 5.1) and keeps
+// the text and future JSON renderers from drifting — both consume the
+// same tree (proposal §8 risk R8).
+//
+// `version` is non-empty when the command declares a version; the text
+// renderer emits the built-in `-V, --version` row only when it is set,
+// matching the historical `_format_help` behavior. `subcommands` is the
+// fully recursed child tree, but the text renderer descends only one
+// level for the `commands:` listing (multi-level walking is Issue 1.14).
+struct HelpNode {
+    name: string;
+    description: string;
+    version: string;
+    flags: HelpFlag[];
+    positionals: HelpPositional[];
+    subcommands: HelpNode[];
+}

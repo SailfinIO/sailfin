@@ -1,0 +1,160 @@
+// Tests for the structured help tree (Issue 1.13).
+//
+// `render_help_tree(cmd)` builds a `HelpNode`; `render_help_text(node)`
+// renders it back to the `--help` string. These tests pin BOTH the tree
+// shape and the exact rendered bytes, locking the refactor against drift
+// (the historical `_format_help` output must be reproduced byte-for-byte).
+// The companion `cli_test.sfn` keeps its substring-based help assertions,
+// which continue to pass unchanged through the same renderer.
+import {
+    Command,
+    HelpNode,
+    arg,
+    arg_optional,
+    arg_variadic,
+    command,
+    flag,
+    flag_env,
+    flag_required,
+    flag_short,
+    flag_value,
+    flag_value_short,
+    help,
+    render_help_text,
+    render_help_tree,
+    with_arg,
+    with_flag,
+    with_subcommand,
+    with_version
+} from "../src/mod";
+
+// A reference command exercising a description, two subcommands, a
+// required positional, and a short boolean flag.
+fn _reference_command() -> Command {
+    return with_flag(with_arg(with_subcommand(with_subcommand(command("greet", "A friendly greeter"), command("build", "Build it")), command("ship", "Ship it")), arg("name", "Who to greet")), flag_short("loud", "l", "Use uppercase"));
+}
+
+// ---- Tree shape ----
+test "help tree: top-level node mirrors the command" {
+    let cmd = _reference_command();
+    let node: HelpNode = render_help_tree(cmd);
+    assert strings_equal(node.name, "greet");
+    assert strings_equal(node.description, "A friendly greeter");
+    assert strings_equal(node.version, "");
+    assert node.flags.length == 1;
+    assert node.positionals.length == 1;
+    assert node.subcommands.length == 2;
+}
+
+test "help tree: flag view carries label fields" {
+    let cmd = _reference_command();
+    let node: HelpNode = render_help_tree(cmd);
+    let f = node.flags[0];
+    assert strings_equal(f.long_name, "loud");
+    assert strings_equal(f.short_name, "l");
+    assert strings_equal(f.description, "Use uppercase");
+    assert f.takes_value == false;
+    assert f.required == false;
+    assert strings_equal(f.env_var, "");
+}
+
+test "help tree: positional view carries arg fields" {
+    let cmd = _reference_command();
+    let node: HelpNode = render_help_tree(cmd);
+    let p = node.positionals[0];
+    assert strings_equal(p.name, "name");
+    assert strings_equal(p.description, "Who to greet");
+    assert p.is_optional == false;
+    assert p.is_variadic == false;
+}
+
+test "help tree: subcommands recurse in declaration order" {
+    let cmd = _reference_command();
+    let node: HelpNode = render_help_tree(cmd);
+    assert strings_equal(node.subcommands[0].name, "build");
+    assert strings_equal(node.subcommands[0].description, "Build it");
+    assert strings_equal(node.subcommands[1].name, "ship");
+    // The recursed child node is a full HelpNode (Issue 1.14 walks it).
+    assert node.subcommands[0].flags.length == 0;
+    assert node.subcommands[0].subcommands.length == 0;
+}
+
+test "help tree: version flows onto the node" {
+    let cmd = with_version(command("app", "Tool"), "2.1.0");
+    let node: HelpNode = render_help_tree(cmd);
+    assert strings_equal(node.version, "2.1.0");
+}
+
+// ---- Golden rendered strings (byte-identical contract) ----
+test "help tree: render_help_text golden for minimal command" {
+    // No description, subcommands, args, flags, or version. The flag
+    // column still reserves width for the built-in `-V, --version`
+    // (13) even though no version row is emitted.
+    let cmd = command("app", "");
+    let node: HelpNode = render_help_tree(cmd);
+    let golden = "usage:\n  app\n\noptions:\n  -h, --help     Show this help message\n";
+    assert strings_equal(render_help_text(node), golden);
+}
+
+test "help tree: render_help_text golden with version row" {
+    let cmd = with_version(command("app", "Tool"), "2.1.0");
+    let node: HelpNode = render_help_tree(cmd);
+    let golden = "Tool\n\nusage:\n  app\n\noptions:\n"
+        + "  -h, --help     Show this help message\n"
+        + "  -V, --version  Show version\n";
+    assert strings_equal(render_help_text(node), golden);
+}
+
+test "help tree: render_help_text golden for reference command" {
+    let cmd = _reference_command();
+    let node: HelpNode = render_help_tree(cmd);
+    let golden = "A friendly greeter\n\n"
+        + "usage:\n  greet <command> [options] <name>\n\n"
+        + "commands:\n  build  Build it\n  ship   Ship it\n\n"
+        + "arguments:\n  <name>  Who to greet\n\n"
+        + "options:\n"
+        + "  -l, --loud     Use uppercase\n"
+        + "  -h, --help     Show this help message\n";
+    assert strings_equal(render_help_text(node), golden);
+}
+
+test "help tree: render_help_text golden with rich positionals and flag annotations" {
+    // Optional + variadic positionals and an env-bound required value
+    // flag exercise the annotation branches and the variadic width bump.
+    let cmd = with_flag(with_arg(with_arg(command("pack", "Package files"), arg_optional("out", "Output dir", "dist")), arg_variadic("files", "Files to include")), flag_required(flag_env(flag_value("token", "Auth token"), "PACK_TOKEN")));
+    let node: HelpNode = render_help_tree(cmd);
+    // The long-only `--token <value>` label (19 cols) widens the flag
+    // column to 21, so the built-in `-h, --help` row pads out to match.
+    let golden = "Package files\n\n"
+        + "usage:\n  pack [options] [out] [files...]\n\n"
+        + "arguments:\n"
+        + "  <out>       Output dir (default: dist)\n"
+        + "  <files>...  Files to include (variadic)\n\n"
+        + "options:\n"
+        + "      --token <value>  Auth token [env: PACK_TOKEN] (required)\n"
+        + "  -h, --help           Show this help message\n";
+    assert strings_equal(render_help_text(node), golden);
+}
+
+test "help tree: render_help_text golden locks every flag-label variant" {
+    // All four flag-label forms in one command, so the byte-identical
+    // contract covers long-only boolean, short boolean, long value, and
+    // short value labels plus the column width they jointly drive. The
+    // widest label is `    --output <value>` (20), so the flag column is
+    // 22 and the built-in `-h, --help` row pads to match.
+    let cmd = with_flag(with_flag(with_flag(with_flag(command("tool", "A tool"), flag("verbose", "Verbose output")), flag_short("quiet", "q", "Quiet")), flag_value("output", "Output file")), flag_value_short("input", "i", "Input file"));
+    let node: HelpNode = render_help_tree(cmd);
+    let golden = "A tool\n\n" + "usage:\n  tool [options]\n\n" + "options:\n"
+        + "      --verbose         Verbose output\n"
+        + "  -q, --quiet           Quiet\n"
+        + "      --output <value>  Output file\n"
+        + "  -i, --input <value>   Input file\n"
+        + "  -h, --help            Show this help message\n";
+    assert strings_equal(render_help_text(node), golden);
+}
+
+// ---- Equivalence: help() routes through the tree ----
+test "help tree: help() equals render_help_text(render_help_tree())" {
+    let cmd = _reference_command();
+    assert strings_equal(help(cmd), render_help_text(render_help_tree(cmd)));
+}
