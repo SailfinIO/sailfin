@@ -44,3 +44,13 @@ test "spawn_with_env: empty argv returns the 0 failure sentinel" ![io] {
     let id = process.spawn_with_env([], []);
     assert id == 0;
 }
+
+test "spawn_with_env: a nonexistent command returns the 0 sentinel" ![io] {
+    // Pins the `0 on spawn failure` contract: `posix_spawnp` reports the
+    // missing executable synchronously (`spawn_err != 0`), so the body
+    // returns the `0` sentinel rather than a live handle. Same platform
+    // assumption the sibling `process_run: nonexistent command returns
+    // 127` test relies on (`posix_spawnp` failing for a missing file).
+    let id = process.spawn_with_env(["this_command_definitely_does_not_exist_1102"], []);
+    assert id == 0;
+}
