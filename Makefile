@@ -105,6 +105,16 @@ NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 
 .PHONY: rebuild mcp-server
 
+# Agent-facing targets (#1059) wrap their real `<target>-impl` body in the
+# verdict-block emitter so a single greppable `===SAILFIN-RESULT===` block is
+# always the last output, on success and failure alike. The wrapper also
+# carries the SAILFIN_INNER guard so a `make check` that calls `make test`
+# internally emits only the outer verdict. See scripts/agent_report.sh and
+# docs/reference/make-result-schema.md.
+.PHONY: compile-impl rebuild-impl check-impl check-fast-impl
+.PHONY: test-impl test-unit-impl test-integration-impl test-e2e-impl test-capsules-impl
+AGENT_REPORT := bash scripts/agent_report.sh
+
 help:
 	@echo "Common Sailfin tasks"
 	@echo ""
@@ -151,6 +161,9 @@ endif
 # run from `make test` / `make test-e2e` via `test-e2e-sh` — Phase
 # 3.1 migrates them and retires the .sh branch.
 test:
+	@$(AGENT_REPORT) --target test -- $(MAKE) test-impl
+
+test-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
@@ -218,6 +231,9 @@ fetch-seed:
 # Makefile loops used to emit now comes from `_emit_suite_banners`
 # in `handle_test_command`.
 test-unit:
+	@$(AGENT_REPORT) --target test-unit -- $(MAKE) test-unit-impl
+
+test-unit-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-unit] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
@@ -225,6 +241,9 @@ test-unit:
 	@$(NATIVE_BIN) test compiler/tests/unit
 
 test-integration:
+	@$(AGENT_REPORT) --target test-integration -- $(MAKE) test-integration-impl
+
+test-integration-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-integration] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
@@ -237,6 +256,9 @@ test-integration:
 # then `test-e2e-sh` keeps the bash-driven scripts on the same
 # `make test-e2e` / `make test` paths they were on before #848.
 test-e2e:
+	@$(AGENT_REPORT) --target test-e2e -- $(MAKE) test-e2e-impl
+
+test-e2e-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-e2e] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
@@ -252,6 +274,9 @@ test-e2e:
 # so passing just `capsules` matches the prior
 # `find capsules -path '*/tests/*_test.sfn'` discovery.
 test-capsules:
+	@$(AGENT_REPORT) --target test-capsules -- $(MAKE) test-capsules-impl
+
+test-capsules-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-capsules] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
@@ -413,6 +438,9 @@ clean-build:
 clean-all: clean clean-build
 
 compile:
+	@$(AGENT_REPORT) --target compile -- $(MAKE) compile-impl
+
+compile-impl:
 	@if [ "$${FORCE:-0}" = "0" ] && [ -x "$(NATIVE_BIN)" ] && \
 		[ -z "$$(find compiler/src runtime -type f -name '*.sfn' -newer "$(NATIVE_BIN)" -print -quit 2>/dev/null)" ]; then \
 		echo "[compile] $(NATIVE_BIN) up-to-date"; \
@@ -422,6 +450,9 @@ compile:
 	fi
 
 check:
+	@$(AGENT_REPORT) --target check -- $(MAKE) check-impl
+
+check-impl:
 	@$(MAKE) compile NATIVE_OPT="$(SELFHOST1_OPT)"
 	@seed="build/native/sailfin"; \
 	if [ ! -x "$$seed" ]; then \
@@ -540,6 +571,9 @@ check:
 # (the triple-pass selfhost validator). Naming mirrors what end users
 # of the language will eventually run on their own capsules.
 check-fast:
+	@$(AGENT_REPORT) --target check-fast -- $(MAKE) check-fast-impl
+
+check-fast-impl:
 	@if [ ! -x "$(NATIVE_BIN)" ] && [ ! -f "$(NATIVE_BIN)" ]; then \
 		echo "[check-fast] missing $(NATIVE_BIN); run: make compile"; \
 		exit 1; \
@@ -645,6 +679,9 @@ ci-package-installer:
 # - NATIVE_OPT / SELFHOST1_OPT are no longer honoured here — the
 #   driver hardcodes `-O2` for the link step.
 rebuild:
+	@$(AGENT_REPORT) --target rebuild -- $(MAKE) rebuild-impl
+
+rebuild-impl:
 	@mkdir -p build
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
