@@ -187,10 +187,8 @@ exception runtime). The prelude ships a default Error struct { message: string }
 
     fn describe(r: Result<int, Error>) -> string {
         match r {
-            Result.Ok { value }
-            : return "ok",
-            Result.Err { error }
-            : return "error: " + error.message
+            Result.Ok { value } => return "ok",
+            Result.Err { error } => return "error: " + error.message
         }
     }
 

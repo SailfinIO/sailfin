@@ -47,15 +47,13 @@ read by value (not type-erased to `i8*`).
 ## 12.2 Inspecting a `Result` with `match`
 
 A `Result` is destructured like any other payload-carrying enum (§8), using
-`Pattern : expr` match arms:
+`Pattern => expr` match arms:
 
 ```sfn
 fn describe(result: Result<int, Error>) -> string {
     match result {
-        Result.Ok { value }
-        : return "ok",
-        Result.Err { error }
-        : return "error: " + error.message
+        Result.Ok { value } => return "ok",
+        Result.Err { error } => return "error: " + error.message
     }
 }
 ```
@@ -86,16 +84,21 @@ left-associates in a postfix chain, so `a()?.b()?` parses as `((a()?).b())?`.
 ### 12.3.1 Desugaring (pure control flow)
 
 `x?` desugars, before emission, to a `match` over the operand whose `Err` arm is
-an early `return`:
+an early `return`. Sailfin has no `match`-*expression* (only a `match`
+*statement*), so the emitter performs a **continuation-style** rewrite: the
+operand is hoisted into a `match` statement whose `Ok` arm binds the unwrapped
+value and carries the remainder of the enclosing block, while the `Err` arm
+performs the early return. So `let x = parse_int(a)?;` followed by the rest of
+the block rewrites (illustratively) to:
 
 ```sfn
-// parse_int(a)?  is equivalent to:
-let x = match parse_int(a) {
-    Result.Ok { value }
-    : value,
-    Result.Err { error }
-    : return Result.Err { error: error }
-};
+match parse_int(a) {
+    Result.Err { error } => return Result.Err { error: error },
+    Result.Ok { value } => {
+        let x = value;
+        // ... the remainder of the enclosing block continues here ...
+    }
+}
 ```
 
 This is the same zero-cost lowering Rust uses for `?`: a discriminant test plus a
