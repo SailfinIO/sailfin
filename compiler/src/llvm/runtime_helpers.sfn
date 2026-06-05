@@ -630,14 +630,15 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // wait}` rows flip their `native_signature` to the Sailfin-native
     // `sfn_process_*` bodies in `runtime/sfn/process.sfn` (over
     // `posix_spawnp` / `posix_spawn_file_actions_*` / `pipe` / `poll`),
-    // exactly as M2.9 flipped `process.run`. The `_handle_*` bodies read
-    // and write the C `SailfinProcessHandle` struct at its fixed offsets
-    // because `process.spawn_with_env` — the sole handle producer —
-    // stays C (M4); keep the Sailfin overlay and the C struct in
-    // lockstep until that ports too. The legacy C
-    // `sailfin_runtime_process_*` bodies stay exported for seed-built IR
-    // link-compat through the M-window. `spawn_with_env` is M4-scoped and
-    // is deliberately NOT flipped here.
+    // exactly as M2.9 flipped `process.run`. `process.spawn_with_env` —
+    // the sole handle producer — is now ALSO Sailfin-native
+    // (`sfn_process_spawn_with_env`, #1102): it mallocs the
+    // `SailfinProcessHandle` the `_handle_*` bodies consume, so the
+    // overlay struct in `process.sfn` is the canonical owner. The C
+    // `SailfinProcessHandle` and the legacy C `sailfin_runtime_process_*`
+    // bodies stay defined for seed-built IR link-compat through the
+    // M-window; the C `spawn_with_env` body is retired separately (#822,
+    // M4-gated) once no seed-built IR references it.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.run_capture", symbol: "sfn_process_run_capture", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: "sfn_process_run_capture", c_abi_return_type: null
     });
@@ -648,7 +649,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "process.capture_take_stderr", symbol: "sfn_process_capture_take_stderr", return_type: "i8*", parameter_types: [], effects: ["io"], native_signature: "sfn_process_capture_take_stderr", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "process.spawn_with_env", symbol: "sailfin_runtime_process_spawn_with_env", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+        target: "process.spawn_with_env", symbol: "sfn_process_spawn_with_env", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: "sfn_process_spawn_with_env", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.handle_write", symbol: "sfn_process_handle_write", return_type: "i64", parameter_types: ["i64", "i8*"], effects: ["io"], native_signature: "sfn_process_handle_write", c_abi_return_type: null
