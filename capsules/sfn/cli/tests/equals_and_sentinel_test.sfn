@@ -1,0 +1,174 @@
+// Tests for `--key=value` flag syntax and the `--` sentinel — Issue #801
+// (Issue 1.12 of the CLI Modularization Epic, #351).
+//
+// `--key=value` splits the long-flag token on the FIRST `=`: the name is
+// everything before it, the value everything after, so it parses
+// identically to the space-separated `--key value` form for every value
+// kind. A bare `--` stops flag parsing — every later argv token becomes a
+// positional, even one that looks like a flag. `parse()` (the pure,
+// non-exiting variant) is used throughout so error paths never call
+// `process.exit()`.
+import {
+    arg,
+    arg_variadic,
+    command,
+    flag,
+    flag_choice,
+    flag_float,
+    flag_int,
+    flag_path,
+    flag_value,
+    get,
+    get_choice,
+    get_float,
+    get_int,
+    get_path,
+    has,
+    parse,
+    positionals,
+    with_arg,
+    with_flag
+} from "../src/mod";
+
+// ---- `--key=value` parses identically to `--key value` per kind ----
+test "equals: string flag --out=FILE matches --out FILE" {
+    let cmd = with_flag(command("app", "desc"), flag_value("out", "Output"));
+    let r = parse(cmd, ["app", "--out=build/out.txt"]);
+    assert r.ok == true;
+    assert strings_equal(get(r.matches, "out"), "build/out.txt");
+}
+
+test "equals: int flag --count=42 parses to 42" {
+    let cmd = with_flag(command("app", "desc"), flag_int("count", "How many"));
+    let r = parse(cmd, ["app", "--count=42"]);
+    assert r.ok == true;
+    assert get_int(r.matches, "count") == 42;
+}
+
+test "equals: int flag --delta=-7 parses a negative integer" {
+    let cmd = with_flag(command("app", "desc"), flag_int("delta", "Offset"));
+    let r = parse(cmd, ["app", "--delta=-7"]);
+    assert r.ok == true;
+    assert get_int(r.matches, "delta") == -7;
+}
+
+test "equals: float flag --ratio=0.5 parses to 0.5" {
+    let cmd = with_flag(command("app", "desc"), flag_float("ratio", "Ratio"));
+    let r = parse(cmd, ["app", "--ratio=0.5"]);
+    assert r.ok == true;
+    assert get_float(r.matches, "ratio") == 0.5;
+}
+
+test "equals: path flag --out=dir/x returns the path verbatim" {
+    let cmd = with_flag(command("app", "desc"), flag_path("out", "Output"));
+    let r = parse(cmd, ["app", "--out=dir/x"]);
+    assert r.ok == true;
+    assert strings_equal(get_path(r.matches, "out"), "dir/x");
+}
+
+test "equals: choice flag --color=auto accepts a valid choice" {
+    let choices: string[] = ["always", "auto", "never"];
+    let cmd = with_flag(command("app", "desc"), flag_choice("color", "When", choices));
+    let r = parse(cmd, ["app", "--color=auto"]);
+    assert r.ok == true;
+    assert strings_equal(get_choice(r.matches, "color"), "auto");
+}
+
+test "equals: choice flag --color=bogus yields invalid_choice" {
+    let choices: string[] = ["always", "auto", "never"];
+    let cmd = with_flag(command("app", "desc"), flag_choice("color", "When", choices));
+    let r = parse(cmd, ["app", "--color=bogus"]);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "invalid_choice");
+    assert strings_equal(r.error.flag_name, "color");
+}
+
+// ---- `--key=` (empty value after `=`) ----
+test "equals: string flag --out= yields an empty string value" {
+    let cmd = with_flag(command("app", "desc"), flag_value("out", "Output"));
+    let r = parse(cmd, ["app", "--out="]);
+    assert r.ok == true;
+    assert has(r.matches, "out") == true;
+    assert strings_equal(get(r.matches, "out"), "");
+}
+
+test "equals: int flag --count= yields type_error" {
+    let cmd = with_flag(command("app", "desc"), flag_int("count", "How many"));
+    let r = parse(cmd, ["app", "--count="]);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "type_error");
+    assert strings_equal(r.error.flag_name, "count");
+}
+
+test "equals: float flag --ratio= yields type_error" {
+    let cmd = with_flag(command("app", "desc"), flag_float("ratio", "Ratio"));
+    let r = parse(cmd, ["app", "--ratio="]);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "type_error");
+    assert strings_equal(r.error.flag_name, "ratio");
+}
+
+test "equals: path flag --out= yields type_error" {
+    let cmd = with_flag(command("app", "desc"), flag_path("out", "Output"));
+    let r = parse(cmd, ["app", "--out="]);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "type_error");
+    assert strings_equal(r.error.flag_name, "out");
+}
+
+// ---- `--key=a=b=c` splits on the first `=` only ----
+test "equals: value retains embedded equals (--out=a=b=c)" {
+    let cmd = with_flag(command("app", "desc"), flag_value("out", "Output"));
+    let r = parse(cmd, ["app", "--out=a=b=c"]);
+    assert r.ok == true;
+    assert strings_equal(get(r.matches, "out"), "a=b=c");
+}
+
+// ---- non-value flags reject an inline value ----
+test "equals: boolean flag --verbose=x yields unexpected_value" {
+    let cmd = with_flag(command("app", "desc"), flag("verbose", "Loud"));
+    let r = parse(cmd, ["app", "--verbose=x"]);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "unexpected_value");
+    assert strings_equal(r.error.flag_name, "verbose");
+}
+
+// ---- the `--` sentinel stops flag parsing ----
+test "sentinel: -- makes a following --flag a positional" {
+    let cmd = with_arg(command("app", "desc"), arg("target", "Target"));
+    let r = parse(cmd, ["app", "--", "--flag"]);
+    assert r.ok == true;
+    assert strings_equal(get(r.matches, "target"), "--flag");
+    // `flag` was NOT recorded as a flag.
+    assert has(r.matches, "flag") == false;
+}
+
+test "sentinel: tokens after -- collect into a variadic positional" {
+    let cmd = with_arg(command("app", "desc"), arg_variadic("rest", "Passthrough"));
+    let r = parse(cmd, ["app", "--", "--in", "-x", "plain"]);
+    assert r.ok == true;
+    let rest = positionals(r.matches, "rest");
+    assert rest.length == 3;
+    assert strings_equal(rest[0], "--in");
+    assert strings_equal(rest[1], "-x");
+    assert strings_equal(rest[2], "plain");
+}
+
+test "sentinel: a known flag before -- still parses, value after does not" {
+    let app = with_flag(command("app", "desc"), flag_value("out", "Output"));
+    let cmd = with_arg(app, arg("target", "Target"));
+    let r = parse(cmd, ["app", "--out=here", "--", "--out=ignored"]);
+    assert r.ok == true;
+    assert strings_equal(get(r.matches, "out"), "here");
+    assert strings_equal(get(r.matches, "target"), "--out=ignored");
+}
+
+test "sentinel: a second -- after the sentinel is a literal positional" {
+    let cmd = with_arg(command("app", "desc"), arg_variadic("rest", "Passthrough"));
+    let r = parse(cmd, ["app", "--", "--", "a"]);
+    assert r.ok == true;
+    let rest = positionals(r.matches, "rest");
+    assert rest.length == 2;
+    assert strings_equal(rest[0], "--");
+    assert strings_equal(rest[1], "a");
+}
