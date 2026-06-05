@@ -3,7 +3,7 @@
 Status: proposed (planning only — no code in this PR)
 Date: 2026-06-05
 Author: Sailbot (main-session orchestrator)
-Parent: [docs/proposals/build-architecture.md](./build-architecture.md) §4.11 (structured outcomes),
+Parent: [docs/proposals/build-architecture.md](./build-architecture.md) §4.11 (structured link diagnostics),
 [docs/proposals/test-infra-epic/00-overview.md](./test-infra-epic/00-overview.md)
 
 ## Problem
@@ -17,8 +17,12 @@ the only three questions that decide its next move:
 1. **What failed?** A compile error, a test assertion, a non-deterministic
    IR mismatch, a setup error, an OOM, or a timeout — each demands a
    *different* response, and they all look alike in a truncated tail.
-2. **Where?** Which phase, which file, which line. `make check` runs six
-   phases (`Makefile:424-525`); a nonzero exit names none of them.
+2. **Where?** Which phase, which file, which line. `make check` runs
+   seven phases (`Makefile:424-525`) — compile, first-pass tests,
+   seedcheck build, the seedcheck hello-world viability smoke
+   (`Makefile:459-473`, which fails *independently* of the build and
+   test phases), seedcheck tests, stage3 build, and the fixed-point hash
+   diff; a nonzero exit names none of them.
 3. **Is a retry worth it?** An OOM under the 8 GB cap or a known
    non-determinism flake should escalate or re-run; a real compile error
    should not be retried blind. Agents currently retry everything.
@@ -109,9 +113,9 @@ Fields (closed set, versioned `sailfin-make/1`):
 |---|---|---|
 | `schema_version` | string | `"sailfin-make/N"`; consumers hard-fail on unknown N. |
 | `target` | string | `compile` \| `rebuild` \| `check` \| `check-fast` \| `test` \| `test-unit` \| … |
-| `status` | string | `pass` \| `fail`. |
-| `failure` | string \| null | Classification (closed set below); `null` on pass. |
-| `phase` | string \| null | Which phase reached failure (`check` has six; single-phase targets echo the target). |
+| `status` | string | `pass` \| `warn` \| `fail`. `warn` carries a non-fatal signal (e.g. `nondeterminism`) without a nonzero exit — exit code mirrors `make`'s actual status, so `warn` keeps `make check`'s `0`. |
+| `failure` | string \| null | Classification (closed set below); `null` on `pass`. Set on `warn` too (e.g. `nondeterminism`), not just `fail`. |
+| `phase` | string \| null | Which phase reached failure/warn (`check` has seven; single-phase targets echo the target). |
 | `first_error` | string \| null | `file:line` for a compile/test error, else the failing phase name. |
 | `report` | string \| null | Path to the full JSON report (Phase 2), else `null`. |
 
@@ -125,6 +129,11 @@ distinct responses):
 | `compile-error` | `sfn build`/`check` reported diagnostics | Read diagnostics, fix source — **do not retry** |
 | `test-failure` | One or more tests failed assertions | Read the failing test's JSON event |
 | `nondeterminism` | stage2 ≠ stage3 fixed-point mismatch | Re-run once; if persists, `seed-stabilizer` |
+
+`nondeterminism` is the one class that pairs with `status: "warn"`, not
+`"fail"` — `make check` treats `[check][WARN] stage2 != stage3` as
+non-fatal (exit 0), so the verdict must surface the signal *without*
+flipping the exit code. Every other class pairs with `status: "fail"`.
 | `setup-error` | bad path, missing seed, staging failure (exit 2) | Fix invocation/env, not source |
 | `oom` | hit the 8 GB `ulimit -v` cap | Escalate (memory regression), **do not blind-retry** |
 | `timeout` | wall-clock `timeout` tripped | Re-run or escalate per phase |
@@ -150,6 +159,7 @@ already-shipped tool JSON:
     {"name": "compile",          "status": "pass", "report": "build/native/.build-report.json"},
     {"name": "first-pass-tests", "status": "pass", "passed": 412, "failed": 0},
     {"name": "seedcheck-build",  "status": "pass"},
+    {"name": "seedcheck-smoke",  "status": "pass"},
     {"name": "seedcheck-tests",  "status": "fail", "passed": 411, "failed": 1,
      "failures": [{"file": "compiler/tests/unit/foo_test.sfn", "line": 42, "name": "..."}]},
     {"name": "stage3-build",     "status": "skipped"},
@@ -160,13 +170,15 @@ already-shipped tool JSON:
 }
 ```
 
-- `make test ... --json` feeds the jsonl test stream into the `phases`
-  test entries.
-- `make compile`/`rebuild` requests `sfn build --json` from the seed and
-  tees the BuildReport (already a documented surface).
-- `make check`'s six-phase ledger is the headline win — it is the target
-  with the worst current legibility and the longest runtime, so a wrong
-  retry is the most expensive.
+- `make test JSON=1` (which internally invokes `sfn test --json`) feeds
+  the jsonl test stream into the `phases` test entries.
+- `make compile JSON=1` / `rebuild JSON=1` requests `sfn build --json`
+  from the seed and tees the BuildReport (already a documented surface).
+- `make check`'s seven-phase ledger — including the `seedcheck-smoke`
+  hello-world viability step (`Makefile:459-473`), which can fail
+  independently of the build and test phases — is the headline win: it
+  is the target with the worst current legibility and the longest
+  runtime, so a wrong retry is the most expensive.
 
 ### 4. Opt-in vs always-on
 
@@ -186,7 +198,7 @@ helper + docs/tests).
 | Phase | Size | Scope | Deliverable |
 |---|---|---|---|
 | **1 — keystone** | S | `Makefile` (`compile`, `rebuild`, `check`, `check-fast`, `test*`), new `scripts/agent_report.sh`, `docs/reference/make-result-schema.md` | The `===SAILFIN-RESULT===` always-last verdict block on every agent-facing target, with `status` + `failure` classification. A make-level smoke test asserts the sentinel is present on both a passing and a deliberately-failing run. |
-| **2 — full report** | M | `Makefile` `JSON=1` passthrough wiring the existing `check`/`build`/`test` `--json` surfaces; `scripts/agent_report.sh` composes `build/agent-report.json`; six-phase ledger for `check` | `build/agent-report.json` with per-phase status; `make compile JSON=1` tees `sfn build --json`; `make test JSON=1` consumes the jsonl stream. |
+| **2 — full report** | M | `Makefile` `JSON=1` passthrough wiring the existing `check`/`build`/`test` `--json` surfaces; `scripts/agent_report.sh` composes `build/agent-report.json`; seven-phase ledger for `check` (incl. the `seedcheck-smoke` viability step) | `build/agent-report.json` with per-phase status; `make compile JSON=1` tees `sfn build --json`; `make test JSON=1` consumes the jsonl stream. |
 | **3 — first-error + taxonomy** | S | `scripts/agent_report.sh` parses tool JSON to populate `first_error`; lock `sailfin-make/1` in `docs/reference/make-result-schema.md`; schema-lock test (mirrors `test_check_json_schema.sh`) | `first_error` resolves to `file:line`; full closed-set `failure` classification; versioned, documented, CI-guarded schema. |
 | **4 — surfacing (optional)** | S | `CLAUDE.md` + `.claude/agents/*` note the sentinel contract; optional MCP `sailfin_make` wrapper tool; `llms.txt` entry | Agents are told to read `===SAILFIN-RESULT===`; MCP clients get it as `structuredContent`. |
 
@@ -218,7 +230,7 @@ Phases 2–4 are progressive enrichment.
 - `failure` distinguishes `compile-error` / `test-failure` /
   `nondeterminism` / `setup-error` / `oom` / `timeout` — the six classes
   that demand different agent responses.
-- `make check` reports *which of its six phases* failed.
+- `make check` reports *which of its seven phases* failed.
 - Zero new `compiler/src` lines; zero self-hosting risk in the keystone.
 
 ## Open questions
