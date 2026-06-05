@@ -120,6 +120,15 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
                 return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_flag", _with_hint(cmd.name, path, "error: unknown flag --"
                     + flag_name), flag_name, "");
             }
+            if has_inline && !f.takes_value {
+                // A boolean/count flag given `--name=value` is a usage
+                // error: it accepts no value to assign. Reported before
+                // recording the flag so the `fl_names`/`fl_values`/
+                // `fl_present` arrays stay parallel in the error result.
+                return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "unexpected_value", _with_hint(cmd.name, path, "error: flag --"
+                    + flag_name
+                    + " does not take a value"), f.long_name, "");
+            }
             fl_names.push(f.long_name);
             fl_present.push(true);
             if f.takes_value {
@@ -160,12 +169,6 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
                             + "])"), f.long_name, "");
                     }
                 }
-            } else if has_inline {
-                // A boolean/count flag given `--name=value` is a usage
-                // error: it accepts no value to assign.
-                return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "unexpected_value", _with_hint(cmd.name, path, "error: flag --"
-                    + flag_name
-                    + " does not take a value"), f.long_name, "");
             } else { fl_values.push("true"); }
         } else if _starts_with(token, "-") && token.length > 1 {
             // Short flag: -v or -o value

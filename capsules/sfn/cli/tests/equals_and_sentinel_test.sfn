@@ -14,6 +14,7 @@ import {
     command,
     flag,
     flag_choice,
+    flag_count,
     flag_float,
     flag_int,
     flag_path,
@@ -128,6 +129,14 @@ test "equals: value retains embedded equals (--out=a=b=c)" {
 test "equals: boolean flag --verbose=x yields unexpected_value" {
     let cmd = with_flag(command("app", "desc"), flag("verbose", "Loud"));
     let r = parse(cmd, ["app", "--verbose=x"]);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "unexpected_value");
+    assert strings_equal(r.error.flag_name, "verbose");
+}
+
+test "equals: counted flag --verbose=2 yields unexpected_value" {
+    let cmd = with_flag(command("app", "desc"), flag_count("verbose", "Loud"));
+    let r = parse(cmd, ["app", "--verbose=2"]);
     assert r.ok == false;
     assert strings_equal(r.error.kind, "unexpected_value");
     assert strings_equal(r.error.flag_name, "verbose");
