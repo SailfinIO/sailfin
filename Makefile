@@ -113,6 +113,19 @@ NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 # docs/reference/make-result-schema.md.
 .PHONY: compile-impl rebuild-impl check-impl check-fast-impl
 .PHONY: test-impl test-unit-impl test-integration-impl test-e2e-impl test-capsules-impl
+#
+# Report-file gate (#1119). `JSON=1 make <target>` (or SAILFIN_AGENT_REPORT=1 in
+# the environment) activates a per-target full report file at
+# build/agent-report.<target>.json and points the verdict block's `report`
+# field at it. The gate is off by default: no file is written and `report`
+# stays null. The flag is exported (not threaded through each callsite) so
+# agent_report.sh reads it from the environment; nested SAILFIN_INNER runs still
+# emit no sentinel and write no file.
+JSON ?=
+ifeq ($(JSON),1)
+SAILFIN_AGENT_REPORT := 1
+endif
+export SAILFIN_AGENT_REPORT
 AGENT_REPORT := bash scripts/agent_report.sh
 
 help:

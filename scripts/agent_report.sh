@@ -71,6 +71,25 @@ fi
 # any nested wrapped targets the command spawns.
 export SAILFIN_INNER=1
 
+# --- report-file gate (#1119) ------------------------------------------------
+# JSON=1 / SAILFIN_AGENT_REPORT=1 (set by the Makefile, exported into our env)
+# activates a per-target full report file at build/agent-report.<target>.json.
+# When the gate is off REPORT_PATH stays empty: no file is written and the
+# verdict block's `report` field stays null. The path is target-specific so
+# parallel CI shards (e.g. `make test` + `make compile`) never collide. This
+# guard sits AFTER the SAILFIN_INNER early-return above, so nested wrapped
+# targets never reach it and never write a file.
+REPORT_PATH=""
+if [ "${SAILFIN_AGENT_REPORT:-}" = "1" ]; then
+	# Only enable the report path once its directory exists. If `build` can't
+	# be created (read-only or unwritable workspace), REPORT_PATH stays empty
+	# so the verdict block keeps `report` null instead of advertising a path no
+	# file could be written to.
+	if mkdir -p build 2>/dev/null; then
+		REPORT_PATH="build/agent-report.${TARGET}.json"
+	fi
+fi
+
 # --- output capture ----------------------------------------------------------
 # Capture combined output for classification. If mktemp fails (e.g. /tmp full
 # or unwritable) fall back to /dev/null: the command still streams through and
@@ -194,11 +213,51 @@ json_val() {
 	printf '"%s"' "$v"
 }
 
+# --- full report file (#1119) ------------------------------------------------
+# Write a minimal, well-formed report at REPORT_PATH. Phase 2 scaffolding:
+# `phases` is an empty array stub here; issue E composes real per-phase content
+# from tool JSON. The report mirrors the verdict block's fields and adds a
+# self-referential `report` (its own path) plus `phases`. Best-effort: a write
+# failure must never break the verdict block, so it degrades silently.
+write_report_file() {
+	{
+		printf '{"schema_version":"sailfin-make/1",'
+		printf '"target":%s,' "$(json_val "$TARGET")"
+		printf '"status":%s,' "$(json_val "$STATUS")"
+		printf '"failure":%s,' "$(json_val "$FAILURE")"
+		printf '"phase":%s,' "$(json_val "$PHASE")"
+		printf '"first_error":%s,' "$(json_val "$FIRST_ERROR")"
+		printf '"report":%s,' "$(json_val "$REPORT_PATH")"
+		printf '"phases":[]}\n'
+	} >"$REPORT_PATH" 2>/dev/null || true
+}
+
 emit_verdict() {
+	# Capture the status that triggered the trap as the very first action —
+	# any later command would clobber $?. If we were interrupted (signal,
+	# internal error) before RC was captured from PIPESTATUS, RC is still its
+	# initial 0; inherit the trap's status so an aborted run isn't misreported
+	# as a pass (which would also write a passing report file under the gate).
+	local trap_rc=$?
 	# Fired via trap on EXIT so the block is always the final output, even if
 	# the command aborts a phase or the wrapper is interrupted.
 	trap - EXIT
+	if [ "$RC" -eq 0 ] && [ "$trap_rc" -ne 0 ]; then
+		RC="$trap_rc"
+	fi
 	classify
+	# Report-file field: the per-target path when gated, else null. Write the
+	# file before the verdict so a consumer that follows the `report` pointer
+	# finds it already on disk. Only advertise the path if the file is actually
+	# present after the write — a failed mkdir/write must leave `report` null
+	# rather than dangle a pointer to a missing file.
+	local report_field="null"
+	if [ -n "$REPORT_PATH" ]; then
+		write_report_file
+		if [ -f "$REPORT_PATH" ]; then
+			report_field="$(json_val "$REPORT_PATH")"
+		fi
+	fi
 	{
 		printf '===SAILFIN-RESULT===\n'
 		printf '{"schema_version":"sailfin-make/1",'
@@ -207,7 +266,7 @@ emit_verdict() {
 		printf '"failure":%s,' "$(json_val "$FAILURE")"
 		printf '"phase":%s,' "$(json_val "$PHASE")"
 		printf '"first_error":%s,' "$(json_val "$FIRST_ERROR")"
-		printf '"report":null}\n'
+		printf '"report":%s}\n' "$report_field"
 		printf '===END-SAILFIN-RESULT===\n'
 	}
 	cleanup_outfile
