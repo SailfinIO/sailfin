@@ -108,12 +108,13 @@ run_test "runtime object + content-key sidecar produced on first build" \
 
 T1="$(mtime_of "$RUNTIME_OBJ")"
 
-# The `[cache]` summary line `_print_cache_summary` emits to stdout
-# (captured in build.log). Since #915 the runtime C/LL/sfn object
-# cache folds its hits/misses into this same line, so the counts
-# below are attributable to the runtime objects (the one-line
-# program has no `.ll` module-cache deps of its own). Helpers parse
-# the `hits=`/`misses=` fields out of the most recent build's log.
+# The `[cache]` summary line `_print_cache_summary` emits to stderr
+# (#915); `build.log` still captures it because `do_build` redirects
+# `2>&1`. Since #915 the runtime C/LL/sfn object cache folds its
+# hits/misses into this same line, so the counts below are
+# attributable to the runtime objects (the one-line program has no
+# `.ll` module-cache deps of its own). Helpers parse the
+# `hits=`/`misses=` fields out of the most recent build's log.
 summary_field() {
     # summary_field <field-name> -> integer value (or "" if no line)
     sed -nE "s/.*\[cache\] .*${1}=([0-9]+).*/\1/p" "$SCRATCH/build.log" | tail -n1

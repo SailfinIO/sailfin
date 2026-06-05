@@ -149,7 +149,7 @@ feature availability.
     no-op rebuild shows the runtime objects as `hits`. Both the
     human summary and `sfn build --json`'s `cache` field reflect
     both layers. Counting matches the `.ll` layer (an unhashable key
-    is both a miss and an `invalid_key`). Because runtime objects are
+    is both a miss and an `invalid_keys`). Because runtime objects are
     almost always cached, the summary is now non-empty on nearly
     every build/run, so `_print_cache_summary` moved from stdout to
     **stderr** (keeping `sfn run`'s program stdout and `--json`'s

@@ -312,7 +312,8 @@ fn _emit_capsule_artifact_sidecar(spec_capsule_name: string, spec_version: strin
 // JSON encoding to stdout. Mirrors `_print_cache_summary`'s
 // placement (end of the success path); machine-readable consumers
 // (`sfn lsp`, MCP, CI gates) read this single line and parse it
-// rather than scraping `built: ...` + `[cache] ...` from stderr.
+// rather than scraping the human text output (`built: ...` on
+// stdout, `[cache] ...` on stderr since #915).
 fn _emit_build_report(input_path: string, out_path: string, kind: string, exit_code: int, capsule_result: ProjectCapsuleResult, cache_config: BuildCacheConfig, stats: CacheStats) ![io] {
     let mut report = empty_build_report();
     report.input = input_path;
