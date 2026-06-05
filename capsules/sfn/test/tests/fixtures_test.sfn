@@ -1,0 +1,134 @@
+// Tests for the sfn/test scoped fixtures (#979, proposal §2.2).
+//
+// `with_tmp_dir(body)` creates a temp dir, runs the closure `body`, and
+// recursively removes the tree on scope exit — including when `body`
+// throws. The body is a capturing lambda (M1.5 closures, #687 emission +
+// #689 dispatch); these tests are the capsule-side proof that the chain
+// works end to end against real I/O.
+//
+// Every test is `![io]`: `with_tmp_dir` and the `fs.*` setup/inspection
+// calls all require it, and a body lambda's effects bubble into the
+// enclosing `![io]` test scope.
+//
+// Verifying teardown needs the created path *after* the scope exits, but
+// the path is minted inside `with_tmp_dir`. A lifted lambda cannot write
+// an enclosing/global mutable (the store is dropped) and mutable captures
+// are refused (#687), so the path is ferried out the only channel that
+// survives a lifted body: the filesystem. Each body writes its `dir` to a
+// per-test marker file (a captured local), which the test reads back to
+// assert the directory is gone.
+//
+// SINGLE-CAPTURE CONSTRAINT: every body lambda below captures at most one
+// enclosing local. A lambda capturing *two* locals currently miscompiles
+// — the env-struct type is emitted with only the first field while the
+// load prologue GEPs the second, producing invalid LLVM IR (tracked as a
+// separate multi-capture lowering bug). Single capture — the path the
+// `closure_single_capture` e2e fixture exercises and that #979 actually
+// rides — works; these tests stay within it deliberately.
+import { find } from "sfn/strings";
+
+import { with_tmp_dir } from "../src/mod";
+
+// Scratch root for marker files. Prefer the runner's
+// `SAILFIN_TEST_SCRATCH`; fall back to `/tmp` for a direct
+// `sfn test <file>` invocation that did not export it.
+fn _scratch() -> string ![io] {
+    let s = env.get("SAILFIN_TEST_SCRATCH");
+    if s.length > 0 { return s; }
+    return "/tmp";
+}
+
+// A fresh marker-file path for `name`, with any stale value from a prior
+// run removed so each test starts clean.
+fn _marker(name: string) -> string ![io] {
+    let dir = _scratch();
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-fixture-" + name + ".path";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+fn _cleanup(path: string) ![io] {
+    if fs.exists(path) { fs.deleteFile(path); }
+}
+
+// The body observes a directory that exists and is named `sfn-test-*`,
+// and its return value threads back out through the fixture. The body
+// captures nothing (`find` is an imported symbol, not a local).
+test "with_tmp_dir: body sees an existing, well-named dir; result threads through" ![io] {
+    let r = with_tmp_dir(fn (d: string) -> int {
+        if !fs.exists(d) { return -1; }
+        if find(d, "sfn-test-", 0) < 0 { return -2; }
+        return 42;
+    });
+    assert r == 42;
+}
+
+// On a normal return the directory is removed. The body captures the
+// single local `marker`.
+test "with_tmp_dir: removes the dir on normal scope exit" ![io] {
+    let marker = _marker("remove");
+    let r = with_tmp_dir(fn (d: string) -> int {
+        fs.writeFile(marker, d);
+        return 0;
+    });
+    assert r == 0;
+    let recorded = fs.readFile(marker);
+    assert recorded.length > 0;
+    assert ! fs.exists(recorded);
+    _cleanup(marker);
+}
+
+// A *non-empty* tree is removed — proving the teardown recurses rather
+// than a bare `rmdir` (which would fail on the non-empty dir and leave it
+// behind). Routes through `sfn/fs::remove_all` (#976). Captures `marker`.
+test "with_tmp_dir: recursively removes a nested tree on scope exit" ![io] {
+    let marker = _marker("nested");
+    let r = with_tmp_dir(fn (d: string) -> int {
+        fs.createDirectory(d + "/a/b", true);
+        fs.writeFile(d + "/a/b/leaf.txt", "x");
+        fs.writeFile(marker, d);
+        if fs.exists(d + "/a/b/leaf.txt") { return 1; }
+        return 0;
+    });
+    assert r == 1;
+    let recorded = fs.readFile(marker);
+    assert recorded.length > 0;
+    assert ! fs.exists(recorded);
+    _cleanup(marker);
+}
+
+// The directory is removed even when the body throws, and the original
+// error propagates (the fixture must not swallow a failing test).
+// Captures `marker`.
+test "with_tmp_dir: removes the dir and re-throws when body throws" ![io] {
+    let marker = _marker("throws");
+    let mut threw = false;
+    try {
+        let _ = with_tmp_dir(fn (d: string) -> int {
+            fs.createDirectory(d + "/sub", true);
+            fs.writeFile(marker, d);
+            throw "fixture-body-boom";
+        });
+    } catch (e) { threw = true; }
+    assert threw;
+    let recorded = fs.readFile(marker);
+    assert recorded.length > 0;
+    assert ! fs.exists(recorded);
+    _cleanup(marker);
+}
+
+// The body closure captures the enclosing local `token`: the filename
+// written inside the temp dir is derived from it, so a correct result is
+// only possible if capture works (the #687/#689 gate this issue rode).
+// Exactly one capture (`token`).
+test "with_tmp_dir: body captures an enclosing local" ![io] {
+    let token: string = "captured-name";
+    let r = with_tmp_dir(fn (d: string) -> int {
+        let f = d + "/" + token;
+        fs.writeFile(f, "present");
+        if fs.exists(f) { return token.length; }
+        return -1;
+    });
+    assert r == token.length;
+}

@@ -1,0 +1,56 @@
+// sfn/test — Scoped test fixtures (issue #979, proposal §2.2).
+//
+// A scoped fixture sets up a resource, runs a body closure, and tears the
+// resource down on scope exit — including when the body throws. The body
+// is an ordinary closure that may capture the enclosing test's locals
+// (M1.5 closures-with-capture, #687 emission + #689 dispatch).
+//
+// Only `with_tmp_dir` ships here. The originally-proposed `with_env` and
+// `with_cwd` fixtures are intentionally NOT provided:
+//
+//   * They require mutating *process-global* state (`setenv` / `chdir`)
+//     and restoring it. The runtime exposes no such primitive — only
+//     `env.get` / `env.home` exist — and adding C for it cuts against the
+//     in-flight C→Sailfin runtime port (the C surface is frozen after the
+//     test-infra epic's Phase 0).
+//   * Even with the primitives, both are unsound under structured
+//     concurrency: `chdir(2)` sets a per-*process* working directory and
+//     `setenv(3)` mutates a shared, non-thread-safe `environ`, so a
+//     process-global fixture corrupts sibling tasks the moment the test
+//     runner goes parallel. The right shape is per-child control, which
+//     already ships as the typed `Env` + `os::run_capture` API. A
+//     concurrency-aware redesign is tracked as the #979 follow-up.
+//
+// Teardown routes through `sfn/fs::remove_all` (issue #976) — the
+// pure-Sailfin `rm -rf` composed from `deleteFile` / `listDirectory` /
+// `removeDirectory`. No new C runtime surface is introduced.
+import { mkdtemp, remove_all } from "sfn/fs";
+
+// Create a fresh temporary directory, hand its absolute path to `body`,
+// and recursively remove the whole tree on scope exit — on both the
+// normal-return and the throwing path. Returns whatever `body` returns.
+//
+// `body` may be a capturing lambda; it closes over the enclosing test's
+// locals. The parameter is typed `fn(string) -> int` (no `![io]` row):
+// the effect checker attributes a lambda body's effects to the scope that
+// *defines* the lambda, so an `![io]` test that builds the closure already
+// accounts for any io inside it — the fn-type itself carries no effect row.
+// (`-> int` is the interim return shape shared with the `expect_to_throw`
+// thunks; a body that produces nothing returns `0`. A generic result type
+// waits on generics.)
+//
+// The directory is created with `mkdtemp("sfn-test-")`, so it is unique
+// per call and lives under `$TMPDIR` (or `/tmp`). On the error path the
+// directory is removed first, then the original error is re-thrown so the
+// failing test still fails with its own message.
+fn with_tmp_dir(body: fn (string) -> int) -> int ![io] {
+    let dir = mkdtemp("sfn-test-");
+    try {
+        let result = body(dir);
+        let _ = remove_all(dir);
+        return result;
+    } catch (e) {
+        let _ = remove_all(dir);
+        throw e;
+    }
+}
