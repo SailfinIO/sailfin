@@ -19,7 +19,7 @@
 //     process-global fixture corrupts sibling tasks the moment the test
 //     runner goes parallel. The right shape is per-child control, which
 //     already ships as the typed `Env` + `os::run_capture` API. A
-//     concurrency-aware redesign is tracked as the #979 follow-up.
+//     concurrency-aware redesign is tracked in #1107.
 //
 // Teardown routes through `sfn/fs::remove_all` (issue #976) — the
 // pure-Sailfin `rm -rf` composed from `deleteFile` / `listDirectory` /
@@ -43,8 +43,15 @@ import { mkdtemp, remove_all } from "sfn/fs";
 // per call and lives under `$TMPDIR` (or `/tmp`). On the error path the
 // directory is removed first, then the original error is re-thrown so the
 // failing test still fails with its own message.
+//
+// `mkdtemp` returns an empty string on failure; we refuse to proceed in
+// that case rather than hand `body` an empty path (which would resolve
+// relative to the cwd) and then `remove_all("")` it. Fail loud instead.
 fn with_tmp_dir(body: fn (string) -> int) -> int ![io] {
     let dir = mkdtemp("sfn-test-");
+    if dir.length == 0 {
+        throw "with_tmp_dir: mkdtemp failed to create a temporary directory";
+    }
     try {
         let result = body(dir);
         let _ = remove_all(dir);
