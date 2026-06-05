@@ -136,6 +136,23 @@ fn empty_cache_stats() -> CacheStats {
     };
 }
 
+// Field-wise sum of two `CacheStats`. Pure. Used to fold a
+// separately-accumulated layer's counters into the build-wide
+// total before the CLI prints the `[cache]` summary — e.g. the
+// runtime C/LL object cache (`cli_main.sfn`) accumulates its own
+// hits/misses while compiling `runtime/native/src/*` objects, then
+// merges them into the `.ll` module cache's `CacheStats` so the
+// single summary line reflects both layers (#915).
+fn merge_cache_stats(a: CacheStats, b: CacheStats) -> CacheStats {
+    return CacheStats {
+        hits: a.hits + b.hits,
+        misses: a.misses + b.misses,
+        stores: a.stores + b.stores,
+        invalid_keys: a.invalid_keys + b.invalid_keys,
+        copy_failures: a.copy_failures + b.copy_failures
+    };
+}
+
 // True iff the build produced no cache activity at all (zero
 // hits and zero misses). Useful for deciding whether to print
 // the cache summary line — empty stats from a manifest-less
@@ -712,6 +729,7 @@ export {
     sha256_of_file,
     runtime_object_cache_key,
     empty_cache_stats,
+    merge_cache_stats,
     cache_stats_is_empty,
     empty_build_cache_config,
     resolve_build_cache_config,

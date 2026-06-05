@@ -353,9 +353,13 @@ fn main() -> int ![io] {
     return 0;
 }
 PROBE
-    if ! "$BINARY" run "$probe" > "$out_log" 2>&1; then
+    # #915: capture stdout separately from stderr. The driver folds the
+    # runtime object cache into the `[cache]` summary, which now prints
+    # (to stderr) on nearly every `sfn run`; a combined `2>&1` capture
+    # would corrupt the round-trip stdout comparison below.
+    if ! "$BINARY" run "$probe" > "$out_log" 2> "$out_log.err"; then
         echo "[test]   sfn run round_trip_probe.sfn failed:"
-        cat "$out_log"
+        cat "$out_log" "$out_log.err"
         return 1
     fi
     # Expected stdout (each `print` adds a trailing newline):
@@ -415,9 +419,11 @@ fn main() -> int ![io] {
 }
 PROBE
     local out_log="$SCRATCH/large.log"
-    if ! "$BINARY" run "$probe" > "$out_log" 2>&1; then
+    # #915: capture stdout separately (see test_round_trip_file) so the
+    # stderr `[cache]` summary cannot inflate the byte-exact payload diff.
+    if ! "$BINARY" run "$probe" > "$out_log" 2> "$out_log.err"; then
         echo "[test]   sfn run large_probe.sfn failed:"
-        head -20 "$out_log"
+        head -20 "$out_log" "$out_log.err"
         return 1
     fi
     # `print` always appends a trailing newline; the expected

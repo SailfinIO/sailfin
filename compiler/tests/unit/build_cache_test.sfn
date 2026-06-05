@@ -43,7 +43,8 @@ import {
     cache_compiler_identity,
     empty_build_cache_config,
     empty_cache_stats,
-    is_valid_digest
+    is_valid_digest,
+    merge_cache_stats
 } from "../../src/build_cache";
 
 // --------------------------------------------------------------
@@ -560,6 +561,38 @@ test "build_cache: cache_stats_is_empty false when any counter is non-zero" {
     let mut t = empty_cache_stats();
     t.copy_failures = 1;
     assert ! cache_stats_is_empty(t);
+}
+
+test "build_cache: merge_cache_stats sums every counter field-wise" {
+    let mut a = empty_cache_stats();
+    a.hits = 1;
+    a.misses = 2;
+    a.stores = 3;
+    a.invalid_keys = 4;
+    a.copy_failures = 5;
+    let mut b = empty_cache_stats();
+    b.hits = 10;
+    b.misses = 20;
+    b.stores = 30;
+    b.invalid_keys = 40;
+    b.copy_failures = 50;
+    let m = merge_cache_stats(a, b);
+    assert m.hits == 11;
+    assert m.misses == 22;
+    assert m.stores == 33;
+    assert m.invalid_keys == 44;
+    assert m.copy_failures == 55;
+}
+
+test "build_cache: merge_cache_stats with empty is identity" {
+    let mut a = empty_cache_stats();
+    a.hits = 7;
+    a.misses = 9;
+    let m = merge_cache_stats(a, empty_cache_stats());
+    assert m.hits == 7;
+    assert m.misses == 9;
+    assert m.stores == 0;
+    assert cache_stats_is_empty(merge_cache_stats(empty_cache_stats(), empty_cache_stats()));
 }
 
 test "build_cache: empty_build_cache_config defaults are enabled+quiet" {

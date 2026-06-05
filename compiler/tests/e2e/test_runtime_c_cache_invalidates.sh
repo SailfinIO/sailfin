@@ -108,6 +108,17 @@ run_test "runtime object + content-key sidecar produced on first build" \
 
 T1="$(mtime_of "$RUNTIME_OBJ")"
 
+# The `[cache]` summary line `_print_cache_summary` emits to stdout
+# (captured in build.log). Since #915 the runtime C/LL/sfn object
+# cache folds its hits/misses into this same line, so the counts
+# below are attributable to the runtime objects (the one-line
+# program has no `.ll` module-cache deps of its own). Helpers parse
+# the `hits=`/`misses=` fields out of the most recent build's log.
+summary_field() {
+    # summary_field <field-name> -> integer value (or "" if no line)
+    sed -nE "s/.*\[cache\] .*${1}=([0-9]+).*/\1/p" "$SCRATCH/build.log" | tail -n1
+}
+
 # ---- Pure mtime touch: content unchanged MUST cache-hit ----
 # Sleep 1s so any recompile would produce a strictly newer mtime
 # (filesystem mtime granularity is 1s in the worst case).
@@ -125,6 +136,30 @@ check_touch_is_cache_hit() {
 run_test "pure mtime touch (content unchanged) cache-hits" \
     check_touch_is_cache_hit
 
+# #915: a no-op rebuild reports the runtime objects as cache hits,
+# with zero misses, in the `[cache]` summary line.
+check_noop_rebuild_summary_hits() {
+    local hits misses
+    hits="$(summary_field hits)"
+    misses="$(summary_field misses)"
+    if [ -z "$hits" ]; then
+        echo "  expected a [cache] summary line after no-op rebuild, found none" >&2
+        cat "$SCRATCH/build.log" >&2
+        return 1
+    fi
+    if [ "$hits" -lt 1 ]; then
+        echo "  expected runtime-object cache hits>=1 on no-op rebuild, got hits=$hits" >&2
+        return 1
+    fi
+    if [ "${misses:-0}" -ne 0 ]; then
+        echo "  expected misses=0 on no-op rebuild, got misses=$misses" >&2
+        return 1
+    fi
+    return 0
+}
+run_test "no-op rebuild summary reports runtime hits (misses=0) (#915)" \
+    check_noop_rebuild_summary_hits
+
 # ---- Content edit MUST cache-miss (the regression this fixes) ----
 sleep 1
 printf '\n/* #632 runtime C-object cache invalidation probe */\n' >> "$C_SRC"
@@ -139,6 +174,27 @@ check_content_edit_is_cache_miss() {
 }
 run_test "content edit busts the cache (object recompiled)" \
     check_content_edit_is_cache_miss
+
+# #915: the same content-edit rebuild surfaces >=1 miss in the
+# `[cache]` summary — the observability gap #632 deferred. Before
+# this fix the line read `misses=0` even though the `.o` recompiled.
+check_content_edit_summary_miss() {
+    local misses
+    misses="$(summary_field misses)"
+    if [ -z "$misses" ]; then
+        echo "  expected a [cache] summary line after content edit, found none" >&2
+        cat "$SCRATCH/build.log" >&2
+        return 1
+    fi
+    if [ "$misses" -lt 1 ]; then
+        echo "  expected runtime-object cache misses>=1 after content edit, got misses=$misses" >&2
+        cat "$SCRATCH/build.log" >&2
+        return 1
+    fi
+    return 0
+}
+run_test "content edit surfaces a miss in the [cache] summary (#915)" \
+    check_content_edit_summary_miss
 
 echo "[test] runtime C-object cache: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
