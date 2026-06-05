@@ -138,6 +138,30 @@ fn format_expression(expression: Expression) -> string {
         return "(" + format_expression(expression.operand) + ") as "
             + expression.target_type.text;
     }
+    if expression.variant == "Await" {
+        // Bridge the structured `Await` node (parsed since issue #1080)
+        // back to the text form the existing `async`/`await` lowering
+        // consumes: `lower_expression` in
+        // `llvm/expression_lowering/native/core.sfn` and
+        // `find_suspension_keyword` in `llvm/lifetime.sfn` both key on a
+        // leading `"await "` substring. Rendering it here keeps the
+        // legacy text-based await pipeline working unchanged until the
+        // dedicated `Await` lowering lands in a follow-up.
+        return "await " + format_expression(expression.operand);
+    }
+    if expression.variant == "Spawn" {
+        // `spawn`/`channel` (issues #1079/#1080) parse but have no
+        // lowering yet. Emit an explicit unlowered-construct marker so
+        // `lower_expression` fails the build closed with a `[fatal]`
+        // rather than letting the generic `<variant>` placeholder
+        // false-green an unenforced concurrency surface into the IR
+        // (llms.txt: no parsed-but-unenforced surface). The dedicated
+        // lowering replaces these arms in a follow-up (epic #965).
+        return "<concurrency_unlowered spawn>";
+    }
+    if expression.variant == "Channel" {
+        return "<concurrency_unlowered channel>";
+    }
     if expression.variant == "Lambda" { return "<lambda>"; }
     if expression.variant == "Raw" {
         let raw_text = trim_text(expression.text);

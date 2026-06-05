@@ -810,6 +810,38 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         };
     }
 
+    // Unlowered concurrency frontend constructs (M4.0, epic #965). The
+    // parser builds `Spawn`/`Channel` nodes (issues #1079/#1080) but no
+    // lowering exists yet, so `emit_native_format` renders them to the
+    // `<concurrency_unlowered <kind>>` marker. Fail the build closed with
+    // a `[fatal]` — matching the sentinel scanned by
+    // `lowering_core.sfn:has_fatal_lowering_diagnostic` — rather than
+    // false-greening an unenforced concurrency surface into the IR
+    // (llms.txt: no parsed-but-unenforced surface). The dedicated
+    // lowering replaces this guard in a follow-up. `Await` is bridged to
+    // the existing async lowering upstream and never reaches here as a
+    // marker.
+    if starts_with(stripped, "<concurrency_unlowered spawn>") {
+        diagnostics.push("llvm lowering [fatal]: `spawn` expression is not yet lowered (concurrency frontend, epic #965)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    if starts_with(stripped, "<concurrency_unlowered channel>") {
+        diagnostics.push("llvm lowering [fatal]: `channel` expression is not yet lowered (concurrency frontend, epic #965)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
     // Literal expressions.
     if is_boolean_literal(stripped) {
         let mut value = "0";

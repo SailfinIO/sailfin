@@ -388,6 +388,56 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
         }
     }
 
+    // Concurrency-frontend prefix operators (M4.0, epic #965, issue
+    // #1080). `spawn`/`await` are soft keywords that lex as `Identifier`
+    // (Sailfin has no keyword tokens) and bind like the symbol unaries
+    // above: the operand is parsed at `unary_precedence()` so a trailing
+    // binary operator folds into the parent precedence-climbing loop
+    // (`await a + b` parses as `(await a) + b`, matching `-a + b`). Type
+    // rules, effect-checking, and lowering land in follow-up issues; the
+    // `Await` node is bridged back to the existing text-based lowering
+    // via the `Await` arm in `emit_native_format.sfn` so the legacy
+    // `async`/`await` integration tests keep working unchanged.
+    if token.kind.variant == "Identifier" {
+        if identifier_matches(token, "spawn") {
+            let advanced = expression_tokens_advance(state);
+            let operand_result = parse_expression_bp(advanced, unary_precedence());
+            if !operand_result.success { return operand_result; }
+            return ExpressionParseResult {
+                state: operand_result.state,
+                expression: Expression.Spawn {
+                    operand: operand_result.expression,
+                    span: source_span_from_tokens([token])
+                },
+                success: true
+            };
+        }
+        if identifier_matches(token, "await") {
+            let advanced = expression_tokens_advance(state);
+            let operand_result = parse_expression_bp(advanced, unary_precedence());
+            if !operand_result.success { return operand_result; }
+            return ExpressionParseResult {
+                state: operand_result.state,
+                expression: Expression.Await {
+                    operand: operand_result.expression,
+                    span: source_span_from_tokens([token])
+                },
+                success: true
+            };
+        }
+        // `channel(capacity?)` constructs a channel value. Only treat
+        // `channel` as the constructor when it is immediately followed by
+        // `(` — otherwise it is an ordinary identifier and falls through
+        // to `parse_primary_expression`. The generic `channel<T>(...)`
+        // form (element_type) is deferred to a follow-up.
+        if identifier_matches(token, "channel") {
+            let channel_result = parse_channel_expression(state);
+            if channel_result.success {
+                return parse_postfix_chain(channel_result.state, channel_result.expression);
+            }
+        }
+    }
+
     let primary_result = parse_primary_expression(state);
     if !primary_result.success { return primary_result; }
     return parse_postfix_chain(primary_result.state, primary_result.expression);
@@ -636,6 +686,43 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
     return ExpressionParseResult {
         state: current_state,
         expression: current_expression,
+        success: true
+    };
+}
+
+// ============================================================================
+// Channel Constructor
+// ============================================================================
+// Parse `channel(capacity?)` with `state` positioned at the `channel`
+// identifier token. Returns failure (leaving `state` untouched) when the
+// next token is not `(` or when more than one argument is supplied, so the
+// caller can fall through to treating `channel` as a plain identifier. The
+// element type (`channel<T>(...)`) is not parsed yet — `element_type`
+// stays `null` (issue #1080, scope: parse-only constructor).
+fn parse_channel_expression(state: ExpressionTokens) -> ExpressionParseResult {
+    let channel_token = expression_tokens_peek(state);
+    let after_channel = expression_tokens_advance(state);
+    if expression_tokens_is_at_end(after_channel) {
+        return expression_parse_failure(state);
+    }
+    let next = expression_tokens_peek(after_channel);
+    if !symbol_matches(next, "(") { return expression_parse_failure(state); }
+    let args_result = parse_call_arguments(after_channel);
+    if !args_result.success { return expression_parse_failure(state); }
+    if args_result.arguments.length > 1 {
+        return expression_parse_failure(state);
+    }
+    let mut capacity: Expression? = null;
+    if args_result.arguments.length == 1 {
+        capacity = args_result.arguments[0];
+    }
+    return ExpressionParseResult {
+        state: args_result.state,
+        expression: Expression.Channel {
+            element_type: null,
+            capacity: capacity,
+            span: source_span_from_tokens([channel_token])
+        },
         success: true
     };
 }

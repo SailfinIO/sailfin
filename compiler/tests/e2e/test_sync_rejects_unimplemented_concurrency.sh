@@ -36,6 +36,21 @@
 # stage 5, before lowering, and false-greened with a `.sfn-asm` at rc=0).
 # All three surfaces now reject the identical unresolved-callee programs.
 #
+# As of #1080 the concurrency frontend parses `spawn <expr>` and
+# `channel(...)` into dedicated AST nodes (epic #965), so the FAIL-CLOSED
+# MECHANISM differs by surface:
+#   - `channel(cap)` is now a recognized `Channel` construct, not an
+#     unresolved call. It has no lowering yet, so it fails closed with a
+#     `llvm lowering [fatal]: \`channel\` expression is not yet lowered`
+#     diagnostic (the `assert_*_rejects_unlowered` helpers). The former
+#     `sfn/sync` `channel` export is gone, so the import-based variant is
+#     obsolete and was removed.
+#   - `spawn(0, "worker")` keeps the paren-call shape (the prefix-operator
+#     parse rejects the comma-separated `(...)` and falls back to a `Raw`
+#     call), so it still fails closed as an *unresolved call* (`cannot
+#     resolve ... \`spawn\``) — the `assert_*_rejects` helpers below.
+#   - `parallel(...)` is not parsed as a construct yet; unchanged.
+#
 # The typed `spawn_*` / `await_*` runtime variants below are not
 # exercised here — they have working pthread implementations and
 # are unaffected by this change.
@@ -273,14 +288,104 @@ assert_emit_native_rejects() {
     return 0
 }
 
-test_channel_via_sfn_sync_rejected() {
-    assert_build_rejects "channel_import_caller" \
-'import { channel } from "sfn/sync";
+# Issue #1080: fail-closed assertion for a parsed-but-unlowered concurrency
+# construct. Same headline contract as `assert_build_rejects` (rc != 0, no
+# output binary) but the diagnostic is the lowering `[fatal]: ... is not yet
+# lowered` produced by `lower_expression` for the `<concurrency_unlowered
+# <kind>>` marker, NOT the `cannot resolve` unresolved-call message. The
+# `<symbol>` (e.g. `channel`) must still be named so the diagnostic points at
+# the offending construct.
+assert_build_rejects_unlowered() {
+    local label="$1"
+    local source="$2"
+    local symbol="$3"
 
-fn main() ![io] {
-    let _ch = channel(0);
-}' \
-        "channel"
+    local src_path="$SCRATCH/${label}.sfn"
+    local out_path="$SCRATCH/${label}.out"
+    local log_path="$SCRATCH/${label}.log"
+    printf '%s\n' "$source" > "$src_path"
+
+    local rc=0
+    ( cd "$SCRATCH" && "$BINARY" build -o "$out_path" "$src_path" ) \
+        > "$log_path" 2>&1 || rc=$?
+
+    if [ "$rc" -eq 0 ]; then
+        echo "[test]   build of ${label}.sfn exited 0 — expected non-zero (fail-closed)" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if [ -e "$out_path" ]; then
+        echo "[test]   build of ${label}.sfn produced an output binary at ${out_path} — expected none" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if ! grep -q "is not yet lowered" "$log_path"; then
+        echo "[test]   diagnostic for ${label}.sfn did not mention 'is not yet lowered'" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if ! grep -q "\`${symbol}\`" "$log_path"; then
+        echo "[test]   diagnostic for ${label}.sfn did not name '\`${symbol}\`'" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Issue #1080: `sfn emit native` parity for the unlowered-construct path —
+# rc != 0, no `.sfn-asm`, and the `is not yet lowered` lowering `[fatal]`
+# naming the construct.
+assert_emit_native_rejects_unlowered() {
+    local label="$1"
+    local source="$2"
+    local symbol="$3"
+
+    local src_path="$SCRATCH/${label}.sfn"
+    local out_path="$SCRATCH/${label}.sfn-asm"
+    local log_path="$SCRATCH/${label}.emitnative.log"
+    printf '%s\n' "$source" > "$src_path"
+
+    local rc=0
+    ( cd "$SCRATCH" && "$BINARY" emit -o "$out_path" native "$src_path" ) \
+        > "$log_path" 2>&1 || rc=$?
+
+    if [ "$rc" -eq 0 ]; then
+        echo "[test]   emit native of ${label}.sfn exited 0 — expected non-zero (fail-closed)" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if [ -e "$out_path" ]; then
+        echo "[test]   emit native of ${label}.sfn produced a .sfn-asm at ${out_path} — expected none" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if ! grep -q "is not yet lowered" "$log_path"; then
+        echo "[test]   emit native diagnostic for ${label}.sfn did not mention 'is not yet lowered'" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if ! grep -q "\`${symbol}\`" "$log_path"; then
+        echo "[test]   emit native diagnostic for ${label}.sfn did not name '\`${symbol}\`'" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    return 0
 }
 
 test_parallel_via_sfn_sync_rejected() {
@@ -309,8 +414,13 @@ fn main() ![io] {
 # surface (the unqualified prelude name) — pre-#617 this was the
 # path most users actually hit when they wrote `spawn(...)` thinking
 # of the keyword form.
+#
+# Issue #1080: `channel(0)` now parses to a `Channel` construct, so it
+# fails closed as a parsed-but-unlowered construct (`is not yet lowered`)
+# rather than an unresolved call. The fail-closed contract (rc != 0, no
+# binary) is unchanged.
 test_channel_via_prelude_name_rejected() {
-    assert_build_rejects "channel_prelude_caller" \
+    assert_build_rejects_unlowered "channel_prelude_caller" \
 'fn main() ![io] {
     let _ch = channel(0);
 }' \
@@ -354,17 +464,20 @@ test_emit_llvm_spawn_rejected() {
         "spawn"
 }
 
-# Issue #906: `sfn emit native` must fail closed on the same unresolved
-# callees as `build` / `emit llvm`. Cover both shapes from the issue
-# reproduction:
-#   - value-returning unresolved call (`let _ = channel(0)`), and
+# Issue #906: `sfn emit native` must fail closed on the same surfaces as
+# `build` / `emit llvm`. Cover both shapes from the issue reproduction:
+#   - value-returning `channel(0)`, and
 #   - void-returning unresolved call (`spawn(0, "worker")`).
 # Each must exit non-zero AND leave no `.sfn-asm` behind.
+#
+# Issue #1080: `channel(0)` now parses to a `Channel` construct (the former
+# `sfn/sync` `channel` export is gone), so it fails closed as a
+# parsed-but-unlowered construct (`is not yet lowered`) rather than an
+# unresolved call. The `spawn(0, "worker")` case below keeps the
+# unresolved-call shape.
 test_emit_native_channel_rejected() {
-    assert_emit_native_rejects "channel_emit_native_caller" \
-'import { channel } from "sfn/sync";
-
-fn main() ![io] {
+    assert_emit_native_rejects_unlowered "channel_emit_native_caller" \
+'fn main() ![io] {
     let _ch = channel(0);
 }' \
         "channel"
@@ -378,14 +491,13 @@ test_emit_native_spawn_rejected() {
         "spawn"
 }
 
-run_test "sfn build rejects sfn/sync.channel import (#617)" test_channel_via_sfn_sync_rejected
 run_test "sfn build rejects sfn/sync.parallel import (#617)" test_parallel_via_sfn_sync_rejected
 run_test "sfn build rejects sfn/sync.spawn import (#617)" test_spawn_via_sfn_sync_rejected
-run_test "sfn build rejects bare prelude channel() (#617)" test_channel_via_prelude_name_rejected
+run_test "sfn build rejects bare channel() construct, unlowered (#1080)" test_channel_via_prelude_name_rejected
 run_test "sfn build rejects bare prelude spawn() (#617)" test_spawn_via_prelude_name_rejected
 run_test "sfn build fails closed on unknown void helper (#631)" test_unknown_void_helper_rejected
 run_test "sfn emit llvm fails closed on void spawn() (#631)" test_emit_llvm_spawn_rejected
-run_test "sfn emit native fails closed on value channel() (#906)" test_emit_native_channel_rejected
+run_test "sfn emit native rejects channel() construct, unlowered (#1080)" test_emit_native_channel_rejected
 run_test "sfn emit native fails closed on void spawn() (#906)" test_emit_native_spawn_rejected
 
 echo "[summary] $PASS passed, $FAIL failed"

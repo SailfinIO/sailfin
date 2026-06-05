@@ -1,0 +1,93 @@
+// Unit tests for the concurrency-frontend prefix expressions and the
+// `channel(...)` constructor (M4.0, epic #965, issue #1080).
+//
+// `spawn <expr>` and `await <expr>` are soft-keyword prefix operators
+// (they lex as `Identifier`; Sailfin has no keyword tokens) parsed in
+// `parse_prefix_expression`. `channel(capacity?)` is a constructor
+// parsed in `parse_channel_expression`. All three build the structured
+// AST nodes added in issue #1079 (`Expression.Spawn`, `Expression.Await`,
+// `Expression.Channel`). Type rules, effect-checking, and dedicated
+// lowering land in follow-up issues — this issue is parse-only.
+//
+// The `let` initializer is inspected at top level, matching the
+// convention in `parser_iife_postfix_test.sfn` (the block-scoped `let`
+// initializer path is opaque, tracked separately).
+import { Expression } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+// Initializer of the first top-level `let` in `source`.
+fn first_let_initializer(source: string) -> Expression ![io] {
+    let program = parse_program(source);
+    let stmt = program.statements[0];
+    assert stmt.variant == "VariableDeclaration";
+    let init = stmt.initializer;
+    assert init != null;
+    return init;
+}
+
+// -------------------------------------------------------------------
+// `spawn <call>` parses to a `Spawn` node whose operand is the spawned
+// call expression — never `Raw`.
+// -------------------------------------------------------------------
+test "concurrency: spawn of a call parses to Spawn of Call" ![io] {
+    let expr = first_let_initializer("let f = spawn worker();");
+    assert expr.variant == "Spawn";
+    assert expr.operand.variant == "Call";
+    assert expr.operand.callee.variant == "Identifier";
+}
+
+// `spawn <identifier>` parses to a `Spawn` over the bare identifier.
+test "concurrency: spawn of an identifier parses to Spawn of Identifier" ![io] {
+    let expr = first_let_initializer("let f = spawn task;");
+    assert expr.variant == "Spawn";
+    assert expr.operand.variant == "Identifier";
+}
+
+// -------------------------------------------------------------------
+// `await <expr>` parses to an `Await` node whose operand is the awaited
+// expression. This is the shape the legacy text-based async lowering is
+// bridged to via the `Await` arm in `emit_native_format.sfn`.
+// -------------------------------------------------------------------
+test "concurrency: await of an identifier parses to Await" ![io] {
+    let expr = first_let_initializer("let r = await future;");
+    assert expr.variant == "Await";
+    assert expr.operand.variant == "Identifier";
+}
+
+// `await` binds like a unary prefix: `await f + 1` parses as
+// `(await f) + 1`, so the initializer is a `Binary` whose left is the
+// `Await`.
+test "concurrency: await binds tighter than binary plus" ![io] {
+    let expr = first_let_initializer("let r = await f + 1;");
+    assert expr.variant == "Binary";
+    assert expr.left.variant == "Await";
+    assert expr.left.operand.variant == "Identifier";
+    assert expr.right.variant == "NumberLiteral";
+}
+
+// -------------------------------------------------------------------
+// `channel(capacity)` parses to a `Channel` node carrying the capacity
+// expression. The bound `let` is the "channel declaration" of the
+// acceptance criteria.
+// -------------------------------------------------------------------
+test "concurrency: channel with capacity parses to Channel" ![io] {
+    let expr = first_let_initializer("let c = channel(4);");
+    assert expr.variant == "Channel";
+    assert expr.capacity != null;
+    assert expr.capacity.variant == "NumberLiteral";
+}
+
+// `channel()` with no capacity parses to a `Channel` whose capacity is
+// null (the unbuffered default deferred to lowering).
+test "concurrency: channel with no capacity parses to Channel" ![io] {
+    let expr = first_let_initializer("let c = channel();");
+    assert expr.variant == "Channel";
+    assert expr.capacity == null;
+}
+
+// `channel` not followed by `(` is an ordinary identifier — the
+// constructor path must not swallow it.
+test "concurrency: bare channel identifier is not a Channel node" ![io] {
+    let expr = first_let_initializer("let c = channel;");
+    assert expr.variant == "Identifier";
+}
