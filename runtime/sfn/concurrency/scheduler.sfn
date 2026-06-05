@@ -202,17 +202,31 @@ extern fn pthread_cond_destroy(c: * PthreadCond) -> i32;
 // allocator path encodes; it must track the struct above.
 fn _sfn_taskqueue_struct_size() -> i64 { return 176; }
 
+// Largest ring capacity whose byte size (`cap * 8`) still fits in a
+// positive `i64`: floor((2^63 - 1) / 8) = 0x0FFF_FFFF_FFFF_FFFF. A
+// request beyond this would overflow the `cap * 8` allocation size
+// and wrap to a small (or negative) value, under-allocating the ring
+// and inviting out-of-bounds slot writes — so `create` rejects it
+// rather than mallocing a too-small buffer. (Real scheduler queue
+// depths are tiny; this guards the absurd-input corner, not a hot
+// path.)
+fn _sfn_taskqueue_max_capacity() -> i64 { return 1152921504606846975; }
+
 // `sfn_taskqueue_create(capacity)` allocates a queue handle plus its
 // `capacity`-slot ring buffer and initialises the mutex and both
 // condition variables with default attributes. A non-positive
 // `capacity` is clamped to 1 (a zero-length ring can never hold a
-// task). Returns the queue address as `* u8` (callers re-cast to
-// `* TaskQueue` only inside this module). On OOM either allocation
-// bails; the queue handle is freed before returning so no partial
-// allocation leaks.
+// task); a capacity whose byte size would overflow `i64` is rejected
+// (returns null). Returns the queue address as `* u8` (callers
+// re-cast to `* TaskQueue` only inside this module). Every failure
+// path — OOM on either allocation, or a non-zero `pthread_*_init`
+// return — tears down what was already set up and returns null/the
+// failed pointer so no partial allocation or half-initialised handle
+// escapes.
 fn sfn_taskqueue_create(capacity: i64) -> * u8 {
     let mut cap: i64 = capacity;
     if cap <= 0 { cap = 1; }
+    if cap > _sfn_taskqueue_max_capacity() { return null; }
 
     let queue_ptr: * u8 = malloc(_sfn_taskqueue_struct_size() as usize);
     if queue_ptr as i64 == 0 { return queue_ptr; }
@@ -231,10 +245,32 @@ fn sfn_taskqueue_create(capacity: i64) -> * u8 {
     queue.count = 0;
 
     // Default attributes (null) — the scheduler needs neither
-    // recursive mutexes nor a non-default clock for the conds.
-    pthread_mutex_init(queue.mutex, null);
-    pthread_cond_init(queue.not_empty, null);
-    pthread_cond_init(queue.not_full, null);
+    // recursive mutexes nor a non-default clock for the conds. The
+    // inits can fail (e.g. ENOMEM); on failure, destroy the handles
+    // already initialised (reverse order), free both allocations, and
+    // return null so callers never observe a queue whose mutex/cond
+    // are uninitialised (which would make every later lock/wait UB).
+    let mutex_rc: i32 = pthread_mutex_init(queue.mutex, null);
+    if mutex_rc != 0 {
+        free(ring_ptr);
+        free(queue_ptr);
+        return null;
+    }
+    let empty_rc: i32 = pthread_cond_init(queue.not_empty, null);
+    if empty_rc != 0 {
+        pthread_mutex_destroy(queue.mutex);
+        free(ring_ptr);
+        free(queue_ptr);
+        return null;
+    }
+    let full_rc: i32 = pthread_cond_init(queue.not_full, null);
+    if full_rc != 0 {
+        pthread_cond_destroy(queue.not_empty);
+        pthread_mutex_destroy(queue.mutex);
+        free(ring_ptr);
+        free(queue_ptr);
+        return null;
+    }
 
     return queue_ptr;
 }
