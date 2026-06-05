@@ -72,11 +72,19 @@ fi
 export SAILFIN_INNER=1
 
 # --- output capture ----------------------------------------------------------
-OUTFILE="$(mktemp "${TMPDIR:-/tmp}/sailfin-agent-report.XXXXXX")"
+# Capture combined output for classification. If mktemp fails (e.g. /tmp full
+# or unwritable) fall back to /dev/null: the command still streams through and
+# a verdict is still emitted (best-effort classification degrades to exit-code
+# only, since there's no captured text to scan).
+OUTFILE="$(mktemp "${TMPDIR:-/tmp}/sailfin-agent-report.XXXXXX" 2>/dev/null || echo /dev/null)"
 RC=0
 
 cleanup_outfile() {
-	rm -f "$OUTFILE" 2>/dev/null || true
+	# Only remove a real temp file — never the /dev/null fallback. Guarding on
+	# a regular file also keeps any rm error off the stream after the verdict.
+	if [ -f "$OUTFILE" ] && [ "$OUTFILE" != "/dev/null" ]; then
+		rm -f "$OUTFILE" 2>/dev/null || true
+	fi
 }
 
 # --- classification ----------------------------------------------------------
@@ -140,7 +148,7 @@ classify() {
 		FAILURE="oom"
 	elif [ "$RC" -eq 124 ] || [ "$RC" -eq 137 ]; then
 		FAILURE="timeout"
-	elif out_has 'missing seed compiler|is not invokable|SEED_VERSION is empty|\[fetch-seed\]\[error\]|No such file or directory|run: make compile|run .make compile.|GITHUB_TOKEN'; then
+	elif out_has "missing seed compiler|is not invokable|SEED_VERSION is empty|\[fetch-seed\]\[error\]|No such file or directory|run: make compile|run 'make compile'|GITHUB_TOKEN"; then
 		FAILURE="setup-error"
 	elif out_has 'passed, [1-9][0-9]* failed|\[check\]\[FAIL\]|assertion failed|[0-9]+ failed ═══'; then
 		FAILURE="test-failure"

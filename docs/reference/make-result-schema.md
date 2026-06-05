@@ -18,9 +18,21 @@ upthread:
 A consumer greps for `===SAILFIN-RESULT===` and parses the **one JSON line**
 that follows. Because the block is emitted last (via a `trap … EXIT` idiom in
 `scripts/agent_report.sh` that fires even when a phase aborts), it is the one
-thing a truncated tail is guaranteed to retain. If a log somehow contains more
-than one block (e.g. a test prints the delimiter), consumers MUST read the
-**last** occurrence.
+thing a truncated tail is guaranteed to retain.
+
+**Consumers MUST locate the _last_ `===SAILFIN-RESULT===` block in the log**,
+not assume the file ends immediately after `===END-SAILFIN-RESULT===`. Two
+things can print after the block:
+
+- On a failing target, GNU Make appends its own `make: *** [<target>] Error N`
+  line(s) to **stderr** after the recipe exits non-zero. The verdict block is
+  the last line of the target's own **stdout**, but under `2>&1` the make-error
+  line interleaves after it. (`make compile 2>&1 | tail -5` still captures the
+  block — it is within the last few lines.)
+- If a log somehow contains more than one block (e.g. a test prints the
+  delimiter), only the final one is the real verdict.
+
+Reading the last match handles both cases.
 
 ## Wrapped targets
 
@@ -76,7 +88,7 @@ string.
 | `status` | Meaning | Exit code |
 |---|---|---|
 | `pass` | The target succeeded. | `0` |
-| `warn` | A non-fatal signal (today: `nondeterminism`) without a failure. | mirrors `make`'s actual exit (so `make check`'s `0` is preserved) |
+| `warn` | A non-fatal signal that does **not** flip the exit code. `failure` is still set to the classification (today: `nondeterminism`). | mirrors `make`'s actual exit (so `make check`'s `0` is preserved) |
 | `fail` | The target failed. | non-zero |
 
 ### `failure` (closed enum)
