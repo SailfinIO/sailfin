@@ -2,10 +2,10 @@
 # End-to-end test for the shared runtime-object cache fix (#1096).
 #
 # Before this fix, runtime C/LL/sfn objects were cached only in the
-# per-build work-dir (a sidecar `<obj>.key` next to the `.o` under
-# `<work-dir>/sailfin/`), never in the shared content-addressed cache
-# root (`build/cache/v1`) the `.ll` module cache uses. A second build
-# into a *sibling* work-dir therefore always missed every runtime
+# per-build work-dir (a sidecar `<obj>.o.key` next to the `<obj>.o`
+# under `<work-dir>/sailfin/`), never in the shared content-addressed
+# cache root (`build/cache/v1`) the `.ll` module cache uses. A second
+# build into a *sibling* work-dir therefore always missed every runtime
 # object, even with an identical source tree and a warm shared cache.
 #
 # The build-quality gate (`build-quality.yml`) builds the compiler into

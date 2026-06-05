@@ -76,8 +76,11 @@ test_work_dir_layout() {
     # determinism gate can warm one cache across sibling work-dirs.
     # Forbidding all of $SCRATCH/build/ would wrongly couple the shared
     # cache to the work-dir; assert only that build *output* didn't leak.
-    ! [ -e "$SCRATCH/build/native" ] || return 1
-    ! [ -e "$SCRATCH/build/sailfin" ]
+    if [ -e "$SCRATCH/build/native" ] || [ -e "$SCRATCH/build/sailfin" ]; then
+        echo "  work-dir build output leaked into CWD ./build/" >&2
+        return 1
+    fi
+    return 0
 }
 run_test "--work-dir writes default-binary + sailfin/, no CWD ./build/ leakage" test_work_dir_layout
 
