@@ -1,0 +1,66 @@
+// Regression tests for lockfile precedence during capsule dependency
+// resolution (#1048). The resolver's `enumerate_capsule_sources` consults
+// `capsule.lock` and prefers the locked version over the `capsule.toml`
+// range when constructing the ~/.sfn/cache path. The version-precedence
+// rule is pure logic; it is exercised here against the real lockfile
+// parser (`lock_get_version`) without dragging in the `![io]` resolver
+// graph (which transitively imports the whole compiler via `./main`).
+import { lock_get_version } from "../../src/lock";
+
+fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
+
+// Mirror of the precedence rule inlined in `enumerate_capsule_sources`:
+// prefer the lockfile-pinned version when a lockfile is present and the
+// dep is locked; otherwise fall back to the capsule.toml declared range.
+fn _effective_version(has_lock: boolean, lock_text: string, spec: string, declared: string) -> string {
+    if !has_lock { return declared; }
+    let locked = lock_get_version(lock_text, spec);
+    if locked.length > 0 { return locked; }
+    return declared;
+}
+
+// "declared dep absent from lockfile" — the predicate that drives the
+// diagnostic in the resolver.
+fn _missing_from_lock(has_lock: boolean, lock_text: string, spec: string) -> boolean {
+    if !has_lock { return false; }
+    return lock_get_version(lock_text, spec).length == 0;
+}
+
+// Lockfile fixture. Returned from a function rather than a top-level
+// `let` global: module-level string constants with escapes currently
+// mislower their constant-array length, so building the fixture in
+// function scope keeps this test focused on the precedence rule.
+fn _lock_fixture() -> string {
+    return "# capsule.lock\n\n[packages]\n\"http\" = \"0.1.0 sha256:abc123\"\n\"acme/router\" = \"1.0.0 sha256:def456\"\n";
+}
+
+test "precedence: locked version wins over capsule.toml range" {
+    // capsule.toml says "*", lockfile pins 0.1.0 — resolver uses 0.1.0.
+    assert _str_eq(_effective_version(true, _lock_fixture(), "http", "*"), "0.1.0");
+}
+
+test "precedence: scoped dep uses locked version" {
+    assert _str_eq(_effective_version(true, _lock_fixture(), "acme/router", ">=1.0.0"), "1.0.0");
+}
+
+test "precedence: no lockfile falls back to declared range" {
+    assert _str_eq(_effective_version(false, "", "http", "0.3.1"), "0.3.1");
+}
+
+test "precedence: dep absent from lockfile falls back to declared range" {
+    // Present lockfile but dep not locked — keep the capsule.toml range
+    // so the cache lookup still has a version to try.
+    assert _str_eq(_effective_version(true, _lock_fixture(), "cli", "0.2.0"), "0.2.0");
+}
+
+test "diagnostic: declared dep missing from lockfile is detected" {
+    assert _missing_from_lock(true, _lock_fixture(), "cli") == true;
+}
+
+test "diagnostic: locked dep is not flagged missing" {
+    assert _missing_from_lock(true, _lock_fixture(), "http") == false;
+}
+
+test "diagnostic: no lockfile never flags missing" {
+    assert _missing_from_lock(false, "", "http") == false;
+}
