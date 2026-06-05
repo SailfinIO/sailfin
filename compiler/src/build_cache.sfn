@@ -596,7 +596,14 @@ fn sha256_of_file(file_path: string) -> string ![io] {
 fn runtime_object_cache_key(src_path: string, opt_flag: string) -> string ![io] {
     let content = sha256_of_file(src_path);
     if content.length == 0 { return ""; }
-    return content + "\n" + opt_flag;
+    // The `secsplit1` tag pins the compile-flag scheme into the key.
+    // #1047 added `-ffunction-sections -fdata-sections` to every runtime
+    // object compile so the final link's `--gc-sections` can strip per
+    // function; an object cached by an earlier compiler lacks those
+    // sections, and silently reusing it would defeat the strip (coarse
+    // `.text`) and break the runtime-root retention. Bumping the tag
+    // forces a one-time recompile so cached objects match the link flags.
+    return content + "\n" + opt_flag + "\nsecsplit1";
 }
 
 // ----------------------------------------------------------------
