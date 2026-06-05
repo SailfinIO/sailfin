@@ -1,0 +1,105 @@
+// Regression tests for the workspace.lock writer (#1068). The workspace
+// writer reuses the flat capsule.lock schema (`_LockEntry`, `_lock_parse`,
+// `_lock_write` body) and differs only in the banner (`# workspace.lock`
+// instead of `# capsule.lock`). `_LockEntry` / `_lock_parse` are private,
+// so the round-trip is exercised through the public `workspace_lock_add_entry`
+// wrapper and the public `lock_get_*` parsers.
+import {
+    workspace_lock_add_entry,
+    lock_get_version,
+    lock_get_hash,
+    lock_get_versions,
+    lock_add_entry
+} from "../../src/lock";
+
+fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
+
+fn _starts_with(haystack: string, prefix: string) -> boolean {
+    if haystack.length < prefix.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= prefix.length { break; }
+        if haystack[i] != prefix[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if haystack.length < needle.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let mut j: int = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Return everything after the first newline (drops the banner's first line).
+fn _drop_first_line(text: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        if text[i] == "\n" { return substring(text, i + 1, text.length); }
+        i += 1;
+    }
+    return "";
+}
+
+// -- Banner --
+test "workspace_lock_write: output begins with # workspace.lock banner" {
+    let result = workspace_lock_add_entry("", "http", "0.1.0", "sha256:abc123");
+    assert _starts_with(result, "# workspace.lock");
+    assert _contains(result, "Do not edit manually");
+    assert _contains(result, "sfn add --update");
+    assert _contains(result, "[packages]");
+    assert _contains(result, "\"http\" = \"0.1.0 sha256:abc123\"");
+}
+
+// -- Body byte-matches the capsule.lock writer except for the banner line --
+test "workspace_lock_write: body matches _lock_write below the banner" {
+    let ws = workspace_lock_add_entry("", "http", "0.1.0", "sha256:abc123");
+    let cap = lock_add_entry("", "http", "0.1.0", "sha256:abc123");
+    assert _starts_with(ws, "# workspace.lock");
+    assert _starts_with(cap, "# capsule.lock");
+    // Identical once the first banner line is removed.
+    assert _str_eq(_drop_first_line(ws), _drop_first_line(cap));
+}
+
+// -- Round-trip: _lock_parse(workspace_lock_write(es)) == es --
+test "workspace_lock_write: round-trips through the parser" {
+    let mut lock = workspace_lock_add_entry("", "http", "0.1.0", "sha256:abc123");
+    lock = workspace_lock_add_entry(lock, "acme/router", "2.0.0", "sha256:def456");
+    lock = workspace_lock_add_entry(lock, "cli", "0.3.1", "sha256:ghi789");
+
+    assert _starts_with(lock, "# workspace.lock");
+    assert _str_eq(lock_get_version(lock, "http"), "0.1.0");
+    assert _str_eq(lock_get_version(lock, "acme/router"), "2.0.0");
+    assert _str_eq(lock_get_version(lock, "cli"), "0.3.1");
+    assert _str_eq(lock_get_hash(lock, "http"), "sha256:abc123");
+    assert _str_eq(lock_get_hash(lock, "acme/router"), "sha256:def456");
+    assert _str_eq(lock_get_hash(lock, "cli"), "sha256:ghi789");
+    assert _contains(lock_get_versions(lock), "http=0.1.0");
+}
+
+// -- Update path: existing entry is replaced, not duplicated --
+test "workspace_lock_add_entry: update replaces existing entry" {
+    let mut lock = workspace_lock_add_entry("", "http", "0.1.0", "sha256:old");
+    lock = workspace_lock_add_entry(lock, "http", "0.2.0", "sha256:new");
+    assert _str_eq(lock_get_version(lock, "http"), "0.2.0");
+    assert _str_eq(lock_get_hash(lock, "http"), "sha256:new");
+    let old_present = _contains(lock, "sha256:old");
+    assert old_present == false;
+}
