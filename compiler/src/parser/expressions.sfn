@@ -425,15 +425,29 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
                 success: true
             };
         }
-        // `channel(capacity?)` constructs a channel value. Only treat
-        // `channel` as the constructor when it is immediately followed by
-        // `(` — otherwise it is an ordinary identifier and falls through
-        // to `parse_primary_expression`. The generic `channel<T>(...)`
-        // form (element_type) is deferred to a follow-up.
+        // `channel(capacity?)` constructs a channel value. Commit to the
+        // constructor as soon as `channel` is immediately followed by `(`:
+        // a bare `channel` (no paren) is an ordinary identifier and falls
+        // through to `parse_primary_expression`, but once the `(` is seen
+        // the construct is unambiguous, so a malformed argument list is a
+        // hard parse failure rather than a silent re-interpretation as an
+        // identifier call (which would diverge the fail-closed diagnostic
+        // by arity, e.g. `channel(1, 2)`). The generic `channel<T>(...)`
+        // element-type form is deferred to a follow-up.
         if identifier_matches(token, "channel") {
-            let channel_result = parse_channel_expression(state);
-            if channel_result.success {
-                return parse_postfix_chain(channel_result.state, channel_result.expression);
+            let after_channel = expression_tokens_advance(state);
+            let mut channel_followed_by_paren: boolean = false;
+            if !expression_tokens_is_at_end(after_channel) {
+                if symbol_matches(expression_tokens_peek(after_channel), "(") {
+                    channel_followed_by_paren = true;
+                }
+            }
+            if channel_followed_by_paren {
+                let channel_result = parse_channel_expression(state);
+                if channel_result.success {
+                    return parse_postfix_chain(channel_result.state, channel_result.expression);
+                }
+                return channel_result;
             }
         }
     }
@@ -694,11 +708,15 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
 // Channel Constructor
 // ============================================================================
 // Parse `channel(capacity?)` with `state` positioned at the `channel`
-// identifier token. Returns failure (leaving `state` untouched) when the
-// next token is not `(` or when more than one argument is supplied, so the
-// caller can fall through to treating `channel` as a plain identifier. The
-// element type (`channel<T>(...)`) is not parsed yet — `element_type`
-// stays `null` (issue #1080, scope: parse-only constructor).
+// identifier token. Returns failure (leaving `state` untouched) only when
+// the next token is not `(` (a bare `channel` identifier) or when the
+// argument list itself is malformed (e.g. an unterminated `channel(`); the
+// caller commits to the constructor the moment `(` follows, so a malformed
+// form fails the parse hard rather than backtracking to an identifier
+// call. `capacity` is bound only for the canonical single-argument form;
+// zero or extra arguments leave it `null` and are a typecheck-layer arity
+// concern (deferred — issue #1080 is parse-only). The element type
+// (`channel<T>(...)`) is not parsed yet — `element_type` stays `null`.
 fn parse_channel_expression(state: ExpressionTokens) -> ExpressionParseResult {
     let channel_token = expression_tokens_peek(state);
     let after_channel = expression_tokens_advance(state);
@@ -709,9 +727,6 @@ fn parse_channel_expression(state: ExpressionTokens) -> ExpressionParseResult {
     if !symbol_matches(next, "(") { return expression_parse_failure(state); }
     let args_result = parse_call_arguments(after_channel);
     if !args_result.success { return expression_parse_failure(state); }
-    if args_result.arguments.length > 1 {
-        return expression_parse_failure(state);
-    }
     let mut capacity: Expression? = null;
     if args_result.arguments.length == 1 {
         capacity = args_result.arguments[0];

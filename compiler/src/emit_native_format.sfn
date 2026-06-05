@@ -147,7 +147,15 @@ fn format_expression(expression: Expression) -> string {
         // leading `"await "` substring. Rendering it here keeps the
         // legacy text-based await pipeline working unchanged until the
         // dedicated `Await` lowering lands in a follow-up.
-        return "await " + format_expression(expression.operand);
+        //
+        // Use `_format_binary_operand` (the same helper `Unary` uses) so a
+        // `Binary`/`Cast` operand keeps its parens on the round-trip:
+        // `await (a + b)` must not re-serialize to `await a + b`, which
+        // would re-parse as `(await a) + b` and silently change grouping.
+        // The parser parses `await` at unary precedence, so a bare binary
+        // operand only arises from an explicitly parenthesized awaited
+        // expression — exactly the case these parens preserve.
+        return "await " + _format_binary_operand(expression.operand);
     }
     if expression.variant == "Spawn" {
         // `spawn`/`channel` (issues #1079/#1080) parse but have no

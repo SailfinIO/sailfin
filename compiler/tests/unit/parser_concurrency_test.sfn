@@ -91,3 +91,25 @@ test "concurrency: bare channel identifier is not a Channel node" ![io] {
     let expr = first_let_initializer("let c = channel;");
     assert expr.variant == "Identifier";
 }
+
+// Once `channel` is followed by `(` the parser commits to the
+// constructor: a malformed (too many args) form stays a `Channel`
+// construct rather than backtracking to an identifier `Call`, so its
+// fail-closed diagnostic does not diverge by arity. The extra argument is
+// a typecheck-layer concern (deferred), so `capacity` is left null here.
+test "concurrency: channel commits to construct even with extra args" ![io] {
+    let expr = first_let_initializer("let c = channel(1, 2);");
+    assert expr.variant == "Channel";
+    assert expr.capacity == null;
+}
+
+// `await` parses at unary precedence, so a `Binary` operand only arises
+// from an explicitly parenthesized awaited expression: `await (a + b)`
+// parses to an `Await` whose operand is the `Binary`. This is the shape
+// the `_format_binary_operand` round-trip in `emit_native_format` must
+// keep parenthesized (`await (a + b)`, never `await a + b`).
+test "concurrency: await of a parenthesized binary keeps the binary operand" ![io] {
+    let expr = first_let_initializer("let r = await (a + b);");
+    assert expr.variant == "Await";
+    assert expr.operand.variant == "Binary";
+}
