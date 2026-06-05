@@ -666,6 +666,187 @@ fn sfn_process_capture_take_stderr() -> * u8 ![io] {
     return addr as * u8;
 }
 
+// ── process.spawn_with_env ─────────────────────────────────────
+// Port of `sailfin_runtime_process_spawn_with_env`. Spawns the child
+// with stdin/stdout/stderr each piped to the parent, mallocs a
+// `SailfinProcessHandle` holding the child pid + the three parent-side
+// fds + six zeroed `GrowBuf` stash slots, and returns the handle cast
+// to `i64`. The `handle_*` family above consumes this handle. Returns
+// `0` on argv-empty / OOM / pipe / spawn failure — note `0`, not the
+// `-1` that `run_capture` returns, matching the C contract
+// (`sailfin_runtime.c:6666`, `:6766`). `env_flat` is a flat `string[]`
+// of `"KEY=VALUE"` entries; an empty array means the empty environment
+// (the os-capsule contract at `process.sfn:308`, never "inherit").
+//
+// Modeled on `sfn_process_run_capture` (above) but with a third
+// (stdin) pipe and a handle return instead of a synchronous drain. The
+// `dup2` map mirrors the C body (`sailfin_runtime.c:6742-6750`): the
+// child closes the three parent-side ends, dup2's its own ends over
+// stdin(0)/stdout(1)/stderr(2), then closes the originals. Each pipe's
+// `(read, write)` pair is read through the `PollSlot` overlay
+// (`fd` = read end, `events_revents` = write end).
+fn sfn_process_spawn_with_env(argv: string[], env_flat: string[]) -> i64 ![io] {
+    let argc: i64 = argv.length;
+    if argc <= 0 { return 0; }
+
+    let child_argv: * u8 = _process_build_cstr_argv(argv);
+    if child_argv as i64 == 0 { return 0; }
+    let child_envp: * u8 = _process_build_cstr_argv(env_flat);
+    if child_envp as i64 == 0 {
+        free(child_argv);
+        return 0;
+    }
+
+    let in_pipe: * PollSlot = malloc(8 as usize) as * PollSlot;
+    if in_pipe as i64 == 0 {
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+    if pipe(in_pipe as * i32) < 0 {
+        free(in_pipe as * u8);
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+    let in_rd: i32 = in_pipe.fd;
+    let in_wr: i32 = in_pipe.events_revents;
+
+    let out_pipe: * PollSlot = malloc(8 as usize) as * PollSlot;
+    if out_pipe as i64 == 0 {
+        close(in_rd);
+        close(in_wr);
+        free(in_pipe as * u8);
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+    if pipe(out_pipe as * i32) < 0 {
+        close(in_rd);
+        close(in_wr);
+        free(in_pipe as * u8);
+        free(out_pipe as * u8);
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+    let out_rd: i32 = out_pipe.fd;
+    let out_wr: i32 = out_pipe.events_revents;
+
+    let err_pipe: * PollSlot = malloc(8 as usize) as * PollSlot;
+    if err_pipe as i64 == 0 {
+        close(in_rd);
+        close(in_wr);
+        close(out_rd);
+        close(out_wr);
+        free(in_pipe as * u8);
+        free(out_pipe as * u8);
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+    if pipe(err_pipe as * i32) < 0 {
+        close(in_rd);
+        close(in_wr);
+        close(out_rd);
+        close(out_wr);
+        free(in_pipe as * u8);
+        free(out_pipe as * u8);
+        free(err_pipe as * u8);
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+    let err_rd: i32 = err_pipe.fd;
+    let err_wr: i32 = err_pipe.events_revents;
+    free(in_pipe as * u8);
+    free(out_pipe as * u8);
+    free(err_pipe as * u8);
+
+    let actions: * u8 = malloc(256 as usize);
+    if actions as i64 == 0 {
+        close(in_rd);
+        close(in_wr);
+        close(out_rd);
+        close(out_wr);
+        close(err_rd);
+        close(err_wr);
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+    if posix_spawn_file_actions_init(actions) != 0 {
+        free(actions);
+        close(in_rd);
+        close(in_wr);
+        close(out_rd);
+        close(out_wr);
+        close(err_rd);
+        close(err_wr);
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+    posix_spawn_file_actions_addclose(actions, in_wr);
+    posix_spawn_file_actions_addclose(actions, out_rd);
+    posix_spawn_file_actions_addclose(actions, err_rd);
+    posix_spawn_file_actions_adddup2(actions, in_rd, 0);
+    posix_spawn_file_actions_adddup2(actions, out_wr, 1);
+    posix_spawn_file_actions_adddup2(actions, err_wr, 2);
+    posix_spawn_file_actions_addclose(actions, in_rd);
+    posix_spawn_file_actions_addclose(actions, out_wr);
+    posix_spawn_file_actions_addclose(actions, err_wr);
+
+    let mut pid: i32 = 0;
+    let pid_ptr: * i32 = & pid;
+    let first: string = argv[0];
+    let path: * u8 = sfn_str_to_cstr(first as * u8);
+    let argv_pp: * * u8 = child_argv as * * u8;
+    let envp_pp: * * u8 = child_envp as * * u8;
+    let spawn_err: i32 = posix_spawnp(pid_ptr, path, actions, null, argv_pp, envp_pp);
+    posix_spawn_file_actions_destroy(actions);
+    free(actions);
+    if spawn_err != 0 {
+        close(in_rd);
+        close(in_wr);
+        close(out_rd);
+        close(out_wr);
+        close(err_rd);
+        close(err_wr);
+        free(child_argv);
+        free(child_envp);
+        return 0;
+    }
+
+    // Parent keeps stdin's write end + stdout/stderr read ends; close
+    // the child-side ends and the marshalled argv/envp buffers.
+    close(in_rd);
+    close(out_wr);
+    close(err_wr);
+    free(child_argv);
+    free(child_envp);
+
+    let h: * SailfinProcessHandle = malloc(64 as usize) as * SailfinProcessHandle;
+    if h as i64 == 0 {
+        close(in_wr);
+        close(out_rd);
+        close(err_rd);
+        waitpid(pid, null, 0);
+        return 0;
+    }
+    h.pid = pid;
+    h.stdin_fd = in_wr;
+    h.stdout_fd = out_rd;
+    h.stderr_fd = err_rd;
+    h.stdout_buf = 0;
+    h.stdout_len = 0;
+    h.stdout_cap = 0;
+    h.stderr_buf = 0;
+    h.stderr_len = 0;
+    h.stderr_cap = 0;
+    return h as i64;
+}
+
 // ── process.handle_write ───────────────────────────────────────
 // Port of `sailfin_runtime_process_handle_write`. Writes the full
 // NUL-terminated `data` to the child's stdin, resuming short writes
