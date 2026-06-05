@@ -13,10 +13,12 @@ import {
     arg_optional,
     arg_variadic,
     command,
+    flag,
     flag_env,
     flag_required,
     flag_short,
     flag_value,
+    flag_value_short,
     help,
     render_help_text,
     render_help_tree,
@@ -131,6 +133,23 @@ test "help tree: render_help_text golden with rich positionals and flag annotati
         + "options:\n"
         + "      --token <value>  Auth token [env: PACK_TOKEN] (required)\n"
         + "  -h, --help           Show this help message\n";
+    assert strings_equal(render_help_text(node), golden);
+}
+
+test "help tree: render_help_text golden locks every flag-label variant" {
+    // All four flag-label forms in one command, so the byte-identical
+    // contract covers long-only boolean, short boolean, long value, and
+    // short value labels plus the column width they jointly drive. The
+    // widest label is `    --output <value>` (20), so the flag column is
+    // 22 and the built-in `-h, --help` row pads to match.
+    let cmd = with_flag(with_flag(with_flag(with_flag(command("tool", "A tool"), flag("verbose", "Verbose output")), flag_short("quiet", "q", "Quiet")), flag_value("output", "Output file")), flag_value_short("input", "i", "Input file"));
+    let node: HelpNode = render_help_tree(cmd);
+    let golden = "A tool\n\n" + "usage:\n  tool [options]\n\n" + "options:\n"
+        + "      --verbose         Verbose output\n"
+        + "  -q, --quiet           Quiet\n"
+        + "      --output <value>  Output file\n"
+        + "  -i, --input <value>   Input file\n"
+        + "  -h, --help            Show this help message\n";
     assert strings_equal(render_help_text(node), golden);
 }
 
