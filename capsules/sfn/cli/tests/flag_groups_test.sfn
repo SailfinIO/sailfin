@@ -4,7 +4,8 @@
 // Covers the `flag_group_exclusive` / `flag_group_required_one`
 // builders, the `with_flag_group` collector, and the parser's
 // `flag_group_violation` diagnostic for both modes (exclusive: at most
-// one member; required_one: exactly one member).
+// one member; required_one: at least one member). Requiring *exactly*
+// one is expressed by composing both groups over the same members.
 import {
     command,
     flag,
@@ -83,6 +84,50 @@ test "parse: required-one group with exactly one member present yields ok" {
 test "parse: required-one group with zero members present yields violation" {
     let members: string[] = ["json", "yaml"];
     let cmd = with_flag_group(with_flag(with_flag(command("app", "desc"), flag("json", "JSON output")), flag("yaml", "YAML output")), flag_group_required_one(members));
+    let argv: string[] = ["app"];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "flag_group_violation");
+    assert strings_equal(r.error.message, "one of json, yaml is required");
+}
+
+test "parse: required-one group with two members present yields ok" {
+    // required_one enforces a lower bound only ("at least one"); supplying
+    // two members is intentionally allowed. Use an exclusive group on the
+    // same members to forbid it (see the composition test below).
+    let members: string[] = ["json", "yaml"];
+    let cmd = with_flag_group(with_flag(with_flag(command("app", "desc"), flag("json", "JSON output")), flag("yaml", "YAML output")), flag_group_required_one(members));
+    let argv: string[] = ["app", "--json", "--yaml"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert strings_equal(r.error.kind, "ok");
+}
+
+// ---- Composition: exactly-one (exclusive + required_one) ----
+test "parse: composed exclusive + required-one rejects two members" {
+    // Stacking both groups over the same members yields exactly-one
+    // semantics: zero fails required_one, two fails exclusive, one passes.
+    let members: string[] = ["json", "yaml"];
+    let cmd = with_flag_group(with_flag_group(with_flag(with_flag(command("app", "desc"), flag("json", "JSON output")), flag("yaml", "YAML output")), flag_group_exclusive(members)), flag_group_required_one(members));
+    let argv: string[] = ["app", "--json", "--yaml"];
+    let r = parse(cmd, argv);
+    assert r.ok == false;
+    assert strings_equal(r.error.kind, "flag_group_violation");
+    assert strings_equal(r.error.message, "flags json and yaml are mutually exclusive");
+}
+
+test "parse: composed exclusive + required-one accepts exactly one" {
+    let members: string[] = ["json", "yaml"];
+    let cmd = with_flag_group(with_flag_group(with_flag(with_flag(command("app", "desc"), flag("json", "JSON output")), flag("yaml", "YAML output")), flag_group_exclusive(members)), flag_group_required_one(members));
+    let argv: string[] = ["app", "--json"];
+    let r = parse(cmd, argv);
+    assert r.ok == true;
+    assert strings_equal(r.error.kind, "ok");
+}
+
+test "parse: composed exclusive + required-one rejects zero members" {
+    let members: string[] = ["json", "yaml"];
+    let cmd = with_flag_group(with_flag_group(with_flag(with_flag(command("app", "desc"), flag("json", "JSON output")), flag("yaml", "YAML output")), flag_group_exclusive(members)), flag_group_required_one(members));
     let argv: string[] = ["app"];
     let r = parse(cmd, argv);
     assert r.ok == false;

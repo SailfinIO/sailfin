@@ -292,10 +292,13 @@ fn flag_group_exclusive(members: string[]) -> FlagGroup {
 }
 
 fn flag_group_required_one(members: string[]) -> FlagGroup {
-    // Create a required-one flag group: exactly one of `members` (flag
+    // Create a required-one flag group: at least one of `members` (flag
     // long names, without the leading `--`) must be present. Zero present
-    // is a `ParseError { kind: "flag_group_violation" }`. Attach to a
-    // command with `with_flag_group`.
+    // is a `ParseError { kind: "flag_group_violation" }`; two or more
+    // present is allowed. To require *exactly* one, compose this with
+    // `flag_group_exclusive` over the same members (required-one supplies
+    // the lower bound, exclusive the upper bound). Attach to a command
+    // with `with_flag_group`.
     return FlagGroup { members: members, mode: "required_one" };
 }
 

@@ -51,8 +51,10 @@ struct Flag {
 // proper sum types land post-1.0:
 //   - "exclusive"    — at most one member may be present; two or more
 //                      present is a violation.
-//   - "required_one" — exactly one member must be present; zero present
-//                      is a violation.
+//   - "required_one" — at least one member must be present; zero present
+//                      is a violation. Two or more is allowed — compose
+//                      with an "exclusive" group over the same members to
+//                      require *exactly* one.
 //
 // Build groups with `flag_group_exclusive` / `flag_group_required_one`
 // and attach them to a `Command` with `with_flag_group`. A violation
@@ -105,10 +107,12 @@ struct Matches {
 //
 // `"flag_group_violation"` is emitted when a `FlagGroup` constraint is
 // broken: an "exclusive" group with two or more members present, or a
-// "required_one" group with zero members present. `message` carries the
-// human-readable text (`flags a and b are mutually exclusive` /
-// `one of a, b is required`); `flag_name` and `arg_name` stay empty
-// because a group violation implicates a set of flags, not a single one.
+// "required_one" group with zero members present (two or more members of
+// a required-one group is intentionally allowed — pair it with an
+// exclusive group to forbid that). `message` carries the human-readable
+// text (`flags a and b are mutually exclusive` / `one of a, b is
+// required`); `flag_name` and `arg_name` stay empty because a group
+// violation implicates a set of flags, not a single one.
 //
 // `"type_error"` is emitted when a typed flag (`flag_int`,
 // `flag_float`, `flag_path`) receives a value that fails its shape
