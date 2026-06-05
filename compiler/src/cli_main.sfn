@@ -852,6 +852,11 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             let key = runtime_object_cache_key(src, opt_flag);
             if !_runtime_obj_cache_hit(obj, key) {
                 let mut args: string[] = ["clang", opt_flag, "-Wno-override-module"];
+                // Per-function/per-datum sections so the final link's
+                // dead-strip (`--gc-sections` / `-dead_strip`) can drop
+                // functions no consumer references (#1047).
+                args.push("-ffunction-sections");
+                args.push("-fdata-sections");
                 let mut fi: int = 0;
                 loop {
                     if fi >= include_flags.length { break; }
@@ -884,7 +889,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                 + ".o");
             let key = runtime_object_cache_key(src, opt_flag);
             if !_runtime_obj_cache_hit(obj, key) {
-                let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-c", src, "-o", obj]);
+                let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", src, "-o", obj]);
                 if rc != 0 {
                     print("sfn build: failed to assemble runtime ll-source "
                         + src);
@@ -1017,7 +1022,7 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
             + ")");
         return "";
     }
-    let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", ll_path, "-o", obj_path]);
+    let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", ll_path, "-o", obj_path]);
     if rc2 != 0 {
         print("sfn build: failed to compile runtime sfn-source object "
             + obj_path);
@@ -1166,6 +1171,69 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     };
 }
 
+// Dead-code-strip linker flag for the final link (#1047). With every
+// `clang -c` (and the inline `.ll` compile in the link below) emitting
+// `-ffunction-sections -fdata-sections`, the linker's section garbage
+// collector drops any function/datum unreferenced from the entry point —
+// so importing one symbol from a multi-function capsule no longer drags
+// the whole `src/` closure into the binary. The GC flag is platform-
+// specific: GNU ld / lld use `--gc-sections`, the Darwin linker uses
+// `-dead_strip`. Detected via the same `uname -s` probe the driver
+// already uses (`_package_detect_target`, the errno/exe-path locators).
+fn _dead_strip_link_flag() -> string ![io] {
+    let os = _shell_read_cmd("uname -s");
+    if strings_equal(os, "Darwin") { return "-Wl,-dead_strip"; }
+    return "-Wl,--gc-sections";
+}
+
+// Force-retain the runtime provider surface as link-GC roots (#1047).
+// `--gc-sections` would otherwise strip every runtime helper the *current*
+// program never statically references — including the compiler's own
+// self-hosted binary, which exercises only a slice of the runtime. But the
+// runtime is a provider surface: downstream programs link these helpers
+// fresh, and the C→Sailfin migration tests assert the compiler binary
+// keeps the full `sfn_*` family defined. Rooting the migrated provider
+// symbols keeps that surface intact while user / capsule `.ll` code that
+// nothing references is still collected (the actual #1046 win).
+//
+// We restrict rooting to defined globals whose name contains `sfn` — the
+// migrated runtime helper family (`sfn_*`, `sfn_str_sfn_*`, the Mach-O
+// `_sfn_*` form). Rooting *every* runtime global is wrong: it drags back C
+// startup/internal sections gc-sections is meant to drop. With
+// `-ffunction-sections` each function is its own section, so rooting an
+// `sfn_*` symbol pulls in only that function, not its object's startup
+// neighbours. Runtime objects are few, so a single `nm` over all of them
+// is cheap; its BSD output is `<value> <type> <name>`, and we keep global
+// defined types (uppercase, excluding `U` undefined — which also have only
+// two fields, so `NF >= 3` drops them).
+fn _runtime_retain_root_flags(runtime_objs: string[]) -> string[] ![io] {
+    if runtime_objs.length == 0 { return []; }
+    let mut nm_cmd = "nm";
+    let mut oi: int = 0;
+    loop {
+        if oi >= runtime_objs.length { break; }
+        nm_cmd = nm_cmd + " " + _shell_single_quote_arg(runtime_objs[oi]);
+        oi += 1;
+    }
+    nm_cmd = nm_cmd
+        + " 2>/dev/null | awk 'NF >= 3 && $2 ~ /^[A-TV-Z]$/ && $3 ~ /sfn/ {print $3}' | sort -u";
+    let out = _shell_read_cmd(nm_cmd);
+    if out.length == 0 { return []; }
+    let mut flags: string[] = [];
+    let mut start: int = 0;
+    loop {
+        if start >= out.length { break; }
+        let nl = _find_substring_from(out, "\n", start);
+        let mut end = nl;
+        if end < 0 { end = out.length; }
+        let name = substring(out, start, end);
+        if name.length > 0 { flags.push("-Wl,-u," + name); }
+        if nl < 0 { break; }
+        start = nl + 1;
+    }
+    return flags;
+}
+
 fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> int ![io] {
     // Thin wrapper: most callers have one .ll; capsule-aware callers use
     // _clang_link_multi_with_opt directly.
@@ -1215,6 +1283,22 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     runtime_link_libs = inputs.link_libs;
 
     let mut args: string[] = ["clang", opt_flag, "-Wno-override-module"];
+    // `.ll` inputs are compiled inline by this same clang invocation, so
+    // they need the section split here; pre-compiled runtime `.o`s already
+    // carry it from `_clang_compile_runtime_capsule_objects` /
+    // `_emit_runtime_sfn_to_obj`. The dead-strip flag then GCs every
+    // section unreferenced from the entry point (#1047).
+    args.push("-ffunction-sections");
+    args.push("-fdata-sections");
+    args.push(_dead_strip_link_flag());
+    // Root the runtime provider surface so dead-strip keeps it (#1047).
+    let retain_flags = _runtime_retain_root_flags(runtime_objs);
+    let mut rfi: int = 0;
+    loop {
+        if rfi >= retain_flags.length { break; }
+        args.push(retain_flags[rfi]);
+        rfi += 1;
+    }
     let mut roi: int = 0;
     loop {
         if roi >= runtime_objs.length { break; }
@@ -2007,7 +2091,7 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
         // dep object files will compile them on demand once Stage C lands
         // the in-process driver.
         if no_link {
-            let rc_obj = process.run(["clang", "-O2", "-Wno-override-module", "-c", ll_path, "-o", out_path,]);
+            let rc_obj = process.run(["clang", "-O2", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", ll_path, "-o", out_path,]);
             if rc_obj != 0 {
                 if !json_flag {
                     print("library build failed (clang exit=" + number_to_string(rc_obj)
