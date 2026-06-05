@@ -1,22 +1,25 @@
 // runtime/sfn/concurrency/scheduler.sfn
 //
-// Pure-Sailfin struct layouts for the v0 scheduler described in
-// `docs/runtime_architecture.md` §2.6.1 ("Fixed Thread Pool, Not
-// Work-Stealing"). This file is the **skeleton**: it pins the
-// `Scheduler`, `Task`, and `TaskQueue` byte layouts plus the
-// opaque pthread-handle storage types. The runtime behaviour —
-// queue enqueue/dequeue, worker-pool spawn/join, and the
+// Pure-Sailfin struct layouts plus the shared MPMC task queue for
+// the v0 scheduler described in `docs/runtime_architecture.md`
+// §2.6.1 ("Fixed Thread Pool, Not Work-Stealing"). The struct
+// section pins the `Scheduler`, `Task`, and `TaskQueue` byte
+// layouts plus the opaque pthread-handle storage types; the
+// `sfn_taskqueue_*` section below implements the mutex-guarded
+// enqueue/dequeue surface that producers and consumers share. The
+// remaining runtime behaviour — worker-pool spawn/join and the
 // spawn/await surface (§2.6.2–§2.6.3) — lands in follow-up M4
 // issues and is intentionally out of scope here.
 //
 // Part of the M4 scheduler-core track (epic #965). The track has
-// no frontend dependency: every layout below is written against
-// the `extern fn` pthread surface in
+// no frontend dependency: every layout and operation below is
+// written against the `extern fn` pthread surface in
 // `runtime/sfn/platform/pthread.sfn` that the current seed already
-// compiles, and against atomic intrinsics (#323). Nothing here is
-// imported yet; like the platform skeletons, the file is verified
-// as a standalone typecheck + `sfn fmt` smoke target until the
-// queue/worker implementation consumes it.
+// compiles, and against atomic intrinsics (#323). The module is
+// imported nowhere yet; like the platform skeletons, it is
+// verified as a standalone typecheck + `sfn fmt` smoke target plus
+// a linked single-thread roundtrip until the worker pool consumes
+// it.
 //
 // ── Pointer-as-address convention ─────────────────────────────
 // The runtime models heap pointers stored in struct fields as
@@ -112,9 +115,10 @@ struct Task {
 // pointers; `head`/`tail` are the dequeue/enqueue cursors and
 // `count` is the live-entry total, all mutated under `mutex`.
 // Producers block on `not_full` when the ring is full; consumers
-// block on `not_empty` when it is empty. Queue operations
-// (enqueue/dequeue/close) are the next issue's scope — this struct
-// only fixes the layout.
+// block on `not_empty` when it is empty. The `sfn_taskqueue_*`
+// operations at the foot of this file implement the
+// create/enqueue/dequeue/destroy surface against this layout;
+// `close` (graceful drain) lands with the worker pool.
 struct TaskQueue {
     tasks_addr: i64;
     capacity: i64;
@@ -141,4 +145,225 @@ struct Scheduler {
     thread_count: i64;
     queue_addr: i64;
     shutdown: i64;
+}
+
+// ── Externs ───────────────────────────────────────────────────
+// Declared inline rather than imported from
+// `runtime/sfn/platform/pthread.sfn` / `.../libc.sfn`, matching the
+// `arena.sfn` / `mem.sfn` / `rc.sfn` precedent (#306): the seed
+// resolves imported *defined* functions unreliably, so runtime
+// modules outside `platform/` re-declare the extern surface they
+// call. The signatures mirror `pthread.sfn` exactly — `attr`
+// parameters keep the opaque `* PthreadMutexAttr` / `* PthreadCondAttr`
+// pointee names (callers pass `null` for default attributes) so the
+// emitted `declare` shape is identical if the two modules are ever
+// linked together. `PthreadMutex` / `PthreadCond` resolve to the
+// concrete structs above, so a bare embedded-field read like
+// `q.mutex` in argument position lowers to the field address
+// (`%PthreadMutex*`) and reaches the extern with the right LLVM
+// type — no `&` operator is needed (and `& q.mutex` would not
+// compile: the borrow lowering only addresses plain locals).
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn pthread_mutex_init(m: * PthreadMutex, attr: * PthreadMutexAttr) -> i32;
+
+extern fn pthread_mutex_lock(m: * PthreadMutex) -> i32;
+
+extern fn pthread_mutex_unlock(m: * PthreadMutex) -> i32;
+
+extern fn pthread_mutex_destroy(m: * PthreadMutex) -> i32;
+
+extern fn pthread_cond_init(c: * PthreadCond, attr: * PthreadCondAttr) -> i32;
+
+extern fn pthread_cond_wait(c: * PthreadCond, m: * PthreadMutex) -> i32;
+
+extern fn pthread_cond_signal(c: * PthreadCond) -> i32;
+
+extern fn pthread_cond_destroy(c: * PthreadCond) -> i32;
+
+// ── Shared MPMC task queue ────────────────────────────────────
+// The `sfn_taskqueue_*` surface implements the §2.6.1
+// "mutex-guarded MPMC queue": a fixed-capacity ring buffer of
+// `Task` addresses guarded by one mutex with two condition
+// variables. Producers (`enqueue`) block on `not_full` while the
+// ring is full; consumers (`dequeue`) block on `not_empty` while it
+// is empty. Both signal the complementary condition after mutating
+// the ring, so no wakeup is lost. The ring slots hold raw `i64`
+// task addresses, written/read through the `atomic_store` /
+// `atomic_load` builtins (#323) — the stores execute under the held
+// mutex, so the atomic ordering is stronger than required but never
+// wrong.
+//
+// `TaskQueue` byte size on Linux x86_64 (glibc): five `i64` cursors
+// (40 B) + `PthreadMutex` (40 B) + two `PthreadCond` (96 B) = 176
+// bytes. This constant is the single layout dependency the
+// allocator path encodes; it must track the struct above.
+fn _sfn_taskqueue_struct_size() -> i64 { return 176; }
+
+// Largest ring capacity whose byte size (`cap * 8`) still fits in a
+// positive `i64`: floor((2^63 - 1) / 8) = 0x0FFF_FFFF_FFFF_FFFF. A
+// request beyond this would overflow the `cap * 8` allocation size
+// and wrap to a small (or negative) value, under-allocating the ring
+// and inviting out-of-bounds slot writes — so `create` rejects it
+// rather than mallocing a too-small buffer. (Real scheduler queue
+// depths are tiny; this guards the absurd-input corner, not a hot
+// path.)
+fn _sfn_taskqueue_max_capacity() -> i64 { return 1152921504606846975; }
+
+// `sfn_taskqueue_create(capacity)` allocates a queue handle plus its
+// `capacity`-slot ring buffer and initialises the mutex and both
+// condition variables with default attributes. A non-positive
+// `capacity` is clamped to 1 (a zero-length ring can never hold a
+// task); a capacity whose byte size would overflow `i64` is rejected
+// (returns null). Returns the queue address as `* u8` (callers
+// re-cast to `* TaskQueue` only inside this module). Every failure
+// path — OOM on either allocation, or a non-zero `pthread_*_init`
+// return — tears down what was already set up and returns null/the
+// failed pointer so no partial allocation or half-initialised handle
+// escapes.
+fn sfn_taskqueue_create(capacity: i64) -> * u8 {
+    let mut cap: i64 = capacity;
+    if cap <= 0 { cap = 1; }
+    if cap > _sfn_taskqueue_max_capacity() { return null; }
+
+    let queue_ptr: * u8 = malloc(_sfn_taskqueue_struct_size() as usize);
+    if queue_ptr as i64 == 0 { return queue_ptr; }
+
+    let ring_ptr: * u8 = malloc((cap * 8) as usize);
+    if ring_ptr as i64 == 0 {
+        free(queue_ptr);
+        return ring_ptr;
+    }
+
+    let queue: * TaskQueue = queue_ptr as * TaskQueue;
+    queue.tasks_addr = ring_ptr as i64;
+    queue.capacity = cap;
+    queue.head = 0;
+    queue.tail = 0;
+    queue.count = 0;
+
+    // Default attributes (null) — the scheduler needs neither
+    // recursive mutexes nor a non-default clock for the conds. The
+    // inits can fail (e.g. ENOMEM); on failure, destroy the handles
+    // already initialised (reverse order), free both allocations, and
+    // return null so callers never observe a queue whose mutex/cond
+    // are uninitialised (which would make every later lock/wait UB).
+    let mutex_rc: i32 = pthread_mutex_init(queue.mutex, null);
+    if mutex_rc != 0 {
+        free(ring_ptr);
+        free(queue_ptr);
+        return null;
+    }
+    let empty_rc: i32 = pthread_cond_init(queue.not_empty, null);
+    if empty_rc != 0 {
+        pthread_mutex_destroy(queue.mutex);
+        free(ring_ptr);
+        free(queue_ptr);
+        return null;
+    }
+    let full_rc: i32 = pthread_cond_init(queue.not_full, null);
+    if full_rc != 0 {
+        pthread_cond_destroy(queue.not_empty);
+        pthread_mutex_destroy(queue.mutex);
+        free(ring_ptr);
+        free(queue_ptr);
+        return null;
+    }
+
+    return queue_ptr;
+}
+
+// `sfn_taskqueue_destroy(queue)` tears down the condition variables
+// and mutex (reverse init order), frees the ring buffer, then frees
+// the queue handle. Null-safe: a null queue is a no-op.
+fn sfn_taskqueue_destroy(queue: * u8) -> void {
+    if queue as i64 == 0 { return; }
+    let q: * TaskQueue = queue as * TaskQueue;
+
+    pthread_cond_destroy(q.not_full);
+    pthread_cond_destroy(q.not_empty);
+    pthread_mutex_destroy(q.mutex);
+
+    let ring_addr: i64 = q.tasks_addr;
+    if ring_addr != 0 { free(ring_addr as * u8); }
+    free(queue);
+}
+
+// `sfn_taskqueue_enqueue(queue, task)` appends `task` to the tail of
+// the ring under the mutex, blocking on `not_full` while the ring is
+// full, then signals `not_empty` to wake a waiting consumer. FIFO:
+// the tail cursor advances (wrapping at `capacity`) so dequeue
+// observes tasks in insertion order. Null-safe on the queue handle.
+fn sfn_taskqueue_enqueue(queue: * u8, task: * u8) -> void {
+    if queue as i64 == 0 { return; }
+    let q: * TaskQueue = queue as * TaskQueue;
+
+    pthread_mutex_lock(q.mutex);
+
+    // Guard with a `while` (loop + recheck), not an `if`: a spurious
+    // `pthread_cond_wait` return must not let a producer write into a
+    // full ring.
+    loop {
+        if q.count < q.capacity { break; }
+        pthread_cond_wait(q.not_full, q.mutex);
+    }
+
+    let slot: * i64 = (q.tasks_addr + q.tail * 8) as * i64;
+    atomic_store(slot, task as i64);
+
+    let mut next_tail: i64 = q.tail + 1;
+    if next_tail >= q.capacity { next_tail = 0; }
+    q.tail = next_tail;
+    q.count = q.count + 1;
+
+    // Wake one consumer parked on the empty ring. Signalling under
+    // the mutex (rather than after unlock) is correct and avoids the
+    // lost-wakeup window.
+    pthread_cond_signal(q.not_empty);
+    pthread_mutex_unlock(q.mutex);
+}
+
+// `sfn_taskqueue_dequeue(queue)` removes and returns the head task
+// under the mutex, blocking on `not_empty` while the ring is empty,
+// then signals `not_full` to wake a waiting producer. Returns the
+// task address as `* u8`. A null queue handle returns null.
+fn sfn_taskqueue_dequeue(queue: * u8) -> * u8 {
+    if queue as i64 == 0 { return null; }
+    let q: * TaskQueue = queue as * TaskQueue;
+
+    pthread_mutex_lock(q.mutex);
+
+    // `while`-style recheck: a spurious wakeup must not dequeue from
+    // an empty ring.
+    loop {
+        if q.count > 0 { break; }
+        pthread_cond_wait(q.not_empty, q.mutex);
+    }
+
+    let slot: * i64 = (q.tasks_addr + q.head * 8) as * i64;
+    let task_addr: i64 = atomic_load(slot);
+
+    let mut next_head: i64 = q.head + 1;
+    if next_head >= q.capacity { next_head = 0; }
+    q.head = next_head;
+    q.count = q.count - 1;
+
+    pthread_cond_signal(q.not_full);
+    pthread_mutex_unlock(q.mutex);
+
+    return task_addr as * u8;
+}
+
+// `sfn_taskqueue_count(queue)` reads the live-entry count under the
+// mutex — a consistent snapshot for tests and the worker pool's
+// drain check. Null queue handle reads as 0.
+fn sfn_taskqueue_count(queue: * u8) -> i64 {
+    if queue as i64 == 0 { return 0; }
+    let q: * TaskQueue = queue as * TaskQueue;
+    pthread_mutex_lock(q.mutex);
+    let live: i64 = q.count;
+    pthread_mutex_unlock(q.mutex);
+    return live;
 }
