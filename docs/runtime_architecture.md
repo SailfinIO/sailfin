@@ -2226,6 +2226,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 | `sailfin_runtime_array_push` | `sfn_array_push` | M2 |
 | `sailfin_runtime_array_push_slot` (`array_push_slot_v2`) | `sfn_array_push_slot` (monomorphic) | M2 — ✓ #911 |
 | `sailfin_runtime_process_run` (`process_run_v2`) | `sfn_process_run` | M2 — ✓ #911 |
+| `sailfin_runtime_process_spawn_with_env` | `sfn_process_spawn_with_env` | **#1102** — descriptor flipped; Sailfin body mallocs the `SailfinProcessHandle`, so the `process.sfn` overlay is now the canonical owner. C body retired separately (#822, M4). |
 | `sailfin_adapter_fs_read_file` | `sfn_fs_read_file` | M3 — ✓ #911 |
 | `sailfin_adapter_fs_write_file` | `sfn_fs_write_file` | M3 — ✓ #911 |
 | `sailfin_runtime_set/has/clear_exception` | frame-based `sfn_exception_*` path (M2.7b, #404) | M2 — `set/has/clear` descriptor rows retained for the Throw/Try declare lists (seed-compat); C symbols stay exported until M3.9 |

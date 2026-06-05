@@ -1,0 +1,46 @@
+// Integration coverage for the Sailfin-native process spawn handle
+// producer (#1102). `runtime/sfn/process.sfn:sfn_process_spawn_with_env`
+// replaced the C `sailfin_runtime_process_spawn_with_env` body, and
+// `compiler/src/llvm/runtime_helpers.sfn` flips the
+// `process.spawn_with_env` descriptor onto it. These tests pin the raw
+// `process.*` builtin surface (the handle round-trip and the
+// argv-empty / spawn-failure `0` sentinel) independently of the
+// higher-level `sfn/os` wrappers exercised by
+// `capsules/sfn/os/tests/spawn_with_env_test.sfn`. The exit-code decode
+// and the C-parity contract (return `0`, not `-1`, on failure) mirror
+// `sailfin_runtime.c:6664-6798`.
+test "spawn_with_env: cat round-trips piped stdin to stdout" ![io] {
+    let id = process.spawn_with_env(["cat"], []);
+    assert id != 0;
+    let written = process.handle_write(id, "hello world\n");
+    assert written == 12;
+    // cat exits on stdin EOF, so close stdin before draining stdout.
+    process.handle_close_stdin(id);
+    let out = process.handle_read_stdout(id);
+    assert out == "hello world\n";
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+}
+
+test "spawn_with_env: env overrides reach the spawned child" ![io] {
+    let id = process.spawn_with_env(["printenv", "GREETING"], ["GREETING=salve"]);
+    assert id != 0;
+    process.handle_close_stdin(id);
+    let out = process.handle_read_stdout(id);
+    assert out == "salve\n";
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+}
+
+test "spawn_with_env: handle_wait surfaces a non-zero exit code" ![io] {
+    let id = process.spawn_with_env(["sh", "-c", "exit 3"], []);
+    assert id != 0;
+    process.handle_close_stdin(id);
+    let exit = process.handle_wait(id);
+    assert exit == 3;
+}
+
+test "spawn_with_env: empty argv returns the 0 failure sentinel" ![io] {
+    let id = process.spawn_with_env([], []);
+    assert id == 0;
+}
