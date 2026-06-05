@@ -1,0 +1,144 @@
+// runtime/sfn/concurrency/scheduler.sfn
+//
+// Pure-Sailfin struct layouts for the v0 scheduler described in
+// `docs/runtime_architecture.md` §2.6.1 ("Fixed Thread Pool, Not
+// Work-Stealing"). This file is the **skeleton**: it pins the
+// `Scheduler`, `Task`, and `TaskQueue` byte layouts plus the
+// opaque pthread-handle storage types. The runtime behaviour —
+// queue enqueue/dequeue, worker-pool spawn/join, and the
+// spawn/await surface (§2.6.2–§2.6.3) — lands in follow-up M4
+// issues and is intentionally out of scope here.
+//
+// Part of the M4 scheduler-core track (epic #965). The track has
+// no frontend dependency: every layout below is written against
+// the `extern fn` pthread surface in
+// `runtime/sfn/platform/pthread.sfn` that the current seed already
+// compiles, and against atomic intrinsics (#323). Nothing here is
+// imported yet; like the platform skeletons, the file is verified
+// as a standalone typecheck + `sfn fmt` smoke target until the
+// queue/worker implementation consumes it.
+//
+// ── Pointer-as-address convention ─────────────────────────────
+// The runtime models heap pointers stored in struct fields as
+// `i64` addresses (see `ArenaPage.data_addr`,
+// `SailfinProcessHandle.stdout_buf`, `PollSlot`), casting to a
+// typed `* T` view at the use site. This file follows that
+// convention: `Scheduler.queue_addr`, `Scheduler.threads_addr`,
+// and `Task.fn_ptr` / `Task.ctx` / `Task.result` are `i64`
+// addresses, not typed pointers. The design-doc spellings
+// (`TaskQueue*`, `*Pthread`, `fn(i8*) -> i8*`, `i8*`) map onto
+// these `i64` slots one-for-one. `Task.fn_ptr` in particular
+// holds the raw address of a `fn(* u8) -> * u8` worker entry; the
+// inline `fn(...)` field type is unspellable today (the formatter
+// rewrites `fn(` to `fn (`, which the typechecker's C-ABI
+// function-pointer rule rejects — see the `pthread.sfn` header),
+// so the skeleton stores the entry as an address and casts at the
+// call site, exactly as the adapter layer does for
+// `pthread_create`'s `start`.
+//
+// ── Opaque pthread-handle sizing ──────────────────────────────
+// `PthreadMutex` and `PthreadCond` are embedded **by value** in
+// `Task` (and `TaskQueue`) so that `pthread_mutex_init` /
+// `pthread_cond_init` can be handed `&task.mutex` once the queue
+// code lands — no separate allocation per handle. The design
+// (§2.6.1, §2.9 open question Q7) calls for them to be "opaque
+// byte arrays sized to the target platform's
+// `sizeof(pthread_mutex_t)` / `sizeof(pthread_cond_t)`". Sailfin
+// has no fixed-size array type yet, so — matching the
+// `ArenaPage`/`SailfinProcessHandle` precedent — the byte storage
+// is expressed as a run of 8-byte `i64` slots whose total size
+// equals the platform `sizeof`.
+//
+// Sizes below are for **Linux x86_64 (glibc)**, the supported
+// self-hosting build target:
+//   - `pthread_mutex_t` = 40 bytes -> 5 i64 slots
+//   - `pthread_cond_t`  = 48 bytes -> 6 i64 slots
+// For reference, macOS arm64 differs:
+//   - `pthread_mutex_t` = 64 bytes (8-byte sig + 56-byte opaque)
+//   - `pthread_cond_t`  = 48 bytes (8-byte sig + 40-byte opaque)
+// A platform-conditional split (per §2.9 Q7) is deferred until
+// Sailfin grows `cfg`-style conditional compilation; this
+// skeleton sizes for the build platform and documents the macOS
+// values here. The handles are opaque: only libpthread reads or
+// writes their bytes, so the slot names are deliberately generic.
+// Opaque storage for a `pthread_mutex_t`. 40 bytes on Linux x86_64
+// (glibc) — five 8-byte slots. Never read field-by-field from
+// Sailfin; the bytes belong to libpthread, reached through a
+// `* PthreadMutex` view passed to `pthread_mutex_*`.
+struct PthreadMutex {
+    _opaque0: i64;
+    _opaque1: i64;
+    _opaque2: i64;
+    _opaque3: i64;
+    _opaque4: i64;
+}
+
+// Opaque storage for a `pthread_cond_t`. 48 bytes on Linux x86_64
+// (glibc) — six 8-byte slots. Opaque to Sailfin; libpthread owns
+// the bytes via a `* PthreadCond` view passed to `pthread_cond_*`.
+struct PthreadCond {
+    _opaque0: i64;
+    _opaque1: i64;
+    _opaque2: i64;
+    _opaque3: i64;
+    _opaque4: i64;
+    _opaque5: i64;
+}
+
+// A single unit of deferred work. Mirrors the §2.6.1 `Task`
+// layout. `fn_ptr` is the worker entry (`fn(* u8) -> * u8`) stored
+// as a raw address; `ctx` is the captured environment (`* u8`);
+// `result` is written by the worker and read by the awaiter
+// (`* u8`); `done` is an atomic completion flag toggled via LLVM
+// atomic intrinsics (0 = pending, 1 = complete). `cond` / `mutex`
+// are embedded by value: the awaiter blocks on `cond` under
+// `mutex` until the worker sets `done` and signals (§2.6.3).
+// Linux x86_64 layout: four i64s (32 B) + PthreadCond (48 B) +
+// PthreadMutex (40 B) = 120 bytes.
+struct Task {
+    fn_ptr: i64;
+    ctx: i64;
+    result: i64;
+    done: i64;
+    cond: PthreadCond;
+    mutex: PthreadMutex;
+}
+
+// Shared MPMC task queue — a fixed-capacity ring buffer of `Task`
+// addresses guarded by a single mutex with not-empty / not-full
+// condition variables (the "mutex-guarded MPMC queue" option from
+// §2.6.1; the lock-free variant is a post-skeleton evolution).
+// `tasks_addr` points at a `capacity`-slot buffer of `* Task`
+// pointers; `head`/`tail` are the dequeue/enqueue cursors and
+// `count` is the live-entry total, all mutated under `mutex`.
+// Producers block on `not_full` when the ring is full; consumers
+// block on `not_empty` when it is empty. Queue operations
+// (enqueue/dequeue/close) are the next issue's scope — this struct
+// only fixes the layout.
+struct TaskQueue {
+    tasks_addr: i64;
+    capacity: i64;
+    head: i64;
+    tail: i64;
+    count: i64;
+    mutex: PthreadMutex;
+    not_empty: PthreadCond;
+    not_full: PthreadCond;
+}
+
+// The fixed thread pool. Mirrors the §2.6.1 `Scheduler` layout.
+// `threads_addr` points at a `thread_count`-slot array of
+// `pthread_t` ids (each written by `pthread_create`; `pthread_t`
+// is pointer-sized — modelled as `usize` in `pthread.sfn`).
+// `thread_count` is the pool size, defaulting to
+// `min(available_cores, 4)` and overridable via `SAILFIN_THREADS`
+// (resolution lands with the worker pool). `queue_addr` is the
+// shared `* TaskQueue`. `shutdown` is an atomic flag (LLVM atomic
+// intrinsics): 0 = running, 1 = draining — workers observe it to
+// exit their dispatch loop.
+struct Scheduler {
+    threads_addr: i64;
+    thread_count: i64;
+    queue_addr: i64;
+    shutdown: i64;
+}
