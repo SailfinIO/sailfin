@@ -960,25 +960,26 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
 }
 
 // Resolve the path to the running compiler binary so we can spawn
-// it as a child to emit runtime `.sfn` modules at link time. Reads
+// it as a child to emit runtime `.sfn` modules at link time.
 // Resolution order:
 //   1. `binary_dir + "/sailfin"` if a non-empty `binary_dir` was
 //      threaded from the CLI's `--binary-dir` plumbing. Cross-
-//      platform — works on macOS and Linux.
-//   2. `readlink -f /proc/self/exe` (Linux fallback when no
-//      binary_dir was passed).
-//   3. `""` — caller treats as "skip the runtime-sfn-sources
-//      loop with a diagnostic". On macOS without binary_dir,
-//      this is currently unreachable in practice because the
-//      native driver always computes binary_dir before calling
-//      into the Sailfin entrypoint.
+//      platform — works on macOS and Linux. Now that `exe_path()`
+//      resolves the running binary portably (#968), `fn main`
+//      always threads a non-empty `binary_dir` before reaching
+//      this helper, so this leg is the real resolution path.
+//   2. `""` — caller treats as "skip the runtime-sfn-sources
+//      loop with a diagnostic". The doubly-Linux-only
+//      `readlink -f /proc/self/exe` shell fallback was removed in
+//      #970: it never worked on macOS (no `/proc`; BSD `readlink`
+//      has no `-f`) and is dead code now that `binary_dir` is
+//      always threaded portably.
 fn _resolve_self_path(binary_dir: string) -> string ![io] {
     if binary_dir.length > 0 {
         let candidate = _path_join(binary_dir, "sailfin");
         if fs.exists(candidate) { return candidate; }
     }
-    let raw = _shell_read_cmd("readlink -f /proc/self/exe");
-    return raw;
+    return "";
 }
 
 // Issue #308: compile every `sfn-sources` entry from a list of
@@ -1129,7 +1130,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         print("sfn build: cannot resolve self path for runtime sfn-source emit");
         print("           tried: <binary_dir>/sailfin (binary_dir=\""
             + binary_dir
-            + "\"), then readlink -f /proc/self/exe");
+            + "\")");
         return _failed_runtime_link_inputs();
     }
     let mut i: int = 0;
@@ -1215,7 +1216,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
             print("sfn build: cannot resolve self path for runtime prelude-entry emit");
             print("           tried: <binary_dir>/sailfin (binary_dir=\""
                 + binary_dir
-                + "\"), then readlink -f /proc/self/exe");
+                + "\")");
             return _failed_runtime_link_inputs();
         }
         let mut pi: int = 0;
