@@ -29,6 +29,7 @@ import {
     Arg,
     Command,
     Flag,
+    FlagGroup,
     Matches,
     ParseError,
     ParseResult
@@ -330,6 +331,32 @@ fn _validate_level(cmd_name: string, path: string[], active: Command, pos_idx: i
         rfi += 1;
     }
 
+    // Validate flag groups (mutual exclusion / required-one). Each group
+    // counts how many of its members appear in `fl_names`; an
+    // "exclusive" group rejects two-or-more present, a "required_one"
+    // group rejects zero present. The kind is `"flag_group_violation"`
+    // for both modes; the message text distinguishes them.
+    let mut gi: int = 0;
+    loop {
+        if gi >= active.flag_groups.length { break; }
+        let g = active.flag_groups[gi];
+        let present = _present_members(g, fl_names);
+        if strings_equal(g.mode, "exclusive") {
+            if present.length > 1 {
+                return _err_result(cmd_name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "flag_group_violation", "flags "
+                    + _join(present, " and ")
+                    + " are mutually exclusive", "", "");
+            }
+        } else if strings_equal(g.mode, "required_one") {
+            if present.length == 0 {
+                return _err_result(cmd_name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "flag_group_violation", "one of "
+                    + _join(g.members, ", ")
+                    + " is required", "", "");
+            }
+        }
+        gi += 1;
+    }
+
     let matches = Matches {
         command_name: cmd_name,
         subcommand_name: _leaf_name(path),
@@ -486,13 +513,15 @@ fn _find_subcmd(cmd: Command, name: string) -> Command {
     let empty_args: Arg[] = [];
     let empty_flags: Flag[] = [];
     let empty_subs: Command[] = [];
+    let empty_groups: FlagGroup[] = [];
     return Command {
         name: "",
         description: "",
         version: "",
         args: empty_args,
         flags: empty_flags,
-        subcmds: empty_subs
+        subcmds: empty_subs,
+        flag_groups: empty_groups
     };
 }
 
@@ -567,6 +596,36 @@ fn _flag_seen(fl_names: string[], long_name: string) -> boolean {
         i += 1;
     }
     return false;
+}
+
+fn _present_members(group: FlagGroup, fl_names: string[]) -> string[] {
+    // Return the subset of `group.members` that appear in `fl_names`,
+    // preserving the group's declared order. Drives the
+    // `flag_group_violation` checks in `_validate_level`.
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= group.members.length { break; }
+        if _flag_seen(fl_names, group.members[i]) {
+            out.push(group.members[i]);
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn _join(parts: string[], sep: string) -> string {
+    // Join `parts` with `sep`. Used to build flag-group violation
+    // messages (`a and b`, `a, b, c`).
+    let mut out = "";
+    let mut i: int = 0;
+    loop {
+        if i >= parts.length { break; }
+        if i > 0 { out = out + sep; }
+        out = out + parts[i];
+        i += 1;
+    }
+    return out;
 }
 
 fn _help_hint(root_name: string, path: string[]) -> string {

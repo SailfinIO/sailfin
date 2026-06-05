@@ -43,6 +43,25 @@ struct Flag {
     env_var: string;
 }
 
+// FlagGroup constrains how a set of flags on a `Command` may co-occur.
+//
+// `members` lists the long names of the flags the group governs (the
+// bare names, without the leading `--`). `mode` selects the constraint
+// the parser enforces after parsing, using string discriminants until
+// proper sum types land post-1.0:
+//   - "exclusive"    — at most one member may be present; two or more
+//                      present is a violation.
+//   - "required_one" — exactly one member must be present; zero present
+//                      is a violation.
+//
+// Build groups with `flag_group_exclusive` / `flag_group_required_one`
+// and attach them to a `Command` with `with_flag_group`. A violation
+// surfaces as `ParseError { kind: "flag_group_violation" }`.
+struct FlagGroup {
+    members: string[];
+    mode: string;
+}
+
 struct Command {
     name: string;
     description: string;
@@ -50,6 +69,11 @@ struct Command {
     args: Arg[];
     flags: Flag[];
     subcmds: Command[];
+    // `flag_groups` collects the mutual-exclusion / required-one
+    // constraints attached via `with_flag_group`. Empty when the
+    // command declares no groups. Validated by `parse()` after the
+    // per-level required-flag check.
+    flag_groups: FlagGroup[];
 }
 
 struct Matches {
@@ -75,8 +99,16 @@ struct Matches {
 //
 // `kind` is one of: "ok", "help_requested", "version_requested",
 // "unknown_flag", "missing_value", "unexpected_positional",
-// "missing_required", "type_error", "invalid_choice". String
-// discriminants are used until proper sum types land post-1.0.
+// "missing_required", "type_error", "invalid_choice",
+// "flag_group_violation". String discriminants are used until proper
+// sum types land post-1.0.
+//
+// `"flag_group_violation"` is emitted when a `FlagGroup` constraint is
+// broken: an "exclusive" group with two or more members present, or a
+// "required_one" group with zero members present. `message` carries the
+// human-readable text (`flags a and b are mutually exclusive` /
+// `one of a, b is required`); `flag_name` and `arg_name` stay empty
+// because a group violation implicates a set of flags, not a single one.
 //
 // `"type_error"` is emitted when a typed flag (`flag_int`,
 // `flag_float`, `flag_path`) receives a value that fails its shape
