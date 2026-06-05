@@ -9,6 +9,8 @@
 //   let config = parse(text);
 //   let name = get_string(config, "package.name");
 //   let deps = get_table(config, "dependencies");
+import { trim } from "sfn/strings";
+
 // ---- Types ----
 struct TomlValue {
     kind: string;  // "string", "integer", "float", "boolean", "array", "table", "datetime"
@@ -136,7 +138,7 @@ fn parse(text: string) -> TomlValue {
     let mut i: int = 0;
     loop {
         if i >= lines.length { break; }
-        let line = _trim(lines[i]);
+        let line = trim(lines[i]);
         i += 1;
 
         // Skip empty lines and comments.
@@ -152,7 +154,7 @@ fn parse(text: string) -> TomlValue {
                 header_start = 2;
                 header_end = line.length - 2;
             }
-            let path = _trim(substring(line, header_start, header_end));
+            let path = trim(substring(line, header_start, header_end));
 
             // Check if this table path already exists.
             let mut found: int = -1;
@@ -182,8 +184,8 @@ fn parse(text: string) -> TomlValue {
         let eq_pos = _find_equals(line);
         if eq_pos < 0 { continue; }
 
-        let key = _trim(substring(line, 0, eq_pos));
-        let raw_value = _trim(substring(line, eq_pos + 1, line.length));
+        let key = trim(substring(line, 0, eq_pos));
+        let raw_value = trim(substring(line, eq_pos + 1, line.length));
         let bare_key = _strip_quotes(key);
         let parsed_value = _parse_value(raw_value);
 
@@ -341,7 +343,7 @@ fn _parse_number(value: string) -> TomlValue {
 fn _parse_array(raw: string) -> TomlValue {
     let mut items: TomlValue[] = [];
     if raw.length < 2 { return array_val(items); }
-    let inner = _trim(substring(raw, 1, raw.length - 1));
+    let inner = trim(substring(raw, 1, raw.length - 1));
     if inner.length == 0 { return array_val(items); }
 
     // Split on commas (respecting nesting and strings).
@@ -365,14 +367,14 @@ fn _parse_array(raw: string) -> TomlValue {
             if ch == "[" || ch == "{" { depth += 1; }
             if ch == "]" || ch == "}" { depth -= 1; }
             if ch == "," && depth == 0 {
-                let elem = _trim(substring(inner, start, i));
+                let elem = trim(substring(inner, start, i));
                 if elem.length > 0 { items.push(_parse_value(elem)); }
                 start = i + 1;
             }
         }
         i += 1;
     }
-    let last = _trim(substring(inner, start, inner.length));
+    let last = trim(substring(inner, start, inner.length));
     if last.length > 0 { items.push(_parse_value(last)); }
     return array_val(items);
 }
@@ -381,7 +383,7 @@ fn _parse_inline_table(raw: string) -> TomlValue {
     let mut keys: string[] = [];
     let mut values: TomlValue[] = [];
     if raw.length < 2 { return table_val(keys, values); }
-    let inner = _trim(substring(raw, 1, raw.length - 1));
+    let inner = trim(substring(raw, 1, raw.length - 1));
     if inner.length == 0 { return table_val(keys, values); }
 
     // Split on commas (respecting nesting and strings).
@@ -405,14 +407,14 @@ fn _parse_inline_table(raw: string) -> TomlValue {
             if ch == "[" || ch == "{" { depth += 1; }
             if ch == "]" || ch == "}" { depth -= 1; }
             if ch == "," && depth == 0 {
-                let pair = _trim(substring(inner, start, i));
+                let pair = trim(substring(inner, start, i));
                 _parse_kv_pair(pair, keys, values);
                 start = i + 1;
             }
         }
         i += 1;
     }
-    let last = _trim(substring(inner, start, inner.length));
+    let last = trim(substring(inner, start, inner.length));
     if last.length > 0 { _parse_kv_pair(last, keys, values); }
     return table_val(keys, values);
 }
@@ -420,8 +422,8 @@ fn _parse_inline_table(raw: string) -> TomlValue {
 fn _parse_kv_pair(pair: string, keys: string[], values: TomlValue[]) -> void {
     let eq = _find_equals(pair);
     if eq < 0 { return; }
-    let key = _strip_quotes(_trim(substring(pair, 0, eq)));
-    let val = _parse_value(_trim(substring(pair, eq + 1, pair.length)));
+    let key = _strip_quotes(trim(substring(pair, 0, eq)));
+    let val = _parse_value(trim(substring(pair, eq + 1, pair.length)));
     keys.push(key);
     values.push(val);
 }
@@ -767,26 +769,8 @@ fn _stringify_value(value: TomlValue) -> string {
 }
 
 // ---- String helpers ----
-fn _trim(text: string) -> string {
-    let mut start: int = 0;
-    let mut end: int = text.length;
-    loop {
-        if start >= end { break; }
-        let ch = text[start];
-        if ch == " " || ch == "\t" || ch == "\r" || ch == "\n" { start += 1; } else {
-            break;
-        }
-    }
-    loop {
-        if end <= start { break; }
-        let ch = text[end - 1];
-        if ch == " " || ch == "\t" || ch == "\r" || ch == "\n" { end -= 1; } else {
-            break;
-        }
-    }
-    return substring(text, start, end);
-}
-
+// `_trim` removed in favor of `sfn/strings::trim` (imported above) — the
+// inline helper was a char-for-char duplicate of the shared utility.
 fn _strip_quotes(text: string) -> string {
     if text.length >= 2 {
         let first = text[0];
@@ -860,7 +844,7 @@ fn _strip_inline_comment(raw: string) -> string {
                 in_string = true;
                 quote_char = ch;
             }
-            if ch == "#" { return _trim(substring(raw, 0, i)); }
+            if ch == "#" { return trim(substring(raw, 0, i)); }
         }
         i += 1;
     }
