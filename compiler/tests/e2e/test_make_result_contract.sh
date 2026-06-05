@@ -36,6 +36,15 @@
 set -uo pipefail
 
 BINARY="${1:?usage: test_make_result_contract.sh <compiler-binary>}"
+# Enforce the argument contract before any work. `set -e` is
+# intentionally off (failures are classified explicitly below), so a
+# bad/missing path must be rejected here rather than silently degrading
+# into a false-green — and the check must precede `realpath`, whose
+# failure on a missing path would otherwise leave BINARY empty.
+if [ ! -x "$BINARY" ]; then
+    echo "test_make_result_contract.sh: '$BINARY' is not an executable compiler binary" >&2
+    exit 2
+fi
 BINARY="$(realpath "$BINARY")"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$REPO_ROOT"
@@ -70,8 +79,8 @@ if command -v timeout >/dev/null 2>&1; then TIMEOUT_PREFIX="timeout 300"; fi
 # SAILFIN_INNER=1 — which would make the nested target run transparently
 # and emit NO sentinel. Clearing it here restores the outer-target
 # behavior so the target we invoke prints its own verdict block.
-# Combined stdout+stderr is captured to $2 (make prints its own
-# `make: *** … Error N` trailer to stderr on failure).
+# Combined stdout+stderr is captured to the logfile ($1; make prints its
+# own `make: *** … Error N` trailer to stderr on failure).
 run_make() {
     local logfile="$1"
     shift
