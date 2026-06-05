@@ -1,0 +1,95 @@
+// sfn/test — Scoped test fixtures (issue #979, proposal §2.2).
+//
+// A scoped fixture sets up a resource, runs a body closure, and tears the
+// resource down on scope exit — including when the body throws. The body
+// is an ordinary closure that may capture the enclosing test's locals
+// (M1.5 closures-with-capture, #687 emission + #689 dispatch).
+//
+// Only `with_tmp_dir` ships here. The originally-proposed `with_env` and
+// `with_cwd` fixtures are intentionally NOT provided:
+//
+//   * They require mutating *process-global* state (`setenv` / `chdir`)
+//     and restoring it. The runtime exposes no such primitive — only
+//     `env.get` / `env.home` exist — and adding C for it cuts against the
+//     in-flight C→Sailfin runtime port (the C surface is frozen after the
+//     test-infra epic's Phase 0).
+//   * Even with the primitives, both are unsound under structured
+//     concurrency: `chdir(2)` sets a per-*process* working directory and
+//     `setenv(3)` mutates a shared, non-thread-safe `environ`, so a
+//     process-global fixture corrupts sibling tasks the moment the test
+//     runner goes parallel. The right shape is per-child control, which
+//     already ships as the typed `Env` + `os::run_capture` API. A
+//     concurrency-aware redesign is tracked in #1107.
+//
+// Teardown is a pure-Sailfin `rm -rf` composed from the `fs.*` runtime
+// intrinsics (`deleteFile` / `exists` / `listDirectory` / `removeDirectory`).
+// No new C runtime surface is introduced.
+//
+// NOTE — why this does NOT import `sfn/fs::remove_all` (#976): the batched
+// test runner (`sailfin test <many files>`, used by CI's int-e2e-caps
+// shard) miscompiles when a non-inlined capsule is consumed by *two*
+// capsules in one invocation — only the first consumer links the capsule's
+// object; later ones fail with `undefined reference` (sfn/strings, which
+// inlines, is unaffected; sfn/fs is not). Having `sfn/test` depend on
+// `sfn/fs` made every `sfn/test` barrel test a second `sfn/fs` consumer
+// alongside `sfn/fs`'s own tests, breaking the shard (tracked as #1113).
+// Until that harness bug is fixed, `with_tmp_dir` uses `fs.*` directly — the
+// same primitives `#976`'s `remove_all` composes (and the same approach
+// `snapshot.sfn` already uses for `fs.writeFile`/`fs.createDirectory`), so
+// there is no new C and no behavioral difference. `_remove_all` below
+// mirrors `capsules/sfn/fs/src/mod.sfn::remove_all`; once the batched-link
+// bug is resolved this can switch back to importing that helper.
+// Recursively remove `path` and everything beneath it (`rm -rf`), returning
+// true when the path is gone afterward (including the no-op case where it
+// never existed). Mirrors `sfn/fs::remove_all` (#976): try the file/symlink
+// unlink first (removes dangling symlinks directly and never recurses
+// *through* a symlinked directory), treat a missing path as success, then
+// clear a real directory's children before removing the emptied directory.
+fn _remove_all(path: string) -> boolean ![io] {
+    if fs.deleteFile(path) { return true; }
+    if !fs.exists(path) { return true; }
+    let entries = fs.listDirectory(path);
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        let _ = _remove_all(path + "/" + entries[i]);
+        i += 1;
+    }
+    return fs.removeDirectory(path);
+}
+
+// Create a fresh temporary directory, hand its absolute path to `body`,
+// and recursively remove the whole tree on scope exit — on both the
+// normal-return and the throwing path. Returns whatever `body` returns.
+//
+// `body` may be a capturing lambda; it closes over the enclosing test's
+// locals. The parameter is typed `fn(string) -> int` (no `![io]` row):
+// the effect checker attributes a lambda body's effects to the scope that
+// *defines* the lambda, so an `![io]` test that builds the closure already
+// accounts for any io inside it — the fn-type itself carries no effect row.
+// (`-> int` is the interim return shape shared with the `expect_to_throw`
+// thunks; a body that produces nothing returns `0`. A generic result type
+// waits on generics.)
+//
+// The directory is created with `fs.mkdtemp("sfn-test-")`, so it is unique
+// per call and lives under `$TMPDIR` (or `/tmp`). On the error path the
+// directory is removed first, then the original error is re-thrown so the
+// failing test still fails with its own message.
+//
+// `fs.mkdtemp` returns an empty string on failure; we refuse to proceed in
+// that case rather than hand `body` an empty path (which would resolve
+// relative to the cwd) and then remove it. Fail loud instead.
+fn with_tmp_dir(body: fn (string) -> int) -> int ![io] {
+    let dir = fs.mkdtemp("sfn-test-");
+    if dir.length == 0 {
+        throw "with_tmp_dir: mkdtemp failed to create a temporary directory";
+    }
+    try {
+        let result = body(dir);
+        let _ = _remove_all(dir);
+        return result;
+    } catch (e) {
+        let _ = _remove_all(dir);
+        throw e;
+    }
+}
