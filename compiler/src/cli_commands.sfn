@@ -743,16 +743,17 @@ fn _should_retry_test(exit_code: int, retries_disabled: boolean) -> boolean {
 // Resolve the path to this compiler binary so the multi-file runner
 // can re-invoke itself (`<self> test <file>`) once per test for
 // process isolation. Mirrors `_resolve_self_path` in `cli_main.sfn`:
-// prefer `<binary_dir>/sailfin` (computed by `fn main` from
-// `exe_path()` / `realpath(argv[0])` on every platform), fall back to
-// the Linux `/proc/self/exe` symlink when no binary_dir was threaded
-// through.
+// `<binary_dir>/sailfin` (computed by `fn main` from `exe_path()` /
+// `realpath(argv[0])` on every platform) is the real resolution path.
+// The doubly-Linux-only `readlink -f /proc/self/exe` shell fallback
+// was removed in #970 — it never worked on macOS and is dead code now
+// that `exe_path()` (#968) threads `binary_dir` portably.
 fn _resolve_test_self_path(binary_dir: string) -> string ![io] {
     if binary_dir.length > 0 {
         let candidate = _path_join_cmd(binary_dir, "sailfin");
         if fs.exists(candidate) { return candidate; }
     }
-    return _shell_read_cmd("readlink -f /proc/self/exe");
+    return "";
 }
 
 // Per-test wall-clock budget, ported from the retired
