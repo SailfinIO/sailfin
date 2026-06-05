@@ -968,10 +968,12 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
 //      resolves the running binary portably (#968), `fn main`
 //      always threads a non-empty `binary_dir` before reaching
 //      this helper, so this leg is the real resolution path.
-//   2. `""` — caller treats as "skip the runtime-sfn-sources
-//      loop with a diagnostic". The doubly-Linux-only
-//      `readlink -f /proc/self/exe` shell fallback was removed in
-//      #970: it never worked on macOS (no `/proc`; BSD `readlink`
+//   2. `""` — a hard failure: each caller prints a diagnostic and
+//      returns `_failed_runtime_link_inputs()`, aborting the link
+//      (it does not degrade gracefully). Unreachable in practice
+//      now that `binary_dir` is always threaded. The doubly-Linux-
+//      only `readlink -f /proc/self/exe` shell fallback was removed
+//      in #970: it never worked on macOS (no `/proc`; BSD `readlink`
 //      has no `-f`) and is dead code now that `binary_dir` is
 //      always threaded portably.
 fn _resolve_self_path(binary_dir: string) -> string ![io] {
