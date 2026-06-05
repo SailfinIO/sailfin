@@ -54,6 +54,65 @@ jobs:
         shell: bash
         run: make test-shard-cover
 
+  # Fast static-analysis pre-flight: run `sfn check` over the whole
+  # compiler tree using the *pinned seed* binary (no self-host build
+  # needed), so parse / typecheck / effect-check errors surface in
+  # ~5 min instead of waiting out the ~90 min build+test matrix.
+  #
+  # Runs on Linux, where effect enforcement is full (it is only partial
+  # on macOS arm64 — see #613), so this is the strongest effect signal
+  # in PR CI. The seed parses current source by construction (it is the
+  # same front-end `make compile` self-hosts with), so this cannot drift
+  # from what the build accepts for parse/typecheck.
+  #
+  # Intentionally NOT a `needs:` dependency of `build` — it runs in
+  # parallel so a green PR pays zero added latency, while a red result
+  # still shows up early. Promote it to a required gate via branch
+  # protection once it has proven stable across a few cycles.
+  check-fast:
+    name: Fast static check (sfn check compiler/src/)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.3
+
+      - name: Resolve seed version from .seed-version
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f .seed-version ]; then
+            echo "[seed-pin] .seed-version is missing from checkout" >&2
+            exit 1
+          fi
+          pin="$(tr -d '[:space:]' < .seed-version)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] .seed-version is empty" >&2
+            exit 1
+          fi
+          echo "[seed-pin] using seed $pin"
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch released seed compiler
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
+        run: |
+          set -euo pipefail
+          make fetch-seed SEED_VERSION="$SEED_VERSION"
+          build/seed/bin/sailfin version
+
+      - name: sfn check compiler/src/ (parse + typecheck + effect-check)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # SAILFIN_USE_ARENA=1 matches the rest of CI; it is also the
+          # arena-reset path that keeps per-file scratch bounded across
+          # the full tree. `check` emits no IR and invokes no clang.
+          SAILFIN_USE_ARENA=1 build/seed/bin/sailfin check compiler/src/
+
   build:
     name: Build + Test [${{ matrix.package_label }} / ${{ matrix.shard }}]
     needs: shard-cover
