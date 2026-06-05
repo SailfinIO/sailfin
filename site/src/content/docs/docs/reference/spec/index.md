@@ -23,6 +23,7 @@ The specification is split across chapters for readability:
 - [§9 String Interpolation](/docs/reference/spec/09-strings)
 - [§10 Runtime](/docs/reference/spec/10-runtime)
 - [§11 Testing](/docs/reference/spec/11-testing)
+- [§12 Result and ?](/docs/reference/spec/12-result-and-errors)
 
 For planned-but-not-yet-shipped features, see the [Design Preview](/docs/reference/preview/).
 

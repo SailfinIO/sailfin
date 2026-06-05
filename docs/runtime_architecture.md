@@ -941,7 +941,7 @@ Calls libc filesystem functions via `extern fn` declarations in
 `runtime/sfn/platform/libc.sfn`. Handles NUL-termination of paths internally
 (see §2.2.4):
 
-- `sfn_fs_read_file(path: SfnString, Arena*) -> SfnString` (or `Result<SfnString, Error>` once `Result` lands)
+- `sfn_fs_read_file(path: SfnString, Arena*) -> SfnString` (the ported form returns `Result<SfnString, Error>` — `Result<T, E>` + `?` now ship; see spec §12)
 - `sfn_fs_write_file(path: SfnString, contents: SfnString) -> void`
 - `sfn_fs_append_file(path: SfnString, contents: SfnString) -> void`
 - `sfn_fs_exists(path: SfnString) -> bool`
@@ -949,8 +949,9 @@ Calls libc filesystem functions via `extern fn` declarations in
 - `sfn_fs_delete(path: SfnString) -> bool`
 - `sfn_fs_mkdir(path: SfnString, recursive: bool) -> bool`
 
-All functions that return allocated data take an `Arena*` parameter. If
-`Result<T, E>` is available, error returns replace thrown exceptions.
+All functions that return allocated data take an `Arena*` parameter. Now that
+`Result<T, E>` ships (spec §12), error returns replace thrown exceptions as these
+functions are ported into Sailfin.
 
 #### 2.7.2 HTTP Adapter
 
