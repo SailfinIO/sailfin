@@ -117,17 +117,58 @@ fn pure_assert_eq_bool(actual: boolean, expected: boolean, label: string) -> Res
 
 ## Lifecycle hooks
 
+> **Shipped (issue 2.1a, #975).** Lifecycle hooks are **language syntax**
+> (block declarations), *not* a library surface. The earlier draft of this
+> section specified a runtime registration API (a `before_each(...)`-style
+> function taking a hook closure); that architecture was rejected — see
+> "Why not a registration API" below.
+
+A test file declares at most one of each hook kind at module scope:
+
 ```sfn
-fn before_each(hook: fn() ![io]) -> ();
-fn after_each(hook: fn() ![io]) -> ();
-fn before_all(hook: fn() ![io]) -> ();
-fn after_all(hook: fn() ![io]) -> ();
+before_all  ![io] { /* runs once, before any test in this file */ }
+before_each ![io] { /* runs before every test in this file */ }
+after_each  ![io] { /* runs after every test in this file */ }
+after_all   ![io] { /* runs once, after all tests in this file */ }
 ```
 
-Hooks compose: a parent capsule's `before_each` runs before a child's,
-in import order. Hooks declared at module scope apply to every test in
-that file. Errors in `before_*` mark every dependent test as `fail`
-(not `error`) with a descriptive message.
+The effect list (`![io]` above) is the hook body's own effect row, parsed like
+a test block's. Each hook lowers to a `TestDeclaration` carrying `hook_kind`
+(`compiler/src/ast.sfn`); `emit_native` emits it under a `hook:<kind>` symbol
+kept out of the RUN/PASS test scan. The LLVM test-harness synthesizer
+(`compiler/src/llvm/lowering/lowering_core.sfn`) discovers each kind
+**statically** and emits **direct calls** into the synthesized `@main`:
+`before_all` once before the test loop, `before_each`/`after_each` wrapping each
+test call, `after_all` once after. There is no runtime registry and no indirect
+dispatch — hook ordering is a static property of the source. A failing
+`before_*`/`after_*` is attributable to the surrounding test (or to a
+`HOOK before_all` / `HOOK after_all` stderr marker the harness emits).
+
+Hooks are **file-scoped**: one per kind per file (a second of the same kind is a
+duplicate-symbol diagnostic), applying only to tests in the declaring file.
+
+### Why not a registration API
+
+A `before_each(hook: fn() ![io])` register-now-call-later surface was rejected
+on three independent grounds, any one disqualifying:
+
+1. **Unbuildable today.** It requires storing a `fn` value and calling it back
+   later; the frontend cannot store+recall fn-values (see `src/expect.sfn`:
+   "a thunk cannot be stored in a struct field and called"). Shipping its
+   signatures would be a non-functional, parsed-but-unenforced API.
+2. **Slower.** It replaces #975's static direct `call @hook__suffix()` with an
+   indirect call through a runtime function-pointer table — defeating inlining
+   on code that runs on every `make test` / CI invocation.
+3. **Non-deterministic ordering.** Registry order is the runtime registration
+   sequence; static block order is an inspectable property of the source.
+
+> **Deferred (post-1.0): cross-capsule composition.** Implicit "a parent
+> capsule's `before_each` runs before a child's" is *not* shipped and is not a
+> 1.0 goal (most frameworks scope hooks per file/module; implicit cross-module
+> inheritance is the surprising choice). If ever pursued, it belongs in the
+> harness synthesizer at **compile time** — collect every `hook:<kind>` across
+> linked/imported modules and order by import — **not** in a runtime
+> registration API.
 
 ## Fixtures
 

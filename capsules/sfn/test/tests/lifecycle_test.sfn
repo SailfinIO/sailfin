@@ -1,0 +1,48 @@
+// End-to-end proof of the SHIPPED (#975) lifecycle-hook mechanism, run
+// inside the `sfn/test` capsule suite (`make test-capsules`).
+//
+// Lifecycle hooks are LANGUAGE SYNTAX (block declarations), not a library
+// API. `before_all`/`before_each`/`after_each`/`after_all` blocks lower to
+// `hook:<kind>` symbols (`compiler/src/emit_native.sfn`) that the LLVM
+// test-harness synthesizer (`compiler/src/llvm/lowering/lowering_core.sfn`)
+// discovers statically and calls *directly* — no runtime registry, no
+// fn-value indirection.
+//
+// There is intentionally NO `capsules/sfn/test/src/lifecycle.sfn` registration
+// surface. A `before_each(hook: fn() ![io])` register-now-call-later API would
+// (a) need storable+callable fn-values, a current frontend gap (see
+// `src/expect.sfn` — "a thunk cannot be stored in a struct field and called");
+// (b) trade #975's static direct calls for indirect dispatch; and (c) make hook
+// order depend on runtime registration sequence instead of static module order.
+// See `docs/proposals/test-infra-epic/03-capsule-api.md` (Lifecycle hooks) for
+// the full architecture decision.
+//
+// A module-scoped mutable accumulator records hook/body execution order.
+// Because a test body cannot observe hooks that run *after* it, this in-process
+// test pins the observable prefix (before_all once; before_each before each
+// body; after_each between tests). The full trailing order — the final
+// after_each and after_all, which run after the last test body — stays covered
+// by the compiler e2e `compiler/tests/e2e/test_lifecycle_hook_ordering.sh`.
+let mut TRACE: string = "";
+
+before_all ![io] { TRACE = TRACE + "[BA]"; }
+
+before_each ![io] { TRACE = TRACE + "[BE]"; }
+
+after_each ![io] { TRACE = TRACE + "[AE]"; }
+
+after_all ![io] { TRACE = TRACE + "[AA]"; }
+
+// Runs first (source order). `before_all` has fired exactly once and this
+// test's `before_each` has fired; no `after_each` has run yet.
+test "lifecycle hooks: first test sees before_all then before_each" ![io] {
+    print.info("lifecycle TRACE@first=" + TRACE);
+    assert TRACE == "[BA][BE]";
+}
+
+// Runs second. Between the two tests: the first test's `after_each`, then this
+// test's `before_each`. `before_all` is NOT repeated.
+test "lifecycle hooks: second test sees after_each then before_each wrap" ![io] {
+    print.info("lifecycle TRACE@second=" + TRACE);
+    assert TRACE == "[BA][BE][AE][BE]";
+}
