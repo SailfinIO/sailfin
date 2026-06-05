@@ -4,6 +4,12 @@ version = "0.1.1"
 description = "TOML parsing and serialization for Sailfin"
 
 [dependencies]
+# `sfn/strings::trim` replaces the capsule's hand-rolled `_trim` helper,
+# which was a character-for-character duplicate of the shared utility
+# (same whitespace set, same `substring` tail). A TOML parser legitimately
+# needs string trimming, so this is a genuine inter-capsule edge — the
+# second first-party `→ sfn/strings` consumer after `sfn/test` (#856).
+"sfn/strings" = "*"
 
 [capabilities]
 required = []
