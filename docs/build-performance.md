@@ -39,7 +39,7 @@ Status of every track named in the original RCA. "Shipped" means the work landed
 | Phase 4b — Defensive light-recovery arm deletion                | Not started; needs counters bake then delete ~600 LOC                         | trivial wall-time                         |
 | **Per-module memory — `lowering_core.sfn` split**               | **Shipped April 25** (commits `072bea1`, `cd34d14`): peak RSS 2350 → **1594 MB** (-32%) via `gather_imported_module_symbols` + `seed_default_runtime_helpers` extractions. Clears macOS `BUILD_JOBS=2` gate. | wall delta ancillary; unblocks parallelism |
 | **Phase 6 — Parallel builds**                                   | **Stages 1+2 shipped April 24/25**; **Stage 3 shipped April 25** (`build_jobs` composite-action input); **Stage 4 reverted April 25** — `EMIT_RETRIES=1` attempted, hit a live flake on `instructions.sfn`; default stays at 3 until root-caused | Linux: **2.4× speedup** (13 min → 5:28); macOS unlock pending `detect_build_jobs.sh` rebudget against new 1594 MB peak |
-| **Phase 5a — Arena mark/rewind for in-process multi-module tools** | **Shipped April 27** — `sfn_arena_mark` / `sfn_arena_rewind` C primitives + `sailfin_intrinsic_runtime_arena_*` runtime wrappers + descriptor registry entries; `sfn check` and `sfn test`'s test-discovery loops now mark the arena before the per-iteration loop and rewind at each iteration's bottom (`!json` only on the check path). `sfn_arena_alloc` got a forward-scan fix so rewound pages are reused instead of leaked. Path-normalization fix in `_collect_sfn_files_cmd` (strip trailing slash) eliminated a directory-walk SIGSEGV that surfaced once mark/rewind made the cross-iteration burst long-lived. | enables `sfn check compiler/src/` end-to-end (132 files, ~130s, was SIGSEGV at ~120s pre-Phase-5a) |
+| **Phase 5a — Arena mark/rewind for in-process multi-module tools** | **Shipped April 27** — `sfn_arena_mark` / `sfn_arena_rewind` C primitives + `sailfin_intrinsic_runtime_arena_*` runtime wrappers + descriptor registry entries; `sfn check` and `sfn test`'s test-discovery loops now mark the arena before the per-iteration loop and rewind at each iteration's bottom (`!json` only on the check path). `sfn_arena_alloc` got a forward-scan fix so rewound pages are reused instead of leaked. Path-normalization fix in `_collect_sfn_files_cmd` (strip trailing slash) eliminated a directory-walk SIGSEGV that surfaced once mark/rewind made the cross-iteration burst long-lived. | enables `sfn check compiler/src/` end-to-end (now 156 files, ~295 s clean on macOS arm64, was SIGSEGV at ~120s pre-Phase-5a; the default arena-off path no longer SIGSEGVs either, so this is a correctness guard — the ~295 s runtime is the open perf item) |
 | Phase 5 — Long-lived compiler process                           | Post-1.0; needs `compile module` entry point and arena reset between modules. **Phase 5a's mark/rewind primitive is the same shape Phase 5 needs** — when Phase 5 lands, it marks at process start, rewinds between modules, no new runtime work. | 50–70% on top of Phase 6                  |
 
 Follow-up tracks:
@@ -363,6 +363,14 @@ Headline measurement:
 | `sfn check` single file (`main.sfn`)| 84 s SIGSEGV (pre-cache)   | 8 s clean                           |
 | `sfn check` 60 files                | 98 s SIGSEGV               | ~80 s clean                         |
 | `sfn check compiler/src/` (132 files)| 120 s SIGSEGV             | 130 s clean (rc=1, 2 errors found)  |
+
+> **Re-measured 2026-06-05 (v0.7.0-alpha.25):** the tree has grown to **156 files** and
+> `sfn check compiler/src/` now completes cleanly in **~295 s** (`checked 156 files: ok`,
+> exit 0) on macOS arm64. The default **arena-off** path no longer SIGSEGVs either —
+> it also completes in ~295 s — so as of this measurement the arena reset is a
+> correctness guard, not a measurable speedup, and the ~295 s runtime (≈1.9 s/file)
+> is the open performance item. (macOS does not honor `ulimit -v`, so the 8 GB cap
+> that backstops the Linux/WSL path is unenforced here.)
 
 Open follow-up: **resolved May 6 via #324.** `_init_arena_enabled` now defaults `1` for installed binaries, with `SAILFIN_USE_ARENA=0` (or `""` / `"false"`) as the opt-out kept for at least one release. `sfn check` and `sfn test` for end users get the arena without surfacing an env-var contract; the prior (now retired) `scripts/build.sh` historically kept its explicit `SAILFIN_USE_ARENA=${SAILFIN_USE_ARENA:-1}` export and CI keeps `SAILFIN_USE_ARENA: "1"` in `.github/workflows/ci.yml` as belt-and-suspenders. Pinned by `compiler/tests/e2e/test_arena_default_on.sh`.
 

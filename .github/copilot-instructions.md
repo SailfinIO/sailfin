@@ -37,10 +37,11 @@ Deferred features (parsed but not enforced, post-1.0):
 ## Build, Test, and Development Commands
 
 ```bash
+sfn check <files>     # Fast static analysis (parse + typecheck + effect-check) — the inner loop
 make compile          # Build the compiler by self-hosting from a released seed (preferred)
 make install          # Install the built compiler into PREFIX/bin (default: /usr/local/bin)
 make rebuild          # Force a rebuild from a released seed
-make check            # Compile (if needed) then run the full test suite
+make check            # Triple-pass self-host validation + full test suite (the heavyweight gate)
 make test             # Run unit + integration + e2e suites
 make test-unit        # Run Sailfin-native unit tests
 make test-integration # Run Sailfin-native integration tests
@@ -121,7 +122,7 @@ test "parser: parses effectful fn" {
 }
 ```
 
-Run `make test` before submitting and capture reproduction steps for regressions.
+While iterating, run `sfn check <the-files-you-touched>` for immediate parse / typecheck / effect-check feedback (seconds, no rebuild). Run `make test` before submitting and capture reproduction steps for regressions. `sfn check` is a fast static lint, not a self-host gate — it does not replace `make compile` (self-host invariant) or `make check` (full validation).
 
 ## Documentation
 
