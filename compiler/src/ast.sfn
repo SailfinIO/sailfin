@@ -97,6 +97,33 @@ enum Expression {
     // from the statement-level `TryStatement`. Type rules and emission
     // land in R.3 / R.4 — today this is parse-only.
     TryOperator { operand: Expression, span: SourceSpan? },
+    // Concurrency frontend nodes (M4.0, epic #965, issue #1079). Parse-only
+    // targets for the structured-concurrency surface; parsing, type rules,
+    // effect-checking, and lowering land in follow-up issues. Runtime
+    // semantics are specified in docs/runtime_architecture.md §2.6. Spans
+    // are appended last per the variant convention above so positional GEP
+    // indexing stays stable. `spawn`/`await` are prefix operators over an
+    // expression (mirroring Unary/TryOperator's `operand`); `channel`,
+    // `parallel`, and `serve` are value-producing constructs.
+    //
+    // `spawn <expr>` — enqueue a task, yields a future (§2.6.2).
+    Spawn { operand: Expression, span: SourceSpan? },
+    // `await <expr>` — block on a future, yields its result (§2.6.3).
+    Await { operand: Expression, span: SourceSpan? },
+    // `channel<T>(capacity)` — construct a channel; both the element type
+    // and capacity are optional so the parser can defer to inference and
+    // an unbuffered default (§2.6.4).
+    Channel {
+        element_type: TypeAnnotation?,
+        capacity: Expression?,
+        span: SourceSpan?
+    },
+    // `parallel [t1, t2, ...]` — fan out tasks, await all, yield results in
+    // order (§2.6.5). A convenience built on spawn+await.
+    Parallel { tasks: Expression[], span: SourceSpan? },
+    // `serve(handler, port)` — accept loop dispatching to the thread pool;
+    // `port` is optional to allow a configured default (§2.6.6).
+    Serve { handler: Expression, port: Expression?, span: SourceSpan? },
     Raw { text: string }
 }
 
@@ -316,6 +343,15 @@ enum Statement {
     ExpressionStatement {
         expression: Expression;
         span: SourceSpan?;
+    },
+    // `routine { ... }` — structured-concurrency block scope (M4.0, epic
+    // #965, issue #1079). Parse-only target; the runtime nursery semantics
+    // land in follow-up issues (docs/runtime_architecture.md §2.6.7).
+    // Shaped like LoopStatement (block body + decorators) since the v0
+    // surface is a bare block scope that yields no value.
+    RoutineStatement {
+        body: Block;
+        decorators: Decorator[];
     },
     Unknown {
         tokens: Token[];
