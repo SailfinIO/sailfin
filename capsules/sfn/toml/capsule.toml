@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/toml"
-version = "0.1.1"
+version = "0.1.2"
 description = "TOML parsing and serialization for Sailfin"
 
 [dependencies]
