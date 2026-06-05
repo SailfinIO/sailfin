@@ -1,8 +1,10 @@
 # `make` Verdict Block Schema (`sailfin-make/1`)
 
-Status: Phase 1 of `docs/proposals/agent-output-orchestration.md` (epic #1056,
-issue #1059). The always-last verdict block ships now; the full report file
-(`build/agent-report.json`) and precise `first_error` extraction are Phases 2–3.
+Status: epic #1056 of `docs/proposals/agent-output-orchestration.md`. The
+always-last verdict block ships now (Phase 1, #1059). The opt-in per-target
+full report file (`build/agent-report.<target>.json`, #1119) ships as Phase 2
+scaffolding — well-formed with an empty `phases` stub; composing real per-phase
+content and precise `first_error` extraction are later phases.
 
 Every agent-facing `make` target ends — on success **and** on failure — by
 printing a single greppable verdict block as the **last lines of its output**,
@@ -81,7 +83,7 @@ string.
 | `failure` | string \| null | Classification (closed enum below); `null` on `pass`. Set on `warn` too. |
 | `phase` | string \| null | Best-effort phase that reached the failure/warn. Single-phase targets echo the target name; `check` resolves one of its seven phases. `null` on `pass`. |
 | `first_error` | string \| null | Best-effort `file:line` (or `file:line:col`) pointer when one can be scraped, else the failing phase name, else `null`. Precise extraction is Phase 3. |
-| `report` | string \| null | Path to the full JSON report. Always `null` in Phase 1; populated in Phase 2 (`build/agent-report.json`). |
+| `report` | string \| null | Path to the full JSON report file. `null` unless the report-file gate is active (`JSON=1` / `SAILFIN_AGENT_REPORT=1`), in which case it is the per-target `build/agent-report.<target>.json`. See [Full report file](#full-report-file). |
 
 ### `status` (closed enum)
 
@@ -142,6 +144,39 @@ Non-deterministic fixed point (`make check`, exit 0):
 ===SAILFIN-RESULT===
 {"schema_version":"sailfin-make/1","target":"check","status":"warn","failure":"nondeterminism","phase":"fixed-point","first_error":null,"report":null}
 ===END-SAILFIN-RESULT===
+```
+
+## Full report file
+
+The verdict block is always-on and intentionally one line. The **full report
+file** is the opt-in companion that later phases grow into a per-phase
+breakdown. It is gated so default human runs are untouched.
+
+**Activation.** Off by default. Turn it on with either:
+
+- `JSON=1 make <target>` (the Makefile maps `JSON=1` to `SAILFIN_AGENT_REPORT=1`), or
+- `SAILFIN_AGENT_REPORT=1` in the environment.
+
+When the gate is off, **no file is written** and the verdict block's `report`
+field stays `null`.
+
+**Path.** Per-target: `build/agent-report.<target>.json` (e.g.
+`build/agent-report.compile.json`, `build/agent-report.test.json`). The
+per-target name keeps parallel CI shards from clobbering each other's report.
+When the gate is on, the verdict block's `report` field is exactly this path,
+and the report's own `report` field is self-referential (it names its own path).
+
+**Nested runs.** A `SAILFIN_INNER` nested target (e.g. `make check`'s inner
+`make test`) runs transparently: it emits no verdict sentinel **and** writes no
+report file, even under the gate. Only the outer target produces a report.
+
+**Shape (Phase 2 scaffolding).** The file is a single well-formed JSON object
+mirroring the verdict fields, plus a self-referential `report` and a `phases`
+array. `phases` is an **empty stub** at this stage — composing real per-phase
+content from tool JSON is a later issue.
+
+```json
+{"schema_version":"sailfin-make/1","target":"compile","status":"pass","failure":null,"phase":null,"first_error":null,"report":"build/agent-report.compile.json","phases":[]}
 ```
 
 ## Implementation
