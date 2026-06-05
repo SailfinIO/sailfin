@@ -61,6 +61,20 @@ trap cleanup EXIT
 WORK="$SCRATCH/work"
 mkdir -p "$WORK"
 
+# Isolate the shared content cache to this run's scratch dir. The cache
+# (`build_cache.sfn:cache_root`) is content-addressed by source SHA, and
+# `--work-dir` only relocates build *outputs*, not the cache. The
+# content-edit probe below appends a FIXED string to `sailfin_runtime.c`,
+# so its post-edit SHA is identical on every run. Without an isolated
+# cache, the first run that compiles the probe stores that object under
+# the shared `build/cache` (and CI's restored `actions/cache`); every
+# later run then finds it as a content-key HIT and the
+# "content edit surfaces a miss" assertion reads `misses=0`. Pinning the
+# cache to a fresh per-run dir makes the probe a genuine miss every time,
+# deterministically, regardless of repo or CI cache state.
+export SAILFIN_BUILD_CACHE_DIR="$SCRATCH/cache"
+mkdir -p "$SAILFIN_BUILD_CACHE_DIR"
+
 cat > "$SCRATCH/hello.sfn" <<'EOF'
 fn main() -> int {
     return 0;
