@@ -127,6 +127,18 @@ run_test "consumer importing one capsule symbol builds and runs" test_build_and_
 # contain a substring like `abs` or `mean`.
 MANGLE_SUFFIX="__sfn__math__mod"
 
+# Match a *defined* capsule function symbol in `nm` output, precisely:
+#   - ` [Tt] ` — a defined symbol in the text section (external `T` or
+#     local `t`); anything else (undefined `U`, data, etc.) is ignored.
+#   - `_?`    — ld64 on Darwin prefixes user symbols with a leading
+#     underscore (`_abs__…`); GNU nm on Linux does not. Tolerate both.
+#   - `…$`    — anchor at end-of-line so the whole mangled name must match,
+#     not a substring of some longer symbol.
+# Args: <symbol-table-dump> <bare-fn-name>
+symbol_defined() {
+    printf '%s\n' "$1" | grep -qE "[[:space:]][Tt][[:space:]]_?${2}${MANGLE_SUFFIX}$"
+}
+
 # ---- Test 2: the USED symbol survives (sanity: the dep really linked) ----
 # Without this check the absence assertions in Test 3 could pass
 # vacuously if the whole capsule failed to link or got dropped.
@@ -144,7 +156,7 @@ test_used_symbol_present() {
     [ -x "$SCRATCH/build/program" ] || { echo "[test]   no binary to inspect" >&2; return 1; }
     local syms
     syms="$(dump_symbols)"
-    if ! printf '%s\n' "$syms" | grep -q "abs${MANGLE_SUFFIX}"; then
+    if ! symbol_defined "$syms" "abs"; then
         echo "[test]   used symbol 'abs${MANGLE_SUFFIX}' missing from binary — capsule did not link?" >&2
         printf '%s\n' "$syms" | grep -i "$MANGLE_SUFFIX" >&2 || true
         return 1
@@ -163,7 +175,7 @@ test_unreferenced_symbols_stripped() {
     syms="$(dump_symbols)"
     local leaked=""
     for sym in clamp mean; do
-        if printf '%s\n' "$syms" | grep -q "${sym}${MANGLE_SUFFIX}"; then
+        if symbol_defined "$syms" "$sym"; then
             leaked="$leaked $sym"
         fi
     done
