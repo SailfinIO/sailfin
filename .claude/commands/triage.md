@@ -120,9 +120,10 @@ The helper derives the column from post-edit labels with strict precedence:
 ### PROMOTE — move a groomed issue to Ready
 
 ```bash
-# Backfill the size label from the body's "## Size" block if the label is absent.
-# (XS→size:xs, S→size:s, M→size:m.) Skip if a size:* label already exists.
-gh issue edit <N> --remove-label "needs-grooming" --add-label "claude-ready"   # add size:<x> here too if backfilling
+# If no size:* label exists, backfill it from the body's "## Size" block by
+# appending another --add-label flag (XS→size:xs, S→size:s, M→size:m), e.g.
+#   gh issue edit <N> --remove-label "needs-grooming" --add-label "claude-ready" --add-label "size:s"
+gh issue edit <N> --remove-label "needs-grooming" --add-label "claude-ready"
 gh issue comment <N> --body "Auto-triage promotion: body passes the full hygiene bar (Goal/Scope-In-Out/Acceptance/Files/Verification) with no open blocker or unresolved decision. <If size backfilled: 'Size declared as <X> in the body; applied the size:<x> label.'> <If a precondition was checked: 'Precondition met — #<M> is closed.'> Moving to claude-ready/Ready."
 .claude/scripts/sync-project-status.sh <N> --from-labels   # → Ready
 ```
@@ -143,14 +144,17 @@ Run \`/groom\` to flesh this out, or close if no longer relevant."
 Parse `## Blocked by`. Classify each reference:
 - **Hard reference (`#N`)** — closed/merged = resolved; open = still blocking.
 - **Prose reference** (e.g. "Slice E", "the M4 runtime port", "a fresh seed
-  cut") — always ambiguous; **never auto-flip on prose alone.**
+  cut") — an agent cannot determine when prose is satisfied, so its mere
+  **presence** blocks the auto-flip. Only a human can clear a prose gate.
 
-Flip **only** when every hard `#N` ref is closed AND no prose reference
-remains unresolved:
+Flip **only** when (a) every hard `#N` ref is closed AND (b) the `## Blocked by`
+section contains **no prose gate at all**. If any prose gate is present, leave
+the `blocked` label and surface the issue under "Held back" for human review —
+never auto-flip.
 
 ```bash
 gh issue edit <N> --remove-label "blocked" --add-label "claude-ready"
-gh issue comment <N> --body "Auto-triage: blocker(s) resolved — <list resolved #N>. No open hard references or unresolved prose gates. Marking ready for pickup."
+gh issue comment <N> --body "Auto-triage: all hard blocker references closed (<list resolved #N>) and no prose gate present in '## Blocked by'. Marking ready for pickup."
 .claude/scripts/sync-project-status.sh <N> --from-labels   # → Ready
 ```
 
@@ -174,7 +178,7 @@ gh issue comment <N> --body "Auto-triage: claude-ready for 30+ days without pick
 ### OVERSIZED — L-sized → epic
 
 ```bash
-gh issue edit <N> --remove-label "claude-ready" --add-label "needs-grooming,epic"
+gh issue edit <N> --remove-label "claude-ready" --add-label "needs-grooming" --add-label "epic"
 gh issue comment <N> --body "Auto-triage: this issue is L-sized; the canonical scheme has no \`size:l\`. Marking \`epic\` + \`needs-grooming\`. Run \`/groom #<N>\` to decompose into XS/S/M children."
 .claude/scripts/sync-project-status.sh <N> --from-labels   # → To triage
 ```
