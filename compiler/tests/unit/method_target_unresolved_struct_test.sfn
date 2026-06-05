@@ -125,7 +125,8 @@ test "method base with empty (opacified) annotation does not fail closed" ![io] 
 // No regression (PR #1053 review): an interface-typed local carries a
 // bare annotation (`Meter`) that is absent from `context.structs` but
 // present in `context.interfaces`. The guard must not treat that as an
-// unresolved struct — `m.total()` is valid trait dispatch.
+// unresolved struct — `acct.total()` (with `acct: Meter`) is valid trait
+// dispatch.
 // -------------------------------------------------------------------
 test "method base with interface-typed annotation does not fail closed" ![io] {
     let context = _interface_only_context();
