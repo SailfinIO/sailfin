@@ -155,6 +155,22 @@ feature availability.
     **stderr** (keeping `sfn run`'s program stdout and `--json`'s
     report clean), and the runtime fold is gated on
     `cache_config.enabled` so `--no-cache` still reports zero.
+  - **Shared runtime object cache (#1096)** — runtime C/LL/sfn objects
+    were previously cached only in the per-build work-dir (a sidecar
+    `<obj>.o.key` under `<work-dir>/sailfin/`), so a second build into a
+    *sibling* work-dir always missed them. Once #915 folded them into
+    the summary the build-quality determinism gate (which builds the
+    compiler into `det-pass1` → `det-pass2` sharing one cache root and
+    asserts `cache.hit_rate >= 0.95` on the warm pass) regressed to
+    `0.90`: the 17 runtime objects missed on pass2 while the 155 `.ll`
+    modules hit. Runtime objects now also publish to / fetch from the
+    shared content-addressed cache (`cache_root()`, new `runtime-obj`
+    kind keyed by `runtime_object_entry_key_from_str`) exactly like the
+    `.ll` module cache, so they warm across sibling work-dirs and CI
+    cache restores — restoring the warm second pass to `1.0`. The
+    work-dir sidecar fast-path is preserved, and the shared layer stays
+    gated on `cache_config.enabled` (the `sfn test` link path and
+    `--no-cache` remain work-dir-local).
 - **Stage C2 per-capsule artifact layout (in flight, 2026-04-28).**
   Three PRs land the §4.4 layout (`build/capsules/<scope>/<name>/`)
   for everything `sfn build -p` produces:

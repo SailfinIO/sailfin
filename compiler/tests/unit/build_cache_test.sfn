@@ -44,7 +44,8 @@ import {
     empty_build_cache_config,
     empty_cache_stats,
     is_valid_digest,
-    merge_cache_stats
+    merge_cache_stats,
+    runtime_object_entry_key_from_str
 } from "../../src/build_cache";
 
 // --------------------------------------------------------------
@@ -743,4 +744,36 @@ test "cache_compiler_identity: empty binary path falls back to raw stamp" ![io] 
     // No binary to hash (in-process serial fallback) ⇒ keep the raw
     // stamp; no worse than the prior behaviour.
     assert cache_compiler_identity(raw, "") == raw;
+}
+
+test "runtime_object_entry_key_from_str: empty key yields invalid digest" ![io] {
+    // An unhashable runtime source produces an empty
+    // `runtime_object_cache_key` string; the shared-cache key must then
+    // be rejected by the digest validator so every shared helper treats
+    // it as a hard miss rather than reading/writing a bogus entry (#1096).
+    let ck = runtime_object_entry_key_from_str("", "probe_empty");
+    assert ck.digest == "";
+    assert ! is_valid_digest(ck.digest);
+}
+
+test "runtime_object_entry_key_from_str: non-empty key is a valid digest" ![io] {
+    // A real runtime key string hashes to a 64-hex sha256 digest the
+    // shared-cache artifact helpers accept (#1096).
+    let key = "deadbeef\n-O2\nsecsplit1";
+    let ck = runtime_object_entry_key_from_str(key, "probe_valid");
+    assert is_valid_digest(ck.digest);
+    assert ck.digest.length == 64;
+}
+
+test "runtime_object_entry_key_from_str: content-addressed and deterministic" ![io] {
+    // Same key string ⇒ same digest (so sibling work-dirs and CI
+    // restores resolve the same shared entry); distinct key strings ⇒
+    // distinct digests (no cross-source aliasing) (#1096).
+    let key_a = "aaa111\n-O2\nsecsplit1";
+    let key_b = "bbb222\n-O2\nsecsplit1";
+    let a1 = runtime_object_entry_key_from_str(key_a, "det_a1");
+    let a2 = runtime_object_entry_key_from_str(key_a, "det_a2");
+    let b = runtime_object_entry_key_from_str(key_b, "det_b");
+    assert a1.digest == a2.digest;
+    assert a1.digest != b.digest;
 }

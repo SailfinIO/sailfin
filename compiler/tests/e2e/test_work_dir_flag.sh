@@ -66,8 +66,21 @@ test_work_dir_layout() {
         > "$SCRATCH/build1.stdout" 2>&1 || return 1
     [ -f "$WORK1/native/sailfin" ] || return 1
     [ -d "$WORK1/sailfin" ] || return 1
-    # No leakage to $SCRATCH/build/ (the CWD-relative default).
-    ! [ -d "$SCRATCH/build" ]
+    # No work-dir *artifact* leakage to $SCRATCH/build/: the virtualized
+    # native/ + sailfin/ trees and the default binary must live under
+    # $WORK1, not CWD. The shared content-addressed cache
+    # ($SCRATCH/build/cache) is intentionally NOT virtualized by
+    # --work-dir — it is the CWD-relative default that the .ll module
+    # cache (capsule_resolver.sfn) and, since #1096, the runtime-object
+    # cache both share, independent of work-dir, so the build-quality
+    # determinism gate can warm one cache across sibling work-dirs.
+    # Forbidding all of $SCRATCH/build/ would wrongly couple the shared
+    # cache to the work-dir; assert only that build *output* didn't leak.
+    if [ -e "$SCRATCH/build/native" ] || [ -e "$SCRATCH/build/sailfin" ]; then
+        echo "  work-dir build output leaked into CWD ./build/" >&2
+        return 1
+    fi
+    return 0
 }
 run_test "--work-dir writes default-binary + sailfin/, no CWD ./build/ leakage" test_work_dir_layout
 
