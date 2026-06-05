@@ -6,6 +6,8 @@ import {
     CacheStats,
     cache_root,
     cache_stats_is_empty,
+    empty_cache_stats,
+    merge_cache_stats,
     resolve_build_cache_config,
     runtime_object_cache_key
 } from "./build_cache";
@@ -213,9 +215,18 @@ fn _write_llvm_text(path: string, llvm: string) ![io] {
 // or `--no-cache`). The shape is the human-readable counterpart of
 // the eventual `--json` build report's `cache` field; keep them in
 // sync if either changes.
+//
+// Emitted on stderr, not stdout. Since #915 folded the runtime
+// C/LL/sfn object cache into this summary, the line is non-empty on
+// nearly every `sfn build`/`sfn run` (runtime objects almost always
+// hit). For `sfn run` the driver's stdout is the program's stdout,
+// so a `[cache]` line there would corrupt program output (and any
+// downstream pipe). stderr keeps the diagnostic visible to humans /
+// `2>&1` captures while leaving stdout clean for the program and for
+// `--json`'s machine-readable report.
 fn _print_cache_summary(stats: CacheStats) ![io] {
     if cache_stats_is_empty(stats) { return; }
-    print("[cache] hits=" + number_to_string(stats.hits) + " misses="
+    print.err("[cache] hits=" + number_to_string(stats.hits) + " misses="
         + number_to_string(stats.misses)
         + " stores="
         + number_to_string(stats.stores)
@@ -301,15 +312,18 @@ fn _emit_capsule_artifact_sidecar(spec_capsule_name: string, spec_version: strin
 // JSON encoding to stdout. Mirrors `_print_cache_summary`'s
 // placement (end of the success path); machine-readable consumers
 // (`sfn lsp`, MCP, CI gates) read this single line and parse it
-// rather than scraping `built: ...` + `[cache] ...` from stderr.
-fn _emit_build_report(input_path: string, out_path: string, kind: string, exit_code: int, capsule_result: ProjectCapsuleResult, cache_config: BuildCacheConfig) ![io] {
+// rather than scraping the human text output (`built: ...` on
+// stdout, `[cache] ...` on stderr since #915).
+fn _emit_build_report(input_path: string, out_path: string, kind: string, exit_code: int, capsule_result: ProjectCapsuleResult, cache_config: BuildCacheConfig, stats: CacheStats) ![io] {
     let mut report = empty_build_report();
     report.input = input_path;
     report.out = out_path;
     report.kind = kind;
     report.exit_code = exit_code;
     report.compiler_version = resolve_compiler_version("");
-    report.cache = capsule_result.stats;
+    // `stats` is the build-wide total (`.ll` module cache folded with
+    // the runtime object cache, #915), not just `capsule_result.stats`.
+    report.cache = stats;
     report.cache_root = cache_root();
     report.cache_enabled = cache_config.enabled;
     report.dep_ll_paths = capsule_result.ll_paths;
@@ -746,6 +760,11 @@ struct RuntimeLinkInputs {
     object_paths: string[];
     link_libs: string[];
     success: boolean;
+    // Runtime C/LL/sfn object-cache activity accumulated while
+    // compiling this capsule set (#915). Folded into the build-wide
+    // `CacheStats` so the end-of-build `[cache]` summary reflects
+    // runtime-object hits/misses, not just the `.ll` module cache.
+    stats: CacheStats;
 }
 
 fn _failed_runtime_link_inputs() -> RuntimeLinkInputs {
@@ -754,7 +773,8 @@ fn _failed_runtime_link_inputs() -> RuntimeLinkInputs {
     return RuntimeLinkInputs {
         object_paths: empty,
         link_libs: empty2,
-        success: false
+        success: false,
+        stats: empty_cache_stats()
     };
 }
 
@@ -819,6 +839,17 @@ fn _runtime_obj_cache_record(obj_path: string, key: string) ![io] {
 fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string) -> RuntimeLinkInputs ![io] {
     let mut objects: string[] = [];
     let mut link_libs: string[] = [];
+    // Per-call cache-stat accumulator (#915). Counting mirrors the
+    // `.ll` module cache (`capsule_resolver.sfn::_cr_compile_one`): a
+    // valid-key reuse is a `hit`; any recompile (the producer ran) is
+    // a `miss`; a successful `_runtime_obj_cache_record` is a `store`.
+    // An unhashable (empty) key additionally bumps `invalid_keys` —
+    // NOT disjoint from `misses`, matching the `.ll` layer where an
+    // invalid digest counts as both a miss and an invalid key
+    // (`lookup_attempted` stays true while `is_valid_digest` is
+    // false). It does not `store`: `_runtime_obj_cache_record` no-ops
+    // on an empty key.
+    let mut stats = empty_cache_stats();
     let mut i: int = 0;
     loop {
         if i >= runtime_capsules.length { break; }
@@ -850,7 +881,11 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                 + opt_flag
                 + ".o");
             let key = runtime_object_cache_key(src, opt_flag);
+            if key.length == 0 {
+                stats.invalid_keys = stats.invalid_keys + 1;
+            }
             if !_runtime_obj_cache_hit(obj, key) {
+                stats.misses = stats.misses + 1;
                 let mut args: string[] = ["clang", opt_flag, "-Wno-override-module"];
                 // Per-function/per-datum sections so the final link's
                 // dead-strip (`--gc-sections` / `-dead_strip`) can drop
@@ -873,7 +908,8 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                     return _failed_runtime_link_inputs();
                 }
                 _runtime_obj_cache_record(obj, key);
-            }
+                if key.length > 0 { stats.stores = stats.stores + 1; }
+            } else { stats.hits = stats.hits + 1; }
             objects.push(obj);
             ci += 1;
         }
@@ -888,7 +924,11 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                 + opt_flag
                 + ".o");
             let key = runtime_object_cache_key(src, opt_flag);
+            if key.length == 0 {
+                stats.invalid_keys = stats.invalid_keys + 1;
+            }
             if !_runtime_obj_cache_hit(obj, key) {
+                stats.misses = stats.misses + 1;
                 let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", src, "-o", obj]);
                 if rc != 0 {
                     print("sfn build: failed to assemble runtime ll-source "
@@ -896,7 +936,8 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                     return _failed_runtime_link_inputs();
                 }
                 _runtime_obj_cache_record(obj, key);
-            }
+                if key.length > 0 { stats.stores = stats.stores + 1; }
+            } else { stats.hits = stats.hits + 1; }
             objects.push(obj);
             li += 1;
         }
@@ -913,7 +954,8 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
     return RuntimeLinkInputs {
         object_paths: objects,
         link_libs: link_libs,
-        success: true
+        success: true,
+        stats: stats
     };
 }
 
@@ -979,7 +1021,17 @@ fn _resolve_self_path(binary_dir: string) -> string ![io] {
 // runtime capsule's `prelude-entry` is emitted by the *current*
 // compiler, so any drift between the two emit paths would surface as
 // a stage2≠stage3 mismatch.
-fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string) -> string ![io] {
+// Result of a single runtime `.sfn` emit: the produced `.o` path
+// (`""` on failure) plus the cache-stat delta for this one source
+// (#915), so the caller can fold runtime-object hits/misses into the
+// build-wide `[cache]` summary.
+struct RuntimeEmitResult {
+    obj_path: string;
+    stats: CacheStats;
+}
+
+fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string) -> RuntimeEmitResult ![io] {
+    let mut stats = empty_cache_stats();
     let slug = module_name_from_path(src);
     let ll_path = _path_join(out_dir, cap_prefix + _path_basename(src)
         + opt_flag
@@ -999,7 +1051,12 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
     // mirrors the `_clang_compile_runtime_capsule_objects` c-source
     // path so the sfn-source + prelude emit invalidates identically.
     let key = runtime_object_cache_key(src, opt_flag);
-    if _runtime_obj_cache_hit(obj_path, key) { return obj_path; }
+    if key.length == 0 { stats.invalid_keys = stats.invalid_keys + 1; }
+    if _runtime_obj_cache_hit(obj_path, key) {
+        stats.hits = stats.hits + 1;
+        return RuntimeEmitResult { obj_path: obj_path, stats: stats };
+    }
+    stats.misses = stats.misses + 1;
     // Cache miss: regenerate the `.ll` unconditionally (a cached one
     // is stale by definition here), then compile the `.o` and record
     // the key. Build the `sh -c` argv: each `KEY= ` clears that toggle
@@ -1020,26 +1077,29 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
             + " (child exit="
             + number_to_string(rc)
             + ")");
-        return "";
+        return RuntimeEmitResult { obj_path: "", stats: stats };
     }
     let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", ll_path, "-o", obj_path]);
     if rc2 != 0 {
         print("sfn build: failed to compile runtime sfn-source object "
             + obj_path);
-        return "";
+        return RuntimeEmitResult { obj_path: "", stats: stats };
     }
     _runtime_obj_cache_record(obj_path, key);
-    return obj_path;
+    if key.length > 0 { stats.stores = stats.stores + 1; }
+    return RuntimeEmitResult { obj_path: obj_path, stats: stats };
 }
 
 fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string) -> RuntimeLinkInputs ![io] {
     let mut objects: string[] = [];
     let empty_libs: string[] = [];
+    let mut stats = empty_cache_stats();
     if _env_flag("SAILFIN_DISABLE_RUNTIME_SFN_SOURCES") {
         return RuntimeLinkInputs {
             object_paths: objects,
             link_libs: empty_libs,
-            success: true
+            success: true,
+            stats: stats
         };
     }
     // Quick path: nothing to do if no capsule declares sfn_sources.
@@ -1060,7 +1120,8 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         return RuntimeLinkInputs {
             object_paths: objects,
             link_libs: empty_libs,
-            success: true
+            success: true,
+            stats: stats
         };
     }
     let self_path = _resolve_self_path(binary_dir);
@@ -1080,9 +1141,12 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            let obj_path = _emit_runtime_sfn_to_obj(self_path, cap_prefix, src, out_dir, opt_flag);
-            if obj_path.length == 0 { return _failed_runtime_link_inputs(); }
-            objects.push(obj_path);
+            let emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, src, out_dir, opt_flag);
+            stats = merge_cache_stats(stats, emit.stats);
+            if emit.obj_path.length == 0 {
+                return _failed_runtime_link_inputs();
+            }
+            objects.push(emit.obj_path);
             si += 1;
         }
         i += 1;
@@ -1090,7 +1154,8 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
     return RuntimeLinkInputs {
         object_paths: objects,
         link_libs: empty_libs,
-        success: true
+        success: true,
+        stats: stats
     };
 }
 
@@ -1109,10 +1174,14 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     if !inputs.success { return _failed_runtime_link_inputs(); }
     let mut objects: string[] = inputs.object_paths;
     let link_libs: string[] = inputs.link_libs;
+    // Fold the c-source / ll-source layer's cache stats; the
+    // sfn-source and prelude-entry layers merge in below (#915).
+    let mut stats = inputs.stats;
     // `sfn-sources` + `prelude-entry` are materialized here (the
     // prelude rides the same emit path as of #940).
     let sfn_inputs = _compile_runtime_sfn_sources(runtime_capsules, out_dir, opt_flag, binary_dir);
     if !sfn_inputs.success { return _failed_runtime_link_inputs(); }
+    stats = merge_cache_stats(stats, sfn_inputs.stats);
     let mut soi: int = 0;
     loop {
         if soi >= sfn_inputs.object_paths.length { break; }
@@ -1155,11 +1224,12 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
             let cap = runtime_capsules[pi];
             if cap.prelude_entry.length > 0 {
                 let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
-                let prelude_obj = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag);
-                if prelude_obj.length == 0 {
+                let prelude_emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag);
+                stats = merge_cache_stats(stats, prelude_emit.stats);
+                if prelude_emit.obj_path.length == 0 {
                     return _failed_runtime_link_inputs();
                 }
-                objects.push(prelude_obj);
+                objects.push(prelude_emit.obj_path);
             }
             pi += 1;
         }
@@ -1167,7 +1237,8 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     return RuntimeLinkInputs {
         object_paths: objects,
         link_libs: link_libs,
-        success: true
+        success: true,
+        stats: stats
     };
 }
 
@@ -1234,17 +1305,30 @@ fn _runtime_retain_root_flags(runtime_objs: string[]) -> string[] ![io] {
     return flags;
 }
 
-fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> int ![io] {
+// Result of a runtime link: the clang exit code plus the runtime
+// object-cache stats the link accumulated (#915). The link is the
+// only place the runtime C/LL/sfn object cache is consulted, so the
+// caller folds `stats` into the build-wide `[cache]` summary.
+struct LinkResult {
+    rc: int;
+    stats: CacheStats;
+}
+
+fn _failed_link_result() -> LinkResult {
+    return LinkResult { rc: 1, stats: empty_cache_stats() };
+}
+
+fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> LinkResult ![io] {
     // Thin wrapper: most callers have one .ll; capsule-aware callers use
     // _clang_link_multi_with_opt directly.
     let single: string[] = [ll_path];
     return _clang_link_multi_with_opt(single, out_path, runtime_root, runtime_capsules, opt_flag, cache_dir, binary_dir);
 }
 
-fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> int ![io] {
+fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> LinkResult ![io] {
     if ll_paths.length == 0 {
         print("_clang_link_multi_with_opt: no input .ll files");
-        return 1;
+        return _failed_link_result();
     }
 
     // Cache runtime compilation products under `cache_dir`. With the
@@ -1275,10 +1359,12 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         print("     expected " + root_display
             + "/native/capsule.toml (kind = \"runtime\")");
         print("     hint: ensure the runtime bundle ships alongside the compiler binary");
-        return 1;
+        return _failed_link_result();
     }
     let inputs = assemble_runtime_capsule_link_inputs(runtime_capsules, cache_dir, opt_flag, binary_dir);
-    if !inputs.success { return 1; }
+    if !inputs.success {
+        return LinkResult { rc: 1, stats: inputs.stats };
+    }
     runtime_objs = inputs.object_paths;
     runtime_link_libs = inputs.link_libs;
 
@@ -1332,16 +1418,17 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         args.push(runtime_link_libs[lli]);
         lli += 1;
     }
-    return process.run(args);
+    let rc = process.run(args);
+    return LinkResult { rc: rc, stats: inputs.stats };
 }
 
-fn _clang_link(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> int ![io] {
+fn _clang_link(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> LinkResult ![io] {
     // Default link used by `build` and `run` for single-module programs.
     let resolved_cache_dir = _resolve_sailfin_cache_dir(cache_dir);
     return _clang_link_with_opt(ll_path, out_path, runtime_root, runtime_capsules, "-O2", resolved_cache_dir, binary_dir);
 }
 
-fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> int ![io] {
+fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> LinkResult ![io] {
     // Default link used by `build` and `run` for multi-module programs
     // (main source + capsule dependency modules). `cache_dir` is the
     // sailfin-side scratch root (`build/sailfin` for legacy in-tree
@@ -2113,7 +2200,10 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
                 return rc_obj;
             }
             if json_flag {
-                _emit_build_report(input_path, out_path, "library", 0, capsule_result, cache_config);
+                // Library builds stop after `clang -c` — no runtime
+                // link, so there's no runtime object-cache activity to
+                // fold; `capsule_result.stats` is the full total.
+                _emit_build_report(input_path, out_path, "library", 0, capsule_result, cache_config, capsule_result.stats);
             } else {
                 print("built: " + out_path);
                 _print_cache_summary(capsule_result.stats);
@@ -2151,18 +2241,31 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
         if build_runtime_caps.length == 0 {
             build_runtime_caps = runtime_capsule_from_root(runtime_root);
         }
-        let rc = _clang_link_multi(all_lls, exe_path, runtime_root, build_runtime_caps, binary_dir, sailfin_cache_dir);
+        let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, build_runtime_caps, binary_dir, sailfin_cache_dir);
+        let rc = link_result.rc;
         if rc != 0 {
             if !json_flag {
                 print("link failed (clang exit=" + number_to_string(rc) + ")");
             }
             return rc;
         }
+        // Fold the runtime object-cache stats accumulated during the
+        // link into the `.ll` module cache total so the single
+        // `[cache]` summary reflects both layers (#915). Gated on
+        // `cache_config.enabled`: under `--no-cache` the module cache
+        // is never consulted (counters stay zero), and the runtime
+        // object cache — which has no `--no-cache` gate of its own —
+        // must not resurrect a non-zero summary, so its stats are not
+        // folded when caching is disabled.
+        let mut build_cache_stats = capsule_result.stats;
+        if cache_config.enabled {
+            build_cache_stats = merge_cache_stats(capsule_result.stats, link_result.stats);
+        }
         if json_flag {
-            _emit_build_report(input_path, exe_path, "binary", 0, capsule_result, cache_config);
+            _emit_build_report(input_path, exe_path, "binary", 0, capsule_result, cache_config, build_cache_stats);
         } else {
             print("built: " + exe_path);
-            _print_cache_summary(capsule_result.stats);
+            _print_cache_summary(build_cache_stats);
         }
         // Stage C2a: per-capsule artifact sidecar for `-p` builds.
         // No-op for positional builds (cap_capsule_name == "").
@@ -2277,7 +2380,8 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
         if run_runtime_caps.length == 0 {
             run_runtime_caps = runtime_capsule_from_root(runtime_root);
         }
-        let link_rc = _clang_link_multi(all_lls, exe_path, runtime_root, run_runtime_caps, binary_dir, "");
+        let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, run_runtime_caps, binary_dir, "");
+        let link_rc = link_result.rc;
         if link_rc != 0 {
             // A native link failure is a real compiler/runtime bug to
             // fix at the source — never paper over it. The prior
@@ -2292,8 +2396,15 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
         // Cache summary mirrors `sfn build`: quiet for builds with no
         // cache activity (no manifest deps, or `--no-cache`), and the
         // human-readable counterpart of the eventual `--json` build
-        // report's `cache` field.
-        _print_cache_summary(run_capsule_result.stats);
+        // report's `cache` field. Runtime object-cache stats fold in
+        // alongside the `.ll` module cache total (#915), gated on
+        // `run_cache_config.enabled` so `--no-cache` stays quiet (see
+        // the `sfn build` fold site for the rationale).
+        let mut run_cache_stats = run_capsule_result.stats;
+        if run_cache_config.enabled {
+            run_cache_stats = merge_cache_stats(run_capsule_result.stats, link_result.stats);
+        }
+        _print_cache_summary(run_cache_stats);
         let run_rc = process.run([exe_path]);
         return run_rc;
     }

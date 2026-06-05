@@ -138,6 +138,23 @@ feature availability.
     MCP server's structured compile feedback, CI cache-hit-rate
     gates, and future structured link errors (proposal §4.11 —
     the `diagnostics: []` slot is the forward-compat hook).
+  - **Runtime object-cache observability (#915)** — the runtime
+    C/LL/sfn object cache (`runtime_object_cache_key`, #632) now
+    threads a `CacheStats` accumulator through
+    `_clang_compile_runtime_capsule_objects`,
+    `_emit_runtime_sfn_to_obj`, and `_compile_runtime_sfn_sources`,
+    folded via `merge_cache_stats` into the same `[cache]` summary
+    the `.ll` module cache feeds. Editing a `runtime/native/src/*.c`
+    source now surfaces a `misses=N` (was silently `misses=0`); a
+    no-op rebuild shows the runtime objects as `hits`. Both the
+    human summary and `sfn build --json`'s `cache` field reflect
+    both layers. Counting matches the `.ll` layer (an unhashable key
+    is both a miss and an `invalid_keys`). Because runtime objects are
+    almost always cached, the summary is now non-empty on nearly
+    every build/run, so `_print_cache_summary` moved from stdout to
+    **stderr** (keeping `sfn run`'s program stdout and `--json`'s
+    report clean), and the runtime fold is gated on
+    `cache_config.enabled` so `--no-cache` still reports zero.
 - **Stage C2 per-capsule artifact layout (in flight, 2026-04-28).**
   Three PRs land the §4.4 layout (`build/capsules/<scope>/<name>/`)
   for everything `sfn build -p` produces:
