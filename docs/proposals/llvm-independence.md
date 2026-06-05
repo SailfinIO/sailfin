@@ -21,10 +21,13 @@
 
 ## 1. TL;DR
 
-- The entire LLVM/clang dependency funnels through **one chokepoint**:
-  `process.run(["clang", …])` in `compiler/src/cli_main.sfn`. clang wears four
-  hats — compile the C runtime, assemble `.ll` → `.o`, link the final binary,
-  and (implicitly) pull in libc.
+- The LLVM/clang dependency is **centralized in `compiler/src/cli_main.sfn`**
+  but spread across several `process.run(["clang", …])` call sites (runtime
+  `c-sources` compilation, per-module `.ll` → `.o`, the final link, plus the
+  `sfn test` link path in `compiler/src/cli_commands.sfn`). Across those sites
+  clang wears four hats — compile the C runtime, assemble `.ll` → `.o`, link the
+  final binary, and (implicitly) pull in libc. The surface is small and
+  co-located, not a single call.
 - What Sailfin *owns* today is an LLVM-IR **printer** (the ~48k-line
   `compiler/src/llvm/` subtree), not a code generator. Instruction selection,
   register allocation, and optimization are all LLVM's. The hard 80% of a
@@ -154,7 +157,7 @@ A native backend and a C-API binding look like mutually exclusive bets on the
 same subsystem. **A `Backend` interface dissolves the conflict:**
 
 ```
-trait Backend {
+interface Backend {
     fn lower(module: NativeModule) -> ObjectArtifact ![io];
     fn link(objects: ObjectArtifact[], out: string, libs: string[]) -> int ![io];
 }
