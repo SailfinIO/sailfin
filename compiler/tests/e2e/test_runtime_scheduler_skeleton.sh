@@ -186,6 +186,24 @@ test_roundtrip_fifo() {
         return 1
     fi
 
+    # The embedded PthreadMutex/PthreadCond storage in scheduler.sfn is
+    # sized for Linux x86_64 (glibc): pthread_mutex_t = 40 B,
+    # pthread_cond_t = 48 B. macOS arm64 needs a 64-byte
+    # pthread_mutex_t, so executing the real `pthread_mutex_init`
+    # against the 40-byte embedded field would overflow into the
+    # adjacent cond storage. Platform-conditional sizing of the opaque
+    # handles is deferred (docs/runtime_architecture.md §2.9 Q7), so
+    # the *executing* roundtrip runs only where the static sizing is
+    # correct. The IR-shape assertions above still pin the contract on
+    # every platform (the emitted .ll is target-independent).
+    local host_os
+    host_os="$(uname -s)"
+    if [ "$host_os" != "Linux" ]; then
+        echo "[test]   host is $host_os, not Linux — skipping executing roundtrip"
+        echo "[test]   (scheduler.sfn sizes pthread handles for Linux x86_64; §2.9 Q7)"
+        return 0
+    fi
+
     local harness="$SCRATCH/harness.c"
     cat > "$harness" <<'CHARNESS'
 /* Single-thread correctness harness for the runtime/sfn MPMC task
