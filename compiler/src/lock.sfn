@@ -161,9 +161,11 @@ fn lock_get_version(text: string, capsule: string) -> string {
     return "";
 }
 
-// Add or update a lock entry. Returns the updated lockfile text.
-fn lock_add_entry(lock_text: string, capsule: string, version: string, hash: string) -> string {
-    let entries = _lock_parse(lock_text);
+// Upsert a capsule entry into a parsed entry list: update version/hash in
+// place when the capsule already exists, otherwise append. Mutates and
+// returns `entries`. Shared by `lock_add_entry` and `workspace_lock_add_entry`
+// so the two wrappers differ only in which writer they call.
+fn _lock_upsert_entry(entries: _LockEntry[], capsule: string, version: string, hash: string) -> _LockEntry[] {
     let mut found: boolean = false;
     let mut i: int = 0;
     loop {
@@ -180,6 +182,12 @@ fn lock_add_entry(lock_text: string, capsule: string, version: string, hash: str
             capsule: capsule, version: version, hash: hash
         });
     }
+    return entries;
+}
+
+// Add or update a lock entry. Returns the updated lockfile text.
+fn lock_add_entry(lock_text: string, capsule: string, version: string, hash: string) -> string {
+    let entries = _lock_upsert_entry(_lock_parse(lock_text), capsule, version, hash);
     return _lock_write(entries);
 }
 
@@ -218,22 +226,6 @@ fn workspace_lock_write(entries: _LockEntry[]) -> string {
 // Add or update a workspace.lock entry. Round-trips the existing text through
 // the parser and re-emits via workspace_lock_write. Returns the updated text.
 fn workspace_lock_add_entry(lock_text: string, capsule: string, version: string, hash: string) -> string {
-    let entries = _lock_parse(lock_text);
-    let mut found: boolean = false;
-    let mut i: int = 0;
-    loop {
-        if i >= entries.length { break; }
-        if strings_equal(entries[i].capsule, capsule) {
-            entries[i].version = version;
-            entries[i].hash = hash;
-            found = true;
-        }
-        i += 1;
-    }
-    if !found {
-        entries.push(_LockEntry {
-            capsule: capsule, version: version, hash: hash
-        });
-    }
+    let entries = _lock_upsert_entry(_lock_parse(lock_text), capsule, version, hash);
     return workspace_lock_write(entries);
 }
