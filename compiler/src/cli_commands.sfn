@@ -174,7 +174,10 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         return 1;
     }
     _ensure_dir_cmd(rt_cache_dir);
-    let rt = assemble_runtime_capsule_link_inputs(runtime_caps, rt_cache_dir, "-O0", binary_dir);
+    // Test link path keeps runtime objects work-dir-local (shared root
+    // empty); the shared content-addressed runtime cache (#1096) is
+    // scoped to the build/run path that feeds the build-quality gate.
+    let rt = assemble_runtime_capsule_link_inputs(runtime_caps, rt_cache_dir, "-O0", binary_dir, "");
     if !rt.success { return 1; }
     let mut roi: int = 0;
     loop {
@@ -1169,7 +1172,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         let warm_caps = runtime_capsule_from_root(runtime_root);
         if warm_caps.length > 0 {
             _ensure_dir_cmd(sub_root);
-            let warm = assemble_runtime_capsule_link_inputs(warm_caps, sub_root, "-O0", binary_dir);
+            let warm = assemble_runtime_capsule_link_inputs(warm_caps, sub_root, "-O0", binary_dir, "");
             if !warm.success {
                 print.err("[test] warning: failed to pre-warm runtime objects under "
                     + sub_root

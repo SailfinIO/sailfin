@@ -3,13 +3,18 @@
 // Sailfin-native CLI entrypoint invoked by the native C shim.
 import {
     BuildCacheConfig,
+    CacheKey,
     CacheStats,
+    cache_copy_artifact_to,
+    cache_lookup_artifact,
     cache_root,
     cache_stats_is_empty,
+    cache_store_artifact,
     empty_cache_stats,
     merge_cache_stats,
     resolve_build_cache_config,
-    runtime_object_cache_key
+    runtime_object_cache_key,
+    runtime_object_entry_key_from_str
 } from "./build_cache";
 import {
     BuildReport,
@@ -824,6 +829,42 @@ fn _runtime_obj_cache_record(obj_path: string, key: string) ![io] {
     fs.writeFile(obj_path + ".key", key);
 }
 
+// Shared content-addressed cache lookup for a runtime object (#1096).
+// When the shared cache is enabled (`shared_cache_root` non-empty) and
+// holds the artifact for this content key, copy it into the work-dir
+// `obj_path`, write the work-dir sidecar so a same-work-dir rebuild
+// can fast-path it, and return true (the caller counts a HIT and skips
+// the compile). Returns false on a disabled cache, an empty/unhashable
+// key, or a miss — leaving the caller to compile fresh. `hash_suffix`
+// only needs to be unique enough to avoid a tmp-file collision while
+// the key string is hashed; the per-source `cap_prefix + basename +
+// opt_flag` the callers pass satisfies that.
+fn _runtime_obj_shared_cache_fetch(shared_cache_root: string, key: string, obj_path: string, hash_suffix: string) -> boolean ![io] {
+    if shared_cache_root.length == 0 { return false; }
+    if key.length == 0 { return false; }
+    let ck = runtime_object_entry_key_from_str(key, hash_suffix);
+    if !cache_lookup_artifact(shared_cache_root, ck, "runtime-obj") {
+        return false;
+    }
+    if !cache_copy_artifact_to(shared_cache_root, ck, "runtime-obj", obj_path) {
+        return false;
+    }
+    _runtime_obj_cache_record(obj_path, key);
+    return true;
+}
+
+// Publish a freshly-compiled runtime object into the shared
+// content-addressed cache so sibling work-dirs and CI cache restores
+// can warm-hit it (#1096). No-op when the shared cache is disabled or
+// the key is unhashable. A store failure is non-fatal — the object
+// already exists at `obj_path` for this build's link.
+fn _runtime_obj_shared_cache_publish(shared_cache_root: string, key: string, obj_path: string, hash_suffix: string) ![io] {
+    if shared_cache_root.length == 0 { return; }
+    if key.length == 0 { return; }
+    let ck = runtime_object_entry_key_from_str(key, hash_suffix);
+    cache_store_artifact(shared_cache_root, ck, "runtime-obj", obj_path);
+}
+
 // Compile every `c-sources` / `ll-sources` entry from a list of
 // `kind = "runtime"` capsule artifacts and return the resulting
 // `.o` paths plus the accumulated `link-libs`. Caches `.o` outputs
@@ -836,7 +877,7 @@ fn _runtime_obj_cache_record(obj_path: string, key: string) ![io] {
 // without a runtime dep, the caller falls through to the legacy
 // `_clang_compile_runtime_objects` helper that uses the
 // hardcoded `runtime_root/native/...` layout.
-fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string) -> RuntimeLinkInputs ![io] {
+fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, shared_cache_root: string) -> RuntimeLinkInputs ![io] {
     let mut objects: string[] = [];
     let mut link_libs: string[] = [];
     // Per-call cache-stat accumulator (#915). Counting mirrors the
@@ -877,14 +918,17 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
         loop {
             if ci >= cap.c_sources.length { break; }
             let src = cap.c_sources[ci];
-            let obj = _path_join(out_dir, cap_prefix + _path_basename(src)
-                + opt_flag
-                + ".o");
+            let base = cap_prefix + _path_basename(src) + opt_flag;
+            let obj = _path_join(out_dir, base + ".o");
             let key = runtime_object_cache_key(src, opt_flag);
             if key.length == 0 {
                 stats.invalid_keys = stats.invalid_keys + 1;
             }
-            if !_runtime_obj_cache_hit(obj, key) {
+            if _runtime_obj_cache_hit(obj, key) {
+                stats.hits = stats.hits + 1;
+            } else if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj, base) {
+                stats.hits = stats.hits + 1;
+            } else {
                 stats.misses = stats.misses + 1;
                 let mut args: string[] = ["clang", opt_flag, "-Wno-override-module"];
                 // Per-function/per-datum sections so the final link's
@@ -908,8 +952,11 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                     return _failed_runtime_link_inputs();
                 }
                 _runtime_obj_cache_record(obj, key);
-                if key.length > 0 { stats.stores = stats.stores + 1; }
-            } else { stats.hits = stats.hits + 1; }
+                if key.length > 0 {
+                    stats.stores = stats.stores + 1;
+                    _runtime_obj_shared_cache_publish(shared_cache_root, key, obj, base);
+                }
+            }
             objects.push(obj);
             ci += 1;
         }
@@ -920,14 +967,17 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
         loop {
             if li >= cap.ll_sources.length { break; }
             let src = cap.ll_sources[li];
-            let obj = _path_join(out_dir, cap_prefix + _path_basename(src)
-                + opt_flag
-                + ".o");
+            let base = cap_prefix + _path_basename(src) + opt_flag;
+            let obj = _path_join(out_dir, base + ".o");
             let key = runtime_object_cache_key(src, opt_flag);
             if key.length == 0 {
                 stats.invalid_keys = stats.invalid_keys + 1;
             }
-            if !_runtime_obj_cache_hit(obj, key) {
+            if _runtime_obj_cache_hit(obj, key) {
+                stats.hits = stats.hits + 1;
+            } else if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj, base) {
+                stats.hits = stats.hits + 1;
+            } else {
                 stats.misses = stats.misses + 1;
                 let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", src, "-o", obj]);
                 if rc != 0 {
@@ -936,8 +986,11 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                     return _failed_runtime_link_inputs();
                 }
                 _runtime_obj_cache_record(obj, key);
-                if key.length > 0 { stats.stores = stats.stores + 1; }
-            } else { stats.hits = stats.hits + 1; }
+                if key.length > 0 {
+                    stats.stores = stats.stores + 1;
+                    _runtime_obj_shared_cache_publish(shared_cache_root, key, obj, base);
+                }
+            }
             objects.push(obj);
             li += 1;
         }
@@ -1030,7 +1083,7 @@ struct RuntimeEmitResult {
     stats: CacheStats;
 }
 
-fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string) -> RuntimeEmitResult ![io] {
+fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string) -> RuntimeEmitResult ![io] {
     let mut stats = empty_cache_stats();
     let slug = module_name_from_path(src);
     let ll_path = _path_join(out_dir, cap_prefix + _path_basename(src)
@@ -1052,7 +1105,15 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
     // path so the sfn-source + prelude emit invalidates identically.
     let key = runtime_object_cache_key(src, opt_flag);
     if key.length == 0 { stats.invalid_keys = stats.invalid_keys + 1; }
+    let shared_suffix = cap_prefix + _path_basename(src) + opt_flag;
     if _runtime_obj_cache_hit(obj_path, key) {
+        stats.hits = stats.hits + 1;
+        return RuntimeEmitResult { obj_path: obj_path, stats: stats };
+    }
+    // Shared content-addressed cache hit (#1096): a sibling work-dir or
+    // a CI cache restore may already hold this object even though the
+    // local sidecar above missed. Skip the re-emit + clang entirely.
+    if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj_path, shared_suffix) {
         stats.hits = stats.hits + 1;
         return RuntimeEmitResult { obj_path: obj_path, stats: stats };
     }
@@ -1086,11 +1147,14 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
         return RuntimeEmitResult { obj_path: "", stats: stats };
     }
     _runtime_obj_cache_record(obj_path, key);
-    if key.length > 0 { stats.stores = stats.stores + 1; }
+    if key.length > 0 {
+        stats.stores = stats.stores + 1;
+        _runtime_obj_shared_cache_publish(shared_cache_root, key, obj_path, shared_suffix);
+    }
     return RuntimeEmitResult { obj_path: obj_path, stats: stats };
 }
 
-fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string) -> RuntimeLinkInputs ![io] {
+fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string) -> RuntimeLinkInputs ![io] {
     let mut objects: string[] = [];
     let empty_libs: string[] = [];
     let mut stats = empty_cache_stats();
@@ -1141,7 +1205,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            let emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, src, out_dir, opt_flag);
+            let emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root);
             stats = merge_cache_stats(stats, emit.stats);
             if emit.obj_path.length == 0 {
                 return _failed_runtime_link_inputs();
@@ -1169,8 +1233,8 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
 // (`cli_commands.sfn::_clang_link_test_cmd_with_deps`, which imports
 // this through the `cli_main <-> cli_commands` cycle) so the two
 // paths resolve the runtime identically.
-fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string) -> RuntimeLinkInputs ![io] {
-    let inputs = _clang_compile_runtime_capsule_objects(runtime_capsules, out_dir, opt_flag);
+fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string) -> RuntimeLinkInputs ![io] {
+    let inputs = _clang_compile_runtime_capsule_objects(runtime_capsules, out_dir, opt_flag, shared_cache_root);
     if !inputs.success { return _failed_runtime_link_inputs(); }
     let mut objects: string[] = inputs.object_paths;
     let link_libs: string[] = inputs.link_libs;
@@ -1179,7 +1243,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     let mut stats = inputs.stats;
     // `sfn-sources` + `prelude-entry` are materialized here (the
     // prelude rides the same emit path as of #940).
-    let sfn_inputs = _compile_runtime_sfn_sources(runtime_capsules, out_dir, opt_flag, binary_dir);
+    let sfn_inputs = _compile_runtime_sfn_sources(runtime_capsules, out_dir, opt_flag, binary_dir, shared_cache_root);
     if !sfn_inputs.success { return _failed_runtime_link_inputs(); }
     stats = merge_cache_stats(stats, sfn_inputs.stats);
     let mut soi: int = 0;
@@ -1224,7 +1288,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
             let cap = runtime_capsules[pi];
             if cap.prelude_entry.length > 0 {
                 let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
-                let prelude_emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag);
+                let prelude_emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root);
                 stats = merge_cache_stats(stats, prelude_emit.stats);
                 if prelude_emit.obj_path.length == 0 {
                     return _failed_runtime_link_inputs();
@@ -1318,14 +1382,14 @@ fn _failed_link_result() -> LinkResult {
     return LinkResult { rc: 1, stats: empty_cache_stats() };
 }
 
-fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> LinkResult ![io] {
+fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string, shared_cache_root: string) -> LinkResult ![io] {
     // Thin wrapper: most callers have one .ll; capsule-aware callers use
     // _clang_link_multi_with_opt directly.
     let single: string[] = [ll_path];
-    return _clang_link_multi_with_opt(single, out_path, runtime_root, runtime_capsules, opt_flag, cache_dir, binary_dir);
+    return _clang_link_multi_with_opt(single, out_path, runtime_root, runtime_capsules, opt_flag, cache_dir, binary_dir, shared_cache_root);
 }
 
-fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string) -> LinkResult ![io] {
+fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, binary_dir: string, shared_cache_root: string) -> LinkResult ![io] {
     if ll_paths.length == 0 {
         print("_clang_link_multi_with_opt: no input .ll files");
         return _failed_link_result();
@@ -1361,7 +1425,7 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         print("     hint: ensure the runtime bundle ships alongside the compiler binary");
         return _failed_link_result();
     }
-    let inputs = assemble_runtime_capsule_link_inputs(runtime_capsules, cache_dir, opt_flag, binary_dir);
+    let inputs = assemble_runtime_capsule_link_inputs(runtime_capsules, cache_dir, opt_flag, binary_dir, shared_cache_root);
     if !inputs.success {
         return LinkResult { rc: 1, stats: inputs.stats };
     }
@@ -1425,17 +1489,19 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
 fn _clang_link(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> LinkResult ![io] {
     // Default link used by `build` and `run` for single-module programs.
     let resolved_cache_dir = _resolve_sailfin_cache_dir(cache_dir);
-    return _clang_link_with_opt(ll_path, out_path, runtime_root, runtime_capsules, "-O2", resolved_cache_dir, binary_dir);
+    // Single-module path is not on the cache-gated build/run flow that
+    // threads a shared cache root; pass empty (work-dir-local only).
+    return _clang_link_with_opt(ll_path, out_path, runtime_root, runtime_capsules, "-O2", resolved_cache_dir, binary_dir, "");
 }
 
-fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> LinkResult ![io] {
+fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string, shared_cache_root: string) -> LinkResult ![io] {
     // Default link used by `build` and `run` for multi-module programs
     // (main source + capsule dependency modules). `cache_dir` is the
     // sailfin-side scratch root (`build/sailfin` for legacy in-tree
     // builds, `<work_dir>/sailfin` when `sfn build --work-dir <root>`
     // virtualizes the layout).
     let resolved_cache_dir = _resolve_sailfin_cache_dir(cache_dir);
-    return _clang_link_multi_with_opt(ll_paths, out_path, runtime_root, runtime_capsules, "-O2", resolved_cache_dir, binary_dir);
+    return _clang_link_multi_with_opt(ll_paths, out_path, runtime_root, runtime_capsules, "-O2", resolved_cache_dir, binary_dir, shared_cache_root);
 }
 
 // Resolve the sailfin-side cache scratch root. Empty input is the
@@ -2241,7 +2307,13 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
         if build_runtime_caps.length == 0 {
             build_runtime_caps = runtime_capsule_from_root(runtime_root);
         }
-        let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, build_runtime_caps, binary_dir, sailfin_cache_dir);
+        // Shared content-addressed cache root for runtime objects
+        // (#1096), mirroring the `.ll` module cache. Empty under
+        // `--no-cache` so the persistent store is neither read nor
+        // written, matching the summary-fold gate below.
+        let mut build_shared_cache_root: string = "";
+        if cache_config.enabled { build_shared_cache_root = cache_root(); }
+        let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, build_runtime_caps, binary_dir, sailfin_cache_dir, build_shared_cache_root);
         let rc = link_result.rc;
         if rc != 0 {
             if !json_flag {
@@ -2380,7 +2452,11 @@ fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
         if run_runtime_caps.length == 0 {
             run_runtime_caps = runtime_capsule_from_root(runtime_root);
         }
-        let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, run_runtime_caps, binary_dir, "");
+        // Shared runtime-object cache root (#1096); empty under
+        // `--no-cache` to leave the persistent store untouched.
+        let mut run_shared_cache_root: string = "";
+        if run_cache_config.enabled { run_shared_cache_root = cache_root(); }
+        let link_result = _clang_link_multi(all_lls, exe_path, runtime_root, run_runtime_caps, binary_dir, "", run_shared_cache_root);
         let link_rc = link_result.rc;
         if link_rc != 0 {
             // A native link failure is a real compiler/runtime bug to
