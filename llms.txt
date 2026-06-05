@@ -167,18 +167,34 @@ Supports literals, wildcards (`_`), guards (`if expr`), and enum destructuring.
         print("Error: {{e}}");
     }
 
-Union return types for typed errors:
+Typed errors via the prelude Result<T, E> enum and the postfix ? operator.
+Construct with the qualified form Result.Ok { value: x } / Result.Err { error: e };
+? unwraps the Ok value or early-returns the Err arm (pure control flow, no
+exception runtime). The prelude ships a default Error struct { message: string }.
 
-    struct DivisionError { message: string; }
-
-    fn safe_divide(a: float, b: float) -> float | DivisionError {
+    fn safe_divide(a: int, b: int) -> Result<int, Error> {
         if b == 0 {
-            return DivisionError { message: "division by zero" };
+            return Result.Err { error: Error { message: "division by zero" } };
         }
-        return a / b;
+        return Result.Ok { value: a / b };
     }
 
-Note: Result<T, E> and the ? operator are planned but not yet implemented.
+    fn divide_and_sum(a: int, b: int, c: int, d: int) -> Result<int, Error> {
+        let first = safe_divide(a, b)?;   // unwrap, or early-return the Err
+        let second = safe_divide(c, d)?;
+        return Result.Ok { value: first + second };
+    }
+
+    fn describe(r: Result<int, Error>) -> string {
+        match r {
+            Result.Ok { value } => return "ok",
+            Result.Err { error } => return "error: " + error.message
+        }
+    }
+
+Note: ? is only legal inside a function returning Result, and the operand's error
+type E must match the enclosing function's E exactly (no From coercion yet). The
+type-suffix ? (nullable, e.g. Config?) is a distinct, unrelated use of the glyph.
 
 ### Generics
 
@@ -300,6 +316,7 @@ These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
 - Interfaces with method signatures
 - Control flow (if/else, for, loop, match, break, continue)
 - try/catch/finally exception handling
+- Result<T, E> + the postfix ? error-propagation operator (typed, exception-free)
 - String interpolation (via runtime)
 - Lambdas (non-capturing)
 - Test declarations
@@ -321,7 +338,6 @@ These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
 ## What Is Not Yet in the Parser
 
 - int / float distinct numeric types
-- Result<T, E> and ? error propagation
 - Bitwise operators (&, |, ^, >>, <<)
 - ${ } string interpolation (currently uses {{ }})
 - routine { } structured concurrency blocks
