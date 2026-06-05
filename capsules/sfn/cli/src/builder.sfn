@@ -5,7 +5,12 @@
 // `flag_value`, `flag_short`, `flag_value_short`), and command/composition
 // helpers (`command`, `with_version`, `with_arg`, `with_flag`,
 // `with_subcommand`).
-import { Arg, Flag, Command } from "./types";
+import {
+    Arg,
+    Flag,
+    Command,
+    FlagGroup
+} from "./types";
 
 // ---- Arg builders ----
 fn arg(name: string, description: string) -> Arg {
@@ -277,19 +282,41 @@ fn flag_env(f: Flag, var_name: string) -> Flag {
     };
 }
 
+// ---- Flag group builders ----
+fn flag_group_exclusive(members: string[]) -> FlagGroup {
+    // Create a mutually-exclusive flag group: at most one of `members`
+    // (flag long names, without the leading `--`) may be present. Two or
+    // more present is a `ParseError { kind: "flag_group_violation" }`.
+    // Attach to a command with `with_flag_group`.
+    return FlagGroup { members: members, mode: "exclusive" };
+}
+
+fn flag_group_required_one(members: string[]) -> FlagGroup {
+    // Create a required-one flag group: at least one of `members` (flag
+    // long names, without the leading `--`) must be present. Zero present
+    // is a `ParseError { kind: "flag_group_violation" }`; two or more
+    // present is allowed. To require *exactly* one, compose this with
+    // `flag_group_exclusive` over the same members (required-one supplies
+    // the lower bound, exclusive the upper bound). Attach to a command
+    // with `with_flag_group`.
+    return FlagGroup { members: members, mode: "required_one" };
+}
+
 // ---- Command builders ----
 fn command(name: string, description: string) -> Command {
     // Create a new CLI command definition.
     let empty_args: Arg[] = [];
     let empty_flags: Flag[] = [];
     let empty_cmds: Command[] = [];
+    let empty_groups: FlagGroup[] = [];
     return Command {
         name: name,
         description: description,
         version: "",
         args: empty_args,
         flags: empty_flags,
-        subcmds: empty_cmds
+        subcmds: empty_cmds,
+        flag_groups: empty_groups
     };
 }
 
@@ -301,7 +328,8 @@ fn with_version(cmd: Command, version: string) -> Command {
         version: version,
         args: cmd.args,
         flags: cmd.flags,
-        subcmds: cmd.subcmds
+        subcmds: cmd.subcmds,
+        flag_groups: cmd.flag_groups
     };
 }
 
@@ -332,7 +360,8 @@ fn with_arg(cmd: Command, a: Arg) -> Command {
         version: cmd.version,
         args: new_args,
         flags: cmd.flags,
-        subcmds: cmd.subcmds
+        subcmds: cmd.subcmds,
+        flag_groups: cmd.flag_groups
     };
 }
 
@@ -352,7 +381,31 @@ fn with_flag(cmd: Command, f: Flag) -> Command {
         version: cmd.version,
         args: cmd.args,
         flags: new_flags,
-        subcmds: cmd.subcmds
+        subcmds: cmd.subcmds,
+        flag_groups: cmd.flag_groups
+    };
+}
+
+fn with_flag_group(cmd: Command, group: FlagGroup) -> Command {
+    // Attach a flag group (built with `flag_group_exclusive` or
+    // `flag_group_required_one`) to the command. `parse()` enforces every
+    // attached group after parsing. Chainable like `with_flag`.
+    let mut new_groups: FlagGroup[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= cmd.flag_groups.length { break; }
+        new_groups.push(cmd.flag_groups[i]);
+        i += 1;
+    }
+    new_groups.push(group);
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: cmd.version,
+        args: cmd.args,
+        flags: cmd.flags,
+        subcmds: cmd.subcmds,
+        flag_groups: new_groups
     };
 }
 
@@ -372,6 +425,7 @@ fn with_subcommand(cmd: Command, sub: Command) -> Command {
         version: cmd.version,
         args: cmd.args,
         flags: cmd.flags,
-        subcmds: new_subs
+        subcmds: new_subs,
+        flag_groups: cmd.flag_groups
     };
 }

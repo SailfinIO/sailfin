@@ -62,6 +62,7 @@
 export {
     Arg,
     Flag,
+    FlagGroup,
     Command,
     Matches,
     ParseError,
@@ -87,10 +88,13 @@ export {
     flag_count_short,
     flag_required,
     flag_env,
+    flag_group_exclusive,
+    flag_group_required_one,
     command,
     with_version,
     with_arg,
     with_flag,
+    with_flag_group,
     with_subcommand
 } from "./builder";
 
