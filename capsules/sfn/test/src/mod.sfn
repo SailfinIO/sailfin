@@ -391,8 +391,10 @@ export { CompileExpect, assert_compiles, assert_does_not_compile } from "./compi
 // ---------------------------------------------------------------------------
 // `with_tmp_dir(body)` creates a temp dir, runs the (possibly capturing)
 // `body` closure against it, and recursively removes the tree on scope
-// exit — including the throwing path — via `sfn/fs::remove_all` (#976).
-// The proposed `with_env` / `with_cwd` are intentionally omitted (no
-// runtime setenv/chdir primitive; process-global mutation is unsound
-// under structured concurrency). See `fixtures.sfn`.
+// exit — including the throwing path — via a pure-Sailfin `rm -rf` over the
+// `fs.*` intrinsics (mirroring `sfn/fs::remove_all` from #976; see the note
+// in `fixtures.sfn` for why it does not import that capsule). The proposed
+// `with_env` / `with_cwd` are intentionally omitted (no runtime
+// setenv/chdir primitive; process-global mutation is unsound under
+// structured concurrency). See `fixtures.sfn`.
 export { with_tmp_dir } from "./fixtures";

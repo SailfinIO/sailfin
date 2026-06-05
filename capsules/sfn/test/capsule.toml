@@ -12,9 +12,6 @@ description = "Test assertion helpers and utilities for Sailfin"
 # formatting still goes through the runtime intrinsic `number_to_string`,
 # the same formatter `pure_assert_eq_float` already uses for fractions.
 "sfn/strings" = "*"
-# `sfn/fs::remove_all` (#976) is the pure-Sailfin `rm -rf` that backs
-# `with_tmp_dir` teardown (#979); `mkdtemp` creates the scoped temp dir.
-"sfn/fs" = "*"
 
 [capabilities]
 required = ["io"]
