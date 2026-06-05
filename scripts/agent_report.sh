@@ -81,8 +81,13 @@ export SAILFIN_INNER=1
 # targets never reach it and never write a file.
 REPORT_PATH=""
 if [ "${SAILFIN_AGENT_REPORT:-}" = "1" ]; then
-	REPORT_PATH="build/agent-report.${TARGET}.json"
-	mkdir -p build 2>/dev/null || true
+	# Only enable the report path once its directory exists. If `build` can't
+	# be created (read-only or unwritable workspace), REPORT_PATH stays empty
+	# so the verdict block keeps `report` null instead of advertising a path no
+	# file could be written to.
+	if mkdir -p build 2>/dev/null; then
+		REPORT_PATH="build/agent-report.${TARGET}.json"
+	fi
 fi
 
 # --- output capture ----------------------------------------------------------
@@ -228,17 +233,30 @@ write_report_file() {
 }
 
 emit_verdict() {
+	# Capture the status that triggered the trap as the very first action —
+	# any later command would clobber $?. If we were interrupted (signal,
+	# internal error) before RC was captured from PIPESTATUS, RC is still its
+	# initial 0; inherit the trap's status so an aborted run isn't misreported
+	# as a pass (which would also write a passing report file under the gate).
+	local trap_rc=$?
 	# Fired via trap on EXIT so the block is always the final output, even if
 	# the command aborts a phase or the wrapper is interrupted.
 	trap - EXIT
+	if [ "$RC" -eq 0 ] && [ "$trap_rc" -ne 0 ]; then
+		RC="$trap_rc"
+	fi
 	classify
 	# Report-file field: the per-target path when gated, else null. Write the
 	# file before the verdict so a consumer that follows the `report` pointer
-	# finds it already on disk.
+	# finds it already on disk. Only advertise the path if the file is actually
+	# present after the write — a failed mkdir/write must leave `report` null
+	# rather than dangle a pointer to a missing file.
 	local report_field="null"
 	if [ -n "$REPORT_PATH" ]; then
 		write_report_file
-		report_field="$(json_val "$REPORT_PATH")"
+		if [ -f "$REPORT_PATH" ]; then
+			report_field="$(json_val "$REPORT_PATH")"
+		fi
 	fi
 	{
 		printf '===SAILFIN-RESULT===\n'
