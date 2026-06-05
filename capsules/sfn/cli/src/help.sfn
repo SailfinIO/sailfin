@@ -1,40 +1,111 @@
 // sfn/cli — help text formatting.
 //
-// Renders the `--help` output for a `Command`: usage line, subcommands,
-// positional arguments, and flag rows. The `help()` function returns
-// the rendered string; `print_help()` writes it to stdout.
+// Renders the `--help` output for a `Command`. Help is produced in two
+// stages: `render_help_tree(cmd)` builds a structured, render-agnostic
+// `HelpNode`, and `render_help_text(node)` turns that tree into the
+// `--help` string. `help()` composes the two and returns the string;
+// `print_help()` writes it to stdout. Splitting data (tree) from
+// formatting (text) is the foundation for `--help --json` (Phase 5
+// Issue 5.1) and keeps the text and future JSON renderers from drifting
+// — both consume the same tree (proposal §8 risk R8).
 //
 // Note: `_pad` lives here (not in `parser.sfn` as listed in the
 // modularization proposal §3.1) because it is only used by the help
 // renderer. Keeping it next to its only caller avoids a circular import
 // between `parser.sfn` (which calls `_format_help`) and `help.sfn`.
-import { Arg, Command, Flag } from "./types";
+import {
+    Command,
+    HelpFlag,
+    HelpNode,
+    HelpPositional
+} from "./types";
 
 fn help(cmd: Command) -> string {
     // Generate help text for a command.
-    return _format_help(cmd, cmd.name);
+    return render_help_text(render_help_tree(cmd));
 }
 
 fn print_help(cmd: Command) -> void ![io] {
     // Print help text for a command to stdout.
-    print(_format_help(cmd, cmd.name));
+    print(render_help_text(render_help_tree(cmd)));
 }
 
-fn _format_help(cmd: Command, program: string) -> string {
-    let mut out: string = "";
+fn render_help_tree(cmd: Command) -> HelpNode {
+    // Build the structured help representation of a command. Pure (no
+    // `![io]`). Subcommands recurse so the whole tree is available to
+    // consumers; the text renderer descends only one level for the
+    // `commands:` listing (multi-level walking is Issue 1.14).
+    let mut flags: HelpFlag[] = [];
+    let mut fi: int = 0;
+    loop {
+        if fi >= cmd.flags.length { break; }
+        let f = cmd.flags[fi];
+        flags.push(HelpFlag {
+            long_name: f.long_name, short_name: f.short_name, description: f.description, takes_value: f.takes_value, required: f.required, env_var: f.env_var
+        });
+        fi += 1;
+    }
 
-    // Description.
-    if cmd.description.length > 0 { out = out + cmd.description + "\n\n"; }
-
-    // Usage line.
-    out = out + "usage:\n";
-    out = out + "  " + program;
-    if cmd.subcmds.length > 0 { out = out + " <command>"; }
-    if cmd.flags.length > 0 { out = out + " [options]"; }
+    let mut positionals: HelpPositional[] = [];
     let mut ai: int = 0;
     loop {
         if ai >= cmd.args.length { break; }
         let a = cmd.args[ai];
+        positionals.push(HelpPositional {
+            name: a.name, description: a.description, is_optional: a.is_optional, is_variadic: a.is_variadic, default_value: a.default_value
+        });
+        ai += 1;
+    }
+
+    let mut subcommands: HelpNode[] = [];
+    let mut si: int = 0;
+    loop {
+        if si >= cmd.subcmds.length { break; }
+        subcommands.push(render_help_tree(cmd.subcmds[si]));
+        si += 1;
+    }
+
+    return HelpNode {
+        name: cmd.name,
+        description: cmd.description,
+        version: cmd.version,
+        flags: flags,
+        positionals: positionals,
+        subcommands: subcommands
+    };
+}
+
+fn render_help_text(node: HelpNode) -> string {
+    // Render a `HelpNode` into the `--help` string. Pure (no `![io]`).
+    // The usage-line program name is `node.name`.
+    return _render_help_text(node, node.name);
+}
+
+fn _format_help(cmd: Command, program: string) -> string {
+    // Render help for `cmd` with an explicit program label for the usage
+    // line. Retained for `parser.sfn`, which threads the full descent
+    // label (e.g. `sfn build`) for a matched subcommand while the node's
+    // own name is just the leaf (`build`). Routes through the same tree
+    // + renderer as `render_help_text` so the two cannot drift
+    // (proposal §8 risk R8).
+    return _render_help_text(render_help_tree(cmd), program);
+}
+
+fn _render_help_text(node: HelpNode, program: string) -> string {
+    let mut out: string = "";
+
+    // Description.
+    if node.description.length > 0 { out = out + node.description + "\n\n"; }
+
+    // Usage line.
+    out = out + "usage:\n";
+    out = out + "  " + program;
+    if node.subcommands.length > 0 { out = out + " <command>"; }
+    if node.flags.length > 0 { out = out + " [options]"; }
+    let mut ai: int = 0;
+    loop {
+        if ai >= node.positionals.length { break; }
+        let a = node.positionals[ai];
         if a.is_variadic { out = out + " [" + a.name + "...]"; } else if a.is_optional {
             out = out + " [" + a.name + "]";
         } else { out = out + " <" + a.name + ">"; }
@@ -43,13 +114,13 @@ fn _format_help(cmd: Command, program: string) -> string {
     out = out + "\n";
 
     // Subcommands.
-    if cmd.subcmds.length > 0 {
+    if node.subcommands.length > 0 {
         out = out + "\ncommands:\n";
-        let col_width = _max_name_width(cmd) + 2;
+        let col_width = _max_name_width(node) + 2;
         let mut si: int = 0;
         loop {
-            if si >= cmd.subcmds.length { break; }
-            let sub = cmd.subcmds[si];
+            if si >= node.subcommands.length { break; }
+            let sub = node.subcommands[si];
             out = out + "  " + _pad(sub.name, col_width) + sub.description
                 + "\n";
             si += 1;
@@ -57,13 +128,13 @@ fn _format_help(cmd: Command, program: string) -> string {
     }
 
     // Positional arguments.
-    if cmd.args.length > 0 {
+    if node.positionals.length > 0 {
         out = out + "\narguments:\n";
-        let arg_width = _max_arg_width(cmd) + 2;
+        let arg_width = _max_arg_width(node) + 2;
         ai = 0;
         loop {
-            if ai >= cmd.args.length { break; }
-            let a = cmd.args[ai];
+            if ai >= node.positionals.length { break; }
+            let a = node.positionals[ai];
             let mut label = "<" + a.name + ">";
             if a.is_variadic { label = label + "..."; }
             out = out + "  " + _pad(label, arg_width) + a.description;
@@ -81,11 +152,11 @@ fn _format_help(cmd: Command, program: string) -> string {
 
     // Flags.
     out = out + "\noptions:\n";
-    let flag_width = _max_flag_width(cmd) + 2;
+    let flag_width = _max_flag_width(node) + 2;
     let mut fi: int = 0;
     loop {
-        if fi >= cmd.flags.length { break; }
-        let f = cmd.flags[fi];
+        if fi >= node.flags.length { break; }
+        let f = node.flags[fi];
         let label = _flag_label(f);
         out = out + "  " + _pad(label, flag_width) + f.description;
         if f.env_var.length > 0 { out = out + " [env: " + f.env_var + "]"; }
@@ -96,14 +167,14 @@ fn _format_help(cmd: Command, program: string) -> string {
     // Built-in flags.
     out = out + "  " + _pad("-h, --help", flag_width)
         + "Show this help message\n";
-    if cmd.version.length > 0 {
+    if node.version.length > 0 {
         out = out + "  " + _pad("-V, --version", flag_width) + "Show version\n";
     }
 
     return out;
 }
 
-fn _flag_label(f: Flag) -> string {
+fn _flag_label(f: HelpFlag) -> string {
     let mut label: string = "";
     if f.short_name.length > 0 { label = "-" + f.short_name + ", "; } else {
         label = "    ";
@@ -113,34 +184,34 @@ fn _flag_label(f: Flag) -> string {
     return label;
 }
 
-fn _max_name_width(cmd: Command) -> int {
+fn _max_name_width(node: HelpNode) -> int {
     let mut max: int = 0;
     let mut i: int = 0;
     loop {
-        if i >= cmd.subcmds.length { break; }
-        if cmd.subcmds[i].name.length > max {
-            max = cmd.subcmds[i].name.length;
+        if i >= node.subcommands.length { break; }
+        if node.subcommands[i].name.length > max {
+            max = node.subcommands[i].name.length;
         }
         i += 1;
     }
     return max;
 }
 
-fn _max_arg_width(cmd: Command) -> int {
+fn _max_arg_width(node: HelpNode) -> int {
     let mut max: int = 0;
     let mut i: int = 0;
     loop {
-        if i >= cmd.args.length { break; }
+        if i >= node.positionals.length { break; }
         // +2 for the angle brackets, +3 for a variadic's `...` suffix.
-        let mut w = cmd.args[i].name.length + 2;
-        if cmd.args[i].is_variadic { w = w + 3; }
+        let mut w = node.positionals[i].name.length + 2;
+        if node.positionals[i].is_variadic { w = w + 3; }
         if w > max { max = w; }
         i += 1;
     }
     return max;
 }
 
-fn _max_flag_width(cmd: Command) -> int {
+fn _max_flag_width(node: HelpNode) -> int {
     let mut max: int = 0;
     let built_in_help = 10;  // "-h, --help"
     let built_in_version = 13;  // "-V, --version"
@@ -148,8 +219,8 @@ fn _max_flag_width(cmd: Command) -> int {
     if built_in_version > max { max = built_in_version; }
     let mut i: int = 0;
     loop {
-        if i >= cmd.flags.length { break; }
-        let w = _flag_label(cmd.flags[i]).length;
+        if i >= node.flags.length { break; }
+        let w = _flag_label(node.flags[i]).length;
         if w > max { max = w; }
         i += 1;
     }
