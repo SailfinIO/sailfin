@@ -58,8 +58,13 @@ import {
     is_safe_scope_name,
     parse_scope_name
 } from "./capsule_artifact";
-import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./cli_commands_utils";
+import {
+    _atomic_rename_into_place,
+    _display_capsule_name_cmd,
+    _mktemp_sibling_cmd
+} from "./cli_commands_utils";
 import { emit_subprocess_with_retry } from "./emit_helpers";
+import { lock_get_versions } from "./lock";
 import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_file_with_module_imports,
@@ -931,6 +936,37 @@ fn _cr_parse_deps(deps: string) -> _CrDepEntry[] {
     return out;
 }
 
+// Look up a capsule's locked version from the pre-parsed lockfile
+// entries (#1048). `entry.spec` is always the scoped `scope/name` form
+// (the cache path below requires it), so we match that first and then
+// fall back to the bare display name — mirroring the backward-compat
+// fallback `sfn add` performs (`cli_commands.sfn`) for older lockfiles
+// that stored `"http"` instead of `"sfn/http"`. Returns "" if absent
+// under either key. The caller pre-parses once, so this stays O(deps)
+// per call without re-scanning the lockfile text.
+fn _cr_lookup_locked_version(lock_entries: _CrDepEntry[], spec: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= lock_entries.length { break; }
+        if strings_equal(lock_entries[i].spec, spec) {
+            return lock_entries[i].version;
+        }
+        i += 1;
+    }
+    let display = _display_capsule_name_cmd(spec);
+    if !strings_equal(display, spec) {
+        let mut j: int = 0;
+        loop {
+            if j >= lock_entries.length { break; }
+            if strings_equal(lock_entries[j].spec, display) {
+                return lock_entries[j].version;
+            }
+            j += 1;
+        }
+    }
+    return "";
+}
+
 // Locate the src/ directory for a capsule dep. Checks the in-tree
 // capsules/<scope>/<name>/src/ first (compiler self-build and ecosystem
 // development) and falls back to ~/.sfn/cache/capsules/<scope>/<name>/<version>/src/
@@ -1084,6 +1120,24 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
     let deps = toml_get_dependencies(text);
     let entries = _cr_parse_deps(deps);
 
+    // Lockfile precedence (#1048): the designed resolution order is
+    // workspace → lockfile → cache → registry. When a capsule.lock is
+    // present we prefer its pinned version over the capsule.toml range
+    // when building the ~/.sfn/cache path below. Parse it once up-front
+    // into `<spec>=<version>` entries (the shape `_cr_parse_deps`
+    // consumes) so the per-dep lookups in the loop are plain list scans
+    // rather than a full re-parse of the lockfile text each time. An
+    // absent lockfile leaves `has_lock` false and `lock_entries` empty,
+    // preserving the pre-#1048 capsule.toml-range behaviour byte-for-byte.
+    let lock_path = _cr_path_join(project_root, "capsule.lock");
+    let mut has_lock: boolean = false;
+    let mut lock_entries: _CrDepEntry[] = [];
+    if fs.exists(lock_path) {
+        let lock_text = fs.readFile(lock_path);
+        lock_entries = _cr_parse_deps(lock_get_versions(lock_text));
+        has_lock = true;
+    }
+
     // Discover every `kind = "runtime"` capsule the workspace
     // exposes, so we can skip those names below. Empty when
     // the project sits outside any workspace, which is the
@@ -1132,7 +1186,21 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
             src_dir = workspace_member_for_spec(members, entry.spec);
         }
         if src_dir.length == 0 {
-            src_dir = _cr_locate_capsule_src(project_root, entry.spec, entry.version);
+            // Lockfile-pinned version wins over the capsule.toml range
+            // (#1048). Workspace siblings are resolved above and never
+            // reach this branch, so sibling resolution stays first.
+            let mut effective_version: string = entry.version;
+            if has_lock {
+                let locked = _cr_lookup_locked_version(lock_entries, entry.spec);
+                if locked.length > 0 { effective_version = locked; } else {
+                    print.err("capsule-resolver: dependency \"" + entry.spec
+                        + "\" is declared in capsule.toml but absent from"
+                        + " capsule.lock — run `sfn add "
+                        + entry.spec
+                        + "` to lock it");
+                }
+            }
+            src_dir = _cr_locate_capsule_src(project_root, entry.spec, effective_version);
         }
         if src_dir.length > 0 {
             let found = _cr_collect_capsule_sources(src_dir, entry.spec);
