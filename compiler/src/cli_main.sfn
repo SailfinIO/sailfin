@@ -1290,9 +1290,22 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     // section unreferenced from the entry point (#1047).
     args.push("-ffunction-sections");
     args.push("-fdata-sections");
-    args.push(_dead_strip_link_flag());
-    // Root the runtime provider surface so dead-strip keeps it (#1047).
+    // Root the runtime provider surface, then GC unreferenced sections
+    // (#1047). The order matters for correctness: if symbol enumeration
+    // yields nothing while runtime objects are present (`nm`/`awk`
+    // unavailable, or the pipeline failed), enabling the strip anyway
+    // would drop the runtime surface the compiler binary must export.
+    // In that case we skip the GC flag — keeping the (slightly larger)
+    // un-stripped binary is strictly safer than a silently broken one —
+    // and emit a diagnostic so the lost optimization isn't invisible.
+    // With runtime objects present the enumeration always finds the
+    // `sfn_*` family, so the happy path is unaffected.
     let retain_flags = _runtime_retain_root_flags(runtime_objs);
+    let strip_safe = runtime_objs.length == 0 || retain_flags.length > 0;
+    if strip_safe { args.push(_dead_strip_link_flag()); } else {
+        print("sfn: dead-code strip disabled — could not enumerate runtime");
+        print("     provider symbols (is `nm` on PATH?); linking unstripped");
+    }
     let mut rfi: int = 0;
     loop {
         if rfi >= retain_flags.length { break; }
