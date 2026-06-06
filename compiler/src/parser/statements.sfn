@@ -497,9 +497,13 @@ fn parse_loop_statement(parser: Parser, decorators: Decorator[]) -> BlockStateme
 // Shaped like `parse_loop_statement` since the v0 surface is a bare block
 // scope that yields no value. The caller (`parse_block_statement`) has
 // already confirmed `routine` is immediately followed by `{`, so the soft
-// keyword has committed; an empty body is still rejected (matching `loop`)
-// rather than silently producing an empty routine. Nested routine bodies
-// recurse through `parse_block`.
+// keyword has committed. The `tokens.length == 0` guard below mirrors the
+// one in `parse_loop_statement`: it rejects only a *missing* block (no `{`,
+// where `parse_block` returns empty tokens) and is defensive here since the
+// dispatch already guarantees the `{`. A present-but-empty `routine {}`
+// has non-empty tokens (`{`, `}`) and parses to a `RoutineStatement` with
+// an empty body, matching `loop {}`. Nested routine bodies recurse through
+// `parse_block`.
 fn parse_routine_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);

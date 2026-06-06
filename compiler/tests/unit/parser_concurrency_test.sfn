@@ -12,7 +12,7 @@
 // The `let` initializer is inspected at top level, matching the
 // convention in `parser_iife_postfix_test.sfn` (the block-scoped `let`
 // initializer path is opaque, tracked separately).
-import { Block, Expression, Program } from "../../src/ast";
+import { Block, Expression } from "../../src/ast";
 import { parse_program } from "../../src/parser/mod";
 
 // Initializer of the first top-level `let` in `source`.
@@ -27,19 +27,28 @@ fn first_let_initializer(source: string) -> Expression ![io] {
 
 // Body block of the first top-level function named `name` in `source`.
 // `routine { ... }` is a block-level statement, so its coverage inspects a
-// function body rather than a `let` initializer.
+// function body rather than a `let` initializer. Asserts the function was
+// found so a lookup miss fails here with a clear signal rather than
+// surfacing as a confusing empty-body assertion downstream.
 fn function_body(source: string, name: string) -> Block ![io] {
     let program = parse_program(source);
     let mut index: int = 0;
+    let mut found: boolean = false;
+    let mut body: Block = Block { tokens: [], text: "", statements: [] };
     loop {
         if index >= program.statements.length { break; }
         let stmt = program.statements[index];
         if stmt.variant == "FunctionDeclaration" {
-            if stmt.signature.name == name { return stmt.body; }
+            if stmt.signature.name == name {
+                body = stmt.body;
+                found = true;
+                break;
+            }
         }
         index += 1;
     }
-    return Block { tokens: [], text: "", statements: [] };
+    assert found;
+    return body;
 }
 
 // -------------------------------------------------------------------
