@@ -148,6 +148,34 @@ char_code("");     // -1
 
 ---
 
+#### `char_from_code(code: int) -> string`
+
+Build a one-byte string from the **raw byte value** `code` (1–255). This is the
+write counterpart to `char_code`'s read: `char_code(char_from_code(n)) == n`
+round-trips for every `n` in 1–255, letting pure-Sailfin code construct and
+inspect arbitrary single bytes (binary data, multibyte UTF-8 sequences built
+byte-by-byte).
+
+Unlike a code-point encoder, the byte is written **verbatim** — there is no
+UTF-8 expansion for `128..255`. `char_from_code(195)` is the single byte `0xC3`
+(length 1), not the two-byte UTF-8 encoding of U+00C3.
+
+```sfn
+char_from_code(65);   // "A"
+char_code(char_from_code(200));  // 200  (single raw byte, length 1)
+char_from_code(0);    // ""   (see limitation below)
+char_from_code(300);  // ""   (out of range)
+```
+
+**Limitation — byte 0:** a lone NUL is unrepresentable under the current
+NUL-terminated `string` model (`.length` is recovered with `strlen`), so
+`char_from_code(0)` returns `""`. Faithful embedded-NUL bytes arrive with the
+`SfnString` aggregate (carrying an explicit length) on the runtime roadmap;
+until then, build NUL-containing payloads with a length-carrying structure
+rather than a `string`.
+
+---
+
 #### `strings_equal(left: string, right: string) -> boolean`
 
 Return `true` if two strings have the same length and each grapheme cluster matches at every position. This performs a grapheme-by-grapheme comparison using `char_code` internally.
