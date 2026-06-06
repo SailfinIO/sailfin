@@ -26,7 +26,7 @@ into your compile graph. If the symbols you need all live in one or two
 leaves, name those leaves directly.
 
 ```sfn
-// ❌ drags every leaf re-exported by native/mod.sfn (~11 files)
+// ❌ drags every leaf re-exported by native/mod.sfn into the graph
 import {
     LiftResult,
     lift_non_capturing_lambdas,
@@ -54,8 +54,10 @@ symbol (`lift_non_capturing_lambdas`) from
 `llvm/expression_lowering/native/mod.sfn`. That dragged the entire
 lowering subtree into `emit_native`'s graph, so a test whose only job was
 verifying `extern fn` → `.meta extern` cold-compiled every lowering file
-on every CI run. Wall-clock crept 60s → 300s and tipped past the per-test
-cap (#704, #709). The fix was a one-line switch to a direct leaf import.
+on every CI run. Wall-clock for that test crept upward over successive
+seed bumps (roughly 60s → 300s, as recorded historically on #704/#709)
+until CI runs for it began timing out. The fix was a one-line switch to a
+direct leaf import.
 
 ## The "three or more leaves" threshold
 
