@@ -355,6 +355,30 @@ For issues groomed before this section existed, `/pickup` Phase 1.5
 falls back to checking every `## Blocked by` reference if the issue
 touches compiler-source files.
 
+### Seed-cut advisor (automated)
+
+`/pickup` Phase 1.5 is the strict gate, but it only fires when an agent
+is actively trying to claim an issue. The **seed-cut advisor**
+(`.github/workflows/seed-cut-advisor.yml`) is the complementary
+visibility layer: a plain, deterministic Actions workflow (no gh-aw, no
+LLM) that runs on every PR merge to `main`. When a merged PR closes an
+issue that an open, `release:next-minor`, compiler-touching issue lists
+under `## Required in pinned seed` (or, legacy, `## Blocked by`), the
+advisor:
+
+- comments on the **active** `Release: vX.Y.Z` tracker (resolved
+  dynamically — open issue, `tracking` label, `Release: vX.Y.Z` title;
+  never hardcoded) with an `Auto-advisor:` line naming the merged PR and
+  the dependent issues, and
+- applies the `needs-seed-cut` label to the tracker and the dependent
+  issues.
+
+It is idempotent (one advisory per PR per tracker) and **only flags** —
+it never dispatches `release.yml` or bumps `.seed-version`. `/release-plan`
+consumes the `needs-seed-cut` label, surfacing a "Seed cut required"
+checklist section on the per-cycle tracking issue. Clear the flag by
+cutting a fresh alpha and running `/pin-seed`, then removing the label.
+
 ### When to bump the pin
 
 Run `/pin-seed [vX.Y.Z]`:

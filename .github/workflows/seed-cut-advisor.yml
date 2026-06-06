@@ -1,0 +1,161 @@
+name: Seed-cut Advisor
+
+# Surfaces stale-seed risk on PR merge. When a PR merges to `main` and the
+# issue(s) it closes are listed as a required-in-seed predecessor by an open,
+# release-gated, compiler-touching downstream issue, this workflow comments on
+# the active `Release: vX.Y.Z` tracker and applies `needs-seed-cut` so a human
+# knows to cut a fresh alpha + `/pin-seed` before those downstream issues are
+# picked up.
+#
+# This is the third leg of the #489 stale-seed mitigation, complementing the
+# `## Required in pinned seed` issue-template section and the `/pickup`
+# Phase 1.5 precheck — it makes the gap visible to humans without an agent
+# being present.
+#
+# It is a PLAIN, deterministic Actions workflow — NOT a gh-aw `.md` source.
+# No compiled `.lock.yml`, no LLM engine, no ANTHROPIC_API_KEY. The single
+# `actions/github-script` step (already a pinned repo dependency) does the
+# JSON / GraphQL / markdown-section work that raw shell would do clumsily.
+# The advisor only flags; it never dispatches a release or merges anything.
+# See `.github/AGENTS.md` and docs/conventions/issue-naming.md "Seed pinning".
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: seed-cut-advisor-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  advise:
+    # Only real merges into main: releases to beta/rc don't update .seed-version.
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Advise on stale-seed risk
+        uses: actions/github-script@v9.0.0
+        with:
+          github-token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const prNumber = context.payload.pull_request.number;
+
+            // 1. Resolve the issues this PR closes (GraphQL — REST has no
+            //    direct equivalent).
+            const q = `query($owner:String!,$repo:String!,$pr:Int!){
+              repository(owner:$owner,name:$repo){
+                pullRequest(number:$pr){
+                  closingIssuesReferences(first:50){ nodes{ number } }
+                }
+              }
+            }`;
+            const res = await github.graphql(q, { owner, repo, pr: prNumber });
+            const closing = new Set(
+              res.repository.pullRequest.closingIssuesReferences.nodes.map(n => n.number)
+            );
+            if (closing.size === 0) {
+              core.info(`PR #${prNumber} closes no issues — nothing to advise.`);
+              return;
+            }
+            core.info(`PR #${prNumber} closes: ${[...closing].map(n => '#' + n).join(', ')}`);
+
+            // Extract the body of a single markdown section by heading text.
+            function section(body, heading) {
+              if (!body) return '';
+              const out = [];
+              let capture = false;
+              for (const line of body.split(/\r?\n/)) {
+                const m = line.match(/^#{1,6}\s+(.*)$/);
+                if (m) {
+                  capture = m[1].trim().toLowerCase() === heading.toLowerCase();
+                  continue;
+                }
+                if (capture) out.push(line);
+              }
+              return out.join('\n');
+            }
+
+            // 2. Candidate downstream issues: open + release:next-minor.
+            const downstream = await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: 'release:next-minor', per_page: 100,
+            });
+
+            // 3. Keep those that reference a just-closed issue under
+            //    "## Required in pinned seed" or "## Blocked by" AND whose
+            //    "## Files Affected" touches compiler-source.
+            const dependents = [];
+            for (const d of downstream) {
+              if (d.pull_request) continue; // listForRepo includes PRs
+              const body = d.body || '';
+              const refText =
+                section(body, 'Required in pinned seed') + '\n' + section(body, 'Blocked by');
+              const refs = [...refText.matchAll(/#(\d+)/g)].map(m => parseInt(m[1], 10));
+              if (!refs.some(n => closing.has(n))) continue;
+              const files = section(body, 'Files Affected');
+              if (!/compiler\/src\/|runtime\/prelude\.sfn/.test(files)) continue;
+              dependents.push(d.number);
+            }
+            if (dependents.length === 0) {
+              core.info('No required-in-seed dependents among release:next-minor issues.');
+              return;
+            }
+            core.info(`Dependents needing a seed cut: ${dependents.map(n => '#' + n).join(', ')}`);
+
+            // 4. Resolve the ACTIVE release tracker dynamically: open, labeled
+            //    `tracking`, title `Release: vX.Y.Z`. Never hardcoded.
+            const trackers = (await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: 'tracking', per_page: 100,
+            })).filter(i => !i.pull_request && /^Release:\s*v\d/.test(i.title));
+            if (trackers.length === 0) {
+              core.info('No open Release tracker — logging and exiting 0 without posting.');
+              return;
+            }
+            const ver = t => {
+              const m = t.title.match(/v(\d+)\.(\d+)\.(\d+)/);
+              return m ? [+m[1], +m[2], +m[3]] : [Infinity, 0, 0];
+            };
+            trackers.sort((a, b) => {
+              const x = ver(a), y = ver(b);
+              return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+            });
+            const tracker = trackers[0]; // nearest (lowest) unreleased version
+            if (trackers.length > 1) {
+              core.info(`Multiple open trackers; using nearest ${tracker.title} (#${tracker.number}).`);
+            }
+
+            // 5. Idempotency: skip if an advisory for THIS PR already exists.
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: tracker.number, per_page: 100,
+            });
+            const marker = `Auto-advisor: PR #${prNumber} `;
+            if (comments.some(c => (c.body || '').includes(marker))) {
+              core.info(`Advisory for PR #${prNumber} already on #${tracker.number}; skipping comment.`);
+            } else {
+              const depList = dependents.map(n => '#' + n).join(', ');
+              const body =
+                `Auto-advisor: PR #${prNumber} just merged and is required-in-seed by ` +
+                `${depList}. Cut a new alpha and \`/pin-seed\` before pickup of those issues.`;
+              await github.rest.issues.createComment({ owner, repo, issue_number: tracker.number, body });
+              core.info(`Posted advisory on #${tracker.number}.`);
+            }
+
+            // 6. Flag for /release-plan: label the tracker and each dependent.
+            async function addLabel(num) {
+              try {
+                await github.rest.issues.addLabels({
+                  owner, repo, issue_number: num, labels: ['needs-seed-cut'],
+                });
+              } catch (e) {
+                core.warning(`Could not label #${num}: ${e.message}`);
+              }
+            }
+            await addLabel(tracker.number);
+            for (const n of dependents) await addLabel(n);
