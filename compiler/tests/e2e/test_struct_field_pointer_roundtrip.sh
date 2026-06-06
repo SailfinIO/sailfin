@@ -77,15 +77,26 @@ test_node_layout_has_pointer_fields() {
 # `store i8*` (or `store ptr`). Pre-fix the store was silently dropped.
 test_raw_pointer_field_emits_store() {
     emit_ir_once || return 1
-    local gep
-    gep="$(grep -cE 'getelementptr %Node, %Node\* %[A-Za-z_0-9]+, i32 0, i32 2' "$LL" || true)"
-    local store
-    store="$(grep -cE 'store (i8\*|ptr) ' "$LL" || true)"
-    if [ "${gep:-0}" -ge 1 ] && [ "${store:-0}" -ge 1 ]; then
+    # Tie the store to the specific slot-2 GEP result rather than matching
+    # any `store i8*` in the module: capture each `... i32 0, i32 2` GEP's
+    # result register, then require a `store` whose destination pointer is
+    # one of those registers. The GEP's pointer operand may be `%Node*`
+    # (typed pointers) or `ptr` (opaque pointers) — the middle of the line
+    # is left unconstrained so both forms match.
+    if awk '
+        /^[[:space:]]*%[A-Za-z_0-9.]+ = getelementptr %Node, .*i32 0, i32 2$/ {
+            slot2[$1] = 1
+            next
+        }
+        /^[[:space:]]*store (i8\*|ptr) / {
+            if ($NF in slot2) { found = 1 }
+        }
+        END { exit found ? 0 : 1 }
+    ' "$LL"; then
         return 0
     fi
-    echo "[test]   expected a slot-2 GEP and a store i8* for the raw pointer field"
-    echo "[test]     slot-2 GEPs=${gep:-0}, store i8*/ptr=${store:-0}"
+    echo "[test]   expected a store (i8*/ptr) into the slot-2 GEP result for the raw pointer field"
+    grep -nE 'getelementptr %Node, .*i32 0, i32 2$|store (i8\*|ptr) ' "$LL" | sed 's/^/[test]     /' | head -10
     return 1
 }
 
