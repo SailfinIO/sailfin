@@ -187,19 +187,18 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         ti += 1;
     }
 
-    // Phase B: route effect-violation severity through the same
-    // env-var contract the build path uses. `sfn check` honors
-    // `=warning` and `=error` so contributors can dry-run the
-    // post-Phase-D gate by exporting `=error` locally; the default
-    // ("warning") keeps the audit period non-disruptive.
+    // Route effect-violation severity through the same env-var
+    // contract the build path uses. `sfn check` honors `=warning`
+    // and `=error`; post-Phase-D the unset default is "error", so
+    // `sfn check` enforces declared effects by default. Contributors
+    // who want the pre-Phase-D audit mode opt in with `=warning`.
     //
     // Per proposal §4.7, `=off` is a build-path escape hatch only
     // — "does not turn off sfn check validation, only the build
     // path." `sfn check` therefore ignores `=off` and falls back
-    // to whatever severity would apply for an unset env var. That
-    // way Phase B's warning default and Phase D's eventual error
-    // default both flow through naturally without a second knob
-    // for `sfn check` to track.
+    // to whatever severity would apply for an unset env var — the
+    // Phase D "error" default — without a second knob for `sfn check`
+    // to track.
     //
     // `read_effect_enforcement_env` reads `SAILFIN_EFFECT_ENFORCE`
     // directly via `env.get`; the `file_path` argument is retained

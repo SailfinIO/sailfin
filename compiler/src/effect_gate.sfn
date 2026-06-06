@@ -58,8 +58,8 @@ import { Diagnostic } from "./typecheck_types";
 fn resolve_effect_enforcement(raw: string) -> string {
     if raw == "off" { return "off"; }
     if raw == "warning" { return "warning"; }
-    // Empty string covers both "env var unset" (the shell read
-    // returns "" for missing vars) and an explicit empty value.
+    // Empty string covers both "env var unset" (`env.get` returns
+    // "" for missing vars) and an explicit empty value.
     // Phase D flipped the default to "error" — `make compile`,
     // `sfn build`, `sfn run`, `sfn test`, and `sfn check` all gate
     // builds on declared effects. Capsule authors who want the
