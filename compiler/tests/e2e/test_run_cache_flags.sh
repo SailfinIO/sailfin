@@ -5,7 +5,7 @@
 # `sfn build`:
 #   - backwards-compat `sfn run <file>` (no flags) still works
 #   - `--no-cache` suppresses the cache summary line
-#   - `--clean` wipes `<cache_root>/v1/...` before building
+#   - `--clean` wipes `<cache_root>/v2/...` before building
 #   - `--cache-trace` emits per-module `[cache hit/miss/store]` lines
 #   - the cache stats summary fires after a successful run when the
 #     cache was consulted
@@ -155,7 +155,7 @@ run_test "sfn run --cache-trace prints '[cache hit] sfn/math/mod'" test_cache_tr
 test_clean_wipes_cache() {
     cd "$SCRATCH" || return 1
     # Sanity: cache_root must exist before --clean (populated by tests 1-2)
-    [ -d "$CACHE_DIR/v1" ] || return 1
+    [ -d "$CACHE_DIR/v2" ] || return 1
     SAILFIN_BUILD_CACHE_DIR="$CACHE_DIR" "$BINARY" run --clean src/main.sfn \
         > "$SCRATCH/run_clean.stdout" 2>&1
     local rc=$?
@@ -166,7 +166,7 @@ test_clean_wipes_cache() {
     fi
     # After --clean the `.ll` module cache is wiped and repopulated:
     # miss + store. #915: `--clean` wipes only the `.ll` cache root
-    # ($CACHE_DIR/v1), NOT the runtime object cache under
+    # ($CACHE_DIR/v2), NOT the runtime object cache under
     # $SCRATCH/build/sailfin, so the runtime objects still hit. Assert
     # the re-miss of the `.ll` module (miss>=1, store>=1) without
     # constraining the (now non-zero) runtime hits.

@@ -3444,9 +3444,22 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
 // stage extra `<name>/<rel>` slugs for capsules whose tests only
 // reach the host source via `../src/...` relative imports — those
 // already produce path-shaped slugs through the relative-import
-// walker, and shadowing them with `<name>/...` slugs would race
-// the build cache (which keys IR by source content + dep manifests
-// only, not by slug — see `cache_key_for`).
+// walker.
+//
+// This gate is load-bearing for correctness, not just performance.
+// `_cr_enumerate_host_capsule_sources` collects *every* `.sfn` under
+// `<project_root>/src/`, including the capsule entrypoint
+// (`main.sfn`'s `@main`) and modules the test never imports. The
+// compiler's own `compiler/tests/` suite reaches `compiler/src/`
+// exclusively via `../../src/X` — never by the `sailfin` name — so
+// firing host-enum there would link `compiler/src/main.sfn` into
+// every test binary alongside the test-runner's own `@main`, which
+// fails to link with `invalid redefinition of function 'main'`.
+// Gating on a by-name import keeps host-enum a no-op for those
+// tests. (#527 separately made `cache_key_for` mix the slug into the
+// digest, closing the cache-entry race that co-firing the two
+// walkers would otherwise cause — but the duplicate-`@main` link
+// hazard is a distinct, link-layer problem the gate still guards.)
 fn _cr_any_entry_imports_host(entry_paths: string[], capsule_name: string) -> boolean ![io] {
     if capsule_name.length == 0 { return false; }
     let mut i: int = 0;
@@ -3747,18 +3760,23 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
         // (currently `sfn test`) AND at least one test entry
         // imports the host capsule by its `[capsule].name`,
         // enumerate `<project_root>/src/` and tag each source with
-        // the manifest's name as the spec. Without this gate, a
-        // capsule whose tests only reach the host via `../src/...`
-        // (path-shaped slug) would still get a parallel
-        // `<name>/<rel>` enumeration, and `cache_key_for`'s
-        // slug-blind keying would race the two compiles on the same
-        // cache entry — every test in the resolver-driven `make
-        // test` suite then surfaces undefined references for the
-        // shape that lost the race. The build path keeps this off
-        // (`empty_resolver_consumer()`) because the host capsule's
-        // entry source is compiled directly via the single-file
-        // `compile_to_llvm_file_with_module` path, so re-
-        // enumerating it here would double-emit.
+        // the manifest's name as the spec. The by-name gate is
+        // required for correctness: `_cr_enumerate_host_capsule_sources`
+        // pulls in every `.sfn` under `src/`, including the capsule
+        // entrypoint. For a capsule whose tests only reach the host
+        // via `../src/...` (path-shaped slug) — the compiler's own
+        // `compiler/tests/` suite is the canonical case — firing
+        // host-enum would link `main.sfn`'s `@main` into each test
+        // binary on top of the test-runner `@main`, failing the link
+        // with `invalid redefinition of function 'main'`. (#527 also
+        // closed the cache-entry race that co-firing the path-shaped
+        // and `<name>/<rel>` walkers would cause, by mixing the slug
+        // into `cache_key_for`'s digest; the gate independently
+        // prevents the duplicate-entrypoint link hazard.) The build
+        // path keeps this off (`empty_resolver_consumer()`) because
+        // the host capsule's entry source is compiled directly via
+        // the single-file `compile_to_llvm_file_with_module` path, so
+        // re-enumerating it here would double-emit.
         if consumer.include_host_as_dep {
             let manifest_path = _cr_path_join(project_root, "capsule.toml");
             if fs.exists(manifest_path) {
