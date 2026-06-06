@@ -118,6 +118,14 @@ extern fn sfn_str_find_byte(s: * u8, byte_value: i64, start_index: i64) -> i64;
 
 extern fn sfn_str_from_codepoint(cp: i64) -> * u8;
 
+// #874: raw single-byte string constructor. Unlike `from_codepoint`
+// (UTF-8 encode), this writes the byte value verbatim — the write
+// counterpart to the already-working byte read (`char_code(s[i])`).
+// Returns a fresh NUL-terminated 1-byte buffer for 1..255; the empty
+// string for 0 (unrepresentable under the NUL-terminated model — see
+// the C body) and out-of-range values.
+extern fn sfn_str_from_byte(byte_value: i64) -> * u8;
+
 extern fn sfn_int_to_str(value: i64) -> * u8;
 
 // `sfn_str_sfn_len(s)` — Sailfin-side length recovery for the
@@ -297,6 +305,19 @@ fn sfn_str_sfn_codepoint(s: * u8) -> i64 {
 // the C body's invariant.
 fn sfn_str_sfn_from_codepoint(cp: i64) -> * u8 {
     return sfn_str_from_codepoint(cp);
+}
+
+// `sfn_str_sfn_from_byte(byte_value)` — raw single-byte string build
+// (#874). Proof-of-life Sailfin trampoline following the
+// `from_codepoint` discipline: today's body forwards to the C wave-2
+// entrypoint `sfn_str_from_byte` (which `malloc`s the 1-byte
+// NUL-terminated buffer), because the Sailfin call surface can't thread
+// an arena yet (M1.A.2). The prelude's `char_from_code` wraps this and
+// casts the `* u8` result to `string`. Byte 0 and out-of-range values
+// yield the empty string — see the C body for the NUL-termination
+// limitation deferred to the SfnString aggregate flip.
+fn sfn_str_sfn_from_byte(byte_value: i64) -> * u8 {
+    return sfn_str_from_byte(byte_value);
 }
 
 // `sfn_str_sfn_to_number(s)` — parse `s` as a decimal `f64`.

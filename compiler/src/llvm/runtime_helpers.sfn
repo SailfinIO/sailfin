@@ -904,6 +904,18 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "char_code", symbol: "char_code", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    // #874: `char_from_code(code)` — raw single-byte string constructor, the
+    // write counterpart to `char_code`'s read. Bare-name descriptor so user
+    // call sites resolve the return type and emit `call i8* @char_from_code`,
+    // linking to the prelude's `char_from_code` definition (which forwards to
+    // the C `sfn_str_from_byte` trampoline). `native_signature: null` — same
+    // shape as the `char_code` row above; the symbol IS the prelude function.
+    // Self-host is unaffected: the prelude's own body resolves through its
+    // inline `extern fn sfn_str_from_byte` / function entry (#633), not this
+    // descriptor, so the seed never needs the row to build the prelude.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "char_from_code", symbol: "char_from_code", return_type: "i8*", parameter_types: ["i64"], effects: [], native_signature: null, c_abi_return_type: null
+    });
     // M2.5 (#403): the bare `number_to_string` C trampoline (a one-line
     // wrapper around `sailfin_runtime_number_to_string`) becomes
     // unreferenced once this descriptor targets the wave-2

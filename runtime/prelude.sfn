@@ -705,6 +705,36 @@ fn char_code(character: string) -> int {
     return runtime_char_code_fn(grapheme_at(character, 0));
 }
 
+// `char_from_code(code)` — build a 1-byte string from the raw byte value
+// `code` (1..255). The write counterpart to `char_code`'s read: pure-Sailfin
+// code can now both read (`char_code(s[i])`) and construct (`char_from_code`)
+// arbitrary single bytes, removing the `char_from_code()`-pending workarounds
+// in `capsules/sfn/cli/src/style.sfn` and `capsules/sfn/crypto/src/mod.sfn`
+// (#874). Unlike a codepoint encoder this writes the byte verbatim — no UTF-8
+// expansion for 128..255 — so `char_code(char_from_code(n)) == n` round-trips
+// across 1..255.
+//
+// Byte 0 returns the empty string: a lone NUL is unrepresentable under the
+// current NUL-terminated `string` model (`.length` is `strlen`-recovered).
+// Faithful embedded-NUL bytes arrive with the SfnString aggregate flip
+// (M1.A.2); out-of-range `code` (< 0 or > 255) also yields "". The `* u8`→
+// `string` cast on an alloca-backed local lowers correctly (the seed's cast
+// bug is literal-only — see `runtime/sfn/platform/exec.sfn`).
+//
+// The backing symbol is declared `extern` here rather than imported from
+// `./sfn/string`: prelude emission runs before cross-module import contexts
+// are staged (#306), so a call to the imported `sfn_str_sfn_from_byte` cannot
+// resolve its return type during the seed's prelude build. Re-declaring the C
+// entrypoint inline is the same #306 workaround `exec.sfn` / `process.sfn`
+// use; the `runtime/sfn/string.sfn` wrapper remains the migration unit that
+// absorbs the body once M1.A.2 lets it consume the aggregate directly.
+extern fn sfn_str_from_byte(byte_value: i64) -> * u8;
+
+fn char_from_code(code: int) -> string {
+    let bytes: * u8 = sfn_str_from_byte(code);
+    return bytes as string;
+}
+
 fn grapheme_count(text: string) -> int {
     return runtime_grapheme_count_fn(text);
 }
@@ -722,6 +752,7 @@ export {
     grapheme_count,
     grapheme_at,
     char_code,
+    char_from_code,
     match_exhaustive_failed,
     enum_type,
     enum_define_variant,
