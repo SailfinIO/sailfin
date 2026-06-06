@@ -69,16 +69,16 @@ fn _write_file(path: string, content: string) ![io] {
 // --------------------------------------------------------------
 // Schema version
 // --------------------------------------------------------------
-test "build_cache: schema version is v1" {
-    assert build_cache_schema_version() == "v1";
+test "build_cache: schema version is v2" {
+    assert build_cache_schema_version() == "v2";
 }
 
 test "build_cache: cache_root_with_override empty -> in-tree default" {
-    assert cache_root_with_override("") == "build/cache/v1";
+    assert cache_root_with_override("") == "build/cache/v2";
 }
 
 test "build_cache: cache_root_with_override non-empty -> override + version" {
-    assert cache_root_with_override("/tmp/sfn-shared-cache") == "/tmp/sfn-shared-cache/v1";
+    assert cache_root_with_override("/tmp/sfn-shared-cache") == "/tmp/sfn-shared-cache/v2";
 }
 
 // --------------------------------------------------------------
@@ -162,9 +162,13 @@ test "build_cache: cache_key_for invariant under dep order" ![io] {
     _write_file(dep_a, "module: alpha; layout: ...");
     _write_file(dep_b, "module: beta; layout: ...");
     _write_file(dep_c, "module: gamma; layout: ...");
-    let key_abc = cache_key_for(src, [dep_a, dep_b, dep_c], "0.5.10-alpha.2", "[]", "dep_order_abc");
-    let key_cba = cache_key_for(src, [dep_c, dep_b, dep_a], "0.5.10-alpha.2", "[]", "dep_order_cba");
-    let key_bac = cache_key_for(src, [dep_b, dep_a, dep_c], "0.5.10-alpha.2", "[]", "dep_order_bac");
+    // Slug is held constant — it's a digest input (schema v2), so the
+    // invariant under test is dep *order*, not slug. The tmp suffix
+    // collision concern only applies to concurrent workers; these
+    // calls run sequentially.
+    let key_abc = cache_key_for(src, [dep_a, dep_b, dep_c], "0.5.10-alpha.2", "[]", "dep_order");
+    let key_cba = cache_key_for(src, [dep_c, dep_b, dep_a], "0.5.10-alpha.2", "[]", "dep_order");
+    let key_bac = cache_key_for(src, [dep_b, dep_a, dep_c], "0.5.10-alpha.2", "[]", "dep_order");
     assert key_abc.digest == key_cba.digest;
     assert key_abc.digest == key_bac.digest;
     _cleanup(scratch);
@@ -217,6 +221,22 @@ test "build_cache: cache_key_for changes when flags change" ![io] {
     let key1 = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[]", "flag_sens_1");
     let key2 = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[\"--release\"]", "flag_sens_2");
     assert key1.digest != key2.digest;
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_key_for changes when slug changes" ![io] {
+    let scratch = _test_tmp_root("slug_sensitive");
+    let src = scratch + "/source.sfn";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    let no_deps: string[] = [];
+    // Schema v2: slug is mixed into the digest so the *same* source
+    // enumerated under two distinct slugs (e.g. `/foo` via the host-
+    // capsule walker and `../src/foo` via the relative-import walker)
+    // keys two distinct cache entries instead of racing on one (#527).
+    // All inputs identical except the trailing slug.
+    let key_a = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[]", "slug_a");
+    let key_b = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[]", "slug_b");
+    assert key_a.digest != key_b.digest;
     _cleanup(scratch);
 }
 

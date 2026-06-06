@@ -1282,11 +1282,18 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         // exclusively via `../../src/X` relative imports — fail
         // the in-resolver `_cr_any_entry_imports_host` gate, so
         // host-enum stays a no-op and the resolver behaves the
-        // same as the prior `empty_resolver_consumer()` path.
-        // Standalone test files outside any `capsule.toml`
-        // (project_root empty) get a fully empty consumer for the
-        // same reason — there's no manifest, no `[capsule].name`,
-        // and so nothing for host-enum to walk.
+        // same as the prior `empty_resolver_consumer()` path. That
+        // gate is load-bearing: host-enum pulls in every host `src/`
+        // module including `main.sfn`, so firing it for those tests
+        // would link a second `@main` into each test binary. (#527
+        // mixed the slug into `cache_key_for`'s digest, closing the
+        // separate cache-entry race that co-firing the two walkers
+        // would cause; the gate still guards the link-layer
+        // duplicate-`@main` hazard.) Standalone test files outside
+        // any `capsule.toml` (project_root empty) get a fully empty
+        // consumer for the same reason — there's no manifest, no
+        // `[capsule].name`, and so nothing for
+        // host-enum to walk.
         // Stage D PR3: `sfn test` runs from the legacy `make test`
         // path that does not thread `binary_dir` through, so pass
         // an empty `sailfin_exe`. The resolver falls back to the
