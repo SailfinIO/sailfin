@@ -1,0 +1,114 @@
+name: gh-aw Recompile
+
+# Proactively catches upstream gh-aw image yanks before they break production
+# agentic runs. gh-aw pins firewall / mcpg / runner images to specific
+# releases inside the generated `*.lock.yml` files; when upstream rotates or
+# retracts one of those pins, every agentic workflow fails at `Install AWF
+# binary` until someone recompiles (see PR #442, where `gh-aw-firewall
+# v0.25.28` was retracted and 404'd on `checksums.txt`).
+#
+# Dependabot can't see this: it doesn't watch ghcr digests, and
+# `github/gh-aw-actions/*` is ignored in `.github/dependabot.yml` precisely so
+# it stops desyncing the lock files. So this workflow runs
+# `gh aw compile --force-refresh-action-pins` on a schedule, and if any lock
+# file drifts it opens a PR for human review.
+#
+# This is a regular Actions workflow, NOT a gh-aw `.md` source — it has no
+# LLM, no API key, and only refreshes generated lock files. It deliberately
+# does NOT auto-merge: per the gh-aw FAQ, a human must review bumped pins
+# before merging. See `.github/AGENTS.md` ("Keeping lock files fresh").
+
+on:
+  schedule:
+    # Weekly, Monday 08:27 UTC (off-peak minute to avoid Actions contention).
+    - cron: '27 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: gh-aw-recompile
+  cancel-in-progress: false
+
+jobs:
+  recompile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+        with:
+          # Prefer a PAT so the opened PR triggers downstream CI; the default
+          # GITHUB_TOKEN works too but won't kick other workflow runs.
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Install gh aw extension
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh extension install github/gh-aw || gh extension upgrade gh-aw
+
+      - name: Recompile with refreshed action pins
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh aw compile --force-refresh-action-pins
+
+      - name: Detect lock-file drift
+        id: drift
+        run: |
+          if git diff --quiet -- .github/workflows/*.lock.yml .github/aw/actions-lock.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No drift — gh-aw lock files are current."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Drift detected in gh-aw lock files:"
+            git --no-pager diff --stat -- .github/workflows/*.lock.yml .github/aw/actions-lock.json
+          fi
+
+      - name: Open or update recompile PR
+        if: steps.drift.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BRANCH="chore/gh-aw-recompile"
+          TITLE="chore(workflows): scheduled gh-aw recompile"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -B "$BRANCH"
+          git add .github/workflows/*.lock.yml .github/aw/actions-lock.json
+          git commit -m "$TITLE"
+          # Force-with-lease keeps a single rolling branch: a re-run with the
+          # same drift just refreshes it instead of stacking commits/PRs.
+          git push --force-with-lease origin "$BRANCH"
+
+          BODY=$(cat <<'EOF'
+          Automated recompile of gh-aw lock files via
+          `gh aw compile --force-refresh-action-pins`.
+
+          The scheduled `gh-aw Recompile` workflow detected drift between the
+          committed `*.lock.yml` / `actions-lock.json` and the freshly resolved
+          upstream action/image pins. This usually means gh-aw rotated (or
+          retracted) one of the firewall / mcpg / runner images.
+
+          **Review before merging** — per the
+          [gh-aw FAQ](https://github.github.com/gh-aw/reference/faq/), a human
+          must confirm the bumped pins. This PR is intentionally not
+          auto-merged. See `.github/AGENTS.md` ("Keeping lock files fresh").
+          EOF
+          )
+
+          if gh pr view "$BRANCH" --json state --jq '.state' 2>/dev/null | grep -qx OPEN; then
+            echo "PR already open for $BRANCH — branch updated with latest recompile."
+          else
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "$TITLE" \
+              --body "$BODY" \
+              --label agent-authored \
+              --label area:agents
+          fi
