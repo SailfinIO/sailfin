@@ -24,7 +24,7 @@ to specific releases/digests. When gh-aw rotates one of those pins
 upstream — or retracts a release outright, as happened with
 `gh-aw-firewall v0.25.28` (PR #442) — every agentic run fails at
 `Install AWF binary` until someone recompiles. Dependabot can't see this
-(it doesn't watch ghcr digests, and `github/gh-aw-actions/*` is
+(it doesn't watch ghcr digests, and `github/gh-aw-actions*` is
 explicitly ignored in `.github/dependabot.yml`), so the
 `.github/workflows/gh-aw-recompile.yml` workflow runs `gh aw compile
 --force-refresh-action-pins` weekly (and on demand) and opens a

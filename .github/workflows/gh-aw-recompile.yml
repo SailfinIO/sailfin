@@ -8,7 +8,7 @@ name: gh-aw Recompile
 # v0.25.28` was retracted and 404'd on `checksums.txt`).
 #
 # Dependabot can't see this: it doesn't watch ghcr digests, and
-# `github/gh-aw-actions/*` is ignored in `.github/dependabot.yml` precisely so
+# `github/gh-aw-actions*` is ignored in `.github/dependabot.yml` precisely so
 # it stops desyncing the lock files. So this workflow runs
 # `gh aw compile --force-refresh-action-pins` on a schedule, and if any lock
 # file drifts it opens a PR for human review.
