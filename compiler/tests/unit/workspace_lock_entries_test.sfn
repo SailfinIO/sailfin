@@ -125,11 +125,15 @@ fn _load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
         if i >= paths.length { break; }
         let path = paths[i];
         if !_is_safe_member_path(path) {
+            print.err("workspace: skipping unsafe member path \"" + path
+                + "\" (must be relative, no `..`, no backslashes)");
             i += 1;
             continue;
         }
         let name = _read_member_name(workspace_root, path);
         if name.length == 0 {
+            print.err("workspace: skipping member \"" + path
+                + "\" — capsule.toml missing or has no [capsule].name");
             i += 1;
             continue;
         }
