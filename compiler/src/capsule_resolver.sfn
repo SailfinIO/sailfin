@@ -64,7 +64,7 @@ import {
     _mktemp_sibling_cmd
 } from "./cli_commands_utils";
 import { emit_subprocess_with_retry } from "./emit_helpers";
-import { lock_get_versions } from "./lock";
+import { _LockEntry, lock_get_versions } from "./lock";
 import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_file_with_module_imports,
@@ -78,6 +78,7 @@ import {
     toml_get_capabilities_required,
     toml_get_dependencies,
     toml_get_name,
+    toml_get_version,
     toml_get_workspace_members
 } from "./toml_parser";
 import { resolve_compiler_version_for_cache } from "./version";
@@ -108,6 +109,7 @@ export {
     prepare_project_capsules_for_check,
     prepare_project_capsules_for_test,
     resolve_relative_import,
+    resolve_workspace_lock_entries,
     stage_capsule_imports,
     workspace_member_for_spec
 };
@@ -2371,6 +2373,42 @@ fn workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> string
         i += 1;
     }
     return "";
+}
+
+// Resolve the whole workspace member graph into the flat lock-entry set a
+// writer (`workspace_lock_write`) can serialize. Returns one `_LockEntry`
+// per literal `[workspace].members` entry, carrying the member's canonical
+// name and version read from its own capsule.toml.
+//
+// Member selection mirrors `load_workspace_members`: unsafe paths and
+// members whose capsule.toml is missing or has no [capsule].name are
+// already dropped (with a `print.err` warning) before this fn sees them,
+// so no entry is ever emitted for an unnamed member.
+//
+// Hash field: workspace members are path-pinned local source trees, not
+// content-addressed external dependencies fetched into the capsule cache.
+// A member is identified by its workspace-relative path (fixed by
+// workspace.toml), so there is no packaged form to hash and the integrity
+// hash is left empty. Hashes in the flat lock schema are populated only
+// for external deps; an empty hash here means "path-pinned, not hashed".
+fn resolve_workspace_lock_entries(workspace_root: string) -> _LockEntry[] ![io] {
+    let mut out: _LockEntry[] = [];
+    let members = load_workspace_members(workspace_root);
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let member = members[i];
+        let manifest = _cr_path_join(_cr_path_join(workspace_root, member.member_path), "capsule.toml");
+        let mut version: string = "";
+        if fs.exists(manifest) {
+            version = toml_get_version(fs.readFile(manifest));
+        }
+        out.push(_LockEntry {
+            capsule: member.name, version: version, hash: ""
+        });
+        i += 1;
+    }
+    return out;
 }
 
 // ---- Source-level import scanning ----
