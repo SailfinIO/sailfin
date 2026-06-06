@@ -33,6 +33,21 @@ feature availability.
   reference the source uses without declaring, resolved against the
   workspace.toml member list. The textual `inline_imports_for_source`
   fallback in `sfn run` is gone (Stage B PR1).
+- **By-name and relative imports of a workspace capsule resolve to one
+  symbol** (#873): a relative import (`from "../src/mod"`) that lands
+  inside a workspace member's `src/` is now staged under the member's
+  canonical spec slug (`sfn/crypto/mod`) — the same slug the by-name
+  (`from "sfn/crypto"`) and manifest-dep paths assign — so both import
+  styles mangle a capsule function to one symbol
+  (`sha256_hex__sfn__crypto__mod`) and link. The resolver drops a
+  `.slugalias` sidecar at the path-shaped slug so
+  `resolve_import_artifact_slug` (lowering) converges the relative
+  call site; the canonicalization is scoped strictly to `workspace.toml`
+  members, so compiler-internal `compiler/src/**` relative slugs are
+  byte-identical and self-host is unaffected. Covered by
+  `compiler/tests/unit/capsule_relative_slug_test.sfn`,
+  `compiler/tests/e2e/test_capsule_byname_import_link.sh`, and the
+  `capsules/sfn/crypto` relative-import test suite.
 - `sfn build -p <capsule-path>` builds a capsule by manifest path. Reads
   `[build].kind`: `"library"` (default for stdlib capsules) emits a `.o`
   via `clang -c`; `"binary"` links an executable; `"runtime"` errors as a

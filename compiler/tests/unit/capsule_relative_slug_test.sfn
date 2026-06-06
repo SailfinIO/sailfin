@@ -1,0 +1,143 @@
+// #873 regression: `_cr_capsule_slug_for_path` must map a relatively-
+// imported capsule source (identified by its `module_name_from_path`
+// PATH SLUG) to its workspace member's canonical spec slug, and MUST
+// return "" for any slug not owned by a member.
+//
+// The load-bearing case is self-host safety: this repo's `workspace.toml`
+// lists `compiler` and `runtime/native` as members, but
+// `module_name_from_path` strips the `compiler/src/` and `runtime/`
+// prefixes BEFORE the slug reaches this helper, so a compiler-internal
+// import arrives as `llvm/lowering/abi_hash` (no `compiler/src/` segment)
+// and must NOT match the `compiler` member — otherwise every unit test
+// that relative-imports a compiler module fails to link. The
+// `compiler`/`runtime/native` members are present in `_members()` below
+// precisely so these tests would catch that regression.
+//
+// Helpers are inline-duplicated (mirroring `relative_import_resolver_test.sfn`)
+// because importing from `capsule_resolver.sfn` pulls in the whole
+// compiler via `./main`, which trips the seed's per-module timeout. The
+// inlined copy below MUST stay byte-for-byte in step with the original in
+// `compiler/src/capsule_resolver.sfn`.
+fn _str_eq(a: string, b: string) -> boolean {
+    if a.length != b.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= a.length { break; }
+        if substring(a, i, i + 1) != substring(b, i, i + 1) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Mirror of `WorkspaceMember` (compiler/src/capsule_resolver.sfn).
+struct _Member {
+    name: string;
+    member_path: string;
+    src_dir: string;
+}
+
+// Inline copy of `_cr_find_substring`.
+fn _find_substring(haystack: string, needle: string) -> int {
+    if needle.length == 0 { return 0; }
+    if needle.length > haystack.length { return -1; }
+    let last = haystack.length - needle.length;
+    let mut i: int = 0;
+    loop {
+        if i > last { break; }
+        if substring(haystack, i, i + needle.length) == needle { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// Inline copy of `_cr_capsule_slug_for_path` (operates on the PATH SLUG,
+// i.e. the `module_name_from_path` output the caller computes).
+fn _capsule_slug_for_path(path_slug: string, members: _Member[]) -> string {
+    if path_slug.length == 0 { return ""; }
+    let mut best_slug: string = "";
+    let mut best_len: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let m = members[i];
+        i += 1;
+        if m.member_path.length == 0 { continue; }
+        if m.name.length == 0 { continue; }
+        let needle = m.member_path + "/src/";
+        let pos = _find_substring(path_slug, needle);
+        if pos < 0 { continue; }
+        let tail = substring(path_slug, pos + needle.length, path_slug.length);
+        if tail.length == 0 { continue; }
+        if m.member_path.length > best_len {
+            best_len = m.member_path.length;
+            best_slug = m.name + "/" + tail;
+        }
+    }
+    return best_slug;
+}
+
+// Members mirror this repo's workspace.toml: the `capsules/*` stdlib
+// members PLUS `compiler` and `runtime/native` (whose presence is the
+// whole point of the self-host-safety cases below).
+fn _members() -> _Member[] {
+    let mut out: _Member[] = [];
+    out.push(_Member {
+        name: "sfn/crypto", member_path: "capsules/sfn/crypto", src_dir: "capsules/sfn/crypto/src"
+    });
+    out.push(_Member {
+        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "capsules/sfn/http/src"
+    });
+    out.push(_Member {
+        name: "sfn/compiler", member_path: "compiler", src_dir: "compiler/src"
+    });
+    out.push(_Member {
+        name: "sfn/runtime-native", member_path: "runtime/native", src_dir: "runtime/native/src"
+    });
+    return out;
+}
+
+test "capsule slug: capsule source path slug maps to spec slug" {
+    let slug = _capsule_slug_for_path("capsules/sfn/crypto/src/mod", _members());
+    assert _str_eq(slug, "sfn/crypto/mod");
+}
+
+test "capsule slug: nested capsule source keeps the tail" {
+    let slug = _capsule_slug_for_path("capsules/sfn/crypto/src/util/hex", _members());
+    assert _str_eq(slug, "sfn/crypto/util/hex");
+}
+
+test "capsule slug: second member resolves to its own spec" {
+    let slug = _capsule_slug_for_path("capsules/sfn/http/src/mod", _members());
+    assert _str_eq(slug, "sfn/http/mod");
+}
+
+test "capsule slug: absolute path slug still matches via the src segment" {
+    let slug = _capsule_slug_for_path("/home/user/sailfin/capsules/sfn/crypto/src/mod", _members());
+    assert _str_eq(slug, "sfn/crypto/mod");
+}
+
+// SELF-HOST GUARD: `module_name_from_path` strips `compiler/src/`, so a
+// compiler-internal import reaches the helper as `llvm/lowering/abi_hash`.
+// Even with the `compiler` member present, that slug has no
+// `compiler/src/` segment, so it must NOT canonicalize.
+test "capsule slug: stripped compiler slug returns empty despite compiler member" {
+    let slug = _capsule_slug_for_path("llvm/lowering/abi_hash", _members());
+    assert _str_eq(slug, "");
+}
+
+// SELF-HOST GUARD: `module_name_from_path` strips `runtime/`, so a runtime
+// import reaches the helper as e.g. `prelude` and must NOT canonicalize.
+test "capsule slug: stripped runtime slug returns empty despite runtime member" {
+    let slug = _capsule_slug_for_path("prelude", _members());
+    assert _str_eq(slug, "");
+}
+
+test "capsule slug: slug outside any member src returns empty" {
+    let slug = _capsule_slug_for_path("/tmp/widget/src/main", _members());
+    assert _str_eq(slug, "");
+}
+
+test "capsule slug: member dir slug without a /src/ tail returns empty" {
+    let slug = _capsule_slug_for_path("capsules/sfn/crypto/capsule", _members());
+    assert _str_eq(slug, "");
+}
