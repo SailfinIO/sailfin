@@ -28,7 +28,7 @@ import {
     strip_optional_suffix,
     trim_text
 } from "./emit_native_state";
-import { contains_string } from "./string_utils";
+import { char_at, contains_string, starts_with } from "./string_utils";
 
 // ── Layout-specific data structures ──────────────────────────────────
 struct LayoutEmitResult {
@@ -325,6 +325,17 @@ fn analyze_type_layout(context: LayoutContext, visiting: string[], type_annotati
             diagnostics: diagnostics
         };
     }
+    // Raw pointer fields (`*u8`, `*Node`, `*mut T`) are always one
+    // machine word; recognize them explicitly so legitimate pointer
+    // fields don't fall through to the "unsupported type" diagnostic
+    // below (issue #713).
+    if starts_with(trimmed, "*") {
+        return TypeLayoutInfo {
+            size: 8,
+            align: 8,
+            diagnostics: diagnostics
+        };
+    }
     if trimmed == "number" {
         return TypeLayoutInfo {
             size: 8,
@@ -459,13 +470,39 @@ fn analyze_type_layout(context: LayoutContext, visiting: string[], type_annotati
 }
 
 // ── Field conversion helpers ─────────────────────────────────────────
+// Pointer-typed field annotations (`* u8`, `* mut Node`, `* T`) carry an
+// internal space between the `*` and its pointee. The native-IR layout
+// manifest serializes a field's type as a single whitespace-delimited
+// token (`.layout field <name> type=<T> offset=...`), and the re-parser
+// (`parse_struct_layout_field`) splits that line on whitespace. An
+// embedded space therefore splits the `type=*` token from its pointee,
+// the trailing pointee becomes an unrecognized token, the field's parse
+// fails, and the field is silently dropped from the struct's LLVM layout
+// (issue #713). Collapse the spaces out of pointer annotations so the
+// type survives the round-trip as one token; `map_type_annotation`
+// already treats `*u8` / `*Node` identically to their spaced forms.
+fn normalize_layout_field_type(annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 { return trimmed; }
+    if !starts_with(trimmed, "*") { return trimmed; }
+    let mut result: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = char_at(trimmed, index);
+        if ch != " " { result = result + ch; }
+        index += 1;
+    }
+    return result;
+}
+
 fn convert_struct_fields(fields: FieldDeclaration[]) -> LayoutFieldInput[] {
     let mut inputs: LayoutFieldInput[] = [];
     let mut index: int = 0;
     loop {
         if index >= fields.length { break; }
         let field = fields[index];
-        let type_text = field.type_annotation.text;
+        let type_text = normalize_layout_field_type(field.type_annotation.text);
         inputs = append_layout_field_input(inputs, LayoutFieldInput {
             name: field.name, type_annotation: type_text
         });

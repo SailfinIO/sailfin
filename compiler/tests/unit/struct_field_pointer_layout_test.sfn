@@ -1,0 +1,70 @@
+// Regression coverage for issue #713 — pointer-typed struct fields
+// (`* u8`, `* T`, self-referential `* StructTy`) were silently dropped
+// from the struct's LLVM layout type.
+//
+// Root cause: `emit_native_layout.sfn` serializes a field's type into a
+// single whitespace-delimited token (`.layout field <name> type=<T> ...`),
+// but pointer annotations carry an internal space (`* u8`). The native-IR
+// re-parser (`parse_struct_layout_field`) splits that line on whitespace,
+// so the pointee (`u8`) became a separate, unrecognized token, the field's
+// parse failed, and the consumer dropped the field — yielding
+// `%A = type { i64 }` for `struct A { a: i64; b: * u8; }`.
+//
+// The fix (`normalize_layout_field_type`) collapses the spaces out of
+// pointer annotations so the type survives the round-trip as one token;
+// `map_type_annotation` already treats `*u8` / `*Node` identically to
+// their spaced forms. These tests pin both the normalized native-IR token
+// and the resulting LLVM struct layout type for raw, position-independent,
+// and self-referential pointer fields.
+//
+// The four structs are lowered together in a single module so the heavy
+// `lower_to_llvm_ir_from_text` pass (type_context dominates) runs once for
+// every layout assertion — keeping the test within the per-file memory cap
+// the unit harness enforces.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _all_structs_source() -> string {
+    return "struct A { a: i64; b: * u8; }\n" + "struct C { a: * u8; b: i64; }\n"
+        + "struct Node { prev: * Node; value: i64; }\n"
+        + "struct Mixed { next: * Node; a: i64; other: * Mixed; b: i64; }\n"
+        + "fn main() -> i32 { return 0; }";
+}
+
+fn _emit_native(source: string) -> string ![io] {
+    let program = parse_program(source);
+    return emit_native_text_with_module_name(program, "struct_field_pointer_layout_test");
+}
+
+fn _emit_llvm(source: string) -> string ![io] {
+    let native = _emit_native(source);
+    return lower_to_llvm_ir_from_text(native, "struct_field_pointer_layout_test");
+}
+
+// ── Native-IR layout token survives the round-trip as one token ──────
+test "ptr layout: pointer field types serialize without an internal space" ![io] {
+    let native = _emit_native(_all_structs_source());
+    // Pointer field types are normalized to whitespace-free tokens so the
+    // whitespace-splitting re-parser keeps them. The spaced forms are the
+    // pre-fix shapes that dropped the fields.
+    assert index_of(native, ".layout field b type=*u8") >= 0;
+    assert index_of(native, ".layout field prev type=*Node") >= 0;
+    assert index_of(native, "type=* u8") < 0;
+    assert index_of(native, "type=* Node") < 0;
+    assert index_of(native, "type=* Mixed") < 0;
+}
+
+// ── LLVM struct layout types keep every pointer-shaped field ─────────
+// One lowering pass; every struct's type line is asserted off it.
+test "ptr layout: every pointer-shaped field survives into the LLVM type" ![io] {
+    let llvm = _emit_llvm(_all_structs_source());
+    // Raw `* u8`, trailing and leading (position-independent).
+    assert index_of(llvm, "%A = type { i64, i8* }") >= 0;
+    assert index_of(llvm, "%C = type { i8*, i64 }") >= 0;
+    // Self-referential `* Node` lowers to `%Node*`.
+    assert index_of(llvm, "%Node = type { %Node*, i64 }") >= 0;
+    // Mixed pointer/int, multiple named-struct pointers, position-mixed.
+    assert index_of(llvm, "%Mixed = type { %Node*, i64, %Mixed*, i64 }") >= 0;
+}

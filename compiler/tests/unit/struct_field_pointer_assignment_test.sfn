@@ -1,0 +1,52 @@
+// Regression coverage for issue #713 — the store-level symptom.
+//
+// Before the fix, `header.drop_fn = drop_fn;` (where `drop_fn: * u8`)
+// emitted **no** `store`: the layout pipeline dropped the pointer field
+// (see `struct_field_pointer_layout_test.sfn` for the root cause), so the
+// field-assignment dispatch found no slot to write to and silently
+// no-op'd. The integer field one line above stored fine. With the layout
+// fix the slot exists, so the assignment now lowers to the expected
+// `getelementptr ... i32 0, i32 1` + `store i8*` pair. This test pins that
+// shape so the store-drop cannot resurface.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _emit_llvm(source: string) -> string ![io] {
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "struct_field_pointer_assignment_test");
+    return lower_to_llvm_ir_from_text(native, "struct_field_pointer_assignment_test");
+}
+
+fn _store_source() -> string {
+    return "extern fn malloc(size: usize) -> * u8;\n"
+        + "struct RcHeader { refcount: i64; drop_fn: * u8; }\n"
+        + "fn alloc_test(drop_fn: * u8) -> * u8 {\n"
+        + "    let header_ptr = malloc(16);\n"
+        + "    let header = header_ptr as * RcHeader;\n"
+        + "    header.refcount = 1;\n"
+        + "    header.drop_fn = drop_fn;\n"
+        + "    return header_ptr;\n"
+        + "}\n"
+        + "fn main() -> i32 { return 0; }";
+}
+
+// ── The pointer field assignment GEPs to field index 1 ───────────────
+test "ptr store: `drop_fn` assignment GEPs to field index 1" ![io] {
+    let llvm = _emit_llvm(_store_source());
+    // RcHeader = { refcount: i64 (idx 0), drop_fn: * u8 (idx 1) }.
+    // The pointer field is the second member, so the field GEP selects
+    // `i32 0, i32 1`.
+    assert index_of(llvm, "getelementptr %RcHeader, %RcHeader*") >= 0;
+    assert index_of(llvm, "i32 0, i32 1") >= 0;
+}
+
+// ── The pointer field assignment emits a real `store i8*` ────────────
+test "ptr store: `drop_fn` assignment emits `store i8*`" ![io] {
+    let llvm = _emit_llvm(_store_source());
+    // Pre-fix this store was silently dropped; the `i64` field one line
+    // above still stored, which masked the bug.
+    assert index_of(llvm, "store i8* %drop_fn, i8**") >= 0;
+    assert index_of(llvm, "store i64 1, i64*") >= 0;
+}
