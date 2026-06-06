@@ -407,7 +407,8 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
                 state: operand_result.state,
                 expression: Expression.Spawn {
                     operand: operand_result.expression,
-                    span: source_span_from_tokens([token])
+                    span: source_span_from_tokens([token]),
+                    kind: ""
                 },
                 success: true
             };
@@ -420,7 +421,8 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
                 state: operand_result.state,
                 expression: Expression.Await {
                     operand: operand_result.expression,
-                    span: source_span_from_tokens([token])
+                    span: source_span_from_tokens([token]),
+                    kind: ""
                 },
                 success: true
             };
@@ -782,7 +784,8 @@ fn parse_channel_expression(state: ExpressionTokens) -> ExpressionParseResult {
         expression: Expression.Channel {
             element_type: null,
             capacity: capacity,
-            span: source_span_from_tokens([channel_token])
+            span: source_span_from_tokens([channel_token]),
+            kind: ""
         },
         success: true
     };

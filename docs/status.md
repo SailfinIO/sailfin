@@ -835,10 +835,10 @@ feature availability.
 | `&T` / `&mut T` borrows | Parsed only | Accepted syntactically; exclusivity not checked |
 | `PII<T>` / `Secret<T>` | Parsed only | Parsed as nominal types; no taint enforcement |
 | `model` / `prompt` / `tool` / `pipeline` blocks | **Removed** | Moved to the `sfn/ai` library capsule (post-1.0). The `![model]` effect remains as the capability gate |
-| `routine { }` blocks | **Not implemented** | Not parsed |
-| `await` | **Not implemented** | Not parsed |
-| `channel()` concurrency | **Not implemented** | Not parsed as concurrency primitive |
-| `spawn` | **Not implemented** | Not parsed |
+| `routine { }` blocks | Parsed | Frontend nodes land via #1079/#1081; no typecheck or lowering yet |
+| `await` | Parsed + typed (kind) | Parsed (#1080); `await x` yields the future's monomorphized element kind (void/number/int/bool/string/ptr) and `await` on a non-future is diagnosed (`E0814`) via the #1082 helpers. Live enforcement is helper-tested against explicit type strings — the live walk only recurses, pending the expression-type inferencer (#829). Lowering is #1084 |
+| `channel()` concurrency | Parsed + typed (kind) | Parsed (#1080); element kind resolved from the declared annotation and send-element-kind mismatch diagnosed (`E0815`) via the #1082 helpers (`channel<T>` element-type parsing + live wiring pending #829). Lowering is #1084 |
+| `spawn` | Parsed + typed (kind) | Parsed (#1080); the spawned callee's declared return type is resolved to one of six monomorphized future kinds (mirrors `llvm/type_mapping.sfn`) and a spawn target with no determinable kind is diagnosed (`E0813`) — #1082. AST nodes carry a `kind` tag for emit-native (#1084) to select the matching `spawn_*` helper. Lowering is #1084 |
 | `\|>` pipeline operator | **Not implemented** | Planned post-1.0 expression operator (unrelated to the removed `pipeline` block) |
 | Currency literals (`$0.05`) | **Not implemented** | Use numeric literal + comment |
 | Time literals (`1s`, `150ms`) | **Not implemented** | Use numeric literals |
