@@ -67,6 +67,7 @@ import {
 import {
     _env_flag,
     _legacy_flag_file,
+    _resolve_linker,
     _sha256_of_file_cmd,
     _shell_read_cmd,
     _shell_single_quote_arg
@@ -1436,6 +1437,11 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     runtime_link_libs = inputs.link_libs;
 
     let mut args: string[] = ["clang", opt_flag, "-Wno-override-module"];
+    // Opportunistic faster-linker selection (#343): prefer mold/lld when
+    // present, honour the `SAILFIN_LINKER` override, else fall back to the
+    // platform default. Empty string = no `-fuse-ld=` flag (system linker).
+    let linker_flag = _resolve_linker();
+    if linker_flag.length > 0 { args.push(linker_flag); }
     // `.ll` inputs are compiled inline by this same clang invocation, so
     // they need the section split here; pre-compiled runtime `.o`s already
     // carry it from `_clang_compile_runtime_capsule_objects` /

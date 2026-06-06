@@ -40,7 +40,8 @@ export {
     _is_ident_char_cmd,
     _byte_at_cmd,
     _word_matches_cmd,
-    _string_list_contains_cmd
+    _string_list_contains_cmd,
+    _resolve_linker
 };
 
 fn _ends_with_cmd(value: string, suffix: string) -> boolean {
@@ -147,6 +148,81 @@ fn _get_env_cmd(name: string) -> string ![io] {
 }
 
 fn _get_home_cmd() -> string ![io] { return _get_env_cmd("HOME"); }
+
+// True when `name` resolves to an executable on PATH. `command -v` is
+// POSIX and emits the resolved path (non-empty) on success, nothing on
+// failure — so a non-empty capture means the tool is present. `name` is
+// shell-quoted: current callers pass constants, but quoting matches the
+// surrounding `_shell_single_quote_arg` convention and forecloses a
+// shell-composition footgun if a caller ever threads through user input.
+fn _linker_on_path(name: string) -> boolean ![io] {
+    let found = _shell_read_cmd("command -v " + _shell_single_quote_arg(name)
+        + " 2>/dev/null");
+    return found.length > 0;
+}
+
+// Resolve the `-fuse-ld=` flag for the final clang link (#343).
+//
+// Opportunistic linker selection: probe PATH for a faster linker and
+// pass `-fuse-ld=<linker>` to clang when one is found, otherwise fall
+// back to the platform default. lld is ~2-5x faster than ld.bfd/ld.gold
+// on cold links of large object sets; mold is faster again. The empty
+// string means "use the system default" (no flag added).
+//
+// Self-contained on purpose: #1112 (the `Backend` interface) intends to
+// absorb the final-link call site, so this stays a single helper with no
+// driver-level state to untangle later.
+//
+// Override contract: `SAILFIN_LINKER` wins over auto-detection.
+//   - "ld" / "system" / "default" force the platform linker (no flag).
+//   - any other value selects that linker by name (e.g.
+//     `SAILFIN_LINKER=mold` -> `-fuse-ld=mold`).
+//
+// Auto-detect order: mold, then lld (`ld.lld` or `lld`), else default.
+// Auto-detect is gated to Linux only — every non-Linux host (macOS, the
+// BSDs) keeps the system default unless the user opts in via
+// `SAILFIN_LINKER`. lld's Mach-O backend has historically lagged ld64 on
+// edge cases and the path is not smoke-tested off Linux, so the safe
+// default is to do nothing rather than auto-flip an untested linker
+// (#343 risk note). The chosen linker is surfaced on a single `[link]`
+// info line — emitted on stderr, never stdout, so it cannot corrupt a
+// program's stdout under `sfn run` or any downstream pipe (mirrors the
+// `[cache]` line's stderr routing, #915).
+fn _resolve_linker() -> string ![io] {
+    let linker_override = _get_env_cmd("SAILFIN_LINKER");
+    if linker_override.length > 0 {
+        if linker_override == "ld" || linker_override == "system"
+            || linker_override == "default" {
+            print.err("[link] linker: system default (SAILFIN_LINKER="
+                + linker_override
+                + ")");
+            return "";
+        }
+        print.err("[link] linker: " + linker_override
+            + " (SAILFIN_LINKER override)");
+        return "-fuse-ld=" + linker_override;
+    }
+
+    let os = _shell_read_cmd("uname -s");
+    if os != "Linux" {
+        print.err("[link] linker: system default (auto-detect is Linux-only; "
+            + "set SAILFIN_LINKER=lld to opt in on "
+            + os
+            + ")");
+        return "";
+    }
+
+    if _linker_on_path("mold") {
+        print.err("[link] linker: mold (auto-detected)");
+        return "-fuse-ld=mold";
+    }
+    if _linker_on_path("ld.lld") || _linker_on_path("lld") {
+        print.err("[link] linker: lld (auto-detected)");
+        return "-fuse-ld=lld";
+    }
+    print.err("[link] linker: system default (mold/lld not found on PATH)");
+    return "";
+}
 
 // Compiler debug toggle: returns true when `name` is set to a value
 // other than "", "0", or "false". The legacy file probes
