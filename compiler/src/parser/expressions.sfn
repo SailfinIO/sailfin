@@ -16,6 +16,7 @@ import {
     substring
 } from "../string_utils";
 import { Token, TokenKind } from "../token";
+import { spawn_future_kind } from "../typecheck_types";
 import { parse_block } from "./statements";
 import {
     append_token,
@@ -403,12 +404,25 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
             let advanced = expression_tokens_advance(state);
             let operand_result = parse_expression_bp(advanced, unary_precedence());
             if !operand_result.success { return operand_result; }
+            // Tag the future kind when it is statically derivable from the
+            // operand: a lambda literal carries its declared return type
+            // (issue #1082, "the lambda/fn the parser attaches"). A bare
+            // named-fn call (`spawn foo()`) needs symbol resolution that is
+            // out of scope here, so its kind stays "" for #1084 to fill.
+            let mut spawn_kind: string = "";
+            let spawn_operand = operand_result.expression;
+            if spawn_operand.variant == "Lambda" {
+                let spawn_return = spawn_operand.return_type;
+                if spawn_return != null {
+                    spawn_kind = spawn_future_kind(spawn_return.text);
+                }
+            }
             return ExpressionParseResult {
                 state: operand_result.state,
                 expression: Expression.Spawn {
                     operand: operand_result.expression,
                     span: source_span_from_tokens([token]),
-                    kind: ""
+                    kind: spawn_kind
                 },
                 success: true
             };
@@ -779,6 +793,9 @@ fn parse_channel_expression(state: ExpressionTokens) -> ExpressionParseResult {
     if args_result.arguments.length == 1 {
         capacity = args_result.arguments[0];
     }
+    // `element_type` is `null` until `channel<T>(...)` parsing lands (a
+    // follow-up), so `kind` stays "" today; #1082's `spawn_future_kind` is
+    // ready to derive it from the annotation once the generic form is parsed.
     return ExpressionParseResult {
         state: args_result.state,
         expression: Expression.Channel {

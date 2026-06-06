@@ -80,6 +80,42 @@ fn _make_io_violating_routine(name: string, declared_effects: string[], span_lin
     };
 }
 
+// Build a FunctionDeclaration whose body is a structured `spawn worker()`
+// expression (an AST `Spawn` node, not a `Raw` text body). The spawned call
+// is effect-free on its own, so the only required effect is the `io` the
+// `spawn` prefix carries — exercising the #1082 effect-checker descent that
+// the old `"spawn("` text heuristic misses for the prefix syntax.
+fn _make_spawn_routine(name: string, declared_effects: string[], span_line: int) -> Statement {
+    let span = _span(span_line, 4);
+    let callee = Expression.Identifier { name: "worker", span: null };
+    let mut no_args: Expression[] = [];
+    let call = Expression.Call {
+        callee: callee,
+        arguments: no_args,
+        span: null
+    };
+    let spawn_expr = Expression.Spawn {
+        operand: call,
+        span: span,
+        kind: ""
+    };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: spawn_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: "",
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, declared_effects, span),
+        body: body_block,
+        decorators: empty_decorators
+    };
+}
+
 // -------------------------------------------------------------------
 // Canonical taxonomy — locked at 1.0
 // -------------------------------------------------------------------
@@ -157,6 +193,27 @@ test "effect violation: trigger falls back to signature_token on Raw text bodies
     assert trig.line == 12;
     assert trig.column == 4;
     assert trig.lexeme == "ping";
+}
+
+// -------------------------------------------------------------------
+// Concurrency-node effect descent (#1082)
+// -------------------------------------------------------------------
+test "effect violation: spawn prefix requires io" {
+    // `spawn <expr>` carries `io` like the Call-form `spawn(...)` handler,
+    // even though the prefix syntax escapes the `"spawn("` text heuristic.
+    let stmt = _make_spawn_routine("launcher", [], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert violations[0].routine_name == "launcher";
+}
+
+test "effect violation: spawn declaring io type-checks clean" {
+    let mut io_effects: string[] = ["io"];
+    let stmt = _make_spawn_routine("ok", io_effects, 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
 }
 
 test "effect violation: severity defaults to error" {
