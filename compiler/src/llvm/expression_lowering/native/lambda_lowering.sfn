@@ -56,7 +56,8 @@ import {
     TypeAnnotation,
     WithClause
 } from "../../../ast";
-import { Parser, parse_block } from "../../../parser/mod";
+import { parse_block } from "../../../parser/statements";
+import { Parser } from "../../../parser/types";
 import { LambdaCaptureRecord, analyze_lambda_captures } from "../../../typecheck_captures";
 import { percent_escape_capture_text } from "../../closures";
 import { number_to_string } from "../../utils";
