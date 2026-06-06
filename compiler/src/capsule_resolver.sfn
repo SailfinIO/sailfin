@@ -1348,6 +1348,39 @@ fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string, work_dir: string) -> b
     return true;
 }
 
+// #873: for every staged capsule source whose canonical slug differs
+// from the path-shaped slug a relative importer derives from the file
+// path (`module_name_from_path`), drop a `.slugalias` sidecar at the
+// PATH-slug location mapping it to the canonical slug. A relative import
+// (`../src/mod`) into a workspace member's source tree resolves to that
+// path slug, which has no staged `.layout-manifest` (the module was
+// staged under its canonical `sfn/crypto/mod` slug); the lowering /
+// typecheck import resolver reads this sidecar
+// (`imports.sfn:resolve_import_artifact_slug`) and converges on the
+// canonical slug so the call site mangles to the same symbol the capsule
+// object defines.
+//
+// No sidecar is written when the slug already equals the path slug —
+// which is every compiler-internal and non-capsule relative source — so
+// the self-host staging emits none and the resolver branch is never taken
+// while building the compiler.
+fn _cr_write_capsule_slug_aliases(sources: CapsuleSource[], context_root: string) ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= sources.length { break; }
+        let src = sources[i];
+        i += 1;
+        if src.slug.length == 0 { continue; }
+        if src.source_path.length == 0 { continue; }
+        let path_slug = module_name_from_path(_cr_canonicalise_path(src.source_path));
+        if path_slug.length == 0 { continue; }
+        if strings_equal(path_slug, src.slug) { continue; }
+        let alias_path = context_root + "/" + path_slug + ".slugalias";
+        _cr_ensure_dir(_cr_dirname(alias_path));
+        fs.writeFile(alias_path, src.slug);
+    }
+}
+
 // Extract `.layout` lines from a freshly-emitted `.sfn-asm` and
 // write the sibling `.layout-manifest`. Split out of `_cr_stage_one`
 // so the parallel-emit path can call it after xargs returns.
@@ -1419,6 +1452,7 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
             if !ok { return false; }
             si += 1;
         }
+        _cr_write_capsule_slug_aliases(sources, context_root);
         return true;
     }
 
@@ -1433,6 +1467,7 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
             if !ok { return false; }
             si += 1;
         }
+        _cr_write_capsule_slug_aliases(sources, context_root);
         return true;
     }
 
@@ -1496,6 +1531,10 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
             ei += 1;
         }
     }
+    // #873: alias sidecars are written for ALL sources (not just freshly-
+    // emitted ones) so a cache-hit run still publishes the path→canonical
+    // slug mapping the importer needs.
+    _cr_write_capsule_slug_aliases(sources, context_root);
     return true;
 }
 
@@ -2780,6 +2819,87 @@ fn _cr_relative_slug(entry_dir: string, file_path: string) -> string {
     return module_name_from_path(_cr_canonicalise_path(file_path));
 }
 
+// #873: map a relatively-imported file — identified by the PATH SLUG
+// that `_cr_relative_slug` / `module_name_from_path` derives for it — to
+// the canonical spec slug of the workspace member that owns its `src/`
+// tree. For path slug `capsules/sfn/crypto/src/mod` under member
+// `sfn/crypto` this returns `sfn/crypto/mod` — byte-identical to the slug
+// `_cr_collect_capsule_sources(<member>/src, "sfn/crypto")` assigns the
+// SAME file via the workspace-implicit / manifest-dep walks (line ~1035:
+// `spec + "/" + stem`). Returning that shared slug lets the relative and
+// scoped enumerators agree on one symbol per capsule function, so a
+// capsule's own tests (`import { f } from "../src/mod"`) link against the
+// same `f__sfn__crypto__mod` the by-name path already uses.
+//
+// CRITICAL — self-host safety: the input is the `module_name_from_path`
+// PATH SLUG, not the raw file path. `module_name_from_path` ROOTS every
+// `compiler/src/**` file at `compiler/src/` (→ `llvm/lowering/abi_hash`)
+// and every `runtime/**` file at `runtime/` (→ `prelude`), stripping
+// those prefixes. The `compiler` and `runtime/native` workspace members
+// (this repo lists both in `workspace.toml`) therefore NEVER match here —
+// their `<member_path>/src/` needle is absent from the stripped slug — so
+// compiler- and runtime-internal relative imports keep their existing
+// slugs and the self-host build stays byte-identical. Only
+// `capsules/<scope>/<name>` members, whose paths survive
+// `module_name_from_path` intact, are canonicalized. Returns "" when no
+// member owns the slug. The longest matching `member_path` wins so nested
+// members (a member whose path is a prefix of another) resolve
+// deterministically.
+fn _cr_capsule_slug_for_path(path_slug: string, members: WorkspaceMember[]) -> string {
+    if path_slug.length == 0 { return ""; }
+    let mut best_slug: string = "";
+    let mut best_len: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let m = members[i];
+        i += 1;
+        if m.member_path.length == 0 { continue; }
+        if m.name.length == 0 { continue; }
+        let needle = m.member_path + "/src/";
+        let pos = _cr_find_substring(path_slug, needle);
+        if pos < 0 { continue; }
+        let tail = substring(path_slug, pos + needle.length, path_slug.length);
+        if tail.length == 0 { continue; }
+        if m.member_path.length > best_len {
+            best_len = m.member_path.length;
+            best_slug = m.name + "/" + tail;
+        }
+    }
+    return best_slug;
+}
+
+// #873: recover the workspace-member spec (e.g. `sfn/crypto`) for a
+// canonical capsule slug produced by `_cr_capsule_slug_for_path`
+// (`sfn/crypto/mod`). The slug is `<member.name>/<tail>`, so the spec is
+// the member whose `name + "/"` prefixes the slug; the longest such name
+// wins so a submodule member nested under another resolves
+// deterministically. Returns "" when no member matches — callers then
+// leave `spec` empty (the path-slug / non-capsule case). The spec tags
+// the `CapsuleSource` so the relative-walk entry routes its `.ll` under
+// the per-capsule `build/capsules/<scope>/<name>/ir/` tree identically to
+// the workspace-implicit walk's entry for the same file.
+fn _cr_capsule_spec_for_slug(slug: string, members: WorkspaceMember[]) -> string {
+    let mut best: string = "";
+    let mut best_len: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let m = members[i];
+        i += 1;
+        if m.name.length == 0 { continue; }
+        let prefix = m.name + "/";
+        if slug.length <= prefix.length { continue; }
+        if substring(slug, 0, prefix.length) == prefix {
+            if m.name.length > best_len {
+                best_len = m.name.length;
+                best = m.name;
+            }
+        }
+    }
+    return best;
+}
+
 // Walk relative imports (`./foo`, `../foo`) reachable from `entry_path` and
 // return one CapsuleSource per discovered file. The entry itself is NOT
 // included — the caller compiles it via the standard single-file path.
@@ -2787,7 +2907,7 @@ fn _cr_relative_slug(entry_dir: string, file_path: string) -> string {
 // `runtime/*` and scoped (`scope/name`) imports are handled by
 // `enumerate_capsule_sources` (manifest-declared deps) and the workspace
 // member lookup; this enumerator only walks intra-project relative imports.
-fn enumerate_relative_sources(entry_path: string) -> CapsuleSource[] ![io] {
+fn enumerate_relative_sources(entry_path: string, members: WorkspaceMember[]) -> CapsuleSource[] ![io] {
     let mut out: CapsuleSource[] = [];
     if entry_path.length == 0 { return out; }
     let entry_dir = _cr_dirname(entry_path);
@@ -2844,14 +2964,33 @@ fn enumerate_relative_sources(entry_path: string) -> CapsuleSource[] ![io] {
                 if !already_seen {
                     visited.push(dep_path);
                     queue.push(dep_path);
-                    let slug = _cr_relative_slug(entry_dir, dep_path);
+                    // #873: if this relatively-imported file lives inside a
+                    // workspace member's `src/`, stage it under the member's
+                    // canonical spec slug (`sfn/crypto/mod`) — the SAME slug
+                    // the workspace-implicit / manifest-dep walks assign the
+                    // same file — so the relative and scoped enumerators
+                    // agree on one symbol per capsule function and a
+                    // capsule's own `../src/mod` tests link. Tag the spec
+                    // with the member name so the source routes under the
+                    // per-capsule `ir/` layout exactly like the implicit
+                    // walk's sources. Non-member paths (every `compiler/src/**`
+                    // and `runtime/**` file) get "" and fall back to the
+                    // path-shaped slug, leaving self-host slugs untouched.
+                    let path_slug = _cr_relative_slug(entry_dir, dep_path);
+                    let capsule_slug = _cr_capsule_slug_for_path(path_slug, members);
+                    let mut slug = path_slug;
+                    let mut spec: string = "";
+                    if capsule_slug.length > 0 {
+                        slug = capsule_slug;
+                        spec = _cr_capsule_spec_for_slug(capsule_slug, members);
+                    }
                     // ll_path is filled in by `_cr_resolve_and_dedupe`
                     // once the consumer is known (Stage C2b2) — for
                     // a `-p <consumer>` build with safe scope/name,
                     // this lands under the consumer's per-capsule
                     // tree; otherwise the legacy flat layout.
                     out.push(CapsuleSource {
-                        spec: "", source_path: dep_path, slug: slug, ll_path: ""
+                        spec: spec, source_path: dep_path, slug: slug, ll_path: ""
                     });
                 }
             }
@@ -3668,13 +3807,32 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
         };
     }
 
+    // (2) Manifest-declared capsule deps and (3) workspace-implicit
+    // imports use the first entry's directory as the anchor. By
+    // construction (callers group entries by `(project_root,
+    // workspace_root)`), every entry in `entry_paths` resolves to the
+    // same project root and workspace root, so the choice of anchor
+    // doesn't change the result. Computed up-front (#873) because the
+    // relative walk now needs the workspace member set to canonicalize
+    // a capsule source's slug to its spec slug.
+    let anchor_dir = _cr_dirname(entry_paths[0]);
+
+    let workspace_root = discover_workspace_root(anchor_dir);
+    let mut members: WorkspaceMember[] = [];
+    if workspace_root.length > 0 {
+        members = load_workspace_members(workspace_root);
+    }
+
     // (1) Relative imports — walked from every entry; the dedupe loop
-    // below collapses overlapping sets.
+    // below collapses overlapping sets. A relatively-imported file that
+    // resolves into a workspace member's `src/` is staged under that
+    // member's canonical spec slug (#873), so it collapses cleanly
+    // against the same file discovered by the workspace-implicit walk.
     let mut ei: int = 0;
     loop {
         if ei >= entry_paths.length { break; }
         let entry = entry_paths[ei];
-        let relative = enumerate_relative_sources(entry);
+        let relative = enumerate_relative_sources(entry, members);
         let mut ri: int = 0;
         loop {
             if ri >= relative.length { break; }
@@ -3683,14 +3841,6 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
         }
         ei += 1;
     }
-
-    // (2) Manifest-declared capsule deps and (3) workspace-implicit
-    // imports use the first entry's directory as the anchor. By
-    // construction (callers group entries by `(project_root,
-    // workspace_root)`), every entry in `entry_paths` resolves to the
-    // same project root and workspace root, so the choice of anchor
-    // doesn't change the result.
-    let anchor_dir = _cr_dirname(entry_paths[0]);
 
     let project_root = discover_project_root(anchor_dir);
 
@@ -3796,9 +3946,10 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
         }
     }
 
-    let workspace_root = discover_workspace_root(anchor_dir);
     if workspace_root.length > 0 {
-        let members = load_workspace_members(workspace_root);
+        // `workspace_root` + `members` were resolved up-front (above the
+        // relative walk) so both the relative and implicit enumerators
+        // share one member set (#873).
         // Workspace-implicit enumeration is per-entry: each entry may
         // reference a different scoped import, and the union is the
         // set the project actually needs.
