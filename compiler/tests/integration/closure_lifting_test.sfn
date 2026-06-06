@@ -43,7 +43,7 @@ import {
     closure_sentinel_type_text,
     lift_non_capturing_lambdas,
     lifted_function_name
-} from "../../src/llvm/expression_lowering/native/mod";
+} from "../../src/llvm/expression_lowering/native/lambda_lowering";
 import { parse_program } from "../../src/parser/mod";
 
 // ── Closure-pair aggregate emission ──────────────────────────────────
