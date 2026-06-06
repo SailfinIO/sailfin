@@ -44,11 +44,12 @@
 //
 //   <root>/<key[0..2]>/<key>/{ir.sfn-asm, layout.manifest, mod.ll, mod.o}
 //
-// `<root>` defaults to `build/cache/v1` (in-tree) and can be
+// `<root>` defaults to `build/cache/v2` (in-tree) and can be
 // overridden by `$SAILFIN_BUILD_CACHE_DIR` to support shared CI
-// caches without code changes. The `v1` suffix is `SCHEMA_VERSION`
-// — when the key shape or layout changes, bump it and let `v1` age
-// out so old entries can never poison new compilers.
+// caches without code changes. The trailing suffix is
+// `build_cache_schema_version()` (currently `v2`) — when the key
+// shape or layout changes, bump it and let the old `v<N>` tree age
+// out so stale entries can never poison new compilers.
 //
 // The 2-character prefix shard caps the directory fan-out at 256
 // children, preventing the one-directory-with-millions-of-entries
@@ -676,12 +677,17 @@ fn runtime_object_entry_key_from_str(key_str: string, hash_suffix: string) -> Ca
 // stable but reflects "input was missing", which the caller can
 // surface as a build setup error.
 //
-// `slug` (schema v2) is mixed into the digest as a fifth input so
-// the same source enumerated under two distinct slugs cannot collide
-// on one cache entry (see top-of-file contract and #527). It must be
-// unique per concurrent worker — the driver passes `src.slug`, a
-// `_sanitize_filename_cmd(source_path)`-derived value — so it also
-// disambiguates the `sha256sum` temp filenames below.
+// `slug` (schema v2) is the per-enumeration module slug — the
+// driver passes `src.slug` (e.g. a name-shaped `sfn/cli/mod` or a
+// path-shaped slug derived from a relative import). It is mixed into
+// the digest as a fifth input so the same source enumerated under two
+// distinct slugs cannot collide on one cache entry (see top-of-file
+// contract and #527). Because it feeds the digest it must be
+// *stable* for a given module enumeration — it is NOT a per-worker
+// nonce; a slug that varied per worker would give the same module a
+// different key each run and defeat cache hits. Distinct enumerations
+// carry distinct slugs, which incidentally keeps the `sha256sum` temp
+// filenames below from colliding across concurrent workers.
 fn cache_key_for(source_path: string, dep_layout_manifest_paths: string[], compiler_version: string, flags_canonical: string, slug: string) -> CacheKey ![io] {
     let s_hash = _sha256_of_file_cmd(source_path);
 
