@@ -77,6 +77,14 @@ If no tracking issue exists for the target:
    mcp__github__search_issues query='repo:SailfinIO/sailfin is:open label:seed-blocker'
    ```
 
+2b. Pull open `needs-seed-cut` issues — flagged by the seed-cut advisor
+   (`.github/workflows/seed-cut-advisor.yml`) when a required-in-seed
+   predecessor merged but the pin hasn't been bumped:
+
+   ```
+   mcp__github__search_issues query='repo:SailfinIO/sailfin is:open label:needs-seed-cut'
+   ```
+
 3. Compose the issue body:
 
    ```markdown
@@ -97,6 +105,15 @@ If no tracking issue exists for the target:
    ## Seed blockers (must close before the next seed bump)
 
    - [ ] #<N> — <title>  (`seed-blocker`)
+   - [ ] ...
+
+   ## Seed cut required (auto-flagged)
+
+   <!-- Populated from open `needs-seed-cut` issues. Each means a
+   required-in-seed predecessor merged; cut a fresh alpha + `/pin-seed`
+   before those issues are picked up. Omit the section if none. -->
+
+   - [ ] #<N> — <title>  (`needs-seed-cut`)
    - [ ] ...
 
    ## Cut gate
@@ -131,17 +148,20 @@ If no tracking issue exists for the target:
 
 If the tracking issue already exists:
 
-1. Read the current body. Parse both `## Must close before cut` and
-   `## Seed blockers` sections. Extract every `- [ ] #N` and `- [x] #N`
-   line in each.
+1. Read the current body. Parse the `## Must close before cut`,
+   `## Seed blockers`, and `## Seed cut required (auto-flagged)`
+   sections. Extract every `- [ ] #N` and `- [x] #N` line in each.
 2. Pull the current sets:
 
    ```
    mcp__github__search_issues query='repo:SailfinIO/sailfin label:release:<gate>'
    mcp__github__search_issues query='repo:SailfinIO/sailfin label:seed-blocker'
+   mcp__github__search_issues query='repo:SailfinIO/sailfin is:open label:needs-seed-cut'
    ```
 
-3. Reconcile each section independently:
+3. Reconcile each section independently (`## Seed cut required
+   (auto-flagged)` reconciles against the `needs-seed-cut` set; create
+   the section if newly-flagged issues exist and it's absent):
    - **In body, now closed** → flip `- [ ]` to `- [x]`. Keep the line.
    - **In body, no longer labeled, still open** → flag as drift, leave
      the line, mention in the report. Don't auto-remove (human decision).
