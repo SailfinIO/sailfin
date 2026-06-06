@@ -167,6 +167,17 @@ char_from_code(0);    // ""   (see limitation below)
 char_from_code(300);  // ""   (out of range)
 ```
 
+**Caution — bytes `128..255` are not valid UTF-8 on their own.** A single byte
+in that range is a UTF-8 *continuation* or *lead* byte, so a one-byte string
+from `char_from_code(n)` for `n >= 128` is a raw byte, **not** a complete
+character. The grapheme-oriented helpers above (`grapheme_count`, `grapheme_at`,
+`char_code`, `substring`, `find_char`) assume valid UTF-8 and may treat such a
+byte as a lone fallback grapheme or skip it. Treat `char_from_code`'s output as
+**bytes**, not text: concatenate the bytes of a multibyte character together
+before applying grapheme-oriented APIs, and use byte-oriented indexing
+(`s[i]` + `char_code`) when you need the raw bytes back. Bytes `1..127` (ASCII)
+are always valid single-character UTF-8 and round-trip through every API.
+
 **Limitation — byte 0:** a lone NUL is unrepresentable under the current
 NUL-terminated `string` model (`.length` is recovered with `strlen`), so
 `char_from_code(0)` returns `""`. Faithful embedded-NUL bytes arrive with the
