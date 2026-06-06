@@ -185,6 +185,15 @@ NUL-terminated `string` model (`.length` is recovered with `strlen`), so
 until then, build NUL-containing payloads with a length-carrying structure
 rather than a `string`.
 
+**Known issue — reading byte `0x01` on macOS arm64:** `char_from_code(1)` writes
+the byte correctly, but reading it back with `char_code` currently returns the
+wrong value on macOS arm64. `char_code` decodes ASCII bytes through an
+immediate-codepoint tagged pointer (`byte << 32`), and `1 << 32` collides with
+the executable's load base, so the runtime treats the tag as a real pointer.
+This is a pre-existing `char_code` quirk (it affects any string's `0x01` byte,
+not just `char_from_code` output) tracked as a follow-up; it does not affect
+Linux or bytes other than `0x01`.
+
 ---
 
 #### `strings_equal(left: string, right: string) -> boolean`
