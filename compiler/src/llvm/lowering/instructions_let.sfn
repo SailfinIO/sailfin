@@ -25,7 +25,7 @@ import {
     find_struct_info_by_llvm_type,
     find_vtable_for_struct_interface
 } from "../type_context_queries";
-import { ends_with_pointer_suffix } from "../type_mapping";
+import { ends_with_pointer_suffix, numeric_type_kind } from "../type_mapping";
 import {
     LLVMOperand,
     LetLoweringResult,
@@ -47,6 +47,17 @@ import {
     trim_text
 } from "../utils";
 import { scope_id_inside_try_body } from "./instructions_helpers";
+
+// #537: true when a boolean (`i1`) initializer is being stored into a numeric
+// (`int`/`float`) binding — the silent `zext`/`uitofp` widening this slice
+// refuses. `bool ↔ bool` and `bool ↔ pointer/aggregate` are not flagged.
+fn _bool_into_numeric(from_type: string, to_type: string) -> boolean {
+    if numeric_type_kind(from_type) != "bool" { return false; }
+    let to_kind = numeric_type_kind(to_type);
+    if to_kind == "int" { return true; }
+    if to_kind == "float" { return true; }
+    return false;
+}
 
 // Extract the lifted lambda symbol from a `<closure_pair @<name> ...>`
 // marker. Returns the bare symbol name (e.g. `sfn_lambda_0`) when the
@@ -419,6 +430,35 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                     + " value="
                     + operand.value);
             }
+        } else if _bool_into_numeric(operand.llvm_type, llvm_type) {
+            // #537: a boolean initializer flowing into a numeric (`int`/
+            // `float`) binding is silently `zext`/`uitofp`-widened today.
+            // This path uses `allow_widen = true`, so it bypasses the
+            // boundary diagnostic in `coerce_operand_to_type`; refuse the
+            // silent widening here with the canonical `[fatal]` shape and
+            // store the default so lowering can continue and report. Print
+            // to stderr (like the `coerce_operand_to_type` boundary check)
+            // so the gate in `entrypoints_tests_writer` — which refuses
+            // silently on a `[fatal]` diagnostic — still surfaces the cause.
+            let bool_diag = "llvm lowering [fatal]: ABI primitive mismatch: binding `"
+                + instruction.name
+                + "` expects `"
+                + llvm_type
+                + "` ("
+                + numeric_type_kind(llvm_type)
+                + ") but initializer produced `"
+                + operand.llvm_type
+                + "` ("
+                + numeric_type_kind(operand.llvm_type)
+                + ") — add `as int` or `as bool` to disambiguate";
+            print.err(bool_diag);
+            diagnostics.push(bool_diag);
+            current_lines.push("  store " + llvm_type + " "
+                + default_return_literal(llvm_type)
+                + ", "
+                + llvm_type
+                + "* "
+                + pointer);
         } else {
             // Types differ — coerce and use the returned struct.
             let coerced = coerce_operand_to_type(operand, llvm_type, current_temp, current_lines, true, null);

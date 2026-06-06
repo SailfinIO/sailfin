@@ -50,7 +50,44 @@ test "dominant_type: pointer and i1 paths unchanged" {
     // Pointer always dominates non-pointer (regardless of which side).
     assert dominant_type("i8*", "i64") == "i8*";
     assert dominant_type("i64", "i8*") == "i8*";
+    // bool ↔ bool still resolves via the same-type fast path.
     assert dominant_type("i1", "i1") == "i1";
+}
+
+// ── dominant_type empty-string sentinel on bool↔numeric pairs (#537) ─
+test "dominant_type: i1 + i64 returns empty sentinel" {
+    assert dominant_type("i1", "i64") == "";
+}
+
+test "dominant_type: i64 + i1 returns empty sentinel symmetrically" {
+    assert dominant_type("i64", "i1") == "";
+}
+
+test "dominant_type: i1 + double returns empty sentinel" {
+    assert dominant_type("i1", "double") == "";
+}
+
+test "dominant_type: double + i1 returns empty sentinel symmetrically" {
+    assert dominant_type("double", "i1") == "";
+}
+
+test "harmonise_operands: i1 + i64 refuses with fatal" {
+    let left = _make_operand("i1", "%t0");
+    let right = _make_operand("i64", "%t1");
+    let mut lines: string[] = [];
+    let result = harmonise_operands(left, right, 0, lines);
+    assert result.left == null;
+    assert result.right == null;
+    let mut found_fatal: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= result.diagnostics.length { break; }
+        if _diag_contains(result.diagnostics[i], "[fatal]") {
+            found_fatal = true;
+        }
+        i += 1;
+    }
+    assert found_fatal;
 }
 
 // ── harmonise_operands fatal refusal on int↔float arithmetic ────────
