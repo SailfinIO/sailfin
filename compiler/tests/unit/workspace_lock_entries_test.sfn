@@ -1,0 +1,277 @@
+// Regression tests for #1069: `resolve_workspace_lock_entries` resolves the
+// whole workspace member graph into the flat `_LockEntry` set a writer can
+// serialize — one entry per literal `[workspace].members` entry, carrying
+// the member's canonical name + version read from its own capsule.toml.
+//
+// Mirroring `workspace_resolver_test.sfn` and `stage_capsule_imports_test.sfn`,
+// the resolver helpers are inline-copied here verbatim: importing
+// `capsule_resolver.sfn`'s entry points pulls in the whole driver
+// (`compile_to_llvm_file_with_module` and friends) which fails to link in a
+// standalone unit test. Only the linkable, leaf-level TOML parsers are
+// imported from `toml_parser`. Keep the inline copies in sync with
+// `capsule_resolver.sfn`'s `_cr_path_join`, `_cr_is_safe_member_path`,
+// `parse_workspace_member_paths`, `load_workspace_members`, and
+// `resolve_workspace_lock_entries`, and with `lock.sfn`'s `_LockEntry`.
+//
+// Each test uses its own `/tmp` namespace so parallel runs don't collide and
+// cleans up on exit.
+import { toml_get_name, toml_get_version, toml_get_workspace_members } from "../../src/toml_parser";
+
+// -- inline copy of lock.sfn:_LockEntry --
+struct _LockEntry {
+    capsule: string;
+    version: string;
+    hash: string;
+}
+
+// -- inline copy of capsule_resolver.sfn:WorkspaceMember --
+struct WorkspaceMember {
+    name: string;
+    member_path: string;
+    src_dir: string;
+}
+
+// -- inline copy of capsule_resolver.sfn:_cr_path_join --
+fn _cr_path_join(base: string, name: string) -> string {
+    if base.length == 0 { return name; }
+    if base[base.length - 1] == "/" { return base + name; }
+    return base + "/" + name;
+}
+
+// -- inline copy of capsule_resolver.sfn:_cr_find_char --
+fn _cr_find_char(text: string, ch: string, start: int) -> int {
+    let mut i: int = start;
+    loop {
+        if i >= text.length { break; }
+        if substring(text, i, i + 1) == ch { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// -- inline copy of capsule_resolver.sfn:parse_workspace_member_paths --
+fn _parse_workspace_member_paths(members_text: string) -> string[] {
+    let mut out: string[] = [];
+    if members_text.length == 0 { return out; }
+    let mut start: int = 0;
+    let len = members_text.length;
+    loop {
+        if start >= len { break; }
+        let mut end: int = start;
+        loop {
+            if end >= len { break; }
+            if substring(members_text, end, end + 1) == "\n" { break; }
+            end += 1;
+        }
+        if end > start {
+            let entry = substring(members_text, start, end);
+            let mut has_glob: boolean = false;
+            let mut gi: int = 0;
+            loop {
+                if gi >= entry.length { break; }
+                if substring(entry, gi, gi + 1) == "*" {
+                    has_glob = true;
+                    break;
+                }
+                gi += 1;
+            }
+            if !has_glob { out.push(entry); }
+        }
+        start = end + 1;
+    }
+    return out;
+}
+
+// -- inline copy of capsule_resolver.sfn:_cr_is_safe_member_path --
+fn _is_safe_member_path(path: string) -> boolean {
+    if path.length == 0 { return false; }
+    if substring(path, 0, 1) == "/" { return false; }
+    if _cr_find_char(path, "\\", 0) >= 0 { return false; }
+    let mut start: int = 0;
+    loop {
+        if start >= path.length { break; }
+        let mut end: int = start;
+        loop {
+            if end >= path.length { break; }
+            if substring(path, end, end + 1) == "/" { break; }
+            end += 1;
+        }
+        let segment = substring(path, start, end);
+        if strings_equal(segment, "..") { return false; }
+        if strings_equal(segment, ".") { return false; }
+        start = end + 1;
+    }
+    return true;
+}
+
+// -- inline copy of capsule_resolver.sfn:_cr_read_member_name --
+fn _read_member_name(workspace_root: string, member_path: string) -> string ![io] {
+    let manifest = _cr_path_join(_cr_path_join(workspace_root, member_path), "capsule.toml");
+    if !fs.exists(manifest) { return ""; }
+    return toml_get_name(fs.readFile(manifest));
+}
+
+// -- inline copy of capsule_resolver.sfn:load_workspace_members --
+fn _load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
+    let mut out: WorkspaceMember[] = [];
+    if workspace_root.length == 0 { return out; }
+    let manifest = _cr_path_join(workspace_root, "workspace.toml");
+    if !fs.exists(manifest) { return out; }
+    let text = fs.readFile(manifest);
+    let members_text = toml_get_workspace_members(text);
+    let paths = _parse_workspace_member_paths(members_text);
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        let path = paths[i];
+        if !_is_safe_member_path(path) {
+            print.err("workspace: skipping unsafe member path \"" + path
+                + "\" (must be relative, no `..`, no backslashes)");
+            i += 1;
+            continue;
+        }
+        let name = _read_member_name(workspace_root, path);
+        if name.length == 0 {
+            print.err("workspace: skipping member \"" + path
+                + "\" — capsule.toml missing or has no [capsule].name");
+            i += 1;
+            continue;
+        }
+        let src = _cr_path_join(_cr_path_join(workspace_root, path), "src");
+        out.push(WorkspaceMember {
+            name: name, member_path: path, src_dir: src
+        });
+        i += 1;
+    }
+    return out;
+}
+
+// -- inline copy of capsule_resolver.sfn:resolve_workspace_lock_entries --
+fn _resolve_workspace_lock_entries(workspace_root: string) -> _LockEntry[] ![io] {
+    let mut out: _LockEntry[] = [];
+    let members = _load_workspace_members(workspace_root);
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let member = members[i];
+        let manifest = _cr_path_join(_cr_path_join(workspace_root, member.member_path), "capsule.toml");
+        let mut version: string = "";
+        if fs.exists(manifest) {
+            version = toml_get_version(fs.readFile(manifest));
+        }
+        out.push(_LockEntry {
+            capsule: member.name, version: version, hash: ""
+        });
+        i += 1;
+    }
+    return out;
+}
+
+// --------------------------------------------------------------
+// Fixture helpers
+// --------------------------------------------------------------
+fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
+
+fn _wl_tmp_root(label: string) -> string ![io] {
+    let root = "/tmp/sfn_ws_lock_test_" + label;
+    process.run(["rm", "-rf", root]);
+    process.run(["mkdir", "-p", root]);
+    return root;
+}
+
+fn _wl_cleanup(path: string) ![io] { process.run(["rm", "-rf", path]); }
+
+// Create `<root>/<member>/capsule.toml` with the given name + version.
+// An empty name omits the `name` key so the member parses as "unnamed"
+// and must be skipped.
+fn _wl_member(root: string, member: string, name: string, version: string) ![io] {
+    let dir = _cr_path_join(root, member);
+    process.run(["mkdir", "-p", dir]);
+    let mut body: string = "[capsule]\n";
+    if name.length > 0 { body = body + "name = \"" + name + "\"\n"; }
+    body = body + "version = \"" + version + "\"\n";
+    fs.writeFile(_cr_path_join(dir, "capsule.toml"), body);
+}
+
+// Find the entry for `capsule` in the resolved set; returns an empty-version
+// entry sentinel if absent (so a missing entry fails the version assertion).
+fn _wl_find(entries: _LockEntry[], capsule: string) -> _LockEntry {
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if strings_equal(entries[i].capsule, capsule) { return entries[i]; }
+        i += 1;
+    }
+    return _LockEntry { capsule: "", version: "", hash: "" };
+}
+
+// --------------------------------------------------------------
+// Tests
+// --------------------------------------------------------------
+test "workspace-lock: one entry per named member with name + version" ![io] {
+    let root = _wl_tmp_root("named");
+    fs.writeFile(_cr_path_join(root, "workspace.toml"), "[workspace]\nmembers = [\"a\", \"b\", \"nested/c\"]\n");
+    _wl_member(root, "a", "alpha", "1.0.0");
+    _wl_member(root, "b", "beta", "2.1.0");
+    _wl_member(root, "nested/c", "sfn/gamma", "0.3.0");
+
+    let entries = _resolve_workspace_lock_entries(root);
+    assert entries.length == 3;
+
+    let a = _wl_find(entries, "alpha");
+    assert _str_eq(a.version, "1.0.0");
+    let b = _wl_find(entries, "beta");
+    assert _str_eq(b.version, "2.1.0");
+    let c = _wl_find(entries, "sfn/gamma");
+    assert _str_eq(c.version, "0.3.0");
+
+    _wl_cleanup(root);
+}
+
+test "workspace-lock: members are path-pinned so hash is empty" ![io] {
+    let root = _wl_tmp_root("hash");
+    fs.writeFile(_cr_path_join(root, "workspace.toml"), "[workspace]\nmembers = [\"a\"]\n");
+    _wl_member(root, "a", "alpha", "1.0.0");
+
+    let entries = _resolve_workspace_lock_entries(root);
+    assert entries.length == 1;
+    assert _str_eq(entries[0].hash, "");
+
+    _wl_cleanup(root);
+}
+
+test "workspace-lock: unnamed member is skipped" ![io] {
+    let root = _wl_tmp_root("unnamed");
+    fs.writeFile(_cr_path_join(root, "workspace.toml"), "[workspace]\nmembers = [\"a\", \"unnamed\"]\n");
+    _wl_member(root, "a", "alpha", "1.0.0");
+    // No [capsule].name → unnamed → must be dropped.
+    _wl_member(root, "unnamed", "", "9.9.9");
+
+    let entries = _resolve_workspace_lock_entries(root);
+    assert entries.length == 1;
+    assert _str_eq(entries[0].capsule, "alpha");
+
+    _wl_cleanup(root);
+}
+
+test "workspace-lock: member with no capsule.toml is skipped" ![io] {
+    let root = _wl_tmp_root("missing");
+    fs.writeFile(_cr_path_join(root, "workspace.toml"), "[workspace]\nmembers = [\"a\", \"ghost\"]\n");
+    _wl_member(root, "a", "alpha", "1.0.0");
+
+    // "ghost" directory never created → no capsule.toml → skipped.
+    let entries = _resolve_workspace_lock_entries(root);
+    assert entries.length == 1;
+    assert _str_eq(entries[0].capsule, "alpha");
+
+    _wl_cleanup(root);
+}
+
+test "workspace-lock: no workspace.toml yields no entries" ![io] {
+    let root = _wl_tmp_root("none");
+
+    let entries = _resolve_workspace_lock_entries(root);
+    assert entries.length == 0;
+
+    _wl_cleanup(root);
+}
