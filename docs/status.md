@@ -8,6 +8,23 @@ feature availability.
 
 ## Build Pipeline (Current)
 
+- **Function-reference → address lowering (#1146, 2026-06-06).** A bare
+  identifier in value position that names a defined or `extern fn` (and is
+  neither a local nor a parameter) now lowers to that function's address:
+  `bitcast <fn-ptr-type> @<symbol> to i8*`, a single `i8*` code pointer —
+  deliberately **not** the `{i8*, i8*}` closure pair (top-level functions
+  carry no env, so the closure-dispatch path stays disengaged). Resolved in
+  `lower_expression` (`llvm/expression_lowering/native/core.sfn`) via
+  `find_function_by_name_or_import`, just before the unable-to-lower
+  fallthrough; the `@<name>` symbol is emitted bare so the module mangling
+  post-pass rewrites defined-fn names and leaves extern (C) symbols alone,
+  matching call sites. This is what lets `<fn> as * u8` reach a C-ABI callee
+  such as `pthread_create`'s `start_routine` instead of silently lowering to
+  `null` (the gap that blocked the M4 worker pool, #1088). Covered by
+  `compiler/tests/e2e/test_fn_reference_pthread.sh` (IR-shape + a linked
+  `pthread_create`/`pthread_join` round-trip that runs the Sailfin worker).
+  The complementary diagnostic for un-lowerable reference forms (generic /
+  non-C-ABI signatures, `& fn`) lands in #1147.
 - **LLVM lowering temp-index recovery fix (#543, 2026-05-11).**
   `coerce_operand_to_type` and `harmonise_operands` now recover
   returned SSA temp counters by scanning emitted `%tN` definitions on
