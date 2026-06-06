@@ -185,14 +185,19 @@ NUL-terminated `string` model (`.length` is recovered with `strlen`), so
 until then, build NUL-containing payloads with a length-carrying structure
 rather than a `string`.
 
-**Known issue — reading byte `0x01` on macOS arm64:** `char_from_code(1)` writes
-the byte correctly, but reading it back with `char_code` currently returns the
-wrong value on macOS arm64. `char_code` decodes ASCII bytes through an
-immediate-codepoint tagged pointer (`byte << 32`), and `1 << 32` collides with
-the executable's load base, so the runtime treats the tag as a real pointer.
-This is a pre-existing `char_code` quirk (it affects any string's `0x01` byte,
-not just `char_from_code` output) tracked as a follow-up; it does not affect
-Linux or bytes other than `0x01`.
+**Known issue — reading ASCII bytes (`1..0x7f`) back with `char_code` on macOS
+arm64:** `char_from_code(n)` writes the byte correctly for the full range, but
+reading an ASCII byte back with `char_code` can return the wrong value on macOS
+arm64. `char_code` decodes ASCII bytes through an immediate-codepoint tagged
+pointer (`byte << 32`); on macOS the runtime distinguishes the tag from a real
+pointer by checking whether the address is mapped, and for small byte values
+`byte << 32` may land on a mapped region (e.g. the executable base) — which is
+ASLR-dependent and varies run to run. This is a pre-existing `char_code`
+limitation (it affects any string's ASCII bytes, not just `char_from_code`
+output) tracked as a follow-up. It does **not** affect Linux, and does not affect
+bytes `0x80..0xFF` (which take a non-immediate path). For binary data on macOS,
+read bytes back via byte-oriented indexing of `0x80..0xFF` sequences or treat
+the `1..0x7f` round-trip as platform-conditional until the follow-up lands.
 
 ---
 
