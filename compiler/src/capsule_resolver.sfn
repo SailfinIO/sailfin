@@ -1375,6 +1375,17 @@ fn _cr_write_capsule_slug_aliases(sources: CapsuleSource[], context_root: string
         let path_slug = module_name_from_path(_cr_canonicalise_path(src.source_path));
         if path_slug.length == 0 { continue; }
         if strings_equal(path_slug, src.slug) { continue; }
+        // Guard against path traversal / clobber: `module_name_from_path`
+        // preserves `..` segments and a leading `/` when the source was
+        // reached via a non-canonical or absolute path (e.g. building from
+        // a different CWD via `../repo/...`). Such a slug would let
+        // `alias_path` escape `context_root`. A consumer's import only ever
+        // resolves to a clean relative slug, so a `..`/absolute sidecar
+        // could never be read anyway — skip it rather than write outside
+        // the staging root. The convergence simply falls back to the path
+        // slug for that (unusual) source, which is the pre-#873 behaviour.
+        if _cr_find_substring(path_slug, "..") >= 0 { continue; }
+        if substring(path_slug, 0, 1) == "/" { continue; }
         let alias_path = context_root + "/" + path_slug + ".slugalias";
         _cr_ensure_dir(_cr_dirname(alias_path));
         fs.writeFile(alias_path, src.slug);
