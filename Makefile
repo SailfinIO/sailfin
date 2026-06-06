@@ -594,15 +594,25 @@ check-fast-impl:
 	@echo "[check-fast] running sfn check on compiler/src/ runtime/"
 	@# JSON=1 / SAILFIN_AGENT_REPORT=1 gate (#1122): run `sfn check --json` and
 	@# tee the `sailfin-check/1` envelope to build/agent-check-fast.json for the
-	@# report composer (issue E). PIPESTATUS preserves the check exit-code
+	@# report composer (issue E). PIPESTATUS[0] preserves the check exit-code
 	@# contract (0 clean / 1 diagnostics / 2 setup) across the tee, so a
 	@# diagnostics run still fails the target instead of being masked by tee.
-	@# Default (no JSON=1) runs stay human-only and write no file.
+	@# Because producing the envelope IS the point of this mode, a failure to
+	@# create build/ or write the file (read-only FS, disk full) is a setup
+	@# error (exit 2) rather than a silent OK — check's own exit code still wins
+	@# when it is non-zero. Default (no JSON=1) runs stay human-only, no file.
 	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
-		mkdir -p build; \
+		if ! mkdir -p build; then \
+			echo "[check-fast] cannot create build/ for JSON envelope" >&2; \
+			exit 2; \
+		fi; \
 		$(NATIVE_BIN) check --json compiler/src/ runtime/ | tee build/agent-check-fast.json; \
-		rc=$${PIPESTATUS[0]}; \
-		if [ "$$rc" -ne 0 ]; then exit "$$rc"; fi; \
+		pipe_rc=("$${PIPESTATUS[@]}"); \
+		if [ "$${pipe_rc[0]}" -ne 0 ]; then exit "$${pipe_rc[0]}"; fi; \
+		if [ "$${pipe_rc[1]}" -ne 0 ]; then \
+			echo "[check-fast] failed to write build/agent-check-fast.json" >&2; \
+			exit 2; \
+		fi; \
 	else \
 		$(NATIVE_BIN) check compiler/src/ runtime/; \
 	fi
