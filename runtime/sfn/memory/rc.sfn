@@ -97,8 +97,9 @@ fn sfn_rc_sfn_alloc(size: i64, drop_fn: * u8) -> * u8 {
 
 // `sfn_rc_sfn_retain(payload)` atomically increments the
 // refcount of the value at `payload`. Steps back 16 bytes
-// (two `i64` slots — refcount sits at slot 0, drop_fn at slot 1)
-// to reach the refcount field, then emits `atomicrmw add ptr %p,
+// (two 8-byte slots — the `i64` refcount at slot 0, the `* u8`
+// drop_fn at slot 1) to reach the refcount field, then emits
+// `atomicrmw add ptr %p,
 // i64 1 seq_cst, align 8`. The previous-value return from
 // `atomic_add` is intentionally discarded — retains do not need
 // to observe the old count.
