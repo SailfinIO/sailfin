@@ -29,6 +29,30 @@ sidebar:
 > itself is scheduled for removal in Slice E.4 after the strict-refusal
 > reapply (E.3b) ships — tracked on the [roadmap](/roadmap).
 
+**Scalar coercion rules**:
+
+Scalar primitives fall into three *kinds* — `int` (`i8`/`i16`/`i32`/`i64`),
+`float` (`f32`/`f64`), and `boolean` (`i1`). Coercion is permitted *within* a
+kind (e.g. `i32 → i64` widening) but rejected *across* kinds at value
+boundaries — bindings, call arguments, struct fields, and arithmetic operands:
+
+- **`int ↔ float`** mismatches are rejected; spell the conversion with
+  `as int` or `as float`.
+- **`boolean → int` / `boolean → float`** mismatches are rejected. A boolean
+  flowing into a numeric context (`let n: int = b`, `b + 1`, passing `b` to a
+  numeric parameter) is **not** silently widened to `0`/`1`; the compiler emits
+  an ABI primitive mismatch diagnostic with an `as int` / `as float` fix-it.
+  Convert explicitly — `let n: int = b as int` (`zext`) or `let x: float = b
+  as float` (`uitofp`) — when the numeric value of the boolean is intended.
+  (`as bool` is **not** a valid cast — to derive a boolean from a number, use a
+  comparison such as `n != 0`.) Boolean-to-string interpolation (`"flag: ${b}"`)
+  is unaffected: it renders `"true"`/`"false"`, not a numeric widening.
+
+> Booleans are a distinct scalar kind, not narrow integers. This prevents the
+> accidental, silent `bool → number` widening that earlier partial-migration
+> tooling tolerated. The `as int` escape valve remains available where the
+> 0/1 mapping is deliberate.
+
 **Composite types**: structs, enums, arrays (`T[]`)
 
 **Optional types**: `T?` — the value is `T` or `null`

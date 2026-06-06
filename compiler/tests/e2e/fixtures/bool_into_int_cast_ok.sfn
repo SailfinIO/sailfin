@@ -1,0 +1,15 @@
+// Fixture for compiler/tests/e2e/test_bool_numeric_coercion.sh (#537).
+// The explicit escape valve: spelling the boolean→int conversion with
+// `as int` compiles cleanly. This pins that the #537 refusal does not
+// over-reach — an explicit cast is the supported way to widen a bool
+// into a numeric context.
+fn classify() -> int {
+    let b: boolean = true;
+    let n: int = b as int;
+    return n;
+}
+
+test "bool into int with explicit cast compiles" {
+    let r = classify();
+    assert r == 1;
+}

@@ -33,12 +33,15 @@ test "numeric_type_kind: classifies floating-point LLVM types as float" {
     assert numeric_type_kind("float") == "float";
 }
 
+test "numeric_type_kind: classifies booleans as their own bool kind" {
+    // #537: `i1` is its own kind, distinct from `int`. This makes a bool
+    // flowing into a numeric context (`bool → int`/`bool → float`) a
+    // diagnosable mismatch by construction rather than a silent
+    // `zext`/`uitofp` widening. `i8` stays `"int"` (char/byte width).
+    assert numeric_type_kind("i1") == "bool";
+}
+
 test "numeric_type_kind: classifies non-numeric scalars and aggregates as other" {
-    // Booleans deliberately fall outside the int/float partition — the
-    // existing tree relies on silent i1 ↔ double widening in arithmetic
-    // harmonisation and bool-to-string interpolation; classifying them as
-    // `int` would cause spurious diagnostics on today's source.
-    assert numeric_type_kind("i1") == "other";
     assert numeric_type_kind("i8*") == "other";
     assert numeric_type_kind("{i8*, i64}") == "other";
     assert numeric_type_kind("%MyStruct*") == "other";
@@ -157,14 +160,71 @@ test "coerce_operand_to_type: same-type passthrough is a no-op in strict mode" !
 }
 
 // -------------------------------------------------------------------
-// `other`-kind exemption (pointers, aggregates, booleans)
+// `other`-kind exemption (pointers, aggregates)
 // -------------------------------------------------------------------
-test "coerce_operand_to_type: i1 → double bypasses the strict diagnostic" ![io] {
-    // Boolean → double widening is common today (interpolation, print,
-    // arithmetic harmonisation). The kind check classifies `i1` as `other`
-    // to keep this path silent until Slice E.3 (#490) tightens it.
+test "coerce_operand_to_type: i8* → i8* bypasses the strict diagnostic" ![io] {
+    // Pointers and aggregates stay `other` and are exempt from the
+    // scalar-kind boundary check.
+    let operand = _make_operand("i8*", "%t5");
+    let mut lines: string[] = [];
+    let result = coerce_operand_to_type(operand, "i8*", 0, lines, false, null);
+    assert result.operand != null;
+}
+
+// -------------------------------------------------------------------
+// Boolean (`i1`) boundary refusal (#537)
+// -------------------------------------------------------------------
+// #490 (Slice E.3) is closed, so the `i1 → double` widening that was
+// previously tolerated "until Slice E.3 tightens it" now fires the
+// `[fatal]` boundary diagnostic. A bool flowing into a numeric context
+// must be spelled explicitly (`as int` / `as float`).
+test "coerce_operand_to_type: refuses i1 → double with fatal + bool fix-it" ![io] {
     let operand = _make_operand("i1", "%t5");
     let mut lines: string[] = [];
     let result = coerce_operand_to_type(operand, "double", 0, lines, false, null);
+    assert result.operand == null;
+    let mut found_fatal: boolean = false;
+    let mut found_fixit: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= result.diagnostics.length { break; }
+        let diag = result.diagnostics[i];
+        if _diag_contains(diag, "[fatal]") {
+            if _diag_contains(diag, "i1") {
+                if _diag_contains(diag, "bool") { found_fatal = true; }
+            }
+        }
+        if _diag_contains(diag, "add `as int` or `as float` to disambiguate") {
+            found_fixit = true;
+        }
+        i += 1;
+    }
+    assert found_fatal;
+    assert found_fixit;
+}
+
+test "coerce_operand_to_type: refuses i1 → i64 with fatal in boundary mode" ![io] {
+    let operand = _make_operand("i1", "%t6");
+    let mut lines: string[] = [];
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, false, null);
+    assert result.operand == null;
+    let mut found_fatal: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= result.diagnostics.length { break; }
+        if _diag_contains(result.diagnostics[i], "[fatal]") {
+            found_fatal = true;
+        }
+        i += 1;
+    }
+    assert found_fatal;
+}
+
+test "coerce_operand_to_type: i1 → i1 same-type passthrough is a no-op" ![io] {
+    // bool ↔ bool is not a mismatch — the same-type fast path keeps it silent.
+    let operand = _make_operand("i1", "%t7");
+    let mut lines: string[] = [];
+    let result = coerce_operand_to_type(operand, "i1", 0, lines, false, null);
     assert result.operand != null;
+    assert result.diagnostics.length == 0;
 }

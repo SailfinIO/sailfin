@@ -2111,6 +2111,42 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
                 diagnostics: diagnostics
             };
         }
+        // #537: a boolean (`i1`) flowing into a numeric (`int`/`float`)
+        // boundary is silently `zext`/`uitofp`-widened today. Refuse it
+        // with the canonical `[fatal]` shape so the conversion must be
+        // spelled explicitly (`as int`). This direction is symmetric with
+        // arithmetic harmonisation below and is safe to fire everywhere —
+        // bool-to-string interpolation lowers via `select i1` (core_strings)
+        // and never reaches this numeric coercion path.
+        let mut _bool_check: boolean = false;
+        if from_kind == "bool" {
+            if to_kind == "int" { _bool_check = true; }
+            if to_kind == "float" { _bool_check = true; }
+        }
+        if _bool_check {
+            let mut bool_diag = "llvm lowering [fatal]: ABI primitive mismatch: callee expects `"
+                + target
+                + "` ("
+                + to_kind
+                + ") but caller produced `"
+                + operand_type
+                + "` ("
+                + from_kind
+                + ")";
+            if span != null {
+                bool_diag = bool_diag + " at " + format_coerce_span_location(span);
+            }
+            bool_diag = bool_diag
+                + " — add `as int` or `as float` to disambiguate";
+            print.err(bool_diag);
+            diagnostics.push(bool_diag);
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: recover_temp_from_lines(current_lines, temp_index),
+                operand: null,
+                diagnostics: diagnostics
+            };
+        }
     }
 
     let numeric = coerce_numeric_primitive(operand, operand_type, target, temp_index, current_lines);
@@ -2206,6 +2242,21 @@ fn dominant_type(first: string, second: string) -> string {
         if second_kind == "int" { _mixed_int_float = true; }
     }
     if _mixed_int_float { return ""; }
+    // #537: a boolean operand mixed with a numeric (`int`/`float`) operand in
+    // arithmetic is an ABI mismatch — `harmonise_operands` turns the empty
+    // sentinel into the `[fatal]` diagnostic. `bool ↔ bool` returns early via
+    // the `first == second` fast path above; `bool ↔ aggregate/pointer` falls
+    // through to the `i1` fallback below (unchanged).
+    let mut _mixed_bool_numeric: boolean = false;
+    if first_kind == "bool" {
+        if second_kind == "int" { _mixed_bool_numeric = true; }
+        if second_kind == "float" { _mixed_bool_numeric = true; }
+    }
+    if second_kind == "bool" {
+        if first_kind == "int" { _mixed_bool_numeric = true; }
+        if first_kind == "float" { _mixed_bool_numeric = true; }
+    }
+    if _mixed_bool_numeric { return ""; }
     let mut _if79: boolean = false;
     if first == "double" { _if79 = true; }
     if second == "double" { _if79 = true; }
