@@ -274,12 +274,14 @@ test_disable_gate_skips_consumer() {
     # constructor's `sfn_type_register` is the symbol that fails instead.
     # Match any undefined runtime `sfn_*` symbol so the assertion pins the
     # gate's intent (an sfn-source symbol is unresolved) rather than one
-    # strip-order-dependent name.
-    #   GNU ld (Linux): `undefined reference to 'sfn_sleep'`
-    #   macOS ld:       `"_sfn_type_register", referenced from: ... in ....o`
-    # ld64 prefixes user symbols with an underscore on Mach-O, so the
-    # alternation covers both forms.
-    if ! grep -qE "undefined reference to .sfn_[A-Za-z0-9_]+.|\"_sfn_[A-Za-z0-9_]+\", referenced from" "$log"; then
+    # strip-order-dependent name. The error wording is linker-specific, so
+    # the alternation covers every linker `_resolve_linker` (#343) may pick:
+    #   GNU ld (Linux):   `undefined reference to 'sfn_sleep'`
+    #   macOS ld:         `"_sfn_type_register", referenced from: ... in ....o`
+    #   lld / mold:       `ld.lld: error: undefined symbol: sfn_sleep`
+    # ld64 prefixes user symbols with an underscore on Mach-O, and lld on
+    # Mach-O does the same, so the `_?` tolerates both forms.
+    if ! grep -qE "undefined reference to .sfn_[A-Za-z0-9_]+.|\"_sfn_[A-Za-z0-9_]+\", referenced from|undefined symbol: _?sfn_[A-Za-z0-9_]+" "$log"; then
         echo "[test]   sfn build failed but not for the expected sfn_* reason:"
         tail -40 "$log"
         return 1
