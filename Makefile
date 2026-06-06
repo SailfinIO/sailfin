@@ -592,7 +592,20 @@ check-fast-impl:
 		exit 1; \
 	fi
 	@echo "[check-fast] running sfn check on compiler/src/ runtime/"
-	@$(NATIVE_BIN) check compiler/src/ runtime/
+	@# JSON=1 / SAILFIN_AGENT_REPORT=1 gate (#1122): run `sfn check --json` and
+	@# tee the `sailfin-check/1` envelope to build/agent-check-fast.json for the
+	@# report composer (issue E). PIPESTATUS preserves the check exit-code
+	@# contract (0 clean / 1 diagnostics / 2 setup) across the tee, so a
+	@# diagnostics run still fails the target instead of being masked by tee.
+	@# Default (no JSON=1) runs stay human-only and write no file.
+	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
+		mkdir -p build; \
+		$(NATIVE_BIN) check --json compiler/src/ runtime/ | tee build/agent-check-fast.json; \
+		rc=$${PIPESTATUS[0]}; \
+		if [ "$$rc" -ne 0 ]; then exit "$$rc"; fi; \
+	else \
+		$(NATIVE_BIN) check compiler/src/ runtime/; \
+	fi
 	@echo "[check-fast] OK"
 
 # Pre-release determinism gate. Runs the emit harness at parallel load to
