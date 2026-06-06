@@ -113,9 +113,9 @@ jobs:
             //    `tracking`, title `Release: vX.Y.Z`. Never hardcoded.
             const trackers = (await github.paginate(github.rest.issues.listForRepo, {
               owner, repo, state: 'open', labels: 'tracking', per_page: 100,
-            })).filter(i => !i.pull_request && /^Release:\s*v\d/.test(i.title));
+            })).filter(i => !i.pull_request && /^Release:\s*v\d+\.\d+\.\d+\b/.test(i.title));
             if (trackers.length === 0) {
-              core.info('No open Release tracker — logging and exiting 0 without posting.');
+              core.info('No open semver Release tracker (Release: vX.Y.Z) — logging and exiting 0 without posting.');
               return;
             }
             const ver = t => {
