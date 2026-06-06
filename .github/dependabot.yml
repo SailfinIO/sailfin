@@ -7,7 +7,11 @@ updates:
     ignore:
       # Owned by gh-aw — bumping these in `*.lock.yml` desyncs the embedded
       # manifest from the runtime image pins. Updates land via `gh aw compile`.
-      - dependency-name: "github/gh-aw-actions/*"
+      # The trailing `*` (not `/*`) is load-bearing: dependabot names this
+      # dependency `github/gh-aw-actions` (the bare repo), so `/*` would not
+      # match it — that gap let PR #1063 through. `*` covers both the bare
+      # repo and any sub-path action (e.g. github/gh-aw-actions/setup).
+      - dependency-name: "github/gh-aw-actions*"
   - package-ecosystem: "npm"
     directory: "/site"
     schedule:
