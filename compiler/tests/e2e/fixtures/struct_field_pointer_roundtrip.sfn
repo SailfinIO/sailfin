@@ -1,0 +1,42 @@
+// Fixture for compiler/tests/e2e/test_struct_field_pointer_roundtrip.sh.
+//
+// Issue #713: pointer-typed struct fields (`* u8`, self-referential
+// `* StructTy`) were silently dropped from the struct's LLVM layout, and
+// field assignments to them emitted no `store`. This fixture round-trips a
+// struct with mixed pointer/int fields end-to-end: it writes a
+// self-referential `* Node` field, an `i64` field, and a raw `* u8` field,
+// then reads every field back and signals correctness through the process
+// exit code (0 = all fields round-tripped). Pre-fix the pointer fields
+// were absent from `%Node`, the stores no-op'd, and the read-backs would
+// observe garbage.
+extern fn malloc(size: usize) -> * u8;
+
+struct Node {
+    next: * Node;
+    value: i64;
+    raw: * u8;
+}
+
+fn main() -> i32 {
+    let a = malloc(48) as * Node;
+    let b = malloc(48) as * Node;
+    let buf = malloc(8);
+
+    b.value = 99;
+    a.value = 42;
+    a.next = b;  // self-referential `* Node` pointer-field store
+    a.raw = buf;  // raw `* u8` pointer-field store
+
+    // Read every field back through the pointer.
+    let linked = a.next;  // pointer-field load -> must be `b`
+    if linked.value != 99 { return 1; }
+    if a.value != 42 {
+        return 2;
+    }  // interleaved int field still stores
+
+    let got = a.raw as i64;  // raw pointer-field load
+    let want = buf as i64;
+    if got != want { return 3; }
+
+    return 0;
+}
