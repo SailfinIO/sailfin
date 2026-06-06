@@ -2,7 +2,7 @@
 // A boolean (`i1`) initializer flowing into a numeric (`int`) binding
 // is silently `zext`-widened pre-#537. After this slice the silent
 // widening is refused with the canonical `[fatal]` ABI primitive
-// mismatch diagnostic and the `as int` / `as bool` fix-it. The binding
+// mismatch diagnostic and the `as int` / `as float` fix-it. The binding
 // must spell the conversion explicitly; this fixture must NOT compile.
 fn classify() -> int {
     let b: boolean = true;

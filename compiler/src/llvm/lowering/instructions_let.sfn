@@ -450,7 +450,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 + operand.llvm_type
                 + "` ("
                 + numeric_type_kind(operand.llvm_type)
-                + ") — add `as int` or `as bool` to disambiguate";
+                + ") — add `as int` or `as float` to disambiguate";
             print.err(bool_diag);
             diagnostics.push(bool_diag);
             current_lines.push("  store " + llvm_type + " "

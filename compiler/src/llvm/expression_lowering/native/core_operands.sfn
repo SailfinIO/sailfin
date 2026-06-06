@@ -2137,7 +2137,7 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
                 bool_diag = bool_diag + " at " + format_coerce_span_location(span);
             }
             bool_diag = bool_diag
-                + " — add `as int` or `as bool` to disambiguate";
+                + " — add `as int` or `as float` to disambiguate";
             print.err(bool_diag);
             diagnostics.push(bool_diag);
             return CoercionResult {

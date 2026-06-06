@@ -41,10 +41,12 @@ boundaries — bindings, call arguments, struct fields, and arithmetic operands:
 - **`boolean → int` / `boolean → float`** mismatches are rejected. A boolean
   flowing into a numeric context (`let n: int = b`, `b + 1`, passing `b` to a
   numeric parameter) is **not** silently widened to `0`/`1`; the compiler emits
-  an ABI primitive mismatch diagnostic with an `as int` / `as bool` fix-it.
-  Convert explicitly — `let n: int = b as int` — when the integer value of the
-  boolean is intended. Boolean-to-string interpolation (`"flag: ${b}"`) is
-  unaffected: it renders `"true"`/`"false"`, not a numeric widening.
+  an ABI primitive mismatch diagnostic with an `as int` / `as float` fix-it.
+  Convert explicitly — `let n: int = b as int` (`zext`) or `let x: float = b
+  as float` (`uitofp`) — when the numeric value of the boolean is intended.
+  (`as bool` is **not** a valid cast — to derive a boolean from a number, use a
+  comparison such as `n != 0`.) Boolean-to-string interpolation (`"flag: ${b}"`)
+  is unaffected: it renders `"true"`/`"false"`, not a numeric widening.
 
 > Booleans are a distinct scalar kind, not narrow integers. This prevents the
 > accidental, silent `bool → number` widening that earlier partial-migration

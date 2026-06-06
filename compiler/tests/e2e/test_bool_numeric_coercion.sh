@@ -2,7 +2,7 @@
 # Regression test for issue #537: a boolean (`i1`) flowing into a
 # numeric (`int`/`float`) binding must refuse to compile with the
 # `[fatal]` ABI primitive mismatch diagnostic and the `as int` /
-# `as bool` fix-it, instead of silently `zext`/`uitofp`-widening.
+# `as float` fix-it, instead of silently `zext`/`uitofp`-widening.
 #
 # This pins two behaviours:
 #   1. `let n: int = b` (b: boolean) refuses, exits non-zero, and
@@ -65,7 +65,7 @@ test_bool_into_int_refuses() {
         echo "[test]   missing 'ABI primitive mismatch' in output"
         missing=$((missing + 1))
     fi
-    if ! grep -qE "add \`as int\` or \`as bool\` to disambiguate" "$out"; then
+    if ! grep -qE "add \`as int\` or \`as float\` to disambiguate" "$out"; then
         echo "[test]   missing #537 bool fix-it phrasing in output"
         missing=$((missing + 1))
     fi

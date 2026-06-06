@@ -177,7 +177,7 @@ test "coerce_operand_to_type: i8* → i8* bypasses the strict diagnostic" ![io] 
 // #490 (Slice E.3) is closed, so the `i1 → double` widening that was
 // previously tolerated "until Slice E.3 tightens it" now fires the
 // `[fatal]` boundary diagnostic. A bool flowing into a numeric context
-// must be spelled explicitly (`as int` / `as bool`).
+// must be spelled explicitly (`as int` / `as float`).
 test "coerce_operand_to_type: refuses i1 → double with fatal + bool fix-it" ![io] {
     let operand = _make_operand("i1", "%t5");
     let mut lines: string[] = [];
@@ -194,7 +194,7 @@ test "coerce_operand_to_type: refuses i1 → double with fatal + bool fix-it" ![
                 if _diag_contains(diag, "bool") { found_fatal = true; }
             }
         }
-        if _diag_contains(diag, "add `as int` or `as bool` to disambiguate") {
+        if _diag_contains(diag, "add `as int` or `as float` to disambiguate") {
             found_fixit = true;
         }
         i += 1;
