@@ -450,6 +450,52 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
                 return channel_result;
             }
         }
+        // `parallel [t1, t2, ...]` fans tasks out (M4.0, issue #1081).
+        // Commit to the construct the moment `parallel` is immediately
+        // followed by `[`; a bare `parallel` (or `parallel.foo`) is an
+        // ordinary identifier and falls through to the primary path. Once
+        // committed, a malformed task list is a hard parse failure rather
+        // than a silent re-read as an identifier indexed by an array
+        // literal. The task list reuses the array-literal grammar, so each
+        // element is a full expression (typically a `spawn`).
+        if identifier_matches(token, "parallel") {
+            let after_parallel = expression_tokens_advance(state);
+            let mut parallel_followed_by_bracket: boolean = false;
+            if !expression_tokens_is_at_end(after_parallel) {
+                if symbol_matches(expression_tokens_peek(after_parallel), "[") {
+                    parallel_followed_by_bracket = true;
+                }
+            }
+            if parallel_followed_by_bracket {
+                let parallel_result = parse_parallel_expression(state);
+                if parallel_result.success {
+                    return parse_postfix_chain(parallel_result.state, parallel_result.expression);
+                }
+                return parallel_result;
+            }
+        }
+        // `serve(handler, port?)` runs the accept loop (M4.0, issue #1081).
+        // Same soft-keyword commit rule as `channel`: commit on the `(`
+        // that immediately follows `serve`. `handler` is required by the
+        // AST shape, so a zero-argument `serve()` is a hard parse failure;
+        // any extra argument beyond `handler`/`port` is a typecheck-layer
+        // arity concern (deferred — this issue is parse-only).
+        if identifier_matches(token, "serve") {
+            let after_serve = expression_tokens_advance(state);
+            let mut serve_followed_by_paren: boolean = false;
+            if !expression_tokens_is_at_end(after_serve) {
+                if symbol_matches(expression_tokens_peek(after_serve), "(") {
+                    serve_followed_by_paren = true;
+                }
+            }
+            if serve_followed_by_paren {
+                let serve_result = parse_serve_expression(state);
+                if serve_result.success {
+                    return parse_postfix_chain(serve_result.state, serve_result.expression);
+                }
+                return serve_result;
+            }
+        }
     }
 
     let primary_result = parse_primary_expression(state);
@@ -737,6 +783,76 @@ fn parse_channel_expression(state: ExpressionTokens) -> ExpressionParseResult {
             element_type: null,
             capacity: capacity,
             span: source_span_from_tokens([channel_token])
+        },
+        success: true
+    };
+}
+
+// ============================================================================
+// Parallel Construct
+// ============================================================================
+// Parse `parallel [t1, t2, ...]` with `state` positioned at the `parallel`
+// identifier token. Returns failure (leaving `state` untouched) when the
+// next token is not `[` (a bare `parallel` identifier) or when the task
+// list is malformed; the caller commits to the construct the moment `[`
+// follows. The bracketed task list reuses the array-literal grammar, so the
+// `tasks` are full expressions (typically `spawn` calls). An empty list is
+// accepted at parse time — task-count rules are a typecheck-layer concern
+// (deferred — issue #1081 is parse-only).
+fn parse_parallel_expression(state: ExpressionTokens) -> ExpressionParseResult {
+    let parallel_token = expression_tokens_peek(state);
+    let after_parallel = expression_tokens_advance(state);
+    if expression_tokens_is_at_end(after_parallel) {
+        return expression_parse_failure(state);
+    }
+    let next = expression_tokens_peek(after_parallel);
+    if !symbol_matches(next, "[") { return expression_parse_failure(state); }
+    let array_result = parse_array_literal(expression_tokens_advance(after_parallel));
+    if !array_result.success { return expression_parse_failure(state); }
+    return ExpressionParseResult {
+        state: array_result.state,
+        expression: Expression.Parallel {
+            tasks: array_result.elements,
+            span: source_span_from_tokens([parallel_token])
+        },
+        success: true
+    };
+}
+
+// ============================================================================
+// Serve Construct
+// ============================================================================
+// Parse `serve(handler, port?)` with `state` positioned at the `serve`
+// identifier token. Returns failure (leaving `state` untouched) when the
+// next token is not `(` (a bare `serve` identifier) or when the argument
+// list is malformed; the caller commits to the construct the moment `(`
+// follows. `handler` is the first argument (required by the AST shape, so
+// a zero-argument `serve()` fails the parse hard); `port` is bound only
+// from a second argument. Extra arguments are dropped and are a
+// typecheck-layer arity concern (deferred — issue #1081 is parse-only).
+fn parse_serve_expression(state: ExpressionTokens) -> ExpressionParseResult {
+    let serve_token = expression_tokens_peek(state);
+    let after_serve = expression_tokens_advance(state);
+    if expression_tokens_is_at_end(after_serve) {
+        return expression_parse_failure(state);
+    }
+    let next = expression_tokens_peek(after_serve);
+    if !symbol_matches(next, "(") { return expression_parse_failure(state); }
+    let args_result = parse_call_arguments(after_serve);
+    if !args_result.success { return expression_parse_failure(state); }
+    if args_result.arguments.length == 0 {
+        return expression_parse_failure(state);
+    }
+    let mut port: Expression? = null;
+    if args_result.arguments.length >= 2 {
+        port = args_result.arguments[1];
+    }
+    return ExpressionParseResult {
+        state: args_result.state,
+        expression: Expression.Serve {
+            handler: args_result.arguments[0],
+            port: port,
+            span: source_span_from_tokens([serve_token])
         },
         success: true
     };
