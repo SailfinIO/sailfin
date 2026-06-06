@@ -10,7 +10,8 @@ import {
     TestCapsuleResolution,
     discover_project_root,
     discover_workspace_root,
-    prepare_project_capsules_for_test
+    prepare_project_capsules_for_test,
+    resolve_workspace_lock_entries
 } from "./capsule_resolver";
 import {
     _collect_sfn_files_cmd,
@@ -51,7 +52,7 @@ import {
 import { assemble_runtime_capsule_link_inputs } from "./cli_main";
 import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "./dist_manifest";
 import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
-import { lock_add_entry, lock_get_version } from "./lock";
+import { lock_add_entry, lock_get_version, workspace_lock_write } from "./lock";
 import {
     compile_tests_to_llvm_file_with_module_imports,
     compile_to_llvm_file_with_module,
@@ -2862,6 +2863,33 @@ fn handle_init_command(args: string[]) -> int ![io] {
         fs.writeFile("src/main.sfn", "fn main() ![io] {\n    print(\"Hello, Sailfin!\");\n}\n");
     }
     print("initialized capsule: " + pkg_name);
+    return 0;
+}
+
+// `sfn lock`: materialize `workspace.lock` at the workspace root. Walks up
+// from the current directory for `workspace.toml`, resolves the member graph
+// into the flat lock-entry set (#1069), serializes it with the
+// `# workspace.lock` banner (#1068), and writes the file. Explicit-only —
+// nothing on the `sfn build` path regenerates it (keeps the self-host path
+// predictable). Output is deterministic, so re-running is idempotent.
+fn handle_lock_command(args: string[]) -> int ![io] {
+    if args.length != 1 {
+        print("usage: sfn lock");
+        return 2;
+    }
+    let mut start_dir = _get_env_cmd("PWD");
+    if start_dir.length == 0 { start_dir = "."; }
+    let workspace_root = discover_workspace_root(start_dir);
+    if workspace_root.length == 0 {
+        print("sfn lock: no workspace.toml found (run inside a workspace)");
+        return 1;
+    }
+    let entries = resolve_workspace_lock_entries(workspace_root);
+    let lock_text = workspace_lock_write(entries);
+    let lock_path = workspace_root + "/workspace.lock";
+    fs.writeFile(lock_path, lock_text);
+    print("wrote " + lock_path + " (" + number_to_string(entries.length)
+        + " members)");
     return 0;
 }
 
