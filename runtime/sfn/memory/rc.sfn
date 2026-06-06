@@ -8,8 +8,8 @@
 // Header layout (16 bytes, per `docs/runtime_architecture.md`
 // §2.1.2):
 //
-//   offset 0:  refcount     (i64)        — atomic refcount, init 1
-//   offset 8:  drop_fn_addr (i64 slot)   — `fn(*u8) -> void` storage
+//   offset 0:  refcount (i64)   — atomic refcount, init 1
+//   offset 8:  drop_fn  (* u8)  — `fn(*u8) -> void` storage
 //
 // The header sits at `payload - 16`; `sfn_rc_sfn_alloc` returns
 // the payload pointer so user code never sees the bookkeeping
@@ -19,28 +19,15 @@
 // the IR shape that the test harness pins as the M2.3 proof of
 // life.
 //
-// drop_fn storage uses an `i64` slot (`drop_fn_addr`) rather
-// than `* u8`. The seed compiler's struct-field assignment
-// silently drops stores to `* u8` fields routed through a
-// `* StructTy` pointer (verified during this M2.3 implementation
-// — `header.drop_fn = ptr;` emits no `store i8*, ...` in the
-// resulting IR). Reinterpreting the function-pointer address as
-// `i64` via `as i64` lowers to a clean `ptrtoint i8* … to i64`
-// and a 64-bit store, which is byte-equivalent to storing the
-// raw pointer on every platform Sailfin currently targets (the
-// pointer width is 64 bits everywhere extern function pointers
-// are valid). The architecture spec's `drop_fn: fn(*u8) -> void`
-// shape degrades to `* u8` at the export boundary — same
-// convention as `runtime/sfn/platform/pthread.sfn`, where the
-// `sfn fmt` / `is_c_abi_function_pointer` interaction forces
-// every function-pointer parameter through a raw `* u8` slot
-// until the formatter learns to keep `fn(` tight (see the
-// pthread.sfn header for the same workaround). Only the slot
-// *width* survives, not the typed callsite — and the in-header
-// `drop_fn_addr: i64` reflects that storage truth honestly.
-// The slot retypes to a proper function pointer once both the
-// seed grows aggregate-field assignment for raw pointers AND
-// `is_c_abi_function_pointer` accepts the `fn (...)` form
+// drop_fn storage is a proper `* u8` pointer field. The #713
+// fix (pointer-typed struct-field layout + store, in the pinned
+// seed) lets `header.drop_fn = drop_fn;` emit a real `store i8*`
+// with no `as i64` / `ptrtoint` bridge — the `i64`-slot
+// workaround introduced in M2.3 (PR #712) is retired here (#1115).
+// The architecture spec's `drop_fn: fn(*u8) -> void` shape still
+// degrades to `* u8` at the export boundary — the typed
+// function-pointer slot is gated separately on
+// `is_c_abi_function_pointer` accepting the `fn (...)` form
 // (tracked for M2.4/M2.6, where `sfn_drop_SfnString` /
 // `sfn_drop_SfnArray` callers light up).
 //
@@ -81,18 +68,18 @@ extern fn free(ptr: * u8) -> void;
 
 // `RcHeader` lays out the 16-byte bookkeeping prefix. The
 // architecture spec's `drop_fn: fn(*u8) -> void` field appears
-// here as `drop_fn_addr: i64` — see the file-header note for
-// the storage-type rationale. Field offsets are pinned by the
-// IR-shape assertions in `test_runtime_memory_rc.sh`.
+// here as `drop_fn: * u8` — see the file-header note for the
+// storage-type rationale. The pointer field is 8 bytes, so the
+// header stays 16 bytes with refcount @0 and drop_fn @8.
 struct RcHeader {
     refcount: i64;
-    drop_fn_addr: i64;
+    drop_fn: * u8;
 }
 
 // `sfn_rc_sfn_alloc(size, drop_fn)` allocates a 16-byte header
 // plus `size` payload bytes, initializes the refcount to 1,
-// stores `drop_fn` (as a raw 64-bit address) in the header
-// drop-fn slot, and returns the payload pointer. The header is
+// stores `drop_fn` in the header drop-fn slot, and returns the
+// payload pointer. The header is
 // reachable from the payload via `payload - 16`. Returns `null`
 // when libc `malloc` reports OOM — guarding the header
 // initialisation stores against a NULL deref. The C convention
@@ -104,7 +91,7 @@ fn sfn_rc_sfn_alloc(size: i64, drop_fn: * u8) -> * u8 {
     if header_ptr as i64 == 0 { return header_ptr; }
     let header = header_ptr as * RcHeader;
     header.refcount = 1;
-    header.drop_fn_addr = drop_fn as i64;
+    header.drop_fn = drop_fn;
     return header_ptr + 16;
 }
 
