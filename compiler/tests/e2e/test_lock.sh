@@ -104,6 +104,8 @@ test_lock_outside_workspace() {
         echo "expected non-zero exit outside a workspace, got: $output"
         return 1
     fi
+    echo "$output" | grep -qi "workspace" \
+        || { echo "expected an error message mentioning the workspace, got: $output"; return 1; }
     [ ! -f "$root/workspace.lock" ] \
         || { echo "workspace.lock should not have been written"; return 1; }
     return 0

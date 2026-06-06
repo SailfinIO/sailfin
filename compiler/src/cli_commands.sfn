@@ -3103,6 +3103,7 @@ export {
     handle_add_command,
     handle_config_command,
     handle_init_command,
+    handle_lock_command,
     handle_login_command,
     handle_guillermo_command,
     handle_fmt_command
