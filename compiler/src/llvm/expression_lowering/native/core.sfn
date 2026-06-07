@@ -810,18 +810,23 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         };
     }
 
-    // Unlowered concurrency frontend constructs (M4.0, epic #965). The
-    // parser builds `Spawn`/`Channel` nodes (issues #1079/#1080) but no
-    // lowering exists yet, so `emit_native_format` renders them to the
-    // `<concurrency_unlowered <kind>>` marker. Fail the build closed with
-    // a `[fatal]` — matching the sentinel scanned by
-    // `lowering_core.sfn:has_fatal_lowering_diagnostic` — rather than
-    // false-greening an unenforced concurrency surface into the IR
-    // (llms.txt: no parsed-but-unenforced surface). The dedicated
-    // lowering replaces this guard in a follow-up. `Await` is bridged to
-    // the existing async lowering upstream and never reaches here as a
-    // marker.
-    if starts_with(stripped, "<concurrency_unlowered spawn>") {
+    // Unlowered concurrency frontend constructs (M4.0, epic #965). The parser
+    // builds `Spawn`/`Channel`/`Parallel`/`Serve` nodes (issues #1079–#1081)
+    // and `emit_native_format` (#1084) renders them to real `.sfn-asm` forms
+    // — `spawn[:<kind>] <op>`, `channel[:<kind>](<cap>)`, `parallel [<tasks>]`,
+    // `serve(<handler>[, <port>])` — but no LLVM lowering exists yet. Fail the
+    // build closed with a `[fatal]` — matching the sentinel scanned by
+    // `lowering_core.sfn:has_fatal_lowering_diagnostic` — rather than letting
+    // these forms fall through to the generic, *non-fatal* unable-to-lower
+    // path (which the emit/build fatal gate ignores, false-greening an
+    // unenforced concurrency surface into the IR — llms.txt). The dedicated
+    // lowering replaces these guards in a follow-up (#1085). These prefixes
+    // are collision-safe: `spawn`/`channel`/`parallel`/`serve` are
+    // contextual keywords parsed only in expression-prefix position
+    // (`parser/expressions.sfn:403`), so no user identifier produces them.
+    // `Await` is bridged to the existing async lowering upstream and never
+    // reaches here as a marker.
+    if starts_with(stripped, "spawn ") {
         diagnostics.push("llvm lowering [fatal]: `spawn` expression is not yet lowered (concurrency frontend, epic #965)");
         return ExpressionResult {
             lines: lines,
@@ -831,8 +836,48 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             string_constants: empty_constants
         };
     }
-    if starts_with(stripped, "<concurrency_unlowered channel>") {
+    if starts_with(stripped, "spawn:") {
+        diagnostics.push("llvm lowering [fatal]: `spawn` expression is not yet lowered (concurrency frontend, epic #965)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    if starts_with(stripped, "channel(") {
         diagnostics.push("llvm lowering [fatal]: `channel` expression is not yet lowered (concurrency frontend, epic #965)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    if starts_with(stripped, "channel:") {
+        diagnostics.push("llvm lowering [fatal]: `channel` expression is not yet lowered (concurrency frontend, epic #965)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    if starts_with(stripped, "parallel [") {
+        diagnostics.push("llvm lowering [fatal]: `parallel` expression is not yet lowered (concurrency frontend, epic #965)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    if starts_with(stripped, "serve(") {
+        diagnostics.push("llvm lowering [fatal]: `serve` expression is not yet lowered (concurrency frontend, epic #965)");
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
