@@ -1,6 +1,8 @@
 // compiler/src/cli_main.sfn
 //
 // Sailfin-native CLI entrypoint invoked by the native C shim.
+import { bold } from "sfn/cli/mod";
+
 import {
     BuildCacheConfig,
     CacheKey,
@@ -2653,6 +2655,24 @@ fn main(argv: string[]) -> int ![io, clock] {
     // it so the gate stays in one place.
     let label = _arena_telemetry_label(argv);
     sailfin_runtime_install_arena_telemetry(label as * u8);
+
+    // Issue #1159 (CLI modularization epic #351, Phase 2 / Issue 2.1,
+    // Risk R1): token reference to the `sfn/cli` SOURCE capsule. The
+    // compiler has never imported from `capsules/sfn/*` before (only
+    // the `kind = "runtime"` `sfn/runtime-native`), so this proves
+    // `capsule_resolver.sfn` can stage + compile + link a regular
+    // `sfn/*` capsule into a self-hosted build. We call the pure
+    // `bold` helper (NOT the issue's example `EXIT_OK`): module-level
+    // `let` constants lower to `internal global` and have no
+    // cross-capsule import path today, so an imported function call is
+    // the only construct that emits a real `declare`/`call` the linker
+    // must satisfy from the staged `sfn/cli` `.ll` — exactly the
+    // missing-`sfn__cli__*` symbol path R1 is designed to surface.
+    // Lives in the live `@main` path (never dead-stripped) and is a
+    // no-op: the result is discarded and never observed. Revert target
+    // for Issue 2.1: this block, the `import { bold } from
+    // "sfn/cli/mod"` line, and `"sfn/cli" = "*"` in capsule.toml.
+    let _sfn_cli_link_gate: string = bold("");
 
     // The extern declarations above expose the helpers with `* u8`
     // surface; cast back to `string` at the boundary so the

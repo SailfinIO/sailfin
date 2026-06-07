@@ -19,6 +19,20 @@ description = "The Sailfin compiler — self-hosted, targeting LLVM via .sfn-asm
 # `make compile` to the driver, and Stage E PR7 deleted the
 # script outright.
 "sfn/runtime-native" = "*"
+# Issue #1159 (CLI modularization epic #351, Phase 2 / Issue 2.1,
+# Risk R1): declare the regular `sfn/*` source capsule `sfn/cli` as a
+# compiler dependency. This is the load-bearing feasibility gate — the
+# compiler tree has never imported from `capsules/sfn/*` (only the
+# `kind = "runtime"` `sfn/runtime-native`), so this proves
+# `capsule_resolver.sfn` can stage + compile + link a normal source
+# capsule into a self-hosted build. A single token import + call of
+# the `bold` helper in `cli_main.sfn` exercises link-time symbol
+# resolution (imported module-level `let` constants like `EXIT_OK`
+# lower to `internal global` and have no cross-capsule import path
+# today, so a function call is what actually forces the link). Wildcard
+# matches the `sfn/runtime-native` convention; the capsule is at
+# 0.13.1 (workspace member `capsules/sfn/cli`).
+"sfn/cli" = "*"
 
 [capabilities]
 # `io` covers fs.*, print.*, console.*, and process.* surface used
