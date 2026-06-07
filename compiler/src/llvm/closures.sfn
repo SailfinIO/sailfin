@@ -69,23 +69,31 @@ import { join_with_separator, number_to_string, trim_text } from "./utils";
 // `expression_lowering/splitting.sfn` (see #1106), a literal `,`
 // inside a type annotation like `Map<string, int>` must still not be
 // confused with that separator by any downstream comma-aware reader.
-// Used to make `_encode_captures` safe against type annotations whose
-// literal characters would otherwise either terminate the outer
-// `<closure_pair … >` marker prematurely or collide with a capture
-// delimiter.
+// ASCII space is escaped to `%20` too: the `captures=` value is
+// extracted by `_parse_marker_string_field` / `_parse_prologue_string`,
+// both of which terminate at the next space — so a type annotation
+// containing a space (e.g. `Map<string, int>` or `fn(int) -> boolean`)
+// would otherwise truncate the encoded list and drop every capture
+// after the space, reintroducing the missing-env-fields bug class
+// (#1106 review). Used to make `_encode_captures` safe against type
+// annotations whose literal characters would otherwise either
+// terminate the outer `<closure_pair … >` marker prematurely or
+// collide with a capture delimiter.
 fn percent_escape_capture_text(text: string) -> string {
     let mut buffer: string = "";
     let mut idx: int = 0;
     loop {
         if idx >= text.length { break; }
         let ch = text[idx];
-        if ch == "%" { buffer = buffer + "%25"; } else if ch == "," {
-            buffer = buffer + "%2C";
-        } else if ch == ":" { buffer = buffer + "%3A"; } else if ch == ";" {
-            buffer = buffer + "%3B";
-        } else if ch == "<" { buffer = buffer + "%3C"; } else if ch == ">" {
-            buffer = buffer + "%3E";
-        } else { buffer = buffer + ch; }
+        if ch == "%" { buffer = buffer + "%25"; } else if ch == " " {
+            buffer = buffer + "%20";
+        } else if ch == "," { buffer = buffer + "%2C"; } else if ch == ":" {
+            buffer = buffer + "%3A";
+        } else if ch == ";" { buffer = buffer + "%3B"; } else if ch == "<" {
+            buffer = buffer + "%3C";
+        } else if ch == ">" { buffer = buffer + "%3E"; } else {
+            buffer = buffer + ch;
+        }
         idx += 1;
     }
     return buffer;
@@ -112,6 +120,10 @@ fn percent_unescape_capture_text(text: string) -> string {
             let two = substring(text, idx + 1, idx + 3);
             if two == "25" {
                 buffer = buffer + "%";
+                idx += 3;
+                decoded = true;
+            } else if two == "20" {
+                buffer = buffer + " ";
                 idx += 3;
                 decoded = true;
             } else if two == "2C" {

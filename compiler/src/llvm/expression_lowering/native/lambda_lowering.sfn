@@ -234,9 +234,11 @@ fn _is_non_capturing(records: LambdaCaptureRecord[], lambda: Expression) -> bool
 // `percent_escape_capture_text`, so the literal `;`/`:` delimiters
 // stay unambiguous even when a type annotation contains them (e.g.
 // `Map<string, Result<int, Error>>`). The escape also encodes `,`,
-// `<`, and `>` so a generic-typed capture cannot terminate the outer
-// `<closure_pair … >` marker prematurely or be split by a
-// comma-aware reader. The inter-capture separator is `;` (not `,`)
+// `<`, `>`, and ASCII space so a generic-typed capture cannot
+// terminate the outer `<closure_pair … >` marker prematurely, be
+// split by a comma-aware reader, or be truncated by the
+// space-terminating `captures=` field parsers. The inter-capture
+// separator is `;` (not `,`)
 // specifically so the env_alloc marker survives the comma-splitting
 // argument parser (`split_array_elements` in
 // `expression_lowering/splitting.sfn`) when a capturing lambda is
