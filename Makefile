@@ -866,6 +866,28 @@ rebuild-impl:
 	@mkdir -p build/native/raw
 	@cp -a build/sailfin/capsules/. build/native/raw/ 2>/dev/null || true
 	@cp -f build/sailfin/program.ll build/native/raw/program.ll 2>/dev/null || true
+	@# #1159: the legacy flat copy above only catches modules routed to
+	@# `build/sailfin/capsules/` — i.e. the compiler's own modules (its
+	@# `[capsule].name = "sailfin"` is single-segment, so Stage C2b2 keeps
+	@# them on the legacy path). Scope/name SOURCE-capsule deps (the first
+	@# being `sfn/cli`, a compiler dependency since #1159) route instead to
+	@# `build/capsules/<scope>/<name>/ir/*.ll`. The native self-host link
+	@# pulls from BOTH trees, so the cross-windows IR snapshot must too —
+	@# otherwise `make ci-cross-windows` link-fails with an undefined
+	@# reference to the dep's symbols (e.g. `bold__sfn__cli__mod`). Flatten
+	@# each `<scope>/<name>/ir/<rel>.ll` to `<scope>__<name>__ir__<rel>.ll`
+	@# so the flat `build/native/raw` layout stays collision-free across
+	@# capsules; the .ll filename is link-irrelevant (symbols are already
+	@# mangled), it only needs to be unique. In the cross-windows CI flow
+	@# this runs on a clean build whose `build/capsules/` holds exactly the
+	@# compiler's source-capsule deps.
+	@if [ -d build/capsules ]; then \
+		find build/capsules -path '*/ir/*.ll' 2>/dev/null | while IFS= read -r f; do \
+			rel="$${f#build/capsules/}"; \
+			flat="$$(printf '%s' "$$rel" | sed 's#/#__#g')"; \
+			cp -f "$$f" "build/native/raw/$$flat" 2>/dev/null || true; \
+		done; \
+	fi
 	@# Runtime-object staging removed (#941). Post-#940 the freshly-built
 	@# compiler resolves the runtime via runtime/native/capsule.toml (the
 	@# declarative runtime capsule), emitting prelude + each sfn-source from
