@@ -274,6 +274,25 @@ tally_test_counts() {
 	[ "$found" -eq 1 ] && printf '%s %s' "$passed" "$failed"
 }
 
+# Lightweight structural sanity check for a non-test JSON artifact when `jq`
+# is unavailable. jq (when present) is the real validator; this best-effort
+# fallback rejects an obviously broken artifact (empty, not a JSON object, or
+# truncated mid-stream) so a `jq`-less host still degrades to phases:[] rather
+# than dangling a `report` pointer at unparseable JSON. Returns 0 when the
+# artifact looks structurally intact, non-zero otherwise.
+artifact_looks_intact_no_jq() {
+	local file="$1" first last
+	[ -s "$file" ] || return 1
+	# A BuildReport/check envelope is a JSON object carrying schema_version.
+	first="$(head -c 1 "$file" 2>/dev/null)"
+	[ "$first" = "{" ] || return 1
+	grep -q '"schema_version"' "$file" 2>/dev/null || return 1
+	# Last non-whitespace byte is the closing brace — catches truncation.
+	last="$(tr -d '[:space:]' <"$file" 2>/dev/null | tail -c 1)"
+	[ "$last" = "}" ] || return 1
+	return 0
+}
+
 # Compose the one-element phases[] array (#1123) from the captured tool
 # artifact. Echoes a JSON array literal:
 #   - non-test target, artifact present + parseable:
@@ -326,12 +345,18 @@ compose_phases() {
 	fi
 
 	# Non-test artifact (BuildReport / check-fast envelope). Validate it parses
-	# as JSON when jq is available; degrade to [] when it doesn't.
+	# as JSON when jq is available; degrade to [] when it doesn't. Without jq,
+	# fall back to a lightweight structural check so a truncated/garbage
+	# artifact still degrades to [] rather than dangling a `report` pointer at
+	# unparseable JSON.
 	if command -v jq >/dev/null 2>&1; then
 		if ! jq -e . "$artifact" >/dev/null 2>&1; then
 			printf '[]'
 			return
 		fi
+	elif ! artifact_looks_intact_no_jq "$artifact"; then
+		printf '[]'
+		return
 	fi
 	printf '[{"name":%s,"status":%s,"report":%s}]' \
 		"$name_json" "$status_json" "$(json_val "$artifact")"
