@@ -56,7 +56,7 @@ esac
 # covered.
 needs_cap=0
 
-make_re='(^|[;&|()])[[:space:]]*make[[:space:]]+(compile|rebuild|check|test|test-unit|test-integration|test-e2e|bench)([[:space:]]|$|[;&|])'
+make_re='(^|[;&|()])[[:space:]]*make[[:space:]]+(compile|rebuild|check|test|test-unit|test-integration|test-e2e|bench)([[:space:]]|$|[;&|)])'
 if [[ "$cmd" =~ $make_re ]]; then
   needs_cap=1
 fi
@@ -64,7 +64,7 @@ fi
 # Direct compiler invocations. Require the binary to appear at a
 # command-boundary position (optionally preceded by a relative-path
 # prefix like `./`).
-sfn_re='(^|[;&|()])[[:space:]]*(\./)?build/native/sailfin(-seedcheck)?([[:space:]]|$)'
+sfn_re='(^|[;&|()])[[:space:]]*(\./)?build/native/sailfin(-seedcheck)?([[:space:]]|$|[;&|)])'
 if [[ "$cmd" =~ $sfn_re ]]; then
   needs_cap=1
 fi
