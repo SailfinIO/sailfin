@@ -293,6 +293,30 @@ gh issue edit <N> --add-label "needs-grooming" --remove-label "in-progress"
 
 Do not silently expand scope.
 
+**When the blocker is a missing _prerequisite_ (not just a wrong scope line).**
+Sometimes the issue isn't mis-scoped — it depends on a capability that does
+not exist yet (e.g. a runtime issue that needs a frontend primitive the
+compiler can't emit). Before defaulting to a multi-issue chain (file a
+predecessor → groom → separate PR → seed cut → re-pickup), weigh the cheaper
+path:
+
+- **Single consumer + tightly coupled → propose ONE cohesive PR** that lands
+  the prerequisite *and* the original issue together, and surface the
+  **seed-cut tradeoff** to the user. Bundling a compiler-capability change
+  with its only consumer in one PR avoids the seed cut a split would force
+  (the freshly-built compiler compiles the consumer in the same self-host
+  pass — see `groom.md` "Don't over-decompose"). This is usually faster and
+  cheaper than the file/groom/PR/seed/re-pickup ceremony.
+- **Multiple consumers, or genuinely independent, or large blast radius →**
+  file the predecessor and split (the standard path). A compiler primitive
+  several future issues will want *is* worth shipping standalone.
+
+Either way, **pause and present the choice to the user** rather than silently
+picking the heavier multi-issue route — the original #1088 pickup fanned out
+into separate issues/PRs + a seed-cut gate when one bundled PR would have
+delivered the same result with less overhead. State the tradeoff; let the user
+decide.
+
 ---
 
 ## Phase 4: VERIFY ACCEPTANCE CRITERIA

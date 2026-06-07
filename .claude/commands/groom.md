@@ -43,6 +43,49 @@ The architect produces an ordered list of issues. Each issue must:
 
 If the architect produces any L-sized item, push back: "this needs further breakdown."
 
+### Feasibility-probe FFI / "no frontend dependency" claims (gate)
+
+Before any issue that touches `runtime/` or crosses the C-ABI / `extern fn`
+boundary goes `claude-ready`, **probe the load-bearing feasibility claim** —
+do not take "this is written against the extern layer the seed already
+compiles / has no frontend dependency" on faith. The cheapest probe is a
+throwaway `.sfn` snippet run through the current seed:
+
+```bash
+ulimit -v 8388608 && build/seed/bin/sailfin check /tmp/probe.sfn
+ulimit -v 8388608 && build/seed/bin/sailfin emit -o /tmp/probe.ll llvm /tmp/probe.sfn
+```
+
+Confirm the construct the issue depends on can actually be **expressed and
+emitted** (not silently dropped to `null` / elided). Runtime code that calls
+a C API frequently needs a frontend capability that does not exist yet —
+e.g. taking a function's address to pass as a `pthread_create` start routine
+(the gap that broke the original #1088 pickup: its "no frontend dependency"
+premise was false, and the missing primitive surfaced reactively mid-pickup
+instead of as a planned predecessor). If the probe fails, the prerequisite
+is a **frontend issue that must be groomed first** — make it an explicit
+`Blocked by` / `Required in pinned seed` predecessor, not a surprise.
+
+### Don't over-decompose: bundle a capability with its single consumer
+
+Splitting is not free. Prefer **one issue/PR** for a compiler capability plus
+its first consumer when they are tightly coupled and one agent will work them
+together; only split when the work is genuinely independent **or** the
+capability has multiple consumers that each justify standalone shipping.
+
+The decisive sub-rule — **the seed-cut tax**: when a compiler-source change
+(lowering / parsing / typecheck / intrinsics) and its runtime/consumer change
+land as **separate releases**, the consumer cannot self-host until the
+capability is in the **pinned seed** — forcing a seed cut + `/pin-seed`
+between them (see "Seed dependencies" below). Bundling the capability and its
+consumer in **one PR avoids the seed cut entirely**: `make compile` builds the
+new compiler from the old seed, and that freshly-built compiler then compiles
+the consumer that uses the new capability — all in one self-hosting pass. So
+**splitting a capability away from its only consumer actively manufactures a
+release cycle that bundling would not need.** Factor this into every split
+decision: if a proposed split creates a seed-cut gate and there is a single
+consumer, prefer bundling.
+
 ---
 
 ## Phase 3: REVIEW WITH USER
