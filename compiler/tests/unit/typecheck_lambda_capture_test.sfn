@@ -98,6 +98,18 @@ test "captures: mutability of the enclosing binding is recorded" ![io] {
     assert records[0].captures[0].mutable;
 }
 
+// A lambda nested inside a concurrency node (`spawn <expr>`) must still be
+// reached by the capture walker (#1082) — without the Spawn arm the walker
+// would drop the lambda entirely and miss the `x` capture.
+test "captures: a lambda inside a spawn records its captures" ![io] {
+    let source = "let x: int = 1; let f = spawn fn() -> int { return x; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    assert records[0].captures.length == 1;
+    assert strings_equal(records[0].captures[0].name, "x");
+}
+
 // -------------------------------------------------------------------
 // Parameter-vs-capture — a lambda parameter must shadow an outer
 // binding of the same name. Acceptance criterion calls this case
