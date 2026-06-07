@@ -11,7 +11,6 @@ import {
 import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import {
     NativeModule,
-    collect_reexport_violations,
     emit_native,
     emit_native_text_to_file_with_module_name,
     emit_native_text_with_module_name,
@@ -35,6 +34,7 @@ import { LayoutManifest } from "./native_ir";
 import { number_to_string } from "./num_format";
 import { parse_program } from "./parser/mod";
 import { load_prelude_global_names } from "./prelude_globals";
+import { collect_reexport_violations } from "./reexport_check";
 import { substring } from "./string_utils";
 import { test_decl_matches_filters, test_filters_active, test_runner_trace } from "./test_runner_state";
 import { Token } from "./token";

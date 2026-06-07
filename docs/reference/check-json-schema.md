@@ -81,9 +81,9 @@ distinguishes program-analysis findings from infrastructure warnings.
 | Field | Type | Notes |
 |---|---|---|
 | `kind` | string | `"diagnostic"` for parse / typecheck / effect / capability findings. `"load_warning"` for W00xx import-context loader output. |
-| `code` | string | The diagnostic code. `Exxxx` errors, `Wxxxx` warnings. Locked code ranges (today): `E00xx` (typecheck), `E03xx` (interface), `E04xx` (effect), `E05xx` (parse), `W00xx` (load). |
+| `code` | string | The diagnostic code. `Exxxx` errors, `Wxxxx` warnings. Locked code ranges (today): `E00xx` (typecheck), `E03xx` (interface), `E04xx` (effect), `E05xx` (parse), `E06xx` (reexport), `W00xx` (load). |
 | `severity` | string | One of `"error"`, `"warning"`, `"hint"`, `"info"`. The compiler emits `"error"` and `"warning"` today; `"hint"` and `"info"` are reserved for `sfn vet`. |
-| `producer` | string | Which analysis pass minted the event. One of `"typecheck"`, `"effect"`, `"parse"`, `"load"`, `"unknown"`. The classifier maps code ranges to producers; new codes that fall outside the known ranges report `"unknown"` so a future code addition shows up rather than silently claiming the wrong producer. |
+| `producer` | string | Which analysis pass minted the event. One of `"typecheck"`, `"effect"`, `"parse"`, `"reexport"`, `"load"`, `"unknown"`. The classifier maps code ranges to producers; new codes that fall outside the known ranges report `"unknown"` so a future code addition shows up rather than silently claiming the wrong producer. |
 | `file_path` | string | Path of the analyzed module. Empty string for diagnostics that genuinely have no source anchor (none today; reserved). |
 | `message` | string | Human-readable text. May contain `\n` for multi-line messages (effect violations carry a multi-line "required by" / "suggestion" block). |
 | `primary` | object \| null | Source location for the caret. `null` for diagnostics with no AST anchor (W00xx load warnings always; effect violations on `Raw`-text bodies sometimes). |
@@ -132,6 +132,7 @@ land in:
 | `E03xx` | `typecheck` |
 | `E04xx` | `effect` |
 | `E05xx` | `parse` |
+| `E06xx` | `reexport` |
 | `W00xx` | `load` |
 | (anything else) | `unknown` |
 

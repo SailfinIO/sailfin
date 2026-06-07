@@ -34,6 +34,7 @@ import { runtime_helper_call_names } from "../llvm/runtime_helpers";
 import { number_to_string } from "../num_format";
 import { parse_program } from "../parser/mod";
 import { load_prelude_global_names } from "../prelude_globals";
+import { collect_reexport_violations } from "../reexport_check";
 import { substring } from "../string_utils";
 import { Token } from "../token";
 import { typecheck_diagnostics_with_import_symbols_prelude } from "../typecheck";
@@ -168,6 +169,38 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
             errors += 1;
         }
         ui += 1;
+    }
+
+    // Implicit re-export surfacing. `export { X };` where X is only
+    // imported (no local definition) from a local module path produces
+    // no `.fn X` entry in the re-exporter's .sfn-asm, so consumers fall
+    // back to `i8*` and miscompile boolean `if` guards. The build path
+    // already rejects this (main.sfn:_reject_reexport_violations); run
+    // the same analysis here so `sfn check` catches it in the inner loop
+    // instead of waiting on the self-host build (replaces the former
+    // scripts/lint_no_implicit_reexports.py). Always `error`, and — unlike
+    // effect diagnostics — independent of SAILFIN_EFFECT_ENFORCE: this is
+    // a hard correctness gate, never a warning.
+    // Code family E06xx = module-structure; see diagnostics_json.sfn
+    // classify_producer. Violations carry no token span, so primary is
+    // null (render_diagnostic falls back to a location-only line).
+    let reexport_violations = collect_reexport_violations(program);
+    let mut rxi: int = 0;
+    loop {
+        if rxi >= reexport_violations.length { break; }
+        let rxdiag = Diagnostic {
+            code: "E0600",
+            severity: "error",
+            message: reexport_violations[rxi],
+            file_path: file_path,
+            primary: null,
+            suggestion: null
+        };
+        combined.push(rxdiag);
+        producers.push("reexport");
+        rendered.push(render_diagnostic(rxdiag, source_lines, "reexport"));
+        errors += 1;
+        rxi += 1;
     }
 
     // Stamp the originating module path onto each typecheck diagnostic

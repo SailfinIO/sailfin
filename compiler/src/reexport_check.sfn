@@ -1,0 +1,175 @@
+// compiler/src/reexport_check.sfn
+//
+// Implicit re-export validation — pure AST analysis, shared by the build
+// path (`main.sfn` via `emit_native.sfn:report_reexport_violations`) and
+// the `sfn check` fast path (`tools/check.sfn`).
+//
+// Refuse `export { X };` where X is only imported (no local definition) and
+// the import source is a local module path. The emitter produces no `.fn X`
+// entry in the re-exporter's .sfn-asm for such symbols, so any consumer that
+// imports X through this module loses the real signature and silently
+// miscompiles (boolean returns drop `if` guards).
+//
+// Imports from non-local paths (e.g. "runtime/prelude") are resolved via the
+// runtime helper descriptor table in compiler/src/llvm/runtime_helpers.sfn
+// rather than the re-exporter's .sfn-asm, so they are exempt.
+//
+// Extracted from emit_native.sfn so the emit-free `sfn check` path can run
+// the same analysis without pulling the emitter into its import graph.
+//
+// See docs/rca/2026-04-18-reexport-diagnostic-gep.md.
+import { Program } from "./ast";
+import { contains_string, substring } from "./string_utils";
+
+export {
+    collect_reexport_violations,
+    collect_local_definition_names,
+    find_local_import_source,
+    specifier_local_name,
+    is_local_module_path,
+    format_reexport_violation
+};
+
+// Local string[] append helpers. Kept private here (rather than imported
+// from emit_native_state) so this module stays a true emit-free leaf — the
+// whole point of the extraction is that the `sfn check` import graph never
+// reaches emitter-side modules. Semantics mirror emit_native_state's
+// append_string / append_unique exactly.
+fn _append_string(values: string[], value: string) -> string[] {
+    let mut out = values;
+    if out == null { out = []; }
+    out.push(value);
+    return out;
+}
+
+fn _append_unique(values: string[], value: string) -> string[] {
+    if contains_string(values, value) { return values; }
+    return _append_string(values, value);
+}
+
+fn collect_reexport_violations(program: Program) -> string[] {
+    let local_defs = collect_local_definition_names(program);
+    let mut violations: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "ExportDeclaration" {
+            if statement.source.length == 0 {
+                let mut spec_index: int = 0;
+                loop {
+                    if spec_index >= statement.export_specifiers.length {
+                        break;
+                    }
+                    let spec = statement.export_specifiers[spec_index];
+                    if !contains_string(local_defs, spec.name) {
+                        let origin = find_local_import_source(program, spec.name);
+                        if origin.length > 0 {
+                            if is_local_module_path(origin) {
+                                violations = _append_string(violations, format_reexport_violation(spec.name, origin));
+                            }
+                        }
+                    }
+                    spec_index += 1;
+                }
+            }
+        }
+        index += 1;
+    }
+    return violations;
+}
+
+fn collect_local_definition_names(program: Program) -> string[] {
+    let mut names: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "FunctionDeclaration" {
+            names = _append_unique(names, stmt.signature.name);
+        }
+        if stmt.variant == "ExternFunctionDeclaration" {
+            names = _append_unique(names, stmt.signature.name);
+        }
+        if stmt.variant == "StructDeclaration" {
+            names = _append_unique(names, stmt.name);
+        }
+        if stmt.variant == "EnumDeclaration" {
+            names = _append_unique(names, stmt.name);
+        }
+        if stmt.variant == "InterfaceDeclaration" {
+            names = _append_unique(names, stmt.name);
+        }
+        if stmt.variant == "TypeAliasDeclaration" {
+            names = _append_unique(names, stmt.name);
+        }
+        if stmt.variant == "VariableDeclaration" {
+            names = _append_unique(names, stmt.name);
+        }
+        if stmt.variant == "TestDeclaration" {
+            names = _append_unique(names, stmt.name);
+        }
+        index += 1;
+    }
+    return names;
+}
+
+// Return the import source path for a symbol name, matching against the
+// locally-visible name (the alias when one is present and non-empty,
+// otherwise the original name).  Returns "" if no matching import is
+// found.
+fn find_local_import_source(program: Program, name: string) -> string {
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "ImportDeclaration" {
+            let mut spec_index: int = 0;
+            loop {
+                if spec_index >= stmt.import_specifiers.length { break; }
+                let spec = stmt.import_specifiers[spec_index];
+                if specifier_local_name(spec.name, spec.alias) == name {
+                    return stmt.source;
+                }
+                spec_index += 1;
+            }
+        }
+        index += 1;
+    }
+    return "";
+}
+
+fn specifier_local_name(name: string, alias: string?) -> string {
+    let mut _no_alias: boolean = false;
+    if alias == null { _no_alias = true; }
+    if alias.length == 0 { _no_alias = true; }
+    if _no_alias { return name; }
+    return "" + alias;
+}
+
+fn is_local_module_path(path: string) -> boolean {
+    if path.length >= 2 {
+        if substring(path, 0, 2) == "./" { return true; }
+    }
+    if path.length >= 3 {
+        if substring(path, 0, 3) == "../" { return true; }
+    }
+    return false;
+}
+
+fn format_reexport_violation(symbol: string, origin: string) -> string {
+    return "`export { " + symbol + " };` re-exports a symbol imported from \""
+        + origin
+        + "\" but there is no local definition of `"
+        + symbol
+        + "` in this module.  Sailfin does not support implicit re-exports of imported symbols: "
+        + "the emitter produces no `.fn` signature for them, so consumers silently "
+        + "fall back to `i8*` and miscompile boolean `if` guards.  Fix: remove `"
+        + symbol
+        + "` from this module's export block and have consumers import it "
+        + "directly from \""
+        + origin
+        + "\", or add a local definition or forwarder for `"
+        + symbol
+        + "` in this module.  See docs/rca/2026-04-18-reexport-diagnostic-gep.md.";
+}

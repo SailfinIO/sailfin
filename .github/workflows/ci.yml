@@ -348,18 +348,20 @@ jobs:
           fi
           echo "[canary] all canary files emit cleanly"
 
-      # Static lint: catch any new `export { X };` (no `from`) that
-      # re-exports a symbol imported from a local module path before
-      # the slow self-host build can detect it.  The Sailfin emitter
-      # also rejects this pattern (Option B in the RCA), so this lint
-      # exists as an early-feedback signal duplicated cheaply in CI.
+      # Static check: catch any new `export { X };` (no `from`) that
+      # re-exports a symbol imported from a local module path. This is
+      # the compiler's own analysis (E0600), now run in the `sfn check`
+      # fast path — it replaces the former
+      # scripts/lint_no_implicit_reexports.py Python duplicate. Uses the
+      # freshly-built native binary (not the seed) so the check is the
+      # current source's, with no seed-lag, over both source trees.
       # See docs/rca/2026-04-18-reexport-diagnostic-gep.md.
-      - name: Re-export lint (catches `export { X };` of imports)
+      - name: Re-export check (sfn check enforces E0600)
         if: ${{ matrix.primary }}
         shell: bash {0}
         run: |
           set -euo pipefail
-          python3 scripts/lint_no_implicit_reexports.py compiler/src runtime
+          build/native/sailfin check compiler/src runtime
 
       - name: Enable test runner trace (macOS)
         if: ${{ runner.os == 'macOS' && matrix.primary }}

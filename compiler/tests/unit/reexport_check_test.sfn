@@ -1,0 +1,76 @@
+// Regression coverage for implicit re-export validation
+// (compiler/src/reexport_check.sfn), extracted from emit_native.sfn so the
+// emit-free `sfn check` fast path can run it (replacing the former
+// scripts/lint_no_implicit_reexports.py).
+//
+// `collect_reexport_violations` flags `export { X };` (no `from` clause)
+// where X has no local definition and is imported from a LOCAL module path
+// (./ or ../). Imports from non-local paths (e.g. "runtime/prelude") are
+// exempt — they resolve via the runtime helper descriptor table, not the
+// re-exporter's .sfn-asm.
+//
+// See docs/rca/2026-04-18-reexport-diagnostic-gep.md.
+import { parse_program } from "../../src/parser/mod";
+import { collect_reexport_violations } from "../../src/reexport_check";
+
+fn _msg_contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if haystack.length < needle.length { return false; }
+    let mut i: int = 0;
+    let limit = haystack.length - needle.length;
+    loop {
+        if i > limit { break; }
+        let mut j: int = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "reexport: flags implicit re-export of a local-imported symbol" ![io] {
+    let program = parse_program("import { Foo } from \"./bar\"; export { Foo };");
+    let violations = collect_reexport_violations(program);
+    assert violations.length == 1;
+    assert _msg_contains(violations[0], "Foo");
+    assert _msg_contains(violations[0], "./bar");
+}
+
+test "reexport: non-local import source is exempt" ![io] {
+    let program = parse_program("import { x } from \"runtime/prelude\"; export { x };");
+    let violations = collect_reexport_violations(program);
+    assert violations.length == 0;
+}
+
+test "reexport: local definition present is not a violation" ![io] {
+    let program = parse_program("import { Foo } from \"./bar\"; fn Foo() {} export { Foo };");
+    let violations = collect_reexport_violations(program);
+    assert violations.length == 0;
+}
+
+test "reexport: explicit re-export with from-clause is not a violation" ![io] {
+    let program = parse_program("export { Foo } from \"./bar\";");
+    let violations = collect_reexport_violations(program);
+    assert violations.length == 0;
+}
+
+test "reexport: aliased local import is resolved by local name" ![io] {
+    let program = parse_program("import { Foo as Bar } from \"./bar\"; export { Bar };");
+    let violations = collect_reexport_violations(program);
+    assert violations.length == 1;
+    assert _msg_contains(violations[0], "Bar");
+}
+
+test "reexport: clean module produces no violations" ![io] {
+    let program = parse_program("fn local() {} export { local };");
+    let violations = collect_reexport_violations(program);
+    assert violations.length == 0;
+}

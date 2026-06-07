@@ -1070,7 +1070,7 @@ schema-versioned.**
       "kind": "diagnostic",                  // "diagnostic" | "load_warning"
       "code": "E0400",                       // E0xxx error, W0xxx warning
       "severity": "error",                   // error | warning | hint | info
-      "producer": "effect",                  // typecheck | effect | parse | load
+      "producer": "effect",                  // typecheck | effect | parse | reexport | load
       "file_path": "compiler/src/foo.sfn",
       "message": "function `process` is missing required effects: ![io]",
       "primary": {                           // null when no source location
@@ -1390,7 +1390,7 @@ struct CheckJsonSummary {
 
 struct CheckJsonEvent {
     kind: string;          // "diagnostic" | "load_warning"
-    producer: string;      // "typecheck" | "effect" | "parse" | "load"
+    producer: string;      // "typecheck" | "effect" | "parse" | "reexport" | "load"
     diagnostic: Diagnostic;
 }
 
@@ -1555,7 +1555,8 @@ ulimit -v 8388608 && timeout 1800 make check
 - [ ] All six existing factories in `typecheck_types.sfn` initialize
       `suggestion: null`.
 - [ ] Triple-pass `make check` green on Linux + macOS.
-- [ ] CI re-export lint clean (`scripts/lint_no_implicit_reexports.py`).
+- [ ] CI re-export check clean (`sfn check` enforces `E0600`; the former
+      `scripts/lint_no_implicit_reexports.py` is retired).
 
 ### B4 — Renderer harmonization (`report_typecheck_errors` → `render_diagnostic`)
 

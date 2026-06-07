@@ -117,6 +117,21 @@ feature availability.
   error recovery. Covered by the `E0500` case in
   `compiler/tests/e2e/test_check_json_schema.sh` and the `sfn/test`
   `assert_compiles`/`assert_does_not_compile` helpers.
+- **`sfn check` enforces implicit re-export bans** (`E0600`): `export { X };`
+  (no `from` clause) where `X` has no local definition and is imported from a
+  local module path (`./`, `../`) is now reported as an `E0600` error with
+  `producer: "reexport"` in the `sfn check` fast path — previously only the
+  ~13-minute self-host build (`main.sfn:_reject_reexport_violations`) caught
+  it. The validator was extracted from `emit_native.sfn` into the emit-free
+  leaf module `compiler/src/reexport_check.sfn` so both the build path and
+  `tools/check.sfn` share one implementation; `classify_producer` maps the
+  new `E06xx` (module-structure) range to `"reexport"`. This retires the
+  duplicate Python lint `scripts/lint_no_implicit_reexports.py` (deleted;
+  CI now runs `sfn check compiler/src runtime` via the native binary).
+  Imports from non-local paths (e.g. `runtime/prelude`) remain exempt — they
+  resolve via the runtime helper descriptor table. Covered by
+  `compiler/tests/unit/reexport_check_test.sfn`. See
+  `docs/rca/2026-04-18-reexport-diagnostic-gep.md`.
 - **Diagnostic infrastructure Phase 1** (A3): the `Diagnostic` struct
   now carries `severity` ("error" | "warning" | "hint" | "info") and
   `file_path`; the renderer reads both from the struct rather than

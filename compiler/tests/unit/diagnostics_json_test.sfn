@@ -83,12 +83,19 @@ test "classify_producer: E0500 maps to parse" {
     assert classify_producer("E0500") == "parse";
 }
 
+test "classify_producer: E0600 maps to reexport" {
+    // Re-export diagnostics ride the `E06xx` (module-structure) range;
+    // `sfn check` mints `E0600` for implicit re-exports of imported
+    // symbols (replacing scripts/lint_no_implicit_reexports.py).
+    assert classify_producer("E0600") == "reexport";
+}
+
 test "classify_producer: unknown codes fall through to unknown" {
     // Regression-guard the "fall through" branch — a future code
-    // range outside E00xx/E03xx/E04xx/E05xx/W00xx must surface as
+    // range outside E00xx/E03xx/E04xx/E05xx/E06xx/W00xx must surface as
     // `unknown` so a producer mismatch is visible.
     assert classify_producer("X9999") == "unknown";
-    assert classify_producer("E0600") == "unknown";
+    assert classify_producer("E0700") == "unknown";
 }
 
 // -------------------------------------------------------------------
