@@ -772,6 +772,54 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
     if expression.variant == "Raw" {
         return collect_effects_from_text(expression.text);
     }
+    // Concurrency frontend nodes (epic #965, issues #1079-#1082). Mirror the
+    // Call-form name handlers above so the new prefix/construct syntax carries
+    // the same effects: `spawn`/`parallel` → io, `serve` → net. Each arm also
+    // recurses into its operands/children so effectful calls nested inside a
+    // `spawn <expr>` / `await <expr>` / `channel(...)` / `parallel [...]` /
+    // `serve(...)` are still discovered (the old `"spawn("` text heuristic does
+    // not match the prefix `spawn <expr>` form). `await`/`channel` contribute
+    // no effect of their own — they only recurse.
+    if expression.variant == "Spawn" {
+        let spawn_trigger = _token_from_span(expression.span, "spawn");
+        let mut required = collect_effects_from_expression(expression.operand, imports);
+        required = append_requirement(required, EffectRequirement {
+            effect: "io", description: "spawn call", trigger: spawn_trigger
+        });
+        return required;
+    }
+    if expression.variant == "Await" {
+        return collect_effects_from_expression(expression.operand, imports);
+    }
+    if expression.variant == "Channel" {
+        if expression.capacity == null { return []; }
+        return collect_effects_from_expression(expression.capacity, imports);
+    }
+    if expression.variant == "Parallel" {
+        let parallel_trigger = _token_from_span(expression.span, "parallel");
+        let mut required: EffectRequirement[] = [];
+        let mut task_index: int = 0;
+        loop {
+            if task_index >= expression.tasks.length { break; }
+            required = merge_requirements(required, collect_effects_from_expression(expression.tasks[task_index], imports));
+            task_index += 1;
+        }
+        required = append_requirement(required, EffectRequirement {
+            effect: "io", description: "parallel call", trigger: parallel_trigger
+        });
+        return required;
+    }
+    if expression.variant == "Serve" {
+        let serve_trigger = _token_from_span(expression.span, "serve");
+        let mut required = collect_effects_from_expression(expression.handler, imports);
+        if expression.port != null {
+            required = merge_requirements(required, collect_effects_from_expression(expression.port, imports));
+        }
+        required = append_requirement(required, EffectRequirement {
+            effect: "net", description: "serve call", trigger: serve_trigger
+        });
+        return required;
+    }
     return [];
 }
 

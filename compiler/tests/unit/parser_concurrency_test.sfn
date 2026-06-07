@@ -69,6 +69,25 @@ test "concurrency: spawn of an identifier parses to Spawn of Identifier" ![io] {
     assert expr.operand.variant == "Identifier";
 }
 
+// `spawn` of a lambda with a declared return type tags the future kind
+// (#1082): the parser resolves the lambda's return-type annotation to one of
+// the six monomorphized kinds via `spawn_future_kind`.
+test "concurrency: spawn of an int-returning lambda tags kind int" ![io] {
+    let expr = first_let_initializer("let f = spawn fn() -> int { return 1; };");
+    assert expr.variant == "Spawn";
+    assert expr.operand.variant == "Lambda";
+    assert strings_equal(expr.kind, "int");
+}
+
+// A bare named-fn `spawn foo()` cannot be resolved at parse time (needs
+// symbol resolution that is out of scope), so its kind stays "" for
+// emit-native (#1084) to tag.
+test "concurrency: spawn of a named-fn call leaves kind unresolved" ![io] {
+    let expr = first_let_initializer("let f = spawn worker();");
+    assert expr.variant == "Spawn";
+    assert strings_equal(expr.kind, "");
+}
+
 // -------------------------------------------------------------------
 // `await <expr>` parses to an `Await` node whose operand is the awaited
 // expression. This is the shape the legacy text-based async lowering is

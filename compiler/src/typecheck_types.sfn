@@ -441,6 +441,140 @@ fn make_try_error_type_mismatch_diagnostic(operand_error: string, fn_error: stri
     };
 }
 
+// =============================================================================
+// Concurrency kind resolution (issue #1082, epic #965, M4 — decision B)
+// =============================================================================
+// Types are monomorphized into SIX future/channel kinds: void, number, int,
+// bool, string, ptr (`runtime_helpers.sfn:463-516`). There is NO parametric
+// `Future<T>` and NO generics prerequisite — the runtime never sees a
+// parametric future. `spawn`/`await`/`channel` are typed by resolving a
+// declared return-type / element-type annotation STRING to one of these six
+// kinds; the resolved kind tags the AST node so emit-native (#1084) selects
+// the matching `spawn_*`/`await_*`/`channel_*` helper.
+//
+// Like the `?`-operator rules above, these are driven against explicit type
+// strings: the checker has no expression-type inferencer (#829), so live
+// await/channel-send enforcement waits on that workstream. The unit tests in
+// `concurrency_typecheck_test.sfn` exercise the helpers directly.
+// Resolve a callee's declared return-type annotation to its future kind, one
+// of "void"|"number"|"int"|"bool"|"string"|"ptr". Returns "" when the text is
+// empty (no declared return type) — the caller turns that into E0813. This is
+// the typecheck-side MIRROR of `llvm/type_mapping.sfn`'s
+// `future_pointer_type_for_return_type` / `spawn_symbol_for_return_type`
+// (`:831-905`); keep the two in lockstep so #1084's emission agrees with the
+// kind tagged here. Like the canonical resolver, ownership wrappers
+// (`Affine<T>`/`Linear<T>`) are stripped before classification so a callee
+// declared `-> Affine<int>` tags `int`, not `ptr`.
+fn spawn_future_kind(return_type_text: string) -> string {
+    let trimmed = trim_text(return_type_text);
+    if trimmed.length == 0 { return ""; }
+    let normalized = unwrap_ownership_wrapper(trimmed);
+    if strings_equal(normalized, "void") { return "void"; }
+    if strings_equal(normalized, "number") { return "number"; }
+    if strings_equal(normalized, "int") { return "int"; }
+    if strings_equal(normalized, "i64") { return "int"; }
+    if strings_equal(normalized, "u64") { return "int"; }
+    if strings_equal(normalized, "usize") { return "int"; }
+    if strings_equal(normalized, "isize") { return "int"; }
+    if strings_equal(normalized, "bool") { return "bool"; }
+    if strings_equal(normalized, "boolean") { return "bool"; }
+    if strings_equal(normalized, "string") { return "string"; }
+    // Unknown/user types (structs, arrays, pointers) lower through the opaque
+    // pointer future — the canonical catch-all (`type_mapping.sfn:854`).
+    return "ptr";
+}
+
+// Strip ownership wrappers (`Affine<T>`/`Linear<T>`) before kind
+// classification, mirroring `llvm/type_mapping.sfn:unwrap_move_wrapper`
+// (`:82-98`). Recurses so nested wrappers (`Affine<Linear<int>>`) resolve to
+// the innermost type. Reuses `extract_generic_argument_block` to lift the
+// `<...>` payload.
+fn unwrap_ownership_wrapper(annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if trimmed.length == 0 { return trimmed; }
+    let mut is_wrapped: boolean = false;
+    if starts_with(trimmed, "Affine<") { is_wrapped = true; }
+    if starts_with(trimmed, "Linear<") { is_wrapped = true; }
+    if !is_wrapped { return trimmed; }
+    if !ends_with(trimmed, ">") { return trimmed; }
+    let inner = extract_generic_argument_block(trimmed);
+    if inner == null { return trimmed; }
+    return unwrap_ownership_wrapper(trim_text(inner));
+}
+
+// The element kind carried by a future type, or null when `type_text` is not
+// one of the six future spellings. `await x` yields this kind (the await→T
+// rule). Futures surface as the runtime pointer spellings
+// (`%SailfinFuture<Kind>*`) the spawn lowering produces.
+fn future_element_kind(type_text: string) -> string? {
+    let trimmed = trim_text(type_text);
+    if strings_equal(trimmed, "%SailfinFutureVoid*") { return "void"; }
+    if strings_equal(trimmed, "%SailfinFutureNumber*") { return "number"; }
+    if strings_equal(trimmed, "%SailfinFutureInt*") { return "int"; }
+    if strings_equal(trimmed, "%SailfinFutureBool*") { return "bool"; }
+    if strings_equal(trimmed, "%SailfinFutureString*") { return "string"; }
+    if strings_equal(trimmed, "%SailfinFuturePtr*") { return "ptr"; }
+    return null;
+}
+
+// True when `type_text` names one of the six future types.
+fn type_is_future(type_text: string) -> boolean {
+    return future_element_kind(type_text) != null;
+}
+
+// E0813 — `spawn` target has no declared return type, so its future kind
+// cannot be determined. Inferring the kind from a bare named-function call or
+// an arbitrary expression body needs symbol/expression-type resolution that
+// is out of scope (#829); annotate the spawned lambda/fn return type instead.
+fn make_spawn_unresolvable_kind_diagnostic(span: SourceSpan?) -> Diagnostic {
+    let head = "`spawn` target has no declared return type, so its future";
+    let mid = " kind cannot be determined. Annotate the spawned lambda/fn";
+    let tail = " return type (void, number, int, bool, string, or a"
+        + " pointer/struct type).";
+    let message = head + mid + tail;
+    return Diagnostic {
+        code: "E0813",
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: token_from_name("spawn", span),
+        suggestion: null
+    };
+}
+
+// E0814 — `await` applied to a value that is not a future.
+fn make_await_non_future_diagnostic(operand_type: string, span: SourceSpan?) -> Diagnostic {
+    let head = "`await` applied to a non-future value of type `";
+    let tail = "`; `await` only unwraps a future produced by `spawn`.";
+    let message = head + trim_text(operand_type) + tail;
+    return Diagnostic {
+        code: "E0814",
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: token_from_name("await", span),
+        suggestion: null
+    };
+}
+
+// E0815 — a value sent on a channel has a different element kind than the
+// channel carries. Both kinds are named.
+fn make_channel_send_mismatch_diagnostic(channel_kind: string, sent_kind: string, span: SourceSpan?) -> Diagnostic {
+    let head = "channel send element-kind mismatch: the channel carries `";
+    let mid = "` but the sent value has kind `";
+    let tail = "`.";
+    let message = head + trim_text(channel_kind) + mid + trim_text(sent_kind)
+        + tail;
+    return Diagnostic {
+        code: "E0815",
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: token_from_name("channel", span),
+        suggestion: null
+    };
+}
+
 fn extract_generic_argument_block(annotation_text: string) -> string? {
     let trimmed = trim_text(annotation_text);
     let mut index: int = 0;

@@ -356,6 +356,37 @@ fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWal
     if expression.variant == "Lambda" {
         return analyze_lambda(scope, expression);
     }
+    // Concurrency frontend nodes (epic #965, issues #1079-#1082). Descend into
+    // operands/children so captures inside a spawned/parallel/served lambda
+    // (e.g. `spawn () -> int { uses_outer }`) reach `analyze_lambda` instead of
+    // being silently dropped.
+    if expression.variant == "Spawn" {
+        return walk_expression(scope, expression.operand);
+    }
+    if expression.variant == "Await" {
+        return walk_expression(scope, expression.operand);
+    }
+    if expression.variant == "Channel" {
+        if expression.capacity == null { return empty_walk_result(); }
+        return walk_expression(scope, expression.capacity);
+    }
+    if expression.variant == "Parallel" {
+        let mut result = empty_walk_result();
+        let mut i: int = 0;
+        loop {
+            if i >= expression.tasks.length { break; }
+            result = merge_results(result, walk_expression(scope, expression.tasks[i]));
+            i += 1;
+        }
+        return result;
+    }
+    if expression.variant == "Serve" {
+        let mut result = walk_expression(scope, expression.handler);
+        if expression.port != null {
+            result = merge_results(result, walk_expression(scope, expression.port));
+        }
+        return result;
+    }
     return empty_walk_result();
 }
 

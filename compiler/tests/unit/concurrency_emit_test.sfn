@@ -1,0 +1,101 @@
+// Golden-IR emission test for the concurrency frontend nodes — issue #1084,
+// epic #965 (M4). Pins the `.sfn-asm` text `emit_native_format` produces for
+// `spawn`/`await`/`channel`/`parallel`/`serve`/`routine` so a regression in
+// the emitter (or the parser nodes it consumes, issues #1079–#1082) breaks
+// here.
+//
+// Scope: emission only. The LLVM lowering of these forms is deferred to #1085
+// and currently fails closed with a `[fatal]` (see
+// `compiler/tests/e2e/test_sync_rejects_unimplemented_concurrency.sh` and the
+// guards in `llvm/expression_lowering/native/core.sfn`). This test therefore
+// exercises `emit_native_text_with_module_name` directly, never the full build.
+import { emit_native_text_with_module_name, emit_native_with_module_name } from "../../src/emit_native";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+// `spawn` of an int-returning lambda carries the kind the parser tagged
+// (`parser/expressions.sfn:412`, via `spawn_future_kind`), rendered as the
+// `spawn:<kind>` qualifier #1085 will lower against.
+test "emit_native: spawn of an int lambda tags kind in the IR" ![io] {
+    let source = "fn main() ![io] { let f = spawn fn() -> int { return 1; }; }";
+    let program = parse_program(source);
+    let asm = emit_native_text_with_module_name(program, "test_concurrency");
+    assert _contains(asm, "spawn:int ");
+}
+
+// `spawn` of a bare named-fn call has no statically derivable kind (needs
+// symbol resolution, #829), so it renders without a qualifier and preserves
+// the operand text.
+test "emit_native: spawn of a call renders without a kind qualifier" ![io] {
+    let source = "fn main() ![io] { let g = spawn worker(); }";
+    let program = parse_program(source);
+    let asm = emit_native_text_with_module_name(program, "test_concurrency");
+    assert _contains(asm, "spawn worker()");
+}
+
+// `await <expr>` keeps the existing `await ` text form consumed by the async
+// lowering bridge (unchanged by #1084).
+test "emit_native: await renders the await prefix form" ![io] {
+    let source = "fn main() ![io] { let r = await fut; }";
+    let program = parse_program(source);
+    let asm = emit_native_text_with_module_name(program, "test_concurrency");
+    assert _contains(asm, "await fut");
+}
+
+// `channel(capacity?)` renders the constructor with its capacity argument.
+test "emit_native: channel renders the constructor with capacity" ![io] {
+    let source = "fn main() ![io] { let ch = channel(4); }";
+    let program = parse_program(source);
+    let asm = emit_native_text_with_module_name(program, "test_concurrency");
+    assert _contains(asm, "channel(4)");
+}
+
+// `parallel [tasks]` renders the task list with the array-literal grammar.
+test "emit_native: parallel renders its bracketed task list" ![io] {
+    let source = "fn main() ![io] { let p = parallel [spawn worker()]; }";
+    let program = parse_program(source);
+    let asm = emit_native_text_with_module_name(program, "test_concurrency");
+    assert _contains(asm, "parallel [spawn worker()]");
+}
+
+// `serve(handler, port?)` renders the handler and optional port arguments.
+test "emit_native: serve renders handler and port arguments" ![io] {
+    let source = "fn main() ![io] { serve(handler, 8080); }";
+    let program = parse_program(source);
+    let asm = emit_native_text_with_module_name(program, "test_concurrency");
+    assert _contains(asm, "serve(handler, 8080)");
+}
+
+// `routine { ... }` emits an explicit `.routine`/`.endroutine` scope. The
+// native IR parser maps these to the transparent always-true `If`/`EndIf`
+// scope (`.if 1 > 0`) until the structured-concurrency runtime lands (#1085).
+test "emit_native: routine emits an explicit scope" ![io] {
+    let source = "fn main() ![io] { routine { let x: int = 1; } }";
+    let program = parse_program(source);
+    let asm = emit_native_text_with_module_name(program, "test_concurrency");
+    assert _contains(asm, ".routine");
+    assert _contains(asm, ".endroutine");
+}
+
+// A decorated `routine` block is unsupported in v0 (no statement-level
+// decorator slot in the native IR). Fail closed with a diagnostic rather than
+// silently dropping the decorator the parser attached to the node.
+test "emit_native: a decorated routine fails closed with a diagnostic" ![io] {
+    let source = "fn main() ![io] { @trace\nroutine { let x: int = 1; } }";
+    let program = parse_program(source);
+    let result = emit_native_with_module_name(program, "test_concurrency");
+    let mut found: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= result.diagnostics.length { break; }
+        if index_of(result.diagnostics[index], "decorators on `routine`") >= 0 {
+            found = true;
+        }
+        index += 1;
+    }
+    assert found;
+}

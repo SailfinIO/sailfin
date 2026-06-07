@@ -1,0 +1,137 @@
+// Unit tests for the concurrency type rules — issue #1082, epic #965 (M4,
+// decision B). `spawn`/`await`/`channel` are typed by MONOMORPHIZED KIND
+// (void/number/int/bool/string/ptr) — there is no parametric `Future<T>` and
+// no generics prerequisite. The runtime is already monomorphized into six
+// future kinds (`runtime_helpers.sfn:463-516`).
+//
+// Like the `?`-operator rules (`result_question_typecheck_test.sfn`), these
+// drive the checker primitives against explicit type-annotation strings: the
+// checker has no expression-type inferencer (#829), so live await/channel-send
+// enforcement waits on that workstream. `spawn_future_kind` mirrors
+// `llvm/type_mapping.sfn:831-905` so emit-native (#1084) agrees on the kind.
+import { index_of } from "../../src/string_utils";
+import {
+    await_result_type,
+    check_await_operand,
+    check_channel_send,
+    check_spawn_kind
+} from "../../src/typecheck";
+import { future_element_kind, spawn_future_kind, type_is_future } from "../../src/typecheck_types";
+
+// Collapse the not-found cases so the assert sites stay free of optional
+// narrowing.
+fn _element_kind(future_type: string) -> string {
+    let resolved = await_result_type(future_type);
+    if resolved == null { return "<not-future>"; }
+    return resolved;
+}
+
+// --- spawn_future_kind: declared return type -> one of six kinds ------------
+test "spawn kind: an int-returning callee tags kind int (and int aliases)" {
+    assert strings_equal(spawn_future_kind("int"), "int");
+    assert strings_equal(spawn_future_kind("i64"), "int");
+    assert strings_equal(spawn_future_kind("u64"), "int");
+    assert strings_equal(spawn_future_kind("usize"), "int");
+    assert strings_equal(spawn_future_kind("isize"), "int");
+}
+
+test "spawn kind: each of the six monomorphized kinds resolves" {
+    assert strings_equal(spawn_future_kind("void"), "void");
+    assert strings_equal(spawn_future_kind("number"), "number");
+    assert strings_equal(spawn_future_kind("bool"), "bool");
+    assert strings_equal(spawn_future_kind("boolean"), "bool");
+    assert strings_equal(spawn_future_kind("string"), "string");
+    // Unknown/user types lower through the opaque-pointer future (catch-all).
+    assert strings_equal(spawn_future_kind("MyStruct"), "ptr");
+    assert strings_equal(spawn_future_kind("Order[]"), "ptr");
+}
+
+test "spawn kind: an empty annotation is unresolvable (\"\")" {
+    assert strings_equal(spawn_future_kind(""), "");
+    assert strings_equal(spawn_future_kind("   "), "");
+}
+
+test "spawn kind: ownership wrappers are stripped before classification" {
+    // `Affine<T>`/`Linear<T>` resolve to the wrapped type's kind, matching
+    // the canonical `unwrap_move_wrapper` in `llvm/type_mapping.sfn`.
+    assert strings_equal(spawn_future_kind("Affine<int>"), "int");
+    assert strings_equal(spawn_future_kind("Linear<string>"), "string");
+    assert strings_equal(spawn_future_kind("Affine<Linear<int>>"), "int");
+    assert strings_equal(spawn_future_kind("Affine<MyStruct>"), "ptr");
+}
+
+// --- await: future operand -> element kind (await->T) -----------------------
+test "await type: each future spelling yields its element kind" {
+    assert strings_equal(_element_kind("%SailfinFutureVoid*"), "void");
+    assert strings_equal(_element_kind("%SailfinFutureNumber*"), "number");
+    assert strings_equal(_element_kind("%SailfinFutureInt*"), "int");
+    assert strings_equal(_element_kind("%SailfinFutureBool*"), "bool");
+    assert strings_equal(_element_kind("%SailfinFutureString*"), "string");
+    assert strings_equal(_element_kind("%SailfinFuturePtr*"), "ptr");
+}
+
+test "await type: a non-future operand has no element type" {
+    assert strings_equal(_element_kind("int"), "<not-future>");
+    assert strings_equal(_element_kind("string"), "<not-future>");
+}
+
+test "await type: type_is_future recognizes only the six future spellings" {
+    assert type_is_future("%SailfinFutureInt*");
+    assert type_is_future("%SailfinFuturePtr*");
+    assert ! type_is_future("int");
+    assert ! type_is_future("Future<int>");
+}
+
+// --- await: non-future operand -> E0814 -------------------------------------
+test "await op: `await` on a non-future emits E0814" {
+    let diags = check_await_operand("int", null);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0814");
+}
+
+test "await op: `await` on a future type-checks" {
+    let diags = check_await_operand("%SailfinFutureInt*", null);
+    assert diags.length == 0;
+}
+
+// --- spawn: unresolvable kind -> E0813 --------------------------------------
+test "spawn op: spawn target with no return type emits E0813" {
+    let diags = check_spawn_kind(null, null);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0813");
+}
+
+test "spawn op: spawn target with an empty return type emits E0813" {
+    let diags = check_spawn_kind("", null);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0813");
+}
+
+test "spawn op: a declared return type (incl. user types) type-checks" {
+    assert check_spawn_kind("int", null).length == 0;
+    assert check_spawn_kind("void", null).length == 0;
+    // A user/struct return type resolves to the ptr future (catch-all).
+    assert check_spawn_kind("MyStruct", null).length == 0;
+}
+
+// --- channel: send element-kind mismatch -> E0815 ---------------------------
+test "channel send: mismatched element kind emits E0815 naming both kinds" {
+    let diags = check_channel_send("int", "string", null);
+    assert diags.length == 1;
+    assert strings_equal(diags[0].code, "E0815");
+    assert index_of(diags[0].message, "int") >= 0;
+    assert index_of(diags[0].message, "string") >= 0;
+}
+
+test "channel send: a matching element kind type-checks" {
+    let diags = check_channel_send("int", "int", null);
+    assert diags.length == 0;
+}
+
+test "channel element: kind resolved from a declared annotation" {
+    // The channel's element kind is resolved from its declared element-type
+    // annotation via the same six-kind resolver (channel<T> parsing lands in
+    // a follow-up; the resolver is ready for it).
+    assert strings_equal(spawn_future_kind("int"), "int");
+    assert strings_equal(spawn_future_kind("string"), "string");
+}

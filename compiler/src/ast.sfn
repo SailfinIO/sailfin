@@ -106,17 +106,25 @@ enum Expression {
     // expression (mirroring Unary/TryOperator's `operand`); `channel`,
     // `parallel`, and `serve` are value-producing constructs.
     //
-    // `spawn <expr>` — enqueue a task, yields a future (§2.6.2).
-    Spawn { operand: Expression, span: SourceSpan? },
+    // `spawn <expr>` — enqueue a task, yields a future (§2.6.2). `kind`
+    // tags the monomorphized future kind (one of void/number/int/bool/
+    // string/ptr; "" when not statically resolvable) so emit-native
+    // (#1084) selects the matching `spawn_*` runtime helper. Appended
+    // after `span` to keep existing positional GEP reads stable; the
+    // parser supplies "" by default (mirroring the `captures` roll-in).
+    Spawn { operand: Expression, span: SourceSpan?, kind: string },
     // `await <expr>` — block on a future, yields its result (§2.6.3).
-    Await { operand: Expression, span: SourceSpan? },
+    // `kind` tags the awaited future's element kind ("" until resolved).
+    Await { operand: Expression, span: SourceSpan?, kind: string },
     // `channel<T>(capacity)` — construct a channel; both the element type
     // and capacity are optional so the parser can defer to inference and
-    // an unbuffered default (§2.6.4).
+    // an unbuffered default (§2.6.4). `kind` tags the monomorphized
+    // element kind (derived from `element_type` when present, else "").
     Channel {
         element_type: TypeAnnotation?,
         capacity: Expression?,
-        span: SourceSpan?
+        span: SourceSpan?,
+        kind: string
     },
     // `parallel [t1, t2, ...]` — fan out tasks, await all, yield results in
     // order (§2.6.5). A convenience built on spawn+await.

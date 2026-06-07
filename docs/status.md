@@ -879,10 +879,10 @@ feature availability.
 | `&T` / `&mut T` borrows | Parsed only | Accepted syntactically; exclusivity not checked |
 | `PII<T>` / `Secret<T>` | Parsed only | Parsed as nominal types; no taint enforcement |
 | `model` / `prompt` / `tool` / `pipeline` blocks | **Removed** | Moved to the `sfn/ai` library capsule (post-1.0). The `![model]` effect remains as the capability gate |
-| `routine { }` blocks | **Not implemented** | Not parsed |
-| `await` | **Not implemented** | Not parsed |
-| `channel()` concurrency | **Not implemented** | Not parsed as concurrency primitive |
-| `spawn` | **Not implemented** | Not parsed |
+| `routine { }` blocks | Parsed | Frontend nodes land via #1079/#1081; no typecheck or lowering yet. The effect-checker and capture walkers descend into concurrency nodes as of #1082 |
+| `await` | Parsed (typing helpers) | Parsed (#1080). #1082 adds typecheck helpers: `await x` resolves to the future's monomorphized element kind (void/number/int/bool/string/ptr) and `await` on a non-future is diagnosed (`E0814`). These diagnostics are **not yet wired into the live walk** — they are unit-tested against explicit type strings, pending the expression-type inferencer (#829). The live walk, effect-checker, and capture analysis do recurse into the operand. Lowering is #1084 |
+| `channel()` concurrency | Parsed (typing helpers) | Parsed (#1080). #1082 adds typecheck helpers: element kind resolved from a declared annotation, and send-element-kind mismatch diagnosed (`E0815`). These diagnostics are **helper-only** (not live-wired); `channel<T>` element-type parsing and live wiring are pending (#829). The walkers recurse into the capacity operand. Lowering is #1084 |
+| `spawn` | Parsed (typing helpers) | Parsed (#1080). #1082 adds the future-kind resolver (declared return type → one of six kinds, mirrors `llvm/type_mapping.sfn`) and diagnoses a spawn target with no determinable kind (`E0813`, live for return-typeless lambda operands). The parser populates the AST `kind` tag for lambda operands with a declared return type; a bare named-fn `spawn foo()` stays `""` for emit-native (#1084) to tag. `spawn`/`parallel` require `![io]` and `serve` requires `![net]`, and the effect/capture walkers descend into the operands (#1082). Lowering is #1084 |
 | `\|>` pipeline operator | **Not implemented** | Planned post-1.0 expression operator (unrelated to the removed `pipeline` block) |
 | Currency literals (`$0.05`) | **Not implemented** | Use numeric literal + comment |
 | Time literals (`1s`, `150ms`) | **Not implemented** | Use numeric literals |
