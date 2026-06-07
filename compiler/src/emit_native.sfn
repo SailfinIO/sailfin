@@ -339,6 +339,31 @@ fn emit_statement_control_flow(state: NativeState, statement: Statement) -> Nati
     if statement.variant == "ExpressionStatement" {
         return emit_expression_statement(state, statement);
     }
+    if statement.variant == "RoutineStatement" {
+        // `routine { ... }` — structured-concurrency block scope (M4.0, epic
+        // #965; docs/runtime_architecture.md §2.6.7). The v0 surface is a bare
+        // block scope that yields no value (ast.sfn:355), so emit an explicit
+        // `.routine`/`.endroutine` scope. The native IR parser maps these to
+        // the transparent always-true `If`/`EndIf` scope that `BlockStatement`
+        // emits (`.if 1 > 0`), so no nursery runtime is implied yet and the
+        // existing scope lowering applies unchanged; the real lowering lands in
+        // a follow-up (#1085). Decorators on a `routine` block are not
+        // supported in v0: native IR has no statement-level decorator slot
+        // inside a function body (a `.decorator` directive there is a parse
+        // error), and routine-decorator semantics are undefined until that
+        // runtime lands. Fail closed rather than silently dropping the
+        // decorator (llms.txt: no parsed-but-unenforced surface) — the parser
+        // does attach decorators to the node (`parser/statements.sfn:537`).
+        let mut current = state;
+        if statement.decorators.length > 0 {
+            current = state_add_diagnostic(current, "native backend: decorators on `routine` blocks are not yet supported");
+        }
+        current = state_emit_line(current, ".routine");
+        current = state_push_indent(current);
+        current = emit_block(current, statement.body);
+        current = state_pop_indent(current);
+        return state_emit_line(current, ".endroutine");
+    }
     let message = "native backend: unsupported statement `" + statement.variant
         + "`";
     return state_add_diagnostic(state, message);

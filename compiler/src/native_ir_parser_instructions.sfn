@@ -233,6 +233,28 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
             value_span_consumed: false
         };
     }
+    // `routine { ... }` v0 transparent-scope shim (#1084, epic #965). The
+    // emitter writes `.routine`/`.endroutine` to keep the concurrency surface
+    // explicit in the `.sfn-asm`, but the v0 routine is a bare block scope
+    // (docs/runtime_architecture.md §2.6.7) with no nursery semantics yet. Map
+    // it to the same always-true `If`/`EndIf` scope that `BlockStatement`
+    // lowers through (`.if 1 > 0`/`.endif`), so the existing scope lowering
+    // applies unchanged and no structured-concurrency runtime is implied. The
+    // dedicated `Routine` lowering replaces this shim in a follow-up (#1085).
+    if line == ".routine" {
+        return InstructionParseResult {
+            instructions: [NativeInstruction.If { condition: "1 > 0" }],
+            span_consumed: false,
+            value_span_consumed: false
+        };
+    }
+    if line == ".endroutine" {
+        return InstructionParseResult {
+            instructions: [NativeInstruction.EndIf()],
+            span_consumed: false,
+            value_span_consumed: false
+        };
+    }
     if starts_with(line, ".for ") {
         let body = trim_text(strip_prefix(line, ".for "));
         let separator = " in ";
