@@ -3,7 +3,7 @@
 // Call lowering extracted from core.sfn.
 import { NativeFunction } from "../../../native_ir";
 import { index_of, substring } from "../../../string_utils";
-import { format_temp_name } from "../../expressions_helpers";
+import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
 import { is_simple_identifier } from "../../expressions_helpers";
 import { trace_call_lowering } from "../../lowering_debug_state";
 import { find_runtime_helper, make_concat_descriptor } from "../../runtime_helpers";
@@ -23,6 +23,7 @@ import {
 import {
     ends_with,
     extend_string_array,
+    join_with_separator,
     number_to_string,
     starts_with,
     trim_text
@@ -32,11 +33,14 @@ import { array_pointer_element_type } from "../arrays";
 import { lower_expression } from "./core";
 import { coerce_and_emit_call } from "./core_call_emission";
 import {
+    _ClosureSignatureParse,
+    _parse_fn_pointer_annotation,
     resolve_call_method_target,
     resolve_call_signature,
     try_dispatch_atomic_builtin
 } from "./core_call_resolution";
 import { lower_enum_literal } from "./core_literals_lowering";
+import { coerce_operand_to_type, load_local_operand } from "./core_operands";
 import { parse_member_access } from "./core_parse";
 import { find_local_binding, find_parameter_binding, replace_llvm_operand } from "./core_scopes";
 
@@ -45,6 +49,171 @@ import { find_local_binding, find_parameter_binding, replace_llvm_operand } from
 // compiles as substring() on the wrong local variable.  Extracting the access
 // into a tiny function produces correct array-element-load LLVM IR.
 fn get_string_at(arr: string[], idx: int) -> string { return arr[idx]; }
+
+// Plain C-ABI function pointer (#1089). A value spelled `* fn (A) -> R`
+// (note the leading `*`) is a bare code pointer — NOT the closure-pair
+// `fn (A) -> R` form, which lowers to a `{i8*, i8*}` env aggregate and is
+// handled by the closure-dispatch path. The leading `*` makes the two
+// spellings structurally disjoint, so the env-prepending closure dispatch
+// never fires for a plain pointer. Returns the pointee annotation
+// (`fn (A) -> R`) when `annotation` is `* fn (...)` / `*fn(...)` in either
+// formatter spelling, or the empty string otherwise.
+fn _strip_leading_star_fn(annotation: string) -> string {
+    let trimmed = trim_text(annotation);
+    if !starts_with(trimmed, "*") { return ""; }
+    let pointee = trim_text(substring(trimmed, 1, trimmed.length));
+    if starts_with(pointee, "fn(") { return pointee; }
+    if starts_with(pointee, "fn (") { return pointee; }
+    return "";
+}
+
+// Emit an env-less indirect call through a plain C-ABI function pointer
+// (#1089). Fires when the call target names a local/parameter typed
+// `* fn (A) -> R`: loads the pointer value, bitcasts it to the typed
+// function-pointer LLVM type derived from the annotation, and emits a
+// direct `call <ret> <fnptr>(<args>)` with NO hidden environment argument
+// (contrast the closure path's `extractvalue` + env-prepended call). The
+// indirect-call emission lives behind this single seam so a future
+// non-LLVM backend has one lowering site to retarget. Returns null when
+// the target is not a plain-fn-pointer binding, so the caller falls
+// through to the normal resolution pipeline.
+fn try_lower_plain_fn_ptr_call(target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+    let name = trim_text(target);
+    if name.length == 0 { return null; }
+    if !is_simple_identifier(name) { return null; }
+
+    let local = find_local_binding(locals, name);
+    let parameter = find_parameter_binding(bindings, name);
+    let mut annotation: string = "";
+    if local != null { annotation = local.type_annotation; } else if parameter != null {
+        annotation = parameter.type_annotation;
+    } else { return null; }
+
+    let pointee = _strip_leading_star_fn(annotation);
+    if pointee.length == 0 { return null; }
+    let parsed = _parse_fn_pointer_annotation(context, pointee);
+    if !parsed.ok { return null; }
+
+    // Arity must match the annotation exactly; a mismatch falls through to
+    // the normal pipeline (which raises the standard diagnostic) rather
+    // than emitting a call against a fabricated signature.
+    if arguments.length != parsed.parameter_types.length { return null; }
+
+    let mut diagnostics: string[] = [];
+    let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
+    let mut result_lines = lines;
+    let mut result_temp: int = temp_index;
+
+    // Load the function-pointer value (a bare code pointer stored in the
+    // local/param slot).
+    let mut fn_operand: LLVMOperand? = null;
+    if local != null {
+        let load = load_local_operand(local, result_temp, result_lines);
+        fn_operand = load.operand;
+        result_lines = load.lines;
+        result_temp = load.temp_index;
+    } else if parameter != null {
+        fn_operand = LLVMOperand {
+            llvm_type: parameter.llvm_type,
+            value: parameter.llvm_name
+        };
+    }
+    if fn_operand == null { return null; }
+
+    // Lower each user argument, coercing to the annotation's parameter
+    // type so the emitted call matches the callee's real ABI.
+    let mut arg_operands: LLVMOperand[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= arguments.length { break; }
+        let argument_text = trim_text(get_string_at(arguments, index));
+        let expected_type = parsed.parameter_types[index];
+        let lowered = lower_expression(argument_text, bindings, locals, result_temp, result_lines, functions, context, expected_type);
+        diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
+        collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+        result_lines = lowered.lines;
+        result_temp = lowered.temp_index;
+        if lowered.operand == null {
+            diagnostics.push("llvm lowering: failed to lower argument "
+                + number_to_string(index)
+                + " for plain function-pointer call to `"
+                + name
+                + "`");
+            return ExpressionResult {
+                lines: result_lines,
+                temp_index: result_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+        let coerced = coerce_operand_to_type(lowered.operand, expected_type, result_temp, result_lines, false, null);
+        diagnostics = extend_string_array(diagnostics, coerced.diagnostics);
+        result_lines = coerced.lines;
+        result_temp = coerced.temp_index;
+        if coerced.operand != null { arg_operands.push(coerced.operand); } else {
+            arg_operands.push(lowered.operand);
+        }
+        index += 1;
+    }
+
+    let mut fp_param_types: string[] = [];
+    let mut _pi: int = 0;
+    loop {
+        if _pi >= parsed.parameter_types.length { break; }
+        fp_param_types.push(parsed.parameter_types[_pi]);
+        _pi += 1;
+    }
+    let fn_type = parsed.return_type + " (" + join_with_separator(fp_param_types, ", ")
+        + ")*";
+
+    // Bitcast the stored pointer value to the typed function-pointer type.
+    let typed_fn_temp = format_temp_name(result_temp);
+    result_temp += 1;
+    result_lines.push("  " + typed_fn_temp + " = bitcast " + fn_operand.llvm_type
+        + " "
+        + fn_operand.value
+        + " to "
+        + fn_type);
+
+    let mut rendered_args: string[] = [];
+    let mut _ai: int = 0;
+    loop {
+        if _ai >= arg_operands.length { break; }
+        rendered_args.push(format_typed_operand(arg_operands[_ai]));
+        _ai += 1;
+    }
+    let arg_text = join_with_separator(rendered_args, ", ");
+
+    if parsed.return_type == "void" {
+        result_lines.push("  call void " + typed_fn_temp + "(" + arg_text + ")");
+        return ExpressionResult {
+            lines: result_lines,
+            temp_index: result_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_string_constants
+        };
+    }
+
+    let result_name = format_temp_name(result_temp);
+    result_lines.push("  " + result_name + " = call " + parsed.return_type + " "
+        + typed_fn_temp
+        + "("
+        + arg_text
+        + ")");
+    let call_result = LLVMOperand {
+        llvm_type: parsed.return_type,
+        value: result_name
+    };
+    return ExpressionResult {
+        lines: result_lines,
+        temp_index: result_temp + 1,
+        operand: call_result,
+        diagnostics: diagnostics,
+        string_constants: collected_string_constants
+    };
+}
 
 fn lower_call_expression(target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
     let mut diagnostics: string[] = [];
@@ -68,6 +237,14 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     // entire call pipeline.
     let atomic_dispatch = try_dispatch_atomic_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
     if atomic_dispatch != null { return atomic_dispatch; }
+
+    // Plain C-ABI function-pointer dispatch (#1089). A call whose target is
+    // a local/parameter typed `* fn (A) -> R` is an env-less indirect call
+    // through a bare code pointer — distinct from the closure-pair path.
+    // Resolve it here, before method/closure resolution, so the call does
+    // not fall through to the "callee signature is not known" fatal.
+    let plain_fn_ptr_dispatch = try_lower_plain_fn_ptr_call(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
+    if plain_fn_ptr_dispatch != null { return plain_fn_ptr_dispatch; }
 
     // Check if this is an enum variant constructor call (e.g., LiteralValue.Null())
     let dot_index = index_of(trimmed_target, ".");

@@ -887,6 +887,27 @@ a future handle.
 `sfn_await(future: SfnFuture*) -> i8*` — block on the future's condition
 variable until `done` is set. Returns the result pointer.
 
+**Implemented (M4 v0, #1089).** The task lifecycle landed in
+`runtime/sfn/concurrency/scheduler.sfn` ahead of the public `SfnFuture`
+spawn/await surface, operating directly on the `Task` struct above:
+
+- `sfn_task_create(fn_ptr: i64, ctx: i64) -> * u8` — allocate + init a
+  `Task` (mutex/cond initialised, `result`/`done` zeroed).
+- `sfn_task_run(task: * u8)` — the worker invokes `fn_ptr(ctx)`, stores
+  `result`, sets `done` (seq_cst atomic store), and signals `cond`.
+- `sfn_task_join(task: * u8) -> * u8` — block on `cond` under `mutex`
+  until `done` (seq_cst atomic load), then return `result`.
+- `sfn_task_destroy(task: * u8)` — tear down cond/mutex, free.
+
+The worker reaches `fn_ptr` through the **plain C-ABI function-pointer
+indirect call** primitive: `Task.fn_ptr` (a raw `i64` address) is cast to
+`* fn (* u8) -> * u8` and called. This `* fn (...)` spelling is a bare code
+pointer — the env-less sibling of the closure-application case epic #1118
+addresses — and lowers to a typed-fn-ptr `bitcast` + `call` with no hidden
+environment argument (see `docs/status.md`). The public
+`sfn_spawn`/`sfn_await`/`SfnFuture` wrapper builds on this surface in a
+follow-up M4 issue.
+
 #### 2.6.4 Channel
 
 ```
