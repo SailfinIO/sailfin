@@ -6137,11 +6137,27 @@ char *sailfin_runtime_grapheme_at(char *text, double index)
     // NOTE: For bytes >= 0x80 we preserve legacy behaviour (a raw single-byte
     // C string) because immediate-codepoint strings are interpreted as Unicode
     // codepoints by other runtime helpers.
+    //
+    // macOS arm64 (#1136): the immediate-codepoint tag for an ASCII byte is the
+    // address `byte << 32` — e.g. 0x100000000 for byte 1, which is the
+    // executable's __TEXT load base. `_is_immediate_codepoint_string`'s
+    // mach_vm_region guard treats a mapped+readable address as a real pointer,
+    // so any ASCII byte whose `byte << 32` lands on a mapped region (ASLR-
+    // dependent, varies run to run) is mis-decoded and dereferenced. Drop the
+    // immediate fast-path on Apple platforms and fall through to a real 1-byte
+    // buffer; the decoder then never sees an immediate from this producer on
+    // macOS. This is an interim, platform-scoped retirement of the immediate-
+    // codepoint scheme — the permanent fix is the SfnString aggregate flip
+    // (M1.A.2, docs/runtime_architecture.md §2.2), which deletes the scheme
+    // (and this branch) wholesale. Do NOT re-add a tagged-pointer fast-path
+    // here. Linux keeps the immediate encoding (low addresses are unmapped).
+#if !defined(__APPLE__)
     if (byte <= 0x7fu)
     {
         uintptr_t packed = ((uintptr_t)byte) << 32;
         return (char *)packed;
     }
+#endif
 
     char *out = (char *)malloc(2);
     if (!out)
