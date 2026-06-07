@@ -60,22 +60,36 @@ import { ends_with_pointer_suffix, map_type_annotation } from "./type_mapping";
 import { join_with_separator, number_to_string, trim_text } from "./utils";
 
 // Percent-escape every character that doubles as either a marker
-// delimiter (`,`, `:`) or as part of the outer closure-pair marker
-// boundary (`<`, `>`). The escape character itself (`%`) is also
-// escaped so the substitution round-trips cleanly. Used to make
-// `_encode_captures` safe against type annotations like
-// `Map<string, int>` whose literal characters would otherwise either
+// delimiter (`;` between captures, `:` between a capture's name and
+// type) or as part of the outer closure-pair marker boundary (`<`,
+// `>`). The escape character itself (`%`) is also escaped so the
+// substitution round-trips cleanly. `,` is escaped too: although the
+// inter-capture separator is `;` (not `,`) precisely so the marker
+// survives the comma-splitting argument parser in
+// `expression_lowering/splitting.sfn` (see #1106), a literal `,`
+// inside a type annotation like `Map<string, int>` must still not be
+// confused with that separator by any downstream comma-aware reader.
+// ASCII space is escaped to `%20` too: the `captures=` value is
+// extracted by `_parse_marker_string_field` / `_parse_prologue_string`,
+// both of which terminate at the next space — so a type annotation
+// containing a space (e.g. `Map<string, int>` or `fn(int) -> boolean`)
+// would otherwise truncate the encoded list and drop every capture
+// after the space, reintroducing the missing-env-fields bug class
+// (#1106 review). Used to make `_encode_captures` safe against type
+// annotations whose literal characters would otherwise either
 // terminate the outer `<closure_pair … >` marker prematurely or
-// collide with the `,`/`:` capture delimiters.
+// collide with a capture delimiter.
 fn percent_escape_capture_text(text: string) -> string {
     let mut buffer: string = "";
     let mut idx: int = 0;
     loop {
         if idx >= text.length { break; }
         let ch = text[idx];
-        if ch == "%" { buffer = buffer + "%25"; } else if ch == "," {
-            buffer = buffer + "%2C";
-        } else if ch == ":" { buffer = buffer + "%3A"; } else if ch == "<" {
+        if ch == "%" { buffer = buffer + "%25"; } else if ch == " " {
+            buffer = buffer + "%20";
+        } else if ch == "," { buffer = buffer + "%2C"; } else if ch == ":" {
+            buffer = buffer + "%3A";
+        } else if ch == ";" { buffer = buffer + "%3B"; } else if ch == "<" {
             buffer = buffer + "%3C";
         } else if ch == ">" { buffer = buffer + "%3E"; } else {
             buffer = buffer + ch;
@@ -108,12 +122,20 @@ fn percent_unescape_capture_text(text: string) -> string {
                 buffer = buffer + "%";
                 idx += 3;
                 decoded = true;
+            } else if two == "20" {
+                buffer = buffer + " ";
+                idx += 3;
+                decoded = true;
             } else if two == "2C" {
                 buffer = buffer + ",";
                 idx += 3;
                 decoded = true;
             } else if two == "3A" {
                 buffer = buffer + ":";
+                idx += 3;
+                decoded = true;
+            } else if two == "3B" {
+                buffer = buffer + ";";
                 idx += 3;
                 decoded = true;
             } else if two == "3C" {
@@ -134,13 +156,16 @@ fn percent_unescape_capture_text(text: string) -> string {
     return buffer;
 }
 
-// Decode the percent-escaped, comma-separated capture list produced
-// by `_encode_captures` (in `lambda_lowering.sfn`) back into a
-// `Capture[]` suitable for `synthesize_closure_env_struct`. The
-// outer encoding is `name:type,name:type,...` where `name` and
+// Decode the percent-escaped, semicolon-separated capture list
+// produced by `_encode_captures` (in `lambda_lowering.sfn`) back into
+// a `Capture[]` suitable for `synthesize_closure_env_struct`. The
+// outer encoding is `name:type;name:type;...` where `name` and
 // `type` segments are individually percent-escaped, so the literal
-// `,` and `:` separators are unambiguous regardless of what the
-// source-level type annotation contained. `by_value` is set true
+// `;` and `:` separators are unambiguous regardless of what the
+// source-level type annotation contained. The inter-capture
+// separator is `;` (not `,`) so the env-alloc marker survives the
+// comma-splitting call-argument parser when a capturing lambda is
+// passed directly to a function (see #1106). `by_value` is set true
 // (M1.5 captures are by-value snapshots) and `mutable` is false
 // (the lift pass refuses mutable captures via a separate fatal
 // marker before any encoding happens — anything that reaches
@@ -155,7 +180,7 @@ fn decode_captures(encoded: string) -> Capture[] {
         loop {
             if cursor >= encoded.length { break; }
             let ch = encoded[cursor];
-            if ch == "," {
+            if ch == ";" {
                 cursor += 1;
                 break;
             }

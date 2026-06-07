@@ -112,12 +112,40 @@ test_higher_order_dispatch() {
     run_fixture "$FIXTURE_DIR/closure_higher_order/main.sfn" "10"
 }
 
+# (4) Two-int capture → 1 + 10 + 20 = 31. Issue #1106: before the fix
+# the env-alloc marker's two encoded captures were inlined as a call
+# argument and the comma between them was eaten by the comma-splitting
+# argument parser, so the env struct emitted one field while the load
+# prologue read two — invalid GEP that failed at link.
+test_two_int_capture() {
+    run_fixture "$FIXTURE_DIR/closure_two_int_capture/main.sfn" "31"
+}
+
+# (5) Three-int capture → 10 + 1 + 2 + 3 = 16. Guards the env-struct
+# field walk for N >= 2 captures (issue #1106).
+test_three_int_capture() {
+    run_fixture "$FIXTURE_DIR/closure_three_int_capture/main.sfn" "16"
+}
+
+# (6) Mixed (string + int) two-capture → "x" + "v" + "42" = xv42.
+# Confirms heterogeneous env-field layout (`i8*` then `i64`) agrees
+# between the alloc and load-prologue walks (issue #1106).
+test_mixed_capture() {
+    run_fixture "$FIXTURE_DIR/closure_mixed_capture/main.sfn" "xv42"
+}
+
 run_test "(1) canonical lambda-closure example prints 7" \
     test_canonical_non_capturing_example
 run_test "(2) single-int-capture lambda prints 12" \
     test_single_int_capture
 run_test "(3) higher-order dispatch via fn(int) -> int parameter prints 10" \
     test_higher_order_dispatch
+run_test "(4) two-int-capture lambda prints 31" \
+    test_two_int_capture
+run_test "(5) three-int-capture lambda prints 16" \
+    test_three_int_capture
+run_test "(6) mixed string+int two-capture lambda prints xv42" \
+    test_mixed_capture
 
 echo "[test] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

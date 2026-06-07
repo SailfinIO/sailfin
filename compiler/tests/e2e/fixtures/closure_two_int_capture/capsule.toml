@@ -1,0 +1,4 @@
+[capsule]
+name = "fixture/closure-two-int-capture"
+version = "0.0.0"
+description = "Isolated capsule manifest for the issue #1106 multi-capture e2e fixture so that `discover_project_root` doesn't walk up into compiler/capsule.toml — that would inherit `sfn/runtime-native`, drag `native_driver.c` (with its own `int main`) into the link, and clobber the fixture's own `fn main()`. Mirrors `fixtures/closure_single_capture/capsule.toml`."

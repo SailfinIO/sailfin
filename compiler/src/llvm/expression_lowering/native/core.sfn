@@ -417,8 +417,11 @@ struct _ClosurePairLowerResult {
 // Two forms are accepted:
 //   * `<closure_pair @sfn_lambda_<N> null>` — non-capturing (#686).
 //     Emits the aggregate with a null env slot.
-//   * `<closure_pair @sfn_lambda_<N> env_alloc lambda_id=<N> captures=name:type,...>`
-//     — capturing (#687). Emits the A2 env-struct alloc+populate
+//   * `<closure_pair @sfn_lambda_<N> env_alloc lambda_id=<N> captures=name:type;...>`
+//     — capturing (#687). The capture list is `;`-separated (not `,`)
+//     so it survives the comma-splitting argument parser when the
+//     marker is inlined as a call argument (#1106). Emits the A2
+//     env-struct alloc+populate
 //     sequence (preceded by a hoistable `; closure_env_type_decl ...`
 //     comment) and the aggregate with the alloc's `i8*` env raw var
 //     as the env slot.
