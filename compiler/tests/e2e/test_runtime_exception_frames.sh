@@ -9,9 +9,11 @@
 #                   nine exports plus `declare`s for the inlined libc
 #                   primitives (malloc, free, memset, setjmp, longjmp,
 #                   abort).
-#   4. layout    — `%SfnExceptionFrame = type { i64, i64, i64 }` pins
-#                  the three-`i64`-slot struct shape per the architect's
-#                  layout deviation note in the module header.
+#   4. layout    — `%SfnExceptionFrame = type { %SfnExceptionFrame*,
+#                  i8*, i8* }` pins the pointer-typed struct shape
+#                  restored once the #713 layout/store fix reached the
+#                  pinned seed (the `i64`-slot workaround retired in
+#                  #1116).
 #   5. setjmp pin — `sfn_try_enter` carries exactly one
 #                   `call i32 @setjmp(...)`. The M2.7b compiler-lowering
 #                   migration inlines this call at user code's try-block
@@ -189,12 +191,15 @@ test_struct_layout() {
         echo "[test]   $ll missing — test_emit_define_shape must run first"
         return 1
     fi
-    # Pin the SfnExceptionFrame layout. A regression that adds or
-    # drops a field (e.g. a future i64 cleanup_handlers_addr slot
-    # for option-B drop callbacks) surfaces here and bumps the
-    # `sfn_exception_alloc_frame` malloc literal in lockstep.
-    if ! grep -qE "^%SfnExceptionFrame = type \{ i64, i64, i64 \}$" "$ll"; then
-        echo "[test]   missing '%SfnExceptionFrame = type { i64, i64, i64 }' layout pin"
+    # Pin the SfnExceptionFrame layout. The fields are pointer-typed
+    # (`prev: * SfnExceptionFrame`, `jmp_buf: * u8`, `message: * u8`)
+    # since #1116 retired the `i64`-slot workaround once the #713
+    # layout/store fix landed in the pinned seed. A regression that
+    # drops a pointer field back to `i64` (or adds/removes a field)
+    # surfaces here and bumps the `sfn_exception_alloc_frame` malloc
+    # literal in lockstep.
+    if ! grep -qE "^%SfnExceptionFrame = type \{ %SfnExceptionFrame\*, i8\*, i8\* \}$" "$ll"; then
+        echo "[test]   missing '%SfnExceptionFrame = type { %SfnExceptionFrame*, i8*, i8* }' layout pin"
         echo "[test]   layout candidates in IR:"
         grep -E "^%SfnExceptionFrame" "$ll" || true
         return 1
@@ -299,22 +304,27 @@ test_take_clears_slot() {
     fi
     # Architect §2.4.2 (matched by legacy C
     # sailfin_runtime_take_exception): "take" consumes the message
-    # — a subsequent take on the same frame reads null. Pin the
-    # store-zero to the message_addr slot (field index 2 of
-    # SfnExceptionFrame).
+    # — a subsequent take on the same frame reads null. The `message`
+    # field is now `* u8` (#1116), so the clear stores a null pointer
+    # (`inttoptr i64 0 to i8*`) into the slot rather than `i64 0`.
     local take_block
     take_block="$(sed -n '/^define i8\* @sfn_take_exception(/,/^}/p' "$ll")"
-    if ! echo "$take_block" | grep -qE "store i64 0, i64\* %t[0-9]+$"; then
-        echo "[test]   sfn_take_exception missing 'store i64 0, i64* %tN' clear-on-take:"
+    if ! echo "$take_block" | grep -qE "inttoptr i64 0 to i8\*"; then
+        echo "[test]   sfn_take_exception missing 'inttoptr i64 0 to i8*' null for clear-on-take:"
         echo "$take_block"
         return 1
     fi
-    # The clear must target the message_addr slot — getelementptr
-    # with field index `i32 2` (third field of SfnExceptionFrame).
-    # Anchor on the GEP→store sequence so a regression that
-    # accidentally clears prev_addr or jmp_buf_addr fails here.
+    if ! echo "$take_block" | grep -qE "store i8\* %t[0-9]+, i8\*\* %t[0-9]+$"; then
+        echo "[test]   sfn_take_exception missing 'store i8* %tN, i8** %tN' clear-on-take:"
+        echo "$take_block"
+        return 1
+    fi
+    # The clear must target the message slot — getelementptr with
+    # field index `i32 2` (third field of SfnExceptionFrame). Anchor
+    # on the GEP→store sequence so a regression that accidentally
+    # clears `prev` or `jmp_buf` fails here.
     if ! echo "$take_block" | grep -qE "getelementptr %SfnExceptionFrame, %SfnExceptionFrame\* %frame, i32 0, i32 2"; then
-        echo "[test]   sfn_take_exception missing 'getelementptr ... i32 0, i32 2' to message_addr:"
+        echo "[test]   sfn_take_exception missing 'getelementptr ... i32 0, i32 2' to message slot:"
         echo "$take_block"
         return 1
     fi
@@ -419,10 +429,10 @@ test_cross_frame_roundtrip() {
  * longjmp transfers control back to the inline setjmp, and the
  * caught message is read via sfn_take_exception.
  *
- * The struct layout matches `%SfnExceptionFrame = type { i64,
- * i64, i64 }` — three i64 slots: prev_addr, jmp_buf_addr,
- * message_addr. We read jmp_buf_addr as a void* for the inline
- * setjmp call.
+ * The struct layout matches `%SfnExceptionFrame = type {
+ * %SfnExceptionFrame*, i8*, i8* }` — three pointer slots: prev,
+ * jmp_buf, message (#1116 retired the `i64`-slot workaround). We
+ * read jmp_buf directly as the void* for the inline setjmp call.
  */
 #include <stdio.h>
 #include <setjmp.h>
@@ -431,9 +441,9 @@ test_cross_frame_roundtrip() {
 #include <stdint.h>
 
 struct SfnExceptionFrame {
-    int64_t prev_addr;
-    int64_t jmp_buf_addr;
-    int64_t message_addr;
+    struct SfnExceptionFrame *prev;
+    void *jmp_buf;
+    void *message;
 };
 
 extern struct SfnExceptionFrame *sfn_exception_alloc_frame(void);
@@ -481,7 +491,7 @@ int main(void) {
 
     /* Inline setjmp on the frame's jmp_buf. Equivalent to the
      * M2.7b compiler-inline emission of sfn_try_enter. */
-    int rc = setjmp((void *)frame->jmp_buf_addr);
+    int rc = setjmp(frame->jmp_buf);
     if (rc == 0) {
         /* First-call branch: throw across a deeper frame. */
         provoke("boom");

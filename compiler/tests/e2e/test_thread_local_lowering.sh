@@ -355,9 +355,9 @@ test_exception_tls_isolation_roundtrip() {
 #include <stdatomic.h>
 
 struct SfnExceptionFrame {
-    int64_t prev_addr;
-    int64_t jmp_buf_addr;
-    int64_t message_addr;
+    struct SfnExceptionFrame *prev;
+    void *jmp_buf;
+    void *message;
 };
 
 extern struct SfnExceptionFrame *sfn_exception_alloc_frame(void);
