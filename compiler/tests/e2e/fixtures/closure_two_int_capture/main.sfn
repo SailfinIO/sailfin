@@ -1,0 +1,19 @@
+// compiler/tests/e2e/fixtures/closure_two_int_capture/main.sfn
+//
+// Issue #1106 acceptance — a lambda that captures TWO enclosing
+// locals (two ints). Before the fix, the env-alloc marker was
+// inlined as a call argument and the comma between the two encoded
+// captures was eaten by the comma-splitting argument parser
+// (`split_array_elements`), so the `%sfn_closure_env_*` struct was
+// emitted with only the first field while the load prologue GEP'd a
+// second field that did not exist — invalid LLVM IR that failed at
+// link. The two- and three-capture cases had golden-IR coverage but
+// no runtime e2e, which is how the truncation slipped through.
+//
+// Expected stdout: 31 (1 argument + 10 + 20 captured).
+fn apply(cb: fn(int) -> int, x: int) -> int { return cb(x); }
+fn main() ![io] {
+    let a: int = 10;
+    let b: int = 20;
+    print(apply(fn (d: int) -> int { return d + a + b; }, 1));
+}

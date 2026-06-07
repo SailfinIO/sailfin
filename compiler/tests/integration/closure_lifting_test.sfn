@@ -219,7 +219,7 @@ test "lift #687: multi-typed captures preserve A1 first-use order" ![io] {
     // `c`. The marker must reflect that ordering verbatim so the
     // env-struct field indices stay consistent across the
     // lambda-site alloc and the lifted-body prologue.
-    assert init.text == "<closure_pair @sfn_lambda_0 env_alloc lambda_id=0 captures=b:boolean,a:int,c:string>";
+    assert init.text == "<closure_pair @sfn_lambda_0 env_alloc lambda_id=0 captures=b:boolean;a:int;c:string>";
 }
 
 test "lift #687: shadowing — capture `x` resolves to prologue, not outer" ![io] {
@@ -275,8 +275,8 @@ test "lift #687: mutable capture is refused with a fatal marker" ![io] {
 
 // ── Capture-payload percent escape round-trip ────────────────────────
 //
-// The marker payload's `name:type,name:type,...` shape would be
-// ambiguous if a type annotation contained `,` or `:` (e.g. a future
+// The marker payload's `name:type;name:type;...` shape would be
+// ambiguous if a type annotation contained `;` or `:` (e.g. a future
 // generic like `Map<string, int>`), and a literal `>` in the payload
 // would terminate the outer `<closure_pair … >` marker prematurely.
 // `_encode_captures` percent-escapes those characters; `decode_captures`
@@ -289,6 +289,10 @@ test "captures: percent_escape round-trips the delimiter character set" {
     assert percent_unescape_capture_text("Map%3Cstring%2C int%3E") == "Map<string, int>";
     assert percent_escape_capture_text("a:b") == "a%3Ab";
     assert percent_unescape_capture_text("a%3Ab") == "a:b";
+    // The inter-capture separator `;` is escaped inside a segment so
+    // it can never be confused with the structural delimiter (#1106).
+    assert percent_escape_capture_text("a;b") == "a%3Bb";
+    assert percent_unescape_capture_text("a%3Bb") == "a;b";
     assert percent_escape_capture_text("100%") == "100%25";
     assert percent_unescape_capture_text("100%25") == "100%";
     // No-op for the common case so simple types stay byte-for-byte
@@ -302,7 +306,7 @@ test "captures: decode_captures recovers generic-typed entries" {
     // Hand-rolled the encoded form so we don't depend on the lift
     // pass's encoder being run against a parsed program that the
     // grammar may not yet accept.
-    let encoded = "items:Map%3Cstring%2C int%3E,handler:fn(int) -%3E boolean";
+    let encoded = "items:Map%3Cstring%2C int%3E;handler:fn(int) -%3E boolean";
     let decoded: Capture[] = decode_captures(encoded);
     assert decoded.length == 2;
     assert decoded[0].name == "items";

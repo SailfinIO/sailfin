@@ -1,0 +1,15 @@
+// compiler/tests/e2e/fixtures/closure_mixed_capture/main.sfn
+//
+// Issue #1106 acceptance — a lambda that captures TWO locals of
+// MIXED types (one string, one int). Confirms the env struct lays
+// out heterogeneous fields (`i8*` then `i64`) in first-use order and
+// that the alloc/populate and load-prologue walks agree on both the
+// count and the per-field types.
+//
+// Expected stdout: xv42 (argument "x" + captured "v" + captured 42).
+fn apply_s(cb: fn(string) -> string, x: string) -> string { return cb(x); }
+fn main() ![io] {
+    let s: string = "v";
+    let n: int = 42;
+    print(apply_s(fn (d: string) -> string { return d + s + number_to_string(n); }, "x"));
+}
