@@ -13,11 +13,14 @@ import {
     TypeParameter
 } from "./ast";
 import {
+    char_code_at_text,
     contains_string,
     ends_with,
+    index_of,
     starts_with,
     strings_equal,
-    strip_prefix
+    strip_prefix,
+    substring
 } from "./string_utils";
 import { Token, TokenKind } from "./token";
 
@@ -69,6 +72,14 @@ struct SymbolEntry {
     name: string;
     kind: string;
     span: SourceSpan?;
+    // For `kind == "function"` / `"extern function"`: whether the
+    // function is generic (has type parameters) and whether its
+    // signature is C-ABI-compatible. These drive the #1147
+    // function-reference-as-value diagnostics (E0808/E0809) — taking
+    // a function's address (`<fn> as * u8`) is only valid for a
+    // concrete, C-ABI function. Always `false` for non-function kinds.
+    is_generic: boolean;
+    is_c_abi: boolean;
 }
 
 struct SymbolCollectionResult {
@@ -1315,7 +1326,7 @@ fn check_type_parameters(type_parameters: TypeParameter[]) -> Diagnostic[] {
 // compiler's own LLVM lowering uses the pattern e.g.
 // `compiler/src/llvm/lowering/instructions_loops.sfn:492,597`). Other kinds
 // (function/struct/enum/interface/type/test) keep the duplicate diagnostic.
-fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: int) -> ScopeResult {
+fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?, scope_start: int, is_generic: boolean = false, is_c_abi: boolean = false) -> ScopeResult {
     if !strings_equal(kind, "variable") {
         if has_symbol_in_range(bindings, name, scope_start) {
             return ScopeResult {
@@ -1325,11 +1336,11 @@ fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, sp
         }
     }
 
-    let updated = append_symbol(bindings, name, kind, span);
+    let updated = append_symbol(bindings, name, kind, span, is_generic, is_c_abi);
     return ScopeResult { bindings: updated, diagnostics: [] };
 }
 
-fn register_symbol(name: string, kind: string, span: SourceSpan?, existing: SymbolEntry[]) -> SymbolCollectionResult {
+fn register_symbol(name: string, kind: string, span: SourceSpan?, existing: SymbolEntry[], is_generic: boolean = false, is_c_abi: boolean = false) -> SymbolCollectionResult {
     if has_symbol(existing, name) {
         return SymbolCollectionResult {
             symbols: existing,
@@ -1338,14 +1349,16 @@ fn register_symbol(name: string, kind: string, span: SourceSpan?, existing: Symb
     }
 
     return SymbolCollectionResult {
-        symbols: append_symbol(existing, name, kind, span),
+        symbols: append_symbol(existing, name, kind, span, is_generic, is_c_abi),
         diagnostics: []
     };
 }
 
-fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?) -> SymbolEntry[] {
+fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?, is_generic: boolean = false, is_c_abi: boolean = false) -> SymbolEntry[] {
     let mut updated: SymbolEntry[] = clone_bindings(symbols);
-    updated.push(SymbolEntry { name: name, kind: kind, span: span });
+    updated.push(SymbolEntry {
+        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi
+    });
     return updated;
 }
 
@@ -1368,6 +1381,183 @@ fn has_symbol(symbols: SymbolEntry[], name: string) -> boolean {
         _si += 1;
     }
     return false;
+}
+
+// Look up a symbol by name, innermost-first. Walk in reverse so a
+// locally-registered binding (e.g. a `variable` that shadows a
+// top-level function of the same name) wins over the outer one,
+// matching lexical scoping. Returns null when unbound.
+fn find_symbol(symbols: SymbolEntry[], name: string) -> SymbolEntry? {
+    let mut _si: int = symbols.length - 1;
+    loop {
+        if _si < 0 { break; }
+        if symbols[_si].name == name { return symbols[_si]; }
+        _si -= 1;
+    }
+    return null;
+}
+
+// Whether a symbol kind denotes a callable function (defined or
+// extern). Used by the #1147 function-reference-as-value checks.
+fn is_function_kind(kind: string) -> boolean {
+    if strings_equal(kind, "function") { return true; }
+    if strings_equal(kind, "extern function") { return true; }
+    return false;
+}
+
+// A signature is generic iff it declares type parameters. Taking the
+// address of a generic function is rejected (E0809): there is no single
+// emitted symbol — generics are monomorphized per instantiation.
+fn signature_is_generic(signature: FunctionSignature) -> boolean {
+    return signature.type_parameters.length > 0;
+}
+
+// Whether every parameter and the return type of `signature` is
+// C-ABI-compatible (the same accept-list `check_extern_signature`
+// enforces). Only such functions have a well-formed raw code-pointer
+// address to hand across the C ABI; others are rejected (E0809).
+fn signature_is_c_abi(signature: FunctionSignature) -> boolean {
+    let mut _pi: int = 0;
+    loop {
+        if _pi >= signature.parameters.length { break; }
+        let param = signature.parameters[_pi];
+        let mut param_text: string = "";
+        let annotation = param.type_annotation;
+        if annotation != null { param_text = annotation.text; }
+        if !is_c_abi_parameter_type(param_text) { return false; }
+        _pi += 1;
+    }
+    let mut return_text: string = "";
+    let return_annotation = signature.return_type;
+    if return_annotation != null { return_text = return_annotation.text; }
+    if !is_c_abi_return_type(return_text) { return false; }
+    return true;
+}
+
+// Extract the leading identifier of `text` (already trimmed). Returns
+// the run of identifier characters at the head, or "" if `text` does
+// not start with an identifier character. Used to find the referenced
+// function name in a `Raw`-degraded `<fn> as <type>` / `& <fn>` form.
+fn _leading_identifier(text: string) -> string {
+    let mut _ci: int = 0;
+    let mut head: string = "";
+    loop {
+        if _ci >= text.length { break; }
+        let code = char_code_at_text(text, _ci);
+        if !_is_identifier_code(code, _ci == 0) { break; }
+        head = head + substring(text, _ci, _ci + 1);
+        _ci += 1;
+    }
+    return head;
+}
+
+// Whether the character code is valid in an identifier. `first`
+// toggles the leading-character rule (no digits at position 0).
+// Codes: '_' = 95, 'a'..'z' = 97..122, 'A'..'Z' = 65..90,
+// '0'..'9' = 48..57.
+fn _is_identifier_code(code: int, first: boolean) -> boolean {
+    if code == 95 { return true; }
+    if code >= 97 {
+        if code <= 122 { return true; }
+    }
+    if code >= 65 {
+        if code <= 90 { return true; }
+    }
+    if !first {
+        if code >= 48 {
+            if code <= 57 { return true; }
+        }
+    }
+    return false;
+}
+
+// E0808 — a function used as a value in an unsupported position: a bare
+// function name (not a call), `& fn`, or `<fn> as <non-pointer>`. The
+// only supported way to materialize a function's address is
+// `<fn> as * u8` for a concrete C-ABI function (see #1146).
+fn make_fn_value_position_diagnostic(name: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0808",
+        severity: "error",
+        message: "function `" + name
+            + "` cannot be used as a value here; take its address with `"
+            + name
+            + " as * u8` to pass it across the C ABI (for example a `pthread_create` start routine)",
+        file_path: "",
+        primary: token_from_name(name, span),
+        suggestion: null
+    };
+}
+
+// E0809 — `<fn> as * u8` where the function cannot be reduced to a
+// single C-ABI code pointer: a generic function (no monomorphized
+// symbol exists) or one whose signature is not C-ABI-compatible.
+fn make_fn_address_unsupported_diagnostic(name: string, reason: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0809",
+        severity: "error",
+        message: "cannot take the address of function `" + name + "` because "
+            + reason
+            + "; only a concrete, C-ABI function can be referenced as `* u8`",
+        file_path: "",
+        primary: token_from_name(name, span),
+        suggestion: null
+    };
+}
+
+// Classify a `Raw`-degraded expression that may be a function-reference
+// form the parser could not structure: `& <fn>` (the `&` prefix has no
+// unary parse) or `<fn> as <type>` (the `as` target only parses a bare
+// identifier, so `<fn> as *T` falls back to Raw). Emits E0808/E0809 only
+// when the head identifier resolves to a function in `symbols` — this
+// gate is load-bearing for self-host: `<value> as * u8` casts on
+// non-function operands (e.g. `label as * u8` in the driver) must stay
+// clean. Returns [] for anything that is not a bare function reference.
+fn check_fn_reference_raw(text: string, symbols: SymbolEntry[]) -> Diagnostic[] {
+    let trimmed = trim_text(text);
+    if trimmed.length == 0 { return []; }
+
+    // Address-of form: `& <fn>` — unsupported regardless of target.
+    if starts_with(trimmed, "&") {
+        let rest = trim_text(strip_prefix(trimmed, "&"));
+        let head = _leading_identifier(rest);
+        if head.length == 0 { return []; }
+        if !strings_equal(head, rest) { return []; }
+        let amp_entry = find_symbol(symbols, head);
+        if amp_entry == null { return []; }
+        if !is_function_kind(amp_entry.kind) { return []; }
+        return [make_fn_value_position_diagnostic(head, null)];
+    }
+
+    // Cast form: `<fn> as <type>`.
+    let as_pos = index_of(trimmed, " as ");
+    if as_pos < 0 { return []; }
+    let left = trim_text(substring(trimmed, 0, as_pos));
+    let head = _leading_identifier(left);
+    if head.length == 0 { return []; }
+    // Only fire when the left side is exactly the bare identifier (not
+    // `foo()` / `a + b` / a member access) so we target genuine
+    // function references, not arbitrary casts.
+    if !strings_equal(head, left) { return []; }
+    let cast_entry = find_symbol(symbols, head);
+    if cast_entry == null { return []; }
+    if !is_function_kind(cast_entry.kind) { return []; }
+
+    let target = trim_text(substring(trimmed, as_pos + 4, trimmed.length));
+    // Supported form is a pointer target (`* u8` / `* T`) — #1146 lowers
+    // it to a real code-pointer bitcast — but only for a concrete,
+    // C-ABI function.
+    if starts_with(target, "*") {
+        if cast_entry.is_generic {
+            return [make_fn_address_unsupported_diagnostic(head, "it is generic", null)];
+        }
+        if !cast_entry.is_c_abi {
+            return [make_fn_address_unsupported_diagnostic(head, "its signature is not C-ABI-compatible", null)];
+        }
+        return [];
+    }
+    // A non-pointer cast target is not a supported function-address form.
+    return [make_fn_value_position_diagnostic(head, null)];
 }
 
 fn has_symbol_in_range(symbols: SymbolEntry[], name: string, start: int) -> boolean {
