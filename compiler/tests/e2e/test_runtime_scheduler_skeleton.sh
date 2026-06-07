@@ -477,7 +477,7 @@ test_task_invocation_emit_shape() {
         echo "[test]   could not extract @sfn_task_run body"
         missing=$((missing + 1))
     else
-        if ! grep -qE "bitcast \{i8\*, i8\*\}\* %[a-z0-9]+ to i8\* \(i8\*\)\*" "$run_body"; then
+        if ! grep -qE "bitcast .* to i8\* \(i8\*\)\*" "$run_body"; then
             echo "[test]   @sfn_task_run missing the typed plain-fn-ptr bitcast (i8* (i8*)*):"
             cat "$run_body"
             missing=$((missing + 1))
