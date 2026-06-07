@@ -226,7 +226,7 @@ test_producer_enum() {
     local out
     out="$("$BINARY" check --json src/leak.sfn 2>/dev/null || true)"
     local invalid
-    invalid=$(jq -r '[.events[].producer] | map(select(. != "typecheck" and . != "effect" and . != "parse" and . != "load" and . != "unknown")) | length' <<<"$out")
+    invalid=$(jq -r '[.events[].producer] | map(select(. != "typecheck" and . != "effect" and . != "parse" and . != "load" and . != "reexport" and . != "unknown")) | length' <<<"$out")
     if [ "$invalid" != "0" ]; then
         echo "[test]   found producer values outside the locked enum"
         jq -r '[.events[].producer] | unique[]' <<<"$out"

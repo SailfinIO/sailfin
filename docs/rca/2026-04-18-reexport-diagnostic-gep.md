@@ -536,7 +536,7 @@ The compiler now implements **Option B** from the [Recommended audit and design 
 
 1. **No ABI cost.**  The forwarder (Option A) would require the emitter to know the return type of the re-exported symbol at emit time, which the per-file emitter currently does not — origin signatures live in another file's `.sfn-asm`.  Threading that information through would be invasive.
 2. **The RCA already recommended it.**  The "Recommended audit and design work" section called Option B "the least surprising of the three, has no ABI cost, and the `7f47f70` commit already set the precedent by importing from the origin."
-3. **Zero in-tree fallout.**  An audit of every implicit `export { X };` block in `compiler/src/` and `runtime/` (see `scripts/lint_no_implicit_reexports.py`) found no remaining violations after the 0.5.7 source-level workaround landed.  The seven re-exports in `compiler/src/string_utils.sfn` (`clamp`, `substring`, `find_char`, `grapheme_count`, `grapheme_at`, `char_code`, `strings_equal`) are all re-exports of `runtime/prelude` symbols and are exempt: they resolve via the runtime helper descriptor table in `compiler/src/llvm/runtime_helpers.sfn`, not via the re-exporter's `.sfn-asm`, so they were never broken.
+3. **Zero in-tree fallout.**  An audit of every implicit `export { X };` block in `compiler/src/` and `runtime/` (via `sfn check`, which now enforces `E0600`) found no remaining violations after the 0.5.7 source-level workaround landed.  The seven re-exports in `compiler/src/string_utils.sfn` (`clamp`, `substring`, `find_char`, `grapheme_count`, `grapheme_at`, `char_code`, `strings_equal`) are all re-exports of `runtime/prelude` symbols and are exempt: they resolve via the runtime helper descriptor table in `compiler/src/llvm/runtime_helpers.sfn`, not via the re-exporter's `.sfn-asm`, so they were never broken.
 
 ### Carve-out: `runtime/prelude` and capsule paths
 
@@ -544,9 +544,9 @@ The validator only fires for imports whose source path starts with `./` or `../`
 
 ### Where it lives
 
-- `compiler/src/emit_native.sfn:collect_reexport_violations` — the validator.
-- `compiler/src/main.sfn:_reject_reexport_violations` — the IO-effect reporter, called from every `compile_to_llvm*` and `compile_to_native_text*` path right after typecheck.
-- `scripts/lint_no_implicit_reexports.py` — the equivalent textual lint, wired into `.github/workflows/ci.yml` so PR authors see the failure in seconds rather than waiting for the ~13-minute self-host build.
+- `compiler/src/reexport_check.sfn:collect_reexport_violations` — the validator (extracted from `emit_native.sfn` so the emit-free `sfn check` path can run it too).
+- `compiler/src/main.sfn:_reject_reexport_violations` — the IO-effect reporter (build path), called from every `compile_to_llvm*` and `compile_to_native_text*` path right after typecheck.
+- `compiler/src/tools/check.sfn` — runs the same validator in the `sfn check` fast path, minting an `E0600` diagnostic (`reexport` producer) so PR authors see the failure in seconds rather than waiting for the ~13-minute self-host build. The CI step (`.github/workflows/ci.yml`) runs `sfn check compiler/src runtime` via the freshly-built native binary. This replaced the former `scripts/lint_no_implicit_reexports.py` Python lint (deleted — the duplicate textual implementation could drift from the compiler's own check).
 - `compiler/tests/e2e/test_reexport.sh` — the regression gate.  It tries to compile `fixtures/reexport/middle.sfn` (which has the bare bug shape) directly; the test passes when the emitter refuses with the expected diagnostic.
 
 ### Inline `export { X } from "./path"` is out of scope
