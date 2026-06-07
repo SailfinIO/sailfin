@@ -6159,7 +6159,15 @@ char *sailfin_runtime_grapheme_at(char *text, double index)
     }
 #endif
 
-    char *out = (char *)malloc(2);
+    // Allocate via the arena-aware helper, not raw malloc(2): in arena mode
+    // (SAILFIN_USE_ARENA=1, the CI default) `_track_owned_string` no-ops
+    // because the arena owns bulk reclamation, so a raw malloc here would
+    // never be freed until process exit. With the macOS gate above routing
+    // every ASCII grapheme through this path, that would be unbounded heap
+    // growth across a compile. `_rt_malloc` routes to the arena when enabled
+    // and falls back to plain malloc (then tracked below) otherwise. This
+    // also closes the same latent arena leak on the legacy >= 0x80 path.
+    char *out = (char *)_rt_malloc(2);
     if (!out)
     {
         return NULL;
