@@ -1,7 +1,7 @@
 // compiler/src/cli_main.sfn
 //
 // Sailfin-native CLI entrypoint invoked by the native C shim.
-import { bold } from "sfn/cli/mod";
+import { bold } from "sfn/cli";
 
 import {
     BuildCacheConfig,
@@ -2670,8 +2670,8 @@ fn main(argv: string[]) -> int ![io, clock] {
     // missing-`sfn__cli__*` symbol path R1 is designed to surface.
     // Lives in the live `@main` path (never dead-stripped) and is a
     // no-op: the result is discarded and never observed. Revert target
-    // for Issue 2.1: this block, the `import { bold } from
-    // "sfn/cli/mod"` line, and `"sfn/cli" = "*"` in capsule.toml.
+    // for Issue 2.1: this block, the `import { bold } from "sfn/cli"`
+    // line, and `"sfn/cli" = "*"` in capsule.toml.
     let _sfn_cli_link_gate: string = bold("");
 
     // The extern declarations above expose the helpers with `* u8`
