@@ -448,6 +448,83 @@ test_pool_emit_shape() {
     return "$missing"
 }
 
+# ---- Test: task invocation emitted IR shape (issue #1089) ----
+test_task_invocation_emit_shape() {
+    local ll="$SCRATCH/scheduler.ll"
+    if [ ! -f "$ll" ]; then
+        echo "[test]   $ll missing — test_emit_shape must run first"
+        return 1
+    fi
+
+    local missing=0
+
+    # The task lifecycle surface must be defined.
+    local fn
+    for fn in create destroy run join; do
+        if ! grep -qE "^define .*@sfn_task_${fn}\(" "$ll"; then
+            echo "[test]   missing definition: @sfn_task_${fn}"
+            missing=$((missing + 1))
+        fi
+    done
+
+    # The worker invokes the task through a PLAIN C-ABI function pointer:
+    # an env-less indirect `call i8* %<tmp>(i8* ...)` with the typed
+    # function-pointer bitcast — and crucially NOT the closure-pair path
+    # (no `extractvalue {i8*, i8*}` env unpack in the task_run body).
+    local run_body="$SCRATCH/task_run.body"
+    awk '/^define .* @sfn_task_run[^(]*\(/,/^}/' "$ll" > "$run_body"
+    if [ ! -s "$run_body" ]; then
+        echo "[test]   could not extract @sfn_task_run body"
+        missing=$((missing + 1))
+    else
+        if ! grep -qE "bitcast .* to i8\* \(i8\*\)\*" "$run_body"; then
+            echo "[test]   @sfn_task_run missing the typed plain-fn-ptr bitcast (i8* (i8*)*):"
+            cat "$run_body"
+            missing=$((missing + 1))
+        fi
+        if ! grep -qE "call i8\* %[a-z0-9]+\(i8\* " "$run_body"; then
+            echo "[test]   @sfn_task_run missing env-less indirect call 'call i8* %tmp(i8* ...)'"
+            missing=$((missing + 1))
+        fi
+        # No closure env unpack: a plain fn pointer has no environment, so
+        # the env-prepending closure dispatch must NOT have fired.
+        if grep -qE "extractvalue \{i8\*, i8\*\}" "$run_body"; then
+            echo "[test]   @sfn_task_run unexpectedly unpacks a closure env (extractvalue):"
+            cat "$run_body"
+            missing=$((missing + 1))
+        fi
+        # done flag set atomically (seq_cst), cond signalled.
+        if ! grep -qE "store atomic i64 1, i64\* .* seq_cst" "$run_body"; then
+            echo "[test]   @sfn_task_run missing 'store atomic i64 1 ... seq_cst' (done publish)"
+            missing=$((missing + 1))
+        fi
+        if ! grep -qE "call i32 @pthread_cond_signal\(" "$run_body"; then
+            echo "[test]   @sfn_task_run missing pthread_cond_signal (wake awaiter)"
+            missing=$((missing + 1))
+        fi
+    fi
+
+    # join blocks on the done flag under the mutex: an atomic load of the
+    # done flag plus a pthread_cond_wait inside the join body.
+    local join_body="$SCRATCH/task_join.body"
+    awk '/^define .* @sfn_task_join[^(]*\(/,/^}/' "$ll" > "$join_body"
+    if [ ! -s "$join_body" ]; then
+        echo "[test]   could not extract @sfn_task_join body"
+        missing=$((missing + 1))
+    else
+        if ! grep -qE "load atomic i64, i64\* .* seq_cst" "$join_body"; then
+            echo "[test]   @sfn_task_join missing 'load atomic i64 ... seq_cst' (done poll)"
+            missing=$((missing + 1))
+        fi
+        if ! grep -qE "call i32 @pthread_cond_wait\(" "$join_body"; then
+            echo "[test]   @sfn_task_join does not block on pthread_cond_wait"
+            missing=$((missing + 1))
+        fi
+    fi
+
+    return "$missing"
+}
+
 # ---- Test: multi-threaded pool spin-up / drain / join round-trip ----
 test_pool_roundtrip() {
     local ll="$SCRATCH/scheduler.ll"
@@ -468,11 +545,12 @@ test_pool_roundtrip() {
     local harness="$SCRATCH/pool_harness.c"
     cat > "$harness" <<'CHARNESS'
 /* Multi-threaded round-trip harness for the fixed worker pool
- * (issue #1088). Spins up a real pthread pool, enqueues many sentinel
- * tasks, requests an atomic draining shutdown, and asserts every task
- * was pulled (no leak, no deadlock) and the SAILFIN_THREADS override is
- * honored. Tasks are bare non-null sentinel addresses: task INVOCATION
- * is the next M4 issue, so the worker only pulls + drains here.
+ * (issues #1088 + #1089). Spins up a real pthread pool, enqueues many
+ * real Tasks, requests an atomic draining shutdown, and asserts every
+ * task was pulled (no leak, no deadlock), the SAILFIN_THREADS override is
+ * honored, and — the #1089 lifecycle — each task's body actually RAN:
+ * the worker called fn_ptr(ctx), stored the result, set done, and a
+ * post-shutdown sfn_task_join observes the computed result.
  *
  * No-op stubs mirror the FIFO harness: the seed installs a
  * persistent-pointer hook and a type-registration ctor.
@@ -493,10 +571,21 @@ extern void sfn_scheduler_destroy(void *scheduler);
 extern long sfn_scheduler_thread_count(void *scheduler);
 extern long sfn_scheduler_processed(void *scheduler);
 
+extern void *sfn_task_create(long fn_ptr, long ctx);
+extern void sfn_task_destroy(void *task);
+extern void *sfn_task_join(void *task);
+
 void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }
 void sfn_type_register(void *desc) { (void)desc; }
 /* SAILFIN_THREADS string literal lowers to @sfn_alloc_struct. */
 void *sfn_alloc_struct(long n) { return calloc(1, (size_t)n); }
+
+/* The worker entry the pool invokes: returns ctx + 1 so join can verify
+ * the body ran and the result round-tripped. `ctx` is threaded as an
+ * opaque pointer-sized value (#1089's `* u8`). */
+static void *task_body(void *ctx) {
+    return (void *)((long)ctx + 1);
+}
 
 int main(void) {
     /* Phase 1: SAILFIN_THREADS override is honored. */
@@ -512,18 +601,22 @@ int main(void) {
         return 3;
     }
 
-    /* Enqueue more tasks than the ring holds (capacity 8, N=100): the
-     * producer blocks on a full ring while the 3 workers drain it,
-     * exercising concurrent enqueue/dequeue without deadlock. */
+    /* Enqueue more real Tasks than the ring holds (capacity 8, N=100):
+     * the producer blocks on a full ring while the 3 workers drain and
+     * RUN each task, exercising concurrent enqueue/dequeue/invoke without
+     * deadlock. Each task body returns ctx+1. */
     const long N = 100;
+    void *tasks[100];
     for (long i = 0; i < N; i++) {
-        sfn_taskqueue_enqueue(q, (void *)(uintptr_t)(0x1000 + i));
+        tasks[i] = sfn_task_create((long)(intptr_t)&task_body, i);
+        if (!tasks[i]) { fprintf(stderr, "task create failed at %ld\n", i); return 10; }
+        sfn_taskqueue_enqueue(q, tasks[i]);
     }
 
-    /* Atomic draining shutdown: must pull every queued task, then join
-     * all workers. Hangs here would mean a lost wakeup / deadlock. The
-     * handle stays valid after shutdown (drain+join only) — the getters
-     * below read it, then sfn_scheduler_destroy releases it. */
+    /* Atomic draining shutdown: must pull AND run every queued task, then
+     * join all workers. Hangs here would mean a lost wakeup / deadlock.
+     * The handle stays valid after shutdown (drain+join only) — the
+     * getters below read it, then sfn_scheduler_destroy releases it. */
     sfn_scheduler_shutdown(sched);
 
     if (sfn_taskqueue_count(q) != 0) {
@@ -535,6 +628,19 @@ int main(void) {
                 sfn_scheduler_processed(sched), N);
         return 5;
     }
+
+    /* #1089: every task body ran and its result is readable post-join.
+     * Workers already finished (shutdown joined them), so join returns
+     * immediately with the stored result. */
+    for (long i = 0; i < N; i++) {
+        void *r = sfn_task_join(tasks[i]);
+        if ((long)r != i + 1) {
+            fprintf(stderr, "task %ld result=%ld, want %ld\n", i, (long)r, i + 1);
+            return 11;
+        }
+        sfn_task_destroy(tasks[i]);
+    }
+
     sfn_scheduler_destroy(sched);
     sfn_taskqueue_destroy(q);
 
@@ -594,7 +700,8 @@ run_test "sfn emit llvm produces the sfn_taskqueue_* surface" test_emit_shape
 run_test "blocking dequeue waits on a condition under the mutex" test_dequeue_blocks_on_cond
 run_test "single-thread enqueue/dequeue is FIFO with ring wraparound" test_roundtrip_fifo
 run_test "sfn emit llvm produces the worker-pool surface (#1088)" test_pool_emit_shape
-run_test "multi-threaded pool spin-up drains the queue and joins (#1088)" test_pool_roundtrip
+run_test "sfn emit llvm produces the task-invocation surface (#1089)" test_task_invocation_emit_shape
+run_test "multi-threaded pool runs tasks, drains, joins (#1088 + #1089)" test_pool_roundtrip
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

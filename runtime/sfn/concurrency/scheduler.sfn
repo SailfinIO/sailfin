@@ -417,11 +417,12 @@ fn sfn_taskqueue_count(queue: * u8) -> i64 {
 // every parked worker, and joins them all — draining the queue first,
 // with no leaked thread and no deadlock.
 //
-// Out of scope here (next M4 issue, #1089): task *invocation* — calling
-// `Task.fn_ptr` with `Task.ctx` and writing `Task.result` / `Task.done`
-// — which additionally needs the indirect typed-fn-pointer call
-// primitive (#1118). Until then the worker only proves spin-up + pull +
-// drain + join, recording each pull in `Scheduler.processed`.
+// Task *invocation* (issue #1089) now lands here: a pulled task is run
+// via the `── Task lifecycle ──` surface below — the worker calls
+// `Task.fn_ptr(Task.ctx)` through the plain C-ABI function-pointer
+// primitive (`* fn (* u8) -> * u8`), stores `Task.result`, sets the
+// atomic `Task.done` flag, and signals `Task.cond` so a `sfn_task_join`
+// awaiter unblocks. `Scheduler.processed` still records each pull.
 // `Scheduler` byte size on Linux x86_64: five `i64` fields = 40 bytes.
 // Tracks the struct above; the allocator path is the only layout
 // dependency.
@@ -472,18 +473,146 @@ fn sfn_scheduler_resolve_thread_count() -> i64 {
     return resolved;
 }
 
+// ── Task lifecycle ────────────────────────────────────────────
+// Allocation, invocation, and join for a single `Task` (issue #1089,
+// §2.6.3). A producer builds a task with `sfn_task_create(fn_ptr, ctx)`,
+// enqueues its address on the shared `TaskQueue`, and later blocks in
+// `sfn_task_join` until a worker has run it. The worker runs the task
+// via `sfn_task_run`: it calls `fn_ptr(ctx)` through the plain C-ABI
+// function-pointer primitive (`* fn (* u8) -> * u8` — a bare code
+// pointer, NOT a closure pair), stores the `* u8` return into
+// `Task.result`, sets `Task.done` with a seq_cst atomic store, and
+// signals `Task.cond`. The done flag + cond/mutex live by value in the
+// `Task` (see the struct header) so no extra allocation is needed.
+// `Task` byte size on Linux x86_64 (glibc): four i64s (32 B) +
+// PthreadCond (48 B) + PthreadMutex (40 B) = 120 bytes. Tracks the
+// struct above; the allocator path is the only layout dependency.
+fn _sfn_task_struct_size() -> i64 { return 120; }
+
+// Byte offset of `Task.done` (field 4) — three leading i64s precede it.
+// `done` is reached by offset arithmetic rather than `& task.done`
+// because the borrow lowering only addresses plain locals (see the
+// `pthread.sfn` header), matching the `shutdown_slot` convention used by
+// the scheduler. The seq_cst `atomic_store` / `atomic_load` builtins
+// (#323) operate on the resulting `* i64`.
+fn _sfn_task_done_offset() -> i64 { return 24; }
+
+// `sfn_task_create(fn_ptr, ctx)` allocates a `Task`, initialises its
+// mutex and condition variable with default attributes, zeroes
+// `result`/`done`, and stores the worker entry address (`fn_ptr`, a raw
+// `fn (* u8) -> * u8` address) and captured `ctx` (`* u8`). Returns the
+// task address as `* u8` (callers re-cast to `* Task` only inside this
+// module). On a non-zero `pthread_*_init` return, tears down what was
+// initialised and returns null so no half-initialised handle escapes.
+fn sfn_task_create(fn_ptr: i64, ctx: i64) -> * u8 {
+    let task_ptr: * u8 = malloc(_sfn_task_struct_size() as usize);
+    if task_ptr as i64 == 0 { return task_ptr; }
+
+    let task: * Task = task_ptr as * Task;
+    task.fn_ptr = fn_ptr;
+    task.ctx = ctx;
+    task.result = 0;
+    task.done = 0;
+
+    let mutex_rc: i32 = pthread_mutex_init(task.mutex, null);
+    if mutex_rc != 0 {
+        free(task_ptr);
+        return null;
+    }
+    let cond_rc: i32 = pthread_cond_init(task.cond, null);
+    if cond_rc != 0 {
+        pthread_mutex_destroy(task.mutex);
+        free(task_ptr);
+        return null;
+    }
+    return task_ptr;
+}
+
+// `sfn_task_destroy(task)` tears down the cond + mutex (reverse init
+// order) and frees the task. Null-safe. The caller must ensure the task
+// has been joined (or never enqueued) so no worker still touches it.
+fn sfn_task_destroy(task: * u8) -> void {
+    if task as i64 == 0 { return; }
+    let t: * Task = task as * Task;
+    pthread_cond_destroy(t.cond);
+    pthread_mutex_destroy(t.mutex);
+    free(task);
+}
+
+// `sfn_task_run(task)` executes one pulled task: it calls
+// `fn_ptr(ctx)` through the plain C-ABI function-pointer primitive,
+// then publishes the result under `task.mutex` — store `result`, set the
+// atomic `done` flag (seq_cst), and signal `cond` to wake a parked
+// `sfn_task_join`. A null `fn_ptr` is treated as a no-op body (result
+// stays null) rather than dereferenced, so a malformed task cannot crash
+// the worker. Null-safe on the task handle.
+fn sfn_task_run(task: * u8) -> void {
+    if task as i64 == 0 { return; }
+    let t: * Task = task as * Task;
+
+    let mut result: * u8 = null;
+    if t.fn_ptr != 0 {
+        let entry: * fn (* u8) -> * u8 = t.fn_ptr as * fn (* u8) -> * u8;
+        result = entry(t.ctx as * u8);
+    }
+
+    // Split the address arithmetic across three statements: the inline
+    // `(task as i64 + off) as * i64` form miscompiles today — the cast of
+    // a parenthesised pointer-to-int + offset expression collapses to a
+    // bare `bitcast task to i64*`, silently dropping the offset. The
+    // ptrtoint → add → inttoptr split lowers correctly.
+    let done_base: i64 = task as i64;
+    let done_addr: i64 = done_base + _sfn_task_done_offset();
+    let done_slot: * i64 = done_addr as * i64;
+    pthread_mutex_lock(t.mutex);
+    t.result = result as i64;
+    atomic_store(done_slot, 1);
+    pthread_cond_signal(t.cond);
+    pthread_mutex_unlock(t.mutex);
+}
+
+// `sfn_task_join(task)` blocks until the task's worker has set `done`,
+// then returns `task.result` (`* u8`). The `done` flag is read with
+// `atomic_load` under `task.mutex`; `sfn_task_run` sets it (also under
+// the mutex) and signals `cond`, so the awaiter never sleeps through the
+// transition. The result pointer is readable post-join because the
+// store-then-signal happens-before the join's wake. Null-safe (null task
+// reads as null).
+fn sfn_task_join(task: * u8) -> * u8 {
+    if task as i64 == 0 { return null; }
+    let t: * Task = task as * Task;
+    // Split the address arithmetic across three statements: the inline
+    // `(task as i64 + off) as * i64` form miscompiles today — the cast of
+    // a parenthesised pointer-to-int + offset expression collapses to a
+    // bare `bitcast task to i64*`, silently dropping the offset. The
+    // ptrtoint → add → inttoptr split lowers correctly.
+    let done_base: i64 = task as i64;
+    let done_addr: i64 = done_base + _sfn_task_done_offset();
+    let done_slot: * i64 = done_addr as * i64;
+
+    pthread_mutex_lock(t.mutex);
+    loop {
+        if atomic_load(done_slot) != 0 { break; }
+        pthread_cond_wait(t.cond, t.mutex);
+    }
+    let result: i64 = t.result;
+    pthread_mutex_unlock(t.mutex);
+    return result as * u8;
+}
+
 // `sfn_scheduler_worker(arg)` is the pthread `start_routine`. `arg` is
 // the `* u8` scheduler handle. The loop pulls tasks via
 // `sfn_scheduler_next_task` until it returns null (queue drained AND
-// shutdown requested), then exits so `pthread_join` can complete. Task
-// invocation is deferred (#1089 / #1118 — see the section header), so a
-// pulled task address is simply dropped here; the pull itself is
+// shutdown requested), then exits so `pthread_join` can complete. Each
+// pulled task is run via `sfn_task_run` (#1089) — invoke `fn_ptr(ctx)`,
+// store the result, set `done`, signal the task cond; the pull itself is
 // recorded in `Scheduler.processed` by `sfn_scheduler_next_task`.
 fn sfn_scheduler_worker(arg: * u8) -> * u8 {
     let scheduler: * u8 = arg;
     loop {
         let task: * u8 = sfn_scheduler_next_task(scheduler);
         if task as i64 == 0 { break; }
+        sfn_task_run(task);
     }
     return null;
 }

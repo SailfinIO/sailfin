@@ -1342,5 +1342,7 @@ export {
     resolve_call_method_target,
     resolve_parsed_method_dispatch,
     resolve_call_signature,
-    try_dispatch_atomic_builtin
+    try_dispatch_atomic_builtin,
+    _parse_fn_pointer_annotation,
+    _ClosureSignatureParse
 };

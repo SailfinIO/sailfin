@@ -1,0 +1,32 @@
+// Fixture for the plain C-ABI function-pointer indirect call (#1089).
+//
+// A value spelled `* fn (A) -> R` (note the leading `*`) is a bare code
+// pointer — distinct from the closure form `fn (A) -> R`, which carries a
+// `{i8*, i8*}` environment pair. Calling through such a pointer must emit
+// an env-LESS indirect call (`call <ret> <fnptr>(<args>)` with no hidden
+// environment argument), NOT the closure-dispatch `extractvalue` + env
+// sequence.
+//
+// `invoke_self` takes the address of a defined function (`worker as * u8`,
+// the #1146 fn-reference → address lowering), narrows it to an `i64`
+// (modelling the raw-address-in-a-slot convention the runtime uses), casts
+// it back to a typed `* fn (* u8) -> * u8`, and calls it. `worker` returns
+// `ctx + 1`, so `invoke_self(41)` yields `42` and `main` forwards it as the
+// process exit code — proving the forward (#1146) and inverse (#1089)
+// directions round-trip through a real executed call.
+fn worker(ctx: * u8) -> * u8 {
+    let v: i64 = ctx as i64;
+    return (v + 1) as * u8;
+}
+
+fn invoke_self(ctx: * u8) -> * u8 {
+    let code: * u8 = worker as * u8;
+    let addr: i64 = code as i64;
+    let f: * fn (* u8) -> * u8 = addr as * fn (* u8) -> * u8;
+    return f(ctx);
+}
+
+fn main() -> int {
+    let r: * u8 = invoke_self(41 as * u8);
+    return r as i64 as int;
+}

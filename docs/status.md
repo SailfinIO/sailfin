@@ -1,6 +1,6 @@
 # Status
 
-Updated: May 11, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1–PR7 shipped; lowering temp-index recovery fix for #543 staged — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273, E PR1 / #274, E PR2 / #277, E PR3 / #278, E PR4 / #280, E PR5 / #378, E PR6 / #382, E PR7 / #383; seed pinned to v0.5.10-alpha.13)
+Updated: June 7, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1–PR7 shipped; lowering temp-index recovery fix for #543 staged — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273, E PR1 / #274, E PR2 / #277, E PR3 / #278, E PR4 / #280, E PR5 / #378, E PR6 / #382, E PR7 / #383; seed pinned to v0.5.10-alpha.13)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -8,6 +8,34 @@ feature availability.
 
 ## Build Pipeline (Current)
 
+- **Plain C-ABI function-pointer indirect call + scheduler task lifecycle
+  (#1089, 2026-06-07).** A value spelled `* fn (A) -> R` (leading `*`) is a
+  bare code pointer, distinct from the closure form `fn (A) -> R` (which
+  lowers to a `{i8*, i8*}` env pair). Calling through one now lowers to an
+  **env-less indirect call**: load the pointer, `bitcast` it to the typed
+  function-pointer LLVM type, and `call <ret> <fnptr>(<args>)` with **no**
+  hidden environment argument — the env-less sibling of the closure-dispatch
+  path (and the narrower, plain-pointer case of epic #1118). Implemented as a
+  single early seam, `try_lower_plain_fn_ptr_call`
+  (`llvm/expression_lowering/native/core_call_lowering.sfn`), so the indirect
+  call has one lowering site (a win for backend independence); the closure
+  path and the call-resolution structs are untouched. The two spellings are
+  structurally disjoint (closure keys on `fn (` / `fn(`; plain on `* fn`), so
+  no closure regression — verified by `test_closure_capture.sh` (6/6) and
+  `test_fn_reference_pthread.sh` (4/4, #1146). First consumer: the M4 worker
+  pool's **task lifecycle** in `runtime/sfn/concurrency/scheduler.sfn` —
+  `sfn_task_create` / `sfn_task_run` / `sfn_task_join` / `sfn_task_destroy`.
+  A worker now calls `Task.fn_ptr(Task.ctx)` through the primitive, stores
+  `Task.result`, sets the atomic `done` flag (seq_cst), and signals
+  `Task.cond`; `sfn_task_join` blocks on the cond under the mutex until
+  `done`, then returns the result. Covered by `test_plain_fn_ptr_call.sh`
+  (standalone, executed exit-42 round-trip) and an extended
+  `test_runtime_scheduler_skeleton.sh` (multi-threaded pool runs 100 real
+  tasks, joins, and verifies each result). NOTE: a latent cast-of-pointer-
+  arithmetic miscompile surfaced — `(p as i64 + N) as * T` collapses to
+  `bitcast p to *T`, dropping the offset; `scheduler.sfn` uses the proven
+  ptrtoint → add → inttoptr split to reach `Task.done` and a follow-up should
+  fix the inline form.
 - **Function-reference-as-value diagnostics (#1147, 2026-06-07).**
   Complements #1146's `<fn> as * u8` lowering by
   rejecting every *unsupported* function-reference spelling at typecheck
