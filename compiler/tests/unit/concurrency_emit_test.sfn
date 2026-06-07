@@ -9,7 +9,7 @@
 // `compiler/tests/e2e/test_sync_rejects_unimplemented_concurrency.sh` and the
 // guards in `llvm/expression_lowering/native/core.sfn`). This test therefore
 // exercises `emit_native_text_with_module_name` directly, never the full build.
-import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { emit_native_text_with_module_name, emit_native_with_module_name } from "../../src/emit_native";
 import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
@@ -79,4 +79,23 @@ test "emit_native: routine emits an explicit scope" ![io] {
     let asm = emit_native_text_with_module_name(program, "test_concurrency");
     assert _contains(asm, ".routine");
     assert _contains(asm, ".endroutine");
+}
+
+// A decorated `routine` block is unsupported in v0 (no statement-level
+// decorator slot in the native IR). Fail closed with a diagnostic rather than
+// silently dropping the decorator the parser attached to the node.
+test "emit_native: a decorated routine fails closed with a diagnostic" ![io] {
+    let source = "fn main() ![io] { @trace\nroutine { let x: int = 1; } }";
+    let program = parse_program(source);
+    let result = emit_native_with_module_name(program, "test_concurrency");
+    let mut found: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= result.diagnostics.length { break; }
+        if index_of(result.diagnostics[index], "decorators on `routine`") >= 0 {
+            found = true;
+        }
+        index += 1;
+    }
+    assert found;
 }

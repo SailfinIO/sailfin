@@ -347,10 +347,18 @@ fn emit_statement_control_flow(state: NativeState, statement: Statement) -> Nati
         // the transparent always-true `If`/`EndIf` scope that `BlockStatement`
         // emits (`.if 1 > 0`), so no nursery runtime is implied yet and the
         // existing scope lowering applies unchanged; the real lowering lands in
-        // a follow-up (#1085). Decorators are not emitted — there is no
-        // routine-decorator semantics in v0, and a `.decorator` directive
-        // inside a function body is a parse error in the native IR.
-        let mut current = state_emit_line(state, ".routine");
+        // a follow-up (#1085). Decorators on a `routine` block are not
+        // supported in v0: native IR has no statement-level decorator slot
+        // inside a function body (a `.decorator` directive there is a parse
+        // error), and routine-decorator semantics are undefined until that
+        // runtime lands. Fail closed rather than silently dropping the
+        // decorator (llms.txt: no parsed-but-unenforced surface) — the parser
+        // does attach decorators to the node (`parser/statements.sfn:537`).
+        let mut current = state;
+        if statement.decorators.length > 0 {
+            current = state_add_diagnostic(current, "native backend: decorators on `routine` blocks are not yet supported");
+        }
+        current = state_emit_line(current, ".routine");
         current = state_push_indent(current);
         current = emit_block(current, statement.body);
         current = state_pop_indent(current);
