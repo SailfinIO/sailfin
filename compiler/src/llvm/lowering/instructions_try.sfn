@@ -179,7 +179,7 @@ fn lower_throw_instruction(function_name: string, instruction: NativeInstruction
 
     // M2.7b (#404): route the throw through the frame-based primitive
     // `sfn_throw`, which writes the message into the top frame's
-    // message_addr slot, pops the chain head, then `longjmp`s back to
+    // message slot, pops the chain head, then `longjmp`s back to
     // the matching `setjmp` save point emitted at the user's try entry.
     // Control transfers to the catch body in the dominator function;
     // the `ret` that the legacy TLS-polling path emitted after
@@ -244,10 +244,12 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
     // its save point stays live across the throw. See the UB caveat
     // comment in the M2.7a module file header.
     // Frame and jmp_buf are stack-allocated in the function prologue.
-    // SfnExceptionFrame layout `{ i64, i64, i64 }` (prev_addr,
-    // jmp_buf_addr, message_addr) is encoded as `[3 x i64]` so user
-    // modules don't need the named struct type — the call into
-    // `sfn_exception_push_frame` accepts an `i8*` and link-time
+    // The runtime `SfnExceptionFrame` layout is pointer-typed
+    // (`{ %SfnExceptionFrame*, i8*, i8* }` — prev, jmp_buf, message)
+    // since #1116 retired the `i64`-slot workaround. It is encoded
+    // here as `[3 x i64]` (byte-identical: three 8-byte pointer slots)
+    // so user modules don't need the named struct type — the call
+    // into `sfn_exception_push_frame` accepts an `i8*` and link-time
     // opaque-pointer resolution lands on the `%SfnExceptionFrame*`
     // define in exception.sfn. The jmp_buf is `[32 x i64]` = 256
     // bytes, matching the literal in `sfn_exception_alloc_frame`
@@ -309,9 +311,9 @@ fn lower_try_instruction(function: NativeFunction, start_index: int, llvm_return
         + jmpbuf_pointer
         + " to i8*");
 
-    // Initialize frame.jmp_buf_addr (slot index 1) with ptrtoint of
-    // jmpbuf. The chain-mutation primitive populates prev_addr; the
-    // message_addr slot (index 2) starts zero so `sfn_take_exception`
+    // Initialize the jmp_buf slot (index 1) with ptrtoint of jmpbuf.
+    // The chain-mutation primitive populates the prev slot (index 0);
+    // the message slot (index 2) starts zero so `sfn_take_exception`
     // observes "no message" until `sfn_throw` writes one.
     let jmpbuf_slot_ptr = format_temp_name(current_temp);
     current_temp += 1;

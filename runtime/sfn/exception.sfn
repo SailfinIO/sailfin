@@ -28,19 +28,26 @@
 //   message: SfnString }` — an inline byte array for the jmp_buf
 //   and the M1.A SfnString aggregate for the message. Today's
 //   Sailfin frontend doesn't yet support fixed-size array fields
-//   (the parser accepts only `T[]` dynamic arrays, and the
-//   layout pass drops pointer-typed struct fields under the seed
-//   compiler — see `compiler/src/llvm/type_mapping.sfn:392`).
-//   The M2.7a module therefore stores pointer-shaped values as
-//   `i64` slots (the same workaround `runtime/sfn/memory/rc.sfn`
-//   uses for its `drop_fn_addr` slot), with `jmp_buf` riding as a
-//   separately-malloc'd buffer pointed to by `jmp_buf_addr`.
-//   `message_addr` carries the message as a NUL-terminated
-//   `* u8` placeholder until the SfnString aggregate-by-value
-//   parameter flip lands (mirrors the workaround in
-//   `runtime/sfn/string.sfn`). The layout flips to the architect
-//   shape in lockstep with M1.A.2 and the parser's fixed-size-
-//   array extension — both deferred to M2.7b.
+//   (the parser accepts only `T[]` dynamic arrays). The
+//   `jmp_buf` therefore rides as a separately-malloc'd buffer
+//   pointed to by a `* u8` field, and `message` carries the
+//   message as a NUL-terminated `* u8` placeholder until the
+//   SfnString aggregate-by-value parameter flip lands (mirrors
+//   the workaround in `runtime/sfn/string.sfn`). The message
+//   field flips to the architect's SfnString shape in lockstep
+//   with M1.A.2.
+//
+//   The fields are now pointer-typed: the M2.7a `i64`-slot
+//   workaround (`prev_addr` / `jmp_buf_addr` / `message_addr`,
+//   the same bridge `runtime/sfn/memory/rc.sfn` used for its
+//   `drop_fn_addr` slot) was a deliberate stopgap around the
+//   #713 layout/store drop, where the seed compiler discarded
+//   pointer-typed struct fields. That fix is in the pinned seed,
+//   so the casts are gone and `prev` / `jmp_buf` / `message`
+//   store pointers directly. The per-thread chain head
+//   (`sfn_exception_frame_head_addr`) and the M3 message-slot
+//   globals at the foot of this module still ride as `i64` (see
+//   the "TLS" note below) and retire under their own follow-ups.
 //
 // JMPBUF_SIZE. The module allocates a 256-byte buffer per
 // frame, oversizing Linux x86_64 (200) and macOS arm64 (192).
@@ -149,24 +156,23 @@ extern fn strlen(s: * u8) -> usize;
 
 // `SfnExceptionFrame` lays out the per-`try` bookkeeping. Field
 // offsets are pinned by the IR-shape assertions in
-// `test_runtime_exception_frames.sh`. All slots are `i64` —
-// pointer-typed struct fields drop from the layout under the
-// seed compiler (see the `Frame layout deviation` note in the
-// file header). Callers cast to/from `* u8` / `* SfnExceptionFrame`
-// at use sites; the architect-shaped layout flips in at M2.7b.
+// `test_runtime_exception_frames.sh`. The fields are pointer-typed
+// now that the #713 layout/store fix lands in the pinned seed (see
+// the `Frame layout` note in the file header). The `prev` chain
+// pointer is self-referential; `jmp_buf` and `message` are `* u8`.
 //
-//   - `prev_addr`: pointer to the previous frame in the chain
-//     (cast to/from `i64`). `0` means "this is the bottom".
-//   - `jmp_buf_addr`: pointer to the JMPBUF_SIZE-byte libc
-//     setjmp buffer. Owned by the frame; freed via
+//   - `prev`: pointer to the previous frame in the chain. The null
+//     pointer means "this is the bottom".
+//   - `jmp_buf`: pointer to the JMPBUF_SIZE-byte libc setjmp
+//     buffer. Owned by the frame; freed via
 //     `sfn_exception_free_frame`.
-//   - `message_addr`: pointer to a NUL-terminated exception
-//     message (set by `sfn_throw`; read by
-//     `sfn_take_exception`). `0` when no exception has fired.
+//   - `message`: pointer to a NUL-terminated exception message
+//     (set by `sfn_throw`; read by `sfn_take_exception`). Null when
+//     no exception has fired.
 struct SfnExceptionFrame {
-    prev_addr: i64;
-    jmp_buf_addr: i64;
-    message_addr: i64;
+    prev: * SfnExceptionFrame;
+    jmp_buf: * u8;
+    message: * u8;
 }
 
 // Chain head (per-thread `thread_local`; see the file-header TLS
@@ -183,25 +189,26 @@ thread_local let mut sfn_exception_frame_head_addr: i64 = 0;
 // `frame as i64 == 0` until `Result<T, E>` + `?` ship (Phase 1
 // of the runtime prereqs in CLAUDE.md).
 //
-// `24` = three `i64` slots: prev_addr, jmp_buf_addr,
-// message_addr. The size literal stays in sync with the struct
-// layout — a regression that adds a fourth field but forgets to
-// bump the literal would corrupt subsequent allocations and the
-// IR-shape assertion in `test_runtime_exception_frames.sh`
-// catches it via `%SfnExceptionFrame = type { ... }` count.
+// `24` = three pointer slots: prev, jmp_buf, message (8 bytes
+// each on a 64-bit target). The size literal stays in sync with
+// the struct layout — a regression that adds a fourth field but
+// forgets to bump the literal would corrupt subsequent
+// allocations and the IR-shape assertion in
+// `test_runtime_exception_frames.sh` catches it via
+// `%SfnExceptionFrame = type { ... }` count.
 fn sfn_exception_alloc_frame() -> * SfnExceptionFrame {
     let raw = malloc(24 as usize);
     if raw as i64 == 0 { return raw as * SfnExceptionFrame; }
     let frame = raw as * SfnExceptionFrame;
-    frame.prev_addr = 0;
+    frame.prev = 0 as * SfnExceptionFrame;
     let buf = malloc(256 as usize);
     if buf as i64 == 0 {
         free(raw);
         return buf as * SfnExceptionFrame;
     }
     memset(buf, 0, 256 as usize);
-    frame.jmp_buf_addr = buf as i64;
-    frame.message_addr = 0;
+    frame.jmp_buf = buf;
+    frame.message = 0 as * u8;
     return frame;
 }
 
@@ -209,7 +216,7 @@ fn sfn_exception_alloc_frame() -> * SfnExceptionFrame {
 // owned jmp_buf. Safe to call with a null pointer (idempotent).
 fn sfn_exception_free_frame(frame: * SfnExceptionFrame) -> void {
     if frame as i64 == 0 { return; }
-    free(frame.jmp_buf_addr as * u8);
+    free(frame.jmp_buf);
     free(frame as * u8);
 }
 
@@ -223,14 +230,14 @@ fn sfn_exception_frame_head() -> * SfnExceptionFrame {
 }
 
 // `sfn_exception_push_frame(frame)` links `frame` onto the head
-// of the chain. Sets `frame.prev_addr` to the previous head and
+// of the chain. Sets `frame.prev` to the previous head and
 // updates `head` to `frame`. This is the chain-mutation half of
 // the architect's `try_enter` — split out as a callable function
 // so the cross-frame unwinding test (and the eventual M2.7b
 // inline-emission path) can push a frame whose `jmp_buf` was
 // `setjmp`'d inline at the caller's frame.
 fn sfn_exception_push_frame(frame: * SfnExceptionFrame) -> void {
-    frame.prev_addr = sfn_exception_frame_head_addr;
+    frame.prev = sfn_exception_frame_head_addr as * SfnExceptionFrame;
     sfn_exception_frame_head_addr = frame as i64;
 }
 
@@ -247,7 +254,7 @@ fn sfn_exception_pop_frame(frame: * SfnExceptionFrame) -> void {
     let frame_addr = frame as i64;
     if frame_addr == 0 { return; }
     if sfn_exception_frame_head_addr == frame_addr {
-        sfn_exception_frame_head_addr = frame.prev_addr;
+        sfn_exception_frame_head_addr = frame.prev as i64;
         return;
     }
     let mut cur_addr = sfn_exception_frame_head_addr;
@@ -257,15 +264,15 @@ fn sfn_exception_pop_frame(frame: * SfnExceptionFrame) -> void {
         let cur = cur_addr as * SfnExceptionFrame;
         if cur_addr == frame_addr {
             if prev_addr == 0 {
-                sfn_exception_frame_head_addr = cur.prev_addr;
+                sfn_exception_frame_head_addr = cur.prev as i64;
             } else {
                 let prev = prev_addr as * SfnExceptionFrame;
-                prev.prev_addr = cur.prev_addr;
+                prev.prev = cur.prev;
             }
             return;
         }
         prev_addr = cur_addr;
-        cur_addr = cur.prev_addr;
+        cur_addr = cur.prev as i64;
     }
 }
 
@@ -296,7 +303,7 @@ fn sfn_exception_pop_frame(frame: * SfnExceptionFrame) -> void {
 // — exercised by `test_runtime_exception_frames.sh`.
 fn sfn_try_enter(frame: * SfnExceptionFrame) -> i32 {
     sfn_exception_push_frame(frame);
-    return setjmp(frame.jmp_buf_addr as * u8);
+    return setjmp(frame.jmp_buf);
 }
 
 // `sfn_try_leave(frame)` pops `frame` off the chain. Thin
@@ -311,7 +318,7 @@ fn sfn_try_leave(frame: * SfnExceptionFrame) -> void {
 }
 
 // `sfn_throw(message)` writes `message` into the top frame's
-// `message_addr` slot, pops that frame off the chain, then
+// `message` slot, pops that frame off the chain, then
 // `longjmp`s back to the matching `setjmp` save point. Popping
 // before the longjmp matches architect §2.4.2 ("write message,
 // pop it, longjmp back") — a rethrow from inside the catch
@@ -343,9 +350,9 @@ fn sfn_throw(message: * u8) -> void {
         return;
     }
     let head = sfn_exception_frame_head_addr as * SfnExceptionFrame;
-    head.message_addr = message as i64;
-    let buf = head.jmp_buf_addr as * u8;
-    sfn_exception_frame_head_addr = head.prev_addr;
+    head.message = message;
+    let buf = head.jmp_buf;
+    sfn_exception_frame_head_addr = head.prev as i64;
     longjmp(buf, 1);
 }
 
@@ -367,8 +374,8 @@ fn sfn_throw(message: * u8) -> void {
 // M2.7b retypes this to `SfnString` without touching call
 // sites.
 fn sfn_take_exception(frame: * SfnExceptionFrame) -> * u8 {
-    let msg = frame.message_addr as * u8;
-    frame.message_addr = 0;
+    let msg = frame.message;
+    frame.message = 0 as * u8;
     return msg;
 }
 
