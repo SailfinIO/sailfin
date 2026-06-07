@@ -785,7 +785,11 @@ rebuild-impl:
 	@# and tee that to build/native/.build-report.json for the report
 	@# composer (#1056 Phase 2). Human progress stays on stderr (still
 	@# inherited to the terminal); pipefail keeps the seed's real exit
-	@# code across the tee. Default (gate off) keeps the original
+	@# code across the tee. On failure the seed can still emit non-JSON
+	@# to stdout in `--json` mode (e.g. cli_main.sfn's "failed to compile
+	@# LLVM ..." is not json-gated), so the bail block below removes the
+	@# half-written report — the contract for consumers is "file exists =>
+	@# valid BuildReport". Default (gate off) keeps the original
 	@# `2>&1 | cat` form byte-for-byte.
 	@seed=$$(cat build/.seed-resolved); \
 	echo "[rebuild] running sfn build -p compiler (seed=$$seed)..."; \
@@ -802,6 +806,7 @@ rebuild-impl:
 		echo "[rebuild][error] sfn build failed (exit=$$build_rc) or did not produce build/sailfin/program" >&2; \
 		echo "[rebuild][error] expected the alpha.6+ seed's subprocess-stage path to keep the cold build under the 8 GB ulimit" >&2; \
 		echo "[rebuild][error] if this is a regression, rerun with BUILD_ARGS='--cache-trace' to bisect, or fall back to the prior seed via .seed-version" >&2; \
+		if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then rm -f build/native/.build-report.json; fi; \
 		exit 1; \
 	fi
 	@mkdir -p build/native
