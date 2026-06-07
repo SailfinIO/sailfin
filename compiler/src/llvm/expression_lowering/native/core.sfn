@@ -315,6 +315,9 @@ import {
     map_return_type,
     future_pointer_type_for_return_type,
     await_symbol_for_future_pointer_type,
+    spawn_symbol_for_kind,
+    llvm_return_type_for_spawn_kind,
+    future_type_for_spawn_kind,
     map_parameter_type
 } from "./core_type_mapping";
 
@@ -813,80 +816,395 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         };
     }
 
-    // Unlowered concurrency frontend constructs (M4.0, epic #965). The parser
-    // builds `Spawn`/`Channel`/`Parallel`/`Serve` nodes (issues #1079–#1081)
-    // and `emit_native_format` (#1084) renders them to real `.sfn-asm` forms
-    // — `spawn[:<kind>] <op>`, `channel[:<kind>](<cap>)`, `parallel [<tasks>]`,
-    // `serve(<handler>[, <port>])` — but no LLVM lowering exists yet. Fail the
-    // build closed with a `[fatal]` — matching the sentinel scanned by
-    // `lowering_core.sfn:has_fatal_lowering_diagnostic` — rather than letting
-    // these forms fall through to the generic, *non-fatal* unable-to-lower
-    // path (which the emit/build fatal gate ignores, false-greening an
-    // unenforced concurrency surface into the IR — llms.txt). The dedicated
-    // lowering replaces these guards in a follow-up (#1085). These prefixes
-    // are collision-safe: `spawn`/`channel`/`parallel`/`serve` are
-    // contextual keywords parsed only in expression-prefix position
-    // (`parser/expressions.sfn:403`), so no user identifier produces them.
-    // `Await` is bridged to the existing async lowering upstream and never
-    // reaches here as a marker.
-    if starts_with(stripped, "spawn ") {
-        diagnostics.push("llvm lowering [fatal]: `spawn` expression is not yet lowered (concurrency frontend, epic #965)");
-        return ExpressionResult {
-            lines: lines,
-            temp_index: temp_index,
-            operand: null,
-            diagnostics: diagnostics,
-            string_constants: empty_constants
-        };
-    }
+    // Concurrency frontend lowering (M4.0, epic #965, issue #1085).
+    // The parser builds `Spawn`/`Channel`/`Parallel`/`Serve` nodes and
+    // `emit_native_format` (#1084) renders them to `.sfn-asm` text:
+    //   `spawn[:<kind>] <operand>`
+    //   `channel[:<kind>](<capacity>)`
+    //   `parallel [<task>, ...]`
+    //   `serve(<handler>[, <port>])`
+    // Each form lowers to a call to the matching runtime-helper symbol
+    // wired in `runtime_helpers.sfn`. `Await` is handled earlier in this
+    // function and never reaches here.
+    // ── spawn:<kind> <operand> ──────────────────────────────────────────
+    // Typed spawn: the kind tag selects spawn_<kind> / Future<kind>*.
+    // The operand is a function reference that becomes a typed fn ptr.
     if starts_with(stripped, "spawn:") {
-        diagnostics.push("llvm lowering [fatal]: `spawn` expression is not yet lowered (concurrency frontend, epic #965)");
+        let colon_pos = index_of(stripped, ":");
+        let space_pos = index_of(stripped, " ");
+        let mut spawn_kind: string = "";
+        let mut spawn_operand_text: string = "";
+        if colon_pos >= 0 {
+            if space_pos > colon_pos {
+                spawn_kind = substring(stripped, colon_pos + 1, space_pos);
+                spawn_operand_text = trim_text(substring(stripped, space_pos + 1, stripped.length));
+            } else {
+                spawn_kind = substring(stripped, colon_pos + 1, stripped.length);
+            }
+        }
+        let spawn_sym = spawn_symbol_for_kind(spawn_kind);
+        let future_type = future_type_for_spawn_kind(spawn_kind);
+        let fn_ret_llvm = llvm_return_type_for_spawn_kind(spawn_kind);
+        let fn_ptr_type = fn_ret_llvm + " ()*";
+        let mut spawn_lines: string[] = lines;
+        let mut spawn_temp: int = temp_index;
+        let mut spawn_diag: string[] = diagnostics;
+        let empty_spawn_constants: StringConstant[] = [];
+        let mut fn_ptr_value: string = "";
+        if spawn_operand_text.length > 0 {
+            let lowered_op = lower_expression(spawn_operand_text, bindings, locals, spawn_temp, spawn_lines, functions, context, "");
+            spawn_diag = extend_string_array(spawn_diag, lowered_op.diagnostics);
+            spawn_lines = lowered_op.lines;
+            spawn_temp = lowered_op.temp_index;
+            if lowered_op.operand != null {
+                let raw_op = lowered_op.operand;
+                if raw_op.llvm_type == fn_ptr_type {
+                    fn_ptr_value = raw_op.value;
+                } else {
+                    let cast_t = format_temp_name(spawn_temp);
+                    spawn_temp += 1;
+                    spawn_lines.push("  " + cast_t + " = bitcast " + raw_op.llvm_type
+                        + " "
+                        + raw_op.value
+                        + " to "
+                        + fn_ptr_type);
+                    fn_ptr_value = cast_t;
+                }
+            }
+        }
+        if fn_ptr_value.length == 0 {
+            spawn_diag.push("llvm lowering: spawn:<kind>: could not lower operand for `"
+                + stripped
+                + "`");
+            return ExpressionResult {
+                lines: spawn_lines,
+                temp_index: spawn_temp,
+                operand: null,
+                diagnostics: spawn_diag,
+                string_constants: empty_spawn_constants
+            };
+        }
+        let spawn_result_t = format_temp_name(spawn_temp);
+        spawn_temp += 1;
+        spawn_lines.push("  " + spawn_result_t + " = call " + future_type + " @"
+            + spawn_sym
+            + "("
+            + fn_ptr_type
+            + " "
+            + fn_ptr_value
+            + ")");
+        let spawn_operand = LLVMOperand {
+            llvm_type: future_type,
+            value: spawn_result_t
+        };
         return ExpressionResult {
-            lines: lines,
-            temp_index: temp_index,
-            operand: null,
-            diagnostics: diagnostics,
-            string_constants: empty_constants
+            lines: spawn_lines,
+            temp_index: spawn_temp,
+            operand: spawn_operand,
+            diagnostics: spawn_diag,
+            string_constants: empty_spawn_constants
         };
     }
-    if starts_with(stripped, "channel(") {
-        diagnostics.push("llvm lowering [fatal]: `channel` expression is not yet lowered (concurrency frontend, epic #965)");
+
+    // ── spawn <operand> ─────────────────────────────────────────────────
+    // Untyped spawn: use the generic `spawn_task` adapter (i8* → i8*).
+    if starts_with(stripped, "spawn ") {
+        let spawn_op_text = trim_text(substring(stripped, 6, stripped.length));
+        let mut spawn2_lines: string[] = lines;
+        let mut spawn2_temp: int = temp_index;
+        let mut spawn2_diag: string[] = diagnostics;
+        let empty_spawn2_constants: StringConstant[] = [];
+        if spawn_op_text.length > 0 {
+            let lowered2 = lower_expression(spawn_op_text, bindings, locals, spawn2_temp, spawn2_lines, functions, context, "");
+            spawn2_diag = extend_string_array(spawn2_diag, lowered2.diagnostics);
+            spawn2_lines = lowered2.lines;
+            spawn2_temp = lowered2.temp_index;
+            if lowered2.operand != null {
+                let op2 = lowered2.operand;
+                let mut task_ptr: string = op2.value;
+                if op2.llvm_type != "i8*" {
+                    let cast2_t = format_temp_name(spawn2_temp);
+                    spawn2_temp += 1;
+                    spawn2_lines.push("  " + cast2_t + " = bitcast " + op2.llvm_type
+                        + " "
+                        + op2.value
+                        + " to i8*");
+                    task_ptr = cast2_t;
+                }
+                let spawn2_result = format_temp_name(spawn2_temp);
+                spawn2_temp += 1;
+                spawn2_lines.push("  " + spawn2_result
+                    + " = call i8* @sailfin_adapter_spawn_task(i8* "
+                    + task_ptr
+                    + ")");
+                let spawn2_operand = LLVMOperand {
+                    llvm_type: "i8*",
+                    value: spawn2_result
+                };
+                return ExpressionResult {
+                    lines: spawn2_lines,
+                    temp_index: spawn2_temp,
+                    operand: spawn2_operand,
+                    diagnostics: spawn2_diag,
+                    string_constants: empty_spawn2_constants
+                };
+            }
+        }
+        spawn2_diag.push("llvm lowering: spawn: could not lower operand for `"
+            + stripped
+            + "`");
         return ExpressionResult {
-            lines: lines,
-            temp_index: temp_index,
+            lines: spawn2_lines,
+            temp_index: spawn2_temp,
             operand: null,
-            diagnostics: diagnostics,
-            string_constants: empty_constants
+            diagnostics: spawn2_diag,
+            string_constants: empty_spawn2_constants
+        };
+    }
+
+    // ── channel(<capacity>) / channel:<kind>(<capacity>) ───────────────
+    // Both forms lower to `sailfin_adapter_channel_create(i32 capacity)`.
+    // The kind qualifier is recorded for future typed-channel work (#1091)
+    // but the runtime ABI is uniform today (opaque i8* channel handle).
+    if starts_with(stripped, "channel(") {
+        let chan_inner = trim_text(substring(stripped, 8, stripped.length));
+        let cap_text = trim_text(substring(chan_inner, 0, chan_inner.length > 0? chan_inner.length - 1: 0));
+        let empty_chan_constants: StringConstant[] = [];
+        let mut chan_lines: string[] = lines;
+        let mut chan_temp: int = temp_index;
+        let mut chan_diag: string[] = diagnostics;
+        let mut cap_llvm: string = "i32 0";
+        if cap_text.length > 0 {
+            let cap_lowered = lower_expression(cap_text, bindings, locals, chan_temp, chan_lines, functions, context, "");
+            chan_diag = extend_string_array(chan_diag, cap_lowered.diagnostics);
+            chan_lines = cap_lowered.lines;
+            chan_temp = cap_lowered.temp_index;
+            if cap_lowered.operand != null {
+                let cap_op = cap_lowered.operand;
+                let mut cap_val: string = cap_op.value;
+                if cap_op.llvm_type != "i32" {
+                    let cap_cast = format_temp_name(chan_temp);
+                    chan_temp += 1;
+                    chan_lines.push("  " + cap_cast + " = trunc i64 " + cap_op.value
+                        + " to i32");
+                    cap_val = cap_cast;
+                }
+                cap_llvm = "i32 " + cap_val;
+            }
+        }
+        let chan_result = format_temp_name(chan_temp);
+        chan_temp += 1;
+        chan_lines.push("  " + chan_result
+            + " = call i8* @sailfin_adapter_channel_create("
+            + cap_llvm
+            + ")");
+        let chan_operand = LLVMOperand {
+            llvm_type: "i8*",
+            value: chan_result
+        };
+        return ExpressionResult {
+            lines: chan_lines,
+            temp_index: chan_temp,
+            operand: chan_operand,
+            diagnostics: chan_diag,
+            string_constants: empty_chan_constants
         };
     }
     if starts_with(stripped, "channel:") {
-        diagnostics.push("llvm lowering [fatal]: `channel` expression is not yet lowered (concurrency frontend, epic #965)");
+        let paren_pos = index_of(stripped, "(");
+        let empty_chantyped_constants: StringConstant[] = [];
+        let mut chantyped_lines: string[] = lines;
+        let mut chantyped_temp: int = temp_index;
+        let mut chantyped_diag: string[] = diagnostics;
+        let mut typed_cap_llvm: string = "i32 0";
+        if paren_pos >= 0 {
+            let inner_start = paren_pos + 1;
+            let inner_end = stripped.length > 0? stripped.length - 1: 0;
+            let typed_cap_text = trim_text(substring(stripped, inner_start, inner_end));
+            if typed_cap_text.length > 0 {
+                let typed_cap_lowered = lower_expression(typed_cap_text, bindings, locals, chantyped_temp, chantyped_lines, functions, context, "");
+                chantyped_diag = extend_string_array(chantyped_diag, typed_cap_lowered.diagnostics);
+                chantyped_lines = typed_cap_lowered.lines;
+                chantyped_temp = typed_cap_lowered.temp_index;
+                if typed_cap_lowered.operand != null {
+                    let typed_cap_op = typed_cap_lowered.operand;
+                    let mut typed_cap_val: string = typed_cap_op.value;
+                    if typed_cap_op.llvm_type != "i32" {
+                        let typed_cap_cast = format_temp_name(chantyped_temp);
+                        chantyped_temp += 1;
+                        chantyped_lines.push("  " + typed_cap_cast
+                            + " = trunc i64 "
+                            + typed_cap_op.value
+                            + " to i32");
+                        typed_cap_val = typed_cap_cast;
+                    }
+                    typed_cap_llvm = "i32 " + typed_cap_val;
+                }
+            }
+        }
+        let chantyped_result = format_temp_name(chantyped_temp);
+        chantyped_temp += 1;
+        chantyped_lines.push("  " + chantyped_result
+            + " = call i8* @sailfin_adapter_channel_create("
+            + typed_cap_llvm
+            + ")");
+        let chantyped_operand = LLVMOperand {
+            llvm_type: "i8*",
+            value: chantyped_result
+        };
         return ExpressionResult {
-            lines: lines,
-            temp_index: temp_index,
-            operand: null,
-            diagnostics: diagnostics,
-            string_constants: empty_constants
+            lines: chantyped_lines,
+            temp_index: chantyped_temp,
+            operand: chantyped_operand,
+            diagnostics: chantyped_diag,
+            string_constants: empty_chantyped_constants
         };
     }
+
+    // ── parallel [<task>, ...] ──────────────────────────────────────────
+    // Fan-out: each task expression is lowered as an untyped spawn_task
+    // call. The parallel expression yields the last future handle (or null
+    // for an empty list). Full join semantics require the M4 runtime
+    // nursery (#1090); this lowers the call-site ABI correctly today.
     if starts_with(stripped, "parallel [") {
-        diagnostics.push("llvm lowering [fatal]: `parallel` expression is not yet lowered (concurrency frontend, epic #965)");
+        let list_start = index_of(stripped, "[");
+        let list_end = find_last_index_of_char(stripped, "]");
+        let empty_par_constants: StringConstant[] = [];
+        let mut par_lines: string[] = lines;
+        let mut par_temp: int = temp_index;
+        let mut par_diag: string[] = diagnostics;
+        let mut last_par_operand: LLVMOperand? = null;
+        if list_start >= 0 {
+            if list_end > list_start {
+                let tasks_text = trim_text(substring(stripped, list_start + 1, list_end));
+                if tasks_text.length > 0 {
+                    let task_args = split_call_arguments(tasks_text);
+                    let mut par_index: int = 0;
+                    loop {
+                        if par_index >= task_args.length { break; }
+                        let task_expr = trim_text(task_args[par_index]);
+                        if task_expr.length > 0 {
+                            let task_lowered = lower_expression(task_expr, bindings, locals, par_temp, par_lines, functions, context, "");
+                            par_diag = extend_string_array(par_diag, task_lowered.diagnostics);
+                            par_lines = task_lowered.lines;
+                            par_temp = task_lowered.temp_index;
+                            if task_lowered.operand != null {
+                                let task_op = task_lowered.operand;
+                                let mut task_ptr_val: string = task_op.value;
+                                if task_op.llvm_type != "i8*" {
+                                    let par_cast = format_temp_name(par_temp);
+                                    par_temp += 1;
+                                    par_lines.push("  " + par_cast
+                                        + " = bitcast "
+                                        + task_op.llvm_type
+                                        + " "
+                                        + task_op.value
+                                        + " to i8*");
+                                    task_ptr_val = par_cast;
+                                }
+                                let par_spawn_t = format_temp_name(par_temp);
+                                par_temp += 1;
+                                par_lines.push("  " + par_spawn_t
+                                    + " = call i8* @sailfin_adapter_spawn_task(i8* "
+                                    + task_ptr_val
+                                    + ")");
+                                last_par_operand = LLVMOperand {
+                                    llvm_type: "i8*",
+                                    value: par_spawn_t
+                                };
+                            }
+                        }
+                        par_index += 1;
+                    }
+                }
+            }
+        }
         return ExpressionResult {
-            lines: lines,
-            temp_index: temp_index,
-            operand: null,
-            diagnostics: diagnostics,
-            string_constants: empty_constants
+            lines: par_lines,
+            temp_index: par_temp,
+            operand: last_par_operand,
+            diagnostics: par_diag,
+            string_constants: empty_par_constants
         };
     }
+
+    // ── serve(<handler>[, <port>]) ──────────────────────────────────────
+    // Lower to `sailfin_adapter_serve_start(i8* handler, i32 port)`.
+    // The serve call does not return (it runs an accept loop), so the
+    // result operand is void / null.
     if starts_with(stripped, "serve(") {
-        diagnostics.push("llvm lowering [fatal]: `serve` expression is not yet lowered (concurrency frontend, epic #965)");
+        let serve_inner_start = index_of(stripped, "(");
+        let serve_inner_end = find_last_index_of_char(stripped, ")");
+        let empty_serve_constants: StringConstant[] = [];
+        let mut serve_lines: string[] = lines;
+        let mut serve_temp: int = temp_index;
+        let mut serve_diag: string[] = diagnostics;
+        if serve_inner_start >= 0 {
+            if serve_inner_end > serve_inner_start {
+                let serve_args_text = trim_text(substring(stripped, serve_inner_start
+                    + 1, serve_inner_end));
+                let serve_args = split_call_arguments(serve_args_text);
+                let mut handler_llvm: string = "i8* null";
+                let mut port_llvm: string = "i32 8080";
+                if serve_args.length > 0 {
+                    let handler_text = trim_text(serve_args[0]);
+                    if handler_text.length > 0 {
+                        let handler_lowered = lower_expression(handler_text, bindings, locals, serve_temp, serve_lines, functions, context, "");
+                        serve_diag = extend_string_array(serve_diag, handler_lowered.diagnostics);
+                        serve_lines = handler_lowered.lines;
+                        serve_temp = handler_lowered.temp_index;
+                        if handler_lowered.operand != null {
+                            let h_op = handler_lowered.operand;
+                            let mut h_val: string = h_op.value;
+                            if h_op.llvm_type != "i8*" {
+                                let h_cast = format_temp_name(serve_temp);
+                                serve_temp += 1;
+                                serve_lines.push("  " + h_cast + " = bitcast "
+                                    + h_op.llvm_type
+                                    + " "
+                                    + h_op.value
+                                    + " to i8*");
+                                h_val = h_cast;
+                            }
+                            handler_llvm = "i8* " + h_val;
+                        }
+                    }
+                }
+                if serve_args.length > 1 {
+                    let port_text = trim_text(serve_args[1]);
+                    if port_text.length > 0 {
+                        let port_lowered = lower_expression(port_text, bindings, locals, serve_temp, serve_lines, functions, context, "");
+                        serve_diag = extend_string_array(serve_diag, port_lowered.diagnostics);
+                        serve_lines = port_lowered.lines;
+                        serve_temp = port_lowered.temp_index;
+                        if port_lowered.operand != null {
+                            let p_op = port_lowered.operand;
+                            let mut p_val: string = p_op.value;
+                            if p_op.llvm_type != "i32" {
+                                let p_cast = format_temp_name(serve_temp);
+                                serve_temp += 1;
+                                serve_lines.push("  " + p_cast + " = trunc i64 "
+                                    + p_op.value
+                                    + " to i32");
+                                p_val = p_cast;
+                            }
+                            port_llvm = "i32 " + p_val;
+                        }
+                    }
+                }
+                serve_lines.push("  call void @sailfin_adapter_serve_start("
+                    + handler_llvm
+                    + ", "
+                    + port_llvm
+                    + ")");
+            }
+        }
         return ExpressionResult {
-            lines: lines,
-            temp_index: temp_index,
+            lines: serve_lines,
+            temp_index: serve_temp,
             operand: null,
-            diagnostics: diagnostics,
-            string_constants: empty_constants
+            diagnostics: serve_diag,
+            string_constants: empty_serve_constants
         };
     }
 

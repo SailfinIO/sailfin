@@ -1,0 +1,34 @@
+// Golden-IR lowering test for the concurrency frontend lowering — issue #1085,
+// epic #965 (M4). Verifies that `channel`/`spawn` emit the correct
+// runtime-helper call sites in the lowered LLVM IR.
+//
+// Strategy: ONE `_emit_llvm` call for the whole file. `lower_to_llvm_ir_from_text`
+// is expensive (it invokes clang); multiple calls in one test process accumulate
+// memory and trigger OOM when the full unit suite runs. All assertions share a
+// single combined source program so only one lowering is needed.
+//
+// Scope: lowering call-site shapes only. Runtime bodies are separate
+// issues (#1090/#1091).
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+// `channel(N)` lowers to `sailfin_adapter_channel_create(i32 cap)` and
+// `spawn:int <fn>` lowers to `sailfin_runtime_spawn_int`.
+// Both are verified from a single LLVM emission to avoid arena OOM.
+test "lowering: channel and spawn emit correct runtime helper symbols (#1085)" ![io] {
+    let source = "fn main() ![io] {\n" + "    let ch = channel(4);\n"
+        + "    let f = spawn fn() -> int { return 1; };\n"
+        + "}";
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "concurrency_lowering_test");
+    let ir = lower_to_llvm_ir_from_text(native, "concurrency_lowering_test");
+    assert _contains(ir, "@sailfin_adapter_channel_create");
+    assert _contains(ir, "sailfin_adapter_channel_create(i32");
+    assert _contains(ir, "sailfin_runtime_spawn_int");
+}
