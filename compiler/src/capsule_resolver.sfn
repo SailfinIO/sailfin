@@ -1158,6 +1158,14 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
     // `sfn/strings`, #847/#846) would otherwise be reported "could not
     // locate" and its `.sfn-asm` never staged for import-signature lowering.
     let mut members: WorkspaceMember[] = [];
+    // Workspace.lock precedence (#1071): prefer workspace-level pins over
+    // capsule.lock for external deps. Parsed once here into the same
+    // `_CrDepEntry[]` shape `_cr_lookup_locked_version` consumes. An absent
+    // workspace.lock leaves `ws_has_lock` false and `ws_lock_entries` empty,
+    // making resolution byte-identical to the post-#1048 path. Sibling deps
+    // are resolved via `members` below and never consult this lockfile.
+    let mut ws_has_lock: boolean = false;
+    let mut ws_lock_entries: _CrDepEntry[] = [];
     if workspace_root.length > 0 {
         let runtime_caps = enumerate_runtime_capsule_artifacts(workspace_root, empty_specs);
         let mut rci: int = 0;
@@ -1167,6 +1175,12 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
             rci += 1;
         }
         members = load_workspace_members(workspace_root);
+        let ws_lock_path = _cr_path_join(workspace_root, "workspace.lock");
+        if fs.exists(ws_lock_path) {
+            let ws_lock_text = fs.readFile(ws_lock_path);
+            ws_lock_entries = _cr_parse_deps(lock_get_versions(ws_lock_text));
+            ws_has_lock = true;
+        }
     }
 
     let mut i: int = 0;
@@ -1188,11 +1202,23 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
             src_dir = workspace_member_for_spec(members, entry.spec);
         }
         if src_dir.length == 0 {
-            // Lockfile-pinned version wins over the capsule.toml range
-            // (#1048). Workspace siblings are resolved above and never
-            // reach this branch, so sibling resolution stays first.
+            // Lockfile-pinned version wins over the capsule.toml range.
+            // Precedence: workspace.lock (#1071) > capsule.lock (#1048) >
+            // capsule.toml range. Workspace siblings are resolved above and
+            // never reach this branch, so sibling-first resolution holds.
             let mut effective_version: string = entry.version;
-            if has_lock {
+            let mut resolved_from_lock: boolean = false;
+            if ws_has_lock {
+                let ws_locked = _cr_lookup_locked_version(ws_lock_entries, entry.spec);
+                if ws_locked.length > 0 {
+                    effective_version = ws_locked;
+                    resolved_from_lock = true;
+                }
+            }
+            // Fall back to capsule.lock only when workspace.lock did not
+            // pin this dep. The missing-from-capsule.lock diagnostic is
+            // suppressed when workspace.lock already supplied the version.
+            if !resolved_from_lock && has_lock {
                 let locked = _cr_lookup_locked_version(lock_entries, entry.spec);
                 if locked.length > 0 { effective_version = locked; } else {
                     print.err("capsule-resolver: dependency \"" + entry.spec

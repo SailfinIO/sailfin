@@ -1,0 +1,115 @@
+// Regression tests for workspace.lock precedence during capsule dependency
+// resolution (#1071). The resolver's `enumerate_capsule_sources` consults
+// `workspace.lock` ahead of `capsule.lock` for *external* deps, slotting
+// `workspace → workspace.lock → capsule.lock → cache → registry`. The
+// version-precedence rule is pure logic; it is exercised here against the
+// real lockfile parser (`lock_get_version`) without dragging in the `![io]`
+// resolver graph (which transitively imports the whole compiler via `./main`).
+//
+// `enumerate_capsule_sources` queries with the scoped `scope/name` spec, so
+// the fixtures use scoped keys (`sfn/http`) to mirror real resolver inputs.
+import { lock_get_version } from "../../src/lock";
+
+fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
+
+// Mirror of `_display_capsule_name_cmd`: strip a leading `sfn/` scope so the
+// backward-compat fallback can match older lockfiles that stored the bare
+// display name (e.g. `"http"`) instead of the scoped `"sfn/http"`.
+fn _display_name(spec: string) -> string {
+    let mut slash: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= spec.length { break; }
+        if spec[i] == "/" {
+            slash = i;
+            break;
+        }
+        i += 1;
+    }
+    if slash > 0 {
+        let scope = substring(spec, 0, slash);
+        if strings_equal(scope, "sfn") {
+            return substring(spec, slash + 1, spec.length);
+        }
+    }
+    return spec;
+}
+
+// Mirror of `_cr_lookup_locked_version`: scoped spec first, then the bare
+// display-name fallback for older lockfiles.
+fn _lookup_locked(lock_text: string, spec: string) -> string {
+    let direct = lock_get_version(lock_text, spec);
+    if direct.length > 0 { return direct; }
+    let display = _display_name(spec);
+    if !strings_equal(display, spec) {
+        return lock_get_version(lock_text, display);
+    }
+    return "";
+}
+
+// Mirror of the external-branch precedence inlined in
+// `enumerate_capsule_sources` (#1071): workspace siblings resolve via the
+// member map first (`sibling` short-circuits the whole lock path); then
+// workspace.lock pins win over capsule.lock pins, which win over the
+// capsule.toml declared range. Returns a tag naming the winning source so
+// the sibling-first case is observable, not just the version string.
+fn _resolve(sibling: boolean, ws_has_lock: boolean, ws_lock_text: string, has_lock: boolean, lock_text: string, spec: string, declared: string) -> string {
+    if sibling { return "sibling"; }
+    if ws_has_lock {
+        let ws_locked = _lookup_locked(ws_lock_text, spec);
+        if ws_locked.length > 0 { return "workspace-lock:" + ws_locked; }
+    }
+    if has_lock {
+        let locked = _lookup_locked(lock_text, spec);
+        if locked.length > 0 { return "capsule-lock:" + locked; }
+    }
+    return "toml:" + declared;
+}
+
+// workspace.lock: pins sfn/http to 0.2.0 under the # workspace.lock banner.
+// Returned from a function rather than a top-level `let` global: module-level
+// string constants with escapes currently mislower their constant-array
+// length, so building the fixture in function scope keeps this test focused
+// on the precedence rule (mirrors lock_resolution_precedence_test.sfn).
+fn _ws_lock_fixture() -> string {
+    return "# workspace.lock\n\n[packages]\n\"sfn/http\" = \"0.2.0 sha256:ws0002\"\n";
+}
+
+// capsule.lock: pins the same dep to a *different* version (0.1.0) so the
+// lock-wins-over-capsule.lock test can distinguish the two sources.
+fn _capsule_lock_fixture() -> string {
+    return "# capsule.lock\n\n[packages]\n\"sfn/http\" = \"0.1.0 sha256:cap001\"\n";
+}
+
+test "workspace.lock pin wins over capsule.toml range" {
+    // capsule.toml says "*", workspace.lock pins 0.2.0, no capsule.lock.
+    assert _str_eq(_resolve(false, true, _ws_lock_fixture(), false, "", "sfn/http", "*"), "workspace-lock:0.2.0");
+}
+
+test "workspace.lock pin wins over capsule.lock pin" {
+    // Both lockfiles pin sfn/http to different versions; workspace.lock wins.
+    assert _str_eq(_resolve(false, true, _ws_lock_fixture(), true, _capsule_lock_fixture(), "sfn/http", "*"), "workspace-lock:0.2.0");
+}
+
+test "workspace sibling resolves via member map, never via workspace.lock" {
+    // A sibling dep is resolved by the workspace member map above the lock
+    // path, so even a present workspace.lock cannot redirect it.
+    assert _str_eq(_resolve(true, true, _ws_lock_fixture(), true, _capsule_lock_fixture(), "sfn/strings", "*"), "sibling");
+}
+
+test "absent workspace.lock falls through to capsule.lock (post-#1048 path)" {
+    // No workspace.lock present: resolution is byte-identical to the #1048
+    // capsule.lock path — capsule.lock pin still wins over the toml range.
+    assert _str_eq(_resolve(false, false, "", true, _capsule_lock_fixture(), "sfn/http", "*"), "capsule-lock:0.1.0");
+}
+
+test "absent both lockfiles falls back to declared toml range" {
+    assert _str_eq(_resolve(false, false, "", false, "", "sfn/http", "0.3.1"), "toml:0.3.1");
+}
+
+test "workspace.lock present but dep unpinned falls through to capsule.lock" {
+    // workspace.lock exists but does not pin sfn/cli; capsule.lock does not
+    // either — so the declared range is used, and capsule.lock's missing-dep
+    // diagnostic path (not modeled here) would fire.
+    assert _str_eq(_resolve(false, true, _ws_lock_fixture(), false, "", "sfn/cli", "0.4.0"), "toml:0.4.0");
+}
