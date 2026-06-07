@@ -45,9 +45,18 @@ esac
 # false-positives on prose inside quoted args (e.g. `git commit -m "…
 # blocks make test …"`), which previously made it impossible to commit
 # without tripping the hook.
+#
+# Backtick is deliberately NOT a boundary char. It opens markdown inline
+# code, so any quoted arg or heredoc body containing `make test` /
+# `make compile` (ubiquitous in issue/PR/commit prose) would otherwise
+# trip the guard even though no compiler runs (see #844). The tradeoff:
+# a legacy backtick command substitution (`` `make compile` ``) is no
+# longer treated as a boundary — rare in practice, and the dominant
+# real-invocation paths (start of line, after `;`/`&&`/`||`/`|`) stay
+# covered.
 needs_cap=0
 
-make_re='(^|[;&|()`])[[:space:]]*make[[:space:]]+(compile|rebuild|check|test|test-unit|test-integration|test-e2e|bench)([[:space:]]|$|[;&|])'
+make_re='(^|[;&|()])[[:space:]]*make[[:space:]]+(compile|rebuild|check|test|test-unit|test-integration|test-e2e|bench)([[:space:]]|$|[;&|)])'
 if [[ "$cmd" =~ $make_re ]]; then
   needs_cap=1
 fi
@@ -55,7 +64,7 @@ fi
 # Direct compiler invocations. Require the binary to appear at a
 # command-boundary position (optionally preceded by a relative-path
 # prefix like `./`).
-sfn_re='(^|[;&|()`])[[:space:]]*(\./)?build/native/sailfin(-seedcheck)?([[:space:]]|$)'
+sfn_re='(^|[;&|()])[[:space:]]*(\./)?build/native/sailfin(-seedcheck)?([[:space:]]|$|[;&|)])'
 if [[ "$cmd" =~ $sfn_re ]]; then
   needs_cap=1
 fi
