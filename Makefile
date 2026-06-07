@@ -186,8 +186,17 @@ test-impl:
 	@# must still run even when a `.sfn` suite fails — matches the
 	@# pre-#848 `test-e2e` loop, which ran its `.sh` branch after the
 	@# `.sfn` branch regardless of `.sfn` failures.
+	@# JSON=1 gate (#1121): only the `.sfn` runner gets `--json` + tee; the
+	@# `.sh` branch (test-e2e-sh) has no JSON surface. The `rc` aggregation
+	@# is preserved so a failure in either branch still propagates.
 	@rc=0; \
-	$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules || rc=$$?; \
+	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
+		mkdir -p build; \
+		set -o pipefail; \
+		$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules --json | tee build/agent-test.test.jsonl || rc=$$?; \
+	else \
+		$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules || rc=$$?; \
+	fi; \
 	$(MAKE) test-e2e-sh || rc=$$?; \
 	exit $$rc
 
@@ -251,7 +260,18 @@ test-unit-impl:
 		echo "[test-unit] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@$(NATIVE_BIN) test compiler/tests/unit
+	@# JSON=1 / SAILFIN_AGENT_REPORT=1 gate (#1121): append `--json` so the
+	@# runner emits its jsonl event stream and tee it to a stable per-target
+	@# path for the report composer (#1056 Phase 2). pipefail preserves the
+	@# runner's real exit code across the tee. Default (gate off) keeps the
+	@# original invocation byte-for-byte and writes no file.
+	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
+		mkdir -p build; \
+		set -o pipefail; \
+		$(NATIVE_BIN) test compiler/tests/unit --json | tee build/agent-test.test-unit.jsonl; \
+	else \
+		$(NATIVE_BIN) test compiler/tests/unit; \
+	fi
 
 test-integration:
 	@$(AGENT_REPORT) --target test-integration -- $(MAKE) test-integration-impl
@@ -261,7 +281,14 @@ test-integration-impl:
 		echo "[test-integration] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@$(NATIVE_BIN) test compiler/tests/integration
+	@# JSON=1 gate (#1121) — see test-unit-impl for the rationale.
+	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
+		mkdir -p build; \
+		set -o pipefail; \
+		$(NATIVE_BIN) test compiler/tests/integration --json | tee build/agent-test.test-integration.jsonl; \
+	else \
+		$(NATIVE_BIN) test compiler/tests/integration; \
+	fi
 
 # The legacy e2e `test_*.sh` scripts still run alongside the `.sfn`
 # tests until Phase 3.1 migrates them (see
@@ -276,8 +303,17 @@ test-e2e-impl:
 		echo "[test-e2e] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
+	@# JSON=1 gate (#1121): only the `.sfn` runner gets `--json` + tee; the
+	@# `.sh` branch (test-e2e-sh) has no JSON surface. The `rc` aggregation
+	@# is preserved so a failure in either branch still propagates.
 	@rc=0; \
-	$(NATIVE_BIN) test compiler/tests/e2e || rc=$$?; \
+	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
+		mkdir -p build; \
+		set -o pipefail; \
+		$(NATIVE_BIN) test compiler/tests/e2e --json | tee build/agent-test.test-e2e.jsonl || rc=$$?; \
+	else \
+		$(NATIVE_BIN) test compiler/tests/e2e || rc=$$?; \
+	fi; \
 	$(MAKE) test-e2e-sh || rc=$$?; \
 	exit $$rc
 
@@ -294,7 +330,14 @@ test-capsules-impl:
 		echo "[test-capsules] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@$(NATIVE_BIN) test capsules
+	@# JSON=1 gate (#1121) — see test-unit-impl for the rationale.
+	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
+		mkdir -p build; \
+		set -o pipefail; \
+		$(NATIVE_BIN) test capsules --json | tee build/agent-test.test-capsules.jsonl; \
+	else \
+		$(NATIVE_BIN) test capsules; \
+	fi
 
 # Sharded test execution for parallel CI legs. Phase 1 of
 # docs/proposals/ci-test-speed.md (#843 Track A): the test suite is
