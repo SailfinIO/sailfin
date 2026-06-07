@@ -342,7 +342,7 @@ fn _prepend_capture_prologue(body: Block, lambda_id: int, captures: Capture[]) -
     if captures.length == 0 { return body; }
     let marker_text = closure_env_load_prologue_marker(lambda_id, _encode_captures(captures));
     let prologue_stmt = Statement.ExpressionStatement {
-        expression: Expression.Raw { text: marker_text },
+        expression: Expression.Raw { text: marker_text, span: null },
         span: null
     };
     let mut new_statements: Statement[] = [prologue_stmt];
@@ -572,7 +572,7 @@ fn _rewrite_lambda(ctx: LiftContext, lambda: Expression) -> ExpressionRewriteRes
         let marker_text = closure_pair_marker(lambda_id, "null");
         return ExpressionRewriteResult {
             ctx: new_ctx,
-            expression: Expression.Raw { text: marker_text }
+            expression: Expression.Raw { text: marker_text, span: null }
         };
     }
 
@@ -585,7 +585,7 @@ fn _rewrite_lambda(ctx: LiftContext, lambda: Expression) -> ExpressionRewriteRes
         let fatal_text = closure_pair_fatal_mutable_marker(ctx.counter, mutable_name);
         return ExpressionRewriteResult {
             ctx: ctx,
-            expression: Expression.Raw { text: fatal_text }
+            expression: Expression.Raw { text: fatal_text, span: null }
         };
     }
 
@@ -601,7 +601,7 @@ fn _rewrite_lambda(ctx: LiftContext, lambda: Expression) -> ExpressionRewriteRes
     let marker_text = closure_pair_env_alloc_marker(lambda_id, _encode_captures(record.captures));
     return ExpressionRewriteResult {
         ctx: new_ctx,
-        expression: Expression.Raw { text: marker_text }
+        expression: Expression.Raw { text: marker_text, span: null }
     };
 }
 

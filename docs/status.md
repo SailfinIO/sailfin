@@ -8,6 +8,33 @@ feature availability.
 
 ## Build Pipeline (Current)
 
+- **Function-reference-as-value diagnostics (#1147, 2026-06-07).**
+  Complements #1146's `<fn> as * u8` lowering by
+  rejecting every *unsupported* function-reference spelling at typecheck
+  instead of letting it lower to `null` / a wrong closure-pair coercion.
+  Two new error codes in `typecheck.sfn`'s `walk_expression`: **E0808** —
+  a function used as a value in an unsupported position (a bare function
+  name, `& fn`, or `<fn> as <non-pointer>`); **E0809** — `<fn> as * u8`
+  where the function is generic (no monomorphized symbol) or non-C-ABI
+  (no well-formed code pointer). Detection lives in a new `Identifier`
+  arm and a `Raw` arm (the parser degrades both `& fn` and `<fn> as *T`
+  to `Raw` text), gated on the head resolving to a `function`/`extern
+  function` symbol — so non-function `<value> as * u8` casts (e.g. the
+  driver's `label as * u8`) stay clean. `SymbolEntry` gained
+  `is_generic`/`is_c_abi`, populated from the signature at registration
+  (`signature_is_generic`/`signature_is_c_abi`), so the walker classifies
+  references without re-deriving signatures. The `Call` arm no longer
+  walks a bare-identifier callee as a value, and the `Member` arm no
+  longer walks a bare-identifier object (`env.get(...)`, `Color.Red`) —
+  both are receiver/namespace positions, not value uses, so neither
+  false-positives. Because every unsupported function reference is now
+  rejected at typecheck (and #1146 resolves the supported `<fn> as * u8`
+  form), no function reference reaches lowering to be dropped — so the
+  silent-`null`-from-a-function-reference class is closed at the
+  frontend without needing an emitter backstop. Audited clean across all
+  176 compiler+runtime source files; covered by
+  `compiler/tests/unit/fn_reference_typecheck_test.sfn` (9 cases) with
+  `test_fn_reference_pthread.sh` as the #1146 happy-path regression guard.
 - **Function-reference → address lowering (#1146, 2026-06-06).** A bare
   identifier in value position that names a defined or `extern fn` (and is
   neither a local nor a parameter) now lowers to that function's address:

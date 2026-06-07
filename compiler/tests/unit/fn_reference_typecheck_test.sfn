@@ -1,0 +1,97 @@
+// Unit tests for the function-reference-as-value diagnostics (issue
+// #1147): E0808 (a function used as a value in an unsupported position —
+// bare name, `& fn`, or `<fn> as <non-pointer>`) and E0809 (`<fn> as * u8`
+// where the function is generic or non-C-ABI, so it has no single C-ABI
+// code-pointer symbol).
+//
+// #1146 made `<fn> as * u8` lower to a real `bitcast @sym to i8*` for a
+// concrete C-ABI function; #1147 rejects every other function-reference
+// spelling instead of letting it silently lower to `null` / a wrong
+// closure-pair coercion. The parser degrades both `<fn> as *T` and
+// `& fn` to `Raw` nodes (the `as` target only parses a bare identifier,
+// `&` has no prefix form), so the checks live in the walker's `Raw` and
+// `Identifier` arms — driven here end-to-end via parse + typecheck (no
+// lowering import, per the #331 atomics 180s-timeout precedent).
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+
+fn _count_code(source: string, code: string) -> int ![io] {
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+// ── E0808: unsupported value-position spellings ──
+test "fn-ref: bare function in a let initializer is E0808" {
+    assert _count_code("fn worker() { } fn main() { let f = worker; }", "E0808") == 1;
+}
+
+test "fn-ref: `& fn` (address-of) is E0808" {
+    assert _count_code("fn worker() { } fn main() { let f = & worker; }", "E0808") == 1;
+}
+
+test "fn-ref: `<fn> as <non-pointer>` is E0808" {
+    assert _count_code("fn worker() { } fn main() { let f = worker as i64; }", "E0808") == 1;
+}
+
+test "fn-ref: bare function passed as an argument is E0808" {
+    let source = "fn worker() { } fn take(f: * u8) { } fn main() { take(worker); }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+// ── E0809: generic / non-C-ABI `<fn> as * u8` ──
+test "fn-ref: generic function `as * u8` is E0809" {
+    let source = "fn gen<T>(x: T) -> T { return x; } fn main() { let f = gen as * u8; }";
+    assert _count_code(source, "E0809") == 1;
+}
+
+test "fn-ref: non-C-ABI function `as * u8` is E0809" {
+    let source = "fn nc(x: number) -> number { return x; } fn main() { let f = nc as * u8; }";
+    assert _count_code(source, "E0809") == 1;
+}
+
+// ── Supported form stays clean (the #1146 happy path) ──
+test "fn-ref: concrete C-ABI `<fn> as * u8` is accepted (no E0808/E0809)" {
+    let source = "fn worker(arg: * u8) -> * u8 { return arg; } fn main() { let f = worker as * u8; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0809") == 0;
+}
+
+// ── Self-host gate: a non-function `as * u8` cast must NOT be flagged ──
+// (the compiler driver casts `label`/`argv[0]` as `* u8`; flagging those
+// would break `make compile`).
+test "fn-ref: non-function `<value> as * u8` is not flagged" {
+    let source = "fn main() { let label = \"x\"; let p = label as * u8; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0809") == 0;
+}
+
+// ── Only `* u8` is the supported address target (#1147 review) ──
+test "fn-ref: `<fn> as * i32` (non-u8 pointer target) is E0808" {
+    let source = "fn worker(arg: * u8) -> * u8 { return arg; } fn main() { let f = worker as * i32; }";
+    assert _count_code(source, "E0808") == 1;
+}
+
+// ── Parenthesized forms are still classified (#1147 review) ──
+test "fn-ref: `(<generic-fn>) as * u8` is still E0809 (parens don't hide it)" {
+    let source = "fn gen<T>(x: T) -> T { return x; } fn main() { let f = (gen) as * u8; }";
+    assert _count_code(source, "E0809") == 1;
+}
+
+test "fn-ref: `(<concrete C-ABI fn>) as * u8` is accepted" {
+    let source = "fn worker(arg: * u8) -> * u8 { return arg; } fn main() { let f = (worker) as * u8; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0809") == 0;
+}
+
+// ── A normal call is not a value reference (Risk-1 guard) ──
+test "fn-ref: a normal function call is not flagged as a value use" {
+    assert _count_code("fn worker() { } fn main() { worker(); }", "E0808") == 0;
+}

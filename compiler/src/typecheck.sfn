@@ -31,6 +31,7 @@ import {
     append_symbol,
     check_enum_variants,
     check_extern_signature,
+    check_fn_reference_raw,
     check_function_signature,
     check_interface_members,
     check_struct_fields,
@@ -40,12 +41,15 @@ import {
     clone_bindings,
     detect_removed_ai_keyword,
     detect_unsupported_statement_keyword,
+    find_symbol,
     future_element_kind,
     has_symbol,
     is_builtin_call_name,
+    is_function_kind,
     is_identifier_char,
     make_await_non_future_diagnostic,
     make_channel_send_mismatch_diagnostic,
+    make_fn_value_position_diagnostic,
     make_main_signature_param_count_diagnostic,
     make_main_signature_param_type_diagnostic,
     make_removed_keyword_diagnostic,
@@ -59,6 +63,8 @@ import {
     register_local_symbol,
     register_symbol,
     result_type_arguments,
+    signature_is_c_abi,
+    signature_is_generic,
     spawn_future_kind,
     type_is_future,
     type_is_result
@@ -193,7 +199,7 @@ fn _symbols_from_global_names(names: string[]) -> SymbolEntry[] {
     loop {
         if i >= names.length { break; }
         out.push(SymbolEntry {
-            name: names[i], kind: "prelude", span: null
+            name: names[i], kind: "prelude", span: null, is_generic: false, is_c_abi: false
         });
         i += 1;
     }
@@ -281,7 +287,7 @@ fn _collect_imported_call_symbols(program: Program) -> SymbolEntry[] {
                     if alias_str.length > 0 { local_name = alias_str; }
                 }
                 symbols.push(SymbolEntry {
-                    name: local_name, kind: "import", span: null
+                    name: local_name, kind: "import", span: null, is_generic: false, is_c_abi: false
                 });
                 s += 1;
             }
@@ -293,10 +299,10 @@ fn _collect_imported_call_symbols(program: Program) -> SymbolEntry[] {
 
 fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> SymbolCollectionResult {
     if statement.variant == "FunctionDeclaration" {
-        return register_symbol(statement.signature.name, "function", statement.signature.name_span, existing);
+        return register_symbol(statement.signature.name, "function", statement.signature.name_span, existing, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
     }
     if statement.variant == "ExternFunctionDeclaration" {
-        return register_symbol(statement.signature.name, "extern function", statement.signature.name_span, existing);
+        return register_symbol(statement.signature.name, "extern function", statement.signature.name_span, existing, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
     }
     if statement.variant == "StructDeclaration" {
         return register_symbol(statement.name, "struct", statement.name_span, existing);
@@ -371,7 +377,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         };
     }
     if statement.variant == "FunctionDeclaration" {
-        let registration = register_local_symbol(bindings, statement.signature.name, "function", statement.signature.name_span, scope_start);
+        let registration = register_local_symbol(bindings, statement.signature.name, "function", statement.signature.name_span, scope_start, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
         let mut diagnostics = registration.diagnostics;
         let _sig_diags = check_function_signature(statement.signature);
         let mut _ci: int = 0;
@@ -400,7 +406,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         };
     }
     if statement.variant == "ExternFunctionDeclaration" {
-        let registration = register_local_symbol(bindings, statement.signature.name, "extern function", statement.signature.name_span, scope_start);
+        let registration = register_local_symbol(bindings, statement.signature.name, "extern function", statement.signature.name_span, scope_start, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
         let mut diagnostics = registration.diagnostics;
         let _sig_diags = check_extern_signature(statement.signature);
         let mut _ci: int = 0;
@@ -882,7 +888,18 @@ fn register_raw_pattern_bindings(text: string, bindings: SymbolEntry[]) -> Symbo
 fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: ImportSymbolTable) -> Diagnostic[] {
     if expression == null { return []; }
     if expression.variant == "Call" {
-        let mut diagnostics = walk_expression(expression.callee, bindings, imports);
+        // A bare-identifier callee is a *call target*, not a value
+        // reference — do not route it through `walk_expression` (that
+        // would trip the E0808 function-as-value check below). It is
+        // validated inline for E0420 (undefined function) instead.
+        // Non-identifier callees (parenthesized exprs, member access)
+        // still recurse.
+        let mut diagnostics: Diagnostic[] = [];
+        if expression.callee != null {
+            if expression.callee.variant != "Identifier" {
+                diagnostics = walk_expression(expression.callee, bindings, imports);
+            }
+        }
         // #812: a bare-identifier callee that resolves to neither an
         // in-scope binding (parameter / local / top-level declaration /
         // import-specifier name) nor a builtin envelope name nor an
@@ -920,6 +937,16 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         return walk_expression(expression.operand, bindings, imports);
     }
     if expression.variant == "Member" {
+        // A bare-identifier member *object* is a receiver / namespace
+        // position (`env.get(...)`, `Color.Red`, `process.run(...)`),
+        // not a value use — do not route it through the E0808
+        // function-as-value check below (a module that both defines
+        // `fn env` and calls `env.get` would otherwise false-positive).
+        // Non-identifier objects (`foo().bar`, `xs[0].field`) still
+        // recurse so nested diagnostics surface.
+        if expression.object != null {
+            if expression.object.variant == "Identifier" { return []; }
+        }
         return walk_expression(expression.object, bindings, imports);
     }
     if expression.variant == "Index" {
@@ -994,6 +1021,29 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
     if expression.variant == "Channel" {
         if expression.capacity == null { return []; }
         return walk_expression(expression.capacity, bindings, imports);
+    }
+    // #1147: a bare identifier that resolves to a function used in value
+    // position (not as a call target — those are handled in the Call arm)
+    // is unsupported. The only way to materialize a function's address is
+    // `<fn> as * u8` (#1146), which the parser degrades to a `Raw` node
+    // (handled below), so a structured `Identifier` here is always an
+    // unsupported value use (e.g. `let f = worker;`, `take(worker)`).
+    if expression.variant == "Identifier" {
+        let entry = find_symbol(bindings, expression.name);
+        if entry != null {
+            if is_function_kind(entry.kind) {
+                return [make_fn_value_position_diagnostic(expression.name, expression.span)];
+            }
+        }
+        return [];
+    }
+    // #1147: the parser cannot structure `& <fn>` or `<fn> as *T` (the
+    // `as` target only parses a bare identifier; `&` has no prefix form),
+    // so both fall back to `Raw`. Diagnose the unsupported / invalid
+    // function-reference spellings here. Gated on the head resolving to a
+    // function so non-function `<value> as * u8` casts stay clean.
+    if expression.variant == "Raw" {
+        return check_fn_reference_raw(expression.text, bindings, expression.span);
     }
     return [];
 }
