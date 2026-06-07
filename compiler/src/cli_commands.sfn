@@ -62,7 +62,12 @@ import { LayoutManifest } from "./native_ir";
 import { number_to_string } from "./num_format";
 import { parse_program } from "./parser/mod";
 import { runtime_capsule_from_root } from "./runtime_capsule_resolver";
-import { find_char_local, substring } from "./string_utils";
+import {
+    char_code_at_text,
+    find_char_local,
+    index_of,
+    substring
+} from "./string_utils";
 import {
     TestEntry,
     collect_test_entries,
@@ -846,7 +851,7 @@ fn _append_test_filter_args(argv: string[], name_filter: string, tag_filter: str
     return out;
 }
 
-fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: string, runtime_objdir: string, self_exe: string, path: string, name_filter: string, tag_filter: string, update_snapshots: boolean) -> int ![io] {
+fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: string, runtime_objdir: string, self_exe: string, path: string, name_filter: string, tag_filter: string, update_snapshots: boolean, json_output: boolean) -> int ![io] {
     // #940: `SAILFIN_TEST_RUNTIME_OBJDIR` points the child's runtime
     // link at the shared, invocation-stable object dir the parent
     // warmed once, so the runtime isn't recompiled per test file.
@@ -860,17 +865,21 @@ fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: str
             + child_scratch, "SAILFIN_TEST_RUNTIME_OBJDIR="
             + runtime_objdir];
         if update_snapshots { base.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
+        if json_output { base.push("SAILFIN_TEST_JSON_SUBFRAME=1"); }
         base.push(self_exe);
         base.push("test");
         base.push(path);
+        if json_output { base.push("--json"); }
         return process.run(_append_test_filter_args(base, name_filter, tag_filter));
     }
     let mut base = ["env", "SAILFIN_TEST_SCRATCH=" + child_scratch, "SAILFIN_TEST_RUNTIME_OBJDIR="
         + runtime_objdir];
     if update_snapshots { base.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
+    if json_output { base.push("SAILFIN_TEST_JSON_SUBFRAME=1"); }
     base.push(self_exe);
     base.push("test");
     base.push(path);
+    if json_output { base.push("--json"); }
     return process.run(_append_test_filter_args(base, name_filter, tag_filter));
 }
 
@@ -879,9 +888,26 @@ fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: str
 // `SAILFIN_UPDATE_SNAPSHOTS=1` when `--update-snapshots` is active so
 // `sfn/test::expect_snapshot` re-baselines. When `update_snapshots` is
 // false the argv is byte-identical to the pre-#977 shape.
-fn _test_exec_argv(scratch_root: string, exe_path: string, update_snapshots: boolean) -> string[] {
+fn _test_exec_argv(scratch_root: string, exe_path: string, update_snapshots: boolean, json_output: boolean) -> string[] {
     let mut argv = ["env", "SAILFIN_TEST_SCRATCH=" + scratch_root];
     if update_snapshots { argv.push("SAILFIN_UPDATE_SNAPSHOTS=1"); }
+    if json_output {
+        // #1121: in `--json` mode the test binary's OWN stdout — user
+        // `print(...)` output from inside a test body — must not pollute
+        // the pure jsonl event stream the runner emits on the same fd.
+        // Exec the binary through `sh -c` with stdout redirected to
+        // /dev/null. stderr (the harness `RUN`/`PASS` lines + compiler
+        // diagnostics) and the `fail.bin` assert-record (a file, not a
+        // stream) are untouched, so failure attribution is unaffected.
+        // `exec "$0"` makes the shell hand its pid + exit/signal status
+        // straight to the binary, so `process.run`'s 0..255 / `128+sig`
+        // decoding is identical to the un-wrapped exec.
+        argv.push("sh");
+        argv.push("-c");
+        argv.push("exec \"$0\" >/dev/null");
+        argv.push(exe_path);
+        return argv;
+    }
     argv.push(exe_path);
     return argv;
 }
@@ -904,6 +930,29 @@ fn _cleanup_test_scratch(owned: boolean, scratch_root: string, success: boolean)
         return;
     }
     process.run(["rm", "-rf", scratch_root]);
+}
+
+// Extract the unsigned integer that follows `key` in `text` (a small,
+// allocation-free reader over a known-shape jsonl line). Used by the
+// multi-file `--json` parent to aggregate each child's
+// `_subframe_summary.json` counts (`"passed":N` / `"failed":N` /
+// `"skipped":N`). Returns 0 when the key is absent or not followed by a
+// digit. Deliberately tiny rather than a full JSON parse: the input is
+// the runner's own `render_summary_event` output, whose shape is pinned.
+fn _extract_json_uint_after(text: string, key: string) -> int {
+    let idx = index_of(text, key);
+    if idx < 0 { return 0; }
+    let mut i: int = idx + key.length;
+    let mut n: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c < 48 { break; }
+        if c > 57 { break; }
+        n = n * 10 + (c - 48);
+        i += 1;
+    }
+    return n;
 }
 
 fn handle_test_command(args: string[], runtime_root: string, binary_dir: string) -> int ![io, clock] {
@@ -1000,6 +1049,14 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
     let scratch_root = _test_scratch_root();
     _ensure_dir_cmd(scratch_root);
     _ensure_dir_cmd(scratch_root + "/test-o0");
+    // Sub-frame mode (#1121): set by the multi-file parent on each child
+    // via SAILFIN_TEST_JSON_SUBFRAME=1. In this mode a `--json` child
+    // suppresses its own start/summary on stdout (it still emits per-test
+    // events, which the parent forwards through inherited stdout) and
+    // writes its counts to `<scratch>/_subframe_summary.json` so the
+    // parent can aggregate them into one run-level summary. The result is
+    // a single coherent jsonl document per `sfn test` invocation.
+    let json_subframe = json_output && _env_flag("SAILFIN_TEST_JSON_SUBFRAME");
 
     // Resolve the trace toggle once (popen-cost is fine on the
     // cold orchestrator path) and stash both bits in the
@@ -1074,8 +1131,12 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         // code stays 0 so a legitimately-empty suite (e.g. a capsule
         // with no `tests/` dir) doesn't fail the build.
         if json_output {
-            print(render_start_event(0));
-            print(render_summary_event(0, 0, 0, 0));
+            if json_subframe {
+                fs.writeFile(scratch_root + "/_subframe_summary.json", render_summary_event(0, 0, 0, 0));
+            } else {
+                print(render_start_event(0));
+                print(render_summary_event(0, 0, 0, 0));
+            }
             exit_test_runner_mode();
             return 0;
         }
@@ -1107,10 +1168,18 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
     // an ABI mismatch. Per-file subprocesses give each test its own
     // resolver pass (its own imports only), which is exactly what the
     // retired `scripts/run_native_test.sh` per-file loop did. JSON
-    // mode keeps the single-process path so the jsonl stream stays a
-    // single ordered document; `--json` callers run one file at a
-    // time today.
-    if test_files.length > 1 && !json_output {
+    // mode (#1121) also uses this per-file subprocess path — a multi-file
+    // `sfn test <dir> --json` no longer forces every file through one
+    // resolver pass (that single-process path OOM/segfaulted on the real
+    // suite — 132 unit files — under the 8 GB cap and hit the
+    // resolver-union conflicts per-file isolation exists to avoid).
+    // Output stays a SINGLE coherent jsonl document per invocation: the
+    // parent emits one aggregate `start`, runs each child in sub-frame
+    // mode (children forward only per-test events on the shared stdout
+    // and hand their counts back via `_subframe_summary.json`), then
+    // emits one aggregate `summary`. Human banners and the RETRY line are
+    // suppressed in JSON mode so the stream stays pure jsonl.
+    if test_files.length > 1 {
         let self_exe = _resolve_test_self_path(binary_dir);
         // Ephemeral scratch root + cleanup, ported from the retired
         // `scripts/run_native_test.sh` (issue #850). The script ran
@@ -1181,6 +1250,34 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
                     + " (children will retry per file)");
             }
         }
+        // Single-frame `--json` aggregation (#1121). The parent owns the
+        // run's `start`/`summary`; children run in sub-frame mode (see
+        // `_run_test_child`) and forward only per-test events. Pre-parse
+        // each file to compute the aggregate `total` (parse-only, no
+        // codegen) and keep per-file test counts so a child that dies
+        // before writing its summary file can still be attributed.
+        let mut sf_total: int = 0;
+        let mut sf_counts: int[] = [];
+        if json_output {
+            let mut sfp: int = 0;
+            loop {
+                if sfp >= test_files.length { break; }
+                let sf_src = fs.readFile(test_files[sfp]);
+                let mut sf_prog: Program = parse_program(sf_src);
+                if test_filters_active() {
+                    sf_prog = _filter_program_tests_cmd(sf_prog);
+                }
+                let sf_entries = collect_test_entries(sf_prog, test_files[sfp]);
+                sf_counts.push(sf_entries.length);
+                sf_total += sf_entries.length;
+                sfp += 1;
+            }
+            print(render_start_event(sf_total));
+        }
+        let sf_start_ms = monotonic_millis();
+        let mut sf_passed: int = 0;
+        let mut sf_failed: int = 0;
+        let mut sf_skipped: int = 0;
         let mut overall_rc: int = 0;
         let mut ti: int = 0;
         loop {
@@ -1195,22 +1292,47 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
             // this per-file dir — see `SAILFIN_TEST_RUNTIME_OBJDIR`.
             let child_scratch = sub_root + "/sub-" + number_to_string(ti);
             _ensure_dir_cmd(child_scratch);
-            let mut rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter, update_snapshots);
+            let mut rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter, update_snapshots, json_output);
             if _should_retry_test(rc, sub_retries_disabled) {
-                print("[test] RETRY: " + _package_basename(path)
-                    + " (exit code "
-                    + number_to_string(rc)
-                    + ", retrying once)");
-                rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter, update_snapshots);
+                // RETRY banner is a human-mode artifact; suppress it in
+                // JSON mode so the jsonl stream stays pure (mirrors the
+                // in-process path's `if !json_output` retry-print gate).
+                if !json_output {
+                    print("[test] RETRY: " + _package_basename(path)
+                        + " (exit code "
+                        + number_to_string(rc)
+                        + ", retrying once)");
+                }
+                rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter, update_snapshots, json_output);
             }
             if rc == 0 { suites[suite_idx].pass_count += 1; } else {
                 suites[suite_idx].fail_count += 1;
                 suites[suite_idx].failed_files.push(_package_basename(path));
                 if overall_rc == 0 { overall_rc = rc; }
             }
+            if json_output {
+                // Aggregate the child's per-test counts from the
+                // sub-frame summary it wrote. A missing file means the
+                // child died before writing it (segfault/timeout); count
+                // that file's tests as failed so the aggregate stays
+                // consistent with the non-zero run exit code.
+                let sf_file = child_scratch + "/_subframe_summary.json";
+                if fs.exists(sf_file) {
+                    let sf_raw = fs.readFile(sf_file);
+                    sf_passed += _extract_json_uint_after(sf_raw, "\"passed\":");
+                    sf_failed += _extract_json_uint_after(sf_raw, "\"failed\":");
+                    sf_skipped += _extract_json_uint_after(sf_raw, "\"skipped\":");
+                } else { sf_failed += sf_counts[ti]; }
+            }
             ti += 1;
         }
-        if emit_banners { _emit_suite_banners(suites); }
+        if json_output {
+            // One aggregate `summary` closes the single jsonl document:
+            // one `start`, every per-test event the children forwarded,
+            // one `summary` with run-level counts and wall-clock duration.
+            let sf_dur = monotonic_millis() - sf_start_ms;
+            print(render_summary_event(sf_passed, sf_failed, sf_skipped, sf_dur));
+        } else if emit_banners { _emit_suite_banners(suites); }
         exit_test_runner_mode();
         _cleanup_test_scratch(scratch_owned, sub_root, overall_rc == 0);
         return overall_rc;
@@ -1388,7 +1510,9 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
             total_tests += entries.length;
             pi += 1;
         }
-        print(render_start_event(total_tests));
+        // Sub-frame children suppress their own `start`; the multi-file
+        // parent emits one aggregate `start` for the whole run.
+        if !json_subframe { print(render_start_event(total_tests)); }
     }
 
     let runner_start_ms = monotonic_millis();
@@ -1504,7 +1628,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         if fs.exists(fail_record_path) { fs.deleteFile(fail_record_path); }
 
         if trace_runner { print.err("test runner: exec start"); }
-        let mut run_rc = process.run(_test_exec_argv(scratch_root, exe_path, update_snapshots));
+        let mut run_rc = process.run(_test_exec_argv(scratch_root, exe_path, update_snapshots, json_output));
         // Signal-kill retry (ported from `scripts/run_native_test.sh`
         // by issue #845). 137 (OOM-SIGKILL) / 139 (SIGSEGV) are
         // transient under sustained CI memory pressure on the
@@ -1534,7 +1658,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
             if fs.exists(fail_record_path) {
                 fs.deleteFile(fail_record_path);
             }
-            run_rc = process.run(_test_exec_argv(scratch_root, exe_path, update_snapshots));
+            run_rc = process.run(_test_exec_argv(scratch_root, exe_path, update_snapshots, json_output));
         }
         if trace_runner {
             print.err("test runner: exec done (exit=" + number_to_string(run_rc)
@@ -1613,7 +1737,12 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
     }
     if json_output {
         let runner_elapsed_ms = monotonic_millis() - runner_start_ms;
-        print(render_summary_event(total_passed, total_failed, total_skipped, runner_elapsed_ms));
+        let summary_line = render_summary_event(total_passed, total_failed, total_skipped, runner_elapsed_ms);
+        // Sub-frame children hand their counts to the parent via a file
+        // instead of printing a per-file summary onto the shared stream.
+        if json_subframe {
+            fs.writeFile(scratch_root + "/_subframe_summary.json", summary_line);
+        } else { print(summary_line); }
     } else if emit_banners {
         // Per-suite banners. Suppressed in `--json` mode (the
         // structured summary event is the source of truth there)
