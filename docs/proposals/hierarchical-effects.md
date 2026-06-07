@@ -13,7 +13,7 @@ Closes: #1182
 
 Sailfin's canonical effect taxonomy is **locked at 1.0** to exactly six atoms —
 `clock`, `gpu`, `io`, `model`, `net`, `rand` — in
-[`compiler/src/effect_taxonomy.sfn:18-22`](../../compiler/src/effect_taxonomy.sfn):
+[`compiler/src/effect_taxonomy.sfn:18-22`](../../compiler/src/effect_taxonomy.sfn#L18-L22):
 
 > "Adding a seventh effect post-1.0 means breaking the lock — do not extend
 > without an explicit RFC."
@@ -116,8 +116,14 @@ segment is a canonical atom. `is_canonical_effect("io")` stays exactly as today
 
 ```sfn
 // G6 — sketch only; not implemented by this issue.
-// Returns true iff `name`'s first dotted segment is one of the six.
+// Returns true iff `name` is the `pure` sentinel, or its first dotted
+// segment is one of the six.
 fn is_recognized_effect(name: string) -> boolean {
+    // Preserve the universally-allowed `![pure]` sentinel
+    // (`is_universally_allowed_effect` in effect_taxonomy.sfn). `pure`
+    // is not a canonical atom, carries no refinements, and must keep
+    // round-tripping unchanged when G6 lands.
+    if is_universally_allowed_effect(name) { return true; }
     let root = effect_root(name);   // "io.fs.read" -> "io"; "io" -> "io"
     return is_canonical_effect(root);
 }
