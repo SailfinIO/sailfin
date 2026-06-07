@@ -9,10 +9,14 @@
 # implements the shared MPMC task queue surface
 # (`sfn_taskqueue_create/enqueue/dequeue/destroy/count`, issue #1087):
 # a mutex-guarded ring buffer with not-empty / not-full condition
-# variables for blocking dequeue/enqueue. The worker pool that
-# imports this module lands in a follow-up M4 issue, so `make
-# compile`/`make test` would not otherwise typecheck or exercise it;
-# this script keeps it from bitrotting.
+# variables for blocking dequeue/enqueue. It also implements the fixed
+# worker pool (`sfn_scheduler_create/shutdown/...`, issue #1088):
+# `pthread_create` spin-up sized to `min(cores, 4)` / `SAILFIN_THREADS`,
+# a queue-pulling worker loop, and atomic draining shutdown that joins
+# all workers. The spawn/await surface that imports this module lands in
+# a follow-up M4 issue, so `make compile`/`make test` would not
+# otherwise typecheck or exercise it; this script keeps it from
+# bitrotting.
 #
 # Acceptance:
 #   - `sfn check runtime/sfn/concurrency/scheduler.sfn` exits 0.
@@ -23,6 +27,15 @@
 #     `pthread_cond_wait` in both enqueue and dequeue).
 #   - a linked single-thread roundtrip proves FIFO ordering, ring
 #     wraparound, the create(0) capacity clamp, and null-safety.
+#   - emitted IR defines the `sfn_scheduler_*` worker-pool surface,
+#     materializes the worker entry's address as a real code pointer
+#     (`bitcast ... @sfn_scheduler_worker ... to i8*`, #1146 — not a
+#     silent null), and emits pthread_create/join/cond_broadcast,
+#     sysconf, and an atomic `store atomic i64 1` shutdown publish.
+#   - a linked multi-threaded roundtrip spins up the pool, honors
+#     SAILFIN_THREADS, drains 100 tasks through a capacity-8 ring under
+#     contention, joins cleanly (no leak, no deadlock), and verifies
+#     default `min(cores, 4)` sizing plus null-safety.
 #
 # Usage:
 #   compiler/tests/e2e/test_runtime_scheduler_skeleton.sh <compiler-binary>
@@ -232,6 +245,10 @@ extern long sfn_taskqueue_count(void *q);
 
 void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }
 void sfn_type_register(void *desc) { (void)desc; }
+/* String literals (the SAILFIN_THREADS env name in
+ * sfn_scheduler_resolve_thread_count) lower to @sfn_alloc_struct; stub
+ * it with a plain allocator so the standalone link resolves. */
+void *sfn_alloc_struct(long n) { return calloc(1, (size_t)n); }
 
 int main(void) {
     void *q = sfn_taskqueue_create(4);
@@ -357,11 +374,221 @@ CHARNESS
     return 0
 }
 
+# ---- Test: worker-pool emitted IR shape (issue #1088) ----
+test_pool_emit_shape() {
+    local ll="$SCRATCH/scheduler.ll"
+    if [ ! -f "$ll" ]; then
+        echo "[test]   $ll missing — test_emit_shape must run first"
+        return 1
+    fi
+
+    local missing=0
+
+    # The worker-pool surface must be defined.
+    local fn
+    for fn in create shutdown worker next_task thread_count processed resolve_thread_count; do
+        if ! grep -qE "^define .*@sfn_scheduler_${fn}\(" "$ll"; then
+            echo "[test]   missing definition: @sfn_scheduler_${fn}"
+            missing=$((missing + 1))
+        fi
+    done
+
+    # The worker entry's address must materialize as a real code pointer
+    # (the #1146 fn-reference → address lowering) — NOT the silent null
+    # the frontend emitted before #1146. This is the whole reason the
+    # first pickup of #1088 halted.
+    if ! grep -qE "bitcast .*@sfn_scheduler_worker.* to i8\*" "$ll"; then
+        echo "[test]   missing 'bitcast <fnty> @sfn_scheduler_worker... to i8*' (worker fn-ref not materialized)"
+        grep -nE "sfn_scheduler_worker" "$ll" || true
+        missing=$((missing + 1))
+    fi
+
+    # Scope to the @sfn_scheduler_create body: the start_routine slot
+    # handed to pthread_create must NOT be a null — the #1146 regression.
+    local body="$SCRATCH/create.body"
+    awk '/^define .* @sfn_scheduler_create[^(]*\(/,/^}/' "$ll" > "$body"
+    if [ ! -s "$body" ]; then
+        echo "[test]   could not extract @sfn_scheduler_create body"
+        missing=$((missing + 1))
+    elif grep -qE "store i8\* null" "$body"; then
+        echo "[test]   @sfn_scheduler_create stores i8* null (worker fn-ref dropped to null):"
+        cat "$body"
+        missing=$((missing + 1))
+    fi
+
+    # pthread lifecycle: spawn, join, and the broadcast that wakes parked
+    # workers on shutdown.
+    if ! grep -qE "call i32 @pthread_create\(" "$ll"; then
+        echo "[test]   missing pthread_create call"
+        missing=$((missing + 1))
+    fi
+    if ! grep -qE "call i32 @pthread_join\(" "$ll"; then
+        echo "[test]   missing pthread_join call"
+        missing=$((missing + 1))
+    fi
+    if ! grep -qE "call i32 @pthread_cond_broadcast\(" "$ll"; then
+        echo "[test]   missing pthread_cond_broadcast (shutdown wakeup) call"
+        missing=$((missing + 1))
+    fi
+
+    # Pool sizing queries the online CPU count via sysconf.
+    if ! grep -qE "call i64 @sysconf\(" "$ll"; then
+        echo "[test]   missing sysconf (core count) call"
+        missing=$((missing + 1))
+    fi
+
+    # The atomic shutdown flag: set to 1 atomically. The ring slots store
+    # task-address *registers*, so a literal `store atomic i64 1` is
+    # specific to the shutdown publish.
+    if ! grep -qE "store atomic i64 1," "$ll"; then
+        echo "[test]   missing 'store atomic i64 1' (atomic shutdown flag publish)"
+        missing=$((missing + 1))
+    fi
+
+    return "$missing"
+}
+
+# ---- Test: multi-threaded pool spin-up / drain / join round-trip ----
+test_pool_roundtrip() {
+    local ll="$SCRATCH/scheduler.ll"
+    if [ ! -f "$ll" ]; then
+        echo "[test]   $ll missing — test_emit_shape must run first"
+        return 1
+    fi
+
+    # Same Linux-x86_64-only guard as the FIFO roundtrip: the embedded
+    # pthread handle storage is sized for glibc.
+    local host_os
+    host_os="$(uname -s)"
+    if [ "$host_os" != "Linux" ]; then
+        echo "[test]   host is $host_os, not Linux — skipping executing pool roundtrip"
+        return 0
+    fi
+
+    local harness="$SCRATCH/pool_harness.c"
+    cat > "$harness" <<'CHARNESS'
+/* Multi-threaded round-trip harness for the fixed worker pool
+ * (issue #1088). Spins up a real pthread pool, enqueues many sentinel
+ * tasks, requests an atomic draining shutdown, and asserts every task
+ * was pulled (no leak, no deadlock) and the SAILFIN_THREADS override is
+ * honored. Tasks are bare non-null sentinel addresses: task INVOCATION
+ * is the next M4 issue, so the worker only pulls + drains here.
+ *
+ * No-op stubs mirror the FIFO harness: the seed installs a
+ * persistent-pointer hook and a type-registration ctor.
+ */
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+extern void *sfn_taskqueue_create(long capacity);
+extern void sfn_taskqueue_destroy(void *q);
+extern void sfn_taskqueue_enqueue(void *q, void *task);
+extern long sfn_taskqueue_count(void *q);
+
+extern void *sfn_scheduler_create(void *queue);
+extern void sfn_scheduler_shutdown(void *scheduler);
+extern long sfn_scheduler_thread_count(void *scheduler);
+extern long sfn_scheduler_processed(void *scheduler);
+
+void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }
+void sfn_type_register(void *desc) { (void)desc; }
+/* SAILFIN_THREADS string literal lowers to @sfn_alloc_struct. */
+void *sfn_alloc_struct(long n) { return calloc(1, (size_t)n); }
+
+int main(void) {
+    /* Phase 1: SAILFIN_THREADS override is honored. */
+    setenv("SAILFIN_THREADS", "3", 1);
+    void *q = sfn_taskqueue_create(8);
+    if (!q) { fprintf(stderr, "queue create failed\n"); return 1; }
+
+    void *sched = sfn_scheduler_create(q);
+    if (!sched) { fprintf(stderr, "scheduler create failed\n"); return 2; }
+    if (sfn_scheduler_thread_count(sched) != 3) {
+        fprintf(stderr, "SAILFIN_THREADS=3 not honored: thread_count=%ld\n",
+                sfn_scheduler_thread_count(sched));
+        return 3;
+    }
+
+    /* Enqueue more tasks than the ring holds (capacity 8, N=100): the
+     * producer blocks on a full ring while the 3 workers drain it,
+     * exercising concurrent enqueue/dequeue without deadlock. */
+    const long N = 100;
+    for (long i = 0; i < N; i++) {
+        sfn_taskqueue_enqueue(q, (void *)(uintptr_t)(0x1000 + i));
+    }
+
+    /* Atomic draining shutdown: must pull every queued task, then join
+     * all workers. Hangs here would mean a lost wakeup / deadlock. */
+    sfn_scheduler_shutdown(sched);
+
+    if (sfn_taskqueue_count(q) != 0) {
+        fprintf(stderr, "queue not drained: count=%ld\n", sfn_taskqueue_count(q));
+        return 4;
+    }
+    if (sfn_scheduler_processed(sched) != N) {
+        fprintf(stderr, "pool pulled %ld tasks, want %ld\n",
+                sfn_scheduler_processed(sched), N);
+        return 5;
+    }
+    sfn_taskqueue_destroy(q);
+
+    /* Phase 2: default sizing = min(cores, 4) when no override. */
+    unsetenv("SAILFIN_THREADS");
+    void *q2 = sfn_taskqueue_create(4);
+    void *sched2 = sfn_scheduler_create(q2);
+    if (!sched2) { fprintf(stderr, "default scheduler create failed\n"); return 6; }
+    long tc = sfn_scheduler_thread_count(sched2);
+    if (tc < 1 || tc > 4) {
+        fprintf(stderr, "default thread_count=%ld, want 1..4\n", tc);
+        return 7;
+    }
+    sfn_scheduler_shutdown(sched2);
+    sfn_taskqueue_destroy(q2);
+
+    /* Phase 3: null-safety. */
+    sfn_scheduler_shutdown(NULL);
+    if (sfn_scheduler_thread_count(NULL) != 0) {
+        fprintf(stderr, "thread_count(NULL) != 0\n");
+        return 8;
+    }
+    if (sfn_scheduler_processed(NULL) != 0) {
+        fprintf(stderr, "processed(NULL) != 0\n");
+        return 9;
+    }
+
+    return 0;
+}
+CHARNESS
+
+    local clang_bin
+    clang_bin="${CLANG:-clang}"
+    if ! command -v "$clang_bin" >/dev/null 2>&1; then
+        echo "[test]   clang not available — skipping pool roundtrip"
+        return 0
+    fi
+    local bin="$SCRATCH/pool_roundtrip"
+    if ! "$clang_bin" -Wno-override-module "$harness" "$ll" -o "$bin" -lpthread -lm 2>"$SCRATCH/pool_clang.log"; then
+        echo "[test]   clang failed to link pool harness:"
+        cat "$SCRATCH/pool_clang.log"
+        return 1
+    fi
+    if ! "$bin"; then
+        local rc=$?
+        echo "[test]   pool roundtrip binary exited non-zero (rc=$rc)"
+        return 1
+    fi
+    return 0
+}
+
 run_test "sfn check runtime/sfn/concurrency/scheduler.sfn passes" test_check_clean
 run_test "sfn fmt --check runtime/sfn/concurrency/scheduler.sfn is canonical" test_fmt_clean
 run_test "sfn emit llvm produces the sfn_taskqueue_* surface" test_emit_shape
 run_test "blocking dequeue waits on a condition under the mutex" test_dequeue_blocks_on_cond
 run_test "single-thread enqueue/dequeue is FIFO with ring wraparound" test_roundtrip_fifo
+run_test "sfn emit llvm produces the worker-pool surface (#1088)" test_pool_emit_shape
+run_test "multi-threaded pool spin-up drains the queue and joins (#1088)" test_pool_roundtrip
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
