@@ -58,6 +58,34 @@ Every design must account for the fact that the compiler compiles itself:
 - **New features used by the compiler create circular dependencies.** If you add a feature and then use it in the compiler source, the old seed must be able to compile the new compiler. Design features so they're additive — the old parser ignores what it doesn't understand, or the feature isn't used in the compiler until the next seed.
 - **Build performance matters architecturally.** A 90-minute build means every design iteration takes 90 minutes to validate. Designs that reduce build time have multiplicative value.
 
+## Decomposition Discipline (when grooming an epic into issues)
+
+When `/groom` asks you to break work into session-sized issues, **minimize
+the decomposition** — splitting carries real cost (extra PRs, review cycles,
+and seed cuts). Apply these:
+
+- **Bundle a capability with its single consumer.** When a compiler
+  capability (lowering / parse / typecheck / intrinsic) is tightly coupled to
+  one runtime/consumer that will be worked in the same session, prefer **one
+  issue/PR**, not two. Only split for genuinely independent work, or when the
+  capability has multiple consumers that each justify standalone shipping.
+- **Mind the seed-cut tax.** A compiler-source change and its consumer landing
+  as *separate releases* force a seed cut + `/pin-seed` between them (the
+  consumer can't self-host until the capability is in the pinned seed).
+  Bundling them in one PR avoids the seed cut: `make compile` builds the new
+  compiler from the old seed, which then compiles the consumer in the same
+  pass. **Call this out explicitly** in your plan whenever a proposed split
+  would create a seed-cut gate for a single consumer — recommend bundling.
+- **Don't manufacture splits.** If the whole thing is genuinely one S/M issue,
+  say so and stop. Two artificially-separated S issues are usually worse than
+  one honest M.
+- **Feasibility-probe FFI assumptions.** For any runtime issue claiming "no
+  frontend dependency," verify the needed construct can actually be expressed
+  and emitted by the current seed before treating it as standalone — a runtime
+  call to a C API often needs a frontend primitive that does not exist yet
+  (e.g. taking a function's address for a `pthread_create` start routine).
+  Surface a missing primitive as an explicit predecessor, not a surprise.
+
 ## Reference Documents
 
 Always consult these before designing:
