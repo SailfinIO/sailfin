@@ -3,8 +3,10 @@
 **Date:** 2026-06-05
 **Author:** Compiler architect (vision / design exploration)
 **Status:** Vision — long-horizon, post-1.0. Not scheduled. No issue scoped yet.
-**Companion docs:** `docs/build-performance.md` (perf analysis + Track registry, #339),
-`docs/runtime_audit.md` / `docs/runtime_architecture.md` (C→Sailfin runtime migration),
+**Companion docs:** `docs/proposals/capability-sealed-runtime.md` (the *why* —
+what this independence is ultimately for), `docs/build-performance.md` (perf
+analysis + Track registry, #339), `docs/runtime_audit.md` /
+`docs/runtime_architecture.md` (C→Sailfin runtime migration),
 `site/src/content/docs/docs/reference/runtime-abi.md` (target ABI).
 
 > **Why this doc exists.** Sailfin's self-hosting story currently stops at the
