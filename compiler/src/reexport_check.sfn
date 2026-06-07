@@ -19,7 +19,6 @@
 //
 // See docs/rca/2026-04-18-reexport-diagnostic-gep.md.
 import { Program } from "./ast";
-import { append_string, append_unique } from "./emit_native_state";
 import { contains_string, substring } from "./string_utils";
 
 export {
@@ -30,6 +29,23 @@ export {
     is_local_module_path,
     format_reexport_violation
 };
+
+// Local string[] append helpers. Kept private here (rather than imported
+// from emit_native_state) so this module stays a true emit-free leaf — the
+// whole point of the extraction is that the `sfn check` import graph never
+// reaches emitter-side modules. Semantics mirror emit_native_state's
+// append_string / append_unique exactly.
+fn _append_string(values: string[], value: string) -> string[] {
+    let mut out = values;
+    if out == null { out = []; }
+    out.push(value);
+    return out;
+}
+
+fn _append_unique(values: string[], value: string) -> string[] {
+    if contains_string(values, value) { return values; }
+    return _append_string(values, value);
+}
 
 fn collect_reexport_violations(program: Program) -> string[] {
     let local_defs = collect_local_definition_names(program);
@@ -50,7 +66,7 @@ fn collect_reexport_violations(program: Program) -> string[] {
                         let origin = find_local_import_source(program, spec.name);
                         if origin.length > 0 {
                             if is_local_module_path(origin) {
-                                violations = append_string(violations, format_reexport_violation(spec.name, origin));
+                                violations = _append_string(violations, format_reexport_violation(spec.name, origin));
                             }
                         }
                     }
@@ -70,28 +86,28 @@ fn collect_local_definition_names(program: Program) -> string[] {
         if index >= program.statements.length { break; }
         let stmt = program.statements[index];
         if stmt.variant == "FunctionDeclaration" {
-            names = append_unique(names, stmt.signature.name);
+            names = _append_unique(names, stmt.signature.name);
         }
         if stmt.variant == "ExternFunctionDeclaration" {
-            names = append_unique(names, stmt.signature.name);
+            names = _append_unique(names, stmt.signature.name);
         }
         if stmt.variant == "StructDeclaration" {
-            names = append_unique(names, stmt.name);
+            names = _append_unique(names, stmt.name);
         }
         if stmt.variant == "EnumDeclaration" {
-            names = append_unique(names, stmt.name);
+            names = _append_unique(names, stmt.name);
         }
         if stmt.variant == "InterfaceDeclaration" {
-            names = append_unique(names, stmt.name);
+            names = _append_unique(names, stmt.name);
         }
         if stmt.variant == "TypeAliasDeclaration" {
-            names = append_unique(names, stmt.name);
+            names = _append_unique(names, stmt.name);
         }
         if stmt.variant == "VariableDeclaration" {
-            names = append_unique(names, stmt.name);
+            names = _append_unique(names, stmt.name);
         }
         if stmt.variant == "TestDeclaration" {
-            names = append_unique(names, stmt.name);
+            names = _append_unique(names, stmt.name);
         }
         index += 1;
     }
