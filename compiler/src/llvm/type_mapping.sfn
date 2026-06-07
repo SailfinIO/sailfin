@@ -905,18 +905,24 @@ fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
 }
 
 // =============================================================================
-// ABI Primitive Kind Classification (Slice E.1.5 — issue #528)
+// ABI Primitive Kind Classification (Slice E.1.5 — issue #528; bool — #537)
 // =============================================================================
-// Returns "int", "float", or "other" for an LLVM primitive type. Used by
-// `coerce_operand_to_type` (and future `#296` reapply in Slice E.3) to refuse
-// silent int↔float bitcasts at call boundaries during the partial migration
+// Returns "int", "float", "bool", or "other" for an LLVM primitive type. Used
+// by `coerce_operand_to_type` and `dominant_type` to refuse silent scalar-kind
+// mismatches at call/binding/arithmetic boundaries during the partial migration
 // from the historical `number` annotation to `int`/`float`. Pointer and
-// aggregate types return
-// "other" — this slice deliberately scopes the diagnostic to scalar
-// primitives so the partial-migration ABI hazard is caught loudly without
-// disturbing today's pointer/struct lowering.
+// aggregate types return "other" — this scopes the diagnostic to scalar
+// primitives so the ABI hazard is caught loudly without disturbing today's
+// pointer/struct lowering.
+//
+// #537: `i1` (boolean) is its own kind, distinct from `int`. This makes
+// `bool ↔ int` and `bool ↔ float` mismatches diagnosable by construction (a
+// bool flowing into a numeric context is otherwise silently widened via
+// `zext`/`uitofp`). `i8` stays `"int"` — it doubles as the char/byte width and
+// reclassifying it would cascade across the tree.
 fn numeric_type_kind(llvm_type: string) -> string {
     let trimmed = trim_text(llvm_type);
+    if trimmed == "i1" { return "bool"; }
     if trimmed == "i64" { return "int"; }
     if trimmed == "i32" { return "int"; }
     if trimmed == "i16" { return "int"; }

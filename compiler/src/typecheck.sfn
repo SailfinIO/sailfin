@@ -40,12 +40,16 @@ import {
     clone_bindings,
     detect_removed_ai_keyword,
     detect_unsupported_statement_keyword,
+    future_element_kind,
     has_symbol,
     is_builtin_call_name,
     is_identifier_char,
+    make_await_non_future_diagnostic,
+    make_channel_send_mismatch_diagnostic,
     make_main_signature_param_count_diagnostic,
     make_main_signature_param_type_diagnostic,
     make_removed_keyword_diagnostic,
+    make_spawn_unresolvable_kind_diagnostic,
     make_thread_local_requires_mut_diagnostic,
     make_try_error_type_mismatch_diagnostic,
     make_try_non_result_fn_diagnostic,
@@ -55,6 +59,8 @@ import {
     register_local_symbol,
     register_symbol,
     result_type_arguments,
+    spawn_future_kind,
+    type_is_future,
     type_is_result
 } from "./typecheck_types";
 
@@ -965,6 +971,30 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
     if expression.variant == "TryOperator" {
         return walk_expression(expression.operand, bindings, imports);
     }
+    // Concurrency nodes (issue #1082). Recurse into operands so inner
+    // diagnostics still fire. The only statically-sound live rule is E0813:
+    // a `spawn` of a lambda literal with no declared return type cannot be
+    // assigned a future kind. Spawn of a named-fn call / arbitrary
+    // expression, await-on-non-future (E0814), and channel send-mismatch
+    // (E0815) all need expression-type inference (#829, out of scope) and
+    // ship as helpers exercised by `concurrency_typecheck_test.sfn`.
+    if expression.variant == "Spawn" {
+        let mut diagnostics = walk_expression(expression.operand, bindings, imports);
+        if expression.operand.variant == "Lambda" {
+            let return_type = expression.operand.return_type;
+            if return_type == null {
+                diagnostics = diagnostics.concat(check_spawn_kind(null, expression.span));
+            }
+        }
+        return diagnostics;
+    }
+    if expression.variant == "Await" {
+        return walk_expression(expression.operand, bindings, imports);
+    }
+    if expression.variant == "Channel" {
+        if expression.capacity == null { return []; }
+        return walk_expression(expression.capacity, bindings, imports);
+    }
     return [];
 }
 
@@ -1019,6 +1049,58 @@ fn check_try_operator(operand_type: string, enclosing_return_type: string?, span
 fn try_operator_result_type(operand_type: string) -> string? {
     if !type_is_result(operand_type) { return null; }
     return result_type_arguments(operand_type)[0];
+}
+
+// Concurrency type rules — issue #1082, epic #965 (M4, decision B). Like the
+// `?`-operator rules above, these are driven against explicit type-annotation
+// strings: the checker has no expression-type inferencer (#829), so the only
+// statically-sound LIVE rule is `check_spawn_kind` for a lambda-literal operand
+// (wired in `walk_expression`). `check_await_operand`/`check_channel_send`
+// ship as helpers — live wiring waits on operand-type inference, exactly as
+// `check_try_operator`'s rule 3 does. Kind resolution mirrors
+// `llvm/type_mapping.sfn:831-905` so emit-native (#1084) agrees.
+// `spawn` rule: a spawned callee must have a determinable future kind.
+// `return_type_text` is the callee's declared return-type annotation, or null
+// when the spawn target declares no return type (E0813). A non-null
+// annotation always resolves to one of the six kinds (ptr is the catch-all),
+// so a declared return type never errors here.
+fn check_spawn_kind(return_type_text: string?, span: SourceSpan?) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    if return_type_text == null {
+        diagnostics.push(make_spawn_unresolvable_kind_diagnostic(span));
+        return diagnostics;
+    }
+    let kind = spawn_future_kind(return_type_text);
+    if kind.length == 0 {
+        diagnostics.push(make_spawn_unresolvable_kind_diagnostic(span));
+    }
+    return diagnostics;
+}
+
+// `await` rule (1): the operand must be a future type -> E0814. The
+// expression's type is the future's element kind (`await_result_type`).
+fn check_await_operand(operand_type: string, span: SourceSpan?) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    if !type_is_future(operand_type) {
+        diagnostics.push(make_await_non_future_diagnostic(operand_type, span));
+    }
+    return diagnostics;
+}
+
+// The element kind an `await` yields (the await->T rule), or null when the
+// operand is not a future (E0814 reports that separately).
+fn await_result_type(operand_type: string) -> string? {
+    return future_element_kind(operand_type);
+}
+
+// channel send rule: a value sent on a channel must match the channel's
+// element kind -> E0815. Both kinds are monomorphized strings.
+fn check_channel_send(channel_kind: string, sent_kind: string, span: SourceSpan?) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    if !strings_equal(channel_kind, sent_kind) {
+        diagnostics.push(make_channel_send_mismatch_diagnostic(channel_kind, sent_kind, span));
+    }
+    return diagnostics;
 }
 
 // Resolution probe (issue #811). Returns whether `name` resolves to an

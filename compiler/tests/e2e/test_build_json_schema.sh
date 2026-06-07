@@ -106,14 +106,19 @@ test_top_level_fields() {
 run_test "top-level fields present (command/kind/exit_code/input/version)" test_top_level_fields
 
 # ---- Test 4: cold build cache stats are miss + store ----
+# #915: the runtime C/LL/sfn object cache folds into `.cache`. The
+# cold build runs in a fresh $SCRATCH cwd, so the runtime objects
+# (under $SCRATCH/build/sailfin) are cold too — adding misses/stores
+# on top of the single `sfn/math` .ll module miss. Assert the cold
+# shape (hits=0, miss/store>=1) rather than exact `.ll`-only counts.
 test_cold_cache_stats() {
     [ "$(jq -r .cache.hits "$SCRATCH/cold.json")" = "0" ] || return 1
-    [ "$(jq -r .cache.misses "$SCRATCH/cold.json")" = "1" ] || return 1
-    [ "$(jq -r .cache.stores "$SCRATCH/cold.json")" = "1" ] || return 1
+    [ "$(jq -r .cache.misses "$SCRATCH/cold.json")" -ge 1 ] || return 1
+    [ "$(jq -r .cache.stores "$SCRATCH/cold.json")" -ge 1 ] || return 1
     [ "$(jq -r .cache.enabled "$SCRATCH/cold.json")" = "true" ] || return 1
     [ -n "$(jq -r .cache.root "$SCRATCH/cold.json")" ] || return 1
 }
-run_test "cold build cache stats: hits=0 misses=1 stores=1 enabled=true" test_cold_cache_stats
+run_test "cold build cache stats: hits=0 miss/store>=1 enabled=true" test_cold_cache_stats
 
 # ---- Test 4b: cold build hit_rate is numeric (0 / 1 = 0.0) ----
 # Issue #780: jq must read .cache.hit_rate as a number, never null
@@ -190,12 +195,14 @@ test_warm_cache_hit() {
         return $rc
     fi
     jq . "$SCRATCH/warm.json" > /dev/null 2>&1 || return 1
-    [ "$(jq -r .cache.hits "$SCRATCH/warm.json")" = "1" ] || return 1
+    # #915: both the `.ll` math module and the runtime objects are now
+    # cached, so hits>=1 with zero misses.
+    [ "$(jq -r .cache.hits "$SCRATCH/warm.json")" -ge 1 ] || return 1
     [ "$(jq -r .cache.misses "$SCRATCH/warm.json")" = "0" ] || return 1
-    # #780: warm cache is fully saturated (1 hit, 0 misses) → 1.0.
+    # #780: warm cache is fully saturated (0 misses) → hit_rate 1.0.
     [ "$(jq -r '.cache.hit_rate == 1' "$SCRATCH/warm.json")" = "true" ] || return 1
 }
-run_test "warm build cache.hits=1 misses=0 hit_rate=1.0" test_warm_cache_hit
+run_test "warm build cache.hits>=1 misses=0 hit_rate=1.0" test_warm_cache_hit
 
 # ---- Test 9: --no-cache + --json composes ----
 test_json_with_no_cache() {

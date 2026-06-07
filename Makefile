@@ -105,6 +105,29 @@ NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 
 .PHONY: rebuild mcp-server
 
+# Agent-facing targets (#1059) wrap their real `<target>-impl` body in the
+# verdict-block emitter so a single greppable `===SAILFIN-RESULT===` block is
+# always the last output, on success and failure alike. The wrapper also
+# carries the SAILFIN_INNER guard so a `make check` that calls `make test`
+# internally emits only the outer verdict. See scripts/agent_report.sh and
+# docs/reference/make-result-schema.md.
+.PHONY: compile-impl rebuild-impl check-impl check-fast-impl
+.PHONY: test-impl test-unit-impl test-integration-impl test-e2e-impl test-capsules-impl
+#
+# Report-file gate (#1119). `JSON=1 make <target>` (or SAILFIN_AGENT_REPORT=1 in
+# the environment) activates a per-target full report file at
+# build/agent-report.<target>.json and points the verdict block's `report`
+# field at it. The gate is off by default: no file is written and `report`
+# stays null. The flag is exported (not threaded through each callsite) so
+# agent_report.sh reads it from the environment; nested SAILFIN_INNER runs still
+# emit no sentinel and write no file.
+JSON ?=
+ifeq ($(JSON),1)
+SAILFIN_AGENT_REPORT := 1
+endif
+export SAILFIN_AGENT_REPORT
+AGENT_REPORT := bash scripts/agent_report.sh
+
 help:
 	@echo "Common Sailfin tasks"
 	@echo ""
@@ -151,6 +174,9 @@ endif
 # run from `make test` / `make test-e2e` via `test-e2e-sh` — Phase
 # 3.1 migrates them and retires the .sh branch.
 test:
+	@$(AGENT_REPORT) --target test -- $(MAKE) test-impl
+
+test-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
@@ -218,6 +244,9 @@ fetch-seed:
 # Makefile loops used to emit now comes from `_emit_suite_banners`
 # in `handle_test_command`.
 test-unit:
+	@$(AGENT_REPORT) --target test-unit -- $(MAKE) test-unit-impl
+
+test-unit-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-unit] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
@@ -225,6 +254,9 @@ test-unit:
 	@$(NATIVE_BIN) test compiler/tests/unit
 
 test-integration:
+	@$(AGENT_REPORT) --target test-integration -- $(MAKE) test-integration-impl
+
+test-integration-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-integration] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
@@ -237,6 +269,9 @@ test-integration:
 # then `test-e2e-sh` keeps the bash-driven scripts on the same
 # `make test-e2e` / `make test` paths they were on before #848.
 test-e2e:
+	@$(AGENT_REPORT) --target test-e2e -- $(MAKE) test-e2e-impl
+
+test-e2e-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-e2e] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
@@ -252,6 +287,9 @@ test-e2e:
 # so passing just `capsules` matches the prior
 # `find capsules -path '*/tests/*_test.sfn'` discovery.
 test-capsules:
+	@$(AGENT_REPORT) --target test-capsules -- $(MAKE) test-capsules-impl
+
+test-capsules-impl:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-capsules] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
@@ -413,6 +451,9 @@ clean-build:
 clean-all: clean clean-build
 
 compile:
+	@$(AGENT_REPORT) --target compile -- $(MAKE) compile-impl
+
+compile-impl:
 	@if [ "$${FORCE:-0}" = "0" ] && [ -x "$(NATIVE_BIN)" ] && \
 		[ -z "$$(find compiler/src runtime -type f -name '*.sfn' -newer "$(NATIVE_BIN)" -print -quit 2>/dev/null)" ]; then \
 		echo "[compile] $(NATIVE_BIN) up-to-date"; \
@@ -422,6 +463,9 @@ compile:
 	fi
 
 check:
+	@$(AGENT_REPORT) --target check -- $(MAKE) check-impl
+
+check-impl:
 	@$(MAKE) compile NATIVE_OPT="$(SELFHOST1_OPT)"
 	@seed="build/native/sailfin"; \
 	if [ ! -x "$$seed" ]; then \
@@ -540,12 +584,38 @@ check:
 # (the triple-pass selfhost validator). Naming mirrors what end users
 # of the language will eventually run on their own capsules.
 check-fast:
+	@$(AGENT_REPORT) --target check-fast -- $(MAKE) check-fast-impl
+
+check-fast-impl:
 	@if [ ! -x "$(NATIVE_BIN)" ] && [ ! -f "$(NATIVE_BIN)" ]; then \
 		echo "[check-fast] missing $(NATIVE_BIN); run: make compile"; \
 		exit 1; \
 	fi
 	@echo "[check-fast] running sfn check on compiler/src/ runtime/"
-	@$(NATIVE_BIN) check compiler/src/ runtime/
+	@# JSON=1 / SAILFIN_AGENT_REPORT=1 gate (#1122): run `sfn check --json` and
+	@# tee the `sailfin-check/1` envelope to build/agent-check-fast.json for the
+	@# report composer (issue E). PIPESTATUS[0] preserves the check exit-code
+	@# contract (0 clean / 1 diagnostics / 2 setup) across the tee, so a
+	@# diagnostics run still fails the target instead of being masked by tee.
+	@# Because producing the envelope IS the point of this mode, a failure to
+	@# create build/ or write the file (read-only FS, disk full) is a setup
+	@# error (exit 2) rather than a silent OK — check's own exit code still wins
+	@# when it is non-zero. Default (no JSON=1) runs stay human-only, no file.
+	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
+		if ! mkdir -p build; then \
+			echo "[check-fast] cannot create build/ for JSON envelope" >&2; \
+			exit 2; \
+		fi; \
+		$(NATIVE_BIN) check --json compiler/src/ runtime/ | tee build/agent-check-fast.json; \
+		pipe_rc=("$${PIPESTATUS[@]}"); \
+		if [ "$${pipe_rc[0]}" -ne 0 ]; then exit "$${pipe_rc[0]}"; fi; \
+		if [ "$${pipe_rc[1]}" -ne 0 ]; then \
+			echo "[check-fast] failed to write build/agent-check-fast.json" >&2; \
+			exit 2; \
+		fi; \
+	else \
+		$(NATIVE_BIN) check compiler/src/ runtime/; \
+	fi
 	@echo "[check-fast] OK"
 
 # Pre-release determinism gate. Runs the emit harness at parallel load to
@@ -645,6 +715,9 @@ ci-package-installer:
 # - NATIVE_OPT / SELFHOST1_OPT are no longer honoured here — the
 #   driver hardcodes `-O2` for the link step.
 rebuild:
+	@$(AGENT_REPORT) --target rebuild -- $(MAKE) rebuild-impl
+
+rebuild-impl:
 	@mkdir -p build
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
@@ -707,15 +780,33 @@ rebuild:
 	@# recipe line. The `&&` chain ensures every diagnostic
 	@# message reaches the user before we exit.
 	@rm -f build/sailfin/program build/sailfin/program.ll
+	@# #1120: under the JSON=1 / SAILFIN_AGENT_REPORT=1 gate, append
+	@# `--json` so the seed emits its single-line BuildReport on stdout,
+	@# and tee that to build/native/.build-report.json for the report
+	@# composer (#1056 Phase 2). Human progress stays on stderr (still
+	@# inherited to the terminal); pipefail keeps the seed's real exit
+	@# code across the tee. On failure the seed can still emit non-JSON
+	@# to stdout in `--json` mode (e.g. cli_main.sfn's "failed to compile
+	@# LLVM ..." is not json-gated), so the bail block below removes the
+	@# half-written report — the contract for consumers is "file exists =>
+	@# valid BuildReport". Default (gate off) keeps the original
+	@# `2>&1 | cat` form byte-for-byte.
 	@seed=$$(cat build/.seed-resolved); \
 	echo "[rebuild] running sfn build -p compiler (seed=$$seed)..."; \
 	build_rc=0; \
-	{ cd $(CURDIR) && bash -c "set -o pipefail; \"$$seed\" build $(BUILD_ARGS) -p compiler 2>&1 | cat"; } \
-		|| build_rc=$$?; \
+	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
+		mkdir -p build/native; \
+		{ cd $(CURDIR) && bash -c "set -o pipefail; \"$$seed\" build $(BUILD_ARGS) --json -p compiler | tee build/native/.build-report.json"; } \
+			|| build_rc=$$?; \
+	else \
+		{ cd $(CURDIR) && bash -c "set -o pipefail; \"$$seed\" build $(BUILD_ARGS) -p compiler 2>&1 | cat"; } \
+			|| build_rc=$$?; \
+	fi; \
 	if [ "$$build_rc" -ne 0 ] || [ ! -f build/sailfin/program ]; then \
 		echo "[rebuild][error] sfn build failed (exit=$$build_rc) or did not produce build/sailfin/program" >&2; \
 		echo "[rebuild][error] expected the alpha.6+ seed's subprocess-stage path to keep the cold build under the 8 GB ulimit" >&2; \
 		echo "[rebuild][error] if this is a regression, rerun with BUILD_ARGS='--cache-trace' to bisect, or fall back to the prior seed via .seed-version" >&2; \
+		if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then rm -f build/native/.build-report.json; fi; \
 		exit 1; \
 	fi
 	@mkdir -p build/native

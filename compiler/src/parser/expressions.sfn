@@ -16,6 +16,7 @@ import {
     substring
 } from "../string_utils";
 import { Token, TokenKind } from "../token";
+import { spawn_future_kind } from "../typecheck_types";
 import { parse_block } from "./statements";
 import {
     append_token,
@@ -388,6 +389,131 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
         }
     }
 
+    // Concurrency-frontend prefix operators (M4.0, epic #965, issue
+    // #1080). `spawn`/`await` are soft keywords that lex as `Identifier`
+    // (Sailfin has no keyword tokens) and bind like the symbol unaries
+    // above: the operand is parsed at `unary_precedence()` so a trailing
+    // binary operator folds into the parent precedence-climbing loop
+    // (`await a + b` parses as `(await a) + b`, matching `-a + b`). Type
+    // rules, effect-checking, and lowering land in follow-up issues; the
+    // `Await` node is bridged back to the existing text-based lowering
+    // via the `Await` arm in `emit_native_format.sfn` so the legacy
+    // `async`/`await` integration tests keep working unchanged.
+    if token.kind.variant == "Identifier" {
+        if identifier_matches(token, "spawn") {
+            let advanced = expression_tokens_advance(state);
+            let operand_result = parse_expression_bp(advanced, unary_precedence());
+            if !operand_result.success { return operand_result; }
+            // Tag the future kind when it is statically derivable from the
+            // operand: a lambda literal carries its declared return type
+            // (issue #1082, "the lambda/fn the parser attaches"). A bare
+            // named-fn call (`spawn foo()`) needs symbol resolution that is
+            // out of scope here, so its kind stays "" for #1084 to fill.
+            let mut spawn_kind: string = "";
+            let spawn_operand = operand_result.expression;
+            if spawn_operand.variant == "Lambda" {
+                let spawn_return = spawn_operand.return_type;
+                if spawn_return != null {
+                    spawn_kind = spawn_future_kind(spawn_return.text);
+                }
+            }
+            return ExpressionParseResult {
+                state: operand_result.state,
+                expression: Expression.Spawn {
+                    operand: operand_result.expression,
+                    span: source_span_from_tokens([token]),
+                    kind: spawn_kind
+                },
+                success: true
+            };
+        }
+        if identifier_matches(token, "await") {
+            let advanced = expression_tokens_advance(state);
+            let operand_result = parse_expression_bp(advanced, unary_precedence());
+            if !operand_result.success { return operand_result; }
+            return ExpressionParseResult {
+                state: operand_result.state,
+                expression: Expression.Await {
+                    operand: operand_result.expression,
+                    span: source_span_from_tokens([token]),
+                    kind: ""
+                },
+                success: true
+            };
+        }
+        // `channel(capacity?)` constructs a channel value. Commit to the
+        // constructor as soon as `channel` is immediately followed by `(`:
+        // a bare `channel` (no paren) is an ordinary identifier and falls
+        // through to `parse_primary_expression`, but once the `(` is seen
+        // the construct is unambiguous, so a malformed argument list is a
+        // hard parse failure rather than a silent re-interpretation as an
+        // identifier call (which would diverge the fail-closed diagnostic
+        // by arity, e.g. `channel(1, 2)`). The generic `channel<T>(...)`
+        // element-type form is deferred to a follow-up.
+        if identifier_matches(token, "channel") {
+            let after_channel = expression_tokens_advance(state);
+            let mut channel_followed_by_paren: boolean = false;
+            if !expression_tokens_is_at_end(after_channel) {
+                if symbol_matches(expression_tokens_peek(after_channel), "(") {
+                    channel_followed_by_paren = true;
+                }
+            }
+            if channel_followed_by_paren {
+                let channel_result = parse_channel_expression(state);
+                if channel_result.success {
+                    return parse_postfix_chain(channel_result.state, channel_result.expression);
+                }
+                return channel_result;
+            }
+        }
+        // `parallel [t1, t2, ...]` fans tasks out (M4.0, issue #1081).
+        // Commit to the construct the moment `parallel` is immediately
+        // followed by `[`; a bare `parallel` (or `parallel.foo`) is an
+        // ordinary identifier and falls through to the primary path. Once
+        // committed, a malformed task list is a hard parse failure rather
+        // than a silent re-read as an identifier indexed by an array
+        // literal. The task list reuses the array-literal grammar, so each
+        // element is a full expression (typically a `spawn`).
+        if identifier_matches(token, "parallel") {
+            let after_parallel = expression_tokens_advance(state);
+            let mut parallel_followed_by_bracket: boolean = false;
+            if !expression_tokens_is_at_end(after_parallel) {
+                if symbol_matches(expression_tokens_peek(after_parallel), "[") {
+                    parallel_followed_by_bracket = true;
+                }
+            }
+            if parallel_followed_by_bracket {
+                let parallel_result = parse_parallel_expression(state);
+                if parallel_result.success {
+                    return parse_postfix_chain(parallel_result.state, parallel_result.expression);
+                }
+                return parallel_result;
+            }
+        }
+        // `serve(handler, port?)` runs the accept loop (M4.0, issue #1081).
+        // Same soft-keyword commit rule as `channel`: commit on the `(`
+        // that immediately follows `serve`. `handler` is required by the
+        // AST shape, so a zero-argument `serve()` is a hard parse failure;
+        // any extra argument beyond `handler`/`port` is a typecheck-layer
+        // arity concern (deferred — this issue is parse-only).
+        if identifier_matches(token, "serve") {
+            let after_serve = expression_tokens_advance(state);
+            let mut serve_followed_by_paren: boolean = false;
+            if !expression_tokens_is_at_end(after_serve) {
+                if symbol_matches(expression_tokens_peek(after_serve), "(") {
+                    serve_followed_by_paren = true;
+                }
+            }
+            if serve_followed_by_paren {
+                let serve_result = parse_serve_expression(state);
+                if serve_result.success {
+                    return parse_postfix_chain(serve_result.state, serve_result.expression);
+                }
+                return serve_result;
+            }
+        }
+    }
+
     let primary_result = parse_primary_expression(state);
     if !primary_result.success { return primary_result; }
     return parse_postfix_chain(primary_result.state, primary_result.expression);
@@ -636,6 +762,118 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
     return ExpressionParseResult {
         state: current_state,
         expression: current_expression,
+        success: true
+    };
+}
+
+// ============================================================================
+// Channel Constructor
+// ============================================================================
+// Parse `channel(capacity?)` with `state` positioned at the `channel`
+// identifier token. Returns failure (leaving `state` untouched) only when
+// the next token is not `(` (a bare `channel` identifier) or when the
+// argument list itself is malformed (e.g. an unterminated `channel(`); the
+// caller commits to the constructor the moment `(` follows, so a malformed
+// form fails the parse hard rather than backtracking to an identifier
+// call. `capacity` is bound only for the canonical single-argument form;
+// zero or extra arguments leave it `null` and are a typecheck-layer arity
+// concern (deferred — issue #1080 is parse-only). The element type
+// (`channel<T>(...)`) is not parsed yet — `element_type` stays `null`.
+fn parse_channel_expression(state: ExpressionTokens) -> ExpressionParseResult {
+    let channel_token = expression_tokens_peek(state);
+    let after_channel = expression_tokens_advance(state);
+    if expression_tokens_is_at_end(after_channel) {
+        return expression_parse_failure(state);
+    }
+    let next = expression_tokens_peek(after_channel);
+    if !symbol_matches(next, "(") { return expression_parse_failure(state); }
+    let args_result = parse_call_arguments(after_channel);
+    if !args_result.success { return expression_parse_failure(state); }
+    let mut capacity: Expression? = null;
+    if args_result.arguments.length == 1 {
+        capacity = args_result.arguments[0];
+    }
+    // `element_type` is `null` until `channel<T>(...)` parsing lands (a
+    // follow-up), so `kind` stays "" today; #1082's `spawn_future_kind` is
+    // ready to derive it from the annotation once the generic form is parsed.
+    return ExpressionParseResult {
+        state: args_result.state,
+        expression: Expression.Channel {
+            element_type: null,
+            capacity: capacity,
+            span: source_span_from_tokens([channel_token]),
+            kind: ""
+        },
+        success: true
+    };
+}
+
+// ============================================================================
+// Parallel Construct
+// ============================================================================
+// Parse `parallel [t1, t2, ...]` with `state` positioned at the `parallel`
+// identifier token. Returns failure (leaving `state` untouched) when the
+// next token is not `[` (a bare `parallel` identifier) or when the task
+// list is malformed; the caller commits to the construct the moment `[`
+// follows. The bracketed task list reuses the array-literal grammar, so the
+// `tasks` are full expressions (typically `spawn` calls). An empty list is
+// accepted at parse time — task-count rules are a typecheck-layer concern
+// (deferred — issue #1081 is parse-only).
+fn parse_parallel_expression(state: ExpressionTokens) -> ExpressionParseResult {
+    let parallel_token = expression_tokens_peek(state);
+    let after_parallel = expression_tokens_advance(state);
+    if expression_tokens_is_at_end(after_parallel) {
+        return expression_parse_failure(state);
+    }
+    let next = expression_tokens_peek(after_parallel);
+    if !symbol_matches(next, "[") { return expression_parse_failure(state); }
+    let array_result = parse_array_literal(expression_tokens_advance(after_parallel));
+    if !array_result.success { return expression_parse_failure(state); }
+    return ExpressionParseResult {
+        state: array_result.state,
+        expression: Expression.Parallel {
+            tasks: array_result.elements,
+            span: source_span_from_tokens([parallel_token])
+        },
+        success: true
+    };
+}
+
+// ============================================================================
+// Serve Construct
+// ============================================================================
+// Parse `serve(handler, port?)` with `state` positioned at the `serve`
+// identifier token. Returns failure (leaving `state` untouched) when the
+// next token is not `(` (a bare `serve` identifier) or when the argument
+// list is malformed; the caller commits to the construct the moment `(`
+// follows. `handler` is the first argument (required by the AST shape, so
+// a zero-argument `serve()` fails the parse hard); `port` is bound only
+// from a second argument. Extra arguments are dropped and are a
+// typecheck-layer arity concern (deferred — issue #1081 is parse-only).
+fn parse_serve_expression(state: ExpressionTokens) -> ExpressionParseResult {
+    let serve_token = expression_tokens_peek(state);
+    let after_serve = expression_tokens_advance(state);
+    if expression_tokens_is_at_end(after_serve) {
+        return expression_parse_failure(state);
+    }
+    let next = expression_tokens_peek(after_serve);
+    if !symbol_matches(next, "(") { return expression_parse_failure(state); }
+    let args_result = parse_call_arguments(after_serve);
+    if !args_result.success { return expression_parse_failure(state); }
+    if args_result.arguments.length == 0 {
+        return expression_parse_failure(state);
+    }
+    let mut port: Expression? = null;
+    if args_result.arguments.length >= 2 {
+        port = args_result.arguments[1];
+    }
+    return ExpressionParseResult {
+        state: args_result.state,
+        expression: Expression.Serve {
+            handler: args_result.arguments[0],
+            port: port,
+            span: source_span_from_tokens([serve_token])
+        },
         success: true
     };
 }

@@ -85,6 +85,13 @@ The in-flight set is the union of the two queries (de-duped by PR number).
 
 ## Phase 2: SWEEP BLOCKERS
 
+> **Shared logic.** The hard-vs-prose blocker-clearing rule below is the one
+> mechanic `/sweep` and `/triage` have in common (`/triage` Phase 3 → UNBLOCK).
+> They are otherwise distinct — `/sweep` is the post-merge coordinator (budget,
+> collisions, dispatch); `/triage` is the whole-queue hygiene auditor
+> (promote/demote, Type fixes, orphan release). Do not merge them. If you change
+> this rule, mirror it in `/triage`.
+
 For each issue in the `blocked` pool:
 
 1. Parse the `## Blocked by` section of the body. Extract every `#N` reference via regex (`#\d+`).

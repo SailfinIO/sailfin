@@ -138,6 +138,82 @@ fn format_expression(expression: Expression) -> string {
         return "(" + format_expression(expression.operand) + ") as "
             + expression.target_type.text;
     }
+    if expression.variant == "Await" {
+        // Bridge the structured `Await` node (parsed since issue #1080)
+        // back to the text form the existing `async`/`await` lowering
+        // consumes: `lower_expression` in
+        // `llvm/expression_lowering/native/core.sfn` and
+        // `find_suspension_keyword` in `llvm/lifetime.sfn` both key on a
+        // leading `"await "` substring. Rendering it here keeps the
+        // legacy text-based await pipeline working unchanged until the
+        // dedicated `Await` lowering lands in a follow-up.
+        //
+        // Use `_format_binary_operand` (the same helper `Unary` uses) so a
+        // `Binary`/`Cast` operand keeps its parens on the round-trip:
+        // `await (a + b)` must not re-serialize to `await a + b`, which
+        // would re-parse as `(await a) + b` and silently change grouping.
+        // The parser parses `await` at unary precedence, so a bare binary
+        // operand only arises from an explicitly parenthesized awaited
+        // expression — exactly the case these parens preserve.
+        return "await " + _format_binary_operand(expression.operand);
+    }
+    if expression.variant == "Spawn" {
+        // `spawn <operand>` — enqueue a task, yields a future
+        // (docs/runtime_architecture.md §2.6.2). `kind` is the monomorphized
+        // future kind the parser tagged from a lambda operand's declared
+        // return type (`parser/expressions.sfn:412`, via `spawn_future_kind`);
+        // it is "" when the kind is not statically derivable (e.g.
+        // `spawn foo()`, which needs symbol resolution — #829). Render the
+        // kind as a `spawn:<kind>` qualifier so the LLVM lowering (#1085) can
+        // select the matching `spawn_<kind>` runtime helper without
+        // re-deriving it. The lowering fails closed on this form until that
+        // follow-up lands (see the guards in
+        // `llvm/expression_lowering/native/core.sfn`).
+        if expression.kind.length > 0 {
+            return "spawn:" + expression.kind + " " + _format_binary_operand(expression.operand);
+        }
+        return "spawn " + _format_binary_operand(expression.operand);
+    }
+    if expression.variant == "Channel" {
+        // `channel(capacity?)` — construct a channel (§2.6.4). Capacity is
+        // optional (unbuffered default). `kind` carries the monomorphized
+        // element kind when known; the `channel<T>` element-type form is
+        // deferred in the parser, so it is "" today. The lowering fails
+        // closed on this form until #1085.
+        let mut channel_capacity: string = "";
+        if expression.capacity != null {
+            channel_capacity = format_expression(expression.capacity);
+        }
+        if expression.kind.length > 0 {
+            return "channel:" + expression.kind + "(" + channel_capacity + ")";
+        }
+        return "channel(" + channel_capacity + ")";
+    }
+    if expression.variant == "Parallel" {
+        // `parallel [t1, t2, ...]` — fan out tasks, await all (§2.6.5).
+        // Render the task list with the array-literal grammar the parser
+        // consumed (`parser/expressions.sfn:834`). The lowering fails closed
+        // on this form until #1085.
+        let mut parallel_tasks: string[] = [];
+        let mut parallel_index: int = 0;
+        loop {
+            if parallel_index >= expression.tasks.length { break; }
+            parallel_tasks.push(format_expression(expression.tasks[parallel_index]));
+            parallel_index += 1;
+        }
+        return "parallel [" + join_with_separator(parallel_tasks, ", ") + "]";
+    }
+    if expression.variant == "Serve" {
+        // `serve(handler, port?)` — accept loop dispatching to the pool
+        // (§2.6.6). `port` is optional. The lowering fails closed on this
+        // form until #1085.
+        let serve_handler = format_expression(expression.handler);
+        if expression.port != null {
+            return "serve(" + serve_handler + ", " + format_expression(expression.port)
+                + ")";
+        }
+        return "serve(" + serve_handler + ")";
+    }
     if expression.variant == "Lambda" { return "<lambda>"; }
     if expression.variant == "Raw" {
         let raw_text = trim_text(expression.text);

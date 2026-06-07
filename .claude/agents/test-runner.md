@@ -33,12 +33,15 @@ ulimit -v 8388608 && make test
 
 | Command | Scope | When to Use |
 |---|---|---|
+| `sfn check <files>` | Static analysis only (parse + typecheck + effect-check; no IR, no `clang`, no self-host) | **Inner loop** — after every edit, before paying for a rebuild. Seconds for a few files; ~5 min for the whole `compiler/src/` tree |
 | `make test` | Full suite (unit + integration + e2e) | After completing all changes |
 | `make test-unit` | Unit tests only | After modifying a single compiler pass |
 | `make test-integration` | Integration tests only | After cross-module changes |
 | `make test-e2e` | End-to-end tests only | After user-facing behavior changes |
-| `make compile` | Self-hosting check | After any compiler source change |
-| `make check` | Full validation (build + test + seedcheck) | Before declaring a feature shipped |
+| `make compile` | Self-hosting check (compiler compiles itself) | Before committing any `compiler/src/*.sfn` change (self-host invariant) |
+| `make check` | Full triple-pass validation (build + test + seedcheck) | Before declaring a feature shipped, before a release, or after a structural change |
+
+**Validation ladder — don't skip to the slow gate.** `sfn check` and `make check` are different tools: `sfn check` is a fast static lint (catches type/effect/parse errors without emitting IR or proving self-host), while `make check` is the heavyweight self-host + suite gate (~15–20 min). Iterate with `sfn check <the-files-you-touched>` for immediate feedback, run `make compile` to confirm self-host before committing, and reserve `make check` for ship/release/structural validation. Use `build/native/sailfin check <path>` if `sfn` is not on `PATH`.
 
 Test files live in:
 - `compiler/tests/unit/` — Unit tests for individual compiler modules

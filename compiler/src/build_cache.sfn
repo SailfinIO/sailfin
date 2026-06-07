@@ -17,6 +17,7 @@
 //       || sha256(sorted(sha256(dep.layout-manifest_bytes), …))
 //       || compiler_version
 //       || canonical(flags)
+//       || slug
 //   )
 //
 // Each input separator is `\n` so that two distinct tuples cannot
@@ -29,17 +30,26 @@
 // `canonical(flags)` is `canonicalize_flags(flags)` — a sorted JSON
 // array of strings.
 //
+// `slug` (schema v2) is the per-enumeration module slug. The cache
+// is content-addressed by source bytes + dep manifests + version +
+// flags, but the *same* source can be enumerated under two distinct
+// slugs (e.g. `/foo` via the host-capsule walker and `../src/foo`
+// via the relative-import walker). Without slug in the key those two
+// compiles produce identical keys and race on the same cache entry.
+// Mixing slug in keeps them distinct. See #527.
+//
 // ----------------------------------------------------------------
 // On-disk layout
 // ----------------------------------------------------------------
 //
 //   <root>/<key[0..2]>/<key>/{ir.sfn-asm, layout.manifest, mod.ll, mod.o}
 //
-// `<root>` defaults to `build/cache/v1` (in-tree) and can be
+// `<root>` defaults to `build/cache/v2` (in-tree) and can be
 // overridden by `$SAILFIN_BUILD_CACHE_DIR` to support shared CI
-// caches without code changes. The `v1` suffix is `SCHEMA_VERSION`
-// — when the key shape or layout changes, bump it and let `v1` age
-// out so old entries can never poison new compilers.
+// caches without code changes. The trailing suffix is
+// `build_cache_schema_version()` (currently `v2`) — when the key
+// shape or layout changes, bump it and let the old `v<N>` tree age
+// out so stale entries can never poison new compilers.
 //
 // The 2-character prefix shard caps the directory fan-out at 256
 // children, preventing the one-directory-with-millions-of-entries
@@ -74,7 +84,7 @@ import { char_code_at_text, substring } from "./string_utils";
 // incompatible with the current compiler. Old `v<N>/` trees are
 // left in place; they age out via the user's normal cache-cleanup
 // or `--clean` flow once that ships in PR1b.
-fn build_cache_schema_version() -> string { return "v1"; }
+fn build_cache_schema_version() -> string { return "v2"; }
 
 // ----------------------------------------------------------------
 // Public types
@@ -133,6 +143,23 @@ fn empty_cache_stats() -> CacheStats {
         stores: 0,
         invalid_keys: 0,
         copy_failures: 0
+    };
+}
+
+// Field-wise sum of two `CacheStats`. Pure. Used to fold a
+// separately-accumulated layer's counters into the build-wide
+// total before the CLI prints the `[cache]` summary — e.g. the
+// runtime C/LL object cache (`cli_main.sfn`) accumulates its own
+// hits/misses while compiling `runtime/native/src/*` objects, then
+// merges them into the `.ll` module cache's `CacheStats` so the
+// single summary line reflects both layers (#915).
+fn merge_cache_stats(a: CacheStats, b: CacheStats) -> CacheStats {
+    return CacheStats {
+        hits: a.hits + b.hits,
+        misses: a.misses + b.misses,
+        stores: a.stores + b.stores,
+        invalid_keys: a.invalid_keys + b.invalid_keys,
+        copy_failures: a.copy_failures + b.copy_failures
     };
 }
 
@@ -234,6 +261,11 @@ fn _filename_for_kind(kind: string) -> string {
     if kind == "layout-manifest" { return "layout.manifest"; }
     if kind == "ll" { return "mod.ll"; }
     if kind == "obj" { return "mod.o"; }
+    // Runtime C/LL/sfn object compiles (#1096). A distinct filename
+    // from the per-module `.ll` `obj` kind keeps the two layers from
+    // ever aliasing in a shared cache entry, even though their content
+    // keys are already disjoint.
+    if kind == "runtime-obj" { return "runtime.o"; }
     return "";
 }
 
@@ -596,7 +628,37 @@ fn sha256_of_file(file_path: string) -> string ![io] {
 fn runtime_object_cache_key(src_path: string, opt_flag: string) -> string ![io] {
     let content = sha256_of_file(src_path);
     if content.length == 0 { return ""; }
-    return content + "\n" + opt_flag;
+    // The `secsplit1` tag pins the compile-flag scheme into the key.
+    // #1047 added `-ffunction-sections -fdata-sections` to every runtime
+    // object compile so the final link's `--gc-sections` can strip per
+    // function; an object cached by an earlier compiler lacks those
+    // sections, and silently reusing it would defeat the strip (coarse
+    // `.text`) and break the runtime-root retention. Bumping the tag
+    // forces a one-time recompile so cached objects match the link flags.
+    return content + "\n" + opt_flag + "\nsecsplit1";
+}
+
+// Derive a content-addressed shared-cache `CacheKey` from a
+// `runtime_object_cache_key` string (#1096). The runtime object layer
+// historically cached `.o` outputs only in the per-build work-dir (a
+// sidecar `.o.key` next to the object in `<work-dir>/sailfin/`), so a
+// second build into a *sibling* work-dir — e.g. the build-quality
+// determinism gate's pass1 → pass2 — always missed every runtime
+// object, dragging the folded summary `hit_rate` below the 0.95 gate
+// even though nothing changed. Hashing the runtime key string into a
+// 64-hex digest lets the shared-cache artifact helpers
+// (`cache_lookup_artifact` / `cache_store_artifact`, kind
+// `"runtime-obj"`) back the work-dir objects with the same
+// content-addressed `build/cache/<schema>` store the `.ll` module
+// cache already uses, so runtime objects warm across work-dirs and CI
+// cache restores. Returns an empty-digest key (rejected by
+// `_is_valid_digest`, so every shared-cache helper treats it as a
+// miss) when the runtime key was empty/unhashable.
+fn runtime_object_entry_key_from_str(key_str: string, hash_suffix: string) -> CacheKey ![io] {
+    if key_str.length == 0 {
+        return CacheKey { digest: "" };
+    }
+    return CacheKey { digest: _sha256_of_string(key_str, hash_suffix) };
 }
 
 // ----------------------------------------------------------------
@@ -615,10 +677,18 @@ fn runtime_object_cache_key(src_path: string, opt_flag: string) -> string ![io] 
 // stable but reflects "input was missing", which the caller can
 // surface as a build setup error.
 //
-// `hash_tmp_suffix` must be unique per concurrent worker; pass a
-// `_sanitize_filename_cmd(source_path)` result, which is what the
-// driver already computes for module slugs.
-fn cache_key_for(source_path: string, dep_layout_manifest_paths: string[], compiler_version: string, flags_canonical: string, hash_tmp_suffix: string) -> CacheKey ![io] {
+// `slug` (schema v2) is the per-enumeration module slug — the
+// driver passes `src.slug` (e.g. a name-shaped `sfn/cli/mod` or a
+// path-shaped slug derived from a relative import). It is mixed into
+// the digest as a fifth input so the same source enumerated under two
+// distinct slugs cannot collide on one cache entry (see top-of-file
+// contract and #527). Because it feeds the digest it must be
+// *stable* for a given module enumeration — it is NOT a per-worker
+// nonce; a slug that varied per worker would give the same module a
+// different key each run and defeat cache hits. Distinct enumerations
+// carry distinct slugs, which incidentally keeps the `sha256sum` temp
+// filenames below from colliding across concurrent workers.
+fn cache_key_for(source_path: string, dep_layout_manifest_paths: string[], compiler_version: string, flags_canonical: string, slug: string) -> CacheKey ![io] {
     let s_hash = _sha256_of_file_cmd(source_path);
 
     let mut dep_hashes: string[] = [];
@@ -637,11 +707,13 @@ fn cache_key_for(source_path: string, dep_layout_manifest_paths: string[], compi
         deps_concat = deps_concat + sorted_dep_hashes[j];
         j += 1;
     }
-    let deps_hash = _sha256_of_string(deps_concat, hash_tmp_suffix + "_deps");
+    let deps_hash = _sha256_of_string(deps_concat, slug + "_deps");
 
     let final_input = s_hash + "\n" + deps_hash + "\n" + compiler_version + "\n"
-        + flags_canonical;
-    let final_digest = _sha256_of_string(final_input, hash_tmp_suffix + "_final");
+        + flags_canonical
+        + "\n"
+        + slug;
+    let final_digest = _sha256_of_string(final_input, slug + "_final");
     return CacheKey { digest: final_digest };
 }
 
@@ -704,7 +776,9 @@ export {
     cache_compiler_identity,
     sha256_of_file,
     runtime_object_cache_key,
+    runtime_object_entry_key_from_str,
     empty_cache_stats,
+    merge_cache_stats,
     cache_stats_is_empty,
     empty_build_cache_config,
     resolve_build_cache_config,

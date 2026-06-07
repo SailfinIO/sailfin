@@ -11,6 +11,7 @@ import { find_runtime_helper, make_concat_descriptor, make_push_descriptor } fro
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import {
     find_interface_info_by_name,
+    find_struct_info_by_name,
     resolve_interface_info_for_method_target,
     resolve_struct_info_for_method_target
 } from "../../type_context_queries";
@@ -585,6 +586,64 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                     }
                                 }
                                 if _pre_struct.length > 0 {
+                                    // #1041: fail closed when the base local's
+                                    // declared type is a bare struct name that is
+                                    // absent from the lowering type context. The
+                                    // fusion below (`_pre_struct + _pre_field`)
+                                    // would otherwise dispatch `self` with a
+                                    // default/garbage shape (the #960 staging-gap
+                                    // signature), segfaulting at runtime. Mirrors
+                                    // the #1023/#1037 fail-closed pattern: a
+                                    // `[fatal]` diagnostic makes the emit/build
+                                    // gate refuse to write IR.
+                                    //
+                                    // Narrow to a *bare* identifier to stay
+                                    // self-host safe (#830): generic
+                                    // instantiations like `Result<int, Error>`
+                                    // are not simple identifiers (and key on a
+                                    // mangled name, not the `<...>` spelling), and
+                                    // opacified locals carry an empty annotation —
+                                    // both keep the existing path so `make compile`
+                                    // still lowers method calls on them.
+                                    let mut _pre_fail_closed: boolean = false;
+                                    if is_simple_identifier(_pre_struct) {
+                                        if find_struct_info_by_name(context, _pre_struct) == null {
+                                            // Interface-typed locals carry a bare
+                                            // annotation too (e.g. `let m: Meter`);
+                                            // their `m.total()` calls are valid trait
+                                            // dispatch handled by the downstream
+                                            // `trait_dispatch__` branch. Only fail
+                                            // closed when the name is neither a
+                                            // struct nor an interface in context.
+                                            if find_interface_info_by_name(context, _pre_struct) == null {
+                                                _pre_fail_closed = true;
+                                            }
+                                        }
+                                    }
+                                    if _pre_fail_closed {
+                                        result_diagnostics.push("llvm lowering [fatal]: method call base `"
+                                            + _pre_base
+                                            + "` has declared type `"
+                                            + _pre_struct
+                                            + "` which is not in the lowering type context");
+                                        return CallTargetResolution {
+                                            trimmed_target: result_target,
+                                            method_operand: null,
+                                            helper_descriptor: null,
+                                            injected_argument_count: 0,
+                                            is_array_concat: false,
+                                            array_concat_element_type: "",
+                                            is_array_push: false,
+                                            array_push_element_type: "",
+                                            current_lines: result_lines,
+                                            current_temp: result_temp,
+                                            diagnostics: result_diagnostics,
+                                            string_constants: result_string_constants,
+                                            is_closure_dispatch: false,
+                                            closure_return_type: "",
+                                            closure_parameter_types: []
+                                        };
+                                    }
                                     let _pre_lowered = lower_expression(_pre_base, bindings, locals, result_temp, result_lines, functions, context, "");
                                     let mut _ci1: int = 0;
                                     loop {
@@ -909,6 +968,74 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         };
                     }
                 } else {
+                    // #1041: fail closed when the method base is a struct
+                    // instance whose declared type is known by name but absent
+                    // from the lowering type context. Without this guard the
+                    // runtime-helper probes below would lower `self` with a
+                    // default/garbage shape (the #960 staging-gap signature) and
+                    // segfault at runtime. Mirrors the #1023/#1037 fail-closed
+                    // pattern: a `[fatal]` diagnostic makes the emit/build gate
+                    // refuse to write IR instead of emitting a miscompile.
+                    //
+                    // The discriminator is deliberately narrow to stay
+                    // self-host safe (#830): only a *bare* struct-name
+                    // annotation triggers it. Opacified locals carry an empty
+                    // annotation (left to the by-name fallback above), and
+                    // generic-instantiation locals like `Result<int, Error>`
+                    // carry a non-simple-identifier annotation that
+                    // `find_struct_info_by_name` can't key on — both are
+                    // excluded so `make compile` keeps lowering
+                    // `.diagnostics.concat` and friends.
+                    let _g_base = trim_text(method_parse.base);
+                    if is_simple_identifier(_g_base) {
+                        let mut _g_annotation: string = "";
+                        let _g_local = find_local_binding(locals, _g_base);
+                        if _g_local != null {
+                            _g_annotation = _g_local.type_annotation;
+                        } else {
+                            let _g_param = find_parameter_binding(bindings, _g_base);
+                            if _g_param != null {
+                                _g_annotation = _g_param.type_annotation;
+                            }
+                        }
+                        let mut _g_fail_closed: boolean = false;
+                        if _g_annotation.length > 0 {
+                            if is_simple_identifier(_g_annotation) {
+                                if find_struct_info_by_name(context, _g_annotation) == null {
+                                    // Exclude interface-typed bases: `m.total()`
+                                    // on `let m: Meter` is valid trait dispatch,
+                                    // not an unresolved struct.
+                                    if find_interface_info_by_name(context, _g_annotation) == null {
+                                        _g_fail_closed = true;
+                                    }
+                                }
+                            }
+                        }
+                        if _g_fail_closed {
+                            r_diagnostics.push("llvm lowering [fatal]: method call base `"
+                                + method_parse.base
+                                + "` has declared type `"
+                                + _g_annotation
+                                + "` which is not in the lowering type context");
+                            return CallTargetResolution {
+                                trimmed_target: r_target,
+                                method_operand: null,
+                                helper_descriptor: null,
+                                injected_argument_count: 0,
+                                is_array_concat: false,
+                                array_concat_element_type: "",
+                                is_array_push: false,
+                                array_push_element_type: "",
+                                current_lines: r_lines,
+                                current_temp: r_temp,
+                                diagnostics: r_diagnostics,
+                                string_constants: r_string_constants,
+                                is_closure_dispatch: false,
+                                closure_return_type: "",
+                                closure_parameter_types: []
+                            };
+                        }
+                    }
                     let qualified_helper = find_runtime_helper(r_target);
                     if qualified_helper != null {
                         r_helper_descriptor = qualified_helper;

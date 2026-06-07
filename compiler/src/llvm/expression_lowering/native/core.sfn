@@ -277,7 +277,7 @@ import {
     find_variant_field_info
 } from "../../type_context_queries";
 
-import { find_function_by_name } from "../../rendering_helpers";
+import { find_function_by_name, find_function_by_name_or_import } from "../../rendering_helpers";
 
 import { find_runtime_helper } from "../../runtime_helpers";
 
@@ -801,6 +801,83 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             + " has mutable capture `"
             + name_for_diag
             + "` (not yet supported, see #687)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    // Unlowered concurrency frontend constructs (M4.0, epic #965). The parser
+    // builds `Spawn`/`Channel`/`Parallel`/`Serve` nodes (issues #1079–#1081)
+    // and `emit_native_format` (#1084) renders them to real `.sfn-asm` forms
+    // — `spawn[:<kind>] <op>`, `channel[:<kind>](<cap>)`, `parallel [<tasks>]`,
+    // `serve(<handler>[, <port>])` — but no LLVM lowering exists yet. Fail the
+    // build closed with a `[fatal]` — matching the sentinel scanned by
+    // `lowering_core.sfn:has_fatal_lowering_diagnostic` — rather than letting
+    // these forms fall through to the generic, *non-fatal* unable-to-lower
+    // path (which the emit/build fatal gate ignores, false-greening an
+    // unenforced concurrency surface into the IR — llms.txt). The dedicated
+    // lowering replaces these guards in a follow-up (#1085). These prefixes
+    // are collision-safe: `spawn`/`channel`/`parallel`/`serve` are
+    // contextual keywords parsed only in expression-prefix position
+    // (`parser/expressions.sfn:403`), so no user identifier produces them.
+    // `Await` is bridged to the existing async lowering upstream and never
+    // reaches here as a marker.
+    if starts_with(stripped, "spawn ") {
+        diagnostics.push("llvm lowering [fatal]: `spawn` expression is not yet lowered (concurrency frontend, epic #965)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    if starts_with(stripped, "spawn:") {
+        diagnostics.push("llvm lowering [fatal]: `spawn` expression is not yet lowered (concurrency frontend, epic #965)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    if starts_with(stripped, "channel(") {
+        diagnostics.push("llvm lowering [fatal]: `channel` expression is not yet lowered (concurrency frontend, epic #965)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    if starts_with(stripped, "channel:") {
+        diagnostics.push("llvm lowering [fatal]: `channel` expression is not yet lowered (concurrency frontend, epic #965)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    if starts_with(stripped, "parallel [") {
+        diagnostics.push("llvm lowering [fatal]: `parallel` expression is not yet lowered (concurrency frontend, epic #965)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    if starts_with(stripped, "serve(") {
+        diagnostics.push("llvm lowering [fatal]: `serve` expression is not yet lowered (concurrency frontend, epic #965)");
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
@@ -1520,6 +1597,47 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             lines: lines,
             temp_index: temp_index,
             operand: operand,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    // Function reference in value position (#1146). A bare identifier
+    // that is neither a local nor a parameter, but names a defined or
+    // `extern fn` in the module function table, lowers to that
+    // function's address: `bitcast <fn-ptr-type> @<symbol> to i8*`.
+    // The result is a single `i8*` code pointer — deliberately NOT the
+    // `{i8*, i8*}` closure pair (a top-level function carries no env),
+    // so the closure-dispatch path stays disengaged. The `@<name>`
+    // symbol is emitted bare; the module mangling post-pass rewrites
+    // defined-fn names to their slugged form and leaves extern names
+    // (real C symbols) alone, matching how call sites emit them. This
+    // is what lets `<fn> as * u8` reach a C-ABI callee such as
+    // `pthread_create`'s `start_routine` instead of silently lowering
+    // to `null`.
+    //
+    // `fn_ptr_type` here is the bitcast *source* type only — and an
+    // address-only one. `_compute_function_pointer_type` reconstructs
+    // the signature from `map_return_type` + `map_local_type`, which can
+    // diverge from the real `define` ABI for struct-returning or
+    // `self`-taking functions (sret/by-pointer adjustments it does not
+    // model). That is harmless because the value is immediately bitcast
+    // to `i8*` (a code address is correct regardless of the source
+    // pointee). Do NOT treat the result as a call-ready typed pointer:
+    // calling through it must re-derive the signature from the call
+    // site (as closure dispatch does), not reuse this text.
+    let fn_reference = find_function_by_name_or_import(functions, stripped);
+    if fn_reference != null {
+        let fn_ptr_type = _compute_function_pointer_type(fn_reference, context);
+        let cast_temp = format_temp_name(temp_index);
+        lines.push("  " + cast_temp + " = bitcast " + fn_ptr_type + " @"
+            + fn_reference.name
+            + " to i8*");
+        let fn_operand = LLVMOperand { llvm_type: "i8*", value: cast_temp };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index + 1,
+            operand: fn_operand,
             diagnostics: diagnostics,
             string_constants: empty_constants
         };

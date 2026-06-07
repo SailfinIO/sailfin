@@ -148,6 +148,59 @@ char_code("");     // -1
 
 ---
 
+#### `char_from_code(code: int) -> string`
+
+Build a one-byte string from the **raw byte value** `code` (1–255). This is the
+write counterpart to `char_code`'s read: `char_code(char_from_code(n)) == n`
+round-trips for every `n` in 1–255, letting pure-Sailfin code construct and
+inspect arbitrary single bytes (binary data, multibyte UTF-8 sequences built
+byte-by-byte).
+
+Unlike a code-point encoder, the byte is written **verbatim** — there is no
+UTF-8 expansion for `128..255`. `char_from_code(195)` is the single byte `0xC3`
+(length 1), not the two-byte UTF-8 encoding of U+00C3.
+
+```sfn
+char_from_code(65);   // "A"
+char_code(char_from_code(200));  // 200  (single raw byte, length 1)
+char_from_code(0);    // ""   (see limitation below)
+char_from_code(300);  // ""   (out of range)
+```
+
+**Caution — bytes `128..255` are not valid UTF-8 on their own.** A single byte
+in that range is a UTF-8 *continuation* or *lead* byte, so a one-byte string
+from `char_from_code(n)` for `n >= 128` is a raw byte, **not** a complete
+character. The grapheme-oriented helpers above (`grapheme_count`, `grapheme_at`,
+`char_code`, `substring`, `find_char`) assume valid UTF-8 and may treat such a
+byte as a lone fallback grapheme or skip it. Treat `char_from_code`'s output as
+**bytes**, not text: concatenate the bytes of a multibyte character together
+before applying grapheme-oriented APIs, and use byte-oriented indexing
+(`s[i]` + `char_code`) when you need the raw bytes back. Bytes `1..127` (ASCII)
+are always valid single-character UTF-8 and round-trip through every API.
+
+**Limitation — byte 0:** a lone NUL is unrepresentable under the current
+NUL-terminated `string` model (`.length` is recovered with `strlen`), so
+`char_from_code(0)` returns `""`. Faithful embedded-NUL bytes arrive with the
+`SfnString` aggregate (carrying an explicit length) on the runtime roadmap;
+until then, build NUL-containing payloads with a length-carrying structure
+rather than a `string`.
+
+**Known issue — reading ASCII bytes (`1..0x7f`) back with `char_code` on macOS
+arm64:** `char_from_code(n)` writes the byte correctly for the full range, but
+reading an ASCII byte back with `char_code` can return the wrong value on macOS
+arm64. `char_code` decodes ASCII bytes through an immediate-codepoint tagged
+pointer (`byte << 32`); on macOS the runtime distinguishes the tag from a real
+pointer by checking whether the address is mapped, and for small byte values
+`byte << 32` may land on a mapped region (e.g. the executable base) — which is
+ASLR-dependent and varies run to run. This is a pre-existing `char_code`
+limitation (it affects any string's ASCII bytes, not just `char_from_code`
+output) tracked as a follow-up. It does **not** affect Linux, and does not affect
+bytes `0x80..0xFF` (which take a non-immediate path). For binary data on macOS,
+read bytes back via byte-oriented indexing of `0x80..0xFF` sequences or treat
+the `1..0x7f` round-trip as platform-conditional until the follow-up lands.
+
+---
+
 #### `strings_equal(left: string, right: string) -> boolean`
 
 Return `true` if two strings have the same length and each grapheme cluster matches at every position. This performs a grapheme-by-grapheme comparison using `char_code` internally.

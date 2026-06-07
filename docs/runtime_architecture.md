@@ -941,7 +941,7 @@ Calls libc filesystem functions via `extern fn` declarations in
 `runtime/sfn/platform/libc.sfn`. Handles NUL-termination of paths internally
 (see §2.2.4):
 
-- `sfn_fs_read_file(path: SfnString, Arena*) -> SfnString` (or `Result<SfnString, Error>` once `Result` lands)
+- `sfn_fs_read_file(path: SfnString, Arena*) -> SfnString` (the ported form returns `Result<SfnString, Error>` — `Result<T, E>` + `?` now ship; see spec §12)
 - `sfn_fs_write_file(path: SfnString, contents: SfnString) -> void`
 - `sfn_fs_append_file(path: SfnString, contents: SfnString) -> void`
 - `sfn_fs_exists(path: SfnString) -> bool`
@@ -949,8 +949,9 @@ Calls libc filesystem functions via `extern fn` declarations in
 - `sfn_fs_delete(path: SfnString) -> bool`
 - `sfn_fs_mkdir(path: SfnString, recursive: bool) -> bool`
 
-All functions that return allocated data take an `Arena*` parameter. If
-`Result<T, E>` is available, error returns replace thrown exceptions.
+All functions that return allocated data take an `Arena*` parameter. Now that
+`Result<T, E>` ships (spec §12), error returns replace thrown exceptions as these
+functions are ported into Sailfin.
 
 #### 2.7.2 HTTP Adapter
 
@@ -2225,6 +2226,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 | `sailfin_runtime_array_push` | `sfn_array_push` | M2 |
 | `sailfin_runtime_array_push_slot` (`array_push_slot_v2`) | `sfn_array_push_slot` (monomorphic) | M2 — ✓ #911 |
 | `sailfin_runtime_process_run` (`process_run_v2`) | `sfn_process_run` | M2 — ✓ #911 |
+| `sailfin_runtime_process_spawn_with_env` | `sfn_process_spawn_with_env` | **#1102** — descriptor flipped; Sailfin body mallocs the `SailfinProcessHandle`, so the `process.sfn` overlay is now the canonical owner. C body retired separately (#822, M4). |
 | `sailfin_adapter_fs_read_file` | `sfn_fs_read_file` | M3 — ✓ #911 |
 | `sailfin_adapter_fs_write_file` | `sfn_fs_write_file` | M3 — ✓ #911 |
 | `sailfin_runtime_set/has/clear_exception` | frame-based `sfn_exception_*` path (M2.7b, #404) | M2 — `set/has/clear` descriptor rows retained for the Throw/Try declare lists (seed-compat); C symbols stay exported until M3.9 |

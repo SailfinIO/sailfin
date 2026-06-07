@@ -34,8 +34,11 @@ The four failure surfaces, in order of likelihood:
 
 ## When NOT to use
 
-- For single-pass checks after a small edit, `ulimit -v 8388608 && make compile` is faster.
-- For focused test runs, spawn the `test-runner` agent instead.
+This skill is the heavyweight self-host gate (~15–20 min). Most edit-cycle validation should *not* reach for it:
+
+- **To catch type / effect / parse errors while iterating**, run `sfn check <the-files-you-touched>` (or `build/native/sailfin check <path>` if `sfn` is not on `PATH`). It runs parse + typecheck + effect-check with no IR, no `clang`, and no self-host — seconds for a few files, ~5 min for the whole `compiler/src/` tree. It does **not** prove self-hosting, so it complements rather than replaces `make compile`.
+- **For a single-pass self-host check after a small edit**, `ulimit -v 8388608 && make compile` is faster than the full triple-pass.
+- **For focused test runs**, spawn the `test-runner` agent instead.
 
 ## Budget
 

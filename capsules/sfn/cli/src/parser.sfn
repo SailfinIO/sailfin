@@ -56,9 +56,39 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
     let mut idx: int = 1;
     let mut pos_idx: int = 0;
 
+    // `sentinel` flips true once a bare `--` token is seen. Every token
+    // after it is a positional, even one that looks like a flag
+    // (`cmd -- --x` -> the positional "--x"). The `--` itself is consumed
+    // once; a later `--` is just a positional.
+    let mut sentinel: boolean = false;
+
     loop {
         if idx >= argv.length { break; }
         let token = argv[idx];
+
+        // Post-sentinel: pure positional, no subcommand descent and no
+        // flag/help/version interpretation.
+        if sentinel {
+            if pos_idx < active.args.length {
+                let cur = active.args[pos_idx];
+                pos_names.push(cur.name);
+                pos_values.push(token);
+                if !cur.is_variadic { pos_idx += 1; }
+            } else {
+                return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "unexpected_positional", _with_hint(cmd.name, path, "error: unexpected argument '"
+                    + token
+                    + "'"), "", token);
+            }
+            idx += 1;
+            continue;
+        }
+
+        // A bare `--` stops flag parsing for every later token.
+        if strings_equal(token, "--") {
+            sentinel = true;
+            idx += 1;
+            continue;
+        }
 
         // Built-in flags surface as non-ok results so the caller can
         // decide how to render help/version.
@@ -70,42 +100,72 @@ fn parse(cmd: Command, argv: string[]) -> ParseResult {
         }
 
         if _starts_with(token, "--") {
-            // Long flag: --name or --name value
-            let flag_name = substring(token, 2, token.length);
+            // Long flag: --name, --name value, or --name=value. An inline
+            // `=` splits the token on the FIRST equals sign — the name is
+            // everything before it, the value everything after, so
+            // `--out=a=b=c` yields the value "a=b=c". With no `=`, a
+            // value-taking flag still consumes the next argv token.
+            let raw = substring(token, 2, token.length);
+            let eq = _index_of_eq(raw);
+            let mut flag_name = raw;
+            let mut has_inline = false;
+            let mut inline_value = "";
+            if eq >= 0 {
+                flag_name = substring(raw, 0, eq);
+                inline_value = substring(raw, eq + 1, raw.length);
+                has_inline = true;
+            }
             let f = _find_flag_long(active, flag_name);
             if f.long_name.length == 0 {
                 return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "unknown_flag", _with_hint(cmd.name, path, "error: unknown flag --"
                     + flag_name), flag_name, "");
             }
+            if has_inline && !f.takes_value {
+                // A boolean/count flag given `--name=value` is a usage
+                // error: it accepts no value to assign. Reported before
+                // recording the flag so the `fl_names`/`fl_values`/
+                // `fl_present` arrays stay parallel in the error result.
+                return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "unexpected_value", _with_hint(cmd.name, path, "error: flag --"
+                    + flag_name
+                    + " does not take a value"), f.long_name, "");
+            }
             fl_names.push(f.long_name);
             fl_present.push(true);
             if f.takes_value {
-                idx += 1;
-                if idx >= argv.length {
-                    return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_value", "error: flag --"
-                        + flag_name
-                        + " requires a value", flag_name, "");
+                // Resolve the value (inline after `=`, else the next argv
+                // token) and remember its argv index for diagnostics.
+                let mut value = inline_value;
+                let mut value_idx = idx;
+                if !has_inline {
+                    idx += 1;
+                    if idx >= argv.length {
+                        return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "missing_value", "error: flag --"
+                            + flag_name
+                            + " requires a value", flag_name, "");
+                    }
+                    value = argv[idx];
+                    value_idx = idx;
                 }
-                fl_values.push(argv[idx]);
+                fl_values.push(value);
                 if strings_equal(f.value_kind, "choice") {
-                    if !_value_in_choices(f.choices, argv[idx]) {
+                    if !_value_in_choices(f.choices, value) {
                         return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "invalid_choice", _with_hint(cmd.name, path, "error: flag --"
                             + flag_name
                             + " "
-                            + _choice_detail(f.choices, argv[idx])
+                            + _choice_detail(f.choices, value)
                             + " (argv["
-                            + _int_to_string(idx)
+                            + _int_to_string(value_idx)
                             + "])"), f.long_name, "");
                     }
                 } else {
-                    let detail = _validate_typed_value(f.value_kind, argv[idx]);
+                    let detail = _validate_typed_value(f.value_kind, value);
                     if detail.length > 0 {
                         return _err_result(cmd.name, path, pos_names, pos_values, fl_names, fl_values, fl_present, "type_error", _with_hint(cmd.name, path, "error: flag --"
                             + flag_name
                             + " "
                             + detail
                             + " (argv["
-                            + _int_to_string(idx)
+                            + _int_to_string(value_idx)
                             + "])"), f.long_name, "");
                     }
                 }
@@ -453,6 +513,19 @@ fn _err_result(command_name: string, path: string[], pos_names: string[], pos_va
 fn _starts_with(text: string, prefix: string) -> boolean {
     if prefix.length > text.length { return false; }
     return strings_equal(substring(text, 0, prefix.length), prefix);
+}
+
+fn _index_of_eq(text: string) -> int {
+    // Index of the first '=' in `text`, or -1 when absent. Drives the
+    // `--key=value` split: only the first '=' separates name from value,
+    // so `--out=a=b=c` keeps "a=b=c" intact as the value.
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        if strings_equal(grapheme_at(text, i), "=") { return i; }
+        i += 1;
+    }
+    return -1;
 }
 
 fn _find_flag_long(cmd: Command, name: string) -> Flag {

@@ -209,6 +209,27 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
     };
 }
 
+fn _slug_alias_path_for_slug(slug: string) -> string {
+    return "build/native/import-context/" + slug + ".slugalias";
+}
+
+fn _selfhost_slug_alias_path_for_slug(slug: string) -> string {
+    return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug
+        + ".slugalias";
+}
+
+// #873: read the `.slugalias` sidecar the resolver drops at a capsule
+// source's PATH slug, mapping it to the source's CANONICAL spec slug
+// (`capsules/sfn/crypto/src/mod` → `sfn/crypto/mod`). Returns "" when no
+// sidecar exists (every non-capsule / compiler-internal relative import).
+fn _resolve_slug_alias(slug: string) -> string ![io] {
+    let primary = _slug_alias_path_for_slug(slug);
+    if fs.exists(primary) { return trim_text(fs.readFile(primary)); }
+    let fallback = _selfhost_slug_alias_path_for_slug(slug);
+    if fs.exists(fallback) { return trim_text(fs.readFile(fallback)); }
+    return "";
+}
+
 fn resolve_import_artifact_slug(slug: string) -> string ![io] {
     if slug.length == 0 { return slug; }
 
@@ -223,6 +244,16 @@ fn resolve_import_artifact_slug(slug: string) -> string ![io] {
             return mod_slug;
         }
     }
+
+    // #873: a relative import (`../src/mod`) into a workspace member's
+    // source tree resolves to a path-shaped slug with no staged artifact —
+    // the resolver staged the module under its canonical spec slug
+    // (`sfn/crypto/mod`) and dropped a `.slugalias` sidecar recording the
+    // mapping. Honour it so the call site mangles to the same symbol the
+    // capsule object defines, converging the relative- and by-name-import
+    // paths onto one suffix.
+    let alias = _resolve_slug_alias(slug);
+    if alias.length > 0 { return alias; }
 
     return slug;
 }

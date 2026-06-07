@@ -239,6 +239,22 @@ fn parse_block_statement(parser: Parser) -> BlockStatementParseResult {
     if identifier_matches(token, "loop") {
         return parse_loop_statement(after_decorators, decorators);
     }
+    // `routine { ... }` is a structured-concurrency block scope (M4.0,
+    // issue #1081). `routine` is a soft keyword (lexes as `Identifier`;
+    // Sailfin has no keyword tokens), so commit to the statement only when
+    // it is immediately followed by `{`. A bare `routine` used as an
+    // ordinary identifier (`routine.start()`, `let x = routine;`) must fall
+    // through to the expression-statement path, so the lookahead is done
+    // here rather than inside `parse_routine_statement` (which, unlike the
+    // dispatch arms above, cannot fall through on its own). Nested routine
+    // bodies recurse naturally: `parse_block` re-enters this dispatch for
+    // every statement inside the body.
+    if identifier_matches(token, "routine") {
+        let after_routine = skip_trivia(parser_advance_raw(after_decorators));
+        if symbol_matches(parser_peek_raw(after_routine), "{") {
+            return parse_routine_statement(after_decorators, decorators);
+        }
+    }
     if identifier_matches(token, "break") {
         if decorators.length > 0 {
             return BlockStatementParseResult {
@@ -466,6 +482,57 @@ fn parse_loop_statement(parser: Parser, decorators: Decorator[]) -> BlockStateme
     }
 
     let statement = Statement.LoopStatement {
+        body: body_result.block,
+        decorators: decorators
+    };
+
+    return BlockStatementParseResult {
+        parser: current,
+        statement: statement,
+        success: true
+    };
+}
+
+// Parse `routine { ... }` into a `RoutineStatement` (M4.0, issue #1081).
+// Shaped like `parse_loop_statement` since the v0 surface is a bare block
+// scope that yields no value. The caller (`parse_block_statement`) has
+// already confirmed `routine` is immediately followed by `{`, so the soft
+// keyword has committed. The `tokens.length == 0` guard below mirrors the
+// one in `parse_loop_statement`: it rejects only a *missing* block (no `{`,
+// where `parse_block` returns empty tokens) and is defensive here since the
+// dispatch already guarantees the `{`. A present-but-empty `routine {}`
+// has non-empty tokens (`{`, `}`) and parses to a `RoutineStatement` with
+// an empty body, matching `loop {}`. Nested routine bodies recurse through
+// `parse_block`.
+fn parse_routine_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
+    let original = parser;
+    let mut current = skip_trivia(parser);
+    if !identifier_matches(parser_peek_raw(current), "routine") {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+    current = consume_keyword(current, "routine");
+
+    let body_result = parse_block(current);
+    if body_result.block.tokens.length == 0 {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+    current = body_result.parser;
+
+    current = skip_trivia(current);
+    let terminator = parser_peek_raw(current);
+    if symbol_matches(terminator, ";") {
+        current = parser_advance_raw(current);
+    }
+
+    let statement = Statement.RoutineStatement {
         body: body_result.block,
         decorators: decorators
     };

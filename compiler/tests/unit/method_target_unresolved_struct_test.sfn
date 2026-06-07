@@ -1,0 +1,137 @@
+// Regression coverage for #1041: when a parsed method-dispatch site cannot
+// resolve struct info for the method base — because the base local's declared
+// type is a bare struct name absent from the lowering type context — the
+// compiler must fail closed with a `[fatal]` diagnostic instead of lowering
+// `self` with a default/garbage shape.
+//
+// Background (#960): a cross-module struct-method call passed `self` as garbage
+// because the imported capsule's `.layout-manifest` staged empty, so the call
+// site could not resolve the struct's layout. #960 fixes the staging gap; this
+// guard turns the *next* such staging gap into a clean error instead of a
+// garbage/segfault. Mirrors the #1023/#1037 fail-closed pattern.
+//
+// Self-host safety (#830): the guard fires only on a *bare* struct-name
+// annotation. Opacified locals carry an empty annotation, and generic
+// instantiations such as `Result<int, Error>` carry a non-simple-identifier
+// annotation; both are excluded so the compiler still self-hosts. The two
+// negative tests below pin that boundary.
+import { lower_call_expression } from "../../src/llvm/expression_lowering/native/core_call_lowering";
+import { InterfaceTypeInfo, LocalBinding, TypeContext } from "../../src/llvm/types";
+import { index_of } from "../../src/string_utils";
+
+fn _empty_context() -> TypeContext {
+    return TypeContext {
+        structs: [],
+        enums: [],
+        interfaces: [],
+        vtables: []
+    };
+}
+
+// A context whose only registered type is the interface `Meter`. An
+// interface-typed local carries a bare annotation (`Meter`) absent from
+// `context.structs`, so the guard must consult `context.interfaces` before
+// failing closed — otherwise valid trait dispatch is rejected.
+fn _interface_only_context() -> TypeContext {
+    return TypeContext {
+        structs: [],
+        enums: [],
+        interfaces: [InterfaceTypeInfo {
+            name: "Meter", llvm_name: "%trait.Meter", type_parameters: [], signatures: []
+        }],
+        vtables: []
+    };
+}
+
+fn _contains(text: string, needle: string) -> boolean {
+    return index_of(text, needle) >= 0;
+}
+
+// A `[fatal]` diagnostic carrying the guard's own wording. Scoped to the
+// guard's phrase so the downstream "cannot resolve return type" `[fatal]`
+// (emitted for any unresolved callee) does not produce false positives in
+// the negative cases below.
+fn _has_fatal_unresolved_base(diagnostics: string[]) -> boolean {
+    let mut idx: int = 0;
+    loop {
+        if idx >= diagnostics.length { break; }
+        let diag = diagnostics[idx];
+        if _contains(diag, "[fatal]") {
+            if _contains(diag, "not in the lowering type context") {
+                return true;
+            }
+        }
+        idx += 1;
+    }
+    return false;
+}
+
+fn _local_with_annotation(annotation: string) -> LocalBinding {
+    return LocalBinding {
+        name: "acct",
+        pointer: "%acct",
+        llvm_type: "i8*",
+        type_annotation: annotation,
+        ownership: null,
+        consumed: false,
+        scope_id: "",
+        scope_depth: 0,
+        allocation_kind: "arena",
+        init_sentinel: ""
+    };
+}
+
+// -------------------------------------------------------------------
+// Fail-closed: method base whose bare struct-name type is absent from
+// the lowering type context.
+// -------------------------------------------------------------------
+test "method base with unresolved bare struct type emits a fatal diagnostic" ![io] {
+    let context = _empty_context();
+    let mut lines: string[] = [];
+    let locals: LocalBinding[] = [_local_with_annotation("Missing")];
+    let result = lower_call_expression("acct.get_balance", [], [], locals, 0, lines, [], context);
+    // Without the guard the call would lower `self` with a default/garbage
+    // shape; the `[fatal]` diagnostic makes the emit/build gate refuse to
+    // write IR instead of producing a miscompile.
+    assert _has_fatal_unresolved_base(result.diagnostics);
+}
+
+// -------------------------------------------------------------------
+// No regression (#830): a generic-instantiation annotation like
+// `Result<int, Error>` is NOT a simple identifier, so the guard must
+// not fire — otherwise `make compile` breaks on `.diagnostics.concat`.
+// -------------------------------------------------------------------
+test "method base with generic-instantiation type does not fail closed" ![io] {
+    let context = _empty_context();
+    let mut lines: string[] = [];
+    let locals: LocalBinding[] = [_local_with_annotation("Result<int, Error>")];
+    let result = lower_call_expression("acct.unwrap", [], [], locals, 0, lines, [], context);
+    assert ! _has_fatal_unresolved_base(result.diagnostics);
+}
+
+// -------------------------------------------------------------------
+// No regression: an opacified local carries an empty annotation; the
+// guard's `length > 0` clause leaves it to the by-method-name fallback.
+// -------------------------------------------------------------------
+test "method base with empty (opacified) annotation does not fail closed" ![io] {
+    let context = _empty_context();
+    let mut lines: string[] = [];
+    let locals: LocalBinding[] = [_local_with_annotation("")];
+    let result = lower_call_expression("acct.compute", [], [], locals, 0, lines, [], context);
+    assert ! _has_fatal_unresolved_base(result.diagnostics);
+}
+
+// -------------------------------------------------------------------
+// No regression (PR #1053 review): an interface-typed local carries a
+// bare annotation (`Meter`) that is absent from `context.structs` but
+// present in `context.interfaces`. The guard must not treat that as an
+// unresolved struct — `acct.total()` (with `acct: Meter`) is valid trait
+// dispatch.
+// -------------------------------------------------------------------
+test "method base with interface-typed annotation does not fail closed" ![io] {
+    let context = _interface_only_context();
+    let mut lines: string[] = [];
+    let locals: LocalBinding[] = [_local_with_annotation("Meter")];
+    let result = lower_call_expression("acct.total", [], [], locals, 0, lines, [], context);
+    assert ! _has_fatal_unresolved_base(result.diagnostics);
+}

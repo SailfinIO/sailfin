@@ -43,7 +43,9 @@ import {
     cache_compiler_identity,
     empty_build_cache_config,
     empty_cache_stats,
-    is_valid_digest
+    is_valid_digest,
+    merge_cache_stats,
+    runtime_object_entry_key_from_str
 } from "../../src/build_cache";
 
 // --------------------------------------------------------------
@@ -67,16 +69,16 @@ fn _write_file(path: string, content: string) ![io] {
 // --------------------------------------------------------------
 // Schema version
 // --------------------------------------------------------------
-test "build_cache: schema version is v1" {
-    assert build_cache_schema_version() == "v1";
+test "build_cache: schema version is v2" {
+    assert build_cache_schema_version() == "v2";
 }
 
 test "build_cache: cache_root_with_override empty -> in-tree default" {
-    assert cache_root_with_override("") == "build/cache/v1";
+    assert cache_root_with_override("") == "build/cache/v2";
 }
 
 test "build_cache: cache_root_with_override non-empty -> override + version" {
-    assert cache_root_with_override("/tmp/sfn-shared-cache") == "/tmp/sfn-shared-cache/v1";
+    assert cache_root_with_override("/tmp/sfn-shared-cache") == "/tmp/sfn-shared-cache/v2";
 }
 
 // --------------------------------------------------------------
@@ -160,9 +162,13 @@ test "build_cache: cache_key_for invariant under dep order" ![io] {
     _write_file(dep_a, "module: alpha; layout: ...");
     _write_file(dep_b, "module: beta; layout: ...");
     _write_file(dep_c, "module: gamma; layout: ...");
-    let key_abc = cache_key_for(src, [dep_a, dep_b, dep_c], "0.5.10-alpha.2", "[]", "dep_order_abc");
-    let key_cba = cache_key_for(src, [dep_c, dep_b, dep_a], "0.5.10-alpha.2", "[]", "dep_order_cba");
-    let key_bac = cache_key_for(src, [dep_b, dep_a, dep_c], "0.5.10-alpha.2", "[]", "dep_order_bac");
+    // Slug is held constant — it's a digest input (schema v2), so the
+    // invariant under test is dep *order*, not slug. The tmp suffix
+    // collision concern only applies to concurrent workers; these
+    // calls run sequentially.
+    let key_abc = cache_key_for(src, [dep_a, dep_b, dep_c], "0.5.10-alpha.2", "[]", "dep_order");
+    let key_cba = cache_key_for(src, [dep_c, dep_b, dep_a], "0.5.10-alpha.2", "[]", "dep_order");
+    let key_bac = cache_key_for(src, [dep_b, dep_a, dep_c], "0.5.10-alpha.2", "[]", "dep_order");
     assert key_abc.digest == key_cba.digest;
     assert key_abc.digest == key_bac.digest;
     _cleanup(scratch);
@@ -215,6 +221,22 @@ test "build_cache: cache_key_for changes when flags change" ![io] {
     let key1 = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[]", "flag_sens_1");
     let key2 = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[\"--release\"]", "flag_sens_2");
     assert key1.digest != key2.digest;
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_key_for changes when slug changes" ![io] {
+    let scratch = _test_tmp_root("slug_sensitive");
+    let src = scratch + "/source.sfn";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    let no_deps: string[] = [];
+    // Schema v2: slug is mixed into the digest so the *same* source
+    // enumerated under two distinct slugs (e.g. `/foo` via the host-
+    // capsule walker and `../src/foo` via the relative-import walker)
+    // keys two distinct cache entries instead of racing on one (#527).
+    // All inputs identical except the trailing slug.
+    let key_a = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[]", "slug_a");
+    let key_b = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[]", "slug_b");
+    assert key_a.digest != key_b.digest;
     _cleanup(scratch);
 }
 
@@ -562,6 +584,38 @@ test "build_cache: cache_stats_is_empty false when any counter is non-zero" {
     assert ! cache_stats_is_empty(t);
 }
 
+test "build_cache: merge_cache_stats sums every counter field-wise" {
+    let mut a = empty_cache_stats();
+    a.hits = 1;
+    a.misses = 2;
+    a.stores = 3;
+    a.invalid_keys = 4;
+    a.copy_failures = 5;
+    let mut b = empty_cache_stats();
+    b.hits = 10;
+    b.misses = 20;
+    b.stores = 30;
+    b.invalid_keys = 40;
+    b.copy_failures = 50;
+    let m = merge_cache_stats(a, b);
+    assert m.hits == 11;
+    assert m.misses == 22;
+    assert m.stores == 33;
+    assert m.invalid_keys == 44;
+    assert m.copy_failures == 55;
+}
+
+test "build_cache: merge_cache_stats with empty is identity" {
+    let mut a = empty_cache_stats();
+    a.hits = 7;
+    a.misses = 9;
+    let m = merge_cache_stats(a, empty_cache_stats());
+    assert m.hits == 7;
+    assert m.misses == 9;
+    assert m.stores == 0;
+    assert cache_stats_is_empty(merge_cache_stats(empty_cache_stats(), empty_cache_stats()));
+}
+
 test "build_cache: empty_build_cache_config defaults are enabled+quiet" {
     let c = empty_build_cache_config();
     assert c.enabled;
@@ -710,4 +764,36 @@ test "cache_compiler_identity: empty binary path falls back to raw stamp" ![io] 
     // No binary to hash (in-process serial fallback) ⇒ keep the raw
     // stamp; no worse than the prior behaviour.
     assert cache_compiler_identity(raw, "") == raw;
+}
+
+test "runtime_object_entry_key_from_str: empty key yields invalid digest" ![io] {
+    // An unhashable runtime source produces an empty
+    // `runtime_object_cache_key` string; the shared-cache key must then
+    // be rejected by the digest validator so every shared helper treats
+    // it as a hard miss rather than reading/writing a bogus entry (#1096).
+    let ck = runtime_object_entry_key_from_str("", "probe_empty");
+    assert ck.digest == "";
+    assert ! is_valid_digest(ck.digest);
+}
+
+test "runtime_object_entry_key_from_str: non-empty key is a valid digest" ![io] {
+    // A real runtime key string hashes to a 64-hex sha256 digest the
+    // shared-cache artifact helpers accept (#1096).
+    let key = "deadbeef\n-O2\nsecsplit1";
+    let ck = runtime_object_entry_key_from_str(key, "probe_valid");
+    assert is_valid_digest(ck.digest);
+    assert ck.digest.length == 64;
+}
+
+test "runtime_object_entry_key_from_str: content-addressed and deterministic" ![io] {
+    // Same key string ⇒ same digest (so sibling work-dirs and CI
+    // restores resolve the same shared entry); distinct key strings ⇒
+    // distinct digests (no cross-source aliasing) (#1096).
+    let key_a = "aaa111\n-O2\nsecsplit1";
+    let key_b = "bbb222\n-O2\nsecsplit1";
+    let a1 = runtime_object_entry_key_from_str(key_a, "det_a1");
+    let a2 = runtime_object_entry_key_from_str(key_a, "det_a2");
+    let b = runtime_object_entry_key_from_str(key_b, "det_b");
+    assert a1.digest == a2.digest;
+    assert a1.digest != b.digest;
 }

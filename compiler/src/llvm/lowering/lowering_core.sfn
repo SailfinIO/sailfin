@@ -931,6 +931,19 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         }
         lines = mangled.lines;
     }
+    // Drop exact-duplicate module-scope `declare` lines. The runtime-helper
+    // preamble and the imported-function / inline-preamble paths can each
+    // emit a byte-identical `declare <ret> @<sym>(...)` for the same symbol
+    // (e.g. `sfn_array_sfn_map` is both a registered runtime helper and a
+    // `runtime/prelude.sfn` import). LLVM's library API merges identical
+    // declares, but clang's textual-IR parser — the `clang -c <file>.ll`
+    // path `_emit_runtime_sfn_to_obj` (cli_main.sfn) uses to build runtime
+    // objects — rejects the repeat with "invalid redefinition of function",
+    // which breaks a cold `make test` (the cached `.o` masks it in CI). Run
+    // the dedup here, after mangling so symbol names are final, keeping the
+    // first occurrence and preserving order so the stage2==stage3 fixed
+    // point is unaffected.
+    lines = dedup_module_declare_lines(lines);
     if debug_lowering { print.err("emit-llvm: phase=mangle"); }
     if trace { print.err("test llvm: mangling stage done"); }
     if timing {
@@ -1083,6 +1096,41 @@ fn hoist_closure_env_type_decls(lines: string[]) -> string[] {
             _fi2 += 1;
         }
         return prepended;
+    }
+    return result;
+}
+
+// Drop byte-identical module-scope `declare` lines, keeping the first
+// occurrence. Only column-0 `declare ` lines are considered — function
+// body lines are indented and never match, and `declare` never appears
+// inside a `define` body. Deterministic (order-preserving), so the
+// stage2==stage3 fixed point is unaffected. See the call site in
+// `lower_to_llvm_lines_with_parsed_context` for the clang-vs-LLVM
+// duplicate-declare rationale.
+fn dedup_module_declare_lines(lines: string[]) -> string[] {
+    let mut seen: string[] = [];
+    let mut result: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = lines[index];
+        if starts_with(line, "declare ") {
+            let mut already: boolean = false;
+            let mut _si: int = 0;
+            loop {
+                if _si >= seen.length { break; }
+                if seen[_si] == line {
+                    already = true;
+                    break;
+                }
+                _si += 1;
+            }
+            if !already {
+                seen.push(line);
+                result.push(line);
+            }
+        } else { result.push(line); }
+        index += 1;
     }
     return result;
 }

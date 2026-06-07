@@ -58,8 +58,13 @@ import {
     is_safe_scope_name,
     parse_scope_name
 } from "./capsule_artifact";
-import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./cli_commands_utils";
+import {
+    _atomic_rename_into_place,
+    _display_capsule_name_cmd,
+    _mktemp_sibling_cmd
+} from "./cli_commands_utils";
 import { emit_subprocess_with_retry } from "./emit_helpers";
+import { _LockEntry, lock_get_versions } from "./lock";
 import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_file_with_module_imports,
@@ -73,6 +78,7 @@ import {
     toml_get_capabilities_required,
     toml_get_dependencies,
     toml_get_name,
+    toml_get_version,
     toml_get_workspace_members
 } from "./toml_parser";
 import { resolve_compiler_version_for_cache } from "./version";
@@ -103,6 +109,7 @@ export {
     prepare_project_capsules_for_check,
     prepare_project_capsules_for_test,
     resolve_relative_import,
+    resolve_workspace_lock_entries,
     stage_capsule_imports,
     workspace_member_for_spec
 };
@@ -931,6 +938,37 @@ fn _cr_parse_deps(deps: string) -> _CrDepEntry[] {
     return out;
 }
 
+// Look up a capsule's locked version from the pre-parsed lockfile
+// entries (#1048). `entry.spec` is always the scoped `scope/name` form
+// (the cache path below requires it), so we match that first and then
+// fall back to the bare display name — mirroring the backward-compat
+// fallback `sfn add` performs (`cli_commands.sfn`) for older lockfiles
+// that stored `"http"` instead of `"sfn/http"`. Returns "" if absent
+// under either key. The caller pre-parses once, so this stays O(deps)
+// per call without re-scanning the lockfile text.
+fn _cr_lookup_locked_version(lock_entries: _CrDepEntry[], spec: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= lock_entries.length { break; }
+        if strings_equal(lock_entries[i].spec, spec) {
+            return lock_entries[i].version;
+        }
+        i += 1;
+    }
+    let display = _display_capsule_name_cmd(spec);
+    if !strings_equal(display, spec) {
+        let mut j: int = 0;
+        loop {
+            if j >= lock_entries.length { break; }
+            if strings_equal(lock_entries[j].spec, display) {
+                return lock_entries[j].version;
+            }
+            j += 1;
+        }
+    }
+    return "";
+}
+
 // Locate the src/ directory for a capsule dep. Checks the in-tree
 // capsules/<scope>/<name>/src/ first (compiler self-build and ecosystem
 // development) and falls back to ~/.sfn/cache/capsules/<scope>/<name>/<version>/src/
@@ -1084,6 +1122,24 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
     let deps = toml_get_dependencies(text);
     let entries = _cr_parse_deps(deps);
 
+    // Lockfile precedence (#1048): the designed resolution order is
+    // workspace → lockfile → cache → registry. When a capsule.lock is
+    // present we prefer its pinned version over the capsule.toml range
+    // when building the ~/.sfn/cache path below. Parse it once up-front
+    // into `<spec>=<version>` entries (the shape `_cr_parse_deps`
+    // consumes) so the per-dep lookups in the loop are plain list scans
+    // rather than a full re-parse of the lockfile text each time. An
+    // absent lockfile leaves `has_lock` false and `lock_entries` empty,
+    // preserving the pre-#1048 capsule.toml-range behaviour byte-for-byte.
+    let lock_path = _cr_path_join(project_root, "capsule.lock");
+    let mut has_lock: boolean = false;
+    let mut lock_entries: _CrDepEntry[] = [];
+    if fs.exists(lock_path) {
+        let lock_text = fs.readFile(lock_path);
+        lock_entries = _cr_parse_deps(lock_get_versions(lock_text));
+        has_lock = true;
+    }
+
     // Discover every `kind = "runtime"` capsule the workspace
     // exposes, so we can skip those names below. Empty when
     // the project sits outside any workspace, which is the
@@ -1132,7 +1188,21 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
             src_dir = workspace_member_for_spec(members, entry.spec);
         }
         if src_dir.length == 0 {
-            src_dir = _cr_locate_capsule_src(project_root, entry.spec, entry.version);
+            // Lockfile-pinned version wins over the capsule.toml range
+            // (#1048). Workspace siblings are resolved above and never
+            // reach this branch, so sibling resolution stays first.
+            let mut effective_version: string = entry.version;
+            if has_lock {
+                let locked = _cr_lookup_locked_version(lock_entries, entry.spec);
+                if locked.length > 0 { effective_version = locked; } else {
+                    print.err("capsule-resolver: dependency \"" + entry.spec
+                        + "\" is declared in capsule.toml but absent from"
+                        + " capsule.lock — run `sfn add "
+                        + entry.spec
+                        + "` to lock it");
+                }
+            }
+            src_dir = _cr_locate_capsule_src(project_root, entry.spec, effective_version);
         }
         if src_dir.length > 0 {
             let found = _cr_collect_capsule_sources(src_dir, entry.spec);
@@ -1278,6 +1348,50 @@ fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string, work_dir: string) -> b
     return true;
 }
 
+// #873: for every staged capsule source whose canonical slug differs
+// from the path-shaped slug a relative importer derives from the file
+// path (`module_name_from_path`), drop a `.slugalias` sidecar at the
+// PATH-slug location mapping it to the canonical slug. A relative import
+// (`../src/mod`) into a workspace member's source tree resolves to that
+// path slug, which has no staged `.layout-manifest` (the module was
+// staged under its canonical `sfn/crypto/mod` slug); the lowering /
+// typecheck import resolver reads this sidecar
+// (`imports.sfn:resolve_import_artifact_slug`) and converges on the
+// canonical slug so the call site mangles to the same symbol the capsule
+// object defines.
+//
+// No sidecar is written when the slug already equals the path slug —
+// which is every compiler-internal and non-capsule relative source — so
+// the self-host staging emits none and the resolver branch is never taken
+// while building the compiler.
+fn _cr_write_capsule_slug_aliases(sources: CapsuleSource[], context_root: string) ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= sources.length { break; }
+        let src = sources[i];
+        i += 1;
+        if src.slug.length == 0 { continue; }
+        if src.source_path.length == 0 { continue; }
+        let path_slug = module_name_from_path(_cr_canonicalise_path(src.source_path));
+        if path_slug.length == 0 { continue; }
+        if strings_equal(path_slug, src.slug) { continue; }
+        // Guard against path traversal / clobber: `module_name_from_path`
+        // preserves `..` segments and a leading `/` when the source was
+        // reached via a non-canonical or absolute path (e.g. building from
+        // a different CWD via `../repo/...`). Such a slug would let
+        // `alias_path` escape `context_root`. A consumer's import only ever
+        // resolves to a clean relative slug, so a `..`/absolute sidecar
+        // could never be read anyway — skip it rather than write outside
+        // the staging root. The convergence simply falls back to the path
+        // slug for that (unusual) source, which is the pre-#873 behaviour.
+        if _cr_find_substring(path_slug, "..") >= 0 { continue; }
+        if substring(path_slug, 0, 1) == "/" { continue; }
+        let alias_path = context_root + "/" + path_slug + ".slugalias";
+        _cr_ensure_dir(_cr_dirname(alias_path));
+        fs.writeFile(alias_path, src.slug);
+    }
+}
+
 // Extract `.layout` lines from a freshly-emitted `.sfn-asm` and
 // write the sibling `.layout-manifest`. Split out of `_cr_stage_one`
 // so the parallel-emit path can call it after xargs returns.
@@ -1349,6 +1463,7 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
             if !ok { return false; }
             si += 1;
         }
+        _cr_write_capsule_slug_aliases(sources, context_root);
         return true;
     }
 
@@ -1363,6 +1478,7 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
             if !ok { return false; }
             si += 1;
         }
+        _cr_write_capsule_slug_aliases(sources, context_root);
         return true;
     }
 
@@ -1426,6 +1542,10 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir
             ei += 1;
         }
     }
+    // #873: alias sidecars are written for ALL sources (not just freshly-
+    // emitted ones) so a cache-hit run still publishes the path→canonical
+    // slug mapping the importer needs.
+    _cr_write_capsule_slug_aliases(sources, context_root);
     return true;
 }
 
@@ -2305,6 +2425,42 @@ fn workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> string
     return "";
 }
 
+// Resolve the whole workspace member graph into the flat lock-entry set a
+// writer (`workspace_lock_write`) can serialize. Returns one `_LockEntry`
+// per literal `[workspace].members` entry, carrying the member's canonical
+// name and version read from its own capsule.toml.
+//
+// Member selection mirrors `load_workspace_members`: unsafe paths and
+// members whose capsule.toml is missing or has no [capsule].name are
+// already dropped (with a `print.err` warning) before this fn sees them,
+// so no entry is ever emitted for an unnamed member.
+//
+// Hash field: workspace members are path-pinned local source trees, not
+// content-addressed external dependencies fetched into the capsule cache.
+// A member is identified by its workspace-relative path (fixed by
+// workspace.toml), so there is no packaged form to hash and the integrity
+// hash is left empty. Hashes in the flat lock schema are populated only
+// for external deps; an empty hash here means "path-pinned, not hashed".
+fn resolve_workspace_lock_entries(workspace_root: string) -> _LockEntry[] ![io] {
+    let mut out: _LockEntry[] = [];
+    let members = load_workspace_members(workspace_root);
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let member = members[i];
+        let manifest = _cr_path_join(_cr_path_join(workspace_root, member.member_path), "capsule.toml");
+        let mut version: string = "";
+        if fs.exists(manifest) {
+            version = toml_get_version(fs.readFile(manifest));
+        }
+        out.push(_LockEntry {
+            capsule: member.name, version: version, hash: ""
+        });
+        i += 1;
+    }
+    return out;
+}
+
 // ---- Source-level import scanning ----
 // These helpers replace the cli_commands.sfn `_collect_relative_import_spans_cmd`
 // state machine so the resolver owns the only import-spec scanner. Skip-aware
@@ -2674,6 +2830,87 @@ fn _cr_relative_slug(entry_dir: string, file_path: string) -> string {
     return module_name_from_path(_cr_canonicalise_path(file_path));
 }
 
+// #873: map a relatively-imported file — identified by the PATH SLUG
+// that `_cr_relative_slug` / `module_name_from_path` derives for it — to
+// the canonical spec slug of the workspace member that owns its `src/`
+// tree. For path slug `capsules/sfn/crypto/src/mod` under member
+// `sfn/crypto` this returns `sfn/crypto/mod` — byte-identical to the slug
+// `_cr_collect_capsule_sources(<member>/src, "sfn/crypto")` assigns the
+// SAME file via the workspace-implicit / manifest-dep walks (line ~1035:
+// `spec + "/" + stem`). Returning that shared slug lets the relative and
+// scoped enumerators agree on one symbol per capsule function, so a
+// capsule's own tests (`import { f } from "../src/mod"`) link against the
+// same `f__sfn__crypto__mod` the by-name path already uses.
+//
+// CRITICAL — self-host safety: the input is the `module_name_from_path`
+// PATH SLUG, not the raw file path. `module_name_from_path` ROOTS every
+// `compiler/src/**` file at `compiler/src/` (→ `llvm/lowering/abi_hash`)
+// and every `runtime/**` file at `runtime/` (→ `prelude`), stripping
+// those prefixes. The `compiler` and `runtime/native` workspace members
+// (this repo lists both in `workspace.toml`) therefore NEVER match here —
+// their `<member_path>/src/` needle is absent from the stripped slug — so
+// compiler- and runtime-internal relative imports keep their existing
+// slugs and the self-host build stays byte-identical. Only
+// `capsules/<scope>/<name>` members, whose paths survive
+// `module_name_from_path` intact, are canonicalized. Returns "" when no
+// member owns the slug. The longest matching `member_path` wins so nested
+// members (a member whose path is a prefix of another) resolve
+// deterministically.
+fn _cr_capsule_slug_for_path(path_slug: string, members: WorkspaceMember[]) -> string {
+    if path_slug.length == 0 { return ""; }
+    let mut best_slug: string = "";
+    let mut best_len: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let m = members[i];
+        i += 1;
+        if m.member_path.length == 0 { continue; }
+        if m.name.length == 0 { continue; }
+        let needle = m.member_path + "/src/";
+        let pos = _cr_find_substring(path_slug, needle);
+        if pos < 0 { continue; }
+        let tail = substring(path_slug, pos + needle.length, path_slug.length);
+        if tail.length == 0 { continue; }
+        if m.member_path.length > best_len {
+            best_len = m.member_path.length;
+            best_slug = m.name + "/" + tail;
+        }
+    }
+    return best_slug;
+}
+
+// #873: recover the workspace-member spec (e.g. `sfn/crypto`) for a
+// canonical capsule slug produced by `_cr_capsule_slug_for_path`
+// (`sfn/crypto/mod`). The slug is `<member.name>/<tail>`, so the spec is
+// the member whose `name + "/"` prefixes the slug; the longest such name
+// wins so a submodule member nested under another resolves
+// deterministically. Returns "" when no member matches — callers then
+// leave `spec` empty (the path-slug / non-capsule case). The spec tags
+// the `CapsuleSource` so the relative-walk entry routes its `.ll` under
+// the per-capsule `build/capsules/<scope>/<name>/ir/` tree identically to
+// the workspace-implicit walk's entry for the same file.
+fn _cr_capsule_spec_for_slug(slug: string, members: WorkspaceMember[]) -> string {
+    let mut best: string = "";
+    let mut best_len: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= members.length { break; }
+        let m = members[i];
+        i += 1;
+        if m.name.length == 0 { continue; }
+        let prefix = m.name + "/";
+        if slug.length <= prefix.length { continue; }
+        if substring(slug, 0, prefix.length) == prefix {
+            if m.name.length > best_len {
+                best_len = m.name.length;
+                best = m.name;
+            }
+        }
+    }
+    return best;
+}
+
 // Walk relative imports (`./foo`, `../foo`) reachable from `entry_path` and
 // return one CapsuleSource per discovered file. The entry itself is NOT
 // included — the caller compiles it via the standard single-file path.
@@ -2681,7 +2918,7 @@ fn _cr_relative_slug(entry_dir: string, file_path: string) -> string {
 // `runtime/*` and scoped (`scope/name`) imports are handled by
 // `enumerate_capsule_sources` (manifest-declared deps) and the workspace
 // member lookup; this enumerator only walks intra-project relative imports.
-fn enumerate_relative_sources(entry_path: string) -> CapsuleSource[] ![io] {
+fn enumerate_relative_sources(entry_path: string, members: WorkspaceMember[]) -> CapsuleSource[] ![io] {
     let mut out: CapsuleSource[] = [];
     if entry_path.length == 0 { return out; }
     let entry_dir = _cr_dirname(entry_path);
@@ -2738,14 +2975,33 @@ fn enumerate_relative_sources(entry_path: string) -> CapsuleSource[] ![io] {
                 if !already_seen {
                     visited.push(dep_path);
                     queue.push(dep_path);
-                    let slug = _cr_relative_slug(entry_dir, dep_path);
+                    // #873: if this relatively-imported file lives inside a
+                    // workspace member's `src/`, stage it under the member's
+                    // canonical spec slug (`sfn/crypto/mod`) — the SAME slug
+                    // the workspace-implicit / manifest-dep walks assign the
+                    // same file — so the relative and scoped enumerators
+                    // agree on one symbol per capsule function and a
+                    // capsule's own `../src/mod` tests link. Tag the spec
+                    // with the member name so the source routes under the
+                    // per-capsule `ir/` layout exactly like the implicit
+                    // walk's sources. Non-member paths (every `compiler/src/**`
+                    // and `runtime/**` file) get "" and fall back to the
+                    // path-shaped slug, leaving self-host slugs untouched.
+                    let path_slug = _cr_relative_slug(entry_dir, dep_path);
+                    let capsule_slug = _cr_capsule_slug_for_path(path_slug, members);
+                    let mut slug = path_slug;
+                    let mut spec: string = "";
+                    if capsule_slug.length > 0 {
+                        slug = capsule_slug;
+                        spec = _cr_capsule_spec_for_slug(capsule_slug, members);
+                    }
                     // ll_path is filled in by `_cr_resolve_and_dedupe`
                     // once the consumer is known (Stage C2b2) — for
                     // a `-p <consumer>` build with safe scope/name,
                     // this lands under the consumer's per-capsule
                     // tree; otherwise the legacy flat layout.
                     out.push(CapsuleSource {
-                        spec: "", source_path: dep_path, slug: slug, ll_path: ""
+                        spec: spec, source_path: dep_path, slug: slug, ll_path: ""
                     });
                 }
             }
@@ -3338,9 +3594,22 @@ fn _cr_source_imports_host(source: string, target: string) -> boolean {
 // stage extra `<name>/<rel>` slugs for capsules whose tests only
 // reach the host source via `../src/...` relative imports — those
 // already produce path-shaped slugs through the relative-import
-// walker, and shadowing them with `<name>/...` slugs would race
-// the build cache (which keys IR by source content + dep manifests
-// only, not by slug — see `cache_key_for`).
+// walker.
+//
+// This gate is load-bearing for correctness, not just performance.
+// `_cr_enumerate_host_capsule_sources` collects *every* `.sfn` under
+// `<project_root>/src/`, including the capsule entrypoint
+// (`main.sfn`'s `@main`) and modules the test never imports. The
+// compiler's own `compiler/tests/` suite reaches `compiler/src/`
+// exclusively via `../../src/X` — never by the `sailfin` name — so
+// firing host-enum there would link `compiler/src/main.sfn` into
+// every test binary alongside the test-runner's own `@main`, which
+// fails to link with `invalid redefinition of function 'main'`.
+// Gating on a by-name import keeps host-enum a no-op for those
+// tests. (#527 separately made `cache_key_for` mix the slug into the
+// digest, closing the cache-entry race that co-firing the two
+// walkers would otherwise cause — but the duplicate-`@main` link
+// hazard is a distinct, link-layer problem the gate still guards.)
 fn _cr_any_entry_imports_host(entry_paths: string[], capsule_name: string) -> boolean ![io] {
     if capsule_name.length == 0 { return false; }
     let mut i: int = 0;
@@ -3562,13 +3831,32 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
         };
     }
 
+    // (2) Manifest-declared capsule deps and (3) workspace-implicit
+    // imports use the first entry's directory as the anchor. By
+    // construction (callers group entries by `(project_root,
+    // workspace_root)`), every entry in `entry_paths` resolves to the
+    // same project root and workspace root, so the choice of anchor
+    // doesn't change the result. Computed up-front (#873) because the
+    // relative walk now needs the workspace member set to canonicalize
+    // a capsule source's slug to its spec slug.
+    let anchor_dir = _cr_dirname(entry_paths[0]);
+
+    let workspace_root = discover_workspace_root(anchor_dir);
+    let mut members: WorkspaceMember[] = [];
+    if workspace_root.length > 0 {
+        members = load_workspace_members(workspace_root);
+    }
+
     // (1) Relative imports — walked from every entry; the dedupe loop
-    // below collapses overlapping sets.
+    // below collapses overlapping sets. A relatively-imported file that
+    // resolves into a workspace member's `src/` is staged under that
+    // member's canonical spec slug (#873), so it collapses cleanly
+    // against the same file discovered by the workspace-implicit walk.
     let mut ei: int = 0;
     loop {
         if ei >= entry_paths.length { break; }
         let entry = entry_paths[ei];
-        let relative = enumerate_relative_sources(entry);
+        let relative = enumerate_relative_sources(entry, members);
         let mut ri: int = 0;
         loop {
             if ri >= relative.length { break; }
@@ -3577,14 +3865,6 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
         }
         ei += 1;
     }
-
-    // (2) Manifest-declared capsule deps and (3) workspace-implicit
-    // imports use the first entry's directory as the anchor. By
-    // construction (callers group entries by `(project_root,
-    // workspace_root)`), every entry in `entry_paths` resolves to the
-    // same project root and workspace root, so the choice of anchor
-    // doesn't change the result.
-    let anchor_dir = _cr_dirname(entry_paths[0]);
 
     let project_root = discover_project_root(anchor_dir);
 
@@ -3641,18 +3921,23 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
         // (currently `sfn test`) AND at least one test entry
         // imports the host capsule by its `[capsule].name`,
         // enumerate `<project_root>/src/` and tag each source with
-        // the manifest's name as the spec. Without this gate, a
-        // capsule whose tests only reach the host via `../src/...`
-        // (path-shaped slug) would still get a parallel
-        // `<name>/<rel>` enumeration, and `cache_key_for`'s
-        // slug-blind keying would race the two compiles on the same
-        // cache entry — every test in the resolver-driven `make
-        // test` suite then surfaces undefined references for the
-        // shape that lost the race. The build path keeps this off
-        // (`empty_resolver_consumer()`) because the host capsule's
-        // entry source is compiled directly via the single-file
-        // `compile_to_llvm_file_with_module` path, so re-
-        // enumerating it here would double-emit.
+        // the manifest's name as the spec. The by-name gate is
+        // required for correctness: `_cr_enumerate_host_capsule_sources`
+        // pulls in every `.sfn` under `src/`, including the capsule
+        // entrypoint. For a capsule whose tests only reach the host
+        // via `../src/...` (path-shaped slug) — the compiler's own
+        // `compiler/tests/` suite is the canonical case — firing
+        // host-enum would link `main.sfn`'s `@main` into each test
+        // binary on top of the test-runner `@main`, failing the link
+        // with `invalid redefinition of function 'main'`. (#527 also
+        // closed the cache-entry race that co-firing the path-shaped
+        // and `<name>/<rel>` walkers would cause, by mixing the slug
+        // into `cache_key_for`'s digest; the gate independently
+        // prevents the duplicate-entrypoint link hazard.) The build
+        // path keeps this off (`empty_resolver_consumer()`) because
+        // the host capsule's entry source is compiled directly via
+        // the single-file `compile_to_llvm_file_with_module` path, so
+        // re-enumerating it here would double-emit.
         if consumer.include_host_as_dep {
             let manifest_path = _cr_path_join(project_root, "capsule.toml");
             if fs.exists(manifest_path) {
@@ -3690,9 +3975,10 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
         }
     }
 
-    let workspace_root = discover_workspace_root(anchor_dir);
     if workspace_root.length > 0 {
-        let members = load_workspace_members(workspace_root);
+        // `workspace_root` + `members` were resolved up-front (above the
+        // relative walk) so both the relative and implicit enumerators
+        // share one member set (#873).
         // Workspace-implicit enumeration is per-entry: each entry may
         // reference a different scoped import, and the union is the
         // set the project actually needs.

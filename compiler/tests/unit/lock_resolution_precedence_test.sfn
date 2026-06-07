@@ -1,0 +1,123 @@
+// Regression tests for lockfile precedence during capsule dependency
+// resolution (#1048). The resolver's `enumerate_capsule_sources` consults
+// `capsule.lock` and prefers the locked version over the `capsule.toml`
+// range when constructing the ~/.sfn/cache path. The version-precedence
+// rule is pure logic; it is exercised here against the real lockfile
+// parser (`lock_get_version`) without dragging in the `![io]` resolver
+// graph (which transitively imports the whole compiler via `./main`).
+//
+// `enumerate_capsule_sources` always queries with the scoped `scope/name`
+// spec (the cache path requires it), so the fixtures use scoped keys
+// (`sfn/http`, `acme/router`) to mirror real resolver inputs.
+import { lock_get_version } from "../../src/lock";
+
+fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
+
+// Mirror of `_display_capsule_name_cmd`: strip a leading `sfn/` scope so
+// the backward-compat fallback can match older lockfiles that stored the
+// bare display name (e.g. `"http"`) instead of the scoped `"sfn/http"`.
+fn _display_name(spec: string) -> string {
+    let mut slash: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= spec.length { break; }
+        if spec[i] == "/" {
+            slash = i;
+            break;
+        }
+        i += 1;
+    }
+    if slash > 0 {
+        let scope = substring(spec, 0, slash);
+        if strings_equal(scope, "sfn") {
+            return substring(spec, slash + 1, spec.length);
+        }
+    }
+    return spec;
+}
+
+// Mirror of `_cr_lookup_locked_version`: scoped spec first, then the
+// bare display-name fallback for older lockfiles.
+fn _lookup_locked(lock_text: string, spec: string) -> string {
+    let direct = lock_get_version(lock_text, spec);
+    if direct.length > 0 { return direct; }
+    let display = _display_name(spec);
+    if !strings_equal(display, spec) {
+        return lock_get_version(lock_text, display);
+    }
+    return "";
+}
+
+// Mirror of the precedence rule inlined in `enumerate_capsule_sources`:
+// prefer the lockfile-pinned version when a lockfile is present and the
+// dep is locked; otherwise fall back to the capsule.toml declared range.
+fn _effective_version(has_lock: boolean, lock_text: string, spec: string, declared: string) -> string {
+    if !has_lock { return declared; }
+    let locked = _lookup_locked(lock_text, spec);
+    if locked.length > 0 { return locked; }
+    return declared;
+}
+
+// "declared dep absent from lockfile" — the predicate that drives the
+// diagnostic in the resolver.
+fn _missing_from_lock(has_lock: boolean, lock_text: string, spec: string) -> boolean {
+    if !has_lock { return false; }
+    return _lookup_locked(lock_text, spec).length == 0;
+}
+
+// Modern lockfile: scoped keys, as `sfn add` writes them today.
+// Returned from a function rather than a top-level `let` global:
+// module-level string constants with escapes currently mislower their
+// constant-array length, so building the fixture in function scope keeps
+// this test focused on the precedence rule.
+fn _lock_fixture() -> string {
+    return "# capsule.lock\n\n[packages]\n\"sfn/http\" = \"0.1.0 sha256:abc123\"\n\"acme/router\" = \"1.0.0 sha256:def456\"\n";
+}
+
+// Legacy lockfile: stdlib capsule stored under its bare display name,
+// the format older `sfn add` versions produced before scoped keys.
+fn _lock_fixture_legacy() -> string {
+    return "# capsule.lock\n\n[packages]\n\"http\" = \"0.1.0 sha256:abc123\"\n";
+}
+
+test "precedence: scoped stdlib dep uses locked version over toml range" {
+    // capsule.toml says "*", lockfile pins 0.1.0 — resolver uses 0.1.0.
+    assert _str_eq(_effective_version(true, _lock_fixture(), "sfn/http", "*"), "0.1.0");
+}
+
+test "precedence: third-party scoped dep uses locked version" {
+    assert _str_eq(_effective_version(true, _lock_fixture(), "acme/router", ">=1.0.0"), "1.0.0");
+}
+
+test "backward compat: older bare-name lockfile resolves via display fallback" {
+    // Resolver queries the scoped `sfn/http`; the legacy lockfile only
+    // has the bare `http` key. The display-name fallback must still find
+    // the locked version.
+    assert _str_eq(_effective_version(true, _lock_fixture_legacy(), "sfn/http", "*"), "0.1.0");
+}
+
+test "precedence: no lockfile falls back to declared range" {
+    assert _str_eq(_effective_version(false, "", "sfn/http", "0.3.1"), "0.3.1");
+}
+
+test "precedence: dep absent from lockfile falls back to declared range" {
+    // Present lockfile but dep not locked — keep the capsule.toml range
+    // so the cache lookup still has a version to try.
+    assert _str_eq(_effective_version(true, _lock_fixture(), "sfn/cli", "0.2.0"), "0.2.0");
+}
+
+test "diagnostic: declared dep missing from lockfile is detected" {
+    assert _missing_from_lock(true, _lock_fixture(), "sfn/cli") == true;
+}
+
+test "diagnostic: scoped locked dep is not flagged missing" {
+    assert _missing_from_lock(true, _lock_fixture(), "sfn/http") == false;
+}
+
+test "diagnostic: bare-name legacy lockfile entry is not flagged missing" {
+    assert _missing_from_lock(true, _lock_fixture_legacy(), "sfn/http") == false;
+}
+
+test "diagnostic: no lockfile never flags missing" {
+    assert _missing_from_lock(false, "", "sfn/http") == false;
+}

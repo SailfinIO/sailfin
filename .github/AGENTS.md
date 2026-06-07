@@ -17,6 +17,30 @@ Whenever you change a `.md` workflow, run `gh aw compile` (or
 secret) and commit the resulting `.lock.yml` in the same PR. The
 `activation` check enforces this.
 
+### Keeping lock files fresh against upstream image yanks
+
+Lock files pin upstream gh-aw images (firewall, mcpg, the gh-aw runner)
+to specific releases/digests. When gh-aw rotates one of those pins
+upstream — or retracts a release outright, as happened with
+`gh-aw-firewall v0.25.28` (PR #442) — every agentic run fails at
+`Install AWF binary` until someone recompiles. Dependabot can't see this
+(it doesn't watch ghcr digests, and `github/gh-aw-actions*` is
+explicitly ignored in `.github/dependabot.yml`), so the
+`.github/workflows/gh-aw-recompile.yml` workflow runs `gh aw compile
+--force-refresh-action-pins` weekly (and on demand) and opens a
+`chore(workflows): scheduled gh-aw recompile` PR if any `*.lock.yml` or
+`.github/aw/actions-lock.json` drifts. **Review those PRs, don't
+blind-merge them** — per the gh-aw FAQ, a human must confirm the bumped
+pins before merging. The workflow never auto-merges; it only surfaces the
+drift.
+
+`gh-aw-recompile.yml` is itself a plain Actions workflow (no LLM, no API
+key), so it keeps running even while most agentic `.md` workflows are
+paused for cost. That's deliberate: it keeps the lock files current for
+whatever is active (the release-notes workflow today) and means
+re-enabling a paused workflow is friction-free instead of starting from a
+stale, possibly-broken pin.
+
 ## Prime directive
 
 Code only flows **downward** through the tier pyramid. No agent self-generates

@@ -5,7 +5,7 @@
 # `sfn build`:
 #   - backwards-compat `sfn run <file>` (no flags) still works
 #   - `--no-cache` suppresses the cache summary line
-#   - `--clean` wipes `<cache_root>/v1/...` before building
+#   - `--clean` wipes `<cache_root>/v2/...` before building
 #   - `--cache-trace` emits per-module `[cache hit/miss/store]` lines
 #   - the cache stats summary fires after a successful run when the
 #     cache was consulted
@@ -85,10 +85,16 @@ test_run_backwards_compat() {
 run_test "sfn run <file> still works (no flags)" test_run_backwards_compat
 
 # ---- Test 2: cold run prints summary with miss + store ----
+# #915: the runtime C/LL/sfn object cache folds into this same line.
+# The run executes in a fresh $SCRATCH cwd, so its runtime objects
+# (under $SCRATCH/build/sailfin) are also cold — adding misses/stores
+# on top of the single `sfn/math` .ll module miss. Assert the cold
+# shape (hits=0, miss>=1, store>=1) rather than exact `.ll`-only
+# counts.
 test_first_run_summary() {
-    grep -qE '^\[cache\] hits=0 misses=1 stores=1' "$SCRATCH/run1.stdout"
+    grep -qE '^\[cache\] hits=0 misses=[1-9][0-9]* stores=[1-9][0-9]*' "$SCRATCH/run1.stdout"
 }
-run_test "first run prints '[cache] hits=0 misses=1 stores=1'" test_first_run_summary
+run_test "first run prints cold cache summary (hits=0, miss/store>=1)" test_first_run_summary
 
 # ---- Test 3: warm run prints summary with a hit ----
 test_warm_run_hit() {
@@ -101,9 +107,11 @@ test_warm_run_hit() {
         cat "$SCRATCH/run2.stdout" >&2
         return $rc
     fi
-    grep -qE '^\[cache\] hits=1 misses=0' "$SCRATCH/run2.stdout"
+    # #915: warm run — both the `.ll` math module and the runtime
+    # objects are now cached, so hits>=1 with zero misses.
+    grep -qE '^\[cache\] hits=[1-9][0-9]* misses=0( |$)' "$SCRATCH/run2.stdout"
 }
-run_test "warm run prints '[cache] hits=1 misses=0'" test_warm_run_hit
+run_test "warm run prints warm cache summary (hits>=1, misses=0)" test_warm_run_hit
 
 # ---- Test 4: --no-cache suppresses the summary line entirely ----
 test_no_cache_suppresses_summary() {
@@ -147,7 +155,7 @@ run_test "sfn run --cache-trace prints '[cache hit] sfn/math/mod'" test_cache_tr
 test_clean_wipes_cache() {
     cd "$SCRATCH" || return 1
     # Sanity: cache_root must exist before --clean (populated by tests 1-2)
-    [ -d "$CACHE_DIR/v1" ] || return 1
+    [ -d "$CACHE_DIR/v2" ] || return 1
     SAILFIN_BUILD_CACHE_DIR="$CACHE_DIR" "$BINARY" run --clean src/main.sfn \
         > "$SCRATCH/run_clean.stdout" 2>&1
     local rc=$?
@@ -156,9 +164,13 @@ test_clean_wipes_cache() {
         cat "$SCRATCH/run_clean.stdout" >&2
         return $rc
     fi
-    # After --clean the build path repopulates the cache: miss + store,
-    # NOT a hit.
-    grep -qE '^\[cache\] hits=0 misses=1 stores=1' "$SCRATCH/run_clean.stdout"
+    # After --clean the `.ll` module cache is wiped and repopulated:
+    # miss + store. #915: `--clean` wipes only the `.ll` cache root
+    # ($CACHE_DIR/v2), NOT the runtime object cache under
+    # $SCRATCH/build/sailfin, so the runtime objects still hit. Assert
+    # the re-miss of the `.ll` module (miss>=1, store>=1) without
+    # constraining the (now non-zero) runtime hits.
+    grep -qE '^\[cache\] hits=[0-9]+ misses=[1-9][0-9]* stores=[1-9][0-9]*' "$SCRATCH/run_clean.stdout"
 }
 run_test "sfn run --clean wipes the cache and rebuilds" test_clean_wipes_cache
 

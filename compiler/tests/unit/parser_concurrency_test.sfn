@@ -1,0 +1,243 @@
+// Unit tests for the concurrency-frontend prefix expressions and the
+// `channel(...)` constructor (M4.0, epic #965, issue #1080).
+//
+// `spawn <expr>` and `await <expr>` are soft-keyword prefix operators
+// (they lex as `Identifier`; Sailfin has no keyword tokens) parsed in
+// `parse_prefix_expression`. `channel(capacity?)` is a constructor
+// parsed in `parse_channel_expression`. All three build the structured
+// AST nodes added in issue #1079 (`Expression.Spawn`, `Expression.Await`,
+// `Expression.Channel`). Type rules, effect-checking, and dedicated
+// lowering land in follow-up issues — this issue is parse-only.
+//
+// The `let` initializer is inspected at top level, matching the
+// convention in `parser_iife_postfix_test.sfn` (the block-scoped `let`
+// initializer path is opaque, tracked separately).
+import { Block, Expression } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+// Initializer of the first top-level `let` in `source`.
+fn first_let_initializer(source: string) -> Expression ![io] {
+    let program = parse_program(source);
+    let stmt = program.statements[0];
+    assert stmt.variant == "VariableDeclaration";
+    let init = stmt.initializer;
+    assert init != null;
+    return init;
+}
+
+// Body block of the first top-level function named `name` in `source`.
+// `routine { ... }` is a block-level statement, so its coverage inspects a
+// function body rather than a `let` initializer. Asserts the function was
+// found so a lookup miss fails here with a clear signal rather than
+// surfacing as a confusing empty-body assertion downstream.
+fn function_body(source: string, name: string) -> Block ![io] {
+    let program = parse_program(source);
+    let mut index: int = 0;
+    let mut found: boolean = false;
+    let mut body: Block = Block { tokens: [], text: "", statements: [] };
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "FunctionDeclaration" {
+            if stmt.signature.name == name {
+                body = stmt.body;
+                found = true;
+                break;
+            }
+        }
+        index += 1;
+    }
+    assert found;
+    return body;
+}
+
+// -------------------------------------------------------------------
+// `spawn <call>` parses to a `Spawn` node whose operand is the spawned
+// call expression — never `Raw`.
+// -------------------------------------------------------------------
+test "concurrency: spawn of a call parses to Spawn of Call" ![io] {
+    let expr = first_let_initializer("let f = spawn worker();");
+    assert expr.variant == "Spawn";
+    assert expr.operand.variant == "Call";
+    assert expr.operand.callee.variant == "Identifier";
+}
+
+// `spawn <identifier>` parses to a `Spawn` over the bare identifier.
+test "concurrency: spawn of an identifier parses to Spawn of Identifier" ![io] {
+    let expr = first_let_initializer("let f = spawn task;");
+    assert expr.variant == "Spawn";
+    assert expr.operand.variant == "Identifier";
+}
+
+// `spawn` of a lambda with a declared return type tags the future kind
+// (#1082): the parser resolves the lambda's return-type annotation to one of
+// the six monomorphized kinds via `spawn_future_kind`.
+test "concurrency: spawn of an int-returning lambda tags kind int" ![io] {
+    let expr = first_let_initializer("let f = spawn fn() -> int { return 1; };");
+    assert expr.variant == "Spawn";
+    assert expr.operand.variant == "Lambda";
+    assert strings_equal(expr.kind, "int");
+}
+
+// A bare named-fn `spawn foo()` cannot be resolved at parse time (needs
+// symbol resolution that is out of scope), so its kind stays "" for
+// emit-native (#1084) to tag.
+test "concurrency: spawn of a named-fn call leaves kind unresolved" ![io] {
+    let expr = first_let_initializer("let f = spawn worker();");
+    assert expr.variant == "Spawn";
+    assert strings_equal(expr.kind, "");
+}
+
+// -------------------------------------------------------------------
+// `await <expr>` parses to an `Await` node whose operand is the awaited
+// expression. This is the shape the legacy text-based async lowering is
+// bridged to via the `Await` arm in `emit_native_format.sfn`.
+// -------------------------------------------------------------------
+test "concurrency: await of an identifier parses to Await" ![io] {
+    let expr = first_let_initializer("let r = await future;");
+    assert expr.variant == "Await";
+    assert expr.operand.variant == "Identifier";
+}
+
+// `await` binds like a unary prefix: `await f + 1` parses as
+// `(await f) + 1`, so the initializer is a `Binary` whose left is the
+// `Await`.
+test "concurrency: await binds tighter than binary plus" ![io] {
+    let expr = first_let_initializer("let r = await f + 1;");
+    assert expr.variant == "Binary";
+    assert expr.left.variant == "Await";
+    assert expr.left.operand.variant == "Identifier";
+    assert expr.right.variant == "NumberLiteral";
+}
+
+// -------------------------------------------------------------------
+// `channel(capacity)` parses to a `Channel` node carrying the capacity
+// expression. The bound `let` is the "channel declaration" of the
+// acceptance criteria.
+// -------------------------------------------------------------------
+test "concurrency: channel with capacity parses to Channel" ![io] {
+    let expr = first_let_initializer("let c = channel(4);");
+    assert expr.variant == "Channel";
+    assert expr.capacity != null;
+    assert expr.capacity.variant == "NumberLiteral";
+}
+
+// `channel()` with no capacity parses to a `Channel` whose capacity is
+// null (the unbuffered default deferred to lowering).
+test "concurrency: channel with no capacity parses to Channel" ![io] {
+    let expr = first_let_initializer("let c = channel();");
+    assert expr.variant == "Channel";
+    assert expr.capacity == null;
+}
+
+// `channel` not followed by `(` is an ordinary identifier — the
+// constructor path must not swallow it.
+test "concurrency: bare channel identifier is not a Channel node" ![io] {
+    let expr = first_let_initializer("let c = channel;");
+    assert expr.variant == "Identifier";
+}
+
+// Once `channel` is followed by `(` the parser commits to the
+// constructor: a malformed (too many args) form stays a `Channel`
+// construct rather than backtracking to an identifier `Call`, so its
+// fail-closed diagnostic does not diverge by arity. The extra argument is
+// a typecheck-layer concern (deferred), so `capacity` is left null here.
+test "concurrency: channel commits to construct even with extra args" ![io] {
+    let expr = first_let_initializer("let c = channel(1, 2);");
+    assert expr.variant == "Channel";
+    assert expr.capacity == null;
+}
+
+// `await` parses at unary precedence, so a `Binary` operand only arises
+// from an explicitly parenthesized awaited expression: `await (a + b)`
+// parses to an `Await` whose operand is the `Binary`. This is the shape
+// the `_format_binary_operand` round-trip in `emit_native_format` must
+// keep parenthesized (`await (a + b)`, never `await a + b`).
+test "concurrency: await of a parenthesized binary keeps the binary operand" ![io] {
+    let expr = first_let_initializer("let r = await (a + b);");
+    assert expr.variant == "Await";
+    assert expr.operand.variant == "Binary";
+}
+
+// -------------------------------------------------------------------
+// `parallel [t1, t2, ...]` parses to a `Parallel` node carrying the task
+// expressions in order. The bracketed list reuses the array-literal
+// grammar, so each task is a full expression (typically a `spawn`).
+// -------------------------------------------------------------------
+test "concurrency: parallel of spawns parses to Parallel of Spawns" ![io] {
+    let expr = first_let_initializer("let r = parallel [spawn a(), spawn b()];");
+    assert expr.variant == "Parallel";
+    assert expr.tasks.length == 2;
+    assert expr.tasks[0].variant == "Spawn";
+    assert expr.tasks[1].variant == "Spawn";
+}
+
+// An empty task list still parses to a `Parallel` — task-count rules are a
+// typecheck-layer concern (deferred).
+test "concurrency: parallel with empty task list parses to Parallel" ![io] {
+    let expr = first_let_initializer("let r = parallel [];");
+    assert expr.variant == "Parallel";
+    assert expr.tasks.length == 0;
+}
+
+// `parallel` not followed by `[` is an ordinary identifier — the construct
+// path must not swallow it.
+test "concurrency: bare parallel identifier is not a Parallel node" ![io] {
+    let expr = first_let_initializer("let p = parallel;");
+    assert expr.variant == "Identifier";
+}
+
+// -------------------------------------------------------------------
+// `serve(handler, port)` parses to a `Serve` node: `handler` is the first
+// argument, `port` the optional second.
+// -------------------------------------------------------------------
+test "concurrency: serve with handler and port parses to Serve" ![io] {
+    let expr = first_let_initializer("let s = serve(handler, 8080);");
+    assert expr.variant == "Serve";
+    assert expr.handler.variant == "Identifier";
+    assert expr.port != null;
+    assert expr.port.variant == "NumberLiteral";
+}
+
+// `serve(handler)` with no port parses to a `Serve` whose port is null
+// (the configured default deferred to lowering).
+test "concurrency: serve with no port parses to Serve" ![io] {
+    let expr = first_let_initializer("let s = serve(handler);");
+    assert expr.variant == "Serve";
+    assert expr.handler.variant == "Identifier";
+    assert expr.port == null;
+}
+
+// `serve` not followed by `(` is an ordinary identifier.
+test "concurrency: bare serve identifier is not a Serve node" ![io] {
+    let expr = first_let_initializer("let s = serve;");
+    assert expr.variant == "Identifier";
+}
+
+// -------------------------------------------------------------------
+// `routine { ... }` parses to a `RoutineStatement` block-level statement.
+// -------------------------------------------------------------------
+test "concurrency: routine block parses to RoutineStatement" ![io] {
+    let body = function_body("fn run() { routine { let x = 1; } }", "run");
+    assert body.statements.length == 1;
+    assert body.statements[0].variant == "RoutineStatement";
+}
+
+// Nested routine bodies recurse: the inner `routine { ... }` surfaces as a
+// `RoutineStatement` inside the outer routine's body.
+test "concurrency: nested routine bodies recurse" ![io] {
+    let body = function_body("fn run() { routine { routine { let x = 1; } } }", "run");
+    assert body.statements.length == 1;
+    let outer = body.statements[0];
+    assert outer.variant == "RoutineStatement";
+    assert outer.body.statements.length == 1;
+    assert outer.body.statements[0].variant == "RoutineStatement";
+}
+
+// A bare `routine` used as an identifier (no following `{`) falls through
+// to the expression-statement path and is NOT a `RoutineStatement`.
+test "concurrency: bare routine identifier is not a RoutineStatement" ![io] {
+    let body = function_body("fn run() { let routine = 1; }", "run");
+    assert body.statements.length == 1;
+    assert body.statements[0].variant == "VariableDeclaration";
+}

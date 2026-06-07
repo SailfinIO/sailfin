@@ -35,6 +35,7 @@ AI integration is a library concern (`sfn/ai` capsule, post-1.0) gated by the
 ## Essential Commands
 
 ```bash
+sfn check <files>     # Fast static analysis (parse + typecheck + effect-check) — the inner loop
 make compile          # Self-host the compiler from a released seed (preferred)
 make rebuild          # Force a rebuild from the seed
 make install          # Install the built compiler into PREFIX/bin (default: ~/.local/bin)
@@ -52,6 +53,21 @@ make mcp-server       # Build the MCP server wrapper
 
 Run examples: `make compile && build/native/sailfin run examples/basics/hello-world.sfn`.
 See `examples/README.md` for per-example capability requirements.
+
+**Validation ladder — use the cheapest tool that catches the error.** `sfn check`
+and `make check` are different tools, not fast/slow versions of the same one:
+
+1. **`sfn check <files>`** — fast static analysis (parse + typecheck + effect-check),
+   no IR / `clang` / self-host. Seconds for a few files, ~5 min for the whole
+   `compiler/src/` tree. Use it as the **inner loop** after every edit. It catches
+   type, effect, and parse errors but does **not** prove self-hosting.
+2. **`make compile`** — self-hosts the compiler. Required before committing any
+   `compiler/src/*.sfn` change (the self-host invariant).
+3. **`make check`** — full triple-pass self-host + suite (~15–20 min). Reserve for
+   declaring a feature shipped, cutting a release, or after a structural change.
+
+Don't burn `make check` to discover a type or effect error `sfn check` would have
+caught in seconds. (Use `build/native/sailfin check <path>` if `sfn` is not on `PATH`.)
 
 ## Compiler Pipeline
 

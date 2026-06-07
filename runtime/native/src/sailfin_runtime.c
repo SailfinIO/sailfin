@@ -2483,6 +2483,44 @@ char *sfn_str_from_codepoint(int64_t cp)
     return out;
 }
 
+/* Raw single-byte string constructor (#874). `char_from_code(n)` builds a
+ * 1-byte string whose sole byte is the raw value `n` (1..255). This is the
+ * RAW-byte write direction — the opposite of `sfn_str_from_codepoint`, which
+ * UTF-8-encodes: `from_codepoint(195)` yields the 2-byte sequence 0xC3 0x83,
+ * while `from_byte(195)` yields the single byte 0xC3. The read direction
+ * already round-trips (`char_code(s[i])` returns the raw byte), so this
+ * completes the read/write pair pure-Sailfin code needs to build arbitrary
+ * binary/multibyte byte sequences.
+ *
+ * Byte 0 cannot be represented under the current NUL-terminated string model
+ * — `.length` is `strlen`-recovered, so a lone NUL reads back as length 0.
+ * `n == 0` therefore returns the empty string; faithful embedded-NUL storage
+ * lands with the SfnString aggregate flip (M1.A.2, `runtime_architecture.md`
+ * §2.2). Out-of-range `n` (< 0 or > 255) also returns empty. Structure mirrors
+ * `sfn_str_from_codepoint` above (len ∈ {0,1}, NUL-terminated, arena-tracked).
+ *
+ * Migration: like the other allocating string helpers this is a C trampoline
+ * because the Sailfin frontend can't thread an arena/aggregate yet (M1.A.2).
+ * When that flip lands, the body moves into `runtime/sfn/string.sfn` alongside
+ * `sfn_str_sfn_from_byte`, in lockstep with `from_codepoint`. */
+char *sfn_str_from_byte(int64_t n)
+{
+    _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
+    size_t len = (n >= 1 && n <= 255) ? 1 : 0;
+    char *out = (char *)_rt_malloc(len + 1);
+    if (!out)
+    {
+        return NULL;
+    }
+    if (len > 0)
+    {
+        out[0] = (char)(unsigned char)n;
+    }
+    out[len] = '\0';
+    _track_owned_string(out);
+    return out;
+}
+
 /* #716: unlike the other delegators, `sailfin_runtime_string_to_number`
  * (line ~3871) does NOT guard immediate codepoints — it hands the
  * operand straight to `strtod`, which would dereference a tagged

@@ -10,7 +10,8 @@ import {
     TestCapsuleResolution,
     discover_project_root,
     discover_workspace_root,
-    prepare_project_capsules_for_test
+    prepare_project_capsules_for_test,
+    resolve_workspace_lock_entries
 } from "./capsule_resolver";
 import {
     _collect_sfn_files_cmd,
@@ -51,7 +52,7 @@ import {
 import { assemble_runtime_capsule_link_inputs } from "./cli_main";
 import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "./dist_manifest";
 import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
-import { lock_add_entry, lock_get_version } from "./lock";
+import { lock_add_entry, lock_get_version, workspace_lock_write } from "./lock";
 import {
     compile_tests_to_llvm_file_with_module_imports,
     compile_to_llvm_file_with_module,
@@ -174,7 +175,10 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         return 1;
     }
     _ensure_dir_cmd(rt_cache_dir);
-    let rt = assemble_runtime_capsule_link_inputs(runtime_caps, rt_cache_dir, "-O0", binary_dir);
+    // Test link path keeps runtime objects work-dir-local (shared root
+    // empty); the shared content-addressed runtime cache (#1096) is
+    // scoped to the build/run path that feeds the build-quality gate.
+    let rt = assemble_runtime_capsule_link_inputs(runtime_caps, rt_cache_dir, "-O0", binary_dir, "");
     if !rt.success { return 1; }
     let mut roi: int = 0;
     loop {
@@ -743,16 +747,17 @@ fn _should_retry_test(exit_code: int, retries_disabled: boolean) -> boolean {
 // Resolve the path to this compiler binary so the multi-file runner
 // can re-invoke itself (`<self> test <file>`) once per test for
 // process isolation. Mirrors `_resolve_self_path` in `cli_main.sfn`:
-// prefer `<binary_dir>/sailfin` (computed by `fn main` from
-// `exe_path()` / `realpath(argv[0])` on every platform), fall back to
-// the Linux `/proc/self/exe` symlink when no binary_dir was threaded
-// through.
+// `<binary_dir>/sailfin` (computed by `fn main` from `exe_path()` /
+// `realpath(argv[0])` on every platform) is the real resolution path.
+// The doubly-Linux-only `readlink -f /proc/self/exe` shell fallback
+// was removed in #970 — it never worked on macOS and is dead code now
+// that `exe_path()` (#968) threads `binary_dir` portably.
 fn _resolve_test_self_path(binary_dir: string) -> string ![io] {
     if binary_dir.length > 0 {
         let candidate = _path_join_cmd(binary_dir, "sailfin");
         if fs.exists(candidate) { return candidate; }
     }
-    return _shell_read_cmd("readlink -f /proc/self/exe");
+    return "";
 }
 
 // Per-test wall-clock budget, ported from the retired
@@ -1169,7 +1174,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         let warm_caps = runtime_capsule_from_root(runtime_root);
         if warm_caps.length > 0 {
             _ensure_dir_cmd(sub_root);
-            let warm = assemble_runtime_capsule_link_inputs(warm_caps, sub_root, "-O0", binary_dir);
+            let warm = assemble_runtime_capsule_link_inputs(warm_caps, sub_root, "-O0", binary_dir, "");
             if !warm.success {
                 print.err("[test] warning: failed to pre-warm runtime objects under "
                     + sub_root
@@ -1278,11 +1283,18 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         // exclusively via `../../src/X` relative imports — fail
         // the in-resolver `_cr_any_entry_imports_host` gate, so
         // host-enum stays a no-op and the resolver behaves the
-        // same as the prior `empty_resolver_consumer()` path.
-        // Standalone test files outside any `capsule.toml`
-        // (project_root empty) get a fully empty consumer for the
-        // same reason — there's no manifest, no `[capsule].name`,
-        // and so nothing for host-enum to walk.
+        // same as the prior `empty_resolver_consumer()` path. That
+        // gate is load-bearing: host-enum pulls in every host `src/`
+        // module including `main.sfn`, so firing it for those tests
+        // would link a second `@main` into each test binary. (#527
+        // mixed the slug into `cache_key_for`'s digest, closing the
+        // separate cache-entry race that co-firing the two walkers
+        // would cause; the gate still guards the link-layer
+        // duplicate-`@main` hazard.) Standalone test files outside
+        // any `capsule.toml` (project_root empty) get a fully empty
+        // consumer for the same reason — there's no manifest, no
+        // `[capsule].name`, and so nothing for
+        // host-enum to walk.
         // Stage D PR3: `sfn test` runs from the legacy `make test`
         // path that does not thread `binary_dir` through, so pass
         // an empty `sailfin_exe`. The resolver falls back to the
@@ -2854,6 +2866,33 @@ fn handle_init_command(args: string[]) -> int ![io] {
     return 0;
 }
 
+// `sfn lock`: materialize `workspace.lock` at the workspace root. Walks up
+// from the current directory for `workspace.toml`, resolves the member graph
+// into the flat lock-entry set (#1069), serializes it with the
+// `# workspace.lock` banner (#1068), and writes the file. Explicit-only —
+// nothing on the `sfn build` path regenerates it (keeps the self-host path
+// predictable). Output is deterministic, so re-running is idempotent.
+fn handle_lock_command(args: string[]) -> int ![io] {
+    if args.length != 1 {
+        print("usage: sfn lock");
+        return 2;
+    }
+    let mut start_dir = _get_env_cmd("PWD");
+    if start_dir.length == 0 { start_dir = "."; }
+    let workspace_root = discover_workspace_root(start_dir);
+    if workspace_root.length == 0 {
+        print("sfn lock: no workspace.toml found (run inside a workspace)");
+        return 1;
+    }
+    let entries = resolve_workspace_lock_entries(workspace_root);
+    let lock_text = workspace_lock_write(entries);
+    let lock_path = workspace_root + "/workspace.lock";
+    fs.writeFile(lock_path, lock_text);
+    print("wrote " + lock_path + " (" + number_to_string(entries.length)
+        + " members)");
+    return 0;
+}
+
 fn handle_login_command(args: string[]) -> int ![io] {
     if args.length > 2 {
         print("usage: sfn login [token]");
@@ -3064,6 +3103,7 @@ export {
     handle_add_command,
     handle_config_command,
     handle_init_command,
+    handle_lock_command,
     handle_login_command,
     handle_guillermo_command,
     handle_fmt_command
