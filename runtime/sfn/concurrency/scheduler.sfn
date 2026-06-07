@@ -427,9 +427,11 @@ fn sfn_taskqueue_count(queue: * u8) -> i64 {
 // dependency.
 fn _sfn_scheduler_struct_size() -> i64 { return 40; }
 
-// `_SC_NPROCESSORS_ONLN` on Linux glibc — the `sysconf` request for the
-// number of CPUs currently online. (macOS uses the same value; the
-// constant is the build-target's.)
+// `_SC_NPROCESSORS_ONLN` on Linux glibc (84) — the `sysconf` request for
+// the number of CPUs currently online. This is the build-target's value;
+// the constant is **not** portable: macOS/Darwin spells the same request
+// as 58, so a platform-conditional value is needed once Sailfin grows
+// `cfg`-style conditional compilation (§2.9 Q7).
 fn _sfn_scheduler_sc_nprocessors_onln() -> i32 { return 84; }
 
 // Default pool-size ceiling: `min(available_cores, 4)` per §2.6.1.
@@ -582,11 +584,11 @@ fn sfn_scheduler_create(queue: * u8) -> * u8 {
         if rc != 0 {
             // Partial spin-up: only [0, i) workers started. Shrink the
             // count to what actually launched so the shutdown join
-            // targets exactly those threads, drain + join them, then
-            // return null. `sfn_scheduler_shutdown` frees the handle and
-            // the thread array.
+            // targets exactly those threads, drain + join them, free the
+            // handle, then return null.
             sched.thread_count = i;
             sfn_scheduler_shutdown(sched_ptr);
+            sfn_scheduler_destroy(sched_ptr);
             return null;
         }
         i = i + 1;
@@ -601,9 +603,12 @@ fn sfn_scheduler_create(queue: * u8) -> * u8 {
 // and the wakeup are atomic with respect to a worker about to call
 // `pthread_cond_wait` — no worker sleeps through it. `pthread_join` is
 // the drain barrier: it returns only after each worker has emptied the
-// queue and observed the flag. Frees the scheduler handle and its
-// thread array; the queue is caller-owned and outlives the scheduler
-// (destroy it via `sfn_taskqueue_destroy`). Null-safe.
+// queue and observed the flag. The handle stays **valid** after this
+// call so the caller can read `sfn_scheduler_processed` /
+// `sfn_scheduler_thread_count`; release it with `sfn_scheduler_destroy`.
+// Call exactly once per scheduler (a second call would re-join already
+// joined threads). Null-safe; the queue is caller-owned and outlives the
+// scheduler (destroy it via `sfn_taskqueue_destroy`).
 fn sfn_scheduler_shutdown(scheduler: * u8) -> void {
     if scheduler as i64 == 0 { return; }
     let sched: * Scheduler = scheduler as * Scheduler;
@@ -624,7 +629,17 @@ fn sfn_scheduler_shutdown(scheduler: * u8) -> void {
         pthread_join(tid, null);
         i = i + 1;
     }
+}
 
+// `sfn_scheduler_destroy(scheduler)` frees the scheduler handle and its
+// `pthread_t` array. Pairs with `sfn_scheduler_create`, mirroring
+// `sfn_taskqueue_create`/`sfn_taskqueue_destroy`. The caller must
+// `sfn_scheduler_shutdown` first so no worker is still touching the
+// handle (destroying a running pool would be a use-after-free in the
+// workers). The queue is caller-owned and is NOT freed here. Null-safe.
+fn sfn_scheduler_destroy(scheduler: * u8) -> void {
+    if scheduler as i64 == 0 { return; }
+    let sched: * Scheduler = scheduler as * Scheduler;
     let threads_addr: i64 = sched.threads_addr;
     if threads_addr != 0 { free(threads_addr as * u8); }
     free(scheduler);

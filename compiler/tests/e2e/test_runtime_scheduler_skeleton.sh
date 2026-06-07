@@ -386,7 +386,7 @@ test_pool_emit_shape() {
 
     # The worker-pool surface must be defined.
     local fn
-    for fn in create shutdown worker next_task thread_count processed resolve_thread_count; do
+    for fn in create shutdown destroy worker next_task thread_count processed resolve_thread_count; do
         if ! grep -qE "^define .*@sfn_scheduler_${fn}\(" "$ll"; then
             echo "[test]   missing definition: @sfn_scheduler_${fn}"
             missing=$((missing + 1))
@@ -489,6 +489,7 @@ extern long sfn_taskqueue_count(void *q);
 
 extern void *sfn_scheduler_create(void *queue);
 extern void sfn_scheduler_shutdown(void *scheduler);
+extern void sfn_scheduler_destroy(void *scheduler);
 extern long sfn_scheduler_thread_count(void *scheduler);
 extern long sfn_scheduler_processed(void *scheduler);
 
@@ -520,7 +521,9 @@ int main(void) {
     }
 
     /* Atomic draining shutdown: must pull every queued task, then join
-     * all workers. Hangs here would mean a lost wakeup / deadlock. */
+     * all workers. Hangs here would mean a lost wakeup / deadlock. The
+     * handle stays valid after shutdown (drain+join only) — the getters
+     * below read it, then sfn_scheduler_destroy releases it. */
     sfn_scheduler_shutdown(sched);
 
     if (sfn_taskqueue_count(q) != 0) {
@@ -532,6 +535,7 @@ int main(void) {
                 sfn_scheduler_processed(sched), N);
         return 5;
     }
+    sfn_scheduler_destroy(sched);
     sfn_taskqueue_destroy(q);
 
     /* Phase 2: default sizing = min(cores, 4) when no override. */
@@ -545,10 +549,12 @@ int main(void) {
         return 7;
     }
     sfn_scheduler_shutdown(sched2);
+    sfn_scheduler_destroy(sched2);
     sfn_taskqueue_destroy(q2);
 
     /* Phase 3: null-safety. */
     sfn_scheduler_shutdown(NULL);
+    sfn_scheduler_destroy(NULL);
     if (sfn_scheduler_thread_count(NULL) != 0) {
         fprintf(stderr, "thread_count(NULL) != 0\n");
         return 8;
