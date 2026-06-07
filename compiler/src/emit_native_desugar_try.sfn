@@ -752,12 +752,12 @@ fn dt_build_match(statement: Statement, rest: Statement[], id: int) -> DtStmt {
     };
 
     let ok_case = MatchCase {
-        pattern: Expression.Raw { text: "Result.Ok { value }" },
+        pattern: Expression.Raw { text: "Result.Ok { value }", span: null },
         guard: null,
         body: ok_result.block
     };
     let err_case = MatchCase {
-        pattern: Expression.Raw { text: "Result.Err { error }" },
+        pattern: Expression.Raw { text: "Result.Err { error }", span: null },
         guard: null,
         body: err_block
     };

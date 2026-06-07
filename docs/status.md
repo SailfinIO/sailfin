@@ -8,8 +8,8 @@ feature availability.
 
 ## Build Pipeline (Current)
 
-- **Function-reference-as-value diagnostics + fatal silent-drop backstop
-  (#1147, 2026-06-07).** Complements #1146's `<fn> as * u8` lowering by
+- **Function-reference-as-value diagnostics (#1147, 2026-06-07).**
+  Complements #1146's `<fn> as * u8` lowering by
   rejecting every *unsupported* function-reference spelling at typecheck
   instead of letting it lower to `null` / a wrong closure-pair coercion.
   Two new error codes in `typecheck.sfn`'s `walk_expression`: **E0808** —

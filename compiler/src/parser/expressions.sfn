@@ -70,7 +70,7 @@ fn expression_tokens_advance(state: ExpressionTokens) -> ExpressionTokens {
 fn expression_parse_failure(state: ExpressionTokens) -> ExpressionParseResult {
     return ExpressionParseResult {
         state: state,
-        expression: Expression.Raw { text: "" },
+        expression: Expression.Raw { text: "", span: null },
         success: false
     };
 }
@@ -252,7 +252,10 @@ fn collect_expression_block(state: ExpressionTokens) -> ExpressionBlockParseResu
 fn expression_from_tokens(tokens: Token[]) -> Expression {
     let filtered = filter_trivia(tokens);
     if filtered.length == 0 {
-        return Expression.Raw { text: "" };
+        return Expression.Raw {
+            text: "",
+            span: source_span_from_tokens(tokens)
+        };
     }
 
     if filtered.length == 1 {
@@ -263,11 +266,17 @@ fn expression_from_tokens(tokens: Token[]) -> Expression {
     let state = ExpressionTokens { tokens: filtered, index: 0 };
     let result = parse_expression_bp(state, 0);
     if !result.success {
-        return Expression.Raw { text: trim_text(tokens_to_text(tokens)) };
+        return Expression.Raw {
+            text: trim_text(tokens_to_text(tokens)),
+            span: source_span_from_tokens(tokens)
+        };
     }
 
     if result.state.index != result.state.tokens.length {
-        return Expression.Raw { text: trim_text(tokens_to_text(tokens)) };
+        return Expression.Raw {
+            text: trim_text(tokens_to_text(tokens)),
+            span: source_span_from_tokens(tokens)
+        };
     }
 
     return result.expression;

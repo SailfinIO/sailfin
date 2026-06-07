@@ -1505,6 +1505,18 @@ fn make_fn_address_unsupported_diagnostic(name: string, reason: string, span: So
     };
 }
 
+// Strip one balanced layer of surrounding parentheses from a trimmed
+// string: `(worker)` -> `worker`. Returns the input unchanged when it is
+// not wrapped. Lets the classifier see through `(worker) as * u8` —
+// otherwise the leading `(` hides the function head and the reference
+// slips past the diagnostic.
+fn _strip_outer_parens(text: string) -> string {
+    if !starts_with(text, "(") { return text; }
+    if !ends_with(text, ")") { return text; }
+    let inner = substring(text, 1, text.length - 1);
+    return trim_text(inner);
+}
+
 // Classify a `Raw`-degraded expression that may be a function-reference
 // form the parser could not structure: `& <fn>` (the `&` prefix has no
 // unary parse) or `<fn> as <type>` (the `as` target only parses a bare
@@ -1512,52 +1524,61 @@ fn make_fn_address_unsupported_diagnostic(name: string, reason: string, span: So
 // when the head identifier resolves to a function in `symbols` — this
 // gate is load-bearing for self-host: `<value> as * u8` casts on
 // non-function operands (e.g. `label as * u8` in the driver) must stay
-// clean. Returns [] for anything that is not a bare function reference.
-fn check_fn_reference_raw(text: string, symbols: SymbolEntry[]) -> Diagnostic[] {
+// clean. `span` is the enclosing `Raw` node's span (the parser populates
+// it on degradation), used to caret the diagnostic. Returns [] for
+// anything that is not a bare function reference.
+fn check_fn_reference_raw(text: string, symbols: SymbolEntry[], span: SourceSpan?) -> Diagnostic[] {
     let trimmed = trim_text(text);
     if trimmed.length == 0 { return []; }
 
     // Address-of form: `& <fn>` — unsupported regardless of target.
     if starts_with(trimmed, "&") {
-        let rest = trim_text(strip_prefix(trimmed, "&"));
+        let rest = _strip_outer_parens(trim_text(strip_prefix(trimmed, "&")));
         let head = _leading_identifier(rest);
         if head.length == 0 { return []; }
         if !strings_equal(head, rest) { return []; }
         let amp_entry = find_symbol(symbols, head);
         if amp_entry == null { return []; }
         if !is_function_kind(amp_entry.kind) { return []; }
-        return [make_fn_value_position_diagnostic(head, null)];
+        return [make_fn_value_position_diagnostic(head, span)];
     }
 
     // Cast form: `<fn> as <type>`.
     let as_pos = index_of(trimmed, " as ");
     if as_pos < 0 { return []; }
-    let left = trim_text(substring(trimmed, 0, as_pos));
+    let left = _strip_outer_parens(trim_text(substring(trimmed, 0, as_pos)));
     let head = _leading_identifier(left);
     if head.length == 0 { return []; }
-    // Only fire when the left side is exactly the bare identifier (not
-    // `foo()` / `a + b` / a member access) so we target genuine
-    // function references, not arbitrary casts.
+    // Only fire when the left side is exactly the bare identifier (after
+    // stripping any wrapping parens) — not `foo()` / `a + b` / a member
+    // access — so we target genuine function references, not arbitrary
+    // casts.
     if !strings_equal(head, left) { return []; }
     let cast_entry = find_symbol(symbols, head);
     if cast_entry == null { return []; }
     if !is_function_kind(cast_entry.kind) { return []; }
 
+    // The only supported function-address spelling is `<fn> as * u8` (the
+    // C `void*`/`char*` code-pointer idiom #1146 lowers). Any other cast
+    // target — a non-pointer (`as i64`) or a typed data pointer
+    // (`as * i32`, which would reinterpret a code address as a data
+    // pointer) — is unsupported (E0808).
     let target = trim_text(substring(trimmed, as_pos + 4, trimmed.length));
-    // Supported form is a pointer target (`* u8` / `* T`) — #1146 lowers
-    // it to a real code-pointer bitcast — but only for a concrete,
-    // C-ABI function.
     if starts_with(target, "*") {
-        if cast_entry.is_generic {
-            return [make_fn_address_unsupported_diagnostic(head, "it is generic", null)];
+        let pointee = trim_text(strip_prefix(target, "*"));
+        if strings_equal(pointee, "u8") {
+            // The blessed form — valid only for a concrete C-ABI function.
+            if cast_entry.is_generic {
+                return [make_fn_address_unsupported_diagnostic(head, "it is generic", span)];
+            }
+            if !cast_entry.is_c_abi {
+                return [make_fn_address_unsupported_diagnostic(head, "its signature is not C-ABI-compatible", span)];
+            }
+            return [];
         }
-        if !cast_entry.is_c_abi {
-            return [make_fn_address_unsupported_diagnostic(head, "its signature is not C-ABI-compatible", null)];
-        }
-        return [];
     }
-    // A non-pointer cast target is not a supported function-address form.
-    return [make_fn_value_position_diagnostic(head, null)];
+    // Non-`* u8` target — not a supported function-address form.
+    return [make_fn_value_position_diagnostic(head, span)];
 }
 
 fn has_symbol_in_range(symbols: SymbolEntry[], name: string, start: int) -> boolean {

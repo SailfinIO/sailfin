@@ -1013,7 +1013,7 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
     // function-reference spellings here. Gated on the head resolving to a
     // function so non-function `<value> as * u8` casts stay clean.
     if expression.variant == "Raw" {
-        return check_fn_reference_raw(expression.text, bindings);
+        return check_fn_reference_raw(expression.text, bindings, expression.span);
     }
     return [];
 }

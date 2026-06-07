@@ -124,7 +124,7 @@ enum Expression {
     // `serve(handler, port)` — accept loop dispatching to the thread pool;
     // `port` is optional to allow a configured default (§2.6.6).
     Serve { handler: Expression, port: Expression?, span: SourceSpan? },
-    Raw { text: string }
+    Raw { text: string, span: SourceSpan? }
 }
 
 struct Parameter {

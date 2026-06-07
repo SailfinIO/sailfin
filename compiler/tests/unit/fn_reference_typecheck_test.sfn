@@ -14,7 +14,6 @@
 // lowering import, per the #331 atomics 180s-timeout precedent).
 import { parse_program } from "../../src/parser/mod";
 import { typecheck_diagnostics } from "../../src/typecheck";
-import { Diagnostic } from "../../src/typecheck_types";
 
 fn _count_code(source: string, code: string) -> int ![io] {
     let program = parse_program(source);
@@ -30,7 +29,6 @@ fn _count_code(source: string, code: string) -> int ![io] {
 }
 
 // ── E0808: unsupported value-position spellings ──
-
 test "fn-ref: bare function in a let initializer is E0808" {
     assert _count_code("fn worker() { } fn main() { let f = worker; }", "E0808") == 1;
 }
@@ -49,7 +47,6 @@ test "fn-ref: bare function passed as an argument is E0808" {
 }
 
 // ── E0809: generic / non-C-ABI `<fn> as * u8` ──
-
 test "fn-ref: generic function `as * u8` is E0809" {
     let source = "fn gen<T>(x: T) -> T { return x; } fn main() { let f = gen as * u8; }";
     assert _count_code(source, "E0809") == 1;
@@ -61,7 +58,6 @@ test "fn-ref: non-C-ABI function `as * u8` is E0809" {
 }
 
 // ── Supported form stays clean (the #1146 happy path) ──
-
 test "fn-ref: concrete C-ABI `<fn> as * u8` is accepted (no E0808/E0809)" {
     let source = "fn worker(arg: * u8) -> * u8 { return arg; } fn main() { let f = worker as * u8; }";
     assert _count_code(source, "E0808") == 0;
@@ -71,15 +67,31 @@ test "fn-ref: concrete C-ABI `<fn> as * u8` is accepted (no E0808/E0809)" {
 // ── Self-host gate: a non-function `as * u8` cast must NOT be flagged ──
 // (the compiler driver casts `label`/`argv[0]` as `* u8`; flagging those
 // would break `make compile`).
-
 test "fn-ref: non-function `<value> as * u8` is not flagged" {
     let source = "fn main() { let label = \"x\"; let p = label as * u8; }";
     assert _count_code(source, "E0808") == 0;
     assert _count_code(source, "E0809") == 0;
 }
 
-// ── A normal call is not a value reference (Risk-1 guard) ──
+// ── Only `* u8` is the supported address target (#1147 review) ──
+test "fn-ref: `<fn> as * i32` (non-u8 pointer target) is E0808" {
+    let source = "fn worker(arg: * u8) -> * u8 { return arg; } fn main() { let f = worker as * i32; }";
+    assert _count_code(source, "E0808") == 1;
+}
 
+// ── Parenthesized forms are still classified (#1147 review) ──
+test "fn-ref: `(<generic-fn>) as * u8` is still E0809 (parens don't hide it)" {
+    let source = "fn gen<T>(x: T) -> T { return x; } fn main() { let f = (gen) as * u8; }";
+    assert _count_code(source, "E0809") == 1;
+}
+
+test "fn-ref: `(<concrete C-ABI fn>) as * u8` is accepted" {
+    let source = "fn worker(arg: * u8) -> * u8 { return arg; } fn main() { let f = (worker) as * u8; }";
+    assert _count_code(source, "E0808") == 0;
+    assert _count_code(source, "E0809") == 0;
+}
+
+// ── A normal call is not a value reference (Risk-1 guard) ──
 test "fn-ref: a normal function call is not flagged as a value use" {
     assert _count_code("fn worker() { } fn main() { worker(); }", "E0808") == 0;
 }
