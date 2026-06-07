@@ -7,19 +7,24 @@
 // layouts plus the opaque pthread-handle storage types; the
 // `sfn_taskqueue_*` section below implements the mutex-guarded
 // enqueue/dequeue surface that producers and consumers share. The
-// remaining runtime behaviour — worker-pool spawn/join and the
-// spawn/await surface (§2.6.2–§2.6.3) — lands in follow-up M4
-// issues and is intentionally out of scope here.
+// `sfn_scheduler_*` section spins up the fixed worker pool —
+// `pthread_create` worker loop, `min(cores, 4)` / `SAILFIN_THREADS`
+// sizing, and atomic shutdown that drains + joins (§2.6.2). The
+// remaining runtime behaviour — task invocation and the spawn/await
+// result surface (§2.6.3) — lands in follow-up M4 issues and is
+// intentionally out of scope here.
 //
 // Part of the M4 scheduler-core track (epic #965). The track has
 // no frontend dependency: every layout and operation below is
 // written against the `extern fn` pthread surface in
 // `runtime/sfn/platform/pthread.sfn` that the current seed already
-// compiles, and against atomic intrinsics (#323). The module is
-// imported nowhere yet; like the platform skeletons, it is
-// verified as a standalone typecheck + `sfn fmt` smoke target plus
-// a linked single-thread roundtrip until the worker pool consumes
-// it.
+// compiles, against atomic intrinsics (#323), and against the
+// function-reference → address lowering (#1146) the worker entry
+// needs for `pthread_create`. The module is imported nowhere yet;
+// like the platform skeletons, it is verified as a standalone
+// typecheck + `sfn fmt` smoke target plus linked single-thread
+// (queue) and multi-thread (pool) roundtrips until the spawn/await
+// surface consumes it.
 //
 // ── Pointer-as-address convention ─────────────────────────────
 // The runtime models heap pointers stored in struct fields as
@@ -131,20 +136,26 @@ struct TaskQueue {
 }
 
 // The fixed thread pool. Mirrors the §2.6.1 `Scheduler` layout.
-// `threads_addr` points at a `thread_count`-slot array of
-// `pthread_t` ids (each written by `pthread_create`; `pthread_t`
-// is pointer-sized — modelled as `usize` in `pthread.sfn`).
-// `thread_count` is the pool size, defaulting to
-// `min(available_cores, 4)` and overridable via `SAILFIN_THREADS`
-// (resolution lands with the worker pool). `queue_addr` is the
-// shared `* TaskQueue`. `shutdown` is an atomic flag (LLVM atomic
-// intrinsics): 0 = running, 1 = draining — workers observe it to
-// exit their dispatch loop.
+// `shutdown` is an atomic flag (LLVM atomic intrinsics): 0 = running,
+// 1 = draining — workers observe it to exit their dispatch loop. It is
+// deliberately the **first** field so its address equals the scheduler
+// base pointer (`scheduler as * i64`): the atomic load/store reach it
+// with no offset arithmetic, the way the queue ring reaches its slots.
+// `threads_addr` points at a `thread_count`-slot array of `pthread_t`
+// ids (each written by `pthread_create`; `pthread_t` is pointer-sized —
+// modelled as `usize` in `pthread.sfn`). `thread_count` is the pool
+// size, defaulting to `min(available_cores, 4)` and overridable via
+// `SAILFIN_THREADS` (see `sfn_scheduler_resolve_thread_count`).
+// `queue_addr` is the shared `* TaskQueue`. `processed` counts tasks
+// pulled off the queue, incremented under the queue mutex (so a plain
+// increment is race-free) — a drain witness for tests until task
+// *invocation* (§2.6.3) lands. Linux x86_64 layout: five i64s = 40 B.
 struct Scheduler {
+    shutdown: i64;
     threads_addr: i64;
     thread_count: i64;
     queue_addr: i64;
-    shutdown: i64;
+    processed: i64;
 }
 
 // ── Externs ───────────────────────────────────────────────────
@@ -181,7 +192,31 @@ extern fn pthread_cond_wait(c: * PthreadCond, m: * PthreadMutex) -> i32;
 
 extern fn pthread_cond_signal(c: * PthreadCond) -> i32;
 
+extern fn pthread_cond_broadcast(c: * PthreadCond) -> i32;
+
 extern fn pthread_cond_destroy(c: * PthreadCond) -> i32;
+
+// Thread lifecycle for the worker pool. `pthread_create` writes the new
+// `pthread_t` into the `* usize` out-slot and takes the worker entry as
+// a raw `* u8` start_routine (the address of `sfn_scheduler_worker`,
+// materialised via `<fn> as * u8` — the function-reference → address
+// lowering shipped in #1146). `pthread_join` consumes a `pthread_t` by
+// value (`usize`) and discards the worker return (`null` result). These
+// mirror `runtime/sfn/platform/pthread.sfn` exactly, so the emitted
+// `declare` shape is identical if the two modules are ever linked.
+extern fn pthread_create(thread: * usize, attr: * PthreadAttr, start: * u8, arg: * u8) -> i32;
+
+extern fn pthread_join(thread: usize, result: * * u8) -> i32;
+
+// Process/environment surface for pool sizing. `sysconf` queries the
+// online CPU count (`_SC_NPROCESSORS_ONLN`); `getenv` + `atoi` read the
+// optional `SAILFIN_THREADS` override. Same C-ABI accept-list
+// discipline (E0801–E0805) as the pthread surface above.
+extern fn sysconf(name: i32) -> i64;
+
+extern fn getenv(name: * u8) -> * u8;
+
+extern fn atoi(s: * u8) -> i32;
 
 // ── Shared MPMC task queue ────────────────────────────────────
 // The `sfn_taskqueue_*` surface implements the §2.6.1
@@ -366,4 +401,264 @@ fn sfn_taskqueue_count(queue: * u8) -> i64 {
     let live: i64 = q.count;
     pthread_mutex_unlock(q.mutex);
     return live;
+}
+
+// ── Fixed worker pool ─────────────────────────────────────────
+// Spin-up + atomic shutdown for the §2.6.1 "Fixed Thread Pool, Not
+// Work-Stealing" scheduler (issue #1088). `sfn_scheduler_create`
+// resolves the pool size, allocates the `Scheduler` plus its
+// `pthread_t` array, and `pthread_create`s one `sfn_scheduler_worker`
+// per slot — each handed the worker entry's *address*
+// (`sfn_scheduler_worker as * u8`, the #1146 function-reference →
+// address lowering) as `pthread_create`'s `start_routine`. Workers
+// block on the shared queue's `not_empty` condition until a task
+// arrives or shutdown is requested. `sfn_scheduler_shutdown` publishes
+// the atomic shutdown flag under the queue mutex, broadcasts to wake
+// every parked worker, and joins them all — draining the queue first,
+// with no leaked thread and no deadlock.
+//
+// Out of scope here (next M4 issue, #1089): task *invocation* — calling
+// `Task.fn_ptr` with `Task.ctx` and writing `Task.result` / `Task.done`
+// — which additionally needs the indirect typed-fn-pointer call
+// primitive (#1118). Until then the worker only proves spin-up + pull +
+// drain + join, recording each pull in `Scheduler.processed`.
+// `Scheduler` byte size on Linux x86_64: five `i64` fields = 40 bytes.
+// Tracks the struct above; the allocator path is the only layout
+// dependency.
+fn _sfn_scheduler_struct_size() -> i64 { return 40; }
+
+// `_SC_NPROCESSORS_ONLN` on Linux glibc (84) — the `sysconf` request for
+// the number of CPUs currently online. This is the build-target's value;
+// the constant is **not** portable: macOS/Darwin spells the same request
+// as 58, so a platform-conditional value is needed once Sailfin grows
+// `cfg`-style conditional compilation (§2.9 Q7).
+fn _sfn_scheduler_sc_nprocessors_onln() -> i32 { return 84; }
+
+// Default pool-size ceiling: `min(available_cores, 4)` per §2.6.1.
+fn _sfn_scheduler_default_max() -> i64 { return 4; }
+
+// Sanity ceiling for an explicit `SAILFIN_THREADS` override. The value
+// is honoured verbatim up to this cap; the cap only guards against an
+// absurd request whose `count * 8` thread-array allocation would
+// overflow `i64` (mirroring the queue's capacity guard) — real pools
+// are tiny.
+fn _sfn_scheduler_max_thread_count() -> i64 { return 1024; }
+
+// Resolve the worker count. An explicit `SAILFIN_THREADS=N` (N >= 1)
+// wins, clamped to the sanity ceiling; a missing, empty, non-numeric,
+// or non-positive value falls through to `min(online_cores, 4)`. A
+// `sysconf` failure (returns -1) or a single-core box both clamp up to
+// at least one worker.
+fn sfn_scheduler_resolve_thread_count() -> i64 {
+    let s_env: string = "SAILFIN_THREADS";
+    let raw: * u8 = getenv(s_env as * u8);
+    if raw as i64 != 0 {
+        let n: i32 = atoi(raw);
+        if n >= 1 {
+            let mut requested: i64 = n as i64;
+            if requested > _sfn_scheduler_max_thread_count() {
+                requested = _sfn_scheduler_max_thread_count();
+            }
+            return requested;
+        }
+    }
+
+    let cores: i64 = sysconf(_sfn_scheduler_sc_nprocessors_onln());
+    let mut resolved: i64 = cores;
+    if resolved < 1 { resolved = 1; }
+    if resolved > _sfn_scheduler_default_max() {
+        resolved = _sfn_scheduler_default_max();
+    }
+    return resolved;
+}
+
+// `sfn_scheduler_worker(arg)` is the pthread `start_routine`. `arg` is
+// the `* u8` scheduler handle. The loop pulls tasks via
+// `sfn_scheduler_next_task` until it returns null (queue drained AND
+// shutdown requested), then exits so `pthread_join` can complete. Task
+// invocation is deferred (#1089 / #1118 — see the section header), so a
+// pulled task address is simply dropped here; the pull itself is
+// recorded in `Scheduler.processed` by `sfn_scheduler_next_task`.
+fn sfn_scheduler_worker(arg: * u8) -> * u8 {
+    let scheduler: * u8 = arg;
+    loop {
+        let task: * u8 = sfn_scheduler_next_task(scheduler);
+        if task as i64 == 0 { break; }
+    }
+    return null;
+}
+
+// Pull the next task for a worker, blocking until one is available or
+// shutdown is requested. Returns null only when the queue is empty AND
+// the shutdown flag is set — i.e. drained — so workers finish all
+// queued work before exiting. The shutdown flag is read with
+// `atomic_load` under the queue mutex; `sfn_scheduler_shutdown` sets it
+// (also under the mutex) and broadcasts `not_empty`, so a worker can
+// never sleep through the transition: it either observes `count > 0`,
+// observes `shutdown != 0`, or is parked in `pthread_cond_wait` when the
+// broadcast fires. Draining wins over shutdown — while `count > 0` a
+// worker keeps pulling regardless of the flag.
+fn sfn_scheduler_next_task(scheduler: * u8) -> * u8 {
+    if scheduler as i64 == 0 { return null; }
+    let sched: * Scheduler = scheduler as * Scheduler;
+    let q: * TaskQueue = sched.queue_addr as * TaskQueue;
+    // `shutdown` is the first Scheduler field, so its address is the
+    // scheduler base — no offset arithmetic.
+    let shutdown_slot: * i64 = scheduler as * i64;
+
+    pthread_mutex_lock(q.mutex);
+
+    loop {
+        if q.count > 0 { break; }
+        if atomic_load(shutdown_slot) != 0 {
+            pthread_mutex_unlock(q.mutex);
+            return null;
+        }
+        pthread_cond_wait(q.not_empty, q.mutex);
+    }
+
+    let slot: * i64 = (q.tasks_addr + q.head * 8) as * i64;
+    let task_addr: i64 = atomic_load(slot);
+
+    let mut next_head: i64 = q.head + 1;
+    if next_head >= q.capacity { next_head = 0; }
+    q.head = next_head;
+    q.count = q.count - 1;
+
+    // Mutex-protected, so a plain increment is race-free across workers.
+    sched.processed = sched.processed + 1;
+
+    // Wake a producer parked on a full ring (FIFO drain keeps space
+    // available even while shutting down).
+    pthread_cond_signal(q.not_full);
+    pthread_mutex_unlock(q.mutex);
+
+    return task_addr as * u8;
+}
+
+// `sfn_scheduler_create(queue)` resolves the pool size, allocates the
+// scheduler handle and its `pthread_t` array, and spawns one worker per
+// slot bound to the shared `queue` (`* u8`, re-cast to `* TaskQueue`
+// only inside this module). Returns the scheduler handle as `* u8`, or
+// null on a null queue, OOM, or a failed `pthread_create`. On a partial
+// spin-up failure it tears down the workers already running (no leak, no
+// deadlock) before freeing and returning null.
+fn sfn_scheduler_create(queue: * u8) -> * u8 {
+    if queue as i64 == 0 { return null; }
+
+    let count: i64 = sfn_scheduler_resolve_thread_count();
+
+    let sched_ptr: * u8 = malloc(_sfn_scheduler_struct_size() as usize);
+    if sched_ptr as i64 == 0 { return null; }
+
+    let threads_ptr: * u8 = malloc((count * 8) as usize);
+    if threads_ptr as i64 == 0 {
+        free(sched_ptr);
+        return null;
+    }
+
+    let sched: * Scheduler = sched_ptr as * Scheduler;
+    sched.shutdown = 0;
+    sched.threads_addr = threads_ptr as i64;
+    sched.thread_count = count;
+    sched.queue_addr = queue as i64;
+    sched.processed = 0;
+
+    // The load-bearing #1146 line: the worker entry's address must be a
+    // real code pointer, not the silent null the frontend emitted
+    // before the function-reference → address lowering landed. A null
+    // here would hand `pthread_create` a NULL start_routine (EINVAL /
+    // crash), so guard it explicitly.
+    let start: * u8 = sfn_scheduler_worker as * u8;
+    if start as i64 == 0 {
+        free(threads_ptr);
+        free(sched_ptr);
+        return null;
+    }
+
+    let mut i: i64 = 0;
+    loop {
+        if i >= count { break; }
+        let tid_slot: * usize = (sched.threads_addr + i * 8) as * usize;
+        let rc: i32 = pthread_create(tid_slot, null, start, sched_ptr);
+        if rc != 0 {
+            // Partial spin-up: only [0, i) workers started. Shrink the
+            // count to what actually launched so the shutdown join
+            // targets exactly those threads, drain + join them, free the
+            // handle, then return null.
+            sched.thread_count = i;
+            sfn_scheduler_shutdown(sched_ptr);
+            sfn_scheduler_destroy(sched_ptr);
+            return null;
+        }
+        i = i + 1;
+    }
+
+    return sched_ptr;
+}
+
+// `sfn_scheduler_shutdown(scheduler)` requests an atomic, draining
+// shutdown and joins every worker. It publishes the shutdown flag and
+// broadcasts both conditions **under the queue mutex**, so the flag-set
+// and the wakeup are atomic with respect to a worker about to call
+// `pthread_cond_wait` — no worker sleeps through it. `pthread_join` is
+// the drain barrier: it returns only after each worker has emptied the
+// queue and observed the flag. The handle stays **valid** after this
+// call so the caller can read `sfn_scheduler_processed` /
+// `sfn_scheduler_thread_count`; release it with `sfn_scheduler_destroy`.
+// Call exactly once per scheduler (a second call would re-join already
+// joined threads). Null-safe; the queue is caller-owned and outlives the
+// scheduler (destroy it via `sfn_taskqueue_destroy`).
+fn sfn_scheduler_shutdown(scheduler: * u8) -> void {
+    if scheduler as i64 == 0 { return; }
+    let sched: * Scheduler = scheduler as * Scheduler;
+    let q: * TaskQueue = sched.queue_addr as * TaskQueue;
+    let shutdown_slot: * i64 = scheduler as * i64;
+
+    pthread_mutex_lock(q.mutex);
+    atomic_store(shutdown_slot, 1);
+    pthread_cond_broadcast(q.not_empty);
+    pthread_cond_broadcast(q.not_full);
+    pthread_mutex_unlock(q.mutex);
+
+    let mut i: i64 = 0;
+    loop {
+        if i >= sched.thread_count { break; }
+        let tid_slot: * i64 = (sched.threads_addr + i * 8) as * i64;
+        let tid: usize = atomic_load(tid_slot) as usize;
+        pthread_join(tid, null);
+        i = i + 1;
+    }
+}
+
+// `sfn_scheduler_destroy(scheduler)` frees the scheduler handle and its
+// `pthread_t` array. Pairs with `sfn_scheduler_create`, mirroring
+// `sfn_taskqueue_create`/`sfn_taskqueue_destroy`. The caller must
+// `sfn_scheduler_shutdown` first so no worker is still touching the
+// handle (destroying a running pool would be a use-after-free in the
+// workers). The queue is caller-owned and is NOT freed here. Null-safe.
+fn sfn_scheduler_destroy(scheduler: * u8) -> void {
+    if scheduler as i64 == 0 { return; }
+    let sched: * Scheduler = scheduler as * Scheduler;
+    let threads_addr: i64 = sched.threads_addr;
+    if threads_addr != 0 { free(threads_addr as * u8); }
+    free(scheduler);
+}
+
+// `sfn_scheduler_thread_count(scheduler)` reports the resolved pool
+// size. Null handle reads as 0.
+fn sfn_scheduler_thread_count(scheduler: * u8) -> i64 {
+    if scheduler as i64 == 0 { return 0; }
+    let sched: * Scheduler = scheduler as * Scheduler;
+    return sched.thread_count;
+}
+
+// `sfn_scheduler_processed(scheduler)` reports the number of tasks
+// pulled off the queue by the pool — a drain witness for tests. Safe to
+// read after `sfn_scheduler_shutdown`'s joins establish happens-before;
+// null handle reads as 0.
+fn sfn_scheduler_processed(scheduler: * u8) -> i64 {
+    if scheduler as i64 == 0 { return 0; }
+    let sched: * Scheduler = scheduler as * Scheduler;
+    return sched.processed;
 }
