@@ -1,0 +1,256 @@
+// Unit tests for concurrency-node effect requirements (issue #1083,
+// epic #965 M4). The effect checker must produce an `io` violation for
+// `spawn`, channel-send, and channel-receive operations inside a
+// function that does not declare `![io]`, and a `net` violation for
+// `serve` without `![net]`. With the matching effect declared, the
+// checker produces zero violations.
+//
+// `spawn` and `serve` are first-class AST nodes (Expression.Spawn /
+// Expression.Serve, added in #1079). Channel send/receive are
+// Member-callee calls (`chan.send(v)` / `chan.receive()`) — there are
+// no dedicated AST nodes for them; the checker detects them by
+// inspecting the callee member name.
+import {
+    Block,
+    Decorator,
+    Expression,
+    FunctionSignature,
+    Program,
+    SourceSpan,
+    Statement,
+    TypeAnnotation
+} from "../../src/ast";
+import { EffectViolation, validate_effects } from "../../src/effect_checker";
+
+// -------------------------------------------------------------------
+// Builder helpers
+// -------------------------------------------------------------------
+fn _span(line: int, column: int) -> SourceSpan {
+    return SourceSpan {
+        start_line: line,
+        start_column: column,
+        end_line: line,
+        end_column: column + 1
+    };
+}
+
+fn _signature(name: string, effects: string[], span_line: int) -> FunctionSignature {
+    return FunctionSignature {
+        name: name,
+        is_async: false,
+        parameters: [],
+        return_type: null,
+        effects: effects,
+        type_parameters: [],
+        name_span: _span(span_line, 4)
+    };
+}
+
+fn _empty_block() -> Block {
+    return Block { tokens: [], text: "", statements: [] };
+}
+
+// Build a FunctionDeclaration whose body contains a single `spawn <callee>()`
+// expression node (Expression.Spawn). The spawned callee is an effect-free
+// identifier call so the only required effect is `io` from the spawn prefix.
+fn _make_spawn_fn(name: string, effects: string[], span_line: int) -> Statement {
+    let callee = Expression.Identifier { name: "worker", span: null };
+    let mut no_args: Expression[] = [];
+    let inner_call = Expression.Call {
+        callee: callee,
+        arguments: no_args,
+        span: null
+    };
+    let spawn_expr = Expression.Spawn {
+        operand: inner_call,
+        span: _span(span_line + 1, 4),
+        kind: ""
+    };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: spawn_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: "",
+        statements: [body_stmt]
+    };
+    let mut no_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, effects, span_line),
+        body: body_block,
+        decorators: no_decorators
+    };
+}
+
+// Build a FunctionDeclaration whose body contains a single `serve(handler)`
+// expression node (Expression.Serve). Requires `net`.
+fn _make_serve_fn(name: string, effects: string[], span_line: int) -> Statement {
+    let handler = Expression.Identifier { name: "my_handler", span: null };
+    let serve_expr = Expression.Serve {
+        handler: handler,
+        port: null,
+        span: _span(span_line + 1, 4)
+    };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: serve_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: "",
+        statements: [body_stmt]
+    };
+    let mut no_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, effects, span_line),
+        body: body_block,
+        decorators: no_decorators
+    };
+}
+
+// Build a FunctionDeclaration whose body contains a `chan.send(value)` call.
+// This is expressed as Call { callee: Member { object: "chan", member: "send" } }.
+fn _make_channel_send_fn(name: string, effects: string[], span_line: int) -> Statement {
+    let chan_obj = Expression.Identifier { name: "chan", span: null };
+    let callee = Expression.Member {
+        object: chan_obj,
+        member: "send",
+        span: _span(span_line + 1, 4)
+    };
+    let value = Expression.NumberLiteral { value: "42" };
+    let mut send_args: Expression[] = [];
+    send_args.push(value);
+    let call_expr = Expression.Call {
+        callee: callee,
+        arguments: send_args,
+        span: null
+    };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: call_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: "",
+        statements: [body_stmt]
+    };
+    let mut no_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, effects, span_line),
+        body: body_block,
+        decorators: no_decorators
+    };
+}
+
+// Build a FunctionDeclaration whose body contains a `chan.receive()` call.
+// This is expressed as Call { callee: Member { object: "chan", member: "receive" } }.
+fn _make_channel_receive_fn(name: string, effects: string[], span_line: int) -> Statement {
+    let chan_obj = Expression.Identifier { name: "chan", span: null };
+    let callee = Expression.Member {
+        object: chan_obj,
+        member: "receive",
+        span: _span(span_line + 1, 4)
+    };
+    let mut no_args: Expression[] = [];
+    let call_expr = Expression.Call {
+        callee: callee,
+        arguments: no_args,
+        span: null
+    };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: call_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: "",
+        statements: [body_stmt]
+    };
+    let mut no_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, effects, span_line),
+        body: body_block,
+        decorators: no_decorators
+    };
+}
+
+// -------------------------------------------------------------------
+// spawn — requires io
+// -------------------------------------------------------------------
+test "concurrency: spawn without ![io] is diagnosed" {
+    let mut no_effects: string[] = [];
+    let stmt = _make_spawn_fn("launch_without_io", no_effects, 1);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert violations[0].routine_name == "launch_without_io";
+}
+
+test "concurrency: spawn with ![io] is clean" {
+    let mut io_effects: string[] = ["io"];
+    let stmt = _make_spawn_fn("launch_with_io", io_effects, 1);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+// -------------------------------------------------------------------
+// serve — requires net
+// -------------------------------------------------------------------
+test "concurrency: serve without ![net] is diagnosed" {
+    let mut no_effects: string[] = [];
+    let stmt = _make_serve_fn("server_without_net", no_effects, 1);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert violations[0].routine_name == "server_without_net";
+}
+
+test "concurrency: serve with ![net] is clean" {
+    let mut net_effects: string[] = ["net"];
+    let stmt = _make_serve_fn("server_with_net", net_effects, 1);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+// -------------------------------------------------------------------
+// channel send — requires io
+// -------------------------------------------------------------------
+test "concurrency: channel send without ![io] is diagnosed" {
+    let mut no_effects: string[] = [];
+    let stmt = _make_channel_send_fn("sender_without_io", no_effects, 1);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert violations[0].routine_name == "sender_without_io";
+}
+
+test "concurrency: channel send with ![io] is clean" {
+    let mut io_effects: string[] = ["io"];
+    let stmt = _make_channel_send_fn("sender_with_io", io_effects, 1);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+// -------------------------------------------------------------------
+// channel receive — requires io
+// -------------------------------------------------------------------
+test "concurrency: channel receive without ![io] is diagnosed" {
+    let mut no_effects: string[] = [];
+    let stmt = _make_channel_receive_fn("receiver_without_io", no_effects, 1);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert violations[0].routine_name == "receiver_without_io";
+}
+
+test "concurrency: channel receive with ![io] is clean" {
+    let mut io_effects: string[] = ["io"];
+    let stmt = _make_channel_receive_fn("receiver_with_io", io_effects, 1);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
