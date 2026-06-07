@@ -213,13 +213,140 @@ json_val() {
 	printf '"%s"' "$v"
 }
 
-# --- full report file (#1119) ------------------------------------------------
-# Write a minimal, well-formed report at REPORT_PATH. Phase 2 scaffolding:
-# `phases` is an empty array stub here; issue E composes real per-phase content
-# from tool JSON. The report mirrors the verdict block's fields and adds a
-# self-referential `report` (its own path) plus `phases`. Best-effort: a write
-# failure must never break the verdict block, so it degrades silently.
+# --- tool-artifact composition (#1123) ---------------------------------------
+# Map the wrapped target to the tool JSON artifact the Makefile captured under
+# the same JSON=1 gate: the BuildReport from #1120 (compile/rebuild), the test
+# jsonl from #1121 (test*), the check-fast envelope from #1122 (check-fast).
+# Echoes the path, or empty for a target with no single-tool artifact (today
+# only `check`, whose seven-phase ledger is issue F).
+tool_artifact_path() {
+	case "$TARGET" in
+		compile | rebuild) printf '%s' "build/native/.build-report.json" ;;
+		test | test-unit | test-integration | test-e2e | test-capsules)
+			printf '%s' "build/agent-test.${TARGET}.jsonl"
+			;;
+		check-fast) printf '%s' "build/agent-check-fast.json" ;;
+		*) printf '' ;;
+	esac
+}
+
+# True for the test targets whose artifact is a `sfn test --json` jsonl stream
+# carrying `summary` events with passed/failed counters.
+is_test_target() {
+	case "$TARGET" in
+		test | test-unit | test-integration | test-e2e | test-capsules) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+# Sum the `passed`/`failed` counters across every `summary` event in a test
+# jsonl artifact (a single invocation may emit more than one). jq when present
+# (it also validates each line); a grep/sed tally otherwise — mirroring the
+# jq-or-sed `json_field` pattern in
+# compiler/tests/e2e/test_make_result_contract.sh. Emits "<passed> <failed>" on
+# stdout, or nothing when the file carries no summary event (caller degrades to
+# phases:[]).
+tally_test_counts() {
+	local file="$1"
+	if command -v jq >/dev/null 2>&1; then
+		# -R/-n + inputs reads the file line-by-line as raw strings so a stray
+		# non-JSON banner line (none expected on the teed stream, but be
+		# defensive) is skipped via `fromjson?` rather than aborting the tally.
+		jq -rR -n '
+			[inputs | fromjson? | select(.event == "summary")] as $s
+			| if ($s | length) == 0 then empty
+			  else "\($s | map(.passed // 0) | add) \($s | map(.failed // 0) | add)"
+			  end' "$file" 2>/dev/null
+		return
+	fi
+	local passed=0 failed=0 found=0 line p f
+	while IFS= read -r line; do
+		case "$line" in
+		*'"event":"summary"'*) ;;
+		*) continue ;;
+		esac
+		found=1
+		p="$(printf '%s' "$line" | sed -nE 's/.*"passed":([0-9]+).*/\1/p')"
+		f="$(printf '%s' "$line" | sed -nE 's/.*"failed":([0-9]+).*/\1/p')"
+		[ -n "$p" ] && passed=$((passed + p))
+		[ -n "$f" ] && failed=$((failed + f))
+	done <"$file"
+	[ "$found" -eq 1 ] && printf '%s %s' "$passed" "$failed"
+}
+
+# Compose the one-element phases[] array (#1123) from the captured tool
+# artifact. Echoes a JSON array literal:
+#   - non-test target, artifact present + parseable:
+#       [{"name":<target>,"status":<s>,"report":<artifact>}]
+#   - test target, jsonl present with a summary event:
+#       [{"name":<target>,"status":<s>,"passed":N,"failed":N,"report":<jsonl>}]
+#   - `check` (no single-tool artifact): a synthetic single entry
+#       [{"name":"check","status":<s>}] — issue F expands this to seven phases.
+#   - artifact expected but missing/unparseable: "[]" (graceful degrade).
+# Phase status mirrors the verdict: "fail" when STATUS is fail, else "pass"
+# (a `warn` target — check's nondeterminism — ran every phase, so the phase
+# itself is "pass"; the warn signal lives on the top-level status).
+compose_phases() {
+	local phase_status="pass"
+	[ "$STATUS" = "fail" ] && phase_status="fail"
+	local name_json status_json
+	name_json="$(json_val "$TARGET")"
+	status_json="$(json_val "$phase_status")"
+
+	local artifact
+	artifact="$(tool_artifact_path)"
+
+	# No single-tool artifact (today: `check`). Emit a synthetic one-element
+	# phase from the verdict so the report is never empty; issue F grows this
+	# into the seven-phase ledger.
+	if [ -z "$artifact" ]; then
+		printf '[{"name":%s,"status":%s}]' "$name_json" "$status_json"
+		return
+	fi
+
+	# Artifact expected but absent: degrade to [] (e.g. an up-to-date `compile`
+	# that never rebuilt, or the missing-artifact path of AC #4).
+	if [ ! -f "$artifact" ]; then
+		printf '[]'
+		return
+	fi
+
+	if is_test_target; then
+		local counts
+		counts="$(tally_test_counts "$artifact")"
+		# No summary event -> unparseable for our purpose; degrade to [].
+		if [ -z "$counts" ]; then
+			printf '[]'
+			return
+		fi
+		local passed="${counts%% *}" failed="${counts##* }"
+		printf '[{"name":%s,"status":%s,"passed":%s,"failed":%s,"report":%s}]' \
+			"$name_json" "$status_json" "$passed" "$failed" "$(json_val "$artifact")"
+		return
+	fi
+
+	# Non-test artifact (BuildReport / check-fast envelope). Validate it parses
+	# as JSON when jq is available; degrade to [] when it doesn't.
+	if command -v jq >/dev/null 2>&1; then
+		if ! jq -e . "$artifact" >/dev/null 2>&1; then
+			printf '[]'
+			return
+		fi
+	fi
+	printf '[{"name":%s,"status":%s,"report":%s}]' \
+		"$name_json" "$status_json" "$(json_val "$artifact")"
+}
+
+# --- full report file (#1119, composed in #1123) -----------------------------
+# Write a well-formed report at REPORT_PATH mirroring the verdict block's fields
+# plus a self-referential `report` (its own path) and a composed `phases[]`. The
+# `phases[]` is a single entry derived from the matching tool artifact (#1120/
+# #1121/#1122); it degrades to `[]` when that artifact is missing or
+# unparseable. Best-effort: a write failure must never break the verdict block,
+# so it degrades silently.
 write_report_file() {
+	local phases
+	phases="$(compose_phases)"
 	{
 		printf '{"schema_version":"sailfin-make/1",'
 		printf '"target":%s,' "$(json_val "$TARGET")"
@@ -228,7 +355,7 @@ write_report_file() {
 		printf '"phase":%s,' "$(json_val "$PHASE")"
 		printf '"first_error":%s,' "$(json_val "$FIRST_ERROR")"
 		printf '"report":%s,' "$(json_val "$REPORT_PATH")"
-		printf '"phases":[]}\n'
+		printf '"phases":%s}\n' "$phases"
 	} >"$REPORT_PATH" 2>/dev/null || true
 }
 
