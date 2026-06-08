@@ -1692,16 +1692,20 @@ fn check_fn_reference_raw(text: string, symbols: SymbolEntry[], span: SourceSpan
     if cast_entry == null { return []; }
     if !is_function_kind(cast_entry.kind) { return []; }
 
-    // The only supported function-address spelling is `<fn> as * u8` (the
-    // C `void*`/`char*` code-pointer idiom #1146 lowers). Any other cast
-    // target — a non-pointer (`as i64`) or a typed data pointer
-    // (`as * i32`, which would reinterpret a code address as a data
-    // pointer) — is unsupported (E0808).
+    // Supported function-address spellings: `<fn> as * u8` (the C
+    // `void*`/`char*` code-pointer idiom #1146 lowers) and `<fn> as
+    // * fn (...) -> T` (the precise function-pointer-typed form — e.g.
+    // the M4 concurrency trampolines in runtime/sfn/concurrency, #1193).
+    // Both materialize a C-ABI code pointer. Any other cast target — a
+    // non-pointer (`as i64`) or a typed data pointer (`as * i32`, which
+    // would reinterpret a code address as a data pointer) — is
+    // unsupported (E0808).
     let target = trim_text(substring(trimmed, as_pos + 4, trimmed.length));
     if starts_with(target, "*") {
         let pointee = trim_text(strip_prefix(target, "*"));
-        if strings_equal(pointee, "u8") {
-            // The blessed form — valid only for a concrete C-ABI function.
+        if strings_equal(pointee, "u8") || starts_with(pointee, "fn ")
+            || starts_with(pointee, "fn(") {
+            // A blessed form — valid only for a concrete C-ABI function.
             if cast_entry.is_generic {
                 return [make_fn_address_unsupported_diagnostic(head, "it is generic", span)];
             }
