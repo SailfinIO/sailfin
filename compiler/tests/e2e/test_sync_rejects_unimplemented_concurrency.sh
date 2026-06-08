@@ -415,17 +415,43 @@ fn main() ![io] {
 # path most users actually hit when they wrote `spawn(...)` thinking
 # of the keyword form.
 #
-# Issue #1085: `channel(0)` now has real LLVM lowering (it emits a call
-# to `sailfin_adapter_channel_create`), so it no longer fails at the
-# lowering stage. It will fail at link time because the runtime body is
-# not yet implemented (#1090). The fail-closed contract (rc != 0, no
-# binary) is unchanged — only the failure stage moves from lowering to
-# link time.
-test_channel_via_prelude_name_rejected() {
-    assert_build_fails_closed "channel_prelude_caller" \
-'fn main() ![io] {
+# Issue #1091: `channel(0)` now has both LLVM lowering (#1085) AND a wired
+# runtime body — `runtime/sfn/concurrency/channel.sfn` is listed in
+# `runtime/native/capsule.toml` `sfn-sources` (with `-lpthread`), so the
+# `sfn_channel_*` surface links into the program. A caller that creates a
+# channel therefore builds AND links successfully; the former
+# fail-closed-at-link expectation is obsolete now that the M4 Wave 2
+# channel runtime ships. (`parallel` and the untyped `spawn(0, "worker")`
+# call below remain unimplemented and still fail closed.)
+test_channel_via_prelude_name_builds() {
+    local label="channel_prelude_caller"
+    local source='fn main() ![io] {
     let _ch = channel(0);
 }'
+    local src_path="$SCRATCH/${label}.sfn"
+    local out_path="$SCRATCH/${label}.out"
+    local log_path="$SCRATCH/${label}.log"
+    printf '%s\n' "$source" > "$src_path"
+
+    local rc=0
+    ( cd "$SCRATCH" && "$BINARY" build -o "$out_path" "$src_path" ) \
+        > "$log_path" 2>&1 || rc=$?
+
+    if [ "$rc" -ne 0 ]; then
+        echo "[test]   build of ${label}.sfn exited $rc — expected 0 (channel runtime now wired, #1091)" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if [ ! -e "$out_path" ]; then
+        echo "[test]   build of ${label}.sfn produced no binary at ${out_path} — expected one" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    return 0
 }
 
 test_spawn_via_prelude_name_rejected() {
@@ -510,7 +536,7 @@ test_emit_native_spawn_rejected() {
 
 run_test "sfn build rejects sfn/sync.parallel import (#617)" test_parallel_via_sfn_sync_rejected
 run_test "sfn build rejects sfn/sync.spawn import (#617)" test_spawn_via_sfn_sync_rejected
-run_test "sfn build fails closed on channel() at link time (#1085)" test_channel_via_prelude_name_rejected
+run_test "sfn build succeeds on channel() now that the runtime is wired (#1091)" test_channel_via_prelude_name_builds
 run_test "sfn build rejects bare prelude spawn() (#617)" test_spawn_via_prelude_name_rejected
 run_test "sfn build fails closed on unknown void helper (#631)" test_unknown_void_helper_rejected
 run_test "sfn emit llvm fails closed on void spawn() (#631)" test_emit_llvm_spawn_rejected
