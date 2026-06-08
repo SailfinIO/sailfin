@@ -1,0 +1,390 @@
+// runtime/sfn/concurrency/future.sfn
+//
+// Public sfn_spawn / sfn_await futures built on the v0 scheduler
+// (`runtime/sfn/concurrency/scheduler.sfn`, issues #1088 + #1089).
+// Implements `docs/runtime_architecture.md` §2.6.2–§2.6.3.
+// Resolves issue #1090 (M4 Wave 2).
+//
+// ── Public surface ────────────────────────────────────────────
+// Base (untyped) entry points:
+//   sfn_spawn(fn_ptr: i64, ctx: i64, result_size: i64) -> * u8
+//     Lazily boots the global scheduler on first call, allocates a
+//     Task, enqueues it, returns the Task address as `SfnFuture*`.
+//
+//   sfn_await(future: * u8) -> * u8
+//     Blocks on the Task's cond/mutex until done; returns result.
+//
+// Typed families (compiler target → symbol):
+//   spawn_number     → sfn_spawn_number(fn_ptr: i64)           -> * u8
+//   spawn_number_ctx → sfn_spawn_number_ctx(fn_ptr: i64, ctx: i64) -> * u8
+//   await_number     → sfn_await_number(future: * u8)          -> f64
+//   spawn_int        → sfn_spawn_int(fn_ptr: i64)              -> * u8
+//   spawn_int_ctx    → sfn_spawn_int_ctx(fn_ptr: i64, ctx: i64) -> * u8
+//   await_int        → sfn_await_int(future: * u8)             -> i64
+//   spawn_bool       → sfn_spawn_bool(fn_ptr: i64)             -> * u8
+//   spawn_bool_ctx   → sfn_spawn_bool_ctx(fn_ptr: i64, ctx: i64) -> * u8
+//   await_bool       → sfn_await_bool(future: * u8)            -> i64
+//   spawn_ptr        → sfn_spawn_ptr(fn_ptr: i64)              -> * u8
+//   spawn_ptr_ctx    → sfn_spawn_ptr_ctx(fn_ptr: i64, ctx: i64) -> * u8
+//   await_ptr        → sfn_await_ptr(future: * u8)             -> * u8
+//   spawn_void       → sfn_spawn_void(fn_ptr: i64)             -> * u8
+//   spawn_void_ctx   → sfn_spawn_void_ctx(fn_ptr: i64, ctx: i64) -> * u8
+//   await_void       → sfn_await_void(future: * u8)            -> void
+//   spawn_string     → sfn_spawn_string(fn_ptr: i64)           -> * u8
+//   spawn_string_ctx → sfn_spawn_string_ctx(fn_ptr: i64, ctx: i64) -> * u8
+//   await_string     → sfn_await_string(future: * u8)          -> * u8
+//
+// ── Result packing convention ─────────────────────────────────
+// Task.result is an i64 address. Typed return values pack as:
+//   i64   → stored directly (value cast to * u8)
+//   f64   → bit-reinterpreted to i64 (packed as * u8)
+//   bool  → 0 or 1 cast to * u8
+//   * u8  → address stored directly (the pointer IS the result)
+//   void  → null returned
+//
+// No-ctx trampolines: zero-argument spawn variants pack the
+// caller's fn_ptr into the Task.ctx slot and use a per-type
+// trampoline that casts ctx back to the function-pointer type and
+// calls it with no arguments.
+//
+// Ctx trampolines: ctx-argument variants allocate a 16-byte pair
+// [fn_ptr: i64][user_ctx: i64], pass its address as the Task ctx,
+// unpack in the trampoline, free the pair, and call fn_ptr(user_ctx).
+//
+// ── Global scheduler singleton ────────────────────────────────
+// Two module-level i64 globals (following the
+// `sfn_capture_stdout_addr` / `sfn_exception_message_addr` pattern)
+// hold the queue and scheduler addresses. A third global is the
+// once-init flag. Lazy creation happens on the first sfn_spawn call:
+// if _sfn_g_queue_addr == 0, allocate queue + scheduler, store.
+// Thread safety: first spawn always happens before the pool exists
+// (the pool IS what we are creating), so no concurrent-init race.
+//
+// ── Pointer-as-address convention ─────────────────────────────
+// Follows scheduler.sfn: heap pointers stored in struct fields or
+// globals are kept as i64 addresses and cast to typed * T at use.
+//
+// Part of M4 scheduler-core track, epic #965.
+// ── Module-level globals ──────────────────────────────────────
+// Stored as i64 (matching the `process.sfn` / `exception.sfn`
+// precedent — the seed handles i64 module globals reliably).
+// 0 = not yet initialized.
+let mut _sfn_g_queue_addr: i64 = 0;
+
+let mut _sfn_g_sched_addr: i64 = 0;
+
+// ── Externs ───────────────────────────────────────────────────
+// Re-declared locally (scheduler.sfn discipline: the seed resolves
+// imported defined functions unreliably, so modules re-declare the
+// extern surface they call directly).
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn sfn_taskqueue_create(capacity: i64) -> * u8;
+
+extern fn sfn_taskqueue_enqueue(queue: * u8, task: * u8) -> void;
+
+extern fn sfn_task_create(fn_ptr: i64, ctx: i64) -> * u8;
+
+extern fn sfn_task_join(task: * u8) -> * u8;
+
+extern fn sfn_scheduler_create(queue: * u8) -> * u8;
+
+// ── Global scheduler lazy init ────────────────────────────────
+// Returns the queue address, creating the queue + pool on first call.
+// Default ring capacity: 256 tasks. Pool size is governed by
+// sfn_scheduler_resolve_thread_count (SAILFIN_THREADS or min(cores,4)).
+// Returns 0 on OOM or init failure.
+fn _sfn_ensure_scheduler() -> i64 {
+    if _sfn_g_queue_addr != 0 { return _sfn_g_queue_addr; }
+
+    let queue: * u8 = sfn_taskqueue_create(256);
+    if queue as i64 == 0 { return 0; }
+    _sfn_g_queue_addr = queue as i64;
+
+    let sched: * u8 = sfn_scheduler_create(queue);
+    if sched as i64 == 0 { return 0; }
+    _sfn_g_sched_addr = sched as i64;
+
+    return _sfn_g_queue_addr;
+}
+
+// ── Base spawn / await ────────────────────────────────────────
+//
+// `sfn_spawn(fn_ptr, ctx, result_size)` — enqueue a task. Returns
+// the Task address as `SfnFuture*` (i.e. `* u8`). `result_size` is
+// accepted for API symmetry with §2.6.2 but unused in v0 (the Task
+// stores results inline in the result i64 field).
+fn sfn_spawn(fn_ptr: i64, ctx: i64, result_size: i64) -> * u8 {
+    let queue_addr: i64 = _sfn_ensure_scheduler();
+    if queue_addr == 0 { return null; }
+
+    let task: * u8 = sfn_task_create(fn_ptr, ctx);
+    if task as i64 == 0 { return null; }
+
+    sfn_taskqueue_enqueue(queue_addr as * u8, task);
+    return task;
+}
+
+// `sfn_await(future)` — block until done, return result. Thin
+// wrapper over sfn_task_join.
+fn sfn_await(future: * u8) -> * u8 { return sfn_task_join(future); }
+
+// ── Typed spawn/await families ────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+// number (f64 / double)
+// ────────────────────────────────────────────────────────────────
+// Trampoline: ctx holds the address of a zero-argument `fn() -> f64`.
+// Bit-casts the f64 result to i64 and returns it as a * u8 so the
+// Task result field carries the raw bit pattern.
+fn _sfn_trampoline_number(ctx: * u8) -> * u8 {
+    let fn_addr: i64 = ctx as i64;
+    let entry: * fn () -> f64 = fn_addr as * fn () -> f64;
+    let val: f64 = entry();
+    let packed: i64 = val as i64;
+    return packed as * u8;
+}
+
+fn _sfn_trampoline_number_ctx(ctx: * u8) -> * u8 {
+    let base: i64 = ctx as i64;
+    let fn_slot: * i64 = base as * i64;
+    let ctx_slot: * i64 = (base + 8) as * i64;
+    let fn_addr: i64 = atomic_load(fn_slot);
+    let user_ctx: i64 = atomic_load(ctx_slot);
+    let entry: * fn (* u8) -> f64 = fn_addr as * fn (* u8) -> f64;
+    let val: f64 = entry(user_ctx as * u8);
+    let packed: i64 = val as i64;
+    free(ctx);
+    return packed as * u8;
+}
+
+fn sfn_spawn_number(fn_ptr: * u8) -> * u8 {
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_number as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, fn_ptr as i64, 8);
+}
+
+fn sfn_spawn_number_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
+    let pair: * u8 = malloc(16 as usize);
+    if pair as i64 == 0 { return null; }
+    let p0: * i64 = pair as * i64;
+    let p1: * i64 = (pair as i64 + 8) as * i64;
+    atomic_store(p0, fn_ptr as i64);
+    atomic_store(p1, ctx as i64);
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_number_ctx as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, pair as i64, 8);
+}
+
+fn sfn_await_number(future: * u8) -> f64 {
+    let raw: * u8 = sfn_await(future);
+    let packed: i64 = raw as i64;
+    return packed as f64;
+}
+
+// ────────────────────────────────────────────────────────────────
+// int (i64)
+// ────────────────────────────────────────────────────────────────
+fn _sfn_trampoline_int(ctx: * u8) -> * u8 {
+    let fn_addr: i64 = ctx as i64;
+    let entry: * fn () -> i64 = fn_addr as * fn () -> i64;
+    let val: i64 = entry();
+    return val as * u8;
+}
+
+fn _sfn_trampoline_int_ctx(ctx: * u8) -> * u8 {
+    let base: i64 = ctx as i64;
+    let fn_slot: * i64 = base as * i64;
+    let ctx_slot: * i64 = (base + 8) as * i64;
+    let fn_addr: i64 = atomic_load(fn_slot);
+    let user_ctx: i64 = atomic_load(ctx_slot);
+    let entry: * fn (* u8) -> i64 = fn_addr as * fn (* u8) -> i64;
+    let val: i64 = entry(user_ctx as * u8);
+    free(ctx);
+    return val as * u8;
+}
+
+fn sfn_spawn_int(fn_ptr: * u8) -> * u8 {
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_int as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, fn_ptr as i64, 8);
+}
+
+fn sfn_spawn_int_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
+    let pair: * u8 = malloc(16 as usize);
+    if pair as i64 == 0 { return null; }
+    let p0: * i64 = pair as * i64;
+    let p1: * i64 = (pair as i64 + 8) as * i64;
+    atomic_store(p0, fn_ptr as i64);
+    atomic_store(p1, ctx as i64);
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_int_ctx as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, pair as i64, 8);
+}
+
+fn sfn_await_int(future: * u8) -> i64 {
+    let raw: * u8 = sfn_await(future);
+    return raw as i64;
+}
+
+// ────────────────────────────────────────────────────────────────
+// bool (i1, represented as i64 0/1)
+// ────────────────────────────────────────────────────────────────
+fn _sfn_trampoline_bool(ctx: * u8) -> * u8 {
+    let fn_addr: i64 = ctx as i64;
+    let entry: * fn () -> bool = fn_addr as * fn () -> bool;
+    let val: bool = entry();
+    if val { return 1 as * u8; }
+    return 0 as * u8;
+}
+
+fn _sfn_trampoline_bool_ctx(ctx: * u8) -> * u8 {
+    let base: i64 = ctx as i64;
+    let fn_slot: * i64 = base as * i64;
+    let ctx_slot: * i64 = (base + 8) as * i64;
+    let fn_addr: i64 = atomic_load(fn_slot);
+    let user_ctx: i64 = atomic_load(ctx_slot);
+    let entry: * fn (* u8) -> bool = fn_addr as * fn (* u8) -> bool;
+    let val: bool = entry(user_ctx as * u8);
+    free(ctx);
+    if val { return 1 as * u8; }
+    return 0 as * u8;
+}
+
+fn sfn_spawn_bool(fn_ptr: * u8) -> * u8 {
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_bool as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, fn_ptr as i64, 1);
+}
+
+fn sfn_spawn_bool_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
+    let pair: * u8 = malloc(16 as usize);
+    if pair as i64 == 0 { return null; }
+    let p0: * i64 = pair as * i64;
+    let p1: * i64 = (pair as i64 + 8) as * i64;
+    atomic_store(p0, fn_ptr as i64);
+    atomic_store(p1, ctx as i64);
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_bool_ctx as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, pair as i64, 1);
+}
+
+fn sfn_await_bool(future: * u8) -> bool {
+    let raw: * u8 = sfn_await(future);
+    let val: i64 = raw as i64;
+    if val != 0 { return true; }
+    return false;
+}
+
+// ────────────────────────────────────────────────────────────────
+// ptr (i8* / * u8)
+// ────────────────────────────────────────────────────────────────
+fn _sfn_trampoline_ptr(ctx: * u8) -> * u8 {
+    let fn_addr: i64 = ctx as i64;
+    let entry: * fn () -> * u8 = fn_addr as * fn () -> * u8;
+    return entry();
+}
+
+fn _sfn_trampoline_ptr_ctx(ctx: * u8) -> * u8 {
+    let base: i64 = ctx as i64;
+    let fn_slot: * i64 = base as * i64;
+    let ctx_slot: * i64 = (base + 8) as * i64;
+    let fn_addr: i64 = atomic_load(fn_slot);
+    let user_ctx: i64 = atomic_load(ctx_slot);
+    let entry: * fn (* u8) -> * u8 = fn_addr as * fn (* u8) -> * u8;
+    let result: * u8 = entry(user_ctx as * u8);
+    free(ctx);
+    return result;
+}
+
+fn sfn_spawn_ptr(fn_ptr: * u8) -> * u8 {
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_ptr as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, fn_ptr as i64, 8);
+}
+
+fn sfn_spawn_ptr_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
+    let pair: * u8 = malloc(16 as usize);
+    if pair as i64 == 0 { return null; }
+    let p0: * i64 = pair as * i64;
+    let p1: * i64 = (pair as i64 + 8) as * i64;
+    atomic_store(p0, fn_ptr as i64);
+    atomic_store(p1, ctx as i64);
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_ptr_ctx as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, pair as i64, 8);
+}
+
+fn sfn_await_ptr(future: * u8) -> * u8 { return sfn_await(future); }
+
+// ────────────────────────────────────────────────────────────────
+// void
+// ────────────────────────────────────────────────────────────────
+fn _sfn_trampoline_void(ctx: * u8) -> * u8 {
+    let fn_addr: i64 = ctx as i64;
+    let entry: * fn () -> void = fn_addr as * fn () -> void;
+    entry();
+    return null;
+}
+
+fn _sfn_trampoline_void_ctx(ctx: * u8) -> * u8 {
+    let base: i64 = ctx as i64;
+    let fn_slot: * i64 = base as * i64;
+    let ctx_slot: * i64 = (base + 8) as * i64;
+    let fn_addr: i64 = atomic_load(fn_slot);
+    let user_ctx: i64 = atomic_load(ctx_slot);
+    let entry: * fn (* u8) -> void = fn_addr as * fn (* u8) -> void;
+    entry(user_ctx as * u8);
+    free(ctx);
+    return null;
+}
+
+fn sfn_spawn_void(fn_ptr: * u8) -> * u8 {
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_void as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, fn_ptr as i64, 0);
+}
+
+fn sfn_spawn_void_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
+    let pair: * u8 = malloc(16 as usize);
+    if pair as i64 == 0 { return null; }
+    let p0: * i64 = pair as * i64;
+    let p1: * i64 = (pair as i64 + 8) as * i64;
+    atomic_store(p0, fn_ptr as i64);
+    atomic_store(p1, ctx as i64);
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_void_ctx as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, pair as i64, 0);
+}
+
+fn sfn_await_void(future: * u8) -> void { sfn_await(future); }
+
+// ────────────────────────────────────────────────────────────────
+// string (i8* / * u8 — same as ptr)
+// ────────────────────────────────────────────────────────────────
+fn _sfn_trampoline_string(ctx: * u8) -> * u8 {
+    let fn_addr: i64 = ctx as i64;
+    let entry: * fn () -> * u8 = fn_addr as * fn () -> * u8;
+    return entry();
+}
+
+fn _sfn_trampoline_string_ctx(ctx: * u8) -> * u8 {
+    let base: i64 = ctx as i64;
+    let fn_slot: * i64 = base as * i64;
+    let ctx_slot: * i64 = (base + 8) as * i64;
+    let fn_addr: i64 = atomic_load(fn_slot);
+    let user_ctx: i64 = atomic_load(ctx_slot);
+    let entry: * fn (* u8) -> * u8 = fn_addr as * fn (* u8) -> * u8;
+    let result: * u8 = entry(user_ctx as * u8);
+    free(ctx);
+    return result;
+}
+
+fn sfn_spawn_string(fn_ptr: * u8) -> * u8 {
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_string as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, fn_ptr as i64, 8);
+}
+
+fn sfn_spawn_string_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
+    let pair: * u8 = malloc(16 as usize);
+    if pair as i64 == 0 { return null; }
+    let p0: * i64 = pair as * i64;
+    let p1: * i64 = (pair as i64 + 8) as * i64;
+    atomic_store(p0, fn_ptr as i64);
+    atomic_store(p1, ctx as i64);
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_string_ctx as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, pair as i64, 8);
+}
+
+fn sfn_await_string(future: * u8) -> * u8 { return sfn_await(future); }
