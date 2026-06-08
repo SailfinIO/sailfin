@@ -204,10 +204,10 @@ fn spawn_symbol_for_return_type(return_type: string) -> string {
     let mut _if159: boolean = false;
     if trimmed.length == 0 { _if159 = true; }
     if trimmed == "void" { _if159 = true; }
-    if _if159 { return "sailfin_runtime_spawn_void"; }
+    if _if159 { return "sfn_spawn_void"; }
     let normalized = unwrap_move_wrapper(trimmed);
     if normalized == "number" {
-        return "sailfin_runtime_spawn_number";
+        return "sfn_spawn_number";
     }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
     let mut _if159b: boolean = false;
     if normalized == "int" { _if159b = true; }
@@ -215,13 +215,13 @@ fn spawn_symbol_for_return_type(return_type: string) -> string {
     if normalized == "u64" { _if159b = true; }
     if normalized == "usize" { _if159b = true; }
     if normalized == "isize" { _if159b = true; }
-    if _if159b { return "sailfin_runtime_spawn_int"; }
+    if _if159b { return "sfn_spawn_int"; }
     let mut _if160: boolean = false;
     if normalized == "boolean" { _if160 = true; }
     if normalized == "bool" { _if160 = true; }
-    if _if160 { return "sailfin_runtime_spawn_bool"; }
-    if normalized == "string" { return "sailfin_runtime_spawn_string"; }
-    return "sailfin_runtime_spawn_ptr";
+    if _if160 { return "sfn_spawn_bool"; }
+    if normalized == "string" { return "sfn_spawn_string"; }
+    return "sfn_spawn_ptr";
 }
 
 fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
@@ -229,10 +229,10 @@ fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
     let mut _if161: boolean = false;
     if trimmed.length == 0 { _if161 = true; }
     if trimmed == "void" { _if161 = true; }
-    if _if161 { return "sailfin_runtime_spawn_void_ctx"; }
+    if _if161 { return "sfn_spawn_void_ctx"; }
     let normalized = unwrap_move_wrapper(trimmed);
     if normalized == "number" {
-        return "sailfin_runtime_spawn_number_ctx";
+        return "sfn_spawn_number_ctx";
     }  // alias-coverage: Future mapping seam (Slice E.2 follow-up)
     let mut _if161b: boolean = false;
     if normalized == "int" { _if161b = true; }
@@ -240,33 +240,21 @@ fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
     if normalized == "u64" { _if161b = true; }
     if normalized == "usize" { _if161b = true; }
     if normalized == "isize" { _if161b = true; }
-    if _if161b { return "sailfin_runtime_spawn_int_ctx"; }
+    if _if161b { return "sfn_spawn_int_ctx"; }
     let mut _if162: boolean = false;
     if normalized == "boolean" { _if162 = true; }
     if normalized == "bool" { _if162 = true; }
-    if _if162 { return "sailfin_runtime_spawn_bool_ctx"; }
-    if normalized == "string" { return "sailfin_runtime_spawn_string_ctx"; }
-    return "sailfin_runtime_spawn_ptr_ctx";
+    if _if162 { return "sfn_spawn_bool_ctx"; }
+    if normalized == "string" { return "sfn_spawn_string_ctx"; }
+    return "sfn_spawn_ptr_ctx";
 }
 
 fn await_symbol_for_future_pointer_type(future_ptr_type: string) -> string {
-    if future_ptr_type == "%SailfinFutureNumber*" {
-        return "sailfin_runtime_await_number";
-    }
-    if future_ptr_type == "%SailfinFutureInt*" {
-        return "sailfin_runtime_await_int";
-    }
-    if future_ptr_type == "%SailfinFutureBool*" {
-        return "sailfin_runtime_await_bool";
-    }
-    if future_ptr_type == "%SailfinFutureVoid*" {
-        return "sailfin_runtime_await_void";
-    }
-    if future_ptr_type == "%SailfinFutureString*" {
-        return "sailfin_runtime_await_string";
-    }
-    if future_ptr_type == "%SailfinFuturePtr*" {
-        return "sailfin_runtime_await_ptr";
-    }
+    if future_ptr_type == "%SailfinFutureNumber*" { return "sfn_await_number"; }
+    if future_ptr_type == "%SailfinFutureInt*" { return "sfn_await_int"; }
+    if future_ptr_type == "%SailfinFutureBool*" { return "sfn_await_bool"; }
+    if future_ptr_type == "%SailfinFutureVoid*" { return "sfn_await_void"; }
+    if future_ptr_type == "%SailfinFutureString*" { return "sfn_await_string"; }
+    if future_ptr_type == "%SailfinFuturePtr*" { return "sfn_await_ptr"; }
     return "";
 }
