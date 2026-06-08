@@ -415,16 +415,17 @@ fn main() ![io] {
 # path most users actually hit when they wrote `spawn(...)` thinking
 # of the keyword form.
 #
-# Issue #1080: `channel(0)` now parses to a `Channel` construct, so it
-# fails closed as a parsed-but-unlowered construct (`is not yet lowered`)
-# rather than an unresolved call. The fail-closed contract (rc != 0, no
-# binary) is unchanged.
+# Issue #1085: `channel(0)` now has real LLVM lowering (it emits a call
+# to `sailfin_adapter_channel_create`), so it no longer fails at the
+# lowering stage. It will fail at link time because the runtime body is
+# not yet implemented (#1090). The fail-closed contract (rc != 0, no
+# binary) is unchanged — only the failure stage moves from lowering to
+# link time.
 test_channel_via_prelude_name_rejected() {
-    assert_build_rejects_unlowered "channel_prelude_caller" \
+    assert_build_fails_closed "channel_prelude_caller" \
 'fn main() ![io] {
     let _ch = channel(0);
-}' \
-        "channel"
+}'
 }
 
 test_spawn_via_prelude_name_rejected() {
@@ -464,23 +465,39 @@ test_emit_llvm_spawn_rejected() {
         "spawn"
 }
 
-# Issue #906: `sfn emit native` must fail closed on the same surfaces as
-# `build` / `emit llvm`. Cover both shapes from the issue reproduction:
-#   - value-returning `channel(0)`, and
-#   - void-returning unresolved call (`spawn(0, "worker")`).
-# Each must exit non-zero AND leave no `.sfn-asm` behind.
-#
-# Issue #1080: `channel(0)` now parses to a `Channel` construct (the former
-# `sfn/sync` `channel` export is gone), so it fails closed as a
-# parsed-but-unlowered construct (`is not yet lowered`) rather than an
-# unresolved call. The `spawn(0, "worker")` case below keeps the
-# unresolved-call shape.
-test_emit_native_channel_rejected() {
-    assert_emit_native_rejects_unlowered "channel_emit_native_caller" \
-'fn main() ![io] {
+# Issue #906 / #1085: `sfn emit native` previously checked a lowering
+# dry-run gate and rejected `channel(0)` as `is not yet lowered`. As of
+# #1085, `channel(0)` has real LLVM lowering (emits a call to
+# `sailfin_adapter_channel_create`), so the dry-run gate now passes and
+# `emit native` succeeds, writing a `.sfn-asm`. The `spawn(0, "worker")`
+# case below still exercises the rejection path (unresolved call, unchanged).
+test_emit_native_channel_succeeds() {
+    local label="channel_emit_native_caller"
+    local source='fn main() ![io] {
     let _ch = channel(0);
-}' \
-        "channel"
+}'
+    local src_path="$SCRATCH/${label}.sfn"
+    local out_path="$SCRATCH/${label}.sfn-asm"
+    local log_path="$SCRATCH/${label}.emitnative.log"
+    printf '%s\n' "$source" > "$src_path"
+
+    local rc=0
+    ( cd "$SCRATCH" && "$BINARY" emit -o "$out_path" native "$src_path" ) \
+        > "$log_path" 2>&1 || rc=$?
+
+    if [ "$rc" -ne 0 ]; then
+        echo "[test]   emit native of ${label}.sfn exited $rc — expected 0 (channel now lowers, #1085)" >&2
+        echo "[test]   output:" >&2
+        sed 's/^/[test]     /' "$log_path" >&2
+        return 1
+    fi
+
+    if ! grep -q "channel(" "$out_path" 2>/dev/null; then
+        echo "[test]   emit native of ${label}.sfn did not mention 'channel(' in the .sfn-asm" >&2
+        return 1
+    fi
+
+    return 0
 }
 
 test_emit_native_spawn_rejected() {
@@ -493,11 +510,11 @@ test_emit_native_spawn_rejected() {
 
 run_test "sfn build rejects sfn/sync.parallel import (#617)" test_parallel_via_sfn_sync_rejected
 run_test "sfn build rejects sfn/sync.spawn import (#617)" test_spawn_via_sfn_sync_rejected
-run_test "sfn build rejects bare channel() construct, unlowered (#1080)" test_channel_via_prelude_name_rejected
+run_test "sfn build fails closed on channel() at link time (#1085)" test_channel_via_prelude_name_rejected
 run_test "sfn build rejects bare prelude spawn() (#617)" test_spawn_via_prelude_name_rejected
 run_test "sfn build fails closed on unknown void helper (#631)" test_unknown_void_helper_rejected
 run_test "sfn emit llvm fails closed on void spawn() (#631)" test_emit_llvm_spawn_rejected
-run_test "sfn emit native rejects channel() construct, unlowered (#1080)" test_emit_native_channel_rejected
+run_test "sfn emit native succeeds on channel() now that lowering exists (#1085)" test_emit_native_channel_succeeds
 run_test "sfn emit native fails closed on void spawn() (#906)" test_emit_native_spawn_rejected
 
 echo "[summary] $PASS passed, $FAIL failed"

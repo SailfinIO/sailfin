@@ -659,6 +659,27 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             required = _propagate_imported_callee_effects(name, imports, required, callee_trigger);
         }
 
+        // Channel send/receive: `channel_var.send(value)` and
+        // `channel_var.receive()` are concurrency I/O operations and
+        // require `![io]`. These are expressed as Member-callee calls
+        // (not dedicated AST nodes), so we check the callee's member
+        // name here. The object name is not checked — any `.send()`/
+        // `.receive()` call site is treated as a channel operation,
+        // consistent with the conservative policy used for `fs.*` (io),
+        // `http.*` (net), etc. The trigger carets the method token so
+        // the diagnostic points at the offending operation.
+        if expression.callee.variant == "Member" {
+            let method = expression.callee.member;
+            let mut _is_channel_op: boolean = false;
+            if method == "send" { _is_channel_op = true; }
+            if method == "receive" { _is_channel_op = true; }
+            if _is_channel_op {
+                let callee_trigger = _token_from_span(expression.callee.span, method);
+                required = append_requirement(required, EffectRequirement {
+                    effect: "io", description: "channel send/receive", trigger: callee_trigger
+                });
+            }
+        }
         // Member-callee effects (e.g. `fs.exists(...)`) are already
         // captured by the unconditional `collect_effects_from_expression(
         // expression.callee, imports)` at the top of this branch — the
