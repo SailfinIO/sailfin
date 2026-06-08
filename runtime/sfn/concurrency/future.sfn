@@ -160,7 +160,13 @@ fn _sfn_trampoline_number_ctx(ctx: * u8) -> * u8 {
 }
 
 fn sfn_spawn_number(fn_ptr: * u8) -> * u8 {
-    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_number as * fn (* u8) -> * u8;
+    // Seed-compat workaround (#1193): the pinned seed's E0808 typecheck
+    // rejects casting a function name directly to `* fn (...) -> T`, so
+    // the trampoline address is materialized as `* u8` (the blessed
+    // code-pointer spelling) and handed to sfn_spawn as i64. Revert to
+    // `<fn> as * fn (* u8) -> * u8` once a seed carrying the
+    // typecheck_types.sfn relaxation is pinned.
+    let trampoline: * u8 = _sfn_trampoline_number as * u8;
     return sfn_spawn(trampoline as i64, fn_ptr as i64, 8);
 }
 
@@ -171,7 +177,7 @@ fn sfn_spawn_number_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
     let p1: * i64 = (pair as i64 + 8) as * i64;
     atomic_store(p0, fn_ptr as i64);
     atomic_store(p1, ctx as i64);
-    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_number_ctx as * fn (* u8) -> * u8;
+    let trampoline: * u8 = _sfn_trampoline_number_ctx as * u8;
     return sfn_spawn(trampoline as i64, pair as i64, 8);
 }
 
@@ -204,7 +210,7 @@ fn _sfn_trampoline_int_ctx(ctx: * u8) -> * u8 {
 }
 
 fn sfn_spawn_int(fn_ptr: * u8) -> * u8 {
-    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_int as * fn (* u8) -> * u8;
+    let trampoline: * u8 = _sfn_trampoline_int as * u8;
     return sfn_spawn(trampoline as i64, fn_ptr as i64, 8);
 }
 
@@ -215,7 +221,7 @@ fn sfn_spawn_int_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
     let p1: * i64 = (pair as i64 + 8) as * i64;
     atomic_store(p0, fn_ptr as i64);
     atomic_store(p1, ctx as i64);
-    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_int_ctx as * fn (* u8) -> * u8;
+    let trampoline: * u8 = _sfn_trampoline_int_ctx as * u8;
     return sfn_spawn(trampoline as i64, pair as i64, 8);
 }
 
@@ -249,7 +255,7 @@ fn _sfn_trampoline_bool_ctx(ctx: * u8) -> * u8 {
 }
 
 fn sfn_spawn_bool(fn_ptr: * u8) -> * u8 {
-    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_bool as * fn (* u8) -> * u8;
+    let trampoline: * u8 = _sfn_trampoline_bool as * u8;
     return sfn_spawn(trampoline as i64, fn_ptr as i64, 1);
 }
 
@@ -260,7 +266,7 @@ fn sfn_spawn_bool_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
     let p1: * i64 = (pair as i64 + 8) as * i64;
     atomic_store(p0, fn_ptr as i64);
     atomic_store(p1, ctx as i64);
-    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_bool_ctx as * fn (* u8) -> * u8;
+    let trampoline: * u8 = _sfn_trampoline_bool_ctx as * u8;
     return sfn_spawn(trampoline as i64, pair as i64, 1);
 }
 
@@ -293,7 +299,7 @@ fn _sfn_trampoline_ptr_ctx(ctx: * u8) -> * u8 {
 }
 
 fn sfn_spawn_ptr(fn_ptr: * u8) -> * u8 {
-    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_ptr as * fn (* u8) -> * u8;
+    let trampoline: * u8 = _sfn_trampoline_ptr as * u8;
     return sfn_spawn(trampoline as i64, fn_ptr as i64, 8);
 }
 
@@ -304,7 +310,7 @@ fn sfn_spawn_ptr_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
     let p1: * i64 = (pair as i64 + 8) as * i64;
     atomic_store(p0, fn_ptr as i64);
     atomic_store(p1, ctx as i64);
-    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_ptr_ctx as * fn (* u8) -> * u8;
+    let trampoline: * u8 = _sfn_trampoline_ptr_ctx as * u8;
     return sfn_spawn(trampoline as i64, pair as i64, 8);
 }
 
@@ -333,7 +339,7 @@ fn _sfn_trampoline_void_ctx(ctx: * u8) -> * u8 {
 }
 
 fn sfn_spawn_void(fn_ptr: * u8) -> * u8 {
-    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_void as * fn (* u8) -> * u8;
+    let trampoline: * u8 = _sfn_trampoline_void as * u8;
     return sfn_spawn(trampoline as i64, fn_ptr as i64, 0);
 }
 
@@ -344,7 +350,7 @@ fn sfn_spawn_void_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
     let p1: * i64 = (pair as i64 + 8) as * i64;
     atomic_store(p0, fn_ptr as i64);
     atomic_store(p1, ctx as i64);
-    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_void_ctx as * fn (* u8) -> * u8;
+    let trampoline: * u8 = _sfn_trampoline_void_ctx as * u8;
     return sfn_spawn(trampoline as i64, pair as i64, 0);
 }
 
@@ -372,7 +378,7 @@ fn _sfn_trampoline_string_ctx(ctx: * u8) -> * u8 {
 }
 
 fn sfn_spawn_string(fn_ptr: * u8) -> * u8 {
-    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_string as * fn (* u8) -> * u8;
+    let trampoline: * u8 = _sfn_trampoline_string as * u8;
     return sfn_spawn(trampoline as i64, fn_ptr as i64, 8);
 }
 
@@ -383,7 +389,7 @@ fn sfn_spawn_string_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
     let p1: * i64 = (pair as i64 + 8) as * i64;
     atomic_store(p0, fn_ptr as i64);
     atomic_store(p1, ctx as i64);
-    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_string_ctx as * fn (* u8) -> * u8;
+    let trampoline: * u8 = _sfn_trampoline_string_ctx as * u8;
     return sfn_spawn(trampoline as i64, pair as i64, 8);
 }
 

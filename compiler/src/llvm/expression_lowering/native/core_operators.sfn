@@ -777,6 +777,11 @@ fn is_binary_minus(expression: string, index: int) -> boolean {
     if next_char == "/" { _if92 = true; }
     if next_char == ")" { _if92 = true; }
     if next_char == "," { _if92 = true; }
+    // `->` is a function-return arrow, never subtraction. Without this
+    // guard a cast target like `* fn () -> i64` is mis-split at the `-`
+    // once the additive finder runs before the cast dispatch (#1193),
+    // corrupting function-pointer casts in the concurrency runtime.
+    if next_char == ">" { _if92 = true; }
     if _if92 { return false; }
     return true;
 }
