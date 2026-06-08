@@ -93,7 +93,7 @@
 // and Epic #450 for the milestone-level sequencing.
 //
 import { RuntimeHelperDescriptor } from "./types";
-import { join_with_separator, trim_text } from "./utils";
+import { join_with_separator, string_array_contains, trim_text } from "./utils";
 
 // Synthetic descriptor constructors for array `concat()` and `push()`
 // dispatch. Unlike the ~115 registry entries below (which each carry a
@@ -1295,7 +1295,7 @@ fn effective_helper_declare_return_type(descriptor: RuntimeHelperDescriptor) -> 
 // concurrency ABI. Order tracks `runtime_helper_descriptors()`
 // declaration order — the integration suite pins the resulting IR
 // sequence byte-for-byte.
-fn async_runtime_declare_lines() -> string[] {
+fn async_runtime_declare_lines(local_symbols: string[]) -> string[] {
     let mut lines: string[] = [];
     let descriptors = runtime_helper_descriptors();
     let mut index: int = 0;
@@ -1303,6 +1303,16 @@ fn async_runtime_declare_lines() -> string[] {
         if index >= descriptors.length { break; }
         let descriptor = descriptors[index];
         if is_async_runtime_target(descriptor.target) {
+            // #1090: a runtime-native sfn-source that *defines* a typed
+            // spawn/await helper (runtime/sfn/concurrency/future.sfn) must
+            // not also receive the preamble's forward `declare` for that
+            // symbol — llvm-as rejects the declare+define pair as "invalid
+            // redefinition of function". Skip any async-family symbol the
+            // current module defines locally.
+            if string_array_contains(local_symbols, descriptor.symbol) {
+                index += 1;
+                continue;
+            }
             let declare_return = effective_helper_declare_return_type(descriptor);
             let mut parameter_text: string = "";
             if descriptor.parameter_types.length > 0 {
