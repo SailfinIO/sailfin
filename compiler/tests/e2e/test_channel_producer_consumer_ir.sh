@@ -18,6 +18,17 @@ BINARY="$(realpath "$BINARY")"
 PASS=0
 FAIL=0
 
+# `timeout(1)` is GNU coreutils (present on linux-x86_64 CI) and absent on
+# macos-arm64, where coreutils provides `gtimeout`. Pick whichever exists
+# and fall back to no timeout if neither is available, so the test runs on
+# both runners instead of dying with `timeout: command not found`.
+TIMEOUT_PREFIX=""
+if command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_PREFIX="timeout 30"
+elif command -v gtimeout >/dev/null 2>&1; then
+    TIMEOUT_PREFIX="gtimeout 30"
+fi
+
 SCRATCH="$(mktemp -d -t sfn-channel-pc-ir-XXXXXX)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
@@ -46,7 +57,7 @@ assert_ir_contains() {
     printf '%s\n' "$source" > "$src_path"
 
     local rc=0
-    ( cd "$SCRATCH" && timeout 30 "$BINARY" emit -o "$out_path" llvm "$src_path" ) \
+    ( cd "$SCRATCH" && ${TIMEOUT_PREFIX} "$BINARY" emit -o "$out_path" llvm "$src_path" ) \
         > "$log_path" 2>&1 || rc=$?
 
     if [ "$rc" -ne 0 ]; then
@@ -130,7 +141,7 @@ fn main() ![io] {
 SAILFIN
 
     local rc=0
-    ( cd "$SCRATCH" && timeout 30 "$BINARY" emit -o "$out_path" llvm "$src_path" ) \
+    ( cd "$SCRATCH" && ${TIMEOUT_PREFIX} "$BINARY" emit -o "$out_path" llvm "$src_path" ) \
         > "$log_path" 2>&1 || rc=$?
 
     if [ "$rc" -ne 0 ]; then
