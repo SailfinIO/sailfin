@@ -516,6 +516,64 @@ fn parse_raw_address_expression(text: string) -> RawAddressParseResult {
     };
 }
 
+// A cast's type annotation is a pure type: it never contains a top-level
+// `+`, nor a `-` that is not part of a `->` return arrow. When the text
+// after `as` *does* carry such a binary operator, the `as` is not the
+// outermost operator — `as` binds tighter than `+`/`-`, so e.g.
+// `p as i64 + 8` is `(p as i64) + 8`, not `p as (i64 + 8)`. In that case
+// `parse_cast_expression` must decline (return `recognized = false`) so
+// the dispatcher falls through to the additive split, which peels the
+// `+`/`-` first and re-parses the now-clean `p as i64` as the cast.
+//
+// This keeps the cast dispatch at its early position (where it correctly
+// consumes type syntax like `* fn (...) -> T` and `Foo<Bar>` whole)
+// instead of moving it past the binary-operator finders, whose `-`/`>`
+// would otherwise mis-split a function-pointer cast target at the `->`.
+// See #1193 — the M4 concurrency runtime packs offsets via
+// `(pair as i64 + 8) as * i64`.
+fn _cast_annotation_has_binary_continuation(annotation: string) -> boolean {
+    let mut paren_depth: int = 0;
+    let mut bracket_depth: int = 0;
+    let mut brace_depth: int = 0;
+    let mut angle_depth: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= annotation.length { break; }
+        let ch = char_at(annotation, index);
+        if ch == "(" { paren_depth += 1; } else if ch == ")" {
+            if paren_depth > 0 { paren_depth -= 1; }
+        } else if ch == "[" { bracket_depth += 1; } else if ch == "]" {
+            if bracket_depth > 0 { bracket_depth -= 1; }
+        } else if ch == "{" { brace_depth += 1; } else if ch == "}" {
+            if brace_depth > 0 { brace_depth -= 1; }
+        } else if ch == "<" { angle_depth += 1; } else if ch == ">" {
+            if angle_depth > 0 { angle_depth -= 1; }
+        } else {
+            let mut at_top: boolean = false;
+            if paren_depth == 0 {
+                if bracket_depth == 0 {
+                    if brace_depth == 0 {
+                        if angle_depth == 0 { at_top = true; }
+                    }
+                }
+            }
+            if at_top {
+                if ch == "+" { return true; }
+                if ch == "-" {
+                    let mut next: string = "";
+                    if index + 1 < annotation.length {
+                        next = char_at(annotation, index + 1);
+                    }
+                    // `->` is part of a function-pointer type, not subtraction.
+                    if next != ">" { return true; }
+                }
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
 fn parse_cast_expression(text: string) -> CastParseResult {
     let trimmed = trim_text(text);
     let mut diagnostics: string[] = [];
@@ -661,6 +719,19 @@ fn parse_cast_expression(text: string) -> CastParseResult {
             success: false,
             value: value,
             type_annotation: annotation,
+            diagnostics: diagnostics
+        };
+    }
+    // Precedence guard (#1193): a trailing `+`/`-` in the annotation means
+    // `as` is not the outermost operator (`p as i64 + 8` is
+    // `(p as i64) + 8`). Decline so the additive split runs first; the
+    // inner `p as i64` is then re-parsed here as a clean cast.
+    if _cast_annotation_has_binary_continuation(annotation) {
+        return CastParseResult {
+            recognized: false,
+            success: false,
+            value: "",
+            type_annotation: "",
             diagnostics: diagnostics
         };
     }
