@@ -4,7 +4,11 @@
 # That list is a copy of `runtime/native/capsule.toml`'s `sfn-sources`
 # array plus its `prelude-entry`, MINUS `process.sfn` (Windows resolves
 # `@sfn_process_run` from the `_WIN32` C wrapper in `sailfin_runtime.c`,
-# so linking the Sailfin object too would duplicate the symbol).
+# so linking the Sailfin object too would duplicate the symbol) and MINUS
+# the `concurrency/*` modules (scheduler/future/channel, M4 Wave 2): they
+# depend on POSIX `pthread` (`-lpthread`) which has no native Windows
+# equivalent, so they are excluded from the cross-windows bridge until a
+# Windows threading backend exists.
 #
 # If a future change adds/removes a runtime `sfn-source` in the manifest
 # but forgets to update the cross-windows loop, the Windows bridge would
@@ -54,10 +58,12 @@ prelude_val="$(echo "$prelude_line" \
     | sed -E 's/^[^=]*=//; s/[[:space:]]//g; s/"//g')"
 
 # Expected cross-windows source set: prelude-entry + every sfn-source,
-# minus process.sfn, normalized to repo-relative paths.
+# minus process.sfn and the pthread-dependent concurrency/* modules,
+# normalized to repo-relative paths.
 expected="$( { echo "$prelude_val"; echo "$sfn_vals"; } \
     | norm \
     | grep -v '^runtime/sfn/process\.sfn$' \
+    | grep -v '^runtime/sfn/concurrency/' \
     | grep -v '^$' \
     | sort -u )"
 

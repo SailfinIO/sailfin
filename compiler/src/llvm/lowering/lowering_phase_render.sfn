@@ -108,7 +108,20 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     // as the M4 concurrency work later extends or replaces the typed
     // variants.
     lines = extend_string_lines(lines, ["%SailfinFutureNumber = type opaque", "%SailfinFutureInt = type opaque", "%SailfinFutureBool = type opaque", "%SailfinFuturePtr = type opaque", "%SailfinFutureVoid = type opaque", "%SailfinFutureString = type opaque", ""]);
-    lines = extend_string_lines(lines, async_runtime_declare_lines());
+    // #1090: pass the module's locally-defined function symbols so the
+    // async-family forward declares are suppressed for a runtime-native
+    // sfn-source that defines those helpers (future.sfn) — otherwise the
+    // declare+define pair is an "invalid redefinition". Helper bodies use
+    // plain identifier names, so the raw function name matches the
+    // descriptor symbol without sanitization.
+    let mut _async_local_symbols: string[] = [];
+    let mut _async_li: int = 0;
+    loop {
+        if _async_li >= local_functions.length { break; }
+        _async_local_symbols.push(local_functions[_async_li].name);
+        _async_li += 1;
+    }
+    lines = extend_string_lines(lines, async_runtime_declare_lines(_async_local_symbols));
 
     // Vtable type definitions
     let vtable_type_lines = render_vtable_type_definitions(type_context);

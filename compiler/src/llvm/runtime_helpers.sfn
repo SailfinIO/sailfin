@@ -93,7 +93,7 @@
 // and Epic #450 for the milestone-level sequencing.
 //
 import { RuntimeHelperDescriptor } from "./types";
-import { join_with_separator, trim_text } from "./utils";
+import { join_with_separator, string_array_contains, trim_text } from "./utils";
 
 // Synthetic descriptor constructors for array `concat()` and `push()`
 // dispatch. Unlike the ~115 registry entries below (which each carry a
@@ -460,59 +460,68 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // was added post-grooming under PR #677 — the architect's count
     // of 5+5+5=15 in the issue body assumed 5 types; the actual code
     // tracks 6, so this batch registers 6+6+6=18 entries.
+    // Typed spawn/await descriptors — M4 Wave 2 (#1090).
+    // Symbols flipped from sailfin_runtime_* to sfn_* to match the
+    // pure-Sailfin implementations in runtime/sfn/concurrency/future.sfn.
+    // Types changed to i8* throughout: spawn functions accept the
+    // fn_ptr as i8* (the lowering bitcasts from the typed function-pointer
+    // form) and return i8* (the future/task handle). await functions
+    // accept i8* (the lowering bitcasts from the typed %SailfinFuture* form).
+    // The %SailfinFuture* typed-pointer IR forms are preserved at call sites
+    // via post-spawn bitcast / pre-await bitcast in the lowering.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_number", symbol: "sailfin_runtime_spawn_number", return_type: "%SailfinFutureNumber*", parameter_types: ["double ()*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_number", symbol: "sfn_spawn_number", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_number_ctx", symbol: "sailfin_runtime_spawn_number_ctx", return_type: "%SailfinFutureNumber*", parameter_types: ["double (i8*)*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_number_ctx", symbol: "sfn_spawn_number_ctx", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "await_number", symbol: "sailfin_runtime_await_number", return_type: "double", parameter_types: ["%SailfinFutureNumber*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "await_number", symbol: "sfn_await_number", return_type: "double", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_int", symbol: "sailfin_runtime_spawn_int", return_type: "%SailfinFutureInt*", parameter_types: ["i64 ()*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_int", symbol: "sfn_spawn_int", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_int_ctx", symbol: "sailfin_runtime_spawn_int_ctx", return_type: "%SailfinFutureInt*", parameter_types: ["i64 (i8*)*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_int_ctx", symbol: "sfn_spawn_int_ctx", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "await_int", symbol: "sailfin_runtime_await_int", return_type: "i64", parameter_types: ["%SailfinFutureInt*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "await_int", symbol: "sfn_await_int", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_bool", symbol: "sailfin_runtime_spawn_bool", return_type: "%SailfinFutureBool*", parameter_types: ["i1 ()*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_bool", symbol: "sfn_spawn_bool", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_bool_ctx", symbol: "sailfin_runtime_spawn_bool_ctx", return_type: "%SailfinFutureBool*", parameter_types: ["i1 (i8*)*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_bool_ctx", symbol: "sfn_spawn_bool_ctx", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "await_bool", symbol: "sailfin_runtime_await_bool", return_type: "i1", parameter_types: ["%SailfinFutureBool*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "await_bool", symbol: "sfn_await_bool", return_type: "i1", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_ptr", symbol: "sailfin_runtime_spawn_ptr", return_type: "%SailfinFuturePtr*", parameter_types: ["i8* ()*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_ptr", symbol: "sfn_spawn_ptr", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_ptr_ctx", symbol: "sailfin_runtime_spawn_ptr_ctx", return_type: "%SailfinFuturePtr*", parameter_types: ["i8* (i8*)*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_ptr_ctx", symbol: "sfn_spawn_ptr_ctx", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "await_ptr", symbol: "sailfin_runtime_await_ptr", return_type: "i8*", parameter_types: ["%SailfinFuturePtr*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "await_ptr", symbol: "sfn_await_ptr", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_void", symbol: "sailfin_runtime_spawn_void", return_type: "%SailfinFutureVoid*", parameter_types: ["void ()*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_void", symbol: "sfn_spawn_void", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_void_ctx", symbol: "sailfin_runtime_spawn_void_ctx", return_type: "%SailfinFutureVoid*", parameter_types: ["void (i8*)*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_void_ctx", symbol: "sfn_spawn_void_ctx", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "await_void", symbol: "sailfin_runtime_await_void", return_type: "void", parameter_types: ["%SailfinFutureVoid*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "await_void", symbol: "sfn_await_void", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_string", symbol: "sailfin_runtime_spawn_string", return_type: "%SailfinFutureString*", parameter_types: ["i8* ()*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_string", symbol: "sfn_spawn_string", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_string_ctx", symbol: "sailfin_runtime_spawn_string_ctx", return_type: "%SailfinFutureString*", parameter_types: ["i8* (i8*)*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_string_ctx", symbol: "sfn_spawn_string_ctx", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "await_string", symbol: "sailfin_runtime_await_string", return_type: "i8*", parameter_types: ["%SailfinFutureString*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "await_string", symbol: "sfn_await_string", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
@@ -782,18 +791,21 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "serve_handler_dispatch", symbol: "sailfin_adapter_serve_handler_dispatch", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net", "io"], native_signature: null, c_abi_return_type: null
     });
 
-    // Concurrency adapters
+    // Concurrency adapters — flipped to sfn_* symbols (#1091)
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_task", symbol: "sailfin_adapter_spawn_task", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_task", symbol: "sfn_spawn_task", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: "sfn_spawn_task", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "channel_create", symbol: "sailfin_adapter_channel_create", return_type: "i8*", parameter_types: ["i32"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "channel_create", symbol: "sfn_channel_create", return_type: "i8*", parameter_types: ["i32"], effects: [], native_signature: "sfn_channel_create", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "channel_send", symbol: "sailfin_adapter_channel_send", return_type: "void", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "channel_send", symbol: "sfn_channel_send", return_type: "void", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_channel_send", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "channel_receive", symbol: "sailfin_adapter_channel_receive", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "channel_receive", symbol: "sfn_channel_receive", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: "sfn_channel_receive", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "channel_close", symbol: "sfn_channel_close", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: "sfn_channel_close", c_abi_return_type: null
     });
 
     // Collection helpers
@@ -1283,7 +1295,7 @@ fn effective_helper_declare_return_type(descriptor: RuntimeHelperDescriptor) -> 
 // concurrency ABI. Order tracks `runtime_helper_descriptors()`
 // declaration order — the integration suite pins the resulting IR
 // sequence byte-for-byte.
-fn async_runtime_declare_lines() -> string[] {
+fn async_runtime_declare_lines(local_symbols: string[]) -> string[] {
     let mut lines: string[] = [];
     let descriptors = runtime_helper_descriptors();
     let mut index: int = 0;
@@ -1291,6 +1303,16 @@ fn async_runtime_declare_lines() -> string[] {
         if index >= descriptors.length { break; }
         let descriptor = descriptors[index];
         if is_async_runtime_target(descriptor.target) {
+            // #1090: a runtime-native sfn-source that *defines* a typed
+            // spawn/await helper (runtime/sfn/concurrency/future.sfn) must
+            // not also receive the preamble's forward `declare` for that
+            // symbol — llvm-as rejects the declare+define pair as "invalid
+            // redefinition of function". Skip any async-family symbol the
+            // current module defines locally.
+            if string_array_contains(local_symbols, descriptor.symbol) {
+                index += 1;
+                continue;
+            }
             let declare_return = effective_helper_declare_return_type(descriptor);
             let mut parameter_text: string = "";
             if descriptor.parameter_types.length > 0 {

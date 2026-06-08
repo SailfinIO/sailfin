@@ -884,15 +884,27 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 string_constants: empty_spawn_constants
             };
         }
-        let spawn_result_t = format_temp_name(spawn_temp);
+        // Bitcast typed fn_ptr to i8* — sfn_spawn_* accepts i8* (#1090).
+        let fn_ptr_cast_t = format_temp_name(spawn_temp);
         spawn_temp += 1;
-        spawn_lines.push("  " + spawn_result_t + " = call " + future_type + " @"
-            + spawn_sym
-            + "("
-            + fn_ptr_type
+        spawn_lines.push("  " + fn_ptr_cast_t + " = bitcast " + fn_ptr_type
             + " "
             + fn_ptr_value
+            + " to i8*");
+        // Call sfn_spawn_*(i8*) → i8* raw handle.
+        let spawn_raw_t = format_temp_name(spawn_temp);
+        spawn_temp += 1;
+        spawn_lines.push("  " + spawn_raw_t + " = call i8* @" + spawn_sym
+            + "(i8* "
+            + fn_ptr_cast_t
             + ")");
+        // Bitcast raw i8* result back to typed future pointer for
+        // downstream IR type tracking (e.g. the await dispatch).
+        let spawn_result_t = format_temp_name(spawn_temp);
+        spawn_temp += 1;
+        spawn_lines.push("  " + spawn_result_t + " = bitcast i8* " + spawn_raw_t
+            + " to "
+            + future_type);
         let spawn_operand = LLVMOperand {
             llvm_type: future_type,
             value: spawn_result_t
@@ -934,7 +946,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 let spawn2_result = format_temp_name(spawn2_temp);
                 spawn2_temp += 1;
                 spawn2_lines.push("  " + spawn2_result
-                    + " = call i8* @sailfin_adapter_spawn_task(i8* "
+                    + " = call i8* @sfn_spawn_task(i8* "
                     + task_ptr
                     + ")");
                 let spawn2_operand = LLVMOperand {
@@ -963,7 +975,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     }
 
     // ── channel(<capacity>) / channel:<kind>(<capacity>) ───────────────
-    // Both forms lower to `sailfin_adapter_channel_create(i32 capacity)`.
+    // Both forms lower to `sfn_channel_create(i32 capacity)` (#1091).
     // The kind qualifier is recorded for future typed-channel work (#1091)
     // but the runtime ABI is uniform today (opaque i8* channel handle).
     if starts_with(stripped, "channel(") {
@@ -994,8 +1006,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         }
         let chan_result = format_temp_name(chan_temp);
         chan_temp += 1;
-        chan_lines.push("  " + chan_result
-            + " = call i8* @sailfin_adapter_channel_create("
+        chan_lines.push("  " + chan_result + " = call i8* @sfn_channel_create("
             + cap_llvm
             + ")");
         let chan_operand = LLVMOperand {
@@ -1045,7 +1056,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         let chantyped_result = format_temp_name(chantyped_temp);
         chantyped_temp += 1;
         chantyped_lines.push("  " + chantyped_result
-            + " = call i8* @sailfin_adapter_channel_create("
+            + " = call i8* @sfn_channel_create("
             + typed_cap_llvm
             + ")");
         let chantyped_operand = LLVMOperand {
@@ -1105,7 +1116,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                                 let par_spawn_t = format_temp_name(par_temp);
                                 par_temp += 1;
                                 par_lines.push("  " + par_spawn_t
-                                    + " = call i8* @sailfin_adapter_spawn_task(i8* "
+                                    + " = call i8* @sfn_spawn_task(i8* "
                                     + task_ptr_val
                                     + ")");
                                 last_par_operand = LLVMOperand {
@@ -1366,16 +1377,25 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             }
 
             // Await returns a value whose type depends on the future kind.
+            // sfn_await_* accept i8* — bitcast from the typed future pointer
+            // (#1090). The result type is determined by the future kind.
             if future_operand.llvm_type == "%SailfinFutureVoid*" {
-                let mut awaited_lines = append_string(lowered.lines, "  call void @"
-                    + await_symbol
-                    + "(%SailfinFutureVoid* "
+                let cast_fut_t = format_temp_name(lowered.temp_index);
+                let cast_fut_idx = lowered.temp_index + 1;
+                let mut awaited_lines = append_string(lowered.lines, "  "
+                    + cast_fut_t
+                    + " = bitcast %SailfinFutureVoid* "
                     + future_operand.value
+                    + " to i8*");
+                awaited_lines = append_string(awaited_lines, "  call void @"
+                    + await_symbol
+                    + "(i8* "
+                    + cast_fut_t
                     + ")");
                 let out_operand = LLVMOperand { llvm_type: "void", value: "" };
                 return ExpressionResult {
                     lines: awaited_lines,
-                    temp_index: lowered.temp_index,
+                    temp_index: cast_fut_idx,
                     operand: out_operand,
                     diagnostics: diagnostics,
                     string_constants: lowered.string_constants
@@ -1390,16 +1410,22 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             } else if future_operand.llvm_type == "%SailfinFutureBool*" {
                 result_type = "i1";
             }
-            let result_temp = format_temp_name(lowered.temp_index);
+            // Bitcast typed future pointer to i8* for sfn_await_* (#1090).
+            let cast_fut_t2 = format_temp_name(lowered.temp_index);
+            let cast_fut_idx2 = lowered.temp_index + 1;
+            let cast_line = "  " + cast_fut_t2 + " = bitcast " + future_operand.llvm_type
+                + " "
+                + future_operand.value
+                + " to i8*";
+            let result_temp = format_temp_name(cast_fut_idx2);
             let awaited_call = "  " + result_temp + " = call " + result_type
                 + " @"
                 + await_symbol
-                + "("
-                + future_operand.llvm_type
-                + " "
-                + future_operand.value
+                + "(i8* "
+                + cast_fut_t2
                 + ")";
-            let mut awaited_lines2 = append_string(lowered.lines, awaited_call);
+            let mut awaited_lines2 = append_string(lowered.lines, cast_line);
+            awaited_lines2 = append_string(awaited_lines2, awaited_call);
 
             // If we're awaiting an opaque pointer future in a typed context, try to unbox.
             // This avoids leaking boxed aggregates (struct/enum values) returned as `i8*`.
@@ -1449,10 +1475,12 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 if trimmed_expected.length > 0 {
                     if trimmed_expected != "i8*" {
                         if !ends_with_pointer_suffix(trimmed_expected) {
+                            // cast_fut_t2 = lowered.temp_index
+                            // result_temp  = lowered.temp_index + 1  (#1090 shift)
                             let typed_ptr_temp = format_temp_name(lowered.temp_index
-                                + 1);
-                            let load_temp = format_temp_name(lowered.temp_index
                                 + 2);
+                            let load_temp = format_temp_name(lowered.temp_index
+                                + 3);
                             awaited_lines2.push("  " + typed_ptr_temp
                                 + " = bitcast i8* "
                                 + result_temp
@@ -1478,7 +1506,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                             };
                             let free_operands: LLVMOperand[] = [free_operand];
                             let free_result = emit_runtime_call("runtime.free", free_operands, empty_runtime_call_overrides(), lowered.temp_index
-                                + 3, awaited_lines2);
+                                + 4, awaited_lines2);
                             let mut _free_di: int = 0;
                             loop {
                                 if _free_di >= free_result.diagnostics.length {
@@ -1494,7 +1522,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                             };
                             return ExpressionResult {
                                 lines: awaited_lines2,
-                                temp_index: lowered.temp_index + 3,
+                                temp_index: lowered.temp_index + 4,
                                 operand: out_operand_unboxed,
                                 diagnostics: diagnostics,
                                 string_constants: lowered.string_constants
@@ -1508,7 +1536,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 // value — do NOT free it here (it would dangle on the first
                 // field access).
                 if inferred_boxed_type.length > 0 {
-                    let typed_ptr_temp = format_temp_name(lowered.temp_index + 1);
+                    // cast_fut_t2 = lowered.temp_index, result_temp = + 1 (#1090)
+                    let typed_ptr_temp = format_temp_name(lowered.temp_index + 2);
                     awaited_lines2.push("  " + typed_ptr_temp
                         + " = bitcast i8* "
                         + result_temp
@@ -1520,7 +1549,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                     };
                     return ExpressionResult {
                         lines: awaited_lines2,
-                        temp_index: lowered.temp_index + 2,
+                        temp_index: lowered.temp_index + 3,
                         operand: out_operand_boxed,
                         diagnostics: diagnostics,
                         string_constants: lowered.string_constants
@@ -1534,7 +1563,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             };
             return ExpressionResult {
                 lines: awaited_lines2,
-                temp_index: lowered.temp_index + 1,
+                temp_index: lowered.temp_index + 2,
                 operand: out_operand2,
                 diagnostics: diagnostics,
                 string_constants: lowered.string_constants

@@ -555,6 +555,29 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
             }
         };
     }
+    // Lift lambdas nested inside spawn/await operands (#1090).
+    if expression.variant == "Spawn" {
+        let inner = _rewrite_expression(ctx, expression.operand);
+        return ExpressionRewriteResult {
+            ctx: inner.ctx,
+            expression: Expression.Spawn {
+                operand: inner.expression,
+                span: expression.span,
+                kind: expression.kind
+            }
+        };
+    }
+    if expression.variant == "Await" {
+        let inner = _rewrite_expression(ctx, expression.operand);
+        return ExpressionRewriteResult {
+            ctx: inner.ctx,
+            expression: Expression.Await {
+                operand: inner.expression,
+                span: expression.span,
+                kind: expression.kind
+            }
+        };
+    }
     return ExpressionRewriteResult { ctx: ctx, expression: expression };
 }
 
