@@ -79,13 +79,13 @@ test_channel_create_has_i32_cap() {
         "sfn_channel_create(i32"
 }
 
-# spawn:int <lambda> → sailfin_runtime_spawn_int
+# spawn:int <lambda> → sfn_spawn_int (#1090 flip)
 test_spawn_int_lowers() {
     assert_ir_contains "spawn_int_call" \
 'fn main() ![io] {
     let f = spawn fn() -> int { return 1; };
 }' \
-        "sailfin_runtime_spawn_int"
+        "sfn_spawn_int"
 }
 
 # parallel [spawn task] → one sfn_spawn_task per task (#1091). The symbol is
@@ -112,7 +112,7 @@ fn main() ![net, io] {
 
 run_test "channel(N) lowers to sfn_channel_create (#1091)" test_channel_lowers_to_channel_create
 run_test "channel_create carries i32 capacity argument (#1091)" test_channel_create_has_i32_cap
-run_test "spawn:int lowers to sailfin_runtime_spawn_int (#1085)" test_spawn_int_lowers
+run_test "spawn:int lowers to sfn_spawn_int (#1090)" test_spawn_int_lowers
 run_test "parallel [task] lowers to sfn_spawn_task (#1091)" test_parallel_lowers_to_spawn_task
 run_test "serve(handler, port) lowers to sailfin_adapter_serve_start (#1085)" test_serve_lowers_to_serve_start
 
