@@ -110,13 +110,21 @@ fn emit_async_function(function: NativeFunction, functions: NativeFunction[], ef
             + signature
             + ") {");
         wrapper_lines.push("block.entry:");
-        let t0 = format_temp_name(0);
-        wrapper_lines.push("  " + t0 + " = call " + future_return + " @"
-            + spawn_symbol
-            + "("
-            + impl_return
+        // Pass the impl as i8* (bitcast the typed function pointer) so
+        // the call matches sfn_spawn_*'s `i8*` parameter. Emitting the
+        // raw `<ret> ()* @impl` directly into an i8* argument is
+        // malformed typed-pointer IR that the backend miscompiles (it
+        // drops/shifts the pointer argument). See #1193.
+        let impl_cast = format_temp_name(0);
+        let t0 = format_temp_name(1);
+        wrapper_lines.push("  " + impl_cast + " = bitcast " + impl_return
             + " ()* @"
             + impl_symbol
+            + " to i8*");
+        wrapper_lines.push("  " + t0 + " = call " + future_return + " @"
+            + spawn_symbol
+            + "(i8* "
+            + impl_cast
             + ")");
         wrapper_lines.push("  ret " + future_return + " " + t0);
         wrapper_lines.push("}");
@@ -262,14 +270,25 @@ fn emit_async_function(function: NativeFunction, functions: NativeFunction[], ef
             store_index += 1;
         }
 
+        // Pass the trampoline as i8* (bitcast the typed function
+        // pointer) so the call matches sfn_spawn_*_ctx's `i8*`
+        // parameter. The raw `<ret> (i8*)* @trampoline` directly in an
+        // i8* argument is malformed typed-pointer IR the backend
+        // miscompiles: it dropped the trampoline arg and shifted the
+        // ctx into its slot, so the worker called through the ctx
+        // pointer (a heap address) and segfaulted. See #1193.
+        let tramp_cast = format_temp_name(wrap_temp);
+        wrap_temp += 1;
+        wrapper_lines.push("  " + tramp_cast + " = bitcast " + impl_return
+            + " (i8*)* @"
+            + trampoline_symbol
+            + " to i8*");
         let out_future = format_temp_name(wrap_temp);
         wrap_temp += 1;
         wrapper_lines.push("  " + out_future + " = call " + future_return + " @"
             + spawn_symbol
-            + "("
-            + impl_return
-            + " (i8*)* @"
-            + trampoline_symbol
+            + "(i8* "
+            + tramp_cast
             + ", i8* "
             + ctx_raw
             + ")");

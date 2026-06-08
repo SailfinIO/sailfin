@@ -1548,11 +1548,6 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         return lower_ternary_expression(ternary_parse, bindings, locals, temp_index, lines, functions, context, expected_type);
     }
 
-    let cast_parse = parse_cast_expression(stripped);
-    if cast_parse.recognized {
-        return lower_cast_expression(cast_parse, bindings, locals, temp_index, lines, functions, context);
-    }
-
     let raw_address_parse = parse_raw_address_expression(stripped);
     if raw_address_parse.recognized {
         return lower_raw_address_expression(raw_address_parse, bindings, locals, temp_index, lines);
@@ -1622,6 +1617,26 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 + stripped);
         }
         return lower_binary_operation(stripped, additive, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    // Cast (`as`) binds tighter than the binary operators, so it splits
+    // AFTER them — fixing the precedence inversion of its prior position
+    // (right after the ternary check, before every binary split), where
+    // `p as i64 + 8` was mis-parsed as the cast `p as (i64 + 8)`,
+    // silently dropping the `+ 8`. That miscompiled the
+    // parameterized-async ctx packing `(pair as i64 + 8) as * i64` in
+    // runtime/sfn/concurrency, aliasing the fn-ptr slot and segfaulting
+    // at the trampoline indirect call (#1193).
+    //
+    // It is placed after additive but BEFORE multiplicative on purpose:
+    // a cast target's pointer syntax (`* T`) shares the `*` token with
+    // multiplication, so running the `*/%` finder first would mis-split
+    // `X as * T` at the type's `*`. Splitting `+`/`-` first is enough to
+    // fix #1193; the rarer `x as T * y` shares the same `*` ambiguity
+    // and is unaffected by this move.
+    let cast_parse = parse_cast_expression(stripped);
+    if cast_parse.recognized {
+        return lower_cast_expression(cast_parse, bindings, locals, temp_index, lines, functions, context);
     }
 
     let multiplicative = find_top_level_operator(stripped, "*/%");
