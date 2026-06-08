@@ -606,17 +606,68 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                     // both keep the existing path so `make compile`
                                     // still lowers method calls on them.
                                     let mut _pre_fail_closed: boolean = false;
-                                    if is_simple_identifier(_pre_struct) {
-                                        if find_struct_info_by_name(context, _pre_struct) == null {
-                                            // Interface-typed locals carry a bare
-                                            // annotation too (e.g. `let m: Meter`);
-                                            // their `m.total()` calls are valid trait
-                                            // dispatch handled by the downstream
-                                            // `trait_dispatch__` branch. Only fail
-                                            // closed when the name is neither a
-                                            // struct nor an interface in context.
-                                            if find_interface_info_by_name(context, _pre_struct) == null {
-                                                _pre_fail_closed = true;
+                                    // Channel builtin methods: `send` / `receive` / `close`
+                                    // on a `channel`-typed local are runtime-helper calls,
+                                    // not struct methods.  Route them to the helper
+                                    // descriptor directly instead of failing closed.
+                                    let mut _pre_is_channel_method: boolean = false;
+                                    if _pre_struct == "channel" {
+                                        if _pre_field == "send" {
+                                            _pre_is_channel_method = true;
+                                        }
+                                        if _pre_field == "receive" {
+                                            _pre_is_channel_method = true;
+                                        }
+                                        if _pre_field == "close" {
+                                            _pre_is_channel_method = true;
+                                        }
+                                    }
+                                    if _pre_is_channel_method {
+                                        // Lower the base (the channel handle) and inject it
+                                        // as the first argument.  Route target to the
+                                        // matching `channel_send` / `channel_receive` helper.
+                                        let _pre_ch_lowered = lower_expression(_pre_base, bindings, locals, result_temp, result_lines, functions, context, "");
+                                        let mut _cich: int = 0;
+                                        loop {
+                                            if _cich >= _pre_ch_lowered.diagnostics.length {
+                                                break;
+                                            }
+                                            result_diagnostics.push(_pre_ch_lowered.diagnostics[_cich]);
+                                            _cich += 1;
+                                        }
+                                        result_string_constants = merge_string_constants(result_string_constants, _pre_ch_lowered.string_constants);
+                                        result_lines = _pre_ch_lowered.lines;
+                                        result_temp = _pre_ch_lowered.temp_index;
+                                        if _pre_ch_lowered.operand != null {
+                                            method_operand = _pre_ch_lowered.operand;
+                                            injected_argument_count = 1;
+                                            let mut ch_helper_target: string = "";
+                                            if _pre_field == "send" {
+                                                ch_helper_target = "channel_send";
+                                            }
+                                            if _pre_field == "receive" {
+                                                ch_helper_target = "channel_receive";
+                                            }
+                                            if _pre_field == "close" {
+                                                ch_helper_target = "channel_close";
+                                            }
+                                            result_target = ch_helper_target;
+                                            helper_descriptor = find_runtime_helper(ch_helper_target);
+                                        }
+                                    }
+                                    if !_pre_is_channel_method {
+                                        if is_simple_identifier(_pre_struct) {
+                                            if find_struct_info_by_name(context, _pre_struct) == null {
+                                                // Interface-typed locals carry a bare
+                                                // annotation too (e.g. `let m: Meter`);
+                                                // their `m.total()` calls are valid trait
+                                                // dispatch handled by the downstream
+                                                // `trait_dispatch__` branch. Only fail
+                                                // closed when the name is neither a
+                                                // struct nor an interface in context.
+                                                if find_interface_info_by_name(context, _pre_struct) == null {
+                                                    _pre_fail_closed = true;
+                                                }
                                             }
                                         }
                                     }
@@ -999,43 +1050,93 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             }
                         }
                         let mut _g_fail_closed: boolean = false;
-                        if _g_annotation.length > 0 {
-                            if is_simple_identifier(_g_annotation) {
-                                if find_struct_info_by_name(context, _g_annotation) == null {
-                                    // Exclude interface-typed bases: `m.total()`
-                                    // on `let m: Meter` is valid trait dispatch,
-                                    // not an unresolved struct.
-                                    if find_interface_info_by_name(context, _g_annotation) == null {
-                                        _g_fail_closed = true;
+                        // Channel builtin methods: `send` / `receive` / `close`
+                        // on a `channel`-typed local are runtime-helper calls.
+                        // Route them to the corresponding sfn_channel_* helpers
+                        // instead of failing closed (#1091).
+                        let mut _g_is_channel_method: boolean = false;
+                        if _g_annotation == "channel" {
+                            if method_parse.field == "send" {
+                                _g_is_channel_method = true;
+                            }
+                            if method_parse.field == "receive" {
+                                _g_is_channel_method = true;
+                            }
+                            if method_parse.field == "close" {
+                                _g_is_channel_method = true;
+                            }
+                        }
+                        if _g_is_channel_method {
+                            // Lower the base (channel handle) and wire to the
+                            // matching runtime helper.
+                            let _g_ch_lowered = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
+                            let mut _cig: int = 0;
+                            loop {
+                                if _cig >= _g_ch_lowered.diagnostics.length {
+                                    break;
+                                }
+                                r_diagnostics.push(_g_ch_lowered.diagnostics[_cig]);
+                                _cig += 1;
+                            }
+                            r_string_constants = merge_string_constants(r_string_constants, _g_ch_lowered.string_constants);
+                            r_lines = _g_ch_lowered.lines;
+                            r_temp = _g_ch_lowered.temp_index;
+                            if _g_ch_lowered.operand != null {
+                                r_method_operand = _g_ch_lowered.operand;
+                                r_injected_count = 1;
+                                let mut _g_ch_target: string = "";
+                                if method_parse.field == "send" {
+                                    _g_ch_target = "channel_send";
+                                }
+                                if method_parse.field == "receive" {
+                                    _g_ch_target = "channel_receive";
+                                }
+                                if method_parse.field == "close" {
+                                    _g_ch_target = "channel_close";
+                                }
+                                r_target = _g_ch_target;
+                                r_helper_descriptor = find_runtime_helper(_g_ch_target);
+                            }
+                        }
+                        if !_g_is_channel_method {
+                            if _g_annotation.length > 0 {
+                                if is_simple_identifier(_g_annotation) {
+                                    if find_struct_info_by_name(context, _g_annotation) == null {
+                                        // Exclude interface-typed bases: `m.total()`
+                                        // on `let m: Meter` is valid trait dispatch,
+                                        // not an unresolved struct.
+                                        if find_interface_info_by_name(context, _g_annotation) == null {
+                                            _g_fail_closed = true;
+                                        }
                                     }
                                 }
                             }
+                            if _g_fail_closed {
+                                r_diagnostics.push("llvm lowering [fatal]: method call base `"
+                                    + method_parse.base
+                                    + "` has declared type `"
+                                    + _g_annotation
+                                    + "` which is not in the lowering type context");
+                                return CallTargetResolution {
+                                    trimmed_target: r_target,
+                                    method_operand: null,
+                                    helper_descriptor: null,
+                                    injected_argument_count: 0,
+                                    is_array_concat: false,
+                                    array_concat_element_type: "",
+                                    is_array_push: false,
+                                    array_push_element_type: "",
+                                    current_lines: r_lines,
+                                    current_temp: r_temp,
+                                    diagnostics: r_diagnostics,
+                                    string_constants: r_string_constants,
+                                    is_closure_dispatch: false,
+                                    closure_return_type: "",
+                                    closure_parameter_types: []
+                                };
+                            }
                         }
-                        if _g_fail_closed {
-                            r_diagnostics.push("llvm lowering [fatal]: method call base `"
-                                + method_parse.base
-                                + "` has declared type `"
-                                + _g_annotation
-                                + "` which is not in the lowering type context");
-                            return CallTargetResolution {
-                                trimmed_target: r_target,
-                                method_operand: null,
-                                helper_descriptor: null,
-                                injected_argument_count: 0,
-                                is_array_concat: false,
-                                array_concat_element_type: "",
-                                is_array_push: false,
-                                array_push_element_type: "",
-                                current_lines: r_lines,
-                                current_temp: r_temp,
-                                diagnostics: r_diagnostics,
-                                string_constants: r_string_constants,
-                                is_closure_dispatch: false,
-                                closure_return_type: "",
-                                closure_parameter_types: []
-                            };
-                        }
-                    }
+                    }  // end if !_g_is_channel_method
                     let qualified_helper = find_runtime_helper(r_target);
                     if qualified_helper != null {
                         r_helper_descriptor = qualified_helper;

@@ -427,24 +427,12 @@ fn future_pointer_type_for_return_type(return_type: string) -> string {
 }
 
 fn await_symbol_for_future_pointer_type(future_ptr_type: string) -> string {
-    if future_ptr_type == "%SailfinFutureNumber*" {
-        return "sailfin_runtime_await_number";
-    }
-    if future_ptr_type == "%SailfinFutureInt*" {
-        return "sailfin_runtime_await_int";
-    }
-    if future_ptr_type == "%SailfinFutureBool*" {
-        return "sailfin_runtime_await_bool";
-    }
-    if future_ptr_type == "%SailfinFutureVoid*" {
-        return "sailfin_runtime_await_void";
-    }
-    if future_ptr_type == "%SailfinFutureString*" {
-        return "sailfin_runtime_await_string";
-    }
-    if future_ptr_type == "%SailfinFuturePtr*" {
-        return "sailfin_runtime_await_ptr";
-    }
+    if future_ptr_type == "%SailfinFutureNumber*" { return "sfn_await_number"; }
+    if future_ptr_type == "%SailfinFutureInt*" { return "sfn_await_int"; }
+    if future_ptr_type == "%SailfinFutureBool*" { return "sfn_await_bool"; }
+    if future_ptr_type == "%SailfinFutureVoid*" { return "sfn_await_void"; }
+    if future_ptr_type == "%SailfinFutureString*" { return "sfn_await_string"; }
+    if future_ptr_type == "%SailfinFuturePtr*" { return "sfn_await_ptr"; }
     return "";
 }
 
@@ -458,14 +446,14 @@ fn await_symbol_for_future_pointer_type(future_ptr_type: string) -> string {
 // for `spawn:<kind> <operand>` nodes (#1085).
 fn spawn_symbol_for_kind(kind: string) -> string {
     let trimmed = trim_text(kind);
-    if trimmed.length == 0 { return "sailfin_runtime_spawn_void"; }
-    if trimmed == "void" { return "sailfin_runtime_spawn_void"; }
-    if trimmed == "number" { return "sailfin_runtime_spawn_number"; }
-    if trimmed == "int" { return "sailfin_runtime_spawn_int"; }
-    if trimmed == "bool" { return "sailfin_runtime_spawn_bool"; }
-    if trimmed == "boolean" { return "sailfin_runtime_spawn_bool"; }
-    if trimmed == "string" { return "sailfin_runtime_spawn_string"; }
-    return "sailfin_runtime_spawn_ptr";
+    if trimmed.length == 0 { return "sfn_spawn_void"; }
+    if trimmed == "void" { return "sfn_spawn_void"; }
+    if trimmed == "number" { return "sfn_spawn_number"; }
+    if trimmed == "int" { return "sfn_spawn_int"; }
+    if trimmed == "bool" { return "sfn_spawn_bool"; }
+    if trimmed == "boolean" { return "sfn_spawn_bool"; }
+    if trimmed == "string" { return "sfn_spawn_string"; }
+    return "sfn_spawn_ptr";
 }
 
 // Maps a spawn kind string to the LLVM return type of the spawned function
