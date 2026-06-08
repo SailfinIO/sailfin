@@ -100,21 +100,21 @@ fn main() ![io] {
         "sfn_spawn_task"
 }
 
-# serve(handler, port) → sailfin_adapter_serve_start (use-driven adapter symbol).
+# serve(handler, port) → sfn_serve (Sailfin-native server, #1092).
 test_serve_lowers_to_serve_start() {
     assert_ir_contains "serve_serve_start" \
 'fn handler() ![net, io] { }
 fn main() ![net, io] {
     serve(handler, 8080);
 }' \
-        "sailfin_adapter_serve_start"
+        "sfn_serve"
 }
 
 run_test "channel(N) lowers to sfn_channel_create (#1091)" test_channel_lowers_to_channel_create
 run_test "channel_create carries i32 capacity argument (#1091)" test_channel_create_has_i32_cap
 run_test "spawn:int lowers to sfn_spawn_int (#1090)" test_spawn_int_lowers
 run_test "parallel [task] lowers to sfn_spawn_task (#1091)" test_parallel_lowers_to_spawn_task
-run_test "serve(handler, port) lowers to sailfin_adapter_serve_start (#1085)" test_serve_lowers_to_serve_start
+run_test "serve(handler, port) lowers to sfn_serve (#1092)" test_serve_lowers_to_serve_start
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

@@ -435,7 +435,7 @@ survives until process exit. This is why per-module compiler RAM reaches
 | `sailfin_runtime_http_get` / `http_post_json` / `http_download` | ✅ | Implemented as `curl` subprocess via `popen`. Used by the package manager path |
 | `sailfin_adapter_http_get` / `http_post` | 🚫 **Stub** | Return NULL. The adapter path (the effect-wired version) is not implemented — only the curl-subprocess package-manager path is |
 | `sailfin_adapter_model_invoke_with_prompt` | 🚫 **Stub** | |
-| `sailfin_adapter_serve_start` / `serve_handler_dispatch` | ❌ **Missing** | Declared in `runtime_helpers.sfn`; not defined in the runtime |
+| `sailfin_adapter_serve_start` / `serve_handler_dispatch` | ✅ | **Ported to Sailfin** (#1092): `sfn_serve` / `sfn_serve_handler_dispatch` in `runtime/sfn/concurrency/serve.sfn` — a blocking HTTP/1.1 accept loop on the BSD-sockets surface that dispatches each connection to the M4.1 thread pool (`scheduler.sfn`). The `serve` lowering in `expression_lowering/native/core.sfn` emits `@sfn_serve`; the registry rows carry the `sfn_*` `native_signature`. v0: HTTP only (no TLS), blocking accept (no async), handler ABI `fn (* u8 request) -> * u8 response_body`. The legacy adapter symbols were never defined |
 
 ### Concurrency
 
