@@ -791,18 +791,21 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "serve_handler_dispatch", symbol: "sailfin_adapter_serve_handler_dispatch", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net", "io"], native_signature: null, c_abi_return_type: null
     });
 
-    // Concurrency adapters
+    // Concurrency adapters — flipped to sfn_* symbols (#1091)
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_task", symbol: "sailfin_adapter_spawn_task", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "spawn_task", symbol: "sfn_spawn_task", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: "sfn_spawn_task", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "channel_create", symbol: "sailfin_adapter_channel_create", return_type: "i8*", parameter_types: ["i32"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "channel_create", symbol: "sfn_channel_create", return_type: "i8*", parameter_types: ["i32"], effects: [], native_signature: "sfn_channel_create", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "channel_send", symbol: "sailfin_adapter_channel_send", return_type: "void", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "channel_send", symbol: "sfn_channel_send", return_type: "void", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_channel_send", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "channel_receive", symbol: "sailfin_adapter_channel_receive", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "channel_receive", symbol: "sfn_channel_receive", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: "sfn_channel_receive", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "channel_close", symbol: "sfn_channel_close", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: "sfn_channel_close", c_abi_return_type: null
     });
 
     // Collection helpers

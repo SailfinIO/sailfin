@@ -946,7 +946,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 let spawn2_result = format_temp_name(spawn2_temp);
                 spawn2_temp += 1;
                 spawn2_lines.push("  " + spawn2_result
-                    + " = call i8* @sailfin_adapter_spawn_task(i8* "
+                    + " = call i8* @sfn_spawn_task(i8* "
                     + task_ptr
                     + ")");
                 let spawn2_operand = LLVMOperand {
@@ -975,7 +975,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     }
 
     // ── channel(<capacity>) / channel:<kind>(<capacity>) ───────────────
-    // Both forms lower to `sailfin_adapter_channel_create(i32 capacity)`.
+    // Both forms lower to `sfn_channel_create(i32 capacity)` (#1091).
     // The kind qualifier is recorded for future typed-channel work (#1091)
     // but the runtime ABI is uniform today (opaque i8* channel handle).
     if starts_with(stripped, "channel(") {
@@ -1006,8 +1006,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         }
         let chan_result = format_temp_name(chan_temp);
         chan_temp += 1;
-        chan_lines.push("  " + chan_result
-            + " = call i8* @sailfin_adapter_channel_create("
+        chan_lines.push("  " + chan_result + " = call i8* @sfn_channel_create("
             + cap_llvm
             + ")");
         let chan_operand = LLVMOperand {
@@ -1057,7 +1056,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         let chantyped_result = format_temp_name(chantyped_temp);
         chantyped_temp += 1;
         chantyped_lines.push("  " + chantyped_result
-            + " = call i8* @sailfin_adapter_channel_create("
+            + " = call i8* @sfn_channel_create("
             + typed_cap_llvm
             + ")");
         let chantyped_operand = LLVMOperand {
@@ -1117,7 +1116,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                                 let par_spawn_t = format_temp_name(par_temp);
                                 par_temp += 1;
                                 par_lines.push("  " + par_spawn_t
-                                    + " = call i8* @sailfin_adapter_spawn_task(i8* "
+                                    + " = call i8* @sfn_spawn_task(i8* "
                                     + task_ptr_val
                                     + ")");
                                 last_par_operand = LLVMOperand {
