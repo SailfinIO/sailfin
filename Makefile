@@ -501,7 +501,12 @@ compile-impl:
 		[ -z "$$(find compiler/src runtime -type f -name '*.sfn' -newer "$(NATIVE_BIN)" -print -quit 2>/dev/null)" ]; then \
 		echo "[compile] $(NATIVE_BIN) up-to-date"; \
 	else \
-		$(MAKE) rebuild; \
+		: "#1192: chain rebuild -> echo with && (not ;) so a failed cold"; \
+		: "rebuild propagates its non-zero exit instead of being masked by"; \
+		: "the trailing echo. With ; the if-compound returned the echo's 0,"; \
+		: "so make compile exited 0 / status:pass on a broken self-host and"; \
+		: "silently kept the stale build/native/sailfin."; \
+		$(MAKE) rebuild && \
 		echo "[compile] built $(NATIVE_OUT)"; \
 	fi
 
