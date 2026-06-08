@@ -101,7 +101,7 @@ extern fn bind(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
 
 extern fn listen(sockfd: i32, backlog: i32) -> i32;
 
-extern fn accept(sockfd: i32, addr: * u8, addrlen: * u8) -> i32;
+extern fn accept(sockfd: i32, addr: * u8, addrlen: * i32) -> i32;
 
 extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
 
@@ -113,6 +113,8 @@ extern fn close(fd: i32) -> i32;
 // The shared MPMC task queue + fixed worker pool. `sfn_serve`
 // creates one queue + pool, then enqueues a `Task` per connection.
 extern fn sfn_taskqueue_create(capacity: i64) -> * u8;
+
+extern fn sfn_taskqueue_destroy(queue: * u8) -> void;
 
 extern fn sfn_taskqueue_enqueue(queue: * u8, task: * u8) -> void;
 
@@ -191,7 +193,14 @@ fn _serve_send_all(fd: i32, buf: * u8, total: i64) -> bool {
 // `recv` error. Returns a NUL-terminated, caller-owned buffer (null
 // on OOM / error). v0 reads only up to the header terminator —
 // request bodies past the headers are not drained (GET-shaped v0).
+//
+// A client that never sends the `\r\n\r\n` terminator must not be
+// able to force unbounded growth (DoS / OOM), so the header read is
+// capped at `max_request` bytes — once exceeded without a terminator
+// the request is rejected (buffer freed, null returned, which the
+// worker turns into a `500` + connection close).
 fn _serve_recv_request(fd: i32) -> * u8 {
+    let max_request: i64 = 65536;
     let mut capacity: i64 = 4096;
     let mut len: i64 = 0;
     let mut buf: * u8 = malloc((capacity + 1) as usize);
@@ -219,6 +228,12 @@ fn _serve_recv_request(fd: i32) -> * u8 {
         memset(_serve_ptr_off(buf, len), 0, 1 as usize);
         // Stop as soon as the full header block has arrived.
         if (strstr(buf, terminator as * u8) as i64) != 0 { break; }
+        // Reject a request that exceeds the header cap without a
+        // terminator (slow-loris / unbounded-header DoS guard).
+        if len >= max_request {
+            free(buf);
+            return null;
+        }
     }
     memset(_serve_ptr_off(buf, len), 0, 1 as usize);
     return buf;
@@ -280,6 +295,12 @@ fn sfn_serve_handler_dispatch(handler: * u8, request: * u8) -> * u8 {
 // result is unused — serve is fire-and-forget). Calls only
 // effect-free externs + the effect-erased dispatch, so it carries no
 // effect annotation (matching `future.sfn`'s trampolines).
+//
+// A null request (recv error, OOM, or the header cap exceeded) is
+// NOT handed to user code — the handler receives a `* u8 request` it
+// is free to read, so a null would risk a crash inside the handler.
+// Instead the worker skips dispatch and sends a `500` directly
+// (`_serve_send_response(fd, null)`).
 fn _serve_conn_worker(ctx: * u8) -> * u8 {
     if ctx as i64 == 0 { return null; }
     let base: i64 = ctx as i64;
@@ -290,10 +311,17 @@ fn _serve_conn_worker(ctx: * u8) -> * u8 {
     free(ctx);
 
     let request: * u8 = _serve_recv_request(client_fd as i32);
+    if request as i64 == 0 {
+        // Bad/oversized/failed request: emit a 500, never call the
+        // handler with a null request pointer.
+        _serve_send_response(client_fd as i32, null);
+        close(client_fd as i32);
+        return null;
+    }
     let response: * u8 = sfn_serve_handler_dispatch(handler as * u8, request);
     _serve_send_response(client_fd as i32, response);
     close(client_fd as i32);
-    if request as i64 != 0 { free(request); }
+    free(request);
     return null;
 }
 
@@ -363,6 +391,8 @@ fn sfn_serve(handler: * u8, port: i32) -> void ![net, io] {
     }
     let scheduler: * u8 = sfn_scheduler_create(queue);
     if scheduler as i64 == 0 {
+        // Tear down the already-initialized queue before bailing.
+        sfn_taskqueue_destroy(queue);
         close(listen_fd);
         return;
     }
