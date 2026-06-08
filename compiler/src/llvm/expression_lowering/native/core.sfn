@@ -1140,7 +1140,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     }
 
     // ── serve(<handler>[, <port>]) ──────────────────────────────────────
-    // Lower to `sailfin_adapter_serve_start(i8* handler, i32 port)`.
+    // Lower to `sfn_serve(i8* handler, i32 port)` — the Sailfin-native
+    // server accept loop in `runtime/sfn/concurrency/serve.sfn` (#1092).
     // The serve call does not return (it runs an accept loop), so the
     // result operand is void / null.
     if starts_with(stripped, "serve(") {
@@ -1203,9 +1204,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                         }
                     }
                 }
-                serve_lines.push("  call void @sailfin_adapter_serve_start("
-                    + handler_llvm
-                    + ", "
+                serve_lines.push("  call void @sfn_serve(" + handler_llvm + ", "
                     + port_llvm
                     + ")");
             }

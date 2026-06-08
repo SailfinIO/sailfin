@@ -783,12 +783,20 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "http_post", symbol: "sfn_http_post2", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net"], native_signature: "sfn_http_post2", c_abi_return_type: null
     });
 
-    // Serve adapters
+    // Serve adapters — flipped to the Sailfin-native server in
+    // `runtime/sfn/concurrency/serve.sfn` (#1092). The legacy C
+    // `symbol`s (`sailfin_adapter_serve_*`, never defined) stay for
+    // seed compat; the `native_signature` override routes calls to
+    // `sfn_serve` / `sfn_serve_handler_dispatch`. The bespoke `serve`
+    // lowering in `expression_lowering/native/core.sfn` emits the
+    // `@sfn_serve` call site directly (it does not consult this row),
+    // so the `native_signature` here keeps the registry honest with
+    // the emitted symbol.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "serve_start", symbol: "sailfin_adapter_serve_start", return_type: "void", parameter_types: ["i8*", "i32"], effects: ["net", "io"], native_signature: null, c_abi_return_type: null
+        target: "serve_start", symbol: "sailfin_adapter_serve_start", return_type: "void", parameter_types: ["i8*", "i32"], effects: ["net", "io"], native_signature: "sfn_serve", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "serve_handler_dispatch", symbol: "sailfin_adapter_serve_handler_dispatch", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net", "io"], native_signature: null, c_abi_return_type: null
+        target: "serve_handler_dispatch", symbol: "sailfin_adapter_serve_handler_dispatch", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net", "io"], native_signature: "sfn_serve_handler_dispatch", c_abi_return_type: null
     });
 
     // Concurrency adapters — flipped to sfn_* symbols (#1091)

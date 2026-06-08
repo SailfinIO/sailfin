@@ -55,7 +55,7 @@ ll-sources = ["ir/runtime_globals.ll"]
 # and the formerly-load-bearing allowlist is gone.
 #
 # Single-line array per the parser limitation noted above.
-sfn-sources = ["../sfn/memory/arena.sfn", "../sfn/memory/rc.sfn", "../sfn/memory/mem.sfn", "../sfn/string.sfn", "../sfn/array.sfn", "../sfn/clock.sfn", "../sfn/process.sfn", "../sfn/io.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/platform/exec.sfn", "../sfn/adapters/filesystem.sfn", "../sfn/adapters/http.sfn", "../sfn/concurrency/scheduler.sfn", "../sfn/concurrency/future.sfn", "../sfn/concurrency/channel.sfn"]
+sfn-sources = ["../sfn/memory/arena.sfn", "../sfn/memory/rc.sfn", "../sfn/memory/mem.sfn", "../sfn/string.sfn", "../sfn/array.sfn", "../sfn/clock.sfn", "../sfn/process.sfn", "../sfn/io.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/platform/exec.sfn", "../sfn/adapters/filesystem.sfn", "../sfn/adapters/http.sfn", "../sfn/concurrency/scheduler.sfn", "../sfn/concurrency/future.sfn", "../sfn/concurrency/channel.sfn", "../sfn/concurrency/serve.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm", "-lpthread"]
 
