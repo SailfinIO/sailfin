@@ -230,5 +230,60 @@ check_fail_case() {
 }
 run_test "forced failure: verdict is the final block with status=fail + failure" check_fail_case
 
+# ---- Case 3: failed cold rebuild -> status "fail" (regression for #1192) ----
+# A failed cold self-host rebuild must make `make compile` FAIL (non-zero
+# exit + status:"fail"), not silently fall back to the prior
+# build/native/sailfin and report status:"pass". The bug: compile-impl
+# chained `$(MAKE) rebuild; echo ...` with `;`, so a failed rebuild's
+# non-zero exit was masked by the trailing echo's 0 and the if-compound
+# returned 0. The fix chains with `&&`.
+#
+# To exercise the rebuild branch fast/deterministically/network-free, we
+# force it (FORCE=1) with a stub "seed" that answers --version (passing
+# rebuild-impl's preflight) but fails `build`. No real cold self-host runs.
+# FORCE / SEED_NATIVE are read from the shell env by the recipe, so they
+# go through `env` rather than as make-command-line variables.
+FAKESEED="$SCRATCH/fakeseed"
+cat > "$FAKESEED" <<'STUB'
+#!/usr/bin/env bash
+# Minimal seed stub: viable enough to clear rebuild-impl's `--version`
+# preflight but deliberately fails the actual `build` so the cold rebuild
+# fails. Every other subcommand (e.g. the platform-module `emit`
+# pre-stage) is a harmless no-op.
+case "${1:-}" in
+  --version) echo "sailfin-fakeseed 0.0.0" ;;
+  build)     echo "[fakeseed] build deliberately failing for #1192 regression" >&2; exit 1 ;;
+  *)         exit 0 ;;
+esac
+STUB
+chmod +x "$FAKESEED"
+
+BREAK_LOG="$SCRATCH/break.log"
+( ulimit -v 8388608 2>/dev/null || true
+  env -u SAILFIN_INNER FORCE=1 SEED_NATIVE="$FAKESEED" \
+      ${TIMEOUT_PREFIX} make --no-print-directory compile ) \
+    > "$BREAK_LOG" 2>&1 || true
+
+check_failed_rebuild_case() {
+    assert_final_block "$BREAK_LOG" || return 1
+    local json; json="$(verdict_json "$BREAK_LOG")" || { echo "  no verdict JSON" >&2; return 1; }
+    assert_parses_json "$json" || return 1
+    local target; target="$(json_field "$json" target)"
+    if [ "$target" != "compile" ]; then
+        echo "  expected target compile, got: $target" >&2; return 1
+    fi
+    local status; status="$(json_field "$json" status)"
+    if [ "$status" != "fail" ]; then
+        echo "  expected status fail when the cold rebuild fails (no stale fallback), got: $status" >&2
+        tail -8 "$BREAK_LOG" >&2; return 1
+    fi
+    local failure; failure="$(json_field "$json" failure)"
+    if [ -z "$failure" ] || [ "$failure" = "null" ]; then
+        echo "  expected non-null failure on a failed rebuild, got: $failure" >&2; return 1
+    fi
+    return 0
+}
+run_test "failed rebuild: make compile reports status=fail (no stale fallback)" check_failed_rebuild_case
+
 echo "[test] make result contract: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
