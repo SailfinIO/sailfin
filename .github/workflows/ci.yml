@@ -122,23 +122,17 @@ jobs:
   # the tar round-trip is what keeps the binary executable on download
   # (load-bearing on macOS; asserted by the composite's skip-build
   # verify step).
-  build-compiler:
-    name: Build compiler [${{ matrix.package_label }}]
+  #
+  # Deliberately TWO job ids (not one matrix job): GitHub Actions treats
+  # a matrix job as a single `needs:` dependency, so a shared matrix
+  # would gate every Linux shard on the slower macOS build (and lose
+  # Linux test signal entirely when only the macOS build fails). Per-OS
+  # job ids keep each OS's shard legs gated only on their own build.
+  build-compiler-linux:
+    name: Build compiler [linux-x86_64]
     needs: shard-cover
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-15, ubuntu-24.04]
-        include:
-          - os: macos-15
-            package_label: macos-arm64
-            clang: clang
-          - os: ubuntu-24.04
-            package_label: linux-x86_64
-            clang: clang-18
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6.0.3
@@ -161,18 +155,10 @@ jobs:
           echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 
       - name: Install clang (Linux)
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-18 llvm-18 jq
           echo "CLANG=clang-18" >> "$GITHUB_ENV"
-
-      - name: Install jq + LLVM tools (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          brew install jq llvm
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
       - name: Build native compiler (via Makefile)
         uses: ./.github/actions/sailfin-build
@@ -181,8 +167,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           mode: build-only
-          target: ${{ matrix.package_label }}
-          clang: ${{ matrix.clang }}
+          target: linux-x86_64
+          clang: clang-18
           seed_version: ${{ steps.seed.outputs.seed_version }}
           package: 'false'
 
@@ -193,19 +179,16 @@ jobs:
       # fresh from the `make rebuild` above. Keeping them out of the
       # shard artifact keeps it bounded (#1234 risk note).
       - name: Install MinGW-w64 cross-compiler (Linux)
-        if: ${{ matrix.package_label == 'linux-x86_64' }}
         run: |
           sudo apt-get install -y mingw-w64
 
       - name: Cross-compile for Windows (Linux)
-        if: ${{ matrix.package_label == 'linux-x86_64' }}
         shell: bash {0}
         run: |
           set -euo pipefail
           make ci-cross-windows
 
       - name: Upload Windows installer archive
-        if: ${{ matrix.package_label == 'linux-x86_64' }}
         uses: actions/upload-artifact@v7
         with:
           name: ci-installer-windows-x86_64
@@ -228,59 +211,114 @@ jobs:
           if [ -d build/cache ]; then
             paths="$paths build/cache"
           fi
-          tar --exclude 'build/cache/test-bin' -czf "build-tree-${{ matrix.package_label }}.tar.gz" $paths
-          ls -lh "build-tree-${{ matrix.package_label }}.tar.gz"
+          tar --exclude 'build/cache/test-bin' -czf "build-tree-linux-x86_64.tar.gz" $paths
+          ls -lh "build-tree-linux-x86_64.tar.gz"
 
       - name: Upload compiler build tree
         uses: actions/upload-artifact@v7
         with:
-          name: ci-build-tree-${{ matrix.package_label }}
-          path: build-tree-${{ matrix.package_label }}.tar.gz
+          name: ci-build-tree-linux-x86_64
+          path: build-tree-linux-x86_64.tar.gz
           if-no-files-found: error
           retention-days: 1
 
-  build:
-    name: Build + Test [${{ matrix.package_label }} / ${{ matrix.shard }}]
-    needs: build-compiler
-    runs-on: ${{ matrix.os }}
+  build-compiler-macos:
+    name: Build compiler [macos-arm64]
+    needs: shard-cover
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.3
+
+      - name: Resolve seed version from .seed-version
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f .seed-version ]; then
+            echo "[seed-pin] .seed-version is missing from checkout" >&2
+            exit 1
+          fi
+          pin="$(tr -d '[:space:]' < .seed-version)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] .seed-version is empty" >&2
+            exit 1
+          fi
+          echo "[seed-pin] using seed $pin"
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install jq + LLVM tools (macOS)
+        shell: bash
+        run: |
+          brew install jq llvm
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+
+      - name: Build native compiler (via Makefile)
+        uses: ./.github/actions/sailfin-build
+        env:
+          # PR CI should not require a PAT.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          mode: build-only
+          target: macos-arm64
+          clang: clang
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          package: 'false'
+
+      # Bounded shard payload — see the Linux twin above for the
+      # include/exclude rationale.
+      - name: Bundle compiler tree for shard legs
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths="build/native/sailfin build/native/import-context"
+          if [ -f build/native/.build-stamp ]; then
+            paths="$paths build/native/.build-stamp"
+          fi
+          if [ -d build/cache ]; then
+            paths="$paths build/cache"
+          fi
+          tar --exclude 'build/cache/test-bin' -czf "build-tree-macos-arm64.tar.gz" $paths
+          ls -lh "build-tree-macos-arm64.tar.gz"
+
+      - name: Upload compiler build tree
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-build-tree-macos-arm64
+          path: build-tree-macos-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  # The PR test suite is ~90% of CI wall time and runs serially, so we
+  # fan it across per-OS shard legs that run concurrently (Phase 1 of
+  # docs/proposals/ci-test-speed.md, #843 Track A). Each leg downloads
+  # the shared per-OS compiler tree from its build-compiler-* job
+  # (#1234 — no per-leg `make rebuild`) then runs only its shard.
+  # `primary: true` designates the one leg per OS that also runs the
+  # one-shot steps (fmt/canary/effect-gate/package/upload) so they
+  # don't run 4x. Shard names live in scripts/test_shards.sh.
+  #
+  # build-linux and build-macos are separate job ids (not one os-matrix
+  # job) so each OS's legs gate only on their own compiler build — see
+  # the build-compiler-* comment above.
+  #
+  # e2e-sh is split 4 ways: the 94 legacy .sh scripts (~18s each on
+  # macOS) were the critical path (~31 min) when run as one shard.
+  # Keep in sync with E2E_SH_SHARDS in scripts/test_shards.sh; the
+  # shard-cover job fails if they drift.
+  build-linux:
+    name: Build + Test [linux-x86_64 / ${{ matrix.shard }}]
+    needs: build-compiler-linux
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        # The PR test suite is ~90% of CI wall time and runs serially, so
-        # we fan it across `os x shard` legs that run concurrently (Phase 1
-        # of docs/proposals/ci-test-speed.md, #843 Track A). Each leg
-        # downloads the shared per-OS compiler tree from `build-compiler`
-        # (#1234 — no per-leg `make rebuild`) then runs only its shard.
-        # `primary: true` designates the one leg per OS that also runs the
-        # one-shot steps (fmt/canary/effect-gate/cross/package/upload) so
-        # they don't run 4x. Shard names live in scripts/test_shards.sh.
-        os: [macos-15, ubuntu-24.04]
-        # e2e-sh is split 4 ways: the 94 legacy .sh scripts (~18s each on
-        # macOS) were the critical path (~31 min) when run as one shard.
-        # Keep in sync with E2E_SH_SHARDS in scripts/test_shards.sh; the
-        # shard-cover job fails if they drift.
         shard: [unit-a, unit-b, int-e2e-caps, e2e-sh-1, e2e-sh-2, e2e-sh-3, e2e-sh-4]
         include:
-          # Pinned to macos-15: the `macos-latest` label migrates to macOS 26
-          # starting 2026-06-15. Keep CI on the known-good image; macOS 26 is
-          # being trialed in nightly-selfhost.yml before we adopt it here.
-          - os: macos-15
-            package_label: macos-arm64
-            asset_os: macos
-            asset_arch: arm64
-            clang: clang
-          - os: ubuntu-24.04
-            package_label: linux-x86_64
-            asset_os: linux
-            asset_arch: x86_64
-            clang: clang-18
-          # Primary leg per OS: runs the one-shot non-test steps + packaging.
-          - os: macos-15
-            shard: unit-a
-            primary: true
-          - os: ubuntu-24.04
-            shard: unit-a
+          # Primary leg: runs the one-shot non-test steps + packaging.
+          - shard: unit-a
             primary: true
 
     steps:
@@ -305,34 +343,26 @@ jobs:
           echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 
       - name: Install clang (Linux)
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-18 llvm-18 jq
           echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
-      - name: Install jq + LLVM tools (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          brew install jq llvm
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
-
       # Shared compiler build (#1234): download the per-OS tree built by
-      # `build-compiler` instead of running `make rebuild` here. The tar
-      # round-trip preserves the exec bit (upload-artifact strips file
-      # modes); the composite's skip-build verify step asserts it.
+      # `build-compiler-linux` instead of running `make rebuild` here.
+      # The tar round-trip preserves the exec bit (upload-artifact strips
+      # file modes); the composite's skip-build verify step asserts it.
       - name: Download shared compiler build
         uses: actions/download-artifact@v8
         with:
-          name: ci-build-tree-${{ matrix.package_label }}
+          name: ci-build-tree-linux-x86_64
 
       - name: Extract shared compiler build
         shell: bash
         run: |
           set -euo pipefail
-          tar -xzf "build-tree-${{ matrix.package_label }}.tar.gz"
-          rm -f "build-tree-${{ matrix.package_label }}.tar.gz"
+          tar -xzf "build-tree-linux-x86_64.tar.gz"
+          rm -f "build-tree-linux-x86_64.tar.gz"
           ls -lh build/native/sailfin
 
       - name: Test + package (via Makefile)
@@ -342,8 +372,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           mode: skip-build
-          target: ${{ matrix.package_label }}
-          clang: ${{ matrix.clang }}
+          target: linux-x86_64
+          clang: clang-18
           seed_version: ${{ steps.seed.outputs.seed_version }}
           # Each leg runs only its shard; package only on the primary leg.
           shard: ${{ matrix.shard }}
@@ -508,27 +538,9 @@ jobs:
           set -euo pipefail
           build/native/sailfin check compiler/src runtime
 
-      - name: Enable test runner trace (macOS)
-        if: ${{ runner.os == 'macOS' && matrix.primary }}
-        shell: bash {0}
-        run: |
-          set -euo pipefail
-          mkdir -p build/sailfin
-          touch build/sailfin/.trace_test_runner
-
-      - name: Preflight single unit test (macOS)
-        if: ${{ runner.os == 'macOS' && matrix.primary }}
-        id: mac_test_preflight
-        continue-on-error: true
-        shell: bash {0}
-        run: |
-          set -euo pipefail
-          build/native/sailfin test compiler/tests/unit/cli_version_test.sfn
-
-      - name: Fixed-point rebuild check (linux-x86_64, macos-arm64)
+      - name: Fixed-point rebuild check (linux-x86_64)
         if: >-
           matrix.primary &&
-          (matrix.package_label == 'linux-x86_64' || matrix.package_label == 'macos-arm64') &&
           (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rc')
         shell: bash {0}
         run: |
@@ -582,7 +594,7 @@ jobs:
           fi
 
       # NOTE (#1234): the Windows cross-compile + its installer upload
-      # moved to the `build-compiler` Linux job — it needs
+      # moved to the `build-compiler-linux` job — it needs
       # `build/native/raw/*.ll`, which the shared shard artifact
       # deliberately excludes to stay bounded.
 
@@ -590,17 +602,323 @@ jobs:
         if: ${{ matrix.primary }}
         uses: actions/upload-artifact@v7
         with:
-          name: ci-native-${{ matrix.package_label }}
+          name: ci-native-linux-x86_64
           path: |
-            dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz
-            dist/sailfin-native-${{ matrix.package_label }}-*.tar.gz.sha256
-            dist/sailfin-native-${{ matrix.package_label }}-*.manifest.json
+            dist/sailfin-native-linux-x86_64-*.tar.gz
+            dist/sailfin-native-linux-x86_64-*.tar.gz.sha256
+            dist/sailfin-native-linux-x86_64-*.manifest.json
           if-no-files-found: error
 
       - name: Upload installer archive
         if: ${{ matrix.primary }}
         uses: actions/upload-artifact@v7
         with:
-          name: ci-installer-${{ matrix.package_label }}
-          path: dist/installer-${{ matrix.package_label }}.tar.gz
+          name: ci-installer-linux-x86_64
+          path: dist/installer-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  build-macos:
+    name: Build + Test [macos-arm64 / ${{ matrix.shard }}]
+    needs: build-compiler-macos
+    runs-on: macos-15
+    # Pinned to macos-15: the `macos-latest` label migrates to macOS 26
+    # starting 2026-06-15. Keep CI on the known-good image; macOS 26 is
+    # being trialed in nightly-selfhost.yml before we adopt it here.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [unit-a, unit-b, int-e2e-caps, e2e-sh-1, e2e-sh-2, e2e-sh-3, e2e-sh-4]
+        include:
+          # Primary leg: runs the one-shot non-test steps + packaging.
+          - shard: unit-a
+            primary: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.3
+
+      - name: Resolve seed version from .seed-version
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f .seed-version ]; then
+            echo "[seed-pin] .seed-version is missing from checkout" >&2
+            exit 1
+          fi
+          pin="$(tr -d '[:space:]' < .seed-version)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] .seed-version is empty" >&2
+            exit 1
+          fi
+          echo "[seed-pin] using seed $pin"
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install jq + LLVM tools (macOS)
+        shell: bash
+        run: |
+          brew install jq llvm
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+
+      # Shared compiler build (#1234): download the per-OS tree built by
+      # `build-compiler-macos` instead of running `make rebuild` here.
+      # The tar round-trip preserves the exec bit (upload-artifact strips
+      # file modes); the composite's skip-build verify step asserts it.
+      - name: Download shared compiler build
+        uses: actions/download-artifact@v8
+        with:
+          name: ci-build-tree-macos-arm64
+
+      - name: Extract shared compiler build
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf "build-tree-macos-arm64.tar.gz"
+          rm -f "build-tree-macos-arm64.tar.gz"
+          ls -lh build/native/sailfin
+
+      - name: Test + package (via Makefile)
+        uses: ./.github/actions/sailfin-build
+        env:
+          # PR CI should not require a PAT.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          mode: skip-build
+          target: macos-arm64
+          clang: clang
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          # Each leg runs only its shard; package only on the primary leg.
+          shard: ${{ matrix.shard }}
+          package: ${{ matrix.primary && 'true' || 'false' }}
+
+      - name: Report compiler metadata
+        if: ${{ matrix.primary }}
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          ls -lh build/native/sailfin
+          (file build/native/sailfin || true)
+          build/native/sailfin version || build/native/sailfin --version || true
+
+      # Regression guard for #615 / #807 — see the build-linux twin for
+      # the full background. Runs on macOS arm64 too because the
+      # original hazard was an arm64 ABI bug.
+      - name: Effect-gate exit-code smoke (#615 / #807)
+        if: ${{ matrix.primary }}
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          BAD=compiler/tests/fixtures/cli/missing_effect.sfn
+          OK=compiler/tests/fixtures/cli/clean_effect.sfn
+          fail=0
+
+          # --- Missing-effect input must fail `sailfin check`. ---
+          if out="$(build/native/sailfin check "$BAD" 2>&1)"; then
+            echo "[effect-gate] FAIL: sailfin check on $BAD exited 0 (expected non-zero)."
+            echo "$out"
+            fail=$((fail + 1))
+          else
+            echo "[effect-gate] ok: sailfin check on $BAD exited non-zero."
+          fi
+          if ! echo "$out" | grep -q 'error\[E0400\]'; then
+            echo "[effect-gate] FAIL: missing E0400 diagnostic in output:"
+            echo "$out"
+            fail=$((fail + 1))
+          fi
+          if ! echo "$out" | grep -qE '^checked 1 files: 1 error$'; then
+            echo "[effect-gate] FAIL: summary line not 'checked 1 files: 1 error'."
+            echo "[effect-gate] (likely Bool/int ABI corruption — see #615 / #638 / #641)"
+            echo "$out" | grep -E '^checked ' || true
+            fail=$((fail + 1))
+          fi
+
+          # --- Missing-effect input must also fail `sailfin emit llvm`. ---
+          if build/native/sailfin emit llvm "$BAD" >/dev/null 2>&1; then
+            echo "[effect-gate] FAIL: sailfin emit llvm on $BAD exited 0 (expected non-zero)."
+            fail=$((fail + 1))
+          else
+            echo "[effect-gate] ok: sailfin emit llvm on $BAD exited non-zero."
+          fi
+
+          # --- Clean-file control must succeed. ---
+          if ! ok_out="$(build/native/sailfin check "$OK" 2>&1)"; then
+            echo "[effect-gate] FAIL: sailfin check on $OK exited non-zero (expected 0)."
+            echo "$ok_out"
+            fail=$((fail + 1))
+          else
+            echo "[effect-gate] ok: sailfin check on $OK exited 0."
+          fi
+          if ! echo "$ok_out" | grep -qE '^checked 1 files: ok$'; then
+            echo "[effect-gate] FAIL: clean-file summary not 'checked 1 files: ok'."
+            echo "$ok_out" | grep -E '^checked ' || true
+            fail=$((fail + 1))
+          fi
+
+          if [ "$fail" -gt 0 ]; then
+            echo ""
+            echo "[effect-gate] $fail assertion(s) failed. The effect gate is broken."
+            exit 1
+          fi
+          echo "[effect-gate] all assertions passed"
+
+      - name: Check formatting (sfn fmt --check)
+        if: ${{ matrix.primary }}
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          fail=0
+          # Per-file loop to avoid OOM on bulk --check
+          while IFS= read -r f; do
+            if ! build/native/sailfin fmt --check "$f" > /dev/null 2>&1; then
+              echo "[fmt] needs formatting: $f"
+              fail=$((fail + 1))
+            fi
+          done < <(find compiler/src runtime -name '*.sfn' -print | sort)
+          if [ "$fail" -gt 0 ]; then
+            echo ""
+            echo "[fmt] $fail file(s) need formatting. Run: sfn fmt --write compiler/src/ runtime/"
+            exit 1
+          fi
+          echo "[fmt] all files formatted"
+
+      # Lowering-diagnostic canary — see the build-linux twin for the
+      # full background (docs/rca/2026-04-18-reexport-diagnostic-gep.md).
+      - name: Lowering-diagnostic canary (emit + grep)
+        if: ${{ matrix.primary }}
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          mkdir -p build/sailfin
+          canary_files=(
+            compiler/src/native_ir_api.sfn
+            compiler/src/native_ir_parser.sfn
+            compiler/src/native_ir_parser_defs.sfn
+            compiler/src/native_ir_parser_instructions.sfn
+            compiler/src/native_ir_utils_layout.sfn
+            compiler/src/native_ir_utils_parse.sfn
+          )
+          fail=0
+          for f in "${canary_files[@]}"; do
+            if ! log="$(build/native/sailfin emit llvm "$f" 2>&1 1>/dev/null)"; then
+              echo "[canary] emit crashed for $f"
+              fail=$((fail + 1))
+              continue
+            fi
+            bad="$(echo "$log" | grep -E 'call to unknown function|unable to lower if condition' || true)"
+            if [ -n "$bad" ]; then
+              echo "[canary] lowering diagnostics in $f:"
+              echo "$bad"
+              fail=$((fail + 1))
+            fi
+          done
+          if [ "$fail" -gt 0 ]; then
+            echo ""
+            echo "[canary] $fail file(s) produced unsafe lowering diagnostics."
+            echo "[canary] This typically means an imported symbol has no .fn"
+            echo "[canary] signature in its origin's .sfn-asm — check for"
+            echo "[canary] re-exports of imported symbols."
+            echo "[canary] See docs/rca/2026-04-18-reexport-diagnostic-gep.md."
+            exit 1
+          fi
+          echo "[canary] all canary files emit cleanly"
+
+      # Static check: E0600 re-export analysis — see the build-linux
+      # twin for the full background.
+      - name: Re-export check (sfn check enforces E0600)
+        if: ${{ matrix.primary }}
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          build/native/sailfin check compiler/src runtime
+
+      - name: Enable test runner trace (macOS)
+        if: ${{ matrix.primary }}
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          mkdir -p build/sailfin
+          touch build/sailfin/.trace_test_runner
+
+      - name: Preflight single unit test (macOS)
+        if: ${{ matrix.primary }}
+        id: mac_test_preflight
+        continue-on-error: true
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          build/native/sailfin test compiler/tests/unit/cli_version_test.sfn
+
+      - name: Fixed-point rebuild check (macos-arm64)
+        if: >-
+          matrix.primary &&
+          (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rc')
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          # Stage E PR7 (#383): the prior `scripts/build.sh` orchestrator
+          # was retired; this fixed-point gate now routes through the
+          # driver's `--work-dir` flag (the same path `make check`'s
+          # stage2/stage3 invocations use). `SAILFIN_TEST_SCRATCH`
+          # isolates each stage's per-module `.ll` outputs so the
+          # second-pass build does not clobber the first-pass set.
+          # `--no-cache` forces a fresh emit on each pass so the byte
+          # comparison is meaningful.
+          #
+          # `stage_capsule_imports` treats existing
+          # `<work-dir>/native/import-context/*.sfn-asm` +
+          # `.layout-manifest` files as cache hits based only on
+          # presence (mtime / `--no-cache` are not consulted for that
+          # short-circuit), so a restored workflow cache or stale
+          # workspace could otherwise produce a vacuous fixed-point
+          # comparison. Wipe both work dirs and their scratch roots
+          # before each build, mirroring `make check`'s targeted-find
+          # cleanup at Makefile:455-460/495-500.
+          rm -rf build/selfhost/native-selfhost1 build/selfhost/native-selfhost2
+          mkdir -p build/selfhost/native-selfhost1 build/selfhost/native-selfhost2
+          SAILFIN_TEST_SCRATCH="build/selfhost/native-selfhost1/scratch" \
+            build/native/sailfin build --no-cache -p compiler \
+              --work-dir build/selfhost/native-selfhost1 \
+              -o build/native/sailfin-selfhost1
+          SAILFIN_TEST_SCRATCH="build/selfhost/native-selfhost2/scratch" \
+            build/native/sailfin-selfhost1 build --no-cache -p compiler \
+              --work-dir build/selfhost/native-selfhost2 \
+              -o build/native/sailfin-selfhost2
+          ls -lh build/native/sailfin-selfhost1 build/native/sailfin-selfhost2
+          (file build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 || true)
+          build/native/sailfin-selfhost1 version || true
+          build/native/sailfin-selfhost2 version || true
+          echo "[ci] fixed-point sha256:"
+          (sha256sum build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 2>/dev/null || shasum -a 256 build/native/sailfin-selfhost1 build/native/sailfin-selfhost2)
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            if ! cmp -s build/native/sailfin-selfhost1 build/native/sailfin-selfhost2; then
+              echo "[ci][error] fixed-point rebuild mismatch (binaries differ)" >&2
+              (cmp -l build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 | head -n 20 || true)
+              exit 1
+            fi
+          else
+            # macOS binaries (Mach-O) embed a per-link UUID (LC_UUID), so byte-for-byte
+            # equality is not a stable determinism signal. Instead, assert the second
+            # selfhosted compiler can run a minimal unit test.
+            (dwarfdump --uuid build/native/sailfin-selfhost1 build/native/sailfin-selfhost2 || true)
+            build/native/sailfin-selfhost2 test compiler/tests/unit/cli_version_test.sfn
+          fi
+
+      - name: Upload native artifacts
+        if: ${{ matrix.primary }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-native-macos-arm64
+          path: |
+            dist/sailfin-native-macos-arm64-*.tar.gz
+            dist/sailfin-native-macos-arm64-*.tar.gz.sha256
+            dist/sailfin-native-macos-arm64-*.manifest.json
+          if-no-files-found: error
+
+      - name: Upload installer archive
+        if: ${{ matrix.primary }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-installer-macos-arm64
+          path: dist/installer-macos-arm64.tar.gz
           if-no-files-found: error
