@@ -48,7 +48,7 @@ This proposal recommends changing that stance for 1.0 **narrowly**: not "Sailfin
 is now a borrow-checked language like Rust," but "Sailfin enforces a bounded
 no-aliased-mutation / no-use-after-free analysis sufficient to make the native
 runtime sound." The precise `CLAUDE.md` / roadmap / spec edits the new stance
-requires are enumerated in §4 and §9.
+requires are enumerated in §4-bis and §9.
 
 ---
 
@@ -101,11 +101,18 @@ optimization in raw `* u8`:
   There is no check that `ptr` is uniquely owned. Any live alias of the bytes in
   `[ptr, ptr+old_size)` is now silently extended into.
 
-- **`runtime/sfn/string.sfn:sfn_str_sfn_append`** (`:206-208`) is built on that
-  same grow-at-tip path (the architect spec comment `:198-201` names
-  `sfn_arena_realloc`'s grow-if-at-tip as the chained-concat fast lane), and the
-  module still `extern`s the legacy C helpers (`:82` `sailfin_runtime_string_concat`,
-  `:84` `sailfin_runtime_string_append`).
+- **`runtime/sfn/string.sfn:sfn_str_sfn_append`** (`:206-208`) is the proof-of-life
+  hook for that grow-at-tip path. *Today its body still trampolines to the C
+  helper* `sailfin_runtime_string_append` (`:84`) — the native
+  `sfn_arena_sfn_realloc` grow-at-tip exists but is not yet called from
+  `string.sfn`, and the architect spec comment (`:198-201`) names
+  `sfn_arena_realloc`'s grow-if-at-tip as the *intended* chained-concat fast lane
+  (M2.4b). The module still `extern`s the legacy C helpers (`:82`
+  `sailfin_runtime_string_concat`, `:84` `sailfin_runtime_string_append`). The
+  point for this proposal: whether the append rides the C body now or the native
+  `sfn_arena_sfn_realloc` after M2.4b, **both targets are the same unsound
+  grow-at-tip** — so fixing the aliasing contract (not just the migration) is what
+  matters.
 
 - The equivalent C bodies are still live in tree: `sailfin_runtime.c:3837+`
   (`string_append`) over `sailfin_arena.c:208-245` (`sfn_arena_realloc`
@@ -386,9 +393,12 @@ optional `unsafe` prefix"*). Extend that into a coherent boundary:
 - **Raw `* T` is "unsafe-typed."** Constructing, dereferencing, doing pointer
   arithmetic on, or `free`-ing a raw `* T` is permitted **only**:
   - inside an `extern fn` body, or
-  - inside an explicit `unsafe { … }` block (new — or reuse the `unsafe`
-    keyword the parser already tolerates on externs), or
-  - inside a function marked `unsafe fn`.
+  - inside an explicit `unsafe { … }` block — the syntax **already parses today**
+    as a block statement (`compiler/src/parser/statements.sfn:287-298`) but
+    carries **no ownership semantics yet**; this proposal gives it the
+    aliasing-boundary meaning, or
+  - inside a function marked `unsafe fn` (the `unsafe` prefix already parses on
+    `extern fn`; see `parser/declarations.sfn:896-902`).
 - The ownership checker **does not analyze** the interior of an `unsafe` region
   for aliasing — it is the author's asserted responsibility, exactly as in Rust.
   What it *does* enforce is the **boundary**: a raw pointer may not silently
@@ -421,8 +431,12 @@ struct OwnedBuf {
 
 // Consumes `self` (move), returns the (possibly relocated) buffer.
 // Because `self` is unique and moved, grow-at-tip is SOUND: no live
-// alias of the old bytes can exist.
-fn owned_buf_append(self: OwnedBuf, suffix: Bytes) -> OwnedBuf ![/* none */] { … }
+// alias of the old bytes can exist. No effect clause: a memory
+// primitive declares no effects (same discipline as arena.sfn).
+fn owned_buf_append(self: OwnedBuf, suffix: Bytes) -> OwnedBuf {
+    // grow-at-tip when `self` is at the arena bump tip, else copy;
+    // sound either way because `self` is uniquely owned.
+}
 ```
 
 The key move: `owned_buf_append` **consumes** its `self` (affine/move semantics,
