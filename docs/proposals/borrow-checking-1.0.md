@@ -170,6 +170,8 @@ either **prove** the buffer is uniquely owned (making in-place mutation sound) o
 
 ### 1.3 Quantifying the surface — how much of `runtime/sfn/**` is exposed
 
+Precise per-site inventory: see [docs/runtime_aliasing_inventory.md](../runtime_aliasing_inventory.md) (#1210).
+
 The pattern is **systemic, not a one-off.** The Sailfin-native runtime is written
 in a raw-pointer / manual-lifetime dialect: `* u8` payloads, pointer arithmetic
 over `i64`-typed address slots, and explicit `malloc` / `free`. A survey of
