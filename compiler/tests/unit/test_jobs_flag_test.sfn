@@ -1,0 +1,43 @@
+// #1236: unit coverage for `_parse_jobs_value`, the `sfn test --jobs N`
+// value parser. The flag gates the multi-file runner's bounded worker
+// pool, so the parser must accept exactly the plain positive decimal
+// integers in [1, 256] and reject everything else — `handle_test_command`
+// maps a `-1` return to a usage error (exit 2) rather than silently
+// running serial or unbounded.
+import { _parse_jobs_value } from "../../src/cli_commands_utils";
+
+test "jobs: plain positive integer parses" {
+    assert _parse_jobs_value("4") == 4;
+}
+
+test "jobs: 1 parses (serial default shape)" {
+    assert _parse_jobs_value("1") == 1;
+}
+
+test "jobs: multi-digit value parses" {
+    assert _parse_jobs_value("32") == 32;
+}
+
+test "jobs: cap value 256 accepted" {
+    assert _parse_jobs_value("256") == 256;
+}
+
+test "jobs: above-cap value rejected" {
+    assert _parse_jobs_value("257") == -1;
+}
+
+test "jobs: zero rejected" { assert _parse_jobs_value("0") == -1; }
+
+test "jobs: negative rejected" { assert _parse_jobs_value("-2") == -1; }
+
+test "jobs: empty rejected" { assert _parse_jobs_value("") == -1; }
+
+test "jobs: non-numeric rejected" { assert _parse_jobs_value("four") == -1; }
+
+test "jobs: trailing garbage rejected" {
+    assert _parse_jobs_value("4x") == -1;
+}
+
+test "jobs: leading whitespace rejected" {
+    assert _parse_jobs_value(" 4") == -1;
+}
