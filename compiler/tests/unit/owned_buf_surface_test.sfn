@@ -1,0 +1,83 @@
+// Surface tests for the OwnedBuf / Slice owned-buffer type family
+// (`runtime/sfn/memory/ownedbuf.sfn`, issue #1212, E3 of the
+// ownership epic #1209). The family is SURFACE ONLY today — these
+// tests pin that the surface parses, typechecks, and lowers through
+// the existing struct + i64 paths; move semantics (E5/E6) and view
+// lifetimes (E8) are explicitly NOT covered because they are not
+// enforced yet. The functional roundtrip lives in
+// `compiler/tests/e2e/test_owned_buf_roundtrip.sh`.
+//
+// Strategy:
+//   - Parser shape via `emit_native_text_with_module_name` over
+//     inline struct fixtures (the `.field` / `.layout` lines are the
+//     parse evidence — same approach as struct_field_separator_test).
+//   - Typecheck via `typecheck_diagnostics` over the locked
+//     consume-and-return `owned_buf_append` signature.
+//   - Lowering via ONE `lower_to_llvm_ir_from_text` call (it invokes
+//     clang and is memory-heavy) over the REAL ownedbuf.sfn read via
+//     `fs.readFile`, asserting the pinned aggregate layouts — same
+//     approach as runtime_clock_skeleton_test.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+import { typecheck_diagnostics } from "../../src/typecheck";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+fn _emit(source: string) -> string ![io] {
+    let program = parse_program(source);
+    return emit_native_text_with_module_name(program, "owned_buf_surface_test");
+}
+
+test "parser: OwnedBuf struct parses with four i64 fields" {
+    let asm = _emit("struct OwnedBuf { ptr_addr: i64; len: i64; cap: i64; arena_addr: i64; }");
+    assert _contains(asm, ".field ptr_addr: i64");
+    assert _contains(asm, ".field len: i64");
+    assert _contains(asm, ".field cap: i64");
+    assert _contains(asm, ".field arena_addr: i64");
+    // Four 8-byte slots — the 32-byte layout is the E3 contract.
+    assert _contains(asm, ".layout struct name=OwnedBuf size=32 align=8");
+}
+
+test "parser: Slice struct parses with two i64 fields" {
+    let asm = _emit("struct Slice { ptr_addr: i64; len: i64; }");
+    assert _contains(asm, ".field ptr_addr: i64");
+    assert _contains(asm, ".field len: i64");
+    // Two 8-byte slots — the 16-byte view layout.
+    assert _contains(asm, ".layout struct name=Slice size=16 align=8");
+}
+
+test "typecheck: owned_buf_append consume-and-return signature checks clean" ![io] {
+    // The locked E6 contract: `self: OwnedBuf` is consumed (moved)
+    // and the (possibly relocated) buffer is returned by value. No
+    // effect clause — memory primitives are effect-neutral.
+    let source = "struct OwnedBuf { ptr_addr: i64; len: i64; cap: i64; arena_addr: i64; }\n"
+        + "fn owned_buf_append(self: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedBuf {\n"
+        + "    return self;\n"
+        + "}";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "lowering: OwnedBuf maps to the four-i64 aggregate" ![io] {
+    let source = fs.readFile("runtime/sfn/memory/ownedbuf.sfn");
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "runtime/sfn/memory/ownedbuf");
+    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/memory/ownedbuf");
+
+    // The pinned aggregate layouts: every `_addr` field rides as an
+    // i64 slot (arena.sfn discipline), so OwnedBuf is 4 x i64 and
+    // Slice is 2 x i64.
+    assert _contains(ir, "%OwnedBuf = type { i64, i64, i64, i64 }");
+    assert _contains(ir, "%Slice = type { i64, i64 }");
+
+    // Boxed-struct ABI spot checks: by-value OwnedBuf/Slice params
+    // and returns lower to %OwnedBuf* / %Slice*.
+    assert _contains(ir, "define %OwnedBuf* @owned_buf_new(i64");
+    assert _contains(ir, "define %OwnedBuf* @owned_buf_append(%OwnedBuf*");
+    assert _contains(ir, "define %Slice* @owned_buf_slice(%OwnedBuf*");
+}
