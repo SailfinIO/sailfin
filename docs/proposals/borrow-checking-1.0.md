@@ -1,7 +1,7 @@
 # Proposal: Borrow / Ownership Checking as a 1.0 Memory-Safety Requirement for the Native Runtime
 
-Status: Draft for maintainer decision
-Date: 2026-06-09 (drafted via `/pickup #1207`)
+Status: **Approved — decisions D1–D9 locked 2026-06-09 (repo owner)**. See "Decisions Locked" below. Implementation tracked by epic #1209.
+Date: 2026-06-09 (drafted via `/pickup #1207`; decisions locked same day)
 Authors: compiler-architect (Sailbot session)
 Closes: #1207
 Motivated by: [#1205](https://github.com/SailfinIO/sailfin/issues/1205) (systemic in-place-aliasing corruption, present in **both** the C runtime and its Sailfin-native port)
@@ -9,9 +9,53 @@ Related: [#965](https://github.com/SailfinIO/sailfin/issues/965) (M4 structured 
 Companion docs: [`docs/runtime_audit.md`](../runtime_audit.md), [`docs/proposals/hierarchical-effects.md`](./hierarchical-effects.md), [`docs/proposals/result-and-question-operator.md`](./result-and-question-operator.md)
 
 > **What this issue produces:** the proposal document and a recommended path.
-> It does **not** implement enforcement. A follow-up epic, spawned from the
-> recommendation in §9, owns the implementation. No `compiler/src/*.sfn`
+> It does **not** implement enforcement. A follow-up epic (#1209), spawned from
+> the recommendation in §9, owns the implementation. No `compiler/src/*.sfn`
 > behavior changes here; `make compile` is unaffected.
+
+---
+
+## Decisions Locked (2026-06-09, repo owner)
+
+The nine decision points in §8 are resolved — all on this proposal's recommended
+path. Implementation is groomed into epic **#1209** (sub-issues #1210–#1220).
+
+| # | Decision | Resolution |
+|---|---|---|
+| **D1** | Adopt the stance reversal? | **Yes** — ownership/aliasing checking is enforced on the native runtime for 1.0 as a soundness floor (**not** a fourth pillar). **Expansion mandate (below).** |
+| **D2** | Enforced subset | **Option C** — unique-ownership / no-aliased-mutation / no-use-after-free over `OwnedBuf` + affine values, runtime-scoped. |
+| **D3** | Blocker vs quality bar | **1.0 blocker**, satisfied narrowly by **Phase R1** (memory/string core enforced + #1205 determinism regression green). |
+| **D4** | Ordering vs #822 | **Fix the aliasing contract before #822** deletes the C bodies. |
+| **D5** | `OwnedBuf` type | **Yes** — new owned-buffer / `Slice` type **family** (extensible, not a one-off). |
+| **D6** | `unsafe` boundary | **First-class `unsafe { }` / `unsafe fn`** (the block already parses; give it aliasing-boundary semantics). |
+| **D7** | Pass placement | **Standalone `ownership_checker.sfn`** after effect-check. |
+| **D8** | M4 coupling | **M4 #965 consumes this ownership substrate** for channel-send / spawn-capture safe sharing. |
+| **D9** | Doc surface | **`reference/preview/` chapter** at 1.0; promote to a numbered spec chapter when Phase U (user-facing enforcement) ships. |
+
+### The expansion mandate (load-bearing refinement of D1)
+
+The repo owner adopted Option C **explicitly as the first rung of a deliberately
+extensible model — not a ceiling.** Sailfin's ownership/borrowing story is
+expected to *grow over time* as a modern, agentic-development-era exploration of
+memory safety. **Sailfin does not have to be Rust**, and the 1.0 subset is a
+floor we build *upward* from, not a terminal design.
+
+Concretely, this reclassifies what the rest of this document calls "post-1.0
+maybe" into a **named, intended forward path**:
+
+- The `Borrowed` lattice state (§3.2) and shared-borrow semantics are the
+  **planned next widening**, not a speculative aside.
+- `Slice` / view lifetimes (§4.3) are designed to deepen toward
+  borrowed-view lifetimes.
+- "Phase U" (§5.2) — user-facing ownership — is a committed direction, gated on
+  sequencing, not on whether we want it.
+
+**Design constraint this imposes on the epic:** E3 (`OwnedBuf`/`Slice`) and E4
+(the ownership pass) must be built so the model **widens without a rewrite** —
+the lattice, the type family, and the diagnostic surface all leave room for
+shared borrows and richer ownership to be added incrementally. Extensibility is
+a 1.0 *implementation* requirement, even though the *enforced surface* at 1.0 is
+deliberately narrow.
 
 ---
 
