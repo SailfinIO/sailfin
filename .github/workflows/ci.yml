@@ -113,9 +113,135 @@ jobs:
           # the full tree. `check` emits no IR and invokes no clang.
           SAILFIN_USE_ARENA=1 build/seed/bin/sailfin check compiler/src/
 
+  # One compiler build per OS, shared by every shard leg below (#1234,
+  # "Lever 1 step 1b" of docs/proposals/ci-test-speed.md §6 step 2).
+  # Previously each of the ~14 Build + Test legs ran `make rebuild` from
+  # seed (~1.5 min Linux / ~3 min macOS even warm); now the build runs
+  # once per OS and the legs download the result. The tree is tarred
+  # before upload because upload-artifact does NOT preserve file modes —
+  # the tar round-trip is what keeps the binary executable on download
+  # (load-bearing on macOS; asserted by the composite's skip-build
+  # verify step).
+  build-compiler:
+    name: Build compiler [${{ matrix.package_label }}]
+    needs: shard-cover
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+        include:
+          - os: macos-15
+            package_label: macos-arm64
+            clang: clang
+          - os: ubuntu-24.04
+            package_label: linux-x86_64
+            clang: clang-18
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.3
+
+      - name: Resolve seed version from .seed-version
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f .seed-version ]; then
+            echo "[seed-pin] .seed-version is missing from checkout" >&2
+            exit 1
+          fi
+          pin="$(tr -d '[:space:]' < .seed-version)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] .seed-version is empty" >&2
+            exit 1
+          fi
+          echo "[seed-pin] using seed $pin"
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install clang (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 llvm-18 jq
+          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+
+      - name: Install jq + LLVM tools (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install jq llvm
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+
+      - name: Build native compiler (via Makefile)
+        uses: ./.github/actions/sailfin-build
+        env:
+          # PR CI should not require a PAT.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          mode: build-only
+          target: ${{ matrix.package_label }}
+          clang: ${{ matrix.clang }}
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          package: 'false'
+
+      # --- Cross-compile Windows binary from Linux LLVM IR ---
+      # Lives here (not on a shard leg) because it consumes build
+      # products the shared artifact deliberately excludes:
+      # `build/native/raw/*.ll` and the build work dir's shim — both
+      # fresh from the `make rebuild` above. Keeping them out of the
+      # shard artifact keeps it bounded (#1234 risk note).
+      - name: Install MinGW-w64 cross-compiler (Linux)
+        if: ${{ matrix.package_label == 'linux-x86_64' }}
+        run: |
+          sudo apt-get install -y mingw-w64
+
+      - name: Cross-compile for Windows (Linux)
+        if: ${{ matrix.package_label == 'linux-x86_64' }}
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          make ci-cross-windows
+
+      - name: Upload Windows installer archive
+        if: ${{ matrix.package_label == 'linux-x86_64' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-installer-windows-x86_64
+          path: dist/installer-windows-x86_64.tar.gz
+          if-no-files-found: error
+
+      # Bounded shard payload: compiler binary + import-context +
+      # module-IR cache (+ build stamp). Explicitly NOT included:
+      # build/native/raw (cross-windows only, consumed above),
+      # build/cache/test-bin (each shard leg restores its own test-bin
+      # cache and would be clobbered by an empty copy), and any scratch.
+      - name: Bundle compiler tree for shard legs
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths="build/native/sailfin build/native/import-context"
+          if [ -f build/native/.build-stamp ]; then
+            paths="$paths build/native/.build-stamp"
+          fi
+          if [ -d build/cache ]; then
+            paths="$paths build/cache"
+          fi
+          tar --exclude 'build/cache/test-bin' -czf "build-tree-${{ matrix.package_label }}.tar.gz" $paths
+          ls -lh "build-tree-${{ matrix.package_label }}.tar.gz"
+
+      - name: Upload compiler build tree
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-build-tree-${{ matrix.package_label }}
+          path: build-tree-${{ matrix.package_label }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
   build:
     name: Build + Test [${{ matrix.package_label }} / ${{ matrix.shard }}]
-    needs: shard-cover
+    needs: build-compiler
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     strategy:
@@ -123,8 +249,9 @@ jobs:
       matrix:
         # The PR test suite is ~90% of CI wall time and runs serially, so
         # we fan it across `os x shard` legs that run concurrently (Phase 1
-        # of docs/proposals/ci-test-speed.md, #843 Track A). Each leg builds
-        # the compiler (warm cache: ~1.5/3 min) then runs only its shard.
+        # of docs/proposals/ci-test-speed.md, #843 Track A). Each leg
+        # downloads the shared per-OS compiler tree from `build-compiler`
+        # (#1234 — no per-leg `make rebuild`) then runs only its shard.
         # `primary: true` designates the one leg per OS that also runs the
         # one-shot steps (fmt/canary/effect-gate/cross/package/upload) so
         # they don't run 4x. Shard names live in scripts/test_shards.sh.
@@ -191,12 +318,30 @@ jobs:
           brew install jq llvm
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
-      - name: Build + test + package (via Makefile)
+      # Shared compiler build (#1234): download the per-OS tree built by
+      # `build-compiler` instead of running `make rebuild` here. The tar
+      # round-trip preserves the exec bit (upload-artifact strips file
+      # modes); the composite's skip-build verify step asserts it.
+      - name: Download shared compiler build
+        uses: actions/download-artifact@v8
+        with:
+          name: ci-build-tree-${{ matrix.package_label }}
+
+      - name: Extract shared compiler build
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf "build-tree-${{ matrix.package_label }}.tar.gz"
+          rm -f "build-tree-${{ matrix.package_label }}.tar.gz"
+          ls -lh build/native/sailfin
+
+      - name: Test + package (via Makefile)
         uses: ./.github/actions/sailfin-build
         env:
           # PR CI should not require a PAT.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          mode: skip-build
           target: ${{ matrix.package_label }}
           clang: ${{ matrix.clang }}
           seed_version: ${{ steps.seed.outputs.seed_version }}
@@ -436,18 +581,10 @@ jobs:
             build/native/sailfin-selfhost2 test compiler/tests/unit/cli_version_test.sfn
           fi
 
-      # --- Cross-compile Windows binary from Linux LLVM IR ---
-      - name: Install MinGW-w64 cross-compiler (Linux)
-        if: ${{ matrix.package_label == 'linux-x86_64' && matrix.primary }}
-        run: |
-          sudo apt-get install -y mingw-w64
-
-      - name: Cross-compile for Windows (Linux)
-        if: ${{ matrix.package_label == 'linux-x86_64' && matrix.primary }}
-        shell: bash {0}
-        run: |
-          set -euo pipefail
-          make ci-cross-windows
+      # NOTE (#1234): the Windows cross-compile + its installer upload
+      # moved to the `build-compiler` Linux job — it needs
+      # `build/native/raw/*.ll`, which the shared shard artifact
+      # deliberately excludes to stay bounded.
 
       - name: Upload native artifacts
         if: ${{ matrix.primary }}
@@ -466,12 +603,4 @@ jobs:
         with:
           name: ci-installer-${{ matrix.package_label }}
           path: dist/installer-${{ matrix.package_label }}.tar.gz
-          if-no-files-found: error
-
-      - name: Upload Windows installer archive
-        if: ${{ matrix.package_label == 'linux-x86_64' && matrix.primary }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: ci-installer-windows-x86_64
-          path: dist/installer-windows-x86_64.tar.gz
           if-no-files-found: error

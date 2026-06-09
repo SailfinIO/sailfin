@@ -32,6 +32,17 @@ inputs:
     description: "Build + upload dist/ packages ('true'/'false'). Set 'false' on non-primary shard legs so packaging runs once per OS."
     required: false
     default: "true"
+  mode:
+    description: >-
+      Pipeline slice to run. 'full' (default) = fetch seed + build + test +
+      package (back-compat for release-*.yml / build-quality.yml callers).
+      'build-only' = fetch seed + build the compiler, skip tests/packaging —
+      used by the shared per-OS build-compiler job in ci.yml. 'skip-build' =
+      trust an already-present build/native + build/cache tree (downloaded
+      from the build-compiler artifact) and run tests/packaging only; no
+      seed fetch, no `make rebuild`.
+    required: false
+    default: "full"
 runs:
   using: "composite"
   steps:
@@ -50,13 +61,14 @@ runs:
     # (compiler/src/build_cache.sfn) embeds the real seed/compiler
     # version in the on-disk digest, so a stale-seed entry simply misses.
     - name: Restore seed cache
-      if: ${{ inputs.seed_version != '' && inputs.seed_version != 'latest' }}
+      if: ${{ inputs.mode != 'skip-build' && inputs.seed_version != '' && inputs.seed_version != 'latest' }}
       uses: actions/cache@v4
       with:
         path: build/seed
         key: sailfin-seed-${{ inputs.target }}-${{ inputs.seed_version }}
 
     - name: Fetch released seed compiler
+      if: ${{ inputs.mode != 'skip-build' }}
       shell: bash {0}
       run: |
         set -euo pipefail
@@ -90,6 +102,7 @@ runs:
     # main's cache (primed by build-quality.yml) and from its own
     # earlier pushes.
     - name: Restore build cache (content-addressed module IR)
+      if: ${{ inputs.mode != 'skip-build' }}
       uses: actions/cache@v4
       with:
         path: build/cache
@@ -121,6 +134,7 @@ runs:
     # a fresh entry). They are also folded into the per-test cache key by
     # content (`runtime_link_inputs_identity`), so this is belt-and-braces.
     - name: Restore test-bin cache (per-test linked binaries)
+      if: ${{ inputs.mode != 'build-only' }}
       uses: actions/cache@v4
       with:
         path: build/cache/test-bin
@@ -130,6 +144,7 @@ runs:
           sailfin-testbin-${{ inputs.target }}-
 
     - name: Build native compiler (selfhost from released seed)
+      if: ${{ inputs.mode != 'skip-build' }}
       shell: bash {0}
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
@@ -151,13 +166,32 @@ runs:
             SEED_NATIVE="build/seed/bin/sailfin"
         fi
 
+    # skip-build mode: the compiler tree was downloaded from the shared
+    # per-OS build-compiler artifact instead of being rebuilt here. Verify
+    # the binary survived the artifact round-trip *executable* (GitHub
+    # artifacts strip permissions unless the producer tars first — the
+    # build-compiler job does) and actually runs before spending test time.
+    - name: Verify downloaded compiler tree (skip-build mode)
+      if: ${{ inputs.mode == 'skip-build' }}
+      shell: bash {0}
+      run: |
+        set -euo pipefail
+        if [ ! -x build/native/sailfin ]; then
+          echo "[ci][error] skip-build mode: build/native/sailfin missing or not executable" >&2
+          ls -l build/native 2>/dev/null || true
+          exit 1
+        fi
+        build/native/sailfin version
+
     - name: Prepare test artifacts
+      if: ${{ inputs.mode != 'build-only' }}
       shell: bash {0}
       run: |
         set -euo pipefail
         make ci-prepare-test-artifacts
 
     - name: Run tests (first-pass binary)
+      if: ${{ inputs.mode != 'build-only' }}
       shell: bash {0}
       run: |
         set -euo pipefail
@@ -194,7 +228,7 @@ runs:
         fi
 
     - name: Package artifacts
-      if: ${{ inputs.package == 'true' }}
+      if: ${{ inputs.package == 'true' && inputs.mode != 'build-only' }}
       shell: bash {0}
       run: |
         set -euo pipefail
