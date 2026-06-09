@@ -1,0 +1,51 @@
+// Golden-IR regression test for #1189: `(ptr as i64 + N) as * T` must keep
+// the offset. A parenthesised pointer-arithmetic expression whose left
+// operand is itself an ` as i64` cast used to drop the `+ N` and collapse
+// to a bare `bitcast <ptr> to T*`, aiming at the base address (offset 0)
+// instead of `base + N`, with no diagnostic. The additive-precedence guard
+// (`_cast_annotation_has_binary_continuation`, #1193) fixed it; this pins
+// the `ptrtoint + add + inttoptr` shape so the composition cannot regress.
+//
+// Strategy mirrors `concurrency_lowering_test.sfn`: ONE `lower_to_llvm_ir_
+// from_text` call (it invokes clang and is memory-heavy) over a single
+// combined source carrying every form under test. The functions return the
+// computed pointer so the arithmetic is not dead-stripped.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+// `inline_form` is the bug repro (constant offset packed inside the cast
+// operand). `mul_form` exercises a computed offset (`i * 8`). Both must
+// lower through integer arithmetic + `inttoptr`, never a `bitcast` of the
+// original pointer.
+test "lowering: `(ptr as i64 + N) as * T` keeps the offset (#1189)" ![io] {
+    let source = "fn inline_form(task: * u8) -> * i64 {\n"
+        + "    return (task as i64 + 24) as * i64;\n"
+        + "}\n"
+        + "fn mul_form(task: * u8, i: i64) -> * i64 {\n"
+        + "    return (task as i64 + i * 8) as * i64;\n"
+        + "}";
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "ptr_arith_cast_offset_test");
+    let ir = lower_to_llvm_ir_from_text(native, "ptr_arith_cast_offset_test");
+
+    // The pointer operand is reinterpreted as an integer (not bitcast).
+    assert _contains(ir, "ptrtoint i8* %task to i64");
+    // The constant `+ 24` survives as integer arithmetic.
+    assert _contains(ir, "add i64");
+    assert _contains(ir, ", 24");
+    // The full integer value is turned back into the target pointer.
+    assert _contains(ir, "inttoptr i64");
+    assert _contains(ir, "to i64*");
+    // The computed `i * 8` offset survives too (mul + add + inttoptr).
+    assert _contains(ir, "mul i64");
+
+    // Regression guard: the original bug collapsed the whole expression to
+    // a single `bitcast i8* %task to i64*`, discarding ptrtoint/add/inttoptr.
+    assert !_contains(ir, "bitcast i8* %task to i64*");
+}
