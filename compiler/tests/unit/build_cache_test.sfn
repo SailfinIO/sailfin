@@ -45,7 +45,10 @@ import {
     empty_cache_stats,
     is_valid_digest,
     merge_cache_stats,
-    runtime_object_entry_key_from_str
+    runtime_object_entry_key_from_str,
+    test_bin_cache_key,
+    test_bin_cache_root_with_override,
+    test_bin_cache_schema_version
 } from "../../src/build_cache";
 
 // --------------------------------------------------------------
@@ -198,6 +201,108 @@ test "build_cache: cache_key_for changes when dep manifest changes" ![io] {
     let key1 = cache_key_for(src, [dep], "0.5.10-alpha.2", "[]", "dep_sens_1");
     _write_file(dep, "module: alpha; layout: changed");
     let key2 = cache_key_for(src, [dep], "0.5.10-alpha.2", "[]", "dep_sens_2");
+    assert key1.digest != key2.digest;
+    _cleanup(scratch);
+}
+
+// --------------------------------------------------------------
+// Per-test binary cache (#1230)
+// --------------------------------------------------------------
+test "build_cache: test_bin cache schema + root layout" ![io] {
+    assert test_bin_cache_schema_version() == "v1";
+    // In-tree default sits beside (not under) the module cache's
+    // `<base>/v<N>` tree so the two schema lines age out independently.
+    assert test_bin_cache_root_with_override("") == "build/cache/test-bin/v1";
+    assert test_bin_cache_root_with_override("/shared/cache") == "/shared/cache/test-bin/v1";
+}
+
+test "build_cache: test_bin_cache_key same inputs -> same digest" ![io] {
+    let scratch = _test_tmp_root("tbk_determinism");
+    let test_src = scratch + "/foo_test.sfn";
+    let dep_ll = scratch + "/dep.ll";
+    _write_file(test_src, "test \"x\" { assert 1 == 1; }");
+    _write_file(dep_ll, "; ModuleID = 'dep'");
+    let native_texts: string[] = ["sfn-asm: helper"];
+    let key1 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_det");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_det");
+    assert key1.digest == key2.digest;
+    assert key1.digest.length == 64;
+    _cleanup(scratch);
+}
+
+test "build_cache: test_bin_cache_key changes when a dep .ll hash changes" ![io] {
+    let scratch = _test_tmp_root("tbk_dep_ll");
+    let test_src = scratch + "/foo_test.sfn";
+    let dep_ll = scratch + "/dep.ll";
+    _write_file(test_src, "test \"x\" { assert 1 == 1; }");
+    let native_texts: string[] = ["sfn-asm: helper"];
+    _write_file(dep_ll, "; ModuleID = 'dep'\ndefine i64 @f() { ret i64 1 }");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_dll_1");
+    // A changed transitive dep → changed hash → changed key → cache
+    // miss. This is the correctness hinge: a stale binary can never be
+    // served after a dep edit (acceptance criterion: misses for exactly
+    // the transitive importers of an edited compiler/src file).
+    _write_file(dep_ll, "; ModuleID = 'dep'\ndefine i64 @f() { ret i64 2 }");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_dll_2");
+    assert key1.digest != key2.digest;
+    _cleanup(scratch);
+}
+
+test "build_cache: test_bin_cache_key changes when a native_text dep changes" ![io] {
+    let scratch = _test_tmp_root("tbk_native");
+    let test_src = scratch + "/foo_test.sfn";
+    let dep_ll = scratch + "/dep.ll";
+    _write_file(test_src, "test \"x\" { assert 1 == 1; }");
+    _write_file(dep_ll, "; ModuleID = 'dep'");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], ["sfn-asm: original"], "0.7.0+bin.abc", "[\"-O0\"]", "tbk_nt_1");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], ["sfn-asm: changed"], "0.7.0+bin.abc", "[\"-O0\"]", "tbk_nt_2");
+    assert key1.digest != key2.digest;
+    _cleanup(scratch);
+}
+
+test "build_cache: test_bin_cache_key invariant under dep_ll order" ![io] {
+    let scratch = _test_tmp_root("tbk_order");
+    let test_src = scratch + "/foo_test.sfn";
+    let dep_a = scratch + "/a.ll";
+    let dep_b = scratch + "/b.ll";
+    let dep_c = scratch + "/c.ll";
+    _write_file(test_src, "test \"x\" { assert 1 == 1; }");
+    _write_file(dep_a, "; alpha");
+    _write_file(dep_b, "; beta");
+    _write_file(dep_c, "; gamma");
+    let nt: string[] = [];
+    let key_abc = test_bin_cache_key(test_src, [dep_a, dep_b, dep_c], nt, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_ord");
+    let key_cba = test_bin_cache_key(test_src, [dep_c, dep_b, dep_a], nt, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_ord");
+    assert key_abc.digest == key_cba.digest;
+    _cleanup(scratch);
+}
+
+test "build_cache: test_bin_cache_key changes when test source changes" ![io] {
+    let scratch = _test_tmp_root("tbk_src");
+    let test_src = scratch + "/foo_test.sfn";
+    let dep_ll = scratch + "/dep.ll";
+    _write_file(dep_ll, "; ModuleID = 'dep'");
+    let nt: string[] = [];
+    _write_file(test_src, "test \"x\" { assert 1 == 1; }");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_src_1");
+    _write_file(test_src, "test \"x\" { assert 2 == 2; }");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_src_2");
+    assert key1.digest != key2.digest;
+    _cleanup(scratch);
+}
+
+test "build_cache: test_bin_cache_key changes when compiler identity changes" ![io] {
+    let scratch = _test_tmp_root("tbk_ident");
+    let test_src = scratch + "/foo_test.sfn";
+    let dep_ll = scratch + "/dep.ll";
+    _write_file(test_src, "test \"x\" { assert 1 == 1; }");
+    _write_file(dep_ll, "; ModuleID = 'dep'");
+    let nt: string[] = [];
+    // A rebuilt compiler (new binary content for `.dirty` dev stamps)
+    // changes the identity → busts every cached binary, same model the
+    // module IR cache uses.
+    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0+bin.aaa", "[\"-O0\"]", "tbk_id_1");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0+bin.bbb", "[\"-O0\"]", "tbk_id_2");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }

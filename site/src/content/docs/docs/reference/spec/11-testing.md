@@ -126,8 +126,10 @@ Three event kinds, schema-versioned:
  "assertion":{"file":"path/to/foo_test.sfn","line":8,"col":12,
               "message":"expected x == 42, got 41"}}
 
-// Last line — exactly once per run.
-{"event":"summary","passed":40,"failed":1,"skipped":1,"duration_ms":1284}
+// Last line — exactly once per run. The `cache` object reports the
+// per-test binary cache (see "Per-test binary cache" below).
+{"event":"summary","passed":40,"failed":1,"skipped":1,"duration_ms":1284,
+ "cache":{"test_bin_hits":36,"test_bin_misses":6,"test_bin_hit_rate":0.8571}}
 ```
 
 ### Field semantics
@@ -147,6 +149,15 @@ Three event kinds, schema-versioned:
 | `summary` | `failed`         | integer   | Tests with `status == "fail"`.                                  |
 | `summary` | `skipped`        | integer   | Tests with `status == "skip"`.                                  |
 | `summary` | `duration_ms`    | integer   | Wall-clock time of the entire `sfn test --json` invocation.     |
+| `summary` | `cache`          | object    | Per-test binary cache counters; see *Per-test binary cache*.    |
+
+The `cache` object mirrors the `sfn build --json` report's `cache` field:
+
+| Field                | Type    | Meaning                                                              |
+|----------------------|---------|----------------------------------------------------------------------|
+| `test_bin_hits`      | integer | Tests served from the cached linked binary (lower+link skipped).     |
+| `test_bin_misses`    | integer | Tests that cold lower+linked, then populated the cache.              |
+| `test_bin_hit_rate`  | number  | `hits / (hits + misses)`, floored to four decimals; `0.0000` when no lookups were attempted (e.g. `--no-test-cache`). |
 
 The optional `assertion` object carries the typed
 [`AssertFailure`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/assert_failure.sfn)
@@ -220,5 +231,47 @@ For any `sfn test --json` invocation:
 
 Consumers that pipe into `jq -c` can rely on every line being a complete
 JSON object with no trailing whitespace.
+
+## Per-test binary cache
+
+`sfn test` content-addresses each test's linked native binary so an
+unchanged test skips LLVM lowering and the `clang` link — the dominant
+per-test cost — and just re-runs the cached executable. The cache key is
+
+```
+sha256(
+  sha256(test_source_bytes)
+  || sha256(sorted(hash of each transitive dep the link consumes))
+  || compiler_identity        // busts on a rebuilt compiler
+  || canonical(clang_flags)
+  || schema_version
+)
+```
+
+The dependency set is the resolver output the link already consumes for
+the test's own closure, so a change to the test or any transitive
+dependency changes the key and misses the cache. On a hit the cached
+binary is still **run** (never a cached pass/fail result), so a
+flaky-at-runtime test always surfaces.
+
+The key does **not** fold in the assembled runtime capsule objects or
+link libraries that the link also consumes — those are covered
+indirectly by the compiler identity (a rebuilt compiler, the usual way a
+runtime-source edit reaches a test binary since the runtime is rebuilt
+by `make compile`, busts every entry). A runtime edit *without* a
+compiler rebuild can serve a stale binary; `--no-test-cache` (which
+`make check` and the nightly full suite pass) is the cold-build backstop
+that catches any such drift at the merge gate.
+
+Cached binaries live under `build/cache/test-bin/<schema>/` (alongside
+the module IR cache, under `$SAILFIN_BUILD_CACHE_DIR` when set) and are
+written atomically (temp + rename), so concurrent runs on the same key
+never corrupt an entry. The `cache` object in the `--json` summary
+reports the per-run `test_bin_hit_rate`.
+
+`--no-test-cache` bypasses both the read and the write, forcing a cold
+lower+link for every test (`test_bin_hit_rate` is then `0.0000`). The
+`make check` full-suite gate passes it so a test-compile regression can
+never be masked by a stale hit.
 
 ---

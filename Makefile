@@ -128,6 +128,14 @@ endif
 export SAILFIN_AGENT_REPORT
 AGENT_REPORT := bash scripts/agent_report.sh
 
+# Extra flags appended to every `$(NATIVE_BIN) test ...` invocation
+# (#1230). Empty by default so the local `make test` inner loop uses the
+# per-test binary cache and gets fast incremental reruns. The `make
+# check` full-suite gate overrides this to `--no-test-cache` so the
+# merge/seedcheck gate always cold-builds every test binary — the cache
+# can never mask a test-compile regression.
+TEST_BIN_CACHE_FLAGS ?=
+
 help:
 	@echo "Common Sailfin tasks"
 	@echo ""
@@ -193,9 +201,9 @@ test-impl:
 	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules --json | tee build/agent-test.test.jsonl || rc=$$?; \
+		$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules $(TEST_BIN_CACHE_FLAGS) --json | tee build/agent-test.test.jsonl || rc=$$?; \
 	else \
-		$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules || rc=$$?; \
+		$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules $(TEST_BIN_CACHE_FLAGS) || rc=$$?; \
 	fi; \
 	$(MAKE) test-e2e-sh || rc=$$?; \
 	exit $$rc
@@ -521,7 +529,7 @@ check-impl:
 		exit 1; \
 	fi
 	@echo "[check] running test suite on first-pass binary (early gate)..."
-	@$(MAKE) test NATIVE_BIN=build/native/sailfin
+	@$(MAKE) test NATIVE_BIN=build/native/sailfin TEST_BIN_CACHE_FLAGS=--no-test-cache
 	@echo "[check] first-pass tests passed — proceeding to seedcheck build..."
 	@echo "[check] verifying seed selfhost (stage2)..."
 	@# Stage2 routes through `sfn build -p compiler --work-dir <DIR>`
@@ -564,7 +572,7 @@ check-impl:
 	fi; \
 	echo "[check] seedcheck binary runs hello-world.sfn OK"
 	@echo "[check] running test suite with seedcheck binary (no fallbacks)..."
-	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck
+	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache
 	@echo ""
 	@echo "[check] stage2 tests passed — building stage3 for fixed-point comparison..."
 	@# Same shape as stage2 — driver `--work-dir` with

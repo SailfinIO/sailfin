@@ -290,6 +290,33 @@ feature availability.
     work-dir sidecar fast-path is preserved, and the shared layer stays
     gated on `cache_config.enabled` (the `sfn test` link path and
     `--no-cache` remain work-dir-local).
+  - **Per-test binary cache (#1230)** — Lever 2 of
+    `docs/proposals/ci-test-speed.md`. The test runner
+    (`handle_test_command`) now content-addresses each test's linked
+    native binary, so an unchanged test skips LLVM lowering + the
+    `clang` link (the dominant per-test cost) and just re-runs the
+    cached executable. `test_bin_cache_key` (in `build_cache.sfn`)
+    folds the test source hash, the resolver's transitive dep closure
+    (`TestGroup.native_texts` + `dep_ll_paths` — the test-source-specific
+    link inputs), the compiler identity (`cache_compiler_identity`, so a
+    rebuilt compiler busts every entry), the canonical clang flags, and
+    a `test-bin/v1` schema version. The assembled runtime capsule objects
+    + link libs the link also consumes are *not* folded into the key;
+    they ride on the compiler identity (a runtime edit normally reaches a
+    test binary via `make compile`, which busts it), with
+    `--no-test-cache` on the `make check` gate as the cold-build
+    backstop. Binaries store under
+    `build/cache/test-bin/v1/` via the existing atomic temp+rename
+    artifact helpers (new `"test-bin"` kind). On a hit the binary is
+    still **run** (variant 2a — never a cached pass/fail result). The
+    `--json` summary gains a `cache` object with `test_bin_hit_rate`
+    (mirroring the build report's `cache.hit_rate`), aggregated across
+    the per-file children of a multi-file run. `--no-test-cache`
+    bypasses both read and write; `make check` passes it
+    (`TEST_BIN_CACHE_FLAGS`) so the full-suite gate always cold-builds
+    and a test-compile regression can never be masked by a stale hit.
+    A no-op suite rerun reports ~100% hit rate and skips lower+link for
+    every unchanged test.
 - **Stage C2 per-capsule artifact layout (in flight, 2026-04-28).**
   Three PRs land the §4.4 layout (`build/capsules/<scope>/<name>/`)
   for everything `sfn build -p` produces:

@@ -266,6 +266,12 @@ fn _filename_for_kind(kind: string) -> string {
     // ever aliasing in a shared cache entry, even though their content
     // keys are already disjoint.
     if kind == "runtime-obj" { return "runtime.o"; }
+    // Per-test linked binary cache (#1230, Lever 2 of
+    // `docs/proposals/ci-test-speed.md`). A distinct filename keeps
+    // the test-binary layer from ever aliasing the per-module `.o`
+    // `obj` kind in a shared entry directory, mirroring the
+    // `runtime-obj` precedent.
+    if kind == "test-bin" { return "test.bin"; }
     return "";
 }
 
@@ -756,6 +762,119 @@ fn cache_compiler_identity(compiler_version: string, compiler_binary_path: strin
     return compiler_version + "+bin." + bin_hash;
 }
 
+// ----------------------------------------------------------------
+// Per-test binary cache (#1230)
+// ----------------------------------------------------------------
+// Lever 2 (variant 2a) of `docs/proposals/ci-test-speed.md`: content-
+// address each test's linked native executable so an unchanged test
+// skips LLVM lowering + the clang link (the dominant per-test cost)
+// and just re-runs the cached binary. This is a *second consumer* of
+// the same content-addressing correctness model `cache_key_for` uses
+// for the module IR cache — a changed input (test source, any
+// transitive dep the link consumes, the compiler's identity, or the
+// clang flag set) changes the key and misses the cache; it can never
+// produce a false hit.
+//
+// The on-disk layout reuses the module cache's prefix-sharded entry
+// directory (`cache_artifact_path` with the `"test-bin"` kind) under a
+// SEPARATE schema-versioned root so the two layers age out
+// independently. Lookups/stores/restores go through the existing
+// single-artifact helpers (`cache_lookup_artifact`,
+// `cache_store_artifact`, `cache_copy_artifact_to`), inheriting their
+// atomic temp+rename publish and digest validation for free.
+// Bumped when the test-binary key derivation or layout changes in a
+// way that makes old entries incompatible. Independent of
+// `build_cache_schema_version` so a module-cache schema bump doesn't
+// needlessly evict warm test binaries (and vice versa).
+fn test_bin_cache_schema_version() -> string { return "v1"; }
+
+// Root for the per-test binary cache: `<base>/test-bin/<schema>`,
+// where `<base>` is `$SAILFIN_BUILD_CACHE_DIR` (when set) or the
+// in-tree `build/cache` default. Kept beside — not under — the module
+// cache's `<base>/v<N>` tree so the two schema lines evolve
+// independently. Pure variant for tests.
+fn test_bin_cache_root_with_override(override_path: string) -> string {
+    let mut base: string = "build/cache";
+    if override_path.length > 0 { base = override_path; }
+    return base + "/test-bin/" + test_bin_cache_schema_version();
+}
+
+// Production reader. Resolves `$SAILFIN_BUILD_CACHE_DIR` at call time.
+fn test_bin_cache_root() -> string ![io] {
+    return test_bin_cache_root_with_override(_get_env_cmd("SAILFIN_BUILD_CACHE_DIR"));
+}
+
+// Derive the content-addressed cache key for a single test's linked
+// binary. The dep set is the test-source-specific set of inputs the
+// link consumes — the resolver-produced dependency `.ll` files
+// (`dep_ll_paths`, hashed off disk) plus the staged `.sfn-asm` import
+// contexts (`native_texts`, hashed in memory). Deriving the key from
+// the same resolver output the link already uses is the correctness
+// hinge for the test's OWN closure: a changed test source or dep
+// changes a hash here exactly as it changes the bytes the linker reads.
+//
+// Known gap: the link ALSO pulls in the assembled runtime capsule
+// objects + link libs (`_clang_link_test_cmd_with_deps`), which are NOT
+// folded into this key. Those are covered indirectly by
+// `compiler_identity` (a rebuilt compiler — which is how a runtime
+// source edit normally reaches a test binary, since the runtime is
+// rebuilt as part of `make compile` — busts every entry) and directly
+// by `--no-test-cache` on the `make check` / full-suite gate. A runtime
+// edit that is NOT accompanied by a compiler rebuild can therefore
+// serve a stale binary; the gate's cold build is the backstop.
+//
+//   key = sha256(
+//       sha256(test_source_bytes)
+//       || sha256(sorted(dep hashes))   // dep_ll files + native_texts
+//       || compiler_identity            // cache_compiler_identity(...)
+//       || canonical(clang_flags)
+//       || test_bin_cache_schema_version()
+//   )
+//
+// Hashes are sorted before folding so the key is invariant under dep
+// enumeration order. `unique_suffix` disambiguates the `_sha256_of_string`
+// temp path across concurrent `sfn test` invocations on different
+// files — pass the (sanitized) test source path; reused sequentially
+// within one process, never across two processes hashing the same
+// file simultaneously (the module cache carries the identical
+// single-process precondition).
+fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_texts: string[], compiler_identity: string, flags_canonical: string, unique_suffix: string) -> CacheKey ![io] {
+    let s_hash = _sha256_of_file_cmd(test_source_path);
+
+    let mut dep_hashes: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= dep_ll_paths.length { break; }
+        dep_hashes.push(_sha256_of_file_cmd(dep_ll_paths[i]));
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= native_texts.length { break; }
+        dep_hashes.push(_sha256_of_string(native_texts[j], unique_suffix + "_nt"));
+        j += 1;
+    }
+
+    let sorted_dep_hashes = _sort_strings(dep_hashes);
+    let mut deps_concat: string = "";
+    let mut k: int = 0;
+    loop {
+        if k >= sorted_dep_hashes.length { break; }
+        if k > 0 { deps_concat = deps_concat + "|"; }
+        deps_concat = deps_concat + sorted_dep_hashes[k];
+        k += 1;
+    }
+    let deps_hash = _sha256_of_string(deps_concat, unique_suffix + "_deps");
+
+    let final_input = s_hash + "\n" + deps_hash + "\n" + compiler_identity
+        + "\n"
+        + flags_canonical
+        + "\n"
+        + test_bin_cache_schema_version();
+    let final_digest = _sha256_of_string(final_input, unique_suffix + "_final");
+    return CacheKey { digest: final_digest };
+}
+
 export {
     CacheKey,
     CacheEntryPaths,
@@ -783,5 +902,9 @@ export {
     empty_build_cache_config,
     resolve_build_cache_config,
     cache_clean,
-    is_valid_digest
+    is_valid_digest,
+    test_bin_cache_schema_version,
+    test_bin_cache_root_with_override,
+    test_bin_cache_root,
+    test_bin_cache_key
 };
