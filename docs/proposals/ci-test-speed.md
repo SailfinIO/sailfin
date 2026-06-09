@@ -395,7 +395,7 @@ coverage cost is real. Treat as the *last* lever, not the first.
 | 1 | L1 Seam A: shard `ci.yml` matrix 2→2x4, file-list selection, per-shard `make rebuild`, **shard-cover lint** | CI-config + thin Makefile target | CI | low | 47→~16-18 min |
 | 2 | L1 1b: split build into a `needs:` job, share `build/native` + `build/cache` artifact across shards | CI-config | CI | low-med | removes redundant build minutes; small wall win |
 | 3 | L1 Seam B: `sailfin test --shard I/N` deterministic partition | runner (`cli_commands.sfn`) | compiler | low | (durability, not wall) |
-| 4 | L2 2a: per-test binary cache (key + read/write in runner), atomic writes, `--no-test-cache` for full suite | runner (`cli_commands.sfn` + `build_cache.sfn`) | compiler | med | incremental PRs 50-80% suite skip |
+| 4 | L2 2a: per-test binary cache (key + read/write in runner), atomic writes, `--no-test-cache` for full suite — **shipped (#1230)** | runner (`cli_commands.sfn` + `build_cache.sfn`) | compiler | med | incremental PRs 50-80% suite skip |
 | 5 | L2 CI: save/restore `build/cache/test-bin` per shard; nightly baseline warm | CI-config | CI | low | warms first-push hits |
 | 6 | L3: smoke tag + macOS-smoke PR leg + **full suite on push:main** | runner tag (exists) + CI-config + content pass | CI + compiler (curation) | med-high | only if 1-2 insufficient |
 

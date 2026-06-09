@@ -210,16 +210,53 @@ fn render_test_event(name: string, file: string, line: int, status: string, dura
     return "{" + _trj_join(parts, ",") + "}";
 }
 
+// Format the per-test-binary cache hit rate as a fixed 4-decimal
+// fraction (#1230). Mirrors `build_report.sfn::_br_format_hit_rate`
+// so CI gates can compare `cache.test_bin_hit_rate >= X` the same way
+// they do `cache.hit_rate` for the build report. Zero denominator
+// (no cache lookups attempted — e.g. `--no-test-cache`) emits
+// `0.0000`, never `null`/`nan`; a fully-warm rerun emits `1.0000`.
+// Truncates toward zero to match the floor semantics gate thresholds
+// assume.
+fn _trj_format_hit_rate(hits: int, misses: int) -> string {
+    let denom: int = hits + misses;
+    if denom == 0 { return "0.0000"; }
+    let mut scaled: int = ((hits * 10000) / denom) as int;
+    if scaled >= 10000 { return "1.0000"; }
+    if scaled < 0 { scaled = 0; }
+    let mut frac = _trj_number_to_string(scaled);
+    loop {
+        if frac.length >= 4 { break; }
+        frac = "0" + frac;
+    }
+    return "0." + frac;
+}
+
+// The `cache` sub-object embedded in the summary event (#1230). Mirrors
+// the build `--json` report's `cache` object: raw counters plus the
+// derived `test_bin_hit_rate` so consumers needn't recompute it.
+fn _trj_cache_object(test_bin_hits: int, test_bin_misses: int) -> string {
+    let mut parts: string[] = [];
+    parts.push(_trj_number_field("test_bin_hits", test_bin_hits));
+    parts.push(_trj_number_field("test_bin_misses", test_bin_misses));
+    parts.push(_trj_field("test_bin_hit_rate", _trj_format_hit_rate(test_bin_hits, test_bin_misses)));
+    return "{" + _trj_join(parts, ",") + "}";
+}
+
 // Final line of a `sfn test --json` run. Emitted exactly once, after
 // the last `test` event. `duration_ms` is the wall-clock time of the
-// whole runner invocation.
-fn render_summary_event(passed: int, failed: int, skipped: int, duration_ms: int) -> string {
+// whole runner invocation. The `cache` object (#1230) carries the
+// per-test-binary cache counters; an additive optional field, so no
+// `TEST_RUNNER_JSON_SCHEMA_VERSION` bump (consumers ignore unknown
+// keys per the schema policy above).
+fn render_summary_event(passed: int, failed: int, skipped: int, duration_ms: int, test_bin_hits: int, test_bin_misses: int) -> string {
     let mut parts: string[] = [];
     parts.push(_trj_string_field("event", "summary"));
     parts.push(_trj_number_field("passed", passed));
     parts.push(_trj_number_field("failed", failed));
     parts.push(_trj_number_field("skipped", skipped));
     parts.push(_trj_number_field("duration_ms", duration_ms));
+    parts.push(_trj_field("cache", _trj_cache_object(test_bin_hits, test_bin_misses)));
     return "{" + _trj_join(parts, ",") + "}";
 }
 

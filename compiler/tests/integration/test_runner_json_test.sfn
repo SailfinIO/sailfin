@@ -66,13 +66,27 @@ test "test_runner_json: start event handles zero-test discovery" {
 // `summary` event
 // --------------------------------------------------------------
 test "test_runner_json: summary event golden shape" {
-    let line = render_summary_event(40, 1, 1, 1284);
-    assert line == "{\"event\":\"summary\",\"passed\":40,\"failed\":1,\"skipped\":1,\"duration_ms\":1284}";
+    // #1230: summary now carries a `cache` object with the per-test
+    // binary cache counters + derived hit rate. 36 hits / 6 misses →
+    // 36/42 = 0.8571 (truncated toward zero to four decimals).
+    let line = render_summary_event(40, 1, 1, 1284, 36, 6);
+    assert line == "{\"event\":\"summary\",\"passed\":40,\"failed\":1,\"skipped\":1,\"duration_ms\":1284,\"cache\":{\"test_bin_hits\":36,\"test_bin_misses\":6,\"test_bin_hit_rate\":0.8571}}";
 }
 
 test "test_runner_json: summary all-zero shape (empty discovery)" {
-    let line = render_summary_event(0, 0, 0, 0);
-    assert line == "{\"event\":\"summary\",\"passed\":0,\"failed\":0,\"skipped\":0,\"duration_ms\":0}";
+    // Zero lookups (empty discovery or `--no-test-cache`) → hit_rate
+    // is the floor `0.0000`, never null/nan.
+    let line = render_summary_event(0, 0, 0, 0, 0, 0);
+    assert line == "{\"event\":\"summary\",\"passed\":0,\"failed\":0,\"skipped\":0,\"duration_ms\":0,\"cache\":{\"test_bin_hits\":0,\"test_bin_misses\":0,\"test_bin_hit_rate\":0.0000}}";
+}
+
+test "test_runner_json: summary cache hit_rate saturated and cold" {
+    // Fully-warm rerun: only hits → 1.0000.
+    let warm = render_summary_event(10, 0, 0, 5, 12, 0);
+    assert warm == "{\"event\":\"summary\",\"passed\":10,\"failed\":0,\"skipped\":0,\"duration_ms\":5,\"cache\":{\"test_bin_hits\":12,\"test_bin_misses\":0,\"test_bin_hit_rate\":1.0000}}";
+    // Cold run: only misses → 0.0000.
+    let cold = render_summary_event(10, 0, 0, 5, 0, 12);
+    assert cold == "{\"event\":\"summary\",\"passed\":10,\"failed\":0,\"skipped\":0,\"duration_ms\":5,\"cache\":{\"test_bin_hits\":0,\"test_bin_misses\":12,\"test_bin_hit_rate\":0.0000}}";
 }
 
 // --------------------------------------------------------------

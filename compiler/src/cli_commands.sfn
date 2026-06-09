@@ -4,6 +4,16 @@
 // sailfin_cli_main under ~500 .sfn-asm instructions (avoids seed OOM).
 import { AssertFailure, _empty_assert_failure, _parse_assert_failure_record } from "./assert_failure";
 import { Program, Statement } from "./ast";
+import {
+    CacheKey,
+    cache_compiler_identity,
+    cache_copy_artifact_to,
+    cache_lookup_artifact,
+    cache_store_artifact,
+    canonicalize_flags,
+    test_bin_cache_key,
+    test_bin_cache_root
+} from "./build_cache";
 import { is_safe_scope_name, parse_scope_name } from "./capsule_artifact";
 import {
     ResolverConsumer,
@@ -95,6 +105,7 @@ import {
 } from "./toml_parser";
 import { format_source } from "./tools/fmt";
 import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
+import { resolve_compiler_version_for_cache } from "./version";
 
 // Validate a path segment (scope, name) contains no traversal or illegal chars.
 fn _is_safe_capsule_segment_cmd(value: string) -> boolean {
@@ -851,7 +862,7 @@ fn _append_test_filter_args(argv: string[], name_filter: string, tag_filter: str
     return out;
 }
 
-fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: string, runtime_objdir: string, self_exe: string, path: string, name_filter: string, tag_filter: string, update_snapshots: boolean, json_output: boolean) -> int ![io] {
+fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: string, runtime_objdir: string, self_exe: string, path: string, name_filter: string, tag_filter: string, update_snapshots: boolean, json_output: boolean, no_test_cache: boolean) -> int ![io] {
     // #940: `SAILFIN_TEST_RUNTIME_OBJDIR` points the child's runtime
     // link at the shared, invocation-stable object dir the parent
     // warmed once, so the runtime isn't recompiled per test file.
@@ -870,6 +881,7 @@ fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: str
         base.push("test");
         base.push(path);
         if json_output { base.push("--json"); }
+        if no_test_cache { base.push("--no-test-cache"); }
         return process.run(_append_test_filter_args(base, name_filter, tag_filter));
     }
     let mut base = ["env", "SAILFIN_TEST_SCRATCH=" + child_scratch, "SAILFIN_TEST_RUNTIME_OBJDIR="
@@ -880,6 +892,7 @@ fn _run_test_child(timeout_cmd: string, timeout_secs: string, child_scratch: str
     base.push("test");
     base.push(path);
     if json_output { base.push("--json"); }
+    if no_test_cache { base.push("--no-test-cache"); }
     return process.run(_append_test_filter_args(base, name_filter, tag_filter));
 }
 
@@ -979,11 +992,21 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
     // overwrites instead of comparing. Defaults false; when false every
     // child `env` argv is byte-identical to the pre-#977 shape.
     let mut update_snapshots: boolean = false;
+    // `--no-test-cache` (#1230): bypass BOTH the read and the write of
+    // the per-test linked-binary cache for this invocation, forcing a
+    // cold lower+link for every test. `make check` / the nightly full
+    // suite pass it so the merge gate never reads the cache and a
+    // test-compile regression can never be masked by a stale hit.
+    // Forwarded to every per-file child below so a multi-file run
+    // honours it end-to-end.
+    let mut no_test_cache: boolean = false;
     let mut ai: int = 1;
     loop {
         if ai >= args.length { break; }
         let arg = args[ai];
-        if strings_equal(arg, "--json") { json_output = true; } else if strings_equal(arg, "--update-snapshots") {
+        if strings_equal(arg, "--json") { json_output = true; } else if strings_equal(arg, "--no-test-cache") {
+            no_test_cache = true;
+        } else if strings_equal(arg, "--update-snapshots") {
             update_snapshots = true;
         } else if strings_equal(arg, "-k") {
             if ai + 1 >= args.length {
@@ -1132,10 +1155,10 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         // with no `tests/` dir) doesn't fail the build.
         if json_output {
             if json_subframe {
-                fs.writeFile(scratch_root + "/_subframe_summary.json", render_summary_event(0, 0, 0, 0));
+                fs.writeFile(scratch_root + "/_subframe_summary.json", render_summary_event(0, 0, 0, 0, 0, 0));
             } else {
                 print(render_start_event(0));
-                print(render_summary_event(0, 0, 0, 0));
+                print(render_summary_event(0, 0, 0, 0, 0, 0));
             }
             exit_test_runner_mode();
             return 0;
@@ -1278,6 +1301,11 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         let mut sf_passed: int = 0;
         let mut sf_failed: int = 0;
         let mut sf_skipped: int = 0;
+        // #1230: aggregate each child's per-test-binary cache counters
+        // from its sub-frame summary so the parent's single run-level
+        // `summary` reports the run-wide `cache.test_bin_hit_rate`.
+        let mut sf_tb_hits: int = 0;
+        let mut sf_tb_misses: int = 0;
         let mut overall_rc: int = 0;
         let mut ti: int = 0;
         loop {
@@ -1292,7 +1320,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
             // this per-file dir — see `SAILFIN_TEST_RUNTIME_OBJDIR`.
             let child_scratch = sub_root + "/sub-" + number_to_string(ti);
             _ensure_dir_cmd(child_scratch);
-            let mut rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter, update_snapshots, json_output);
+            let mut rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter, update_snapshots, json_output, no_test_cache);
             if _should_retry_test(rc, sub_retries_disabled) {
                 // RETRY banner is a human-mode artifact; suppress it in
                 // JSON mode so the jsonl stream stays pure (mirrors the
@@ -1303,7 +1331,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
                         + number_to_string(rc)
                         + ", retrying once)");
                 }
-                rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter, update_snapshots, json_output);
+                rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter, update_snapshots, json_output, no_test_cache);
             }
             if rc == 0 { suites[suite_idx].pass_count += 1; } else {
                 suites[suite_idx].fail_count += 1;
@@ -1322,6 +1350,8 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
                     sf_passed += _extract_json_uint_after(sf_raw, "\"passed\":");
                     sf_failed += _extract_json_uint_after(sf_raw, "\"failed\":");
                     sf_skipped += _extract_json_uint_after(sf_raw, "\"skipped\":");
+                    sf_tb_hits += _extract_json_uint_after(sf_raw, "\"test_bin_hits\":");
+                    sf_tb_misses += _extract_json_uint_after(sf_raw, "\"test_bin_misses\":");
                 } else { sf_failed += sf_counts[ti]; }
             }
             ti += 1;
@@ -1331,7 +1361,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
             // one `start`, every per-test event the children forwarded,
             // one `summary` with run-level counts and wall-clock duration.
             let sf_dur = monotonic_millis() - sf_start_ms;
-            print(render_summary_event(sf_passed, sf_failed, sf_skipped, sf_dur));
+            print(render_summary_event(sf_passed, sf_failed, sf_skipped, sf_dur, sf_tb_hits, sf_tb_misses));
         } else if emit_banners { _emit_suite_banners(suites); }
         exit_test_runner_mode();
         _cleanup_test_scratch(scratch_owned, sub_root, overall_rc == 0);
@@ -1527,6 +1557,24 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
     let mut total_skipped: int = 0;
     let mut overall_rc: int = 0;
 
+    // #1230: per-test linked-binary cache. Resolve the invocation-stable
+    // key inputs once: the compiler's cache identity (binary content for
+    // `.dirty` dev stamps, version otherwise — the same model the module
+    // IR cache uses so a rebuilt compiler busts every cached binary) and
+    // the canonical clang flag set (`-O0`, matching
+    // `_clang_link_test_cmd_with_deps`). Per-test the key folds in the
+    // test source hash + the resolver's dep closure
+    // (`dep_ll_paths` + `native_texts`). `--no-test-cache` disables both
+    // the read and the write so `make check` always cold-builds.
+    let test_cache_enabled = !no_test_cache;
+    let tb_cache_root = test_bin_cache_root();
+    let tb_self_exe = _resolve_test_self_path(binary_dir);
+    let tb_compiler_identity = cache_compiler_identity(resolve_compiler_version_for_cache(binary_dir), tb_self_exe);
+    let mut tb_flags: string[] = ["-O0"];
+    let tb_flags_canonical = canonicalize_flags(tb_flags);
+    let mut test_bin_hits: int = 0;
+    let mut test_bin_misses: int = 0;
+
     let mut index: int = 0;
     loop {
         if index >= test_files.length { break; }
@@ -1547,76 +1595,116 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
 
         let file_start_ms = monotonic_millis();
 
-        if trace_runner { print.err("test runner: compile start"); }
-        _clean_lowering_state(scratch_root);
-        let empty_manifests: LayoutManifest[] = [];
-        let _compiled = compile_tests_to_llvm_file_with_module_imports(source, module_name, ll_path, groups[group_idx].interfaces, empty_manifests, groups[group_idx].native_texts, groups[group_idx].function_effects, groups[group_idx].capabilities_required);
-        if !_compiled {
-            // Stderr stays usable for compiler-internal diagnostics
-            // even in `--json` mode; the affected tests show up as
-            // `skip` events with a synthetic assertion message so
-            // consumers can correlate the stderr noise with the
-            // tests that didn't run.
-            print.err("test runner: compile failed for " + path);
-            if json_output {
-                let outcome = _outcome_setup_failure(_synthetic_assert_failure(path, "compile failed"));
-                let packed = _emit_file_test_events(entries, outcome);
-                total_passed += _trj_decode_passed(packed);
-                total_failed += _trj_decode_failed(packed);
-                total_skipped += _trj_decode_skipped(packed);
-                overall_rc = 1;
+        // #1230: derive the per-test binary cache key from the test
+        // source + the resolver's dep closure (the EXACT inputs the link
+        // consumes), then try to serve the linked binary from cache. On
+        // a hit we copy it into `exe_path` and skip both LLVM lowering
+        // and the clang link (the dominant per-test cost); we still RUN
+        // the binary below (variant 2a — never trust a cached result).
+        let mut tb_key: CacheKey = CacheKey { digest: "" };
+        let mut cache_hit: boolean = false;
+        if test_cache_enabled {
+            tb_key = test_bin_cache_key(path, groups[group_idx].dep_ll_paths, groups[group_idx].native_texts, tb_compiler_identity, tb_flags_canonical, _sanitize_filename_cmd(path));
+            if cache_lookup_artifact(tb_cache_root, tb_key, "test-bin") {
+                if cache_copy_artifact_to(tb_cache_root, tb_key, "test-bin", exe_path) {
+                    // The shared atomic-copy helper publishes through an
+                    // `mktemp` temp (mode 0600), so the restored binary
+                    // loses the executable bit clang gave the original —
+                    // harmless for the `.ll`/`.o` artifacts the module
+                    // cache restores, fatal for a binary we then `exec`
+                    // (`Permission denied`, rc 126). Re-assert +x on the
+                    // materialised executable.
+                    process.run(["chmod", "+x", exe_path]);
+                    cache_hit = true;
+                    test_bin_hits += 1;
+                    if trace_runner {
+                        print.err("test runner: test-bin cache hit (" + path
+                            + ")");
+                    }
+                }
+            }
+        }
+
+        if !cache_hit {
+            if trace_runner { print.err("test runner: compile start"); }
+            _clean_lowering_state(scratch_root);
+            let empty_manifests: LayoutManifest[] = [];
+            let _compiled = compile_tests_to_llvm_file_with_module_imports(source, module_name, ll_path, groups[group_idx].interfaces, empty_manifests, groups[group_idx].native_texts, groups[group_idx].function_effects, groups[group_idx].capabilities_required);
+            if !_compiled {
+                // Stderr stays usable for compiler-internal diagnostics
+                // even in `--json` mode; the affected tests show up as
+                // `skip` events with a synthetic assertion message so
+                // consumers can correlate the stderr noise with the
+                // tests that didn't run.
+                print.err("test runner: compile failed for " + path);
+                if json_output {
+                    let outcome = _outcome_setup_failure(_synthetic_assert_failure(path, "compile failed"));
+                    let packed = _emit_file_test_events(entries, outcome);
+                    total_passed += _trj_decode_passed(packed);
+                    total_failed += _trj_decode_failed(packed);
+                    total_skipped += _trj_decode_skipped(packed);
+                    overall_rc = 1;
+                    sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+                    index += 1;
+                    continue;
+                }
+                // FAIL banner on compile failure: the bash wrapper
+                // surfaced this as `[test] FAIL: <basename> (exit code 1,
+                // ...)`. Emit the same shape so callers parsing test
+                // output (CI log scrubbers, human readers) see consistent
+                // attribution regardless of which stage failed.
+                let cf_basename = _package_basename(path);
+                print("[test] FAIL: " + cf_basename + " (exit code 1)");
+                suites[file_suite_index[index]].fail_count += 1;
+                suites[file_suite_index[index]].failed_files.push(cf_basename);
+                if overall_rc == 0 { overall_rc = 1; }
                 sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
                 index += 1;
                 continue;
             }
-            // FAIL banner on compile failure: the bash wrapper
-            // surfaced this as `[test] FAIL: <basename> (exit code 1,
-            // ...)`. Emit the same shape so callers parsing test
-            // output (CI log scrubbers, human readers) see consistent
-            // attribution regardless of which stage failed.
-            let cf_basename = _package_basename(path);
-            print("[test] FAIL: " + cf_basename + " (exit code 1)");
-            suites[file_suite_index[index]].fail_count += 1;
-            suites[file_suite_index[index]].failed_files.push(cf_basename);
-            if overall_rc == 0 { overall_rc = 1; }
-            sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
-            index += 1;
-            continue;
-        }
 
-        if trace_runner { print.err("test runner: link start"); }
-        let link_rc = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths, scratch_root, binary_dir);
-        if link_rc != 0 {
-            print.err("link failed (clang exit=" + number_to_string(link_rc)
-                + ")");
-            if json_output {
-                let outcome = _outcome_setup_failure(_synthetic_assert_failure(path, "link failed (clang exit="
+            if trace_runner { print.err("test runner: link start"); }
+            let link_rc = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths, scratch_root, binary_dir);
+            if link_rc != 0 {
+                print.err("link failed (clang exit=" + number_to_string(link_rc)
+                    + ")");
+                if json_output {
+                    let outcome = _outcome_setup_failure(_synthetic_assert_failure(path, "link failed (clang exit="
+                        + number_to_string(link_rc)
+                        + ")"));
+                    let packed = _emit_file_test_events(entries, outcome);
+                    total_passed += _trj_decode_passed(packed);
+                    total_failed += _trj_decode_failed(packed);
+                    total_skipped += _trj_decode_skipped(packed);
+                    if overall_rc == 0 { overall_rc = link_rc; }
+                    sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+                    index += 1;
+                    continue;
+                }
+                // FAIL banner on link failure (issue #845). Same rationale
+                // as the compile-failure banner above — keep `[test] FAIL`
+                // attribution consistent across every failure stage so
+                // tooling (CI scrubbers, human readers, future grep-based
+                // log audits) sees one shape.
+                let lf_basename = _package_basename(path);
+                print("[test] FAIL: " + lf_basename + " (exit code "
                     + number_to_string(link_rc)
-                    + ")"));
-                let packed = _emit_file_test_events(entries, outcome);
-                total_passed += _trj_decode_passed(packed);
-                total_failed += _trj_decode_failed(packed);
-                total_skipped += _trj_decode_skipped(packed);
+                    + ")");
+                suites[file_suite_index[index]].fail_count += 1;
+                suites[file_suite_index[index]].failed_files.push(lf_basename);
                 if overall_rc == 0 { overall_rc = link_rc; }
                 sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
                 index += 1;
                 continue;
             }
-            // FAIL banner on link failure (issue #845). Same rationale
-            // as the compile-failure banner above — keep `[test] FAIL`
-            // attribution consistent across every failure stage so
-            // tooling (CI scrubbers, human readers, future grep-based
-            // log audits) sees one shape.
-            let lf_basename = _package_basename(path);
-            print("[test] FAIL: " + lf_basename + " (exit code "
-                + number_to_string(link_rc)
-                + ")");
-            suites[file_suite_index[index]].fail_count += 1;
-            suites[file_suite_index[index]].failed_files.push(lf_basename);
-            if overall_rc == 0 { overall_rc = link_rc; }
-            sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
-            index += 1;
-            continue;
+            // #1230: a fresh lower+link produced `exe_path`; record the miss
+            // and populate the cache so the next unchanged run hits. The
+            // store is atomic (temp+rename) and non-fatal — a write failure
+            // just means the next run misses again, never a broken binary.
+            if test_cache_enabled {
+                test_bin_misses += 1;
+                cache_store_artifact(tb_cache_root, tb_key, "test-bin", exe_path);
+            }
         }
         // Issue #364: clear any leftover assert-fail record from the
         // previous iteration before spawning. The record is keyed
@@ -1737,7 +1825,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
     }
     if json_output {
         let runner_elapsed_ms = monotonic_millis() - runner_start_ms;
-        let summary_line = render_summary_event(total_passed, total_failed, total_skipped, runner_elapsed_ms);
+        let summary_line = render_summary_event(total_passed, total_failed, total_skipped, runner_elapsed_ms, test_bin_hits, test_bin_misses);
         // Sub-frame children hand their counts to the parent via a file
         // instead of printing a per-file summary onto the shared stream.
         if json_subframe {
