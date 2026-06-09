@@ -23,7 +23,7 @@
 import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
 import { parse_program } from "../../src/parser/mod";
-import { index_of } from "../../src/string_utils";
+import { index_of, substring } from "../../src/string_utils";
 
 fn _contains(haystack: string, needle: string) -> boolean {
     return index_of(haystack, needle) >= 0;
@@ -35,23 +35,38 @@ test "lowering: runtime/sfn/clock.sfn wraps @nanosleep in an EINTR loop (#397/#6
     let native = emit_native_text_with_module_name(program, "runtime/sfn/clock");
     let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/clock");
 
-    // Wrapper definition + the imported nanosleep declared and called.
+    // Module-level shape: wrapper defined, imported nanosleep declared,
+    // and the pre-PR2 C trampoline fully retired (a partial revert
+    // resurrects this symbol).
     assert _contains(ir, "define void @sfn_sleep(");
     assert _contains(ir, "declare i32 @nanosleep(");
-    assert _contains(ir, "call i32 @nanosleep(");
-
-    // The pre-PR2 C trampoline is fully retired — neither declared nor
-    // called. A partial revert resurrects this symbol.
     assert ! _contains(ir, "@sailfin_runtime_sleep");
 
-    // EINTR-resume loop (#693): the bounded retry produces a conditional
-    // branch in the lowered body.
-    assert _contains(ir, "br i1");
+    // Scope the call-shape + EINTR checks to the `@sfn_sleep` body so an
+    // unrelated conditional elsewhere in the module (the `tv_nsec` clamps,
+    // the `ret != 0` guard in the clock readers, …) can't satisfy them.
+    // Mirrors the deleted shell test, which `awk`-extracted the body and
+    // searched within it.
+    let def_idx = index_of(ir, "define void @sfn_sleep(");
+    assert def_idx >= 0;
+    let after_def = substring(ir, def_idx, ir.length);
+    let close_rel = index_of(after_def, "\n}");
+    assert close_rel >= 0;
+    let body = substring(after_def, 0, close_rel);
 
-    // errno discipline (#877): after a non-zero nanosleep the loop reads
-    // errno via the host-aware locator sentinel (#887), dereferenced by
-    // the pointer-read load (#875). Accept either host spelling.
-    let has_locator = _contains(ir, "@__errno_location(") || _contains(ir, "@__error(");
+    // nanosleep is called inside the body…
+    let call_idx = index_of(body, "call i32 @nanosleep(");
+    assert call_idx >= 0;
+    let after_call = substring(body, call_idx, body.length);
+
+    // …and the EINTR-resume machinery occurs AFTER the call: the bounded
+    // retry's conditional back-edge (`br i1`, #693) and the errno read
+    // via the host-aware locator sentinel (#887), dereferenced by the
+    // pointer-read load (#875). Accept either host spelling of the
+    // locator (`@__errno_location` on glibc, `@__error` on Darwin).
+    assert index_of(after_call, "br i1") >= 0;
+    let has_locator = index_of(after_call, "@__errno_location(") >= 0
+        || index_of(after_call, "@__error(") >= 0;
     assert has_locator;
-    assert _contains(ir, "load i32, i32* %");
+    assert index_of(after_call, "load i32, i32* %") >= 0;
 }

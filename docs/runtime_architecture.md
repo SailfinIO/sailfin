@@ -104,8 +104,9 @@
 >   `runtime/sfn/io.sfn`; general typecheck-level call-site resolution is
 >   the remaining sub-step; see §3.6.
 > - First `runtime/sfn/platform/libc.sfn` skeleton: **shipped 2026-05-01**
->   (12 extern declarations, typecheck + fmt + LLVM `declare` emission
->   verified by `compiler/tests/unit/runtime_libc_skeleton_test.sfn`).
+>   (12 extern declarations; LLVM `declare` emission pinned by
+>   `compiler/tests/unit/runtime_libc_skeleton_test.sfn`, with typecheck +
+>   fmt covered by CI `sfn fmt --check` and `make compile`).
 > - First Sailfin-native runtime service wrapper: **shipped 2026-05-04.**
 >   `runtime/sfn/io.sfn` imports `write` from `./platform/libc` and exposes
 >   `sfn_write_fd(...) ![io]`. Pinned by
@@ -117,7 +118,9 @@
 >   on pointer-to-pointer (`* * u8`), primitive-pointer out-parameters
 >   (`* i32`), and multi-family opaque-struct pointers
 >   (`* Pthread`, `* Timespec`, `* SockAddr`, …). Pinned by
->   `compiler/tests/unit/runtime_{pthread,posix,net}_skeleton_test.sfn`.
+>   `compiler/tests/unit/runtime_pthread_skeleton_test.sfn`,
+>   `compiler/tests/unit/runtime_posix_skeleton_test.sfn`, and
+>   `compiler/tests/unit/runtime_net_skeleton_test.sfn`.
 >   Function-pointer parameters degrade to `* u8` due to a `sfn fmt` /
 >   `is_c_abi_function_pointer` interaction documented in the
 >   `pthread.sfn` header. Not yet imported; the C runtime continues
