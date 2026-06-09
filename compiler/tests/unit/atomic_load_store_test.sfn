@@ -1,29 +1,44 @@
 // Unit tests for the `atomic_load` / `atomic_store` builtins
 // (M0-Atomics.1, issue #331).
 //
-// The four lowering acceptance cases (load happy-path, store
-// happy-path, type-error on non-pointer arg, type-error on non-int
-// value arg) are pinned end-to-end in
-// `compiler/tests/e2e/test_atomic_load_store_compile.sh` — that
-// shell test drives a real `sfn emit llvm` invocation and greps
-// the emitted IR for `load atomic i64 ... seq_cst, align 8` /
-// `store atomic i64 ... seq_cst, align 8`, plus stderr for the
-// E0806 diagnostic on the type-error cases.
+// Two layers of coverage:
 //
-// We can't pin the same IR shape from a unit test because importing
-// the LLVM-lowering stack (`lower_to_llvm_ir_from_text` in
-// `llvm/lowering/entrypoints`, or transitively via
-// `compile_to_llvm` in `main`) blows the per-test 180s CI budget on
-// the GitHub Linux runner — see
-// https://github.com/SailfinIO/sailfin/actions/runs/25439053692/job/74625128990
-// where this file timed out (exit 124) while every other unit test
-// in the same suite ran in <1s. The sub-issue contract still cares
-// about ≥4 unit cases passing; this file pins the predicate /
-// reserved-name surface that the dispatch hook keys on, so a
-// regression in `is_atomic_builtin` (which gates whether the LLVM
-// lowering even runs) surfaces here without paying the lowering
-// import cost.
+//   1. Predicate surface — `is_atomic_builtin` gates whether the LLVM
+//      lowering for the atomic builtins runs at all. A regression that
+//      loosens it to a prefix/suffix match (or drops a reserved name) is
+//      caught here without paying the lowering import cost.
+//   2. Golden-IR shape — the `load atomic` / `store atomic` emission,
+//      pinned in-process via the `parse_program` →
+//      `emit_native_text_with_module_name` → `lower_to_llvm_ir_from_text`
+//      idiom (see `concurrency_lowering_test.sfn`). This replaces the
+//      happy-path half of the former
+//      `compiler/tests/e2e/test_atomic_load_store_compile.sh`, which
+//      drove a real `sfn emit llvm` and grepped the IR — the
+//      bash-collapse migration (epic #842, issue #1223) moved that shape
+//      assertion into the unified `sfn test` runner.
+//
+// E0806 note: the `.sh` also pinned the type-error rejection path
+// (`atomic_load(42)` / `atomic_store(p, "hello")` → `[fatal] [E0806]` on
+// stderr). E0806 is a lowering-level `print.err` diagnostic
+// (`compiler/src/llvm/atomics.sfn`); capturing it in-process needs a
+// second `lower_to_llvm_ir_from_text` over a distinct bad-source program,
+// and the one-lowering-per-file memory budget (clang/arena-heavy; the
+// suite OOMs on multiple calls per process) makes that a poor trade. The
+// reserved-name predicate tests below backstop the dispatch gate; the
+// happy-path IR shape is the migrated surface.
+//
+// Strategy: ONE `lower_to_llvm_ir_from_text` call for the whole file. A
+// single combined source carrying both the load and store call sites
+// keeps the per-file cost to one lowering.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { is_atomic_builtin } from "../../src/llvm/atomics_check";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
 
 // ── Predicate recognises the implemented names ──
 test "atomics: is_atomic_builtin recognises atomic_load" {
@@ -66,4 +81,27 @@ test "atomics: is_atomic_builtin rejects partial / near-miss names" {
     assert ! is_atomic_builtin("load");
     assert ! is_atomic_builtin("atomic_loa");
     assert ! is_atomic_builtin("atomic_loadx");
+}
+
+// ── Golden-IR shape (was test_atomic_load_store_compile.sh) ──
+// `atomic_load(*int)` lowers to `load atomic i64 … seq_cst, align 8` and
+// `atomic_store(*int, int)` to `store atomic i64 …, … seq_cst, align 8`
+// (issue #331 acceptance). Assert the stable pieces (opcode, ordering,
+// alignment) rather than the full instruction line, whose SSA register
+// and pointer spelling vary.
+test "lowering: atomic_load/store emit seq_cst, align 8 atomics (#331)" ![io] {
+    let source = "fn read_counter(counter: * int) -> int {\n"
+        + "    return atomic_load(counter);\n"
+        + "}\n"
+        + "fn write_counter(counter: * int, value: int) {\n"
+        + "    atomic_store(counter, value);\n"
+        + "}";
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "atomic_load_store_test");
+    let ir = lower_to_llvm_ir_from_text(native, "atomic_load_store_test");
+
+    assert _contains(ir, "load atomic i64");
+    assert _contains(ir, "store atomic i64");
+    assert _contains(ir, "seq_cst");
+    assert _contains(ir, "align 8");
 }

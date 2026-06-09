@@ -1,0 +1,45 @@
+// Golden-IR test for the `runtime/sfn/platform/pthread.sfn` skeleton —
+// the pthread surface used by the v0 scheduler (see
+// `docs/runtime_architecture.md` §2.6 "Scheduler and Concurrency").
+//
+// Replaces `compiler/tests/e2e/test_runtime_pthread_skeleton.sh` as part
+// of the bash-collapse migration (epic #842, issue #1223). The `.sh` ran
+// `sfn check` + `sfn fmt --check` + `sfn emit llvm` and grepped the IR
+// for a `declare` per extern; this pins the same `declare` surface
+// in-process. The typecheck/fmt halves are covered elsewhere — CI runs
+// `sfn fmt --check` over `runtime/` and `make compile` typechecks these
+// sfn-sources.
+//
+// Strategy: ONE `lower_to_llvm_ir_from_text` call over the REAL skeleton
+// file (read via `fs.readFile`). `pthread.sfn` has no imports, so
+// single-module lowering resolves every symbol it declares — including
+// the pointer-to-pointer (`* * u8`) result out-param `pthread_join`
+// exercises that the libc skeleton does not.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+test "lowering: runtime/sfn/platform/pthread.sfn emits a declare for every extern" ![io] {
+    let source = fs.readFile("runtime/sfn/platform/pthread.sfn");
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "runtime/sfn/platform/pthread");
+    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/platform/pthread");
+
+    assert _contains(ir, "declare ");
+    assert _contains(ir, "@pthread_create(");
+    assert _contains(ir, "@pthread_join(");
+    assert _contains(ir, "@pthread_mutex_init(");
+    assert _contains(ir, "@pthread_mutex_lock(");
+    assert _contains(ir, "@pthread_mutex_unlock(");
+    assert _contains(ir, "@pthread_mutex_destroy(");
+    assert _contains(ir, "@pthread_cond_init(");
+    assert _contains(ir, "@pthread_cond_wait(");
+    assert _contains(ir, "@pthread_cond_signal(");
+    assert _contains(ir, "@pthread_cond_broadcast(");
+    assert _contains(ir, "@pthread_cond_destroy(");
+}

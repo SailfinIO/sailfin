@@ -1,0 +1,38 @@
+// Golden-IR test for the `runtime/sfn/platform/posix.sfn` skeleton — the
+// POSIX surface used by the v0 process / clock / sleep adapters (see
+// `docs/runtime_architecture.md` §2.7.4 and the §2.7 process adapter).
+//
+// Replaces `compiler/tests/e2e/test_runtime_posix_skeleton.sh` as part of
+// the bash-collapse migration (epic #842, issue #1223). The `.sh` ran
+// `sfn check` + `sfn fmt --check` + `sfn emit llvm` and grepped the IR
+// for a `declare` per extern; this pins the same `declare` surface
+// in-process. The typecheck/fmt halves are covered elsewhere — CI runs
+// `sfn fmt --check` over `runtime/` and `make compile` typechecks these
+// sfn-sources.
+//
+// Strategy: ONE `lower_to_llvm_ir_from_text` call over the REAL skeleton
+// file (read via `fs.readFile`). `posix.sfn` has no imports, so
+// single-module lowering resolves every symbol it declares — including
+// the primitive-pointer out-parameters (`* i32`) and `* * u8` argv/envp
+// shapes the libc skeleton does not exercise.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+test "lowering: runtime/sfn/platform/posix.sfn emits a declare for every extern" ![io] {
+    let source = fs.readFile("runtime/sfn/platform/posix.sfn");
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "runtime/sfn/platform/posix");
+    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/platform/posix");
+
+    assert _contains(ir, "declare ");
+    assert _contains(ir, "@posix_spawnp(");
+    assert _contains(ir, "@waitpid(");
+    assert _contains(ir, "@clock_gettime(");
+    assert _contains(ir, "@nanosleep(");
+}

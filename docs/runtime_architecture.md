@@ -105,19 +105,19 @@
 >   the remaining sub-step; see §3.6.
 > - First `runtime/sfn/platform/libc.sfn` skeleton: **shipped 2026-05-01**
 >   (12 extern declarations, typecheck + fmt + LLVM `declare` emission
->   verified by `compiler/tests/e2e/test_runtime_libc_skeleton.sh`).
+>   verified by `compiler/tests/unit/runtime_libc_skeleton_test.sfn`).
 > - First Sailfin-native runtime service wrapper: **shipped 2026-05-04.**
 >   `runtime/sfn/io.sfn` imports `write` from `./platform/libc` and exposes
 >   `sfn_write_fd(...) ![io]`. Pinned by
->   `compiler/tests/e2e/test_runtime_io_skeleton.sh`, which verifies
->   typecheck/fmt and LLVM lowering of the imported extern call site.
+>   `compiler/tests/unit/runtime_io_skeleton_test.sfn`, which verifies
+>   LLVM lowering of the imported extern call site.
 > - Three further `runtime/sfn/platform/*.sfn` skeletons: **shipped
 >   2026-05-02.** `pthread.sfn` (11 decls), `posix.sfn` (4 decls),
 >   `net.sfn` (9 decls) — together they validate the extern pipeline
 >   on pointer-to-pointer (`* * u8`), primitive-pointer out-parameters
 >   (`* i32`), and multi-family opaque-struct pointers
 >   (`* Pthread`, `* Timespec`, `* SockAddr`, …). Pinned by
->   `compiler/tests/e2e/test_runtime_{pthread,posix,net}_skeleton.sh`.
+>   `compiler/tests/unit/runtime_{pthread,posix,net}_skeleton_test.sfn`.
 >   Function-pointer parameters degrade to `* u8` due to a `sfn fmt` /
 >   `is_c_abi_function_pointer` interaction documented in the
 >   `pthread.sfn` header. Not yet imported; the C runtime continues

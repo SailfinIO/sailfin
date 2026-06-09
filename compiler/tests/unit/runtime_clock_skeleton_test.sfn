@@ -1,0 +1,57 @@
+// Golden-IR test for `runtime/sfn/clock.sfn` — the Sailfin-native
+// `@sfn_sleep` definition that replaced the C `sailfin_runtime_sleep`
+// trampoline with a direct `nanosleep` call wrapped in a bounded
+// EINTR-resume loop (issues #397 / #693 / #877).
+//
+// Replaces `compiler/tests/e2e/test_runtime_clock_skeleton.sh` as part of
+// the bash-collapse migration (epic #842, issue #1223). The `.sh` ran
+// `sfn check` + `sfn fmt --check` + `sfn emit llvm` and grepped the IR
+// for the wrapper/define/declare shape, the retired C trampoline, and the
+// EINTR loop + errno-locator discipline; this pins the same IR surface
+// in-process. The typecheck/fmt halves are covered elsewhere — CI runs
+// `sfn fmt --check` over `runtime/` and `make compile` typechecks these
+// sfn-sources.
+//
+// Strategy: ONE `lower_to_llvm_ir_from_text` call over the REAL
+// `clock.sfn` (read via `fs.readFile`). `clock.sfn` imports `nanosleep`
+// from `./platform/posix`; `lower_to_llvm_ir_from_text` resolves imported
+// `extern` signatures through `collect_imported_module_context_for_module`
+// (the same path the `sfn emit llvm` driver uses), so the cross-module
+// `nanosleep` call lowers to a `declare` + `call`. The errno locator is
+// host-dependent — `@__errno_location` on glibc, `@__error` on Darwin —
+// so accept either.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+test "lowering: runtime/sfn/clock.sfn wraps @nanosleep in an EINTR loop (#397/#693/#877)" ![io] {
+    let source = fs.readFile("runtime/sfn/clock.sfn");
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "runtime/sfn/clock");
+    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/clock");
+
+    // Wrapper definition + the imported nanosleep declared and called.
+    assert _contains(ir, "define void @sfn_sleep(");
+    assert _contains(ir, "declare i32 @nanosleep(");
+    assert _contains(ir, "call i32 @nanosleep(");
+
+    // The pre-PR2 C trampoline is fully retired — neither declared nor
+    // called. A partial revert resurrects this symbol.
+    assert ! _contains(ir, "@sailfin_runtime_sleep");
+
+    // EINTR-resume loop (#693): the bounded retry produces a conditional
+    // branch in the lowered body.
+    assert _contains(ir, "br i1");
+
+    // errno discipline (#877): after a non-zero nanosleep the loop reads
+    // errno via the host-aware locator sentinel (#887), dereferenced by
+    // the pointer-read load (#875). Accept either host spelling.
+    let has_locator = _contains(ir, "@__errno_location(") || _contains(ir, "@__error(");
+    assert has_locator;
+    assert _contains(ir, "load i32, i32* %");
+}
