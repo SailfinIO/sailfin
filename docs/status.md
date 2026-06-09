@@ -298,15 +298,23 @@ feature availability.
     cached executable. `test_bin_cache_key` (in `build_cache.sfn`)
     folds the test source hash, the resolver's transitive dep closure
     (`TestGroup.native_texts` + `dep_ll_paths` — the test-source-specific
-    link inputs), the compiler identity (`cache_compiler_identity`, so a
-    rebuilt compiler busts every entry), the canonical clang flags, and
-    a `test-bin/v1` schema version. The assembled runtime capsule objects
-    + link libs the link also consumes are *not* folded into the key;
-    they ride on the compiler identity (a runtime edit normally reaches a
-    test binary via `make compile`, which busts it), with
-    `--no-test-cache` on the `make check` gate as the cold-build
-    backstop. Binaries store under
-    `build/cache/test-bin/v1/` via the existing atomic temp+rename
+    link inputs), the compiler identity, a `runtime_identity` content
+    hash, the canonical clang flags, and a `test-bin/v2` schema version.
+    **#1233 made the cache cross-commit-stable:** the compiler identity is
+    now the commit-stable capsule version
+    (`resolve_test_bin_identity_for_cache` strips the `+dev.<hash>` build
+    metadata), so a `push:main` baseline warms a PR's first run and a PR's
+    second push reuses the first's binaries — previously the per-commit
+    git hash busted every entry on every commit. To keep runtime edits
+    correct without that per-commit stamp, the assembled runtime capsule's
+    link inputs (its `.c`/`.ll`/`.sfn` sources, prelude entry, and link
+    libs) are folded into the key by content via
+    `runtime_link_inputs_identity`, so a runtime edit busts the key
+    directly; `--no-test-cache` on the `make check` gate remains the
+    cold-build backstop. The `build-quality.yml` `test-bin-baseline` job
+    (push:main + nightly) runs the full `.sfn` suite cache-enabled and
+    saves `build/cache/test-bin` so PRs warm from main. Binaries store
+    under `build/cache/test-bin/v2/` via the existing atomic temp+rename
     artifact helpers (new `"test-bin"` kind). On a hit the binary is
     still **run** (variant 2a — never a cached pass/fail result). The
     `--json` summary gains a `cache` object with `test_bin_hit_rate`

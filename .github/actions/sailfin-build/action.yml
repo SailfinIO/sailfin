@@ -98,6 +98,29 @@ runs:
           sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-
           sailfin-buildcache-${{ inputs.target }}-
 
+    # Restore the per-test linked-binary cache (`build/cache/test-bin`,
+    # #1230/#1233) under its OWN key prefix, separate from the module-IR
+    # cache above. This is deliberate: a shared `sailfin-buildcache-`
+    # prefix would let a test-bin-only entry shadow the module-IR cache on
+    # a restore-keys prefix match and force a cold compiler build. The
+    # producer is the `test-bin-baseline` job in `build-quality.yml`
+    # (push:main + nightly), which runs the full `.sfn` suite with the
+    # cache ENABLED and `cache/save`s `build/cache/test-bin` under this
+    # exact key. GitHub scopes caches to the branch + default branch, so a
+    # PR's first run restores main's baseline. This step runs AFTER the
+    # module-IR restore so the populated test-bin subtree overlays the
+    # (empty) test-bin the module-IR save carries. Cross-commit hits work
+    # because the test-bin cache identity is the commit-STABLE capsule
+    # version (#1233): a baseline at one commit warms a PR at another.
+    - name: Restore test-bin cache (per-test linked binaries)
+      uses: actions/cache@v4
+      with:
+        path: build/cache/test-bin
+        key: sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', '.seed-version') }}
+        restore-keys: |
+          sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-
+          sailfin-testbin-${{ inputs.target }}-
+
     - name: Build native compiler (selfhost from released seed)
       shell: bash {0}
       env:

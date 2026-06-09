@@ -287,6 +287,142 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # Per-test binary cache baseline producer (#1233, sequencing step 5 of
+  # docs/proposals/ci-test-speed.md). The PR build action
+  # (.github/actions/sailfin-build) restores `build/cache/test-bin` under
+  # the `sailfin-testbin-...` key, but until this job nothing populated
+  # it: the `build-quality` gate above runs no tests, and the nightly
+  # `make check` runs with `--no-test-cache`. This job runs the full
+  # `.sfn` suite with the test-bin cache ENABLED and saves
+  # `build/cache/test-bin` into the default-branch cache scope, so a PR's
+  # first run hits for every unchanged test. Cross-commit hits work
+  # because the per-test binary cache identity is the commit-stable
+  # capsule version (#1233 compiler change), so a baseline cut at one
+  # commit warms a PR built at another.
+  #
+  # Independent of the determinism + cache.hit_rate gates above (those are
+  # untouched): this job has no cold-build requirement, so it restores the
+  # warm module-IR cache for a fast compile. The save is gated on a green
+  # suite (save-only step, no `if:`, runs only when every prior step
+  # succeeded) so a failing baseline can never poison the cache PRs
+  # consume — the previous good cache stays in place.
+  #
+  # Linux x86_64 only for now (mirrors the gate job); macOS cache tuning
+  # is deferred (#1233 Out:). The full-suite `make check` / determinism
+  # gates remain the cold-build correctness backstop — this cache is read
+  # only by the `sfn test` runner, never by those gates.
+  test-bin-baseline:
+    name: Warm test-bin cache (linux-x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6.0.3
+
+      - name: Resolve seed version from .seed-version
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f .seed-version ]; then
+            echo "[seed-pin] .seed-version is missing from checkout" >&2
+            exit 1
+          fi
+          pin="$(tr -d '[:space:]' < .seed-version)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] .seed-version is empty" >&2
+            exit 1
+          fi
+          echo "[seed-pin] using seed $pin"
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install clang + llvm + jq
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang-18 llvm-18 jq
+          echo "CLANG=clang-18" >> "$GITHUB_ENV"
+
+      - name: Restore seed cache
+        uses: actions/cache@v5
+        with:
+          path: build/seed
+          key: sailfin-seed-linux-x86_64-${{ steps.seed.outputs.seed_version }}
+
+      - name: Fetch released seed compiler
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
+        run: |
+          set -euo pipefail
+          if [ -x build/seed/bin/sailfin ] && build/seed/bin/sailfin version >/dev/null 2>&1; then
+            echo "[ci] seed cache hit ($SEED_VERSION) — skipping fetch"
+          else
+            make fetch-seed SEED_VERSION="$SEED_VERSION"
+          fi
+          build/seed/bin/sailfin version
+
+      # Warm module-IR cache for a fast compile. Unlike the determinism
+      # gate, this job has no cold-build requirement, so restoring is safe
+      # and desirable. Keys mirror `.github/actions/sailfin-build`.
+      - name: Restore build cache (content-addressed module IR)
+        uses: actions/cache@v5
+        with:
+          path: build/cache
+          key: sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', '.seed-version') }}
+          restore-keys: |
+            sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-
+            sailfin-buildcache-linux-x86_64-
+
+      - name: Self-host the compiler (make compile)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ulimit -v 8388608
+          make compile \
+            CLANG="${CLANG:-clang-18}" \
+            SEED_NATIVE="build/seed/bin/sailfin"
+          build/native/sailfin version
+
+      # Run the full `.sfn` suite with the test-bin cache ENABLED (no
+      # `--no-test-cache`), populating `build/cache/test-bin/v<schema>`.
+      # Loop the `.sfn` shard names from scripts/test_shards.sh (the
+      # single source of truth) and skip the e2e-sh `.sh` shards — those
+      # scripts compile their own throwaway programs and don't exercise
+      # the per-test binary cache. Retry-once mirrors the PR action's #892
+      # flake mitigation so one non-deterministic codegen flake doesn't
+      # skip the save (a persistent failure still fails → no save).
+      - name: Warm test-bin cache (run .sfn shards, cache enabled)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ulimit -v 8388608 || true
+          run_shard() { make test-shard SHARD="$1"; }
+          for shard in $(bash scripts/test_shards.sh sfn-names); do
+            echo "[warm] shard $shard"
+            if ! run_shard "$shard"; then
+              echo "::warning title=test flake (likely #892)::shard $shard failed on attempt 1; retrying once."
+              echo "[warm] retrying shard $shard once (attempt 2/2) — see #892"
+              run_shard "$shard"
+            fi
+          done
+
+      # Save the warmed test-bin cache for PR CI to restore. Save-only (no
+      # `if:`) so it runs only when every prior step — including the suite
+      # — succeeded; a failed baseline leaves the previous good cache in
+      # place (no poisoning). Key matches the PR action's
+      # `sailfin-testbin-...` key exactly; if it already exists (no source
+      # change since the last main run) the save is a no-op.
+      - name: Save test-bin cache for PR CI
+        uses: actions/cache/save@v5
+        with:
+          path: build/cache/test-bin
+          key: sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', '.seed-version') }}
+
   # Failure-mode job (issue #782). Runs only when `build-quality` fails.
   # Elevated permissions are scoped to this job alone so the gate job
   # itself stays `contents: read` (architect verdict on #339 Q4).

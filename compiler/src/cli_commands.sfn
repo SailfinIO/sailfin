@@ -6,11 +6,11 @@ import { AssertFailure, _empty_assert_failure, _parse_assert_failure_record } fr
 import { Program, Statement } from "./ast";
 import {
     CacheKey,
-    cache_compiler_identity,
     cache_copy_artifact_to,
     cache_lookup_artifact,
     cache_store_artifact,
     canonicalize_flags,
+    runtime_link_inputs_identity,
     test_bin_cache_key,
     test_bin_cache_root
 } from "./build_cache";
@@ -105,7 +105,7 @@ import {
 } from "./toml_parser";
 import { format_source } from "./tools/fmt";
 import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
-import { resolve_compiler_version_for_cache } from "./version";
+import { resolve_test_bin_identity_for_cache } from "./version";
 
 // Validate a path segment (scope, name) contains no traversal or illegal chars.
 fn _is_safe_capsule_segment_cmd(value: string) -> boolean {
@@ -968,6 +968,55 @@ fn _extract_json_uint_after(text: string, key: string) -> int {
     return n;
 }
 
+// #1233: content identity of the runtime link inputs every test binary
+// links against. The runtime capsule set is invocation-stable, so this
+// is resolved once and folded into every per-test cache key via
+// `runtime_link_inputs_identity`. Replacing the former per-commit
+// `compiler_identity` reliance with this content hash is what keeps the
+// per-test binary cache correct across a runtime edit while letting
+// genuinely-unchanged tests hit across commits. `unique_suffix` makes
+// the hash temp path collision-safe across concurrent `sfn test`
+// invocations (pass the per-invocation scratch root).
+fn _test_bin_runtime_identity(runtime_root: string, unique_suffix: string) -> string ![io] {
+    let caps = runtime_capsule_from_root(runtime_root);
+    let mut sources: string[] = [];
+    let mut libs: string[] = [];
+    let mut ci: int = 0;
+    loop {
+        if ci >= caps.length { break; }
+        let cap = caps[ci];
+        let mut si: int = 0;
+        loop {
+            if si >= cap.c_sources.length { break; }
+            sources.push(cap.c_sources[si]);
+            si += 1;
+        }
+        let mut li: int = 0;
+        loop {
+            if li >= cap.ll_sources.length { break; }
+            sources.push(cap.ll_sources[li]);
+            li += 1;
+        }
+        let mut fi: int = 0;
+        loop {
+            if fi >= cap.sfn_sources.length { break; }
+            sources.push(cap.sfn_sources[fi]);
+            fi += 1;
+        }
+        if cap.prelude_entry.length > 0 {
+            sources.push(cap.prelude_entry);
+        }
+        let mut bi: int = 0;
+        loop {
+            if bi >= cap.link_libs.length { break; }
+            libs.push(cap.link_libs[bi]);
+            bi += 1;
+        }
+        ci += 1;
+    }
+    return runtime_link_inputs_identity(sources, libs, unique_suffix + "_rtid");
+}
+
 fn handle_test_command(args: string[], runtime_root: string, binary_dir: string) -> int ![io, clock] {
     // Flag parser: `--json` selects the jsonl event stream; `-k` and
     // `--tag` (issue #849) each consume the following argv element as a
@@ -1568,8 +1617,8 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
     // the read and the write so `make check` always cold-builds.
     let test_cache_enabled = !no_test_cache;
     let tb_cache_root = test_bin_cache_root();
-    let tb_self_exe = _resolve_test_self_path(binary_dir);
-    let tb_compiler_identity = cache_compiler_identity(resolve_compiler_version_for_cache(binary_dir), tb_self_exe);
+    let tb_compiler_identity = resolve_test_bin_identity_for_cache(binary_dir);
+    let tb_runtime_identity = _test_bin_runtime_identity(runtime_root, _sanitize_filename_cmd(scratch_root));
     let mut tb_flags: string[] = ["-O0"];
     let tb_flags_canonical = canonicalize_flags(tb_flags);
     let mut test_bin_hits: int = 0;
@@ -1615,7 +1664,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         let mut tb_key: CacheKey = CacheKey { digest: "" };
         let mut cache_hit: boolean = false;
         if test_cache_enabled {
-            tb_key = test_bin_cache_key(path, groups[group_idx].dep_ll_paths, groups[group_idx].native_texts, tb_compiler_identity, tb_flags_canonical, _sanitize_filename_cmd(scratch_root
+            tb_key = test_bin_cache_key(path, groups[group_idx].dep_ll_paths, groups[group_idx].native_texts, tb_compiler_identity, tb_runtime_identity, tb_flags_canonical, _sanitize_filename_cmd(scratch_root
                 + "/"
                 + path));
             if cache_lookup_artifact(tb_cache_root, tb_key, "test-bin") {
