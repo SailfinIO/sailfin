@@ -261,6 +261,14 @@ int main(void) {
         return 6;
     }
 
+    /* Phase 4: a non-empty fan-out with a null fn_ptrs array is rejected
+     * (returns null) rather than dereferencing near-null. A null ctxs
+     * stays valid (Phase 2), so only fn_ptrs is guarded. */
+    if (sfn_parallel(NULL, (void *)ctxs, 4) != NULL) {
+        fprintf(stderr, "sfn_parallel(NULL, ctxs, 4) did not return NULL\n");
+        return 7;
+    }
+
     return 0;
 }
 CHARNESS

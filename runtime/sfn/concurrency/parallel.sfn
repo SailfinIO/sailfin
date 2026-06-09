@@ -60,13 +60,44 @@ extern fn sfn_spawn(fn_ptr: i64, ctx: i64, result_size: i64) -> * u8;
 
 extern fn sfn_await(future: * u8) -> * u8;
 
+// Await (and discard) every spawned future in a `count`-element futures
+// array based at `futures_base`. The failure paths use this to honor the
+// structured contract — no spawned task may outlive the `sfn_parallel`
+// call (a still-running task can read caller `ctx` memory). `sfn_await`
+// is null-safe, so unspawned (null) slots drain harmlessly.
+fn _sfn_parallel_drain(futures_base: i64, count: i64) -> void {
+    let mut k: i64 = 0;
+    loop {
+        if k >= count { break; }
+        let slot: * i64 = (futures_base + k * 8) as * i64;
+        let future: * u8 = atomic_load(slot) as * u8;
+        sfn_await(future);
+        k = k + 1;
+    }
+}
+
 // `sfn_parallel(fn_ptrs, ctxs, count)` — fan out `count` tasks, join
 // them, and return their results in input order. See the file header for
 // the full contract. Empty input returns null; allocation failure
-// returns null (after releasing any scratch already taken).
+// returns null (after draining any spawned tasks and releasing scratch).
 fn sfn_parallel(fn_ptrs: * u8, ctxs: * u8, count: i64) -> * u8 {
     // Empty (or negative) input → empty output. Nothing is allocated.
     if count <= 0 { return null; }
+
+    // A non-empty fan-out with no task array is a caller bug: every slot
+    // would dereference near-null. Reject rather than crash (matching
+    // scheduler.sfn's null-handle discipline). A null `ctxs`, by
+    // contrast, is VALID — it means "every task receives a zero ctx".
+    if fn_ptrs as i64 == 0 { return null; }
+
+    // Overflow guard on the `count * 8` allocation size: a `count` past
+    // floor((2^63 - 1) / 8) = 0x0FFF_FFFF_FFFF_FFFF would wrap the byte
+    // size to a small (or negative) value, under-allocate, and invite
+    // out-of-bounds slot writes — so reject it rather than malloc a
+    // too-small array. Mirrors the ring-capacity clamp in scheduler.sfn
+    // (`_sfn_taskqueue_max_capacity`). Real fan-out widths are tiny; this
+    // guards the absurd-input corner, not a hot path.
+    if count > 1152921504606846975 { return null; }
 
     let fns_base: i64 = fn_ptrs as i64;
     let ctxs_base: i64 = ctxs as i64;
@@ -79,6 +110,11 @@ fn sfn_parallel(fn_ptrs: * u8, ctxs: * u8, count: i64) -> * u8 {
     let futures_base: i64 = futures as i64;
 
     // ── Fan-out: spawn every task. ────────────────────────────────
+    // A failed spawn (null future on scheduler-init failure or OOM)
+    // stores null in its slot and fan-out continues; the join phase
+    // awaits every slot (`sfn_await` is null-safe), so already-spawned
+    // tasks are never abandoned — the structured fan-out/join contract
+    // holds even on a partial spawn failure.
     let mut i: i64 = 0;
     loop {
         if i >= count { break; }
@@ -104,6 +140,11 @@ fn sfn_parallel(fn_ptrs: * u8, ctxs: * u8, count: i64) -> * u8 {
     // Results array, returned to the caller (it owns and frees it).
     let results: * u8 = malloc((count * 8) as usize);
     if results as i64 == 0 {
+        // Structured-concurrency contract: spawned tasks must not outlive
+        // this call (a running task may still read caller `ctx`). Drain
+        // every spawned future before bailing, even though we can no
+        // longer hand back results.
+        _sfn_parallel_drain(futures_base, count);
         free(futures);
         return null;
     }

@@ -1,6 +1,6 @@
 # Status
 
-Updated: June 7, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1–PR7 shipped; lowering temp-index recovery fix for #543 staged — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273, E PR1 / #274, E PR2 / #277, E PR3 / #278, E PR4 / #280, E PR5 / #378, E PR6 / #382, E PR7 / #383; seed pinned to v0.5.10-alpha.13)
+Updated: June 8, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1–PR7 shipped; lowering temp-index recovery fix for #543 staged — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273, E PR1 / #274, E PR2 / #277, E PR3 / #278, E PR4 / #280, E PR5 / #378, E PR6 / #382, E PR7 / #383; seed pinned to v0.5.10-alpha.13)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
