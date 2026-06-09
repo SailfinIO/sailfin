@@ -918,7 +918,7 @@ fn _pool_child_argv(timeout_cmd: string, timeout_secs: string, self_exe: string,
     return _append_test_filter_args(base, name_filter, tag_filter);
 }
 
-// #1236: explicit environment for a pooled child.
+// #1236: invocation-stable environment snapshot for pooled children.
 // `process.spawn_with_env` treats its env argument as the child's
 // ENTIRE environment ("empty means empty, never inherit" —
 // `runtime/sfn/process.sfn`), so the pool must reconstruct what the
@@ -928,13 +928,15 @@ fn _pool_child_argv(timeout_cmd: string, timeout_secs: string, self_exe: string,
 // the child toolchain actually consults: process basics (PATH for
 // the child's own clang/sh lookups; TMPDIR/HOME for scratch and
 // cache roots) plus every SAILFIN_*/SFN_* knob read by
-// `compiler/src/` and `runtime/`. A variable absent from the parent
-// is omitted, not set to empty. The per-child test-runner variables
-// (`SAILFIN_TEST_SCRATCH`, `SAILFIN_TEST_RUNTIME_OBJDIR`, and the
-// conditional `SAILFIN_UPDATE_SNAPSHOTS` / `SAILFIN_TEST_JSON_SUBFRAME`
-// flags) are layered on top, exactly mirroring the serial path's
-// `env` prefix.
-fn _pool_child_env(child_scratch: string, runtime_objdir: string, update_snapshots: boolean, json_output: boolean) -> string[] ![io] {
+// `compiler/src/` and `runtime/`. A variable that resolves to the
+// empty string is omitted rather than passed as empty — `_get_env_cmd`
+// (shell expansion) cannot distinguish unset from set-but-empty, so
+// both shapes are dropped; nothing in the passthrough list treats
+// `VAR=` differently from unset. Resolved ONCE per `sfn test`
+// invocation (each `_get_env_cmd` read is a popen) and reused for
+// every spawn; only the per-child variables vary (see
+// `_pool_child_env`).
+fn _pool_env_snapshot() -> string[] ![io] {
     let passthrough = ["PATH", "HOME", "PWD", "TMPDIR", "USER", "LOGNAME", "LANG", "LC_ALL", "USERPROFILE", "SAILFIN_TEST_TIMEOUT", "SAILFIN_TEST_RETRY", "SAILFIN_TEST_KEEP_SCRATCH", "SAILFIN_TRACE_TEST_RUNNER", "SAILFIN_DUMP_TEST_SOURCES", "SAILFIN_TRACE_EMIT", "SAILFIN_TRACE_LOWERING", "SAILFIN_TRACE_CALL_LOWERING", "SAILFIN_TRACE_ARGV", "SAILFIN_TRACE_CRASH", "SAILFIN_TRACE_FS_WRITE_FILE", "SAILFIN_TRACE_GRAPHEME_AT", "SAILFIN_TRACE_NUMBER_TO_STRING", "SAILFIN_TRACE_STRING_CONCAT", "SAILFIN_TRACE_STRING_LENGTH", "SAILFIN_SKIP_TYPECHECK", "SAILFIN_SKIP_MODULE_GLOBALS", "SAILFIN_TARGET_OS", "SAILFIN_BUILD_CACHE_DIR", "SAILFIN_LINKER", "SAILFIN_NO_CACHE", "SAILFIN_NO_LEGACY_PROBE", "SAILFIN_CACHE_TRACE", "SAILFIN_DISABLE_RUNTIME_SFN_SOURCES", "SAILFIN_USE_ARENA", "SAILFIN_ABI_FORCE_MISMATCH", "SAILFIN_DEBUG_DUMP_BUDGET", "SAILFIN_DUMP_ARENA_STATS", "SFN_TOKEN", "SFN_REGISTRY"];
     let mut env_flat: string[] = [];
     let mut i: int = 0;
@@ -943,6 +945,24 @@ fn _pool_child_env(child_scratch: string, runtime_objdir: string, update_snapsho
         let name = passthrough[i];
         let value = _get_env_cmd(name);
         if value.length > 0 { env_flat.push(name + "=" + value); }
+        i += 1;
+    }
+    return env_flat;
+}
+
+// #1236: per-child environment = the invocation-stable snapshot plus
+// the per-child test-runner variables (`SAILFIN_TEST_SCRATCH`,
+// `SAILFIN_TEST_RUNTIME_OBJDIR`, and the conditional
+// `SAILFIN_UPDATE_SNAPSHOTS` / `SAILFIN_TEST_JSON_SUBFRAME` flags),
+// exactly mirroring the serial path's `env` argv prefix. The base
+// snapshot is copied entry-by-entry into a fresh array so per-child
+// pushes can never accumulate into the shared snapshot across spawns.
+fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: string, update_snapshots: boolean, json_output: boolean) -> string[] {
+    let mut env_flat: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base_env.length { break; }
+        env_flat.push(base_env[i]);
         i += 1;
     }
     env_flat.push("SAILFIN_TEST_SCRATCH=" + child_scratch);
@@ -1562,6 +1582,11 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
             // (137/139) is re-spawned and reaped synchronously at
             // reap time; the window stays ≤ `jobs` live children
             // throughout.
+            // Snapshot the passthrough environment ONCE — each
+            // `_get_env_cmd` read shells out via popen, so resolving
+            // it per spawn would add dozens of subprocesses per test
+            // file and eat the parallelism win.
+            let pool_base_env = _pool_env_snapshot();
             let mut handles: int[] = [];
             let mut launched: int = 0;
             let mut ti: int = 0;
@@ -1578,7 +1603,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
                     if launched - ti >= jobs { break; }
                     let spawn_scratch = sub_root + "/sub-" + number_to_string(launched);
                     _ensure_dir_cmd(spawn_scratch);
-                    handles.push(process.spawn_with_env(_pool_child_argv(timeout_cmd, timeout_secs, self_exe, test_files[launched], name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(spawn_scratch, sub_root, update_snapshots, json_output)));
+                    handles.push(process.spawn_with_env(_pool_child_argv(timeout_cmd, timeout_secs, self_exe, test_files[launched], name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, spawn_scratch, sub_root, update_snapshots, json_output)));
                     launched += 1;
                 }
                 let path = test_files[ti];
@@ -1594,7 +1619,7 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
                             + number_to_string(rc)
                             + ", retrying once)");
                     }
-                    let retry_handle = process.spawn_with_env(_pool_child_argv(timeout_cmd, timeout_secs, self_exe, path, name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(child_scratch, sub_root, update_snapshots, json_output));
+                    let retry_handle = process.spawn_with_env(_pool_child_argv(timeout_cmd, timeout_secs, self_exe, path, name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, child_scratch, sub_root, update_snapshots, json_output));
                     rc = _reap_test_child(retry_handle);
                 }
                 if rc == 0 { suites[suite_idx].pass_count += 1; } else {
