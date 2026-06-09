@@ -115,9 +115,18 @@ test_inttoptr() {
 test_no_bitcast_collapse() {
     # The original bug: the whole expression collapsed to a single
     # `bitcast i8* %task to i64*`, discarding the ptrtoint/add/inttoptr.
-    if _inline_body | grep -qE 'bitcast i8\* %task to i64\*'; then
+    # Validate the extracted body is non-empty FIRST — otherwise this
+    # negative assertion would pass vacuously if the function signature
+    # drifts and `_inline_body` extracts nothing.
+    local body
+    body="$(_inline_body)"
+    if [ -z "$body" ]; then
+        echo "[test]   inline_form: could not extract function body (signature drift?)"
+        return 1
+    fi
+    if printf '%s\n' "$body" | grep -qE 'bitcast i8\* %task to i64\*'; then
         echo "[test]   inline_form: offset dropped — collapsed to 'bitcast i8* %task to i64*':"
-        _inline_body | grep -nE 'bitcast i8\* %task to i64\*'
+        printf '%s\n' "$body" | grep -nE 'bitcast i8\* %task to i64\*'
         return 1
     fi
     return 0
@@ -129,19 +138,33 @@ _mul_body() {
 }
 
 test_mul_offset_survives() {
-    if ! _mul_body | grep -qE 'mul i64 '; then
+    # Validate the extracted body is non-empty FIRST so the negative
+    # `bitcast` assertion below can't pass vacuously on signature drift.
+    local body
+    body="$(_mul_body)"
+    if [ -z "$body" ]; then
+        echo "[test]   mul_form: could not extract function body (signature drift?)"
+        return 1
+    fi
+    # Documented shape: mul (i * 8) + add (base + offset) + inttoptr.
+    if ! printf '%s\n' "$body" | grep -qE 'mul i64 '; then
         echo "[test]   mul_form: computed offset 'i * 8' did not survive as 'mul i64'"
-        _mul_body
+        printf '%s\n' "$body"
         return 1
     fi
-    if ! _mul_body | grep -qE 'inttoptr i64 %[a-zA-Z0-9._]+ to i64\*'; then
+    if ! printf '%s\n' "$body" | grep -qE 'add i64 '; then
+        echo "[test]   mul_form: base + offset did not survive as 'add i64'"
+        printf '%s\n' "$body"
+        return 1
+    fi
+    if ! printf '%s\n' "$body" | grep -qE 'inttoptr i64 %[a-zA-Z0-9._]+ to i64\*'; then
         echo "[test]   mul_form: missing 'inttoptr i64 … to i64*'"
-        _mul_body
+        printf '%s\n' "$body"
         return 1
     fi
-    if _mul_body | grep -qE 'bitcast i8\* %task to i64\*'; then
+    if printf '%s\n' "$body" | grep -qE 'bitcast i8\* %task to i64\*'; then
         echo "[test]   mul_form: offset dropped — collapsed to 'bitcast i8* %task to i64*'"
-        _mul_body
+        printf '%s\n' "$body"
         return 1
     fi
     return 0
