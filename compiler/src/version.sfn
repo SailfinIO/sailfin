@@ -202,3 +202,37 @@ fn resolve_compiler_version_for_cache(binary_dir: string) -> string ![io] {
 
     return __version_fallback__;
 }
+
+// Strip semver build metadata (everything from the first `+`) from a
+// version string. `+` is the semver build-metadata separator, so
+// `<ver>+dev.<hash>`, `<ver>+dev.<hash>.dirty`, and `<ver>+bin.<sha>`
+// all collapse to the bare `<ver>`. A string with no `+` is returned
+// unchanged. Pure (no IO) so it is directly unit-testable.
+fn _strip_build_metadata(version: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= version.length { break; }
+        if version[i] == "+" { return substring(version, 0, i); }
+        i += 1;
+    }
+    return version;
+}
+
+// Commit-stable identity for the per-test binary cache (#1230/#1233).
+// Same resolution chain as `resolve_compiler_version_for_cache`, but
+// strips the `+dev.<hash>` build metadata so the identity is invariant
+// across commits at the same capsule version.
+//
+// Why a separate identity from the module-IR cache: the module-IR cache
+// is SEED-built, so its stamp is the stable pinned-seed version. The
+// per-test binary cache is keyed by the FRESHLY-built compiler's stamp,
+// which embeds a per-commit git short hash — so without this strip a
+// `push:main` baseline can never warm a PR (the commit differs), and a
+// PR's second push can't reuse its first push's binaries. Correctness
+// for runtime edits is NOT lost: the runtime link inputs are folded into
+// the test-bin key by content (see `build_cache.sfn::test_bin_cache_key`
+// and `runtime_link_inputs_identity`), so a runtime change still busts
+// the key even though the identity no longer carries the commit hash.
+fn resolve_test_bin_identity_for_cache(binary_dir: string) -> string ![io] {
+    return _strip_build_metadata(resolve_compiler_version_for_cache(binary_dir));
+}

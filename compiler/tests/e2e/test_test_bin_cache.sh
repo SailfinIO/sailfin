@@ -37,9 +37,26 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 SCRATCH="$(mktemp -d -t sfn-test-bin-cache-XXXXXX)"
-trap 'rm -rf "$SCRATCH"' EXIT
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+
+# Test 5 rewrites build/native/.build-stamp to simulate a different
+# commit. Back the original file up with `cp` (faithful to trailing
+# newlines / an empty file, unlike `$(cat)`) and restore it on exit
+# BEFORE the scratch dir is removed, so a local dev tree's stamp is never
+# poisoned. The backup lives outside $SCRATCH so trap order is irrelevant.
+STAMP_FILE="$REPO_ROOT/build/native/.build-stamp"
+STAMP_BACKUP=""
+STAMP_PRESENT=0
+if [ -f "$STAMP_FILE" ]; then
+    STAMP_BACKUP="$(mktemp)"
+    cp "$STAMP_FILE" "$STAMP_BACKUP"
+    STAMP_PRESENT=1
+fi
+restore_stamp() {
+    [ "$STAMP_PRESENT" = "1" ] && [ -f "$STAMP_BACKUP" ] && cp "$STAMP_BACKUP" "$STAMP_FILE"
+}
+trap 'restore_stamp; rm -rf "$SCRATCH" "$STAMP_BACKUP"' EXIT
 
 run_test() {
     local name="$1"
@@ -105,6 +122,39 @@ test_warm_hit() {
     return 0
 }
 run_test "warm rerun: every test hits, hit_rate 1.0000" test_warm_hit
+
+# ---- Test 5: cross-commit stability (#1233) ----
+# The per-test binary cache identity is the commit-STABLE capsule version
+# (`resolve_test_bin_identity_for_cache` strips the `+dev.<hash>` build
+# metadata), so a `push:main` baseline warms a PR and a second push
+# reuses the first's binaries. We can't change the real git hash in a
+# hermetic test, so simulate the commit change the way the bug was first
+# diagnosed: overwrite build/native/.build-stamp with a DIFFERENT
+# `+dev.<hash>` at the SAME capsule version, then assert the warm cache
+# (populated under the original stamp in Tests 1-2) still HITS. Before
+# the fix this missed (the per-commit hash busted every entry).
+test_cross_commit_stable() {
+    if [ "$STAMP_PRESENT" != "1" ]; then
+        echo "[test]   SKIP: no build/native/.build-stamp to rewrite" >&2
+        return 0
+    fi
+    # Rewrite only the build-metadata: keep everything before the first
+    # `+`, append a distinct `+dev.<hash>`. A stamp with no `+` (a tagged
+    # release) gets one appended — still a different stamp, same version.
+    local base
+    base="$(head -1 "$STAMP_FILE" | sed 's/+.*//')"
+    printf '%s\n' "${base}+dev.deadbee" > "$STAMP_FILE"
+    local summary
+    summary="$(run_suite "")" || { restore_stamp; return 1; }
+    restore_stamp
+    echo "[test]   cross-commit summary: $summary" >&2
+    # Same capsule version ⇒ same stripped identity ⇒ key unchanged ⇒ HIT.
+    [ "$(echo "$summary" | jq -r '.cache.test_bin_hits')" -ge 1 ] || return 1
+    [ "$(echo "$summary" | jq -r '.cache.test_bin_misses')" = "0" ] || return 1
+    [ "$(echo "$summary" | jq -r '.cache.test_bin_hit_rate == 1')" = "true" ] || return 1
+    return 0
+}
+run_test "different +dev.<hash> stamp, same version: still hits (no commit bust)" test_cross_commit_stable
 
 # ---- Test 3: --no-test-cache bypasses read + write, hit_rate 0.0000 ----
 test_no_cache_flag() {

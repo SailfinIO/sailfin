@@ -786,7 +786,14 @@ fn cache_compiler_identity(compiler_version: string, compiler_binary_path: strin
 // way that makes old entries incompatible. Independent of
 // `build_cache_schema_version` so a module-cache schema bump doesn't
 // needlessly evict warm test binaries (and vice versa).
-fn test_bin_cache_schema_version() -> string { return "v1"; }
+//
+// v1 -> v2 (#1233): the key gained a `runtime_identity` component (the
+// runtime link inputs, hashed by content) and the `compiler_identity`
+// component switched from the per-commit build stamp to the commit-stable
+// capsule version (`resolve_test_bin_identity_for_cache`). Both change
+// the folded key bytes, so the schema bump re-roots the on-disk tree to
+// `build/cache/test-bin/v2` and old v1 entries can never false-hit.
+fn test_bin_cache_schema_version() -> string { return "v2"; }
 
 // Root for the per-test binary cache: `<base>/test-bin/<schema>`,
 // where `<base>` is `$SAILFIN_BUILD_CACHE_DIR` (when set) or the
@@ -813,20 +820,23 @@ fn test_bin_cache_root() -> string ![io] {
 // hinge for the test's OWN closure: a changed test source or dep
 // changes a hash here exactly as it changes the bytes the linker reads.
 //
-// Known gap: the link ALSO pulls in the assembled runtime capsule
-// objects + link libs (`_clang_link_test_cmd_with_deps`), which are NOT
-// folded into this key. Those are covered indirectly by
-// `compiler_identity` (a rebuilt compiler — which is how a runtime
-// source edit normally reaches a test binary, since the runtime is
-// rebuilt as part of `make compile` — busts every entry) and directly
-// by `--no-test-cache` on the `make check` / full-suite gate. A runtime
-// edit that is NOT accompanied by a compiler rebuild can therefore
-// serve a stale binary; the gate's cold build is the backstop.
+// The link ALSO pulls in the assembled runtime capsule objects + link
+// libs (`_clang_link_test_cmd_with_deps`), which are not part of the
+// test's own dep closure. Those are folded in via `runtime_identity`
+// (`runtime_link_inputs_identity` — the runtime source + link-lib
+// content hashed by the caller), so a runtime edit busts the key
+// directly by content. This replaced the former reliance on a
+// per-commit `compiler_identity` busting every entry on every commit
+// (#1233): `compiler_identity` is now the commit-stable capsule version
+// (`resolve_test_bin_identity_for_cache`), so genuinely-unchanged tests
+// hit across commits. `--no-test-cache` on the `make check` /
+// full-suite gate remains the final cold-build backstop.
 //
 //   key = sha256(
 //       sha256(test_source_bytes)
 //       || sha256(sorted(dep hashes))   // dep_ll files + native_texts
-//       || compiler_identity            // cache_compiler_identity(...)
+//       || compiler_identity            // commit-stable capsule version
+//       || runtime_identity             // runtime_link_inputs_identity(...)
 //       || canonical(clang_flags)
 //       || test_bin_cache_schema_version()
 //   )
@@ -838,7 +848,7 @@ fn test_bin_cache_root() -> string ![io] {
 // within one process, never across two processes hashing the same
 // file simultaneously (the module cache carries the identical
 // single-process precondition).
-fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_texts: string[], compiler_identity: string, flags_canonical: string, unique_suffix: string) -> CacheKey ![io] {
+fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_texts: string[], compiler_identity: string, runtime_identity: string, flags_canonical: string, unique_suffix: string) -> CacheKey ![io] {
     let s_hash = _sha256_of_file_cmd(test_source_path);
 
     let mut dep_hashes: string[] = [];
@@ -868,11 +878,61 @@ fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_t
 
     let final_input = s_hash + "\n" + deps_hash + "\n" + compiler_identity
         + "\n"
+        + runtime_identity
+        + "\n"
         + flags_canonical
         + "\n"
         + test_bin_cache_schema_version();
     let final_digest = _sha256_of_string(final_input, unique_suffix + "_final");
     return CacheKey { digest: final_digest };
+}
+
+// Content identity for the runtime link inputs a test binary links
+// against (#1233). The clang link pulls in the assembled runtime capsule
+// objects + link libs, which are NOT part of the test's own dep closure;
+// folding their *source* content into the test-bin key is what lets that
+// cache stay correct across a runtime edit WITHOUT relying on a
+// per-commit compiler stamp (which would bust every entry on every
+// commit). Callers enumerate the runtime inputs once per `sfn test`
+// invocation (the set is invocation-stable) and fold the result into
+// `test_bin_cache_key` as `runtime_identity`.
+//
+// `source_paths` are the runtime input sources (`.c` / `.ll` / `.sfn`
+// + prelude entry + the `.h` headers under the include roots) hashed off
+// disk; `value_inputs` are non-file inputs folded by value — linker flag
+// strings (`-lm`, `-lpthread`, capsule-declared libs) and the include-dir
+// paths (`-I<dir>`), so an include-root or link-flag change busts the key.
+// All components are sorted before folding so the identity is invariant
+// under enumeration order. Each source folds in as `<path>@<sha256>`: the
+// path keeps two distinct inputs from aliasing (notably when a file is
+// unreadable and `_sha256_of_file_cmd` returns an empty digest) and makes
+// a rename observable. Hashing SOURCES (not built objects) is both
+// available on the single-file leaf path — where objects may not exist
+// yet — and strictly upstream: a source edit busts even before a rebuild.
+fn runtime_link_inputs_identity(source_paths: string[], value_inputs: string[], unique_suffix: string) -> string ![io] {
+    let mut parts: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= source_paths.length { break; }
+        parts.push("src:" + source_paths[i] + "@" + _sha256_of_file_cmd(source_paths[i]));
+        i += 1;
+    }
+    let mut j: int = 0;
+    loop {
+        if j >= value_inputs.length { break; }
+        parts.push("val:" + value_inputs[j]);
+        j += 1;
+    }
+    let sorted = _sort_strings(parts);
+    let mut concat: string = "";
+    let mut k: int = 0;
+    loop {
+        if k >= sorted.length { break; }
+        if k > 0 { concat = concat + "|"; }
+        concat = concat + sorted[k];
+        k += 1;
+    }
+    return _sha256_of_string(concat, unique_suffix + "_rt");
 }
 
 export {
@@ -906,5 +966,6 @@ export {
     test_bin_cache_schema_version,
     test_bin_cache_root_with_override,
     test_bin_cache_root,
-    test_bin_cache_key
+    test_bin_cache_key,
+    runtime_link_inputs_identity
 };

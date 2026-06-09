@@ -22,6 +22,7 @@
 #
 # Commands:
 #   test_shards.sh names                 # all shard names (sfn + sh)
+#   test_shards.sh sfn-names             # just the *_test.sfn shard names
 #   test_shards.sh list  <shard>         # print the shard's files, one per line
 #   test_shards.sh run   <shard> <bin>   # run an *_test.sfn shard via <bin>
 #   test_shards.sh cover                 # assert the union == full surface
@@ -179,6 +180,7 @@ cover() {
 cmd="${1:-}"
 case "$cmd" in
 names) _all_shard_names ;;
+sfn-names) printf '%s\n' "$SFN_SHARDS" ;;
 list)
 	shift
 	list "${1:?usage: test_shards.sh list <shard>}"

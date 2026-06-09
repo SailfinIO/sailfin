@@ -242,7 +242,8 @@ per-test cost — and just re-runs the cached executable. The cache key is
 sha256(
   sha256(test_source_bytes)
   || sha256(sorted(hash of each transitive dep the link consumes))
-  || compiler_identity        // busts on a rebuilt compiler
+  || compiler_identity        // commit-stable capsule version
+  || runtime_identity         // content hash of the runtime link inputs
   || canonical(clang_flags)
   || schema_version
 )
@@ -254,14 +255,26 @@ dependency changes the key and misses the cache. On a hit the cached
 binary is still **run** (never a cached pass/fail result), so a
 flaky-at-runtime test always surfaces.
 
-The key does **not** fold in the assembled runtime capsule objects or
-link libraries that the link also consumes — those are covered
-indirectly by the compiler identity (a rebuilt compiler, the usual way a
-runtime-source edit reaches a test binary since the runtime is rebuilt
-by `make compile`, busts every entry). A runtime edit *without* a
-compiler rebuild can serve a stale binary; `--no-test-cache` (which
-`make check` and the nightly full suite pass) is the cold-build backstop
-that catches any such drift at the merge gate.
+`compiler_identity` is the **commit-stable** capsule version: the build
+stamp's `+dev.<hash>` build metadata is stripped, so two commits at the
+same version produce the same identity. This is what lets a `push:main`
+baseline cache warm a PR's first run and a PR's second push reuse the
+first's binaries — without it, the per-commit git hash busted every
+entry on every commit. The test's own dep closure (hashed by content)
+still captures any compiler codegen change that affects that test, so a
+codegen-affecting change still misses; only commits that change nothing
+in the test's closure hit across commits.
+
+`runtime_identity` folds the assembled runtime capsule's link inputs
+into the key by **content**: the runtime `.c`/`.ll`/`.sfn` sources, the
+prelude entry, and the `.h` headers under each include root (each hashed
+off disk, folded as `<path>@<sha256>` so distinct inputs never alias),
+plus the include-dir paths and the declared link libraries (folded by
+value). A runtime edit — including a header-only change or an
+include-root change — therefore busts the key directly, no longer relying
+on a compiler rebuild changing the stamp. `--no-test-cache` (which
+`make check` and the nightly full suite pass) remains the cold-build
+backstop at the merge gate.
 
 Cached binaries live under `build/cache/test-bin/<schema>/` (alongside
 the module IR cache, under `$SAILFIN_BUILD_CACHE_DIR` when set) and are

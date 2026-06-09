@@ -30,26 +30,28 @@ import {
     build_cache_schema_version,
     cache_artifact_path,
     cache_clean,
+    cache_compiler_identity,
     cache_copy_artifact_to,
+    cache_key_for,
     cache_lookup_artifact,
     cache_lookup_complete,
     cache_paths_for,
     cache_root_with_override,
+    cache_stats_is_empty,
     cache_store,
     cache_store_artifact,
-    cache_stats_is_empty,
     canonicalize_flags,
-    cache_key_for,
-    cache_compiler_identity,
     empty_build_cache_config,
     empty_cache_stats,
     is_valid_digest,
     merge_cache_stats,
+    runtime_link_inputs_identity,
     runtime_object_entry_key_from_str,
     test_bin_cache_key,
     test_bin_cache_root_with_override,
     test_bin_cache_schema_version
 } from "../../src/build_cache";
+import { _strip_build_metadata } from "../../src/version";
 
 // --------------------------------------------------------------
 // Fixture helpers
@@ -209,11 +211,11 @@ test "build_cache: cache_key_for changes when dep manifest changes" ![io] {
 // Per-test binary cache (#1230)
 // --------------------------------------------------------------
 test "build_cache: test_bin cache schema + root layout" ![io] {
-    assert test_bin_cache_schema_version() == "v1";
+    assert test_bin_cache_schema_version() == "v2";
     // In-tree default sits beside (not under) the module cache's
     // `<base>/v<N>` tree so the two schema lines age out independently.
-    assert test_bin_cache_root_with_override("") == "build/cache/test-bin/v1";
-    assert test_bin_cache_root_with_override("/shared/cache") == "/shared/cache/test-bin/v1";
+    assert test_bin_cache_root_with_override("") == "build/cache/test-bin/v2";
+    assert test_bin_cache_root_with_override("/shared/cache") == "/shared/cache/test-bin/v2";
 }
 
 test "build_cache: test_bin_cache_key same inputs -> same digest" ![io] {
@@ -223,8 +225,8 @@ test "build_cache: test_bin_cache_key same inputs -> same digest" ![io] {
     _write_file(test_src, "test \"x\" { assert 1 == 1; }");
     _write_file(dep_ll, "; ModuleID = 'dep'");
     let native_texts: string[] = ["sfn-asm: helper"];
-    let key1 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_det");
-    let key2 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_det");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0", "rt0", "[\"-O0\"]", "tbk_det");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0", "rt0", "[\"-O0\"]", "tbk_det");
     assert key1.digest == key2.digest;
     assert key1.digest.length == 64;
     _cleanup(scratch);
@@ -237,13 +239,13 @@ test "build_cache: test_bin_cache_key changes when a dep .ll hash changes" ![io]
     _write_file(test_src, "test \"x\" { assert 1 == 1; }");
     let native_texts: string[] = ["sfn-asm: helper"];
     _write_file(dep_ll, "; ModuleID = 'dep'\ndefine i64 @f() { ret i64 1 }");
-    let key1 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_dll_1");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0", "rt0", "[\"-O0\"]", "tbk_dll_1");
     // A changed transitive dep → changed hash → changed key → cache
     // miss. This is the correctness hinge: a stale binary can never be
     // served after a dep edit (acceptance criterion: misses for exactly
     // the transitive importers of an edited compiler/src file).
     _write_file(dep_ll, "; ModuleID = 'dep'\ndefine i64 @f() { ret i64 2 }");
-    let key2 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_dll_2");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], native_texts, "0.7.0", "rt0", "[\"-O0\"]", "tbk_dll_2");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }
@@ -254,8 +256,8 @@ test "build_cache: test_bin_cache_key changes when a native_text dep changes" ![
     let dep_ll = scratch + "/dep.ll";
     _write_file(test_src, "test \"x\" { assert 1 == 1; }");
     _write_file(dep_ll, "; ModuleID = 'dep'");
-    let key1 = test_bin_cache_key(test_src, [dep_ll], ["sfn-asm: original"], "0.7.0+bin.abc", "[\"-O0\"]", "tbk_nt_1");
-    let key2 = test_bin_cache_key(test_src, [dep_ll], ["sfn-asm: changed"], "0.7.0+bin.abc", "[\"-O0\"]", "tbk_nt_2");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], ["sfn-asm: original"], "0.7.0", "rt0", "[\"-O0\"]", "tbk_nt_1");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], ["sfn-asm: changed"], "0.7.0", "rt0", "[\"-O0\"]", "tbk_nt_2");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }
@@ -271,8 +273,8 @@ test "build_cache: test_bin_cache_key invariant under dep_ll order" ![io] {
     _write_file(dep_b, "; beta");
     _write_file(dep_c, "; gamma");
     let nt: string[] = [];
-    let key_abc = test_bin_cache_key(test_src, [dep_a, dep_b, dep_c], nt, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_ord");
-    let key_cba = test_bin_cache_key(test_src, [dep_c, dep_b, dep_a], nt, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_ord");
+    let key_abc = test_bin_cache_key(test_src, [dep_a, dep_b, dep_c], nt, "0.7.0", "rt0", "[\"-O0\"]", "tbk_ord");
+    let key_cba = test_bin_cache_key(test_src, [dep_c, dep_b, dep_a], nt, "0.7.0", "rt0", "[\"-O0\"]", "tbk_ord");
     assert key_abc.digest == key_cba.digest;
     _cleanup(scratch);
 }
@@ -284,9 +286,9 @@ test "build_cache: test_bin_cache_key changes when test source changes" ![io] {
     _write_file(dep_ll, "; ModuleID = 'dep'");
     let nt: string[] = [];
     _write_file(test_src, "test \"x\" { assert 1 == 1; }");
-    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_src_1");
+    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "tbk_src_1");
     _write_file(test_src, "test \"x\" { assert 2 == 2; }");
-    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0+bin.abc", "[\"-O0\"]", "tbk_src_2");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "tbk_src_2");
     assert key1.digest != key2.digest;
     _cleanup(scratch);
 }
@@ -298,12 +300,74 @@ test "build_cache: test_bin_cache_key changes when compiler identity changes" ![
     _write_file(test_src, "test \"x\" { assert 1 == 1; }");
     _write_file(dep_ll, "; ModuleID = 'dep'");
     let nt: string[] = [];
-    // A rebuilt compiler (new binary content for `.dirty` dev stamps)
-    // changes the identity → busts every cached binary, same model the
-    // module IR cache uses.
-    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0+bin.aaa", "[\"-O0\"]", "tbk_id_1");
-    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0+bin.bbb", "[\"-O0\"]", "tbk_id_2");
+    // A real capsule-version bump (the commit-stable identity, #1233)
+    // still busts every cached binary.
+    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt0", "[\"-O0\"]", "tbk_id_1");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.8.0", "rt0", "[\"-O0\"]", "tbk_id_2");
     assert key1.digest != key2.digest;
+    _cleanup(scratch);
+}
+
+// #1233 headline: two compiler stamps that differ ONLY in their
+// `+dev.<hash>` build metadata (i.e. two commits at the same capsule
+// version) must collapse to the SAME identity, so a push:main baseline
+// warms a PR and a second push reuses the first's binaries. This is the
+// unit-level proof of the cross-stamp e2e (test_test_bin_cache.sh Test
+// 5); the per-commit hash used to bust every entry on every commit.
+test "version: _strip_build_metadata collapses +dev.<hash> stamps" {
+    assert _strip_build_metadata("0.7.0-alpha.28+dev.f944726") == "0.7.0-alpha.28";
+    assert _strip_build_metadata("0.7.0-alpha.28+dev.f944726.dirty") == "0.7.0-alpha.28";
+    assert _strip_build_metadata("0.7.0-alpha.28+bin.abcdef0") == "0.7.0-alpha.28";
+    // No build metadata → unchanged (a tagged release stamp).
+    assert _strip_build_metadata("0.7.0-alpha.28") == "0.7.0-alpha.28";
+    assert _strip_build_metadata("") == "";
+    // Two different commits at the same version collapse to one identity.
+    assert _strip_build_metadata("0.7.0-alpha.28+dev.aaaaaaa") == _strip_build_metadata("0.7.0-alpha.28+dev.bbbbbbb");
+}
+
+test "build_cache: test_bin_cache_key changes when runtime identity changes" ![io] {
+    let scratch = _test_tmp_root("tbk_rtid");
+    let test_src = scratch + "/foo_test.sfn";
+    let dep_ll = scratch + "/dep.ll";
+    _write_file(test_src, "test \"x\" { assert 1 == 1; }");
+    _write_file(dep_ll, "; ModuleID = 'dep'");
+    let nt: string[] = [];
+    // A runtime edit changes the folded runtime identity → busts the key
+    // (this is what replaces the former per-commit-stamp backstop).
+    let key1 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt-aaa", "[\"-O0\"]", "tbk_rt_1");
+    let key2 = test_bin_cache_key(test_src, [dep_ll], nt, "0.7.0", "rt-bbb", "[\"-O0\"]", "tbk_rt_2");
+    assert key1.digest != key2.digest;
+    _cleanup(scratch);
+}
+
+test "build_cache: runtime_link_inputs_identity is content-addressed + order-invariant" ![io] {
+    let scratch = _test_tmp_root("rtid");
+    let a = scratch + "/a.c";
+    let b = scratch + "/b.ll";
+    let c = scratch + "/prelude.sfn";
+    _write_file(a, "int a(void){return 1;}");
+    _write_file(b, "; beta");
+    _write_file(c, "fn p() {}");
+    let libs: string[] = ["-lm", "-lpthread"];
+    // Same inputs → same digest; invariant under source-path order.
+    let id_abc = runtime_link_inputs_identity([a, b, c], libs, "rtid_1");
+    let id_cba = runtime_link_inputs_identity([c, b, a], libs, "rtid_2");
+    assert id_abc == id_cba;
+    assert id_abc.length == 64;
+    // Editing one source's bytes → different digest (runtime edit busts).
+    _write_file(b, "; beta-changed");
+    let id_edited = runtime_link_inputs_identity([a, b, c], libs, "rtid_3");
+    assert id_edited != id_abc;
+    // A changed value input (link lib / include dir) → different digest.
+    _write_file(b, "; beta");
+    let id_more_libs = runtime_link_inputs_identity([a, b, c], ["-lm", "-lpthread", "-lfoo"], "rtid_4");
+    assert id_more_libs != id_abc;
+    // Each source folds in as `<path>@<hash>`, so two DIFFERENT unreadable
+    // paths (both empty digest) do NOT alias to the same identity.
+    let no_libs: string[] = [];
+    let id_missing_x = runtime_link_inputs_identity([scratch + "/nope-x.h"], no_libs, "rtid_5");
+    let id_missing_y = runtime_link_inputs_identity([scratch + "/nope-y.h"], no_libs, "rtid_6");
+    assert id_missing_x != id_missing_y;
     _cleanup(scratch);
 }
 
