@@ -41,13 +41,22 @@ SCRATCH="$(mktemp -d -t sfn-test-bin-cache-XXXXXX)"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 # Test 5 rewrites build/native/.build-stamp to simulate a different
-# commit. Capture the original bytes and restore them on exit (alongside
-# the scratch cleanup) so a local dev tree's stamp is never poisoned.
+# commit. Back the original file up with `cp` (faithful to trailing
+# newlines / an empty file, unlike `$(cat)`) and restore it on exit
+# BEFORE the scratch dir is removed, so a local dev tree's stamp is never
+# poisoned. The backup lives outside $SCRATCH so trap order is irrelevant.
 STAMP_FILE="$REPO_ROOT/build/native/.build-stamp"
-ORIG_STAMP=""
-[ -f "$STAMP_FILE" ] && ORIG_STAMP="$(cat "$STAMP_FILE")"
-restore_stamp() { [ -n "$ORIG_STAMP" ] && printf '%s\n' "$ORIG_STAMP" > "$STAMP_FILE"; }
-trap 'rm -rf "$SCRATCH"; restore_stamp' EXIT
+STAMP_BACKUP=""
+STAMP_PRESENT=0
+if [ -f "$STAMP_FILE" ]; then
+    STAMP_BACKUP="$(mktemp)"
+    cp "$STAMP_FILE" "$STAMP_BACKUP"
+    STAMP_PRESENT=1
+fi
+restore_stamp() {
+    [ "$STAMP_PRESENT" = "1" ] && [ -f "$STAMP_BACKUP" ] && cp "$STAMP_BACKUP" "$STAMP_FILE"
+}
+trap 'restore_stamp; rm -rf "$SCRATCH" "$STAMP_BACKUP"' EXIT
 
 run_test() {
     local name="$1"
@@ -125,14 +134,15 @@ run_test "warm rerun: every test hits, hit_rate 1.0000" test_warm_hit
 # (populated under the original stamp in Tests 1-2) still HITS. Before
 # the fix this missed (the per-commit hash busted every entry).
 test_cross_commit_stable() {
-    if [ -z "$ORIG_STAMP" ]; then
+    if [ "$STAMP_PRESENT" != "1" ]; then
         echo "[test]   SKIP: no build/native/.build-stamp to rewrite" >&2
         return 0
     fi
     # Rewrite only the build-metadata: keep everything before the first
     # `+`, append a distinct `+dev.<hash>`. A stamp with no `+` (a tagged
     # release) gets one appended — still a different stamp, same version.
-    local base="${ORIG_STAMP%%+*}"
+    local base
+    base="$(head -1 "$STAMP_FILE" | sed 's/+.*//')"
     printf '%s\n' "${base}+dev.deadbee" > "$STAMP_FILE"
     local summary
     summary="$(run_suite "")" || { restore_stamp; return 1; }

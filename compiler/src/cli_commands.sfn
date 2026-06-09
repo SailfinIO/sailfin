@@ -968,19 +968,71 @@ fn _extract_json_uint_after(text: string, key: string) -> int {
     return n;
 }
 
+// Recursively collect `.h` header files under `root` (bounded depth),
+// mirroring `_collect_sfn_files_cmd`'s walker. Used by
+// `_test_bin_runtime_identity` to fold the runtime's include-dir headers
+// into the per-test cache key by content — a header edit changes the
+// compiled runtime objects the test binary links against, so it must
+// bust the key even though the `.c`/`.ll` source list is unchanged.
+fn _collect_header_files_cmd(root: string, max_depth: int) -> string[] ![io] {
+    let mut results: string[] = [];
+    if _ends_with_cmd(root, ".h") { return [root]; }
+    let root_norm: string = _strip_trailing_slashes_cmd(root);
+    let mut queue: string[] = [root_norm];
+    let mut depth: int = 0;
+    loop {
+        if depth >= max_depth { break; }
+        if queue.length == 0 { break; }
+        let mut next_queue: string[] = [];
+        let mut qi: int = 0;
+        loop {
+            if qi >= queue.length { break; }
+            let dir = queue[qi];
+            if !fs.exists(dir) {
+                qi += 1;
+                continue;
+            }
+            let entries = fs.listDirectory(dir);
+            let mut ei: int = 0;
+            loop {
+                if ei >= entries.length { break; }
+                let entry = entries[ei];
+                let full_path = dir + "/" + entry;
+                if _ends_with_cmd(entry, ".h") { results.push(full_path); } else {
+                    let child_entries = fs.listDirectory(full_path);
+                    if child_entries.length > 0 {
+                        next_queue.push(full_path);
+                    }
+                }
+                ei += 1;
+            }
+            qi += 1;
+        }
+        queue = next_queue;
+        depth += 1;
+    }
+    return results;
+}
+
 // #1233: content identity of the runtime link inputs every test binary
 // links against. The runtime capsule set is invocation-stable, so this
 // is resolved once and folded into every per-test cache key via
 // `runtime_link_inputs_identity`. Replacing the former per-commit
 // `compiler_identity` reliance with this content hash is what keeps the
 // per-test binary cache correct across a runtime edit while letting
-// genuinely-unchanged tests hit across commits. `unique_suffix` makes
-// the hash temp path collision-safe across concurrent `sfn test`
-// invocations (pass the per-invocation scratch root).
+// genuinely-unchanged tests hit across commits.
+//
+// Folds, per runtime capsule: the `.c`/`.ll`/`.sfn` sources + prelude
+// entry (by content), the `.h` headers found under each include root (by
+// content — a header edit changes the compiled runtime objects), the
+// include-dir paths (`-I<dir>`, by value — an include-root change), and
+// the declared link libs (by value). `unique_suffix` makes the hash temp
+// path collision-safe across concurrent `sfn test` invocations (pass the
+// per-invocation scratch root).
 fn _test_bin_runtime_identity(runtime_root: string, unique_suffix: string) -> string ![io] {
     let caps = runtime_capsule_from_root(runtime_root);
     let mut sources: string[] = [];
-    let mut libs: string[] = [];
+    let mut values: string[] = [];
     let mut ci: int = 0;
     loop {
         if ci >= caps.length { break; }
@@ -1006,15 +1058,32 @@ fn _test_bin_runtime_identity(runtime_root: string, unique_suffix: string) -> st
         if cap.prelude_entry.length > 0 {
             sources.push(cap.prelude_entry);
         }
+        // Include roots: fold the path by value (`-I<dir>`) so an
+        // include-root change busts, and hash every `.h` under it by
+        // content so a header edit busts.
+        let mut di: int = 0;
+        loop {
+            if di >= cap.include_dirs.length { break; }
+            let inc = cap.include_dirs[di];
+            values.push("-I" + inc);
+            let headers = _collect_header_files_cmd(inc, 32);
+            let mut hi: int = 0;
+            loop {
+                if hi >= headers.length { break; }
+                sources.push(headers[hi]);
+                hi += 1;
+            }
+            di += 1;
+        }
         let mut bi: int = 0;
         loop {
             if bi >= cap.link_libs.length { break; }
-            libs.push(cap.link_libs[bi]);
+            values.push(cap.link_libs[bi]);
             bi += 1;
         }
         ci += 1;
     }
-    return runtime_link_inputs_identity(sources, libs, unique_suffix + "_rtid");
+    return runtime_link_inputs_identity(sources, values, unique_suffix + "_rtid");
 }
 
 fn handle_test_command(args: string[], runtime_root: string, binary_dir: string) -> int ![io, clock] {
@@ -1606,19 +1675,26 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
     let mut total_skipped: int = 0;
     let mut overall_rc: int = 0;
 
-    // #1230: per-test linked-binary cache. Resolve the invocation-stable
-    // key inputs once: the compiler's cache identity (binary content for
-    // `.dirty` dev stamps, version otherwise — the same model the module
-    // IR cache uses so a rebuilt compiler busts every cached binary) and
-    // the canonical clang flag set (`-O0`, matching
-    // `_clang_link_test_cmd_with_deps`). Per-test the key folds in the
-    // test source hash + the resolver's dep closure
+    // #1230/#1233: per-test linked-binary cache. Resolve the
+    // invocation-stable key inputs once: the commit-stable compiler
+    // identity (`resolve_test_bin_identity_for_cache` — the bare capsule
+    // version, `+dev.<hash>` stripped, so a baseline at one commit warms a
+    // PR at another), the runtime link-input content identity (so a
+    // runtime/header/include-root change busts every entry), and the
+    // canonical clang flag set (`-O0`, matching
+    // `_clang_link_test_cmd_with_deps`). Per-test the key additionally
+    // folds the test source hash + the resolver's dep closure
     // (`dep_ll_paths` + `native_texts`). `--no-test-cache` disables both
-    // the read and the write so `make check` always cold-builds.
+    // the read and the write so `make check` always cold-builds — so the
+    // runtime identity (the one expensive input: it hashes the runtime
+    // sources + headers) is only computed when the cache is enabled.
     let test_cache_enabled = !no_test_cache;
     let tb_cache_root = test_bin_cache_root();
     let tb_compiler_identity = resolve_test_bin_identity_for_cache(binary_dir);
-    let tb_runtime_identity = _test_bin_runtime_identity(runtime_root, _sanitize_filename_cmd(scratch_root));
+    let mut tb_runtime_identity: string = "";
+    if test_cache_enabled {
+        tb_runtime_identity = _test_bin_runtime_identity(runtime_root, _sanitize_filename_cmd(scratch_root));
+    }
     let mut tb_flags: string[] = ["-O0"];
     let tb_flags_canonical = canonicalize_flags(tb_flags);
     let mut test_bin_hits: int = 0;
@@ -1644,13 +1720,14 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
 
         let file_start_ms = monotonic_millis();
 
-        // #1230: derive the per-test binary cache key from the test
+        // #1230/#1233: derive the per-test binary cache key from the test
         // source + the resolver's dep closure (the test-source-specific
-        // link inputs — the runtime capsule objects + link libs the link
-        // also consumes are NOT folded in; a runtime edit relies on the
-        // compiler-identity component or `--no-test-cache`, see
-        // `test_bin_cache_key`), then try to serve the linked binary from
-        // cache. On a hit we copy it into `exe_path` and skip both LLVM
+        // link inputs) plus the invocation-stable `tb_runtime_identity`
+        // (the runtime link inputs — sources, headers, include roots, link
+        // libs — folded by content above) and the commit-stable compiler
+        // identity, see `test_bin_cache_key`. Then try to serve the linked
+        // binary from cache. On a hit we copy it into `exe_path` and skip
+        // both LLVM
         // lowering and the clang link (the dominant per-test cost); we
         // still RUN the binary below (variant 2a — never trust a cached
         // result).

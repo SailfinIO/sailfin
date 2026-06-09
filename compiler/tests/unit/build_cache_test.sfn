@@ -358,10 +358,16 @@ test "build_cache: runtime_link_inputs_identity is content-addressed + order-inv
     _write_file(b, "; beta-changed");
     let id_edited = runtime_link_inputs_identity([a, b, c], libs, "rtid_3");
     assert id_edited != id_abc;
-    // A changed link lib → different digest.
+    // A changed value input (link lib / include dir) → different digest.
     _write_file(b, "; beta");
     let id_more_libs = runtime_link_inputs_identity([a, b, c], ["-lm", "-lpthread", "-lfoo"], "rtid_4");
     assert id_more_libs != id_abc;
+    // Each source folds in as `<path>@<hash>`, so two DIFFERENT unreadable
+    // paths (both empty digest) do NOT alias to the same identity.
+    let no_libs: string[] = [];
+    let id_missing_x = runtime_link_inputs_identity([scratch + "/nope-x.h"], no_libs, "rtid_5");
+    let id_missing_y = runtime_link_inputs_identity([scratch + "/nope-y.h"], no_libs, "rtid_6");
+    assert id_missing_x != id_missing_y;
     _cleanup(scratch);
 }
 

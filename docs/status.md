@@ -307,11 +307,12 @@ feature availability.
     second push reuses the first's binaries — previously the per-commit
     git hash busted every entry on every commit. To keep runtime edits
     correct without that per-commit stamp, the assembled runtime capsule's
-    link inputs (its `.c`/`.ll`/`.sfn` sources, prelude entry, and link
+    link inputs (its `.c`/`.ll`/`.sfn` sources, prelude entry, the `.h`
+    headers under each include root, the include-dir paths, and the link
     libs) are folded into the key by content via
-    `runtime_link_inputs_identity`, so a runtime edit busts the key
-    directly; `--no-test-cache` on the `make check` gate remains the
-    cold-build backstop. The `build-quality.yml` `test-bin-baseline` job
+    `runtime_link_inputs_identity`, so a runtime/header/include-root edit
+    busts the key directly; `--no-test-cache` on the `make check` gate
+    remains the cold-build backstop. The `build-quality.yml` `test-bin-baseline` job
     (push:main + nightly) runs the full `.sfn` suite cache-enabled and
     saves `build/cache/test-bin` so PRs warm from main. Binaries store
     under `build/cache/test-bin/v2/` via the existing atomic temp+rename

@@ -265,13 +265,16 @@ still captures any compiler codegen change that affects that test, so a
 codegen-affecting change still misses; only commits that change nothing
 in the test's closure hit across commits.
 
-`runtime_identity` folds the assembled runtime capsule's link inputs —
-the runtime `.c`/`.ll`/`.sfn` sources, the prelude entry, and the
-declared link libraries — into the key by **content**. A runtime edit
-therefore busts the key directly (it no longer relies on a compiler
-rebuild changing the stamp). `--no-test-cache` (which `make check` and
-the nightly full suite pass) remains the cold-build backstop at the
-merge gate.
+`runtime_identity` folds the assembled runtime capsule's link inputs
+into the key by **content**: the runtime `.c`/`.ll`/`.sfn` sources, the
+prelude entry, and the `.h` headers under each include root (each hashed
+off disk, folded as `<path>@<sha256>` so distinct inputs never alias),
+plus the include-dir paths and the declared link libraries (folded by
+value). A runtime edit — including a header-only change or an
+include-root change — therefore busts the key directly, no longer relying
+on a compiler rebuild changing the stamp. `--no-test-cache` (which
+`make check` and the nightly full suite pass) remains the cold-build
+backstop at the merge gate.
 
 Cached binaries live under `build/cache/test-bin/<schema>/` (alongside
 the module IR cache, under `$SAILFIN_BUILD_CACHE_DIR` when set) and are

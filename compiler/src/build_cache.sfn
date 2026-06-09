@@ -898,26 +898,29 @@ fn test_bin_cache_key(test_source_path: string, dep_ll_paths: string[], native_t
 // `test_bin_cache_key` as `runtime_identity`.
 //
 // `source_paths` are the runtime input sources (`.c` / `.ll` / `.sfn`
-// + prelude entry) hashed off disk; `link_libs` are linker flag strings
-// (`-lm`, `-lpthread`, capsule-declared libs) folded in by value. All
-// components are sorted before folding so the identity is invariant
-// under enumeration order. Hashing SOURCES (not built objects) is both
+// + prelude entry + the `.h` headers under the include roots) hashed off
+// disk; `value_inputs` are non-file inputs folded by value — linker flag
+// strings (`-lm`, `-lpthread`, capsule-declared libs) and the include-dir
+// paths (`-I<dir>`), so an include-root or link-flag change busts the key.
+// All components are sorted before folding so the identity is invariant
+// under enumeration order. Each source folds in as `<path>@<sha256>`: the
+// path keeps two distinct inputs from aliasing (notably when a file is
+// unreadable and `_sha256_of_file_cmd` returns an empty digest) and makes
+// a rename observable. Hashing SOURCES (not built objects) is both
 // available on the single-file leaf path — where objects may not exist
-// yet — and strictly upstream: a source edit busts even before a
-// rebuild. An unreadable source yields an empty `_sha256_of_file_cmd`
-// digest, which still folds in deterministically.
-fn runtime_link_inputs_identity(source_paths: string[], link_libs: string[], unique_suffix: string) -> string ![io] {
+// yet — and strictly upstream: a source edit busts even before a rebuild.
+fn runtime_link_inputs_identity(source_paths: string[], value_inputs: string[], unique_suffix: string) -> string ![io] {
     let mut parts: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= source_paths.length { break; }
-        parts.push("src:" + _sha256_of_file_cmd(source_paths[i]));
+        parts.push("src:" + source_paths[i] + "@" + _sha256_of_file_cmd(source_paths[i]));
         i += 1;
     }
     let mut j: int = 0;
     loop {
-        if j >= link_libs.length { break; }
-        parts.push("lib:" + link_libs[j]);
+        if j >= value_inputs.length { break; }
+        parts.push("val:" + value_inputs[j]);
         j += 1;
     }
     let sorted = _sort_strings(parts);
