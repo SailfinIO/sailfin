@@ -9069,6 +9069,35 @@ double sfn_process_run(SfnArray *argv)
 {
     return sailfin_runtime_process_run_v2(argv);
 }
+
+/* #1236: same shim strategy for the spawn-handle family the parallel
+ * test runner (`sfn test --jobs N`) consumes. The Sailfin-native
+ * bodies in `runtime/sfn/process.sfn` (posix_spawnp/waitpid/poll) are
+ * skipped on the cross-windows path, so these wrappers keep the
+ * `@sfn_process_*` symbols the compiler IR references resolvable.
+ * They forward to the `_WIN32` stub bodies above (spawn returns the
+ * `0` failure sentinel, wait returns `-1`, reads return ""): the
+ * pooled runner is POSIX-only for now, and a Windows `--jobs N` run
+ * degrades to per-file spawn failures rather than a link error. */
+int64_t sfn_process_spawn_with_env(SfnArray *argv, SfnArray *env_flat)
+{
+    return sailfin_runtime_process_spawn_with_env(argv, env_flat);
+}
+
+char *sfn_process_handle_read_stdout(int64_t handle_id)
+{
+    return sailfin_runtime_process_handle_read_stdout(handle_id);
+}
+
+char *sfn_process_handle_read_stderr(int64_t handle_id)
+{
+    return sailfin_runtime_process_handle_read_stderr(handle_id);
+}
+
+int64_t sfn_process_handle_wait(int64_t handle_id)
+{
+    return sailfin_runtime_process_handle_wait(handle_id);
+}
 #endif
 
 void sailfin_adapter_fs_write_lines_v2(void *path, SfnArray *lines)

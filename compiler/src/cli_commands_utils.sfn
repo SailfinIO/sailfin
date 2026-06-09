@@ -41,6 +41,7 @@ export {
     _byte_at_cmd,
     _word_matches_cmd,
     _string_list_contains_cmd,
+    _parse_jobs_value,
     _resolve_linker
 };
 
@@ -673,4 +674,31 @@ fn _string_list_contains_cmd(items: string[], value: string) -> boolean {
         i += 1;
     }
     return false;
+}
+
+// #1236: parse the `--jobs N` value for `sfn test`. Returns the
+// parsed worker count, or `-1` for anything that is not a plain
+// positive decimal integer in [1, 256]. The 256 ceiling is a sanity
+// cap, not a tuning hint: every pooled child is a full compiler
+// invocation whose leaf compile can peak at multiple GB, so callers
+// must size N to the machine's RAM budget — each child runs under
+// its own 8 GB virtual-memory cap, and CI runners (macOS ~7 GB)
+// sustain only a small N. The conservative default is `--jobs 1`
+// (the serial path), which stays byte-identical to the pre-#1236
+// runner.
+fn _parse_jobs_value(text: string) -> int {
+    if text.length == 0 { return -1; }
+    let mut i: int = 0;
+    let mut n: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c < 48 { return -1; }
+        if c > 57 { return -1; }
+        n = n * 10 + (c - 48);
+        if n > 256 { return -1; }
+        i += 1;
+    }
+    if n < 1 { return -1; }
+    return n;
 }
