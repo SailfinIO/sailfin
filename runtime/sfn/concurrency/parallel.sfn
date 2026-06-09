@@ -1,0 +1,171 @@
+// runtime/sfn/concurrency/parallel.sfn
+//
+// Pure fan-out/join combinator over `sfn_spawn` / `sfn_await`
+// (`runtime/sfn/concurrency/future.sfn`, issue #1090). Implements
+// `docs/runtime_architecture.md` §2.6.5. Resolves issue #1093 (M4
+// scheduler-core track, epic #965).
+//
+// ── What this is ──────────────────────────────────────────────
+// `sfn_parallel` spawns every task onto the shared v0 scheduler, awaits
+// them all, and returns their results in INPUT ORDER. It is a
+// CONVENIENCE COMBINATOR built entirely on the existing spawn+await
+// surface — it adds NO new runtime-helper descriptor and NO new
+// scheduler primitive (the untyped channel/spawn/parallel descriptors
+// were removed; see `runtime_helpers.sfn:442`). The fan-out happens
+// first (spawn all, so the pool runs them concurrently); only then does
+// the join phase block on each result.
+//
+// ── Public surface ────────────────────────────────────────────
+//   sfn_parallel(fn_ptrs: * u8, ctxs: * u8, count: i64) -> * u8
+//     fn_ptrs: address of a `count`-element i64 array; entry i is the
+//              raw address of a `fn(* u8) -> * u8` worker (the same
+//              plain C-ABI worry sfn_spawn enqueues).
+//     ctxs:    address of a `count`-element i64 array; entry i is the
+//              ctx (`* u8`) handed to worker i. A null `ctxs` means
+//              every task receives a zero ctx (the zero-argument case).
+//     count:   number of tasks. `count <= 0` returns null — empty input
+//              yields empty output, allocating nothing.
+//     Returns: address of a freshly `malloc`'d `count`-element i64
+//              array; slot i holds worker i's result (`* u8` as i64), in
+//              input order. The caller owns the array and frees it.
+//              Returns null on allocation failure.
+//
+// ── Result packing ────────────────────────────────────────────
+// Identical to `future.sfn`: each result is the raw `* u8` the worker
+// returned, stored as an i64. Typed callers reinterpret per element type
+// (f64 bit-cast, i64, 0/1 bool, pointer) exactly as the `sfn_await_*`
+// helpers already do — `sfn_parallel` is type-agnostic.
+//
+// ── Externs (re-declared inline) ──────────────────────────────
+// `sfn_spawn` / `sfn_await` are DEFINED functions in `future.sfn`.
+// Following the `scheduler.sfn` / `future.sfn` discipline (the seed
+// resolves imported defined functions unreliably, so modules re-declare
+// the surface they call directly), they are re-declared here as externs
+// and resolved at link time.
+//
+// ── Pointer-as-address / address-arithmetic convention ────────
+// Heap pointers are kept as i64 addresses and cast to typed `* T` views
+// at the use site (matching `scheduler.sfn`). Slot addresses are formed
+// by holding the base in an i64 LOCAL first, then `(base + idx * 8) as
+// * i64` — the inline `(ptr as i64 + off) as * i64` form miscompiles
+// today (the cast collapses to a bare bitcast, dropping the offset; see
+// `scheduler.sfn:559-563`). Scratch/result slots are read and written
+// through the `atomic_load` / `atomic_store` builtins (#323), matching
+// the ring-buffer slot accesses in `scheduler.sfn`.
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn sfn_spawn(fn_ptr: i64, ctx: i64, result_size: i64) -> * u8;
+
+extern fn sfn_await(future: * u8) -> * u8;
+
+// Await (and discard) every spawned future in a `count`-element futures
+// array based at `futures_base`. The failure paths use this to honor the
+// structured contract — no spawned task may outlive the `sfn_parallel`
+// call (a still-running task can read caller `ctx` memory). `sfn_await`
+// is null-safe, so unspawned (null) slots drain harmlessly.
+fn _sfn_parallel_drain(futures_base: i64, count: i64) -> void {
+    let mut k: i64 = 0;
+    loop {
+        if k >= count { break; }
+        let slot: * i64 = (futures_base + k * 8) as * i64;
+        let future: * u8 = atomic_load(slot) as * u8;
+        sfn_await(future);
+        k = k + 1;
+    }
+}
+
+// `sfn_parallel(fn_ptrs, ctxs, count)` — fan out `count` tasks, join
+// them, and return their results in input order. See the file header for
+// the full contract. Empty input returns null; allocation failure
+// returns null (after draining any spawned tasks and releasing scratch).
+fn sfn_parallel(fn_ptrs: * u8, ctxs: * u8, count: i64) -> * u8 {
+    // Empty (or negative) input → empty output. Nothing is allocated.
+    if count <= 0 { return null; }
+
+    // A non-empty fan-out with no task array is a caller bug: every slot
+    // would dereference near-null. Reject rather than crash (matching
+    // scheduler.sfn's null-handle discipline). A null `ctxs`, by
+    // contrast, is VALID — it means "every task receives a zero ctx".
+    if fn_ptrs as i64 == 0 { return null; }
+
+    // Overflow guard on the `count * 8` allocation size: a `count` past
+    // floor((2^63 - 1) / 8) = 0x0FFF_FFFF_FFFF_FFFF would wrap the byte
+    // size to a small (or negative) value, under-allocate, and invite
+    // out-of-bounds slot writes — so reject it rather than malloc a
+    // too-small array. Mirrors the ring-capacity clamp in scheduler.sfn
+    // (`_sfn_taskqueue_max_capacity`). Real fan-out widths are tiny; this
+    // guards the absurd-input corner, not a hot path.
+    if count > 1152921504606846975 { return null; }
+
+    let fns_base: i64 = fn_ptrs as i64;
+    let ctxs_base: i64 = ctxs as i64;
+
+    // Scratch array of futures (one i64 task handle per task). Spawning
+    // ALL tasks before awaiting any is what makes this parallel: the
+    // pool drains the queue while the producer is still enqueuing.
+    let futures: * u8 = malloc((count * 8) as usize);
+    if futures as i64 == 0 { return null; }
+    let futures_base: i64 = futures as i64;
+
+    // ── Fan-out: spawn every task. ────────────────────────────────
+    // A failed spawn (null future on scheduler-init failure or OOM)
+    // stores null in its slot and fan-out continues; the join phase
+    // awaits every slot (`sfn_await` is null-safe), so already-spawned
+    // tasks are never abandoned — the structured fan-out/join contract
+    // holds even on a partial spawn failure.
+    let mut i: i64 = 0;
+    loop {
+        if i >= count { break; }
+
+        let fn_slot: * i64 = (fns_base + i * 8) as * i64;
+        let fn_addr: i64 = atomic_load(fn_slot);
+
+        // A null `ctxs` array means "no per-task ctx" → pass zero.
+        let mut ctx_val: i64 = 0;
+        if ctxs_base != 0 {
+            let ctx_slot: * i64 = (ctxs_base + i * 8) as * i64;
+            ctx_val = atomic_load(ctx_slot);
+        }
+
+        let future: * u8 = sfn_spawn(fn_addr, ctx_val, 8);
+
+        let out_slot: * i64 = (futures_base + i * 8) as * i64;
+        atomic_store(out_slot, future as i64);
+
+        i = i + 1;
+    }
+
+    // Results array, returned to the caller (it owns and frees it).
+    let results: * u8 = malloc((count * 8) as usize);
+    if results as i64 == 0 {
+        // Structured-concurrency contract: spawned tasks must not outlive
+        // this call (a running task may still read caller `ctx`). Drain
+        // every spawned future before bailing, even though we can no
+        // longer hand back results.
+        _sfn_parallel_drain(futures_base, count);
+        free(futures);
+        return null;
+    }
+    let results_base: i64 = results as i64;
+
+    // ── Join: await each future in input order. ───────────────────
+    let mut j: i64 = 0;
+    loop {
+        if j >= count { break; }
+
+        let fut_slot: * i64 = (futures_base + j * 8) as * i64;
+        let future: * u8 = atomic_load(fut_slot) as * u8;
+
+        let result: * u8 = sfn_await(future);
+
+        let res_slot: * i64 = (results_base + j * 8) as * i64;
+        atomic_store(res_slot, result as i64);
+
+        j = j + 1;
+    }
+
+    free(futures);
+    return results;
+}

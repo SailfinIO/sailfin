@@ -1,6 +1,6 @@
 # Status
 
-Updated: June 7, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1–PR7 shipped; lowering temp-index recovery fix for #543 staged — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273, E PR1 / #274, E PR2 / #277, E PR3 / #278, E PR4 / #280, E PR5 / #378, E PR6 / #382, E PR7 / #383; seed pinned to v0.5.10-alpha.13)
+Updated: June 8, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1–PR7 shipped; lowering temp-index recovery fix for #543 staged — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273, E PR1 / #274, E PR2 / #277, E PR3 / #278, E PR4 / #280, E PR5 / #378, E PR6 / #382, E PR7 / #383; seed pinned to v0.5.10-alpha.13)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -8,6 +8,23 @@ feature availability.
 
 ## Build Pipeline (Current)
 
+- **Parallel fan-out/join combinator (#1093, 2026-06-08).**
+  `sfn_parallel(fn_ptrs, ctxs, count)` in
+  `runtime/sfn/concurrency/parallel.sfn` is a pure structured fan-out/join
+  built on the `sfn_spawn` / `sfn_await` surface (#1090): it spawns all
+  `count` tasks onto the shared v0 scheduler first (so the pool runs them
+  concurrently), then awaits each in turn, returning a freshly-allocated
+  i64 result array in **input order**. A null `ctxs` array means every
+  task receives a zero ctx; `count <= 0` returns null (empty input → empty
+  output, no allocation). It is a CONVENIENCE COMBINATOR — no new
+  runtime-helper descriptor, no new scheduler primitive (it only calls
+  spawn+await). Wired into `runtime/native/capsule.toml` sfn-sources
+  alongside its siblings; design in `docs/runtime_architecture.md` §2.6.5.
+  Covered by `test_runtime_parallel_combinator.sh` (sfn check + fmt +
+  IR-shape asserting it drives spawn/await with no new descriptor, plus a
+  linked roundtrip that fans out 64 tasks, verifies results land in input
+  order under concurrent completion, exercises the null-ctx path, and
+  checks the empty/negative-count → null fast path).
 - **Plain C-ABI function-pointer indirect call + scheduler task lifecycle
   (#1089, 2026-06-07).** A value spelled `* fn (A) -> R` (leading `*`) is a
   bare code pointer, distinct from the closure form `fn (A) -> R` (which
