@@ -1,0 +1,60 @@
+// Tests for sfn/os env_from_current — typed snapshot of the parent
+// process environment over the environ-iteration primitive
+// (`process.environ`, issue #1242). The raw `process.*` builtin
+// surface is pinned by
+// `compiler/tests/integration/process_environ_test.sfn`; these tests
+// cover the typed `Env` wrapper: the KEY=VALUE split, agreement with
+// per-variable reads, and the `env_to_flat` round-trip.
+import {
+    Env,
+    EnvEntry,
+    env_from_current,
+    env_get,
+    env_has,
+    env_set,
+    env_to_flat
+} from "../src/mod";
+
+test "env_from_current: snapshot is non-empty and includes PATH" ![io] {
+    let e = env_from_current();
+    assert e.entries.length > 0;
+    assert env_has(e, "PATH");
+}
+
+test "env_from_current: values agree with per-variable env reads" ![io] {
+    let e = env_from_current();
+    let expected = env.get("PATH");
+    assert expected.length > 0;
+    assert strings_equal(env_get(e, "PATH"), expected);
+}
+
+test "env_from_current: entries have non-empty names" ![io] {
+    // The split skips malformed entries, so every surviving entry has
+    // a non-empty name. Values may legitimately be empty.
+    let e = env_from_current();
+    let mut i = 0;
+    loop {
+        if i >= e.entries.length { break; }
+        assert e.entries[i].name.length > 0;
+        i += 1;
+    }
+}
+
+test "env_from_current: round-trips through env_to_flat" ![io] {
+    // `env_to_flat` re-joins each entry as `name + "=" + value` — the
+    // flat shape the runtime spawn primitives consume. Entry counts
+    // match and the first entry reassembles exactly.
+    let e = env_from_current();
+    let flat = env_to_flat(e);
+    assert flat.length == e.entries.length;
+    assert flat.length > 0;
+    let first = e.entries[0];
+    assert strings_equal(flat[0], first.name + "=" + first.value);
+}
+
+test "env_from_current: env_set layers an override on the snapshot" ![io] {
+    // The documented composition: snapshot the parent, then override.
+    let e = env_set(env_from_current(), "SFN_ENV_FROM_CURRENT_TEST", "layered");
+    assert env_has(e, "PATH");
+    assert strings_equal(env_get(e, "SFN_ENV_FROM_CURRENT_TEST"), "layered");
+}

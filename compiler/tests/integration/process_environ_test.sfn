@@ -1,0 +1,80 @@
+// Integration coverage for the environ-iteration primitive (#1242).
+// `runtime/sfn/process.sfn:sfn_process_environ` walks the libc
+// `environ` block (via `sailfin_runtime_get_environ`) and returns
+// every `"KEY=VALUE"` entry as an `SfnArray<string>`;
+// `compiler/src/llvm/runtime_helpers.sfn` routes the
+// `process.environ` target onto it. These tests pin the raw
+// `process.*` builtin surface independently of the higher-level
+// `sfn/os::env_from_current` wrapper exercised by
+// `capsules/sfn/os/tests/env_from_current_test.sfn`.
+//
+// The test harness always runs with a populated environment (PATH at
+// minimum — the runner spawns children through it), so the
+// non-empty / PATH assertions hold without the suite setting any
+// dedicated variable.
+// Index of the first '=' in `text`, or -1 when absent. Local copy of
+// the split helper — the entry shape contract is "everything before
+// the FIRST '=' is the key".
+fn _index_of_eq(text: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        if strings_equal(grapheme_at(text, i), "=") { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+test "process.environ: returns a non-empty list of KEY=VALUE entries" ![io] {
+    let entries = process.environ();
+    assert entries.length > 0;
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let entry = entries[i];
+        // Every entry is `KEY=VALUE`-shaped: it contains an '=' with a
+        // non-empty key in front of it.
+        assert _index_of_eq(entry) > 0;
+        i += 1;
+    }
+}
+
+test "process.environ: includes PATH with the value env.get reports" ![io] {
+    // Cross-check the iteration surface against the per-variable read:
+    // the PATH entry's value half must match `env.get("PATH")` exactly.
+    let expected = env.get("PATH");
+    assert expected.length > 0;
+    let entries = process.environ();
+    let mut found = false;
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let entry = entries[i];
+        let eq = _index_of_eq(entry);
+        if eq > 0 {
+            if strings_equal(substring(entry, 0, eq), "PATH") {
+                assert strings_equal(substring(entry, eq + 1, entry.length), expected);
+                found = true;
+            }
+        }
+        i += 1;
+    }
+    assert found;
+}
+
+test "process.environ: snapshot propagates a parent variable to a spawned child" ![io] {
+    // End-to-end inheritance shape: a child spawned with the full
+    // environ snapshot sees the parent's PATH — the exact pattern the
+    // post-pin `_pool_env_snapshot` migration (scoped out of #1242)
+    // will rely on.
+    let expected = env.get("PATH");
+    assert expected.length > 0;
+    let snapshot = process.environ();
+    let id = process.spawn_with_env(["printenv", "PATH"], snapshot);
+    assert id != 0;
+    process.handle_close_stdin(id);
+    let out = process.handle_read_stdout(id);
+    assert out == expected + "\n";
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+}

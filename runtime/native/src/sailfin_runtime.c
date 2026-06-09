@@ -9098,6 +9098,19 @@ int64_t sfn_process_handle_wait(int64_t handle_id)
 {
     return sailfin_runtime_process_handle_wait(handle_id);
 }
+
+/* #1242: environ-iteration primitive. The Sailfin-native body in
+ * `runtime/sfn/process.sfn` walks the POSIX `environ` block; the
+ * cross-windows path skips that module, so this wrapper keeps the
+ * `@sfn_process_environ` symbol the compiler IR references
+ * resolvable. Returning an empty array is the accepted Windows
+ * behaviour for now (same degradation contract as the spawn-handle
+ * shims above); a real Windows enumeration over
+ * `GetEnvironmentStringsA` is follow-up work. */
+SfnArray *sfn_process_environ(void)
+{
+    return _sfn_array_alloc_v2(0, sizeof(char *));
+}
 #endif
 
 void sailfin_adapter_fs_write_lines_v2(void *path, SfnArray *lines)

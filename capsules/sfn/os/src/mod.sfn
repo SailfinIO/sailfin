@@ -126,22 +126,50 @@ fn env_to_flat(e: Env) -> string[] {
     return out;
 }
 
-// Snapshot the parent process environment. Implementation note:
-// today the runtime exposes per-variable reads (`env.get`) but no
-// "iterate all env vars" primitive, so this returns an empty Env
-// that callers can layer overrides on top of via `env_set`. When a
-// generic environ-iteration primitive lands, this fills in the
-// remaining variables; until then, the contract is "callers should
-// list every variable they need to propagate explicitly". The
-// runtime spawn helpers accept an empty `Env` as "empty environment"
-// rather than "inherit", so this still constructs the right shape.
+// Index of the first '=' in `text`, or -1 when absent. Drives the
+// `KEY=VALUE` split in `env_from_current`: only the FIRST '='
+// separates name from value, so `FOO=a=b=c` keeps "a=b=c" intact as
+// the value (mirrors `sfn/cli`'s `--key=value` split).
+fn _env_index_of_eq(text: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= text.length { break; }
+        if strings_equal(grapheme_at(text, i), "=") { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// Snapshot the parent process environment as a typed `Env`. Backed
+// by the runtime environ-iteration primitive (`process.environ`,
+// #1242), which returns the calling process's environment as a flat
+// `string[]` of `"KEY=VALUE"` entries. Each entry is split on its
+// FIRST '=' (values may themselves contain '='); malformed entries
+// with no '=' or an empty name (e.g. Windows' hidden `=C:=...`
+// drive-tracking variables) are skipped. Callers can layer overrides
+// on top via `env_set`. The runtime spawn helpers accept an empty
+// `Env` as "empty environment" rather than "inherit", so
+// `env_from_current()` is the way to build an inheriting child env.
 //
-// The `![io]` annotation is forward-compat: the eventual environ-
-// iteration implementation will read process state, which the
-// effect system gates under `io`. Today the stub body is pure but
-// the signature is locked so callers don't need to adjust their
-// effect declarations when the implementation lands.
-fn env_from_current() -> Env ![io] { return env_empty(); }
+// `![io]` — reading the process environment is an environment read,
+// the same gate as `env.get`.
+fn env_from_current() -> Env ![io] {
+    let flat = process.environ();
+    let mut entries: EnvEntry[] = [];
+    let mut i = 0;
+    loop {
+        if i >= flat.length { break; }
+        let entry = flat[i];
+        let eq = _env_index_of_eq(entry);
+        if eq > 0 {
+            entries.push(EnvEntry {
+                name: substring(entry, 0, eq), value: substring(entry, eq + 1, entry.length)
+            });
+        }
+        i += 1;
+    }
+    return Env { entries: entries };
+}
 
 // ── Capturing / streaming process APIs ────────────────────────────
 //
