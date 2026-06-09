@@ -1596,15 +1596,28 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         let file_start_ms = monotonic_millis();
 
         // #1230: derive the per-test binary cache key from the test
-        // source + the resolver's dep closure (the EXACT inputs the link
-        // consumes), then try to serve the linked binary from cache. On
-        // a hit we copy it into `exe_path` and skip both LLVM lowering
-        // and the clang link (the dominant per-test cost); we still RUN
-        // the binary below (variant 2a — never trust a cached result).
+        // source + the resolver's dep closure (the test-source-specific
+        // link inputs — the runtime capsule objects + link libs the link
+        // also consumes are NOT folded in; a runtime edit relies on the
+        // compiler-identity component or `--no-test-cache`, see
+        // `test_bin_cache_key`), then try to serve the linked binary from
+        // cache. On a hit we copy it into `exe_path` and skip both LLVM
+        // lowering and the clang link (the dominant per-test cost); we
+        // still RUN the binary below (variant 2a — never trust a cached
+        // result).
+        //
+        // The `_sha256_of_string` temp path is disambiguated by
+        // `scratch_root` (per-invocation / per-child unique — the
+        // multi-file parent mints a `mktemp -d` and hands each child its
+        // own `sub-N`; seedcheck pins `SAILFIN_TEST_SCRATCH`) so
+        // concurrent `sfn test` invocations and CI shards never collide
+        // on the deterministic `/tmp/.sfn_build_cache_hash_*` tmp file.
         let mut tb_key: CacheKey = CacheKey { digest: "" };
         let mut cache_hit: boolean = false;
         if test_cache_enabled {
-            tb_key = test_bin_cache_key(path, groups[group_idx].dep_ll_paths, groups[group_idx].native_texts, tb_compiler_identity, tb_flags_canonical, _sanitize_filename_cmd(path));
+            tb_key = test_bin_cache_key(path, groups[group_idx].dep_ll_paths, groups[group_idx].native_texts, tb_compiler_identity, tb_flags_canonical, _sanitize_filename_cmd(scratch_root
+                + "/"
+                + path));
             if cache_lookup_artifact(tb_cache_root, tb_key, "test-bin") {
                 if cache_copy_artifact_to(tb_cache_root, tb_key, "test-bin", exe_path) {
                     // The shared atomic-copy helper publishes through an
@@ -1612,14 +1625,18 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
                     // loses the executable bit clang gave the original —
                     // harmless for the `.ll`/`.o` artifacts the module
                     // cache restores, fatal for a binary we then `exec`
-                    // (`Permission denied`, rc 126). Re-assert +x on the
-                    // materialised executable.
-                    process.run(["chmod", "+x", exe_path]);
-                    cache_hit = true;
-                    test_bin_hits += 1;
-                    if trace_runner {
-                        print.err("test runner: test-bin cache hit (" + path
-                            + ")");
+                    // (`Permission denied`, rc 126). Re-assert +x; only
+                    // count the hit when chmod succeeds, otherwise leave
+                    // `cache_hit` false so the run falls through to a cold
+                    // lower+link (counted as a miss) rather than exec'ing a
+                    // non-executable file.
+                    if process.run(["chmod", "+x", exe_path]) == 0 {
+                        cache_hit = true;
+                        test_bin_hits += 1;
+                        if trace_runner {
+                            print.err("test runner: test-bin cache hit (" + path
+                                + ")");
+                        }
                     }
                 }
             }

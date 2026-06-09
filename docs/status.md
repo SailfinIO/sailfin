@@ -297,10 +297,15 @@ feature availability.
     `clang` link (the dominant per-test cost) and just re-runs the
     cached executable. `test_bin_cache_key` (in `build_cache.sfn`)
     folds the test source hash, the resolver's transitive dep closure
-    (`TestGroup.native_texts` + `dep_ll_paths` — the exact link
-    inputs), the compiler identity (`cache_compiler_identity`, so a
+    (`TestGroup.native_texts` + `dep_ll_paths` — the test-source-specific
+    link inputs), the compiler identity (`cache_compiler_identity`, so a
     rebuilt compiler busts every entry), the canonical clang flags, and
-    a `test-bin/v1` schema version. Binaries store under
+    a `test-bin/v1` schema version. The assembled runtime capsule objects
+    + link libs the link also consumes are *not* folded into the key;
+    they ride on the compiler identity (a runtime edit normally reaches a
+    test binary via `make compile`, which busts it), with
+    `--no-test-cache` on the `make check` gate as the cold-build
+    backstop. Binaries store under
     `build/cache/test-bin/v1/` via the existing atomic temp+rename
     artifact helpers (new `"test-bin"` kind). On a hit the binary is
     still **run** (variant 2a — never a cached pass/fail result). The

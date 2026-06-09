@@ -805,13 +805,23 @@ fn test_bin_cache_root() -> string ![io] {
 }
 
 // Derive the content-addressed cache key for a single test's linked
-// binary. The dep set is the EXACT set of inputs the link consumes —
-// the resolver-produced dependency `.ll` files (`dep_ll_paths`, hashed
-// off disk) plus the staged `.sfn-asm` import contexts
-// (`native_texts`, hashed in memory). Deriving the key from the same
-// resolver output the link already uses is the correctness hinge: the
-// key can never miss a dep, because a changed dep changes a hash here
-// exactly as it changes the bytes the linker reads.
+// binary. The dep set is the test-source-specific set of inputs the
+// link consumes — the resolver-produced dependency `.ll` files
+// (`dep_ll_paths`, hashed off disk) plus the staged `.sfn-asm` import
+// contexts (`native_texts`, hashed in memory). Deriving the key from
+// the same resolver output the link already uses is the correctness
+// hinge for the test's OWN closure: a changed test source or dep
+// changes a hash here exactly as it changes the bytes the linker reads.
+//
+// Known gap: the link ALSO pulls in the assembled runtime capsule
+// objects + link libs (`_clang_link_test_cmd_with_deps`), which are NOT
+// folded into this key. Those are covered indirectly by
+// `compiler_identity` (a rebuilt compiler — which is how a runtime
+// source edit normally reaches a test binary, since the runtime is
+// rebuilt as part of `make compile` — busts every entry) and directly
+// by `--no-test-cache` on the `make check` / full-suite gate. A runtime
+// edit that is NOT accompanied by a compiler rebuild can therefore
+// serve a stale binary; the gate's cold build is the backstop.
 //
 //   key = sha256(
 //       sha256(test_source_bytes)

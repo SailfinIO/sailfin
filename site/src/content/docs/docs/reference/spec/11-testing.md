@@ -248,11 +248,20 @@ sha256(
 )
 ```
 
-The dependency set is exactly the resolver output the link already
-consumes, so a change to the test or any transitive dependency changes
-the key and misses the cache — a stale binary can never be served. On a
-hit the cached binary is still **run** (never a cached pass/fail result),
-so a flaky-at-runtime test always surfaces.
+The dependency set is the resolver output the link already consumes for
+the test's own closure, so a change to the test or any transitive
+dependency changes the key and misses the cache. On a hit the cached
+binary is still **run** (never a cached pass/fail result), so a
+flaky-at-runtime test always surfaces.
+
+The key does **not** fold in the assembled runtime capsule objects or
+link libraries that the link also consumes — those are covered
+indirectly by the compiler identity (a rebuilt compiler, the usual way a
+runtime-source edit reaches a test binary since the runtime is rebuilt
+by `make compile`, busts every entry). A runtime edit *without* a
+compiler rebuild can serve a stale binary; `--no-test-cache` (which
+`make check` and the nightly full suite pass) is the cold-build backstop
+that catches any such drift at the merge gate.
 
 Cached binaries live under `build/cache/test-bin/<schema>/` (alongside
 the module IR cache, under `$SAILFIN_BUILD_CACHE_DIR` when set) and are
