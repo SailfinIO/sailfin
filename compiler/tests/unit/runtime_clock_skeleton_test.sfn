@@ -1,0 +1,72 @@
+// Golden-IR test for `runtime/sfn/clock.sfn` — the Sailfin-native
+// `@sfn_sleep` definition that replaced the C `sailfin_runtime_sleep`
+// trampoline with a direct `nanosleep` call wrapped in a bounded
+// EINTR-resume loop (issues #397 / #693 / #877).
+//
+// Replaces `compiler/tests/e2e/test_runtime_clock_skeleton.sh` as part of
+// the bash-collapse migration (epic #842, issue #1223). The `.sh` ran
+// `sfn check` + `sfn fmt --check` + `sfn emit llvm` and grepped the IR
+// for the wrapper/define/declare shape, the retired C trampoline, and the
+// EINTR loop + errno-locator discipline; this pins the same IR surface
+// in-process. The typecheck/fmt halves are covered elsewhere — CI runs
+// `sfn fmt --check` over `runtime/` and `make compile` typechecks these
+// sfn-sources.
+//
+// Strategy: ONE `lower_to_llvm_ir_from_text` call over the REAL
+// `clock.sfn` (read via `fs.readFile`). `clock.sfn` imports `nanosleep`
+// from `./platform/posix`; `lower_to_llvm_ir_from_text` resolves imported
+// `extern` signatures through `collect_imported_module_context_for_module`
+// (the same path the `sfn emit llvm` driver uses), so the cross-module
+// `nanosleep` call lowers to a `declare` + `call`. The errno locator is
+// host-dependent — `@__errno_location` on glibc, `@__error` on Darwin —
+// so accept either.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of, substring } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+test "lowering: runtime/sfn/clock.sfn wraps @nanosleep in an EINTR loop (#397/#693/#877)" ![io] {
+    let source = fs.readFile("runtime/sfn/clock.sfn");
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "runtime/sfn/clock");
+    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/clock");
+
+    // Module-level shape: wrapper defined, imported nanosleep declared,
+    // and the pre-PR2 C trampoline fully retired (a partial revert
+    // resurrects this symbol).
+    assert _contains(ir, "define void @sfn_sleep(");
+    assert _contains(ir, "declare i32 @nanosleep(");
+    assert ! _contains(ir, "@sailfin_runtime_sleep");
+
+    // Scope the call-shape + EINTR checks to the `@sfn_sleep` body so an
+    // unrelated conditional elsewhere in the module (the `tv_nsec` clamps,
+    // the `ret != 0` guard in the clock readers, …) can't satisfy them.
+    // Mirrors the deleted shell test, which `awk`-extracted the body and
+    // searched within it.
+    let def_idx = index_of(ir, "define void @sfn_sleep(");
+    assert def_idx >= 0;
+    let after_def = substring(ir, def_idx, ir.length);
+    let close_rel = index_of(after_def, "\n}");
+    assert close_rel >= 0;
+    let body = substring(after_def, 0, close_rel);
+
+    // nanosleep is called inside the body…
+    let call_idx = index_of(body, "call i32 @nanosleep(");
+    assert call_idx >= 0;
+    let after_call = substring(body, call_idx, body.length);
+
+    // …and the EINTR-resume machinery occurs AFTER the call: the bounded
+    // retry's conditional back-edge (`br i1`, #693) and the errno read
+    // via the host-aware locator sentinel (#887), dereferenced by the
+    // pointer-read load (#875). Accept either host spelling of the
+    // locator (`@__errno_location` on glibc, `@__error` on Darwin).
+    assert index_of(after_call, "br i1") >= 0;
+    let has_locator = index_of(after_call, "@__errno_location(") >= 0
+        || index_of(after_call, "@__error(") >= 0;
+    assert has_locator;
+    assert index_of(after_call, "load i32, i32* %") >= 0;
+}

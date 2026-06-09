@@ -1,0 +1,42 @@
+// Golden-IR test for the `runtime/sfn/io.sfn` skeleton — the first
+// Sailfin-native runtime service module. Where the `platform/*.sfn`
+// skeletons prove standalone `extern` declarations lower to `declare`s,
+// this proves a sibling runtime module can *import* one of those
+// declarations (`write` from `platform/libc.sfn`) and lower an actual
+// call site against it.
+//
+// Replaces `compiler/tests/e2e/test_runtime_io_skeleton.sh` as part of
+// the bash-collapse migration (epic #842, issue #1223). The `.sh` ran
+// `sfn check` + `sfn fmt --check` + `sfn emit llvm` and grepped the IR
+// for the imported `write` declaration and call; this pins the same
+// surface in-process. The typecheck/fmt halves are covered elsewhere —
+// CI runs `sfn fmt --check` over `runtime/` and `make compile`
+// typechecks these sfn-sources.
+//
+// Strategy: ONE `lower_to_llvm_ir_from_text` call over the REAL `io.sfn`
+// (read via `fs.readFile`). Unlike the `platform/*` skeletons, `io.sfn`
+// imports `write` from `./platform/libc`; `lower_to_llvm_ir_from_text`
+// resolves imported `extern` signatures through
+// `collect_imported_module_context_for_module` (the same path the `sfn
+// emit llvm` driver uses), so the cross-module `write` call lowers to a
+// `declare` + `call` exactly as the `.sh` asserted.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+test "lowering: runtime/sfn/io.sfn lowers the imported libc write call" ![io] {
+    let source = fs.readFile("runtime/sfn/io.sfn");
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "runtime/sfn/io");
+    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/io");
+
+    // The imported extern is declared and called against — the
+    // cross-module resolution the skeleton exists to prove.
+    assert _contains(ir, "declare i64 @write(");
+    assert _contains(ir, "call i64 @write(");
+}

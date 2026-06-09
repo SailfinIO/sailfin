@@ -1,21 +1,61 @@
 // Unit tests for the `atomic_fence` builtin (M0-Atomics.4, issue
-// #334). The predecessor M0-Atomics.1 unit suite documents the
-// reason these tests can't import the LLVM lowering stack to pin
-// the IR shape directly — see `atomic_load_store_test.sfn` for the
-// full background and the GitHub Actions run that timed out at
-// 180s. The same constraint applies here: importing
-// `lower_atomic_builtin` pulls in `lower_expression` and the rest
-// of `compiler/src/llvm/expression_lowering/native/core`, which
-// blows the per-test CI budget.
+// #334).
 //
-// The IR shape (`fence seq_cst` on the happy path, `[fatal] [E0806]`
-// on the arity-error path) is pinned end-to-end in
-// `compiler/tests/e2e/test_atomic_fence_compile.sh`. This file
-// pins the predicate surface so a regression in
-// `is_atomic_builtin` — which gates whether the LLVM lowering for
-// `atomic_fence` runs at all — surfaces here without paying the
-// lowering import cost.
+// Two layers of coverage:
+//
+//   1. Predicate surface — `is_atomic_builtin` gates whether the LLVM
+//      lowering for `atomic_fence` runs at all. A regression that
+//      loosens it to a prefix/suffix match (or drops the name) is
+//      caught here without paying the lowering import cost.
+//   2. Golden-IR shape — the `fence seq_cst` emission, pinned in-process
+//      via the `parse_program` → `emit_native_text_with_module_name` →
+//      `lower_to_llvm_ir_from_text` idiom (see
+//      `concurrency_lowering_test.sfn`). This replaces the former
+//      `compiler/tests/e2e/test_atomic_fence_compile.sh`, which drove a
+//      real `sfn emit llvm` and grepped the IR — the bash-collapse
+//      migration (epic #842, issue #1223) moved that shape assertion
+//      into the unified `sfn test` runner.
+//
+// Strategy: ONE `lower_to_llvm_ir_from_text` call for the whole file.
+// Lowering pulls the full backend closure and accumulates arena memory;
+// a single combined source carrying both `atomic_fence` call sites keeps
+// the per-file cost to one lowering.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { is_atomic_builtin } from "../../src/llvm/atomics_check";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+// Count non-overlapping occurrences of `needle` in `haystack`. Used to
+// pin one `fence seq_cst` per call site (the fixture has two).
+fn _count(haystack: string, needle: string) -> int {
+    if needle.length == 0 { return 0; }
+    let mut count: int = 0;
+    let mut i: int = 0;
+    let limit = haystack.length - needle.length;
+    loop {
+        if i > limit { break; }
+        let mut j: int = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches {
+            count += 1;
+            i += needle.length;
+        } else { i += 1; }
+    }
+    return count;
+}
 
 // ── Predicate recognises the implemented name ──
 test "atomics: is_atomic_builtin recognises atomic_fence" {
@@ -39,4 +79,33 @@ test "atomics: is_atomic_builtin rejects partial atomic_fence names" {
     assert ! is_atomic_builtin("atomic_fenc");
     assert ! is_atomic_builtin("atomic_fencex");
     assert ! is_atomic_builtin("atomic_fence_seq_cst");
+}
+
+// ── Golden-IR shape (was test_atomic_fence_compile.sh) ──
+// The fixture exercises `atomic_fence` between two atomic ops so the
+// emitted IR contains exactly two `fence seq_cst` instructions (issue
+// #334's verification regex). Each must be a bare fence: no alignment
+// clause and no operand (LLVM rejects both for `fence`).
+test "lowering: atomic_fence emits one bare `fence seq_cst` per call site (#334)" ![io] {
+    let source = "fn flush(counter: * int, value: int) {\n"
+        + "    atomic_store(counter, value);\n"
+        + "    atomic_fence();\n"
+        + "}\n"
+        + "fn observe(counter: * int) -> int {\n"
+        + "    atomic_fence();\n"
+        + "    return atomic_load(counter);\n"
+        + "}";
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "atomic_fence_test");
+    let ir = lower_to_llvm_ir_from_text(native, "atomic_fence_test");
+
+    // Present, and exactly one per call site (the fixture has two).
+    assert _contains(ir, "fence seq_cst");
+    assert _count(ir, "fence seq_cst") == 2;
+    // No alignment clause and no operand on the fence — a regression
+    // that adds either emits invalid IR (`fence seq_cst, align …` /
+    // `fence seq_cst i…`).
+    assert ! _contains(ir, "fence seq_cst,");
+    assert ! _contains(ir, "fence seq_cst align");
+    assert ! _contains(ir, "fence seq_cst i");
 }
