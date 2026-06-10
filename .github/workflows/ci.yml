@@ -121,8 +121,29 @@ jobs:
           # runaway dies as a clean non-zero exit instead, and time -v
           # records the peak RSS either way.
           ulimit -v 8388608
-          SAILFIN_USE_ARENA=1 /usr/bin/time -v \
-            build/seed/bin/sailfin check compiler/src/
+          # Sharded invocation: the seed checker's per-file analysis
+          # loop accumulates ~25-30MB per file with no reset between
+          # files (#1245), so a cold whole-tree run costs ~6.3GB of
+          # one-off staging PLUS ~4.5GB of accumulation and blows the
+          # cap. Four fresh processes bound the accumulation; the
+          # first shard warms build/sailfin/capsules so later shards
+          # skip the staging cost (measured: ~3 min total, every
+          # shard well under the cap). Deterministic split (sorted)
+          # so failures are attributable. Revert to the single
+          # whole-tree invocation once a seed containing the #1245
+          # fix is pinned.
+          mapfile -t FILES < <(find compiler/src -name '*.sfn' | sort)
+          TOTAL=${#FILES[@]}
+          N=4
+          PER=$(( (TOTAL + N - 1) / N ))
+          echo "[check-fast] $TOTAL files in $N shards of <=$PER"
+          for ((i=0; i<N; i++)); do
+            CHUNK=("${FILES[@]:i*PER:PER}")
+            [ ${#CHUNK[@]} -eq 0 ] && continue
+            echo "[check-fast] shard $((i+1))/$N (${#CHUNK[@]} files)"
+            SAILFIN_USE_ARENA=1 /usr/bin/time -v \
+              build/seed/bin/sailfin check "${CHUNK[@]}"
+          done
 
   # One compiler build per OS, shared by every shard leg below (#1234,
   # "Lever 1 step 1b" of docs/proposals/ci-test-speed.md §6 step 2).
