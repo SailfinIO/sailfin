@@ -130,7 +130,8 @@ The self-hosted native compiler (`build/native/sailfin`, installed as
 
 `strings`, `json`, `crypto`, `math`, `path`, `toml`, `fs`, `os`, `log`,
 `time`, `cli`, `test`, `http` (partial), `tensor` / `layers` / `nn` /
-`losses` (CPU). See [`docs/status.md`](docs/status.md) for the full feature
+`losses` (CPU). `net` and `sync` exist as stubs pending the concurrency
+runtime. See [`docs/status.md`](docs/status.md) for the full feature
 matrix and effect requirements per capsule.
 
 ```sfn
@@ -177,8 +178,8 @@ and a pure Sailfin runtime. The critical path:
 - **Structured concurrency** — `routine { }` blocks, `await`, `channel()`,
   and `spawn` as first-class constructs. Atomic intrinsics and the v0
   scheduler runtime (task lifecycle, `spawn`/`await`, fan-out/join) are
-  built; the language constructs parse and type-check, with LLVM lowering
-  the remaining step.
+  built, and the language constructs parse; wiring the type rules into
+  the live typecheck walk and LLVM lowering are the remaining steps.
 - **Effect system hardening** — hierarchical effects (`io.fs`, `net.http`),
   effect polymorphism for generics, and `sfn fix` for auto-inserting missing
   annotations.
