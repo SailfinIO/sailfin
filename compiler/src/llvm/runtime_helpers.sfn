@@ -676,6 +676,18 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "process.handle_wait", symbol: "sfn_process_handle_wait", return_type: "i64", parameter_types: ["i64"], effects: ["io"], native_signature: "sfn_process_handle_wait", c_abi_return_type: null
     });
 
+    // #1242: environ-iteration primitive. Returns every `"KEY=VALUE"`
+    // entry of the calling process's environment as an
+    // `SfnArray<string>` — the same array-return shape as
+    // `fs.listDirectory`. Sailfin-native body
+    // (`runtime/sfn/process.sfn:sfn_process_environ`) on POSIX; the
+    // cross-windows path resolves the symbol from the `_WIN32` shim in
+    // `runtime/native/src/sailfin_runtime.c` (empty array). Backs
+    // `sfn/os::env_from_current`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.environ", symbol: "sfn_process_environ", return_type: "{ i8**, i64, i64 }*", parameter_types: [], effects: ["io"], native_signature: "sfn_process_environ", c_abi_return_type: null
+    });
+
     // Filesystem adapters.
     //
     // M3.1a (#814): `read_file` / `write_file` / `append_file`

@@ -1100,6 +1100,7 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "process.handle_read_stdout");
     helpers = append_unique_effect(helpers, "process.handle_read_stderr");
     helpers = append_unique_effect(helpers, "process.handle_wait");
+    helpers = append_unique_effect(helpers, "process.environ");
     helpers = append_unique_effect(helpers, "is_decimal_digit");
     return helpers;
 }
