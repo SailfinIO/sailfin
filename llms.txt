@@ -1,6 +1,6 @@
 # Sailfin Language Reference for LLMs
 
-> Version: 0.5.9 | Updated: 2026-04-26 (Phase F)
+> Version: 0.7.0-alpha.29 | Updated: 2026-06-10
 > Source: https://github.com/SailfinIO/sailfin | Site: https://sailfin.dev
 
 Sailfin is a systems language with compile-time capability enforcement
@@ -159,6 +159,10 @@ Supports literals, wildcards (`_`), guards (`if expr`), and enum destructuring.
         if done { break; }
     }
 
+There is NO `while` keyword. The parser rejects `while` at statement
+position (E0411) with a fix-it; write `loop { if !cond { break; } ... }`
+instead.
+
 ### Error Handling
 
     try {
@@ -213,8 +217,10 @@ type-suffix ? (nullable, e.g. Config?) is a distinct, unrelated use of the glyph
         }
     }
 
-Generic type parameters are parsed. Constraint syntax (`<T: Bound>`) is parsed
-but not enforced. Monomorphization is not yet implemented.
+Generic type parameters are parsed and captured. Generic enum payloads
+(e.g. `Result<T, E>`) monomorphise per instantiation at construction and
+`match` sites. Constraint syntax (`<T: Bound>`) is parsed but not
+enforced; full generic-struct method monomorphization is partial.
 
 ### Imports and Modules
 
@@ -225,12 +231,16 @@ but not enforced. Monomorphization is not yet implemented.
 Standard library capsules use bare names ("fs", "http", "json", etc.).
 Relative paths use "./" or "../" syntax.
 
-### Lambdas
+### Lambdas and Closures
 
     let double = fn(x: int) -> int { return x * 2; };
 
-Lambdas are supported but do not capture enclosing variables (closures with
-capture are planned).
+    let base = 10;
+    let add_base = fn(x: int) -> int { return x + base; };  // captures `base`
+
+Lambdas capture enclosing variables (closures shipped end-to-end,
+including multi-variable capture). Higher-order dispatch through
+`fn(int) -> int` typed values works.
 
 ### Tests
 
@@ -262,29 +272,42 @@ Uses `{{ }}` syntax (migration to `${ }` is planned pre-1.0).
 
 ### Extern Functions (FFI)
 
-    unsafe extern fn malloc(size: int) -> int;
-    unsafe extern fn free(ptr: int) -> void;
+    extern fn malloc(size: usize) -> * u8;
+    extern fn free(ptr: * u8) -> void;
+    extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
 
-Declares external C symbols for linking.
+Declares external C symbols for linking. Signatures must use the C-ABI
+accept-list — fixed-width ints (`i8`..`u64`, `usize`, `isize`), `bool`,
+`f32`/`f64`, raw pointers (`* u8`, `* const T`, `* OpaqueStruct`), and
+`void` (return only); violations are diagnosed (E0801–E0805). Raw
+pointer types are written with a space after `*` (`* u8`). A defined or
+extern fn can be passed to a C callee as a code pointer via
+`my_fn as * u8`; unsupported function-reference forms are rejected at
+typecheck (E0808/E0809).
 
 ## Standard Library Capsules
 
-| Capsule   | Import       | Effects       | Description                              |
-|-----------|-------------|---------------|------------------------------------------|
-| sfn/strings | "strings" | None          | Trim, case, split/join, find/replace     |
-| sfn/json  | "json"      | None          | JSON parse, serialize, pretty-print      |
-| sfn/crypto| "crypto"    | None          | SHA-256, base64                          |
-| sfn/math  | "math"      | None          | abs, min, max, clamp, pow, floor, ceil   |
-| sfn/path  | "path"      | None          | join, dirname, basename, ext, normalize  |
-| sfn/toml  | "toml"      | None          | TOML parsing and serialization           |
-| sfn/fs    | "fs"        | io            | File r/w/append, exists, mkdir, perms, symlink, mkdtemp |
-| sfn/os    | "os"        | io            | Env vars, home dir, exec, exit           |
-| sfn/log   | "log"       | io, clock     | Structured leveled logging               |
-| sfn/time  | "time"      | clock         | Sleep, monotonic timing, elapsed         |
-| sfn/http  | "http"      | net, io       | HTTP GET/POST client (partial)           |
-| sfn/cli   | "cli"       | io            | CLI arg parsing, subcommands, styling    |
-| sfn/tensor| "tensor"    | gpu (planned) | Tensor ops, matmul, transpose (CPU)      |
-| sfn/losses| "losses"    | None          | MSE, MAE, Huber, hinge loss functions    |
+| Capsule   | Import      | Status        | Effects       | Description                              |
+|-----------|-------------|---------------|---------------|------------------------------------------|
+| sfn/strings | "strings" | Shipped       | None          | Trim, case, split/join, find/replace     |
+| sfn/json  | "json"      | Shipped       | None          | JSON parse, serialize, pretty-print      |
+| sfn/crypto| "crypto"    | Shipped       | None          | SHA-256, base64                          |
+| sfn/math  | "math"      | Shipped       | None          | abs, min, max, clamp, pow, floor, ceil   |
+| sfn/path  | "path"      | Shipped       | None          | join, dirname, basename, ext, normalize  |
+| sfn/toml  | "toml"      | Shipped       | None          | TOML parsing and serialization           |
+| sfn/fs    | "fs"        | Shipped       | io            | File r/w/append, exists, mkdir, perms, symlink, mkdtemp |
+| sfn/os    | "os"        | Shipped       | io            | Env vars, home dir, exec, exit           |
+| sfn/log   | "log"       | Shipped       | io, clock     | Structured leveled logging               |
+| sfn/time  | "time"      | Shipped       | clock         | Sleep, monotonic timing, elapsed         |
+| sfn/http  | "http"      | Partial       | net, io       | HTTP GET/POST client; server stubbed     |
+| sfn/cli   | "cli"       | Shipped       | io            | CLI arg parsing, subcommands, styling    |
+| sfn/test  | "test"      | Partial       | None / io     | Assertions (`expect_*` pure tier, `assert_*` io tier), snapshots |
+| sfn/sync  | "sync"      | Stubbed       | io            | channel/parallel/spawn API — pending concurrency runtime; DO NOT USE yet |
+| sfn/net   | "net"       | Stubbed       | net, io       | TCP/UDP sockets — pending runtime intrinsics; DO NOT USE yet |
+| sfn/tensor| "tensor"    | Shipped (CPU) | gpu (planned) | Tensor ops, matmul, transpose            |
+| sfn/layers| "layers"    | Shipped (CPU) | gpu (planned) | Linear layers, ReLU, sequential models   |
+| sfn/nn    | "nn"        | Shipped (CPU) | gpu (planned) | Activations, normalization, argmax, one_hot |
+| sfn/losses| "losses"    | Shipped       | None          | MSE, MAE, Huber, hinge loss functions    |
 
 ## Numeric Types
 
@@ -304,7 +327,14 @@ Fixed-width FFI integer types (`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
 `u64`, `usize`) and float types (`f32`, `f64`) are also recognized for
 extern-fn signatures and low-level interop.
 
-Bitwise operators (&, |, ^, >>, <<) are not yet implemented.
+Bitwise and shift operators (`&`, `|`, `^`, `<<`, `>>`) are shipped and
+operate on `int`.
+
+Mixing `int` and `float` operands in arithmetic, bindings, call
+arguments, or struct-field writes is a compile error — disambiguate with
+an explicit cast: `x as float`, `n as int`. The `as` cast lowers through
+a typed matrix (`sitofp`, `fptosi`, `sext`, `trunc`, ...). `as bool` is
+rejected; write `x != 0` instead.
 
 ## What Works End-to-End Today
 
@@ -312,14 +342,20 @@ These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
 
 - Functions (including async fn, extern fn, generics, defaults, decorators)
 - Structs with methods, fields, generic params, implements clauses
-- Enums with variant payloads and pattern matching
+- Enums with variant payloads and pattern matching (generic payloads
+  monomorphise per instantiation)
 - Interfaces with method signatures
-- Control flow (if/else, for, loop, match, break, continue)
+- Control flow (if/else, for, loop, match, break, continue — no `while`)
 - try/catch/finally exception handling
 - Result<T, E> + the postfix ? error-propagation operator (typed, exception-free)
+- int (i64) / float (f64) numeric types with strict no-implicit-mixing rules
+- Bitwise and shift operators (&, |, ^, <<, >>) on int
+- Explicit numeric `as` casts (typed lowering matrix)
+- Atomic intrinsics: atomic_load/store/add/sub/cas/fence (seq_cst)
+- thread_local let mut globals (top-level only)
 - String interpolation (via runtime)
-- Lambdas (non-capturing)
-- Test declarations
+- Lambdas and closures with capture (multi-variable capture included)
+- Test declarations (plus -k/--tag filtering, lifecycle hooks, snapshots)
 - Import/export across modules
 - Effect annotations -- parsed AND enforced at compile time (build fails on undeclared effects by default; configurable via SAILFIN_EFFECT_ENFORCE)
 - Colon type annotations (x: Type) for params, variables, fields
@@ -328,21 +364,24 @@ These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
 
 ## What Is Parsed but Not Fully Implemented
 
+DO NOT use these in generated code unless explicitly asked — they parse
+(and some typecheck) but do not yet compile to working programs:
+
+- Concurrency constructs: `routine { }`, `await`, `channel()`, `spawn`
+  -- parsed with partial typecheck diagnostics (E0813–E0815); LLVM
+  lowering and the scheduler runtime are pending. `async fn` is
+  structural only.
 - Member-callee cross-module effect propagation (`mod.fetch()`) -- direct `Identifier` callee resolution ships in Phase E1; member callees and decorator-implied transitives are deferred to Phase E2
-- Closures with capture -- lambdas parse but don't capture enclosing scope
 - Generic constraints (<T: Bound>) -- parsed as text, not enforced
-- Affine<T> / Linear<T> ownership -- parsed, transparent (no enforcement)
+- Affine<T> / Linear<T> ownership, &T / &mut T borrows -- parsed, transparent (no enforcement)
+- PII<T> / Secret<T> taint types -- parsed as nominal types, no enforcement
 - Union types -- parse but match destructuring is unstable
-- async/await -- async fn compiles, await lowering is partial
 
 ## What Is Not Yet in the Parser
 
-- int / float distinct numeric types
-- Bitwise operators (&, |, ^, >>, <<)
-- ${ } string interpolation (currently uses {{ }})
-- routine { } structured concurrency blocks
-- channel() and spawn concurrency primitives
-- |> pipeline operator
+- ${ } string interpolation (currently uses {{ }}; migration planned pre-1.0)
+- |> pipeline operator (planned post-1.0)
+- while loops (intentional — use loop { } with break)
 
 ## AI Constructs (Moved to Library)
 
@@ -432,6 +471,11 @@ Override the registry with `sfn config set registry <url>` (persists to
         return response.body;
     }
 
+Output builtins: `print(value)` writes to stdout, `print.err(value)` to
+stderr. `print.info` / `print.warn` / `print.error` are deprecated
+legacy variants — do not emit them in new code; use the `sfn/log`
+capsule for leveled logging.
+
 ### Struct with interface
     interface Serializable {
         fn to_json(self) -> string;
@@ -446,16 +490,11 @@ Override the registry with `sfn config set registry <url>` (persists to
         }
     }
 
-### Match with enum destructuring
-    enum Result {
-        Ok { value: string },
-        Err { message: string },
-    }
-
-    fn handle(result: Result) ![io] {
+### Match with enum destructuring (prelude Result — do NOT redefine Result)
+    fn handle(result: Result<string, Error>) ![io] {
         match result {
             Result.Ok { value } => print("Success: {{value}}"),
-            Result.Err { message } => print.err("Error: {{message}}"),
+            Result.Err { error } => print.err("Error: {{error.message}}"),
         }
     }
 
@@ -512,5 +551,5 @@ Sailfin source files use the `.sfn` extension.
 - Language spec: https://sailfin.dev/docs/reference/spec/ (source: site/src/content/docs/docs/reference/spec/)
 - Feature status: docs/status.md
 - Roadmap: https://sailfin.dev/roadmap
-- Examples: examples/ directory (40+ programs across 11 categories)
+- Examples: examples/ directory (45 programs; the index marks design-stage features)
 - Contributing: CONTRIBUTING.md
