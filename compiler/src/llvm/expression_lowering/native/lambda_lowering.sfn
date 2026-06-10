@@ -335,7 +335,8 @@ fn _synthesize_lifted_function_with_captures(lambda: Expression, lambda_id: int,
     return Statement.FunctionDeclaration {
         signature: signature,
         body: body_with_prologue,
-        decorators: no_decorators
+        decorators: no_decorators,
+        is_unsafe: false
     };
 }
 
@@ -682,7 +683,8 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
             statement: Statement.FunctionDeclaration {
                 signature: statement.signature,
                 body: body_result.block,
-                decorators: statement.decorators
+                decorators: statement.decorators,
+                is_unsafe: statement.is_unsafe
             }
         };
     }
@@ -737,7 +739,10 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
         let body_result = _rewrite_block(ctx, statement.body);
         return StatementRewriteResult {
             ctx: body_result.ctx,
-            statement: Statement.BlockStatement { body: body_result.block }
+            statement: Statement.BlockStatement {
+                body: body_result.block,
+                is_unsafe: statement.is_unsafe
+            }
         };
     }
     if statement.variant == "ForStatement" {

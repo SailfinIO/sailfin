@@ -76,7 +76,8 @@ fn _make_io_violating_routine(name: string, declared_effects: string[], span_lin
     return Statement.FunctionDeclaration {
         signature: _signature(name, declared_effects, span),
         body: body_block,
-        decorators: empty_decorators
+        decorators: empty_decorators,
+        is_unsafe: false
     };
 }
 
@@ -112,7 +113,8 @@ fn _make_spawn_routine(name: string, declared_effects: string[], span_line: int)
     return Statement.FunctionDeclaration {
         signature: _signature(name, declared_effects, span),
         body: body_block,
-        decorators: empty_decorators
+        decorators: empty_decorators,
+        is_unsafe: false
     };
 }
 
@@ -248,7 +250,8 @@ test "effect violation: routines without name_span produce a null trigger" {
     let stmt = Statement.FunctionDeclaration {
         signature: _signature("nameless", [], null),
         body: body_block,
-        decorators: empty_decorators
+        decorators: empty_decorators,
+        is_unsafe: false
     };
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
@@ -414,7 +417,8 @@ fn _routine_with_member_call(name: string, declared_effects: string[], sig_line:
     return Statement.FunctionDeclaration {
         signature: _signature(name, declared_effects, sig_span),
         body: body_block,
-        decorators: empty_decorators
+        decorators: empty_decorators,
+        is_unsafe: false
     };
 }
 
@@ -441,7 +445,8 @@ fn _routine_with_bare_call(name: string, declared_effects: string[], sig_line: i
     return Statement.FunctionDeclaration {
         signature: _signature(name, declared_effects, sig_span),
         body: body_block,
-        decorators: empty_decorators
+        decorators: empty_decorators,
+        is_unsafe: false
     };
 }
 
@@ -542,7 +547,8 @@ fn _routine_with_try_member_call(name: string, declared_effects: string[], sig_l
     return Statement.FunctionDeclaration {
         signature: _signature(name, declared_effects, sig_span),
         body: body_block,
-        decorators: empty_decorators
+        decorators: empty_decorators,
+        is_unsafe: false
     };
 }
 
@@ -719,7 +725,8 @@ fn _routine_with_brace(name: string, sig_line: int, brace_line: int, brace_colum
     return Statement.FunctionDeclaration {
         signature: _signature(name, empty_effects, sig_span),
         body: body_block,
-        decorators: empty_decorators
+        decorators: empty_decorators,
+        is_unsafe: false
     };
 }
 

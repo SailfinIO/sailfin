@@ -799,9 +799,15 @@ fn parse_variable_with_storage(initial_parser: Parser, is_thread_local: boolean)
 // ============================================================================
 // Function Declaration
 // ============================================================================
-fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators: Decorator[]) -> StatementParseResult {
+fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators: Decorator[], starts_with_unsafe: boolean) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
+    let mut is_unsafe = false;
+    if starts_with_unsafe {
+        parser = consume_keyword(parser, "unsafe");
+        parser = skip_trivia(parser);
+        is_unsafe = true;
+    }
     let mut is_async = false;
     if starts_with_async {
         parser = consume_keyword(parser, "async");
@@ -888,7 +894,8 @@ fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators
     let statement = Statement.FunctionDeclaration {
         signature: signature,
         body: body,
-        decorators: decorators
+        decorators: decorators,
+        is_unsafe: is_unsafe
     };
     return StatementParseResult { parser: parser, statement: statement };
 }

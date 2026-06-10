@@ -1,0 +1,151 @@
+// Regression coverage for the `unsafe` ownership boundary marker (#1211).
+//
+// E2 of the ownership epic (#1209): `unsafe { }` blocks and `unsafe fn`
+// declarations parse and carry an inert `is_unsafe` flag on the AST —
+// `BlockStatement.is_unsafe` and `FunctionDeclaration.is_unsafe`. The
+// flag is marker-only: no enforcement, no diagnostics, no IR change.
+// E4 (the ownership checker) reads it later.
+//
+// These tests pin:
+//   - `unsafe { }` sets `BlockStatement.is_unsafe`; bare blocks stay false
+//   - `unsafe fn` sets `FunctionDeclaration.is_unsafe`; plain fns stay false
+//   - the pre-existing `unsafe extern fn` path is untouched
+//   - the sailfin re-emitter prints the `unsafe` keyword back out, and a
+//     full parse -> emit -> parse round-trip preserves both markers
+import { Block, Program, Statement } from "../../src/ast";
+import { emit_program } from "../../src/emitter_sailfin";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+fn _find_function(program: Program, name: string) -> Statement {
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "FunctionDeclaration" {
+            if stmt.signature.name == name { return stmt; }
+        }
+        index += 1;
+    }
+    return program.statements[0];
+}
+
+fn _has_function(program: Program, name: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "FunctionDeclaration" {
+            if stmt.signature.name == name { return true; }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn _find_block_statement(body: Block) -> Statement {
+    let mut index: int = 0;
+    loop {
+        if index >= body.statements.length { break; }
+        let stmt = body.statements[index];
+        if stmt.variant == "BlockStatement" { return stmt; }
+        index += 1;
+    }
+    return body.statements[0];
+}
+
+fn _has_block_statement(body: Block) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= body.statements.length { break; }
+        if body.statements[index].variant == "BlockStatement" { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+test "parser: unsafe block carries is_unsafe marker" ![io] {
+    let source = "fn f() {\n    unsafe {\n        let x = 1;\n    }\n}\n";
+    let program = parse_program(source);
+    assert _has_function(program, "f");
+    let decl = _find_function(program, "f");
+    assert _has_block_statement(decl.body);
+    let block_stmt = _find_block_statement(decl.body);
+    assert block_stmt.is_unsafe == true;
+}
+
+test "parser: plain block has is_unsafe false" ![io] {
+    let source = "fn f() {\n    {\n        let x = 1;\n    }\n}\n";
+    let program = parse_program(source);
+    assert _has_function(program, "f");
+    let decl = _find_function(program, "f");
+    assert _has_block_statement(decl.body);
+    let block_stmt = _find_block_statement(decl.body);
+    assert block_stmt.is_unsafe == false;
+}
+
+test "parser: unsafe fn carries is_unsafe marker" ![io] {
+    let source = "unsafe fn raw() -> int {\n    return 0;\n}\n";
+    let program = parse_program(source);
+    assert _has_function(program, "raw");
+    let decl = _find_function(program, "raw");
+    assert decl.is_unsafe == true;
+    assert decl.signature.name == "raw";
+}
+
+test "parser: ordinary fn has is_unsafe false" ![io] {
+    let source = "fn safe() {\n    return;\n}\n";
+    let program = parse_program(source);
+    assert _has_function(program, "safe");
+    let decl = _find_function(program, "safe");
+    assert decl.is_unsafe == false;
+}
+
+test "parser: unsafe extern fn still parses with unsafe flag" ![io] {
+    let source = "unsafe extern fn c_free(p: int) -> void;\n";
+    let program = parse_program(source);
+    let mut found = false;
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "ExternFunctionDeclaration" {
+            assert stmt.signature.name == "c_free";
+            assert stmt.unsafe == true;
+            found = true;
+        }
+        index += 1;
+    }
+    assert found == true;
+}
+
+test "fmt: unsafe block round-trips" ![io] {
+    let source = "fn f() {\n    unsafe {\n        let x = 1;\n    }\n}\n";
+    let program = parse_program(source);
+    let emitted = emit_program(program);
+    assert _contains(emitted, "unsafe {");
+}
+
+test "fmt: unsafe fn round-trips" ![io] {
+    let source = "unsafe fn raw() -> int {\n    return 0;\n}\n";
+    let program = parse_program(source);
+    let emitted = emit_program(program);
+    assert _contains(emitted, "unsafe fn raw");
+}
+
+test "fmt: idempotent round-trip for unsafe" ![io] {
+    let source = "unsafe fn raw() -> int {\n    unsafe {\n        let x = 1;\n    }\n    return 0;\n}\n";
+    let program = parse_program(source);
+    let emitted = emit_program(program);
+    let reparsed = parse_program(emitted);
+    assert _has_function(reparsed, "raw");
+    let decl = _find_function(reparsed, "raw");
+    assert decl.is_unsafe == true;
+    assert _has_block_statement(decl.body);
+    let block_stmt = _find_block_statement(decl.body);
+    assert block_stmt.is_unsafe == true;
+}

@@ -214,7 +214,10 @@ fn parse_block_statement(parser: Parser) -> BlockStatementParseResult {
         let body_result = parse_block(after_decorators);
         return BlockStatementParseResult {
             parser: body_result.parser,
-            statement: Statement.BlockStatement { body: body_result.block },
+            statement: Statement.BlockStatement {
+                body: body_result.block,
+                is_unsafe: false
+            },
             success: true
         };
     }
@@ -297,7 +300,10 @@ fn parse_block_statement(parser: Parser) -> BlockStatementParseResult {
         let body_result = parse_block(unsafe_current);
         return BlockStatementParseResult {
             parser: body_result.parser,
-            statement: Statement.BlockStatement { body: body_result.block },
+            statement: Statement.BlockStatement {
+                body: body_result.block,
+                is_unsafe: true
+            },
             success: true
         };
     }
