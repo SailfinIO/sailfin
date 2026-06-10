@@ -111,7 +111,18 @@ jobs:
           # SAILFIN_USE_ARENA=1 matches the rest of CI; it is also the
           # arena-reset path that keeps per-file scratch bounded across
           # the full tree. `check` emits no IR and invokes no clang.
-          SAILFIN_USE_ARENA=1 build/seed/bin/sailfin check compiler/src/
+          #
+          # ulimit -v mirrors the repo-wide compiler-safety rule (every
+          # compiler invocation runs under an 8GB virtual cap). Without
+          # it, a runaway allocation in the seed checker exhausts the
+          # runner VM and kills the runner agent itself — the job dies
+          # as an unexplained "runner received a shutdown signal" with
+          # no diagnosable output (observed on #1243). Under the cap a
+          # runaway dies as a clean non-zero exit instead, and time -v
+          # records the peak RSS either way.
+          ulimit -v 8388608
+          SAILFIN_USE_ARENA=1 /usr/bin/time -v \
+            build/seed/bin/sailfin check compiler/src/
 
   # One compiler build per OS, shared by every shard leg below (#1234,
   # "Lever 1 step 1b" of docs/proposals/ci-test-speed.md §6 step 2).
