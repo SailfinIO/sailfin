@@ -111,7 +111,42 @@ jobs:
           # SAILFIN_USE_ARENA=1 matches the rest of CI; it is also the
           # arena-reset path that keeps per-file scratch bounded across
           # the full tree. `check` emits no IR and invokes no clang.
-          SAILFIN_USE_ARENA=1 build/seed/bin/sailfin check compiler/src/
+          #
+          # ulimit -v mirrors the repo-wide compiler-safety rule (every
+          # compiler invocation runs under an 8GB virtual cap). Without
+          # it, a runaway allocation in the seed checker exhausts the
+          # runner VM and kills the runner agent itself — the job dies
+          # as an unexplained "runner received a shutdown signal" with
+          # no diagnosable output (observed on #1243). Under the cap a
+          # runaway dies as a clean non-zero exit instead, and time -v
+          # records the peak RSS either way.
+          ulimit -v 8388608
+          # Self-warming invocation (#1245): the seed checker's
+          # resolver staging + per-file analysis accumulate memory
+          # with no reset, so a fully COLD check of this tree —
+          # whole-tree or even single-file with a large import
+          # closure — exceeds the 8GB cap. Staged artifacts persist
+          # incrementally across runs (including crashed ones), so a
+          # bounded warm-up retry loop on the widest-closure file
+          # converges in 1-2 attempts and warms build/sailfin for
+          # the real check (measured cold: warm-up converges on
+          # attempt 2; warm whole-tree peaks ~5GB, well under cap).
+          # Warm-up failures are tolerated — if it never converges,
+          # the gating whole-tree check below fails with a clean
+          # capped exit + time -v stats instead of killing the
+          # runner VM. Revert to a bare whole-tree invocation once a
+          # seed containing the #1245 fix is pinned.
+          for attempt in 1 2 3 4; do
+            echo "[check-fast] warm-up attempt $attempt"
+            if SAILFIN_USE_ARENA=1 timeout 300 \
+                 build/seed/bin/sailfin check compiler/src/cli_main.sfn \
+                 >/dev/null 2>&1; then
+              echo "[check-fast] warm-up converged on attempt $attempt"
+              break
+            fi
+          done
+          SAILFIN_USE_ARENA=1 /usr/bin/time -v \
+            build/seed/bin/sailfin check compiler/src/
 
   # One compiler build per OS, shared by every shard leg below (#1234,
   # "Lever 1 step 1b" of docs/proposals/ci-test-speed.md §6 step 2).
