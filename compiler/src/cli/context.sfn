@@ -28,24 +28,51 @@ struct CliContext {
     trace_argv: boolean;
 }
 
+// Single source of truth for the prefix walk. Both public entry
+// points (`parse_driver_prefix`, `driver_prefix_length`) delegate
+// here so the prefix rules can never drift between the parsed
+// values and the consumed-token count.
+struct _DriverPrefix {
+    runtime_root: string;
+    binary_dir: string;
+    length: int;
+}
+
+fn _walk_driver_prefix(argv: string[]) -> _DriverPrefix {
+    let mut prefix = _DriverPrefix {
+        runtime_root: "",
+        binary_dir: "",
+        length: 0
+    };
+    let mut start_index: int = 0;
+    if start_index < argv.length {
+        if argv[start_index] == "--runtime-root" {
+            if start_index + 1 < argv.length {
+                prefix.runtime_root = argv[start_index + 1];
+                start_index += 2;
+            }
+        }
+    }
+    if start_index < argv.length {
+        if argv[start_index] == "--binary-dir" {
+            if start_index + 1 < argv.length {
+                prefix.binary_dir = argv[start_index + 1];
+                start_index += 2;
+            }
+        }
+    }
+    prefix.length = start_index;
+    return prefix;
+}
+
 // Number of leading argv tokens consumed by the driver prefix.
 // `argv[driver_prefix_length(argv)..]` is the user-visible argv.
 // Kept separate from CliContext so the struct stays on the §4.2
 // contract while callers can still slice the remaining args without
 // re-walking the prefix inline.
 fn driver_prefix_length(argv: string[]) -> int {
-    let mut start_index: int = 0;
-    if start_index < argv.length {
-        if argv[start_index] == "--runtime-root" {
-            if start_index + 1 < argv.length { start_index += 2; }
-        }
-    }
-    if start_index < argv.length {
-        if argv[start_index] == "--binary-dir" {
-            if start_index + 1 < argv.length { start_index += 2; }
-        }
-    }
-    return start_index;
+    let prefix = _walk_driver_prefix(argv);
+    return prefix.length;
 }
 
 // Parse the driver-injected prefix out of `argv` into a CliContext.
@@ -57,29 +84,13 @@ fn driver_prefix_length(argv: string[]) -> int {
 // bundle stays with the caller — it is a filesystem probe, not argv
 // parsing, and moves to `cli/runtime_root.sfn` in a later issue.
 fn parse_driver_prefix(argv: string[]) -> CliContext ![io] {
+    let prefix = _walk_driver_prefix(argv);
     let mut ctx = CliContext {
-        runtime_root: "",
-        binary_dir: "",
+        runtime_root: prefix.runtime_root,
+        binary_dir: prefix.binary_dir,
         registry_url: "",
         trace_argv: false
     };
     ctx.trace_argv = _env_flag("SAILFIN_TRACE_ARGV") || _legacy_flag_file("build/sailfin/.trace_argv");
-    let mut start_index: int = 0;
-    if start_index < argv.length {
-        if argv[start_index] == "--runtime-root" {
-            if start_index + 1 < argv.length {
-                ctx.runtime_root = argv[start_index + 1];
-                start_index += 2;
-            }
-        }
-    }
-    if start_index < argv.length {
-        if argv[start_index] == "--binary-dir" {
-            if start_index + 1 < argv.length {
-                ctx.binary_dir = argv[start_index + 1];
-                start_index += 2;
-            }
-        }
-    }
     return ctx;
 }
