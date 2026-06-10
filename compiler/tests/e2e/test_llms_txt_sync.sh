@@ -42,8 +42,11 @@ else
 fi
 
 # ── 2. Version line matches capsule.toml ─────────────────────────────
-capsule_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$ROOT/compiler/capsule.toml" | head -1)"
-llms_version="$(sed -n 's/^> Version: \([^ |]*\).*/\1/p' "$ROOT/llms.txt" | head -1)"
+# Whitespace-tolerant extraction: TOML allows leading whitespace and a
+# trailing inline comment; the llms.txt version line may vary spacing.
+# Both patterns stop at the closing quote / first separator.
+capsule_version="$(sed -n 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$ROOT/compiler/capsule.toml" | head -1)"
+llms_version="$(sed -n 's/^>[[:space:]]*Version:[[:space:]]*\([^ |]*\).*/\1/p' "$ROOT/llms.txt" | head -1)"
 
 if [ -z "$capsule_version" ]; then
     echo "FAIL: could not extract version from compiler/capsule.toml"
