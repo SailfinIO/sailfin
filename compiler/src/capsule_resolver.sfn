@@ -2937,6 +2937,71 @@ fn _cr_capsule_spec_for_slug(slug: string, members: WorkspaceMember[]) -> string
     return best;
 }
 
+// #1247: per-resolution-pass memo shared across the per-entry
+// relative-import walks in `_cr_resolve_and_dedupe`. Without it, a
+// multi-entry resolution (`sfn check compiler/src/` = 158 entries)
+// re-reads and re-scans every source in every entry's import closure
+// once PER ENTRY — O(entries × closure) full-source scans through the
+// allocation-heavy `collect_relative_import_specs` state machine
+// (`_cr_byte_at` allocates a fresh 1-char string per byte). All of
+// that garbage lands in the process-global arena BEFORE `cli_check`'s
+// Phase 5a loop mark, so the per-file rewind can never reclaim it:
+// measured ~25MB of dead arena per entry (~4.0GB across the warm
+// whole-tree check). The memo caches, per unique source path:
+//   - `scan_specs`: the `collect_relative_import_specs` result, so
+//     each source is read + scanned at most once per resolution pass;
+//   - `dep_sources`: the discovered-dependency `CapsuleSource`, which
+//     is entry-independent (`_cr_relative_slug` ignores `entry_dir`),
+//     so slug/member canonicalization also runs once per unique dep.
+// Lookups are linear scans over parallel arrays — the same pattern
+// the visited-set below already uses — because the key set is small
+// (one entry per unique module, ~170 for the compiler tree).
+//
+// The memo deliberately does NOT change which files are emitted for
+// which entry: each entry still runs its own BFS with its own
+// visited set, so the output (and therefore staged artifacts and
+// diagnostics) is byte-identical to the unmemoized walk.
+struct RelativeScanMemo {
+    scan_paths: string[];
+    scan_specs: string[][];
+    dep_paths: string[];
+    dep_sources: CapsuleSource[];
+}
+
+// Outcome of one memoized per-entry walk: the entry's discovered
+// sources plus the (possibly grown) memo to thread into the next
+// entry's walk. Returned explicitly — rather than relying on
+// in-place mutation of the memo argument — to match the
+// return-the-updated-value convention used across the resolver.
+struct RelativeEnumerateOutcome {
+    sources: CapsuleSource[];
+    memo: RelativeScanMemo;
+}
+
+fn _cr_empty_relative_scan_memo() -> RelativeScanMemo {
+    let scan_paths: string[] = [];
+    let scan_specs: string[][] = [];
+    let dep_paths: string[] = [];
+    let dep_sources: CapsuleSource[] = [];
+    return RelativeScanMemo {
+        scan_paths: scan_paths,
+        scan_specs: scan_specs,
+        dep_paths: dep_paths,
+        dep_sources: dep_sources
+    };
+}
+
+// Linear index lookup over a memo key column. Returns -1 when absent.
+fn _cr_memo_index(paths: string[], path: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        if strings_equal(paths[i], path) { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
 // Walk relative imports (`./foo`, `../foo`) reachable from `entry_path` and
 // return one CapsuleSource per discovered file. The entry itself is NOT
 // included — the caller compiles it via the standard single-file path.
@@ -2944,9 +3009,22 @@ fn _cr_capsule_spec_for_slug(slug: string, members: WorkspaceMember[]) -> string
 // `runtime/*` and scoped (`scope/name`) imports are handled by
 // `enumerate_capsule_sources` (manifest-declared deps) and the workspace
 // member lookup; this enumerator only walks intra-project relative imports.
+//
+// Thin compatibility wrapper over the memoized core: single-entry
+// callers get a fresh memo (identical behavior to the historical
+// implementation); `_cr_resolve_and_dedupe` calls the memoized core
+// directly so the scan cache is shared across all entries in one
+// resolution pass (#1247).
 fn enumerate_relative_sources(entry_path: string, members: WorkspaceMember[]) -> CapsuleSource[] ![io] {
+    let outcome = _cr_enumerate_relative_sources_memo(entry_path, members, _cr_empty_relative_scan_memo());
+    return outcome.sources;
+}
+
+fn _cr_enumerate_relative_sources_memo(entry_path: string, members: WorkspaceMember[], memo: RelativeScanMemo) -> RelativeEnumerateOutcome ![io] {
     let mut out: CapsuleSource[] = [];
-    if entry_path.length == 0 { return out; }
+    if entry_path.length == 0 {
+        return RelativeEnumerateOutcome { sources: out, memo: memo };
+    }
     let entry_dir = _cr_dirname(entry_path);
     let mut visited: string[] = [entry_path];
     let mut queue: string[] = [entry_path];
@@ -2970,9 +3048,18 @@ fn enumerate_relative_sources(entry_path: string, members: WorkspaceMember[]) ->
         iterations += 1;
         let current_path = queue[head];
         head += 1;
-        if !fs.exists(current_path) { continue; }
-        let source = fs.readFile(current_path);
-        let specs = collect_relative_import_specs(source);
+        // #1247: scan each unique source at most once per resolution
+        // pass. A memo hit skips the `fs.exists` probe too — the file
+        // was on disk when this same pass scanned it moments ago.
+        let mut specs: string[] = [];
+        let scan_idx = _cr_memo_index(memo.scan_paths, current_path);
+        if scan_idx >= 0 { specs = memo.scan_specs[scan_idx]; } else {
+            if !fs.exists(current_path) { continue; }
+            let source = fs.readFile(current_path);
+            specs = collect_relative_import_specs(source);
+            memo.scan_paths.push(current_path);
+            memo.scan_specs.push(specs);
+        }
         let cur_dir = _cr_dirname(current_path);
         let mut i: int = 0;
         loop {
@@ -3001,40 +3088,58 @@ fn enumerate_relative_sources(entry_path: string, members: WorkspaceMember[]) ->
                 if !already_seen {
                     visited.push(dep_path);
                     queue.push(dep_path);
-                    // #873: if this relatively-imported file lives inside a
-                    // workspace member's `src/`, stage it under the member's
-                    // canonical spec slug (`sfn/crypto/mod`) — the SAME slug
-                    // the workspace-implicit / manifest-dep walks assign the
-                    // same file — so the relative and scoped enumerators
-                    // agree on one symbol per capsule function and a
-                    // capsule's own `../src/mod` tests link. Tag the spec
-                    // with the member name so the source routes under the
-                    // per-capsule `ir/` layout exactly like the implicit
-                    // walk's sources. Non-member paths (every `compiler/src/**`
-                    // and `runtime/**` file) get "" and fall back to the
-                    // path-shaped slug, leaving self-host slugs untouched.
-                    let path_slug = _cr_relative_slug(entry_dir, dep_path);
-                    let capsule_slug = _cr_capsule_slug_for_path(path_slug, members);
-                    let mut slug = path_slug;
-                    let mut spec: string = "";
-                    if capsule_slug.length > 0 {
-                        slug = capsule_slug;
-                        spec = _cr_capsule_spec_for_slug(capsule_slug, members);
+                    // #1247: the CapsuleSource for a dep is independent
+                    // of which entry discovered it (`_cr_relative_slug`
+                    // ignores `entry_dir`), so the slug / workspace-
+                    // member canonicalization below runs once per
+                    // unique dep per resolution pass; later entries
+                    // that rediscover the same dep reuse the memoized
+                    // value.
+                    let dep_idx = _cr_memo_index(memo.dep_paths, dep_path);
+                    if dep_idx >= 0 {
+                        out.push(memo.dep_sources[dep_idx]);
+                    } else {
+                        // #873: if this relatively-imported file lives inside a
+                        // workspace member's `src/`, stage it under the member's
+                        // canonical spec slug (`sfn/crypto/mod`) — the SAME slug
+                        // the workspace-implicit / manifest-dep walks assign the
+                        // same file — so the relative and scoped enumerators
+                        // agree on one symbol per capsule function and a
+                        // capsule's own `../src/mod` tests link. Tag the spec
+                        // with the member name so the source routes under the
+                        // per-capsule `ir/` layout exactly like the implicit
+                        // walk's sources. Non-member paths (every `compiler/src/**`
+                        // and `runtime/**` file) get "" and fall back to the
+                        // path-shaped slug, leaving self-host slugs untouched.
+                        let path_slug = _cr_relative_slug(entry_dir, dep_path);
+                        let capsule_slug = _cr_capsule_slug_for_path(path_slug, members);
+                        let mut slug = path_slug;
+                        let mut spec: string = "";
+                        if capsule_slug.length > 0 {
+                            slug = capsule_slug;
+                            spec = _cr_capsule_spec_for_slug(capsule_slug, members);
+                        }
+                        // ll_path is filled in by `_cr_resolve_and_dedupe`
+                        // once the consumer is known (Stage C2b2) — for
+                        // a `-p <consumer>` build with safe scope/name,
+                        // this lands under the consumer's per-capsule
+                        // tree; otherwise the legacy flat layout.
+                        let dep_source = CapsuleSource {
+                            spec: spec,
+                            source_path: dep_path,
+                            slug: slug,
+                            ll_path: ""
+                        };
+                        memo.dep_paths.push(dep_path);
+                        memo.dep_sources.push(dep_source);
+                        out.push(dep_source);
                     }
-                    // ll_path is filled in by `_cr_resolve_and_dedupe`
-                    // once the consumer is known (Stage C2b2) — for
-                    // a `-p <consumer>` build with safe scope/name,
-                    // this lands under the consumer's per-capsule
-                    // tree; otherwise the legacy flat layout.
-                    out.push(CapsuleSource {
-                        spec: spec, source_path: dep_path, slug: slug, ll_path: ""
-                    });
                 }
             }
             i += 1;
         }
     }
-    return out;
+    return RelativeEnumerateOutcome { sources: out, memo: memo };
 }
 
 // Stage D PR3: walk every `.sfn` under `<project_root>/src/` for
@@ -3878,11 +3983,22 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
     // resolves into a workspace member's `src/` is staged under that
     // member's canonical spec slug (#873), so it collapses cleanly
     // against the same file discovered by the workspace-implicit walk.
+    //
+    // #1247: one scan memo is threaded across every entry's walk so
+    // each unique source in the union closure is read + scanned at
+    // most once per resolution pass. Without this, a whole-tree
+    // `sfn check` re-scanned every closure module once per entry —
+    // O(entries × closure) scans whose arena garbage (allocated
+    // before the per-file loop's Phase 5a mark) grew peak RSS by
+    // ~25MB per entry and could never be rewound.
+    let mut scan_memo = _cr_empty_relative_scan_memo();
     let mut ei: int = 0;
     loop {
         if ei >= entry_paths.length { break; }
         let entry = entry_paths[ei];
-        let relative = enumerate_relative_sources(entry, members);
+        let outcome = _cr_enumerate_relative_sources_memo(entry, members, scan_memo);
+        scan_memo = outcome.memo;
+        let relative = outcome.sources;
         let mut ri: int = 0;
         loop {
             if ri >= relative.length { break; }
