@@ -24,7 +24,7 @@ import {
     empty_resolver_consumer,
     prepare_project_capsules_for_check
 } from "./capsule_resolver";
-import { _collect_sfn_files_cmd, _dirname_cmd } from "./cli_commands_utils";
+import { _collect_sfn_files_cmd, _dirname_cmd, _path_join_cmd } from "./cli_commands_utils";
 import {
     CheckJsonEvent,
     CheckJsonSummary,
@@ -130,6 +130,28 @@ fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean)
     }
 }
 
+// Resolve the path to this compiler binary so the resolver can stage
+// each import-context module in a subprocess (#1246), bounding the
+// parent's arena the same way `sfn build` does. Mirrors
+// `_resolve_test_self_path` in `cli_commands.sfn` /
+// `_resolve_self_path` in `cli_main.sfn`: `<binary_dir>/sailfin`
+// (computed by `fn main` from `exe_path()` on every platform) is the
+// repo-build resolution path. `make install` publishes the binary as
+// `<PREFIX>/bin/sfn` (`INSTALL_NAME ?= sfn`, Makefile), so probe that
+// name second — otherwise an installed compiler would silently fall
+// back in-process and lose the memory bound this helper exists to
+// provide. Empty result falls back to in-process staging inside the
+// resolver — degraded memory bound, not an error.
+fn _resolve_check_self_path(binary_dir: string) -> string ![io] {
+    if binary_dir.length > 0 {
+        let candidate = _path_join_cmd(binary_dir, "sailfin");
+        if fs.exists(candidate) { return candidate; }
+        let installed = _path_join_cmd(binary_dir, "sfn");
+        if fs.exists(installed) { return installed; }
+    }
+    return "";
+}
+
 // Compute the resolution-group key for a file path. Two files share a
 // group iff `discover_project_root` and `discover_workspace_root`
 // return the same value when walked from each file's directory. The
@@ -153,7 +175,7 @@ fn _find_group(groups: CheckGroup[], key: string) -> int {
     return -1;
 }
 
-fn handle_check_command(args: string[]) -> int ![io] {
+fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
     let mut quiet: boolean = false;
     let mut json: boolean = false;
     let mut paths: string[] = [];
@@ -239,6 +261,13 @@ fn handle_check_command(args: string[]) -> int ![io] {
         gpi += 1;
     }
 
+    // #1246: resolve the self-executable once for every group's
+    // resolver pass. Non-empty ⇒ the resolver stages each cache-miss
+    // module in a subprocess (fresh arena per child), mirroring
+    // `sfn build`; empty ⇒ in-process fallback (e.g. a caller that
+    // couldn't resolve `binary_dir`).
+    let check_self_exe = _resolve_check_self_path(binary_dir);
+
     // Per-group resolution + load. Aggregated warnings are emitted
     // after the per-file analysis loop so they group together at the
     // bottom of stderr regardless of how many groups produced them.
@@ -253,7 +282,12 @@ fn handle_check_command(args: string[]) -> int ![io] {
         // this path. Pass an empty consumer; when `sfn check -p`
         // lands the consumer is computed from the project's manifest
         // the same way `sfn build` does it.
-        let resolution = prepare_project_capsules_for_check(groups[gi].entry_paths, empty_resolver_consumer(), "");
+        //
+        // #1246: thread the self-executable so cache-miss modules
+        // stage in subprocesses (bounded parent arena). Warm runs
+        // spawn nothing — the per-module cache hit short-circuits
+        // before the subprocess branch.
+        let resolution = prepare_project_capsules_for_check(groups[gi].entry_paths, empty_resolver_consumer(), check_self_exe, "");
         if resolution.staging_failed {
             // The resolver already wrote a structured error to
             // stderr (slug collision or stage-write failure).

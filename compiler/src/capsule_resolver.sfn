@@ -1464,9 +1464,9 @@ fn _cr_extract_layout_manifest(asm_path: string, manifest_path: string) ![io] {
 // the legacy serial loop (one `_cr_stage_one` call per source) so
 // regression bisects keep the simple shape they had pre-PR3.
 //
-// Empty `sailfin_exe` (`sfn check`, `sfn test`) keeps the in-process
-// stage path that's load-bearing for callers that don't yet plumb
-// `binary_dir` through.
+// Empty `sailfin_exe` keeps the in-process stage path that's
+// load-bearing for callers that don't plumb `binary_dir` through
+// (`sfn test` today; `sfn check` threads its exe since #1246).
 fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir: string) -> boolean ![io] {
     let context_root = _cr_import_context_root(work_dir);
     if work_dir.length == 0 {
@@ -4290,7 +4290,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
 //   - Standalone files outside any capsule.toml are valid input and
 //     return an empty resolution (no error) — relative-import walking
 //     still happens via `enumerate_relative_sources`.
-fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverConsumer, work_dir: string) -> CheckCapsuleResolution ![io] {
+fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string, work_dir: string) -> CheckCapsuleResolution ![io] {
     let empty_paths: string[] = [];
     let resolved = _cr_resolve_and_dedupe(entry_paths, consumer);
     // Phase F: surface the manifest's capability surface even on
@@ -4316,12 +4316,18 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
         };
     }
 
-    // Stage E PR1: sfn check stays on the in-process stage path
-    // (empty `sailfin_exe`). Check's typical input — single
-    // files or small dirs — fits in-process; subprocess overhead
-    // would dominate. When `sfn check -p` lands, this becomes a
-    // one-line update mirroring `sfn build`.
-    let staged = stage_capsule_imports(resolved.sources, "", work_dir);
+    // #1246: thread `sailfin_exe` so staging mirrors `sfn build` —
+    // each cache-miss module is emitted in a subprocess
+    // (`_cr_stage_one` exe branch via `emit_subprocess_with_retry`)
+    // and the parent arena stays bounded. The prior in-process
+    // fallback (empty exe) peaked 8.3GB on a cold
+    // `check compiler/src/cli_main.sfn` because the full import
+    // closure's AST + native text accumulated in one arena
+    // (#1245). Warm runs are unaffected: `_cr_stage_one`'s cache
+    // hit short-circuits before the exe branch, so no subprocess
+    // is spawned. Callers without `binary_dir` plumbing pass ""
+    // and keep the in-process path.
+    let staged = stage_capsule_imports(resolved.sources, sailfin_exe, work_dir);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return CheckCapsuleResolution {
