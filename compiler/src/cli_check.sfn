@@ -136,12 +136,18 @@ fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean)
 // `_resolve_test_self_path` in `cli_commands.sfn` /
 // `_resolve_self_path` in `cli_main.sfn`: `<binary_dir>/sailfin`
 // (computed by `fn main` from `exe_path()` on every platform) is the
-// real resolution path. Empty result falls back to in-process
-// staging inside the resolver — degraded memory bound, not an error.
+// repo-build resolution path. `make install` publishes the binary as
+// `<PREFIX>/bin/sfn` (`INSTALL_NAME ?= sfn`, Makefile), so probe that
+// name second — otherwise an installed compiler would silently fall
+// back in-process and lose the memory bound this helper exists to
+// provide. Empty result falls back to in-process staging inside the
+// resolver — degraded memory bound, not an error.
 fn _resolve_check_self_path(binary_dir: string) -> string ![io] {
     if binary_dir.length > 0 {
         let candidate = _path_join_cmd(binary_dir, "sailfin");
         if fs.exists(candidate) { return candidate; }
+        let installed = _path_join_cmd(binary_dir, "sfn");
+        if fs.exists(installed) { return installed; }
     }
     return "";
 }

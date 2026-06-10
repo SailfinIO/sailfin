@@ -127,27 +127,45 @@ test "check staging: warm re-run is a cache hit (staged artifacts untouched)" ![
     let rc_cold = process.run(["sh", "-c", cmd]);
     assert rc_cold == 0;
 
-    // Snapshot the staged tree (paths + content hashes + mtimes).
+    // Pin the "warm runs spawn nothing" half of #1246:
     // `_cr_stage_one`'s cache hit short-circuits before the
-    // subprocess branch, so a warm run must not rewrite anything —
-    // pinning the "warm runs spawn nothing" half of #1246.
+    // subprocess branch, so a warm run must not rewrite anything.
+    // Two POSIX-portable probes (macOS CI runs this suite — no GNU
+    // `stat -c` / `sha256sum` / `xargs -r` here):
+    //   1. the staged file SET is unchanged (`find | sort`), and
+    //   2. no staged file is newer than a marker touched between the
+    //      runs (`find -newer`) — i.e. nothing was rewritten, even
+    //      with identical content.
     //
     // Load-bearing fixture assumption: with NO capsule.toml, every
     // source's canonical slug equals its path slug, so
     // `_cr_write_capsule_slug_aliases` writes no `.slugalias` on
     // either run. A capsule fixture with a scoped slug would rewrite
-    // the alias each run and flake the mtime half of this snapshot.
-    let snap_cmd = "cd " + work
-        + "/build/native/import-context && find . -type f | sort | xargs -r stat -c '%n %Y' && find . -type f | sort | xargs -r sha256sum";
-    let before = _shell_capture(snap_cmd);
-    assert before.length > 0;
+    // the alias each run and flake the `-newer` half of this probe.
+    let ctx = work + "/build/native/import-context";
+    let set_cmd = "cd " + ctx + " && find . -type f | sort";
+    let set_before = _shell_capture(set_cmd);
+    assert set_before.length > 0;
+
+    // The sleep guards against coarse (1s) mtime granularity on
+    // older filesystems: a same-second rewrite would otherwise tie
+    // with the marker and slip past `-newer`.
+    let marker = root + "/warm-marker";
+    process.run(["touch", marker]);
+    process.run(["sleep", "1"]);
 
     // Warm run: byte-identical source -> content-hash cache hit.
     let rc_warm = process.run(["sh", "-c", cmd]);
     assert rc_warm == 0;
 
-    let after = _shell_capture(snap_cmd);
-    assert before == after;
+    let set_after = _shell_capture(set_cmd);
+    assert set_before == set_after;
+    // `grep -q .` exits 0 iff `find -newer` emitted anything; a warm
+    // run must leave NOTHING newer than the marker.
+    let rewritten = process.run(["sh", "-c", "find " + ctx + " -type f -newer "
+        + marker
+        + " | grep -q ."]);
+    assert rewritten != 0;
 
     process.run(["rm", "-rf", root]);
 }
