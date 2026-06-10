@@ -225,13 +225,34 @@ jobs:
           echo "--- compiler/src/version.sfn ---"
           grep '__version_fallback__' compiler/src/version.sfn
 
-          # Final sanity check: the new version must appear in both files
+          # Update llms.txt's "> Version:" stamp. The drift guard
+          # (compiler/tests/e2e/test_llms_txt_sync.sh) asserts this line
+          # matches capsule.toml; without this rewrite every automated
+          # release tag fails that test by construction (the bump lands
+          # seconds before the build, with no human review in between) —
+          # exactly what broke the v0.7.0-alpha.30 cut. Content accuracy
+          # beyond the stamp remains a review concern on content PRs.
+          llms_matches=$(grep -c '^> Version:' llms.txt || true)
+          if [ "$llms_matches" -ne 1 ]; then
+            echo "::error::Expected exactly 1 '> Version:' line in llms.txt, found $llms_matches"
+            exit 1
+          fi
+          today=$(date -u +%Y-%m-%d)
+          sed -i "s/^> Version:.*/> Version: ${NEXT} | Updated: ${today}/" llms.txt
+          echo "--- llms.txt ---"
+          grep '^> Version:' llms.txt
+
+          # Final sanity check: the new version must appear in all three files
           if ! grep -q "\"${NEXT}\"" compiler/capsule.toml; then
             echo "::error::capsule.toml was not updated to version ${NEXT}"
             exit 1
           fi
           if ! grep -q "\"${NEXT}\"" compiler/src/version.sfn; then
             echo "::error::version.sfn was not updated to version ${NEXT}"
+            exit 1
+          fi
+          if ! grep -q "^> Version: ${NEXT} " llms.txt; then
+            echo "::error::llms.txt was not updated to version ${NEXT}"
             exit 1
           fi
 
@@ -241,7 +262,7 @@ jobs:
           TAG: ${{ steps.bump.outputs.tag }}
         run: |
           set -euo pipefail
-          git add compiler/capsule.toml compiler/src/version.sfn
+          git add compiler/capsule.toml compiler/src/version.sfn llms.txt
           git commit -m "chore(release): ${TAG#v}"
 
       - name: Rebase, tag & push
