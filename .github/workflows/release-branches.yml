@@ -108,25 +108,6 @@ jobs:
                   clang: ${{ matrix.clang }}
                   seed_version: ${{ steps.seed.outputs.seed_version }}
                   test_jobs: ${{ matrix.test_jobs }}
-                  # Slim release gate (#843): beta/rc tags are always
-                  # prereleases cut from a validated main/branch SHA —
-                  # build + package + smoke here; suite coverage lives in
-                  # PR CI, push:main, and the nightly self-host.
-                  mode: build-package
-
-            - name: Smoke-test built compiler (hello-world)
-              shell: bash {0}
-              run: |
-                  set -euo pipefail
-                  if [ "${RUNNER_OS:-}" = "Linux" ]; then
-                      ulimit -v 8388608 || true
-                  fi
-                  out="$(build/native/sailfin run examples/basics/hello-world.sfn)"
-                  echo "$out"
-                  if ! printf '%s' "$out" | grep -q "Hello, Sailfin!"; then
-                      echo "[ci][error] hello-world smoke failed: expected 'Hello, Sailfin!' in output" >&2
-                      exit 1
-                  fi
 
             - name: Report compiler metadata
               shell: bash {0}
