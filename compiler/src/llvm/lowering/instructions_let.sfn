@@ -5,7 +5,7 @@ import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../nativ
 import { index_of } from "../../string_utils";
 import { analyze_value_ownership, detect_borrow_conflicts, lower_expression } from "../expression_lowering/native/core";
 import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
-import { append_local_binding } from "../expression_lowering/native/core_scopes";
+import { append_local_binding, promote_escaping_locals_for_boundaries } from "../expression_lowering/native/core_scopes";
 import { is_heap_type } from "../expression_lowering/native/core_type_mapping";
 import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
 import { map_local_type } from "../expression_lowering/native/statement_type_mapping";
@@ -264,6 +264,13 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         string_constants = lowered.string_constants;
         let inferred = _infer_field_constants_from_lines(current_lines, _pre_expr_line_count);
         string_constants = merge_string_constants(string_constants, inferred);
+        // M4 (#1094): conservative escape promotion at channel-send /
+        // spawn-capture boundaries in the initializer (`let f = spawn
+        // fn() ... ;`, `let ok = ch.send(msg);`). Mirrors the M1.5.5
+        // return-boundary rule: escaping heap locals are promoted to `rc`
+        // and marked consumed so the sender's scope-exit drops skip them —
+        // the receiver/worker thread owns the value now.
+        current_locals = promote_escaping_locals_for_boundaries(instruction.value, current_locals, current_bindings);
     }
 
     if debug_lowering {
