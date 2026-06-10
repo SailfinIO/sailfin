@@ -136,6 +136,16 @@ AGENT_REPORT := bash scripts/agent_report.sh
 # can never mask a test-compile regression.
 TEST_BIN_CACHE_FLAGS ?=
 
+# Parallel test execution (#843 / #1236). The unified runner accepts
+# `--jobs N` (per-file child processes run N at a time); every
+# `$(NATIVE_BIN) test ...` invocation below threads this knob. The
+# default stays 1 because each child carries its own RAM footprint
+# under the 8GB per-process cap — callers pick N for their RAM budget
+# (e.g. `make test TEST_JOBS=4` on a 4-core/16GB box, smaller on
+# 7GB CI runners). CI sharding (`make test-shard`) is unaffected.
+TEST_JOBS ?= 1
+TEST_JOBS_FLAG = --jobs $(TEST_JOBS)
+
 help:
 	@echo "Common Sailfin tasks"
 	@echo ""
@@ -145,6 +155,7 @@ help:
 	@echo "  make check          # Compile (if needed) then run the full test suite"
 	@echo "  make check-fast     # Run sfn check on compiler/src/ + runtime/ (no codegen, fast PR gate)"
 	@echo "  make test           # Run Sailfin-native unit + integration + e2e tests"
+	@echo "  make test TEST_JOBS=4 # Same, with 4 parallel test children (pick N for your RAM budget)"
 	@echo "  make test-unit      # Run Sailfin-native unit tests"
 	@echo "  make test-integration # Run Sailfin-native integration tests"
 	@echo "  make test-e2e       # Run Sailfin-native end-to-end tests"
@@ -201,9 +212,9 @@ test-impl:
 	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules $(TEST_BIN_CACHE_FLAGS) --json | tee build/agent-test.test.jsonl || rc=$$?; \
+		$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules $(TEST_BIN_CACHE_FLAGS) $(TEST_JOBS_FLAG) --json | tee build/agent-test.test.jsonl || rc=$$?; \
 	else \
-		$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules $(TEST_BIN_CACHE_FLAGS) || rc=$$?; \
+		$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules $(TEST_BIN_CACHE_FLAGS) $(TEST_JOBS_FLAG) || rc=$$?; \
 	fi; \
 	$(MAKE) test-e2e-sh || rc=$$?; \
 	exit $$rc
@@ -276,9 +287,9 @@ test-unit-impl:
 	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test compiler/tests/unit --json | tee build/agent-test.test-unit.jsonl; \
+		$(NATIVE_BIN) test compiler/tests/unit $(TEST_JOBS_FLAG) --json | tee build/agent-test.test-unit.jsonl; \
 	else \
-		$(NATIVE_BIN) test compiler/tests/unit; \
+		$(NATIVE_BIN) test compiler/tests/unit $(TEST_JOBS_FLAG); \
 	fi
 
 test-integration:
@@ -293,9 +304,9 @@ test-integration-impl:
 	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test compiler/tests/integration --json | tee build/agent-test.test-integration.jsonl; \
+		$(NATIVE_BIN) test compiler/tests/integration $(TEST_JOBS_FLAG) --json | tee build/agent-test.test-integration.jsonl; \
 	else \
-		$(NATIVE_BIN) test compiler/tests/integration; \
+		$(NATIVE_BIN) test compiler/tests/integration $(TEST_JOBS_FLAG); \
 	fi
 
 # The legacy e2e `test_*.sh` scripts still run alongside the `.sfn`
@@ -318,9 +329,9 @@ test-e2e-impl:
 	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test compiler/tests/e2e --json | tee build/agent-test.test-e2e.jsonl || rc=$$?; \
+		$(NATIVE_BIN) test compiler/tests/e2e $(TEST_JOBS_FLAG) --json | tee build/agent-test.test-e2e.jsonl || rc=$$?; \
 	else \
-		$(NATIVE_BIN) test compiler/tests/e2e || rc=$$?; \
+		$(NATIVE_BIN) test compiler/tests/e2e $(TEST_JOBS_FLAG) || rc=$$?; \
 	fi; \
 	$(MAKE) test-e2e-sh || rc=$$?; \
 	exit $$rc
@@ -342,9 +353,9 @@ test-capsules-impl:
 	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test capsules --json | tee build/agent-test.test-capsules.jsonl; \
+		$(NATIVE_BIN) test capsules $(TEST_JOBS_FLAG) --json | tee build/agent-test.test-capsules.jsonl; \
 	else \
-		$(NATIVE_BIN) test capsules; \
+		$(NATIVE_BIN) test capsules $(TEST_JOBS_FLAG); \
 	fi
 
 # Sharded test execution for parallel CI legs. Phase 1 of

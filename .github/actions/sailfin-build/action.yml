@@ -28,6 +28,10 @@ inputs:
     description: "Test shard to run (unit-a|unit-b|int-e2e-caps|e2e-sh). Empty = run the full `make test` suite. See scripts/test_shards.sh."
     required: false
     default: ""
+  test_jobs:
+    description: "Parallel test children for the full-suite path (TEST_JOBS, forwarded to `make test` — see Makefile). Empty = serial (TEST_JOBS=1). Only consulted when `shard` is empty: the shard path parallelizes across CI legs instead. Pick N for the runner's RAM budget — each child carries its own footprint under the 8GB per-process cap (e.g. 4 on 4-vCPU/16GB ubuntu, 2 on 3-vCPU/7GB macos-15)."
+    required: false
+    default: ""
   package:
     description: "Build + upload dist/ packages ('true'/'false'). Set 'false' on non-primary shard legs so packaging runs once per OS."
     required: false
@@ -40,7 +44,12 @@ inputs:
       used by the shared per-OS build-compiler job in ci.yml. 'skip-build' =
       trust an already-present build/native + build/cache tree (downloaded
       from the build-compiler artifact) and run tests/packaging only; no
-      seed fetch, no `make rebuild`.
+      seed fetch, no `make rebuild`. 'build-package' = fetch seed + build +
+      package, skip the test suite — the slim release gate (#843): a release
+      commit is a mechanical version bump on a main SHA that already passed
+      full PR CI + push:main validation, so the release legs verify the
+      build/package/smoke surface and delegate suite coverage to main CI
+      and the nightly self-host.
     required: false
     default: "full"
 runs:
@@ -134,7 +143,7 @@ runs:
     # a fresh entry). They are also folded into the per-test cache key by
     # content (`runtime_link_inputs_identity`), so this is belt-and-braces.
     - name: Restore test-bin cache (per-test linked binaries)
-      if: ${{ inputs.mode != 'build-only' }}
+      if: ${{ inputs.mode != 'build-only' && inputs.mode != 'build-package' }}
       uses: actions/cache@v4
       with:
         path: build/cache/test-bin
@@ -184,14 +193,14 @@ runs:
         build/native/sailfin version
 
     - name: Prepare test artifacts
-      if: ${{ inputs.mode != 'build-only' }}
+      if: ${{ inputs.mode != 'build-only' && inputs.mode != 'build-package' }}
       shell: bash {0}
       run: |
         set -euo pipefail
         make ci-prepare-test-artifacts
 
     - name: Run tests (first-pass binary)
-      if: ${{ inputs.mode != 'build-only' }}
+      if: ${{ inputs.mode != 'build-only' && inputs.mode != 'build-package' }}
       shell: bash {0}
       run: |
         set -euo pipefail
@@ -210,6 +219,11 @@ runs:
         run_tests() {
           if [ -n "${{ inputs.shard }}" ]; then
             make test-shard SHARD="${{ inputs.shard }}"
+          elif [ -n "${{ inputs.test_jobs }}" ]; then
+            # Full-suite path with parallel test children (#843 Track A).
+            # Forwarded only when explicitly set so the default invocation
+            # stays byte-identical to the historical `make test`.
+            make test TEST_JOBS="${{ inputs.test_jobs }}"
           else
             make test
           fi

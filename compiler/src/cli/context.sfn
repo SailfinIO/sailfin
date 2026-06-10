@@ -1,0 +1,96 @@
+// compiler/src/cli/context.sfn
+//
+// CLI invocation context (CLI modularization epic #351, Issue 2.2 —
+// proposal §4.2). Owns the driver-injected argv prefix that the
+// retired C driver (and today's `sailfin_cli_main_with_paths`)
+// prepends to user argv, in the fixed order:
+//
+//     --runtime-root <path> --binary-dir <path>
+//
+// Both flags are optional, but `--binary-dir` is only recognised
+// after `--runtime-root` has been consumed (or was absent) — the
+// walk is positional, mirroring the historical inline parsing in
+// `sailfin_cli_main` byte-for-byte. A flag with no following value
+// is left unconsumed, exactly like the inline walk it replaces.
+//
+// `registry_url` is part of the canonical CliContext contract
+// (proposal §4.2) but has no driver-prefix source today: registry
+// resolution still lives with the `config` command plumbing until
+// `compiler/src/cli/registry.sfn` lands in a later epic issue. It is
+// always "" here, matching today's behaviour where no inline argv
+// parsing produces a registry URL.
+import { _env_flag, _legacy_flag_file } from "../cli_commands_utils";
+
+struct CliContext {
+    runtime_root: string;
+    binary_dir: string;
+    registry_url: string;
+    trace_argv: boolean;
+}
+
+// Single source of truth for the prefix walk. Both public entry
+// points (`parse_driver_prefix`, `driver_prefix_length`) delegate
+// here so the prefix rules can never drift between the parsed
+// values and the consumed-token count.
+struct _DriverPrefix {
+    runtime_root: string;
+    binary_dir: string;
+    length: int;
+}
+
+fn _walk_driver_prefix(argv: string[]) -> _DriverPrefix {
+    let mut prefix = _DriverPrefix {
+        runtime_root: "",
+        binary_dir: "",
+        length: 0
+    };
+    let mut start_index: int = 0;
+    if start_index < argv.length {
+        if argv[start_index] == "--runtime-root" {
+            if start_index + 1 < argv.length {
+                prefix.runtime_root = argv[start_index + 1];
+                start_index += 2;
+            }
+        }
+    }
+    if start_index < argv.length {
+        if argv[start_index] == "--binary-dir" {
+            if start_index + 1 < argv.length {
+                prefix.binary_dir = argv[start_index + 1];
+                start_index += 2;
+            }
+        }
+    }
+    prefix.length = start_index;
+    return prefix;
+}
+
+// Number of leading argv tokens consumed by the driver prefix.
+// `argv[driver_prefix_length(argv)..]` is the user-visible argv.
+// Kept separate from CliContext so the struct stays on the §4.2
+// contract while callers can still slice the remaining args without
+// re-walking the prefix inline.
+fn driver_prefix_length(argv: string[]) -> int {
+    let prefix = _walk_driver_prefix(argv);
+    return prefix.length;
+}
+
+// Parse the driver-injected prefix out of `argv` into a CliContext.
+// Populated identically to the historical inline parsing in
+// `sailfin_cli_main`: same runtime_root / binary_dir for the same
+// argv, and the same `trace_argv` toggle (SAILFIN_TRACE_ARGV env
+// flag, with the legacy `build/sailfin/.trace_argv` file as
+// back-compat). The `runtime_root` fallback to the local `runtime`
+// bundle stays with the caller — it is a filesystem probe, not argv
+// parsing, and moves to `cli/runtime_root.sfn` in a later issue.
+fn parse_driver_prefix(argv: string[]) -> CliContext ![io] {
+    let prefix = _walk_driver_prefix(argv);
+    let mut ctx = CliContext {
+        runtime_root: prefix.runtime_root,
+        binary_dir: prefix.binary_dir,
+        registry_url: "",
+        trace_argv: false
+    };
+    ctx.trace_argv = _env_flag("SAILFIN_TRACE_ARGV") || _legacy_flag_file("build/sailfin/.trace_argv");
+    return ctx;
+}

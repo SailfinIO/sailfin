@@ -32,9 +32,16 @@ Always update in this order: status → spec → roadmap.
 ## Update Guidelines
 
 ### status.md
+- **Flip the row, link the PR.** status.md is a current-state matrix, not a
+  changelog: update the status cell, rewrite the note to ≤1–2 sentences, and
+  cite the issue/PR numbers. Never append narrative paragraphs — the merged
+  PR description, the linked issue, and `CHANGELOG.md` are the history.
+- If a detail must survive long-term (an ABI shape, a design constraint, a
+  caveat), it belongs in the spec, `docs/proposals/*`, or
+  `docs/runtime_architecture.md` — link it from the row instead of inlining.
 - Use the existing table format and status markers.
 - Be precise about which pipeline stages are complete (parsed, type-checked, effect-checked, emitted, lowered, tested).
-- Reference the specific compiler files that implement the feature.
+- Update the `Updated:` header line (date + pinned seed) when you touch the file.
 
 ### Language spec (`site/src/content/docs/docs/reference/spec/` + `preview/`)
 - `spec/NN-*.md` files are **current language only** — features that are fully implemented and tested.

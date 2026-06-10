@@ -31,7 +31,7 @@
 
 > **Status:** Pre-1.0, active development. The self-hosted native compiler is
 > stable enough for daily use; some marquee features (structured concurrency,
-> `Result<T, E>`, Sailfin-native runtime) are still on the path to 1.0. See
+> the pure-Sailfin runtime) are still on the path to 1.0. See
 > [What Works Today](#what-works-today) and the
 > [roadmap](https://sailfin.dev/roadmap) for the unvarnished picture.
 
@@ -74,7 +74,16 @@ The self-hosted native compiler (`build/native/sailfin`, installed as
   destructuring), `if` / `else`, `for`, `loop` / `break` / `continue`,
   `try` / `catch` / `finally`
 - `int` (i64) and `float` (f64) numeric types, alongside `bool`, `string`,
-  and arrays. `number` remains as an alias for `float`.
+  and arrays. `number` remains as an alias for `float`. Mixed int/float
+  arithmetic is rejected at compile time; disambiguate with explicit `as`
+  casts.
+- `Result<T, E>` and the postfix `?` operator — the canonical
+  `Result<T, E>` enum and `Error` struct ship in the prelude, `?` is
+  type-checked (operand and enclosing function must agree on `E`) and
+  desugars to pure control flow with no exception-runtime cost
+- Closures with capture — lambdas capture enclosing variables (including
+  multiple and mixed-type captures) and compile to `{fn_ptr, env}` pairs
+  callable through higher-order functions
 - Bitwise and shift operators (`&`, `|`, `^`, `<<`, `>>`) and explicit
   numeric `as` casts with a typed lowering matrix (`sitofp`, `fptosi`,
   `sext`, `trunc`, …)
@@ -109,17 +118,21 @@ The self-hosted native compiler (`build/native/sailfin`, installed as
   `--json` emits the `sailfin-check/1` envelope consumed by the MCP server
 - `sfn fmt --check` / `sfn fmt --write` — zero-configuration token-stream
   formatter, enforced in CI
-- `sfn test` — discovers and runs `*_test.sfn` files
+- `sfn test` — discovers and runs `*_test.sfn` files, with name/tag
+  filtering (`-k`, `--tag`), lifecycle hooks, snapshot testing, parallel
+  multi-file runs (`--jobs N`), and a content-addressed per-test binary
+  cache
 - `sfn init` / `sfn add` / `sfn publish` — package registry at
   `pkg.sfn.dev` (configurable via `sfn config set registry <url>` or
   `SFN_REGISTRY` for private/enterprise registries)
 
 **Standard library capsules** (under `capsules/sfn/`, imported by bare name):
 
-`fmt`, `json`, `crypto`, `math`, `path`, `toml`, `fs`, `os`, `log`, `time`,
-`cli`, `http` (partial), `tensor` / `layers` / `nn` / `losses` (CPU). See
-[`docs/status.md`](docs/status.md) for the full feature matrix and effect
-requirements per capsule.
+`strings`, `json`, `crypto`, `math`, `path`, `toml`, `fs`, `os`, `log`,
+`time`, `cli`, `test`, `http` (partial), `tensor` / `layers` / `nn` /
+`losses` (CPU). `net` and `sync` exist as stubs pending the concurrency
+runtime. See [`docs/status.md`](docs/status.md) for the full feature
+matrix and effect requirements per capsule.
 
 ```sfn
 struct User {
@@ -150,33 +163,36 @@ with a fix-it that splices the annotation in for you.
 Sailfin is working toward a 1.0 release with a fully self-hosted toolchain
 and a pure Sailfin runtime. The critical path:
 
-- **`Result<T, E>` + `?` operator** — typed error handling to complement
-  `try` / `catch`. Errors become visible in signatures.
 - **`${expression}` string interpolation** — replacing `{{ }}` to align
   with mainstream conventions and reduce confusion for both humans and LLMs.
-- **Raw pointer types (`*T`, `*const T`)** — needed for OS handles and
-  buffer interop, enforced at typecheck.
-- **Closures with capture** — `map`/`filter`/`reduce`, spawn handlers, and
-  route handlers.
+- **Raw pointer type enforcement (`*T`)** — pointer-typed struct fields,
+  C-ABI function pointers (`* fn`), and extern declarations already lower;
+  full typecheck-level enforcement for OS handles and buffer interop is
+  next.
 - **Generic type constraints** — `fn sort<T: Comparable>(…)`, real
-  `Array<T>` / `HashMap<K, V>` / `Channel<T>`.
+  `Array<T>` / `HashMap<K, V>` / `Channel<T>`, and `From<E>` coercion for
+  the `?` operator.
 - **Deterministic drop emission** (in flight) — compiler-emitted scope-exit
   drops for owned values. Unblocks memory reclamation in the Sailfin-native
   runtime.
 - **Structured concurrency** — `routine { }` blocks, `await`, `channel()`,
-  and `spawn` as first-class constructs. M0 (atomic intrinsics) is shipped;
-  the scheduler is next.
+  and `spawn` as first-class constructs. Atomic intrinsics and the v0
+  scheduler runtime (task lifecycle, `spawn`/`await`, fan-out/join) are
+  built, and the language constructs parse; wiring the type rules into
+  the live typecheck walk and LLVM lowering are the remaining steps.
 - **Effect system hardening** — hierarchical effects (`io.fs`, `net.http`),
   effect polymorphism for generics, and `sfn fix` for auto-inserting missing
   annotations.
 - **Capability auditing (`sfn audit`)** — recursive capability analysis of
   a dependency tree before deployment.
-- **Sailfin-native runtime** — the binary's entry point is now the
-  Sailfin-emitted `@main` (M5, #451); the remaining C helpers under
-  `runtime/native/src/` are being replaced module-by-module with
-  Sailfin (`runtime/sfn/`). `memory/arena.sfn`, `memory/rc.sfn`, and
-  `clock.sfn` are already linked into the compiler; the full rewrite
-  (~90 ABI functions) is a hard 1.0 prerequisite.
+- **Sailfin-native runtime** — the binary's entry point is the
+  Sailfin-emitted `@main`; the remaining C helpers under
+  `runtime/native/src/` are being replaced module-by-module with Sailfin
+  (`runtime/sfn/`). Memory (arena, refcounting), clock, process spawning,
+  type metadata, filesystem adapters, and the concurrency scheduler are
+  already Sailfin modules linked into the compiler; the full rewrite is a
+  hard 1.0 prerequisite. Progress is tracked in
+  [`docs/runtime_audit.md`](docs/runtime_audit.md).
 
 After 1.0, focus shifts to ecosystem growth: an `sfn/ai` capsule for
 model invocation gated by `![model]`, taint types (`Secret<T>`, `PII<T>`)
@@ -202,7 +218,7 @@ curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh |
 To pin a specific version:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | VERSION=0.5.10-alpha.13 bash
+curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | VERSION=0.7.0-alpha.31 bash
 ```
 
 ### Windows (PowerShell)
@@ -214,7 +230,7 @@ irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
 To pin a specific version:
 
 ```powershell
-$env:VERSION = "0.5.10-alpha.13"
+$env:VERSION = "0.7.0-alpha.31"
 irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
 ```
 

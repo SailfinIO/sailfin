@@ -1,10 +1,16 @@
 # Sailfin Proposal: Model Engines, Adapters, Tensors, and Training
 
-Status: Draft Proposal
+Status: Draft Proposal — **superseded in part**. The `model` / `prompt` /
+`tool` / `pipeline` keywords this draft builds on were **removed from the
+language** (see `docs/status.md` § "AI / Model Constructs (Moved to
+Library)"); the functionality targets the post-1.0 `sfn/ai` library
+capsule instead, gated by the `![model]` effect. Engine/adapter/training
+design ideas below remain relevant as *library API* design input, but
+every language-syntax reference in this document is historical.
 
 Author: Sailfin Core Team
 
-Date: October 2025
+Date: October 2025 (status note updated 2026-06-10)
 
 Applies to: Compiler, Runtime, Spec, and Package Manager
 
@@ -14,7 +20,10 @@ Goal: Unify inference and training semantics through typed engines, modular adap
 
 ## 1. Overview
 
-Sailfin already treats models and prompts as first-class language constructs. However, model creation, training, and fine-tuning are not yet implemented, and runtime engines remain implicit.
+Earlier drafts of Sailfin treated models and prompts as first-class
+language constructs; those keywords have since been removed in favour of
+the post-1.0 `sfn/ai` library capsule. Model creation, training, and
+fine-tuning are not yet implemented, and runtime engines remain implicit.
 
 This proposal formalizes:
 

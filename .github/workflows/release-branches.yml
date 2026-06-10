@@ -23,6 +23,10 @@ on:
             - CHANGELOG.md
             - compiler/src/version.sfn
             - compiler/capsule.toml
+            # The release bump commit also stamps llms.txt's "> Version:"
+            # line (release.yml "Update version files"); keep bump commits
+            # from triggering branch CI, same as the other version files.
+            - llms.txt
             - 'site/**'
             - 'capsules/**/capsule.toml'
 
@@ -51,9 +55,14 @@ jobs:
                     - os: macos-15
                       package_label: macos-arm64
                       clang: clang
+                      # 3-vCPU / 7GB hosted runner — see the test_jobs
+                      # input in actions/sailfin-build for the RAM budget.
+                      test_jobs: 2
                     - os: ubuntu-24.04
                       package_label: linux-x86_64
                       clang: clang-18
+                      # 4-vCPU / 16GB hosted runner.
+                      test_jobs: 4
 
         steps:
             - name: Checkout repository
@@ -98,6 +107,7 @@ jobs:
                   target: ${{ matrix.package_label }}
                   clang: ${{ matrix.clang }}
                   seed_version: ${{ steps.seed.outputs.seed_version }}
+                  test_jobs: ${{ matrix.test_jobs }}
 
             - name: Report compiler metadata
               shell: bash {0}
