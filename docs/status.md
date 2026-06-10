@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-06-10. Seed pinned to `v0.7.0-alpha.31` (`.seed-version`);
+Updated: 2026-06-10. Seed pinned to `0.7.0-alpha.31` (`.seed-version`);
 the compiler version source of truth is `compiler/capsule.toml`.
 
 This document is the **current-state source of truth**: what ships today,
@@ -89,7 +89,7 @@ doc, or `docs/runtime_architecture.md`, not here.
 | `let` / `let mut` | Shipped | Annotations optional; limited inference |
 | `thread_local let mut` | Shipped | Top-level only; ELF TLS; immutable form rejected (`E0807`) |
 | Functions (`fn`) | Shipped | Generics, default params, decorators |
-| `async fn` | Parsed | Structural only; concurrency runtime pending |
+| `async fn` | Parsed | Structural only; language-level concurrency lowering pending (#1084) — the v0 runtime surface itself ships (see Runtime) |
 | Structs | Shipped | Generic params, `implements` clause |
 | Interfaces | Shipped | Trait-style method signatures |
 | Enums / ADTs | Shipped | Payload variants; generic payloads monomorphise per instantiation (#830). >8-byte by-value payload layouts not yet emitted |
