@@ -730,7 +730,8 @@ sfn build
  └─ driver::build_capsule(capsule_ref)
      ├─ manifest::load(path) → Manifest
      ├─ resolver::resolve(manifest) → ResolvedGraph
-     │    (workspace → lockfile → cache → registry, in that order)
+     │    (workspace → workspace.lock → capsule.lock → cache → registry,
+     │     in that order)
      ├─ planner::plan(graph) → BuildPlan
      │    (topologically ordered module list + cache keys)
      ├─ executor::execute(plan) → Artifacts
@@ -750,6 +751,27 @@ Key points:
 
 - The driver is **one process**. Modules share parsed imports, the arena,
   and the cache.
+- **Resolution order** (shipped: #1048 capsule.lock, #1071 workspace.lock):
+  workspace siblings resolve first and short-circuit — a lockfile can never
+  redirect an intra-workspace edge (e.g. compiler → runtime). For external
+  deps, a root `workspace.lock` pin wins over the consuming capsule's
+  `capsule.lock`, which wins over the `capsule.toml` version range; then
+  the user cache, then the registry. Absent lockfiles are a no-op —
+  resolution is byte-identical to the pre-lockfile behaviour.
+- **Lockfile ownership**: the workspace root (or a standalone binary
+  capsule's root) owns the lockfile — `sfn lock` (#1070) writes
+  `workspace.lock` at the workspace root only. Library capsules do **not**
+  commit lockfiles; their version *ranges* live in `capsule.toml`, and the
+  consuming root decides the pins. (Same rule as Cargo/npm: applications
+  commit lockfiles, libraries don't.)
+- **Seed gate (self-host hazard)**: `make compile` runs `<seed> build -p
+  compiler`, so the *pinned seed's* resolver reads any committed root
+  `workspace.lock` during self-host. Do **not** commit a root
+  `workspace.lock` until a seed embedding the #1071 consumer is pinned —
+  a pre-consumer seed would either choke on or silently ignore the file,
+  and the two-pass seedcheck would diverge from the first pass. Satisfied
+  as of seed `v0.7.0-alpha.31` (contains #1071); committing the root
+  lockfile itself is #1050.
 - Each module's work is a pure function from `(source_hash, dep_hashes,
   flags)` to `(sfn-asm, layout-manifest, ll)`. Pure inputs → cacheable.
 - Parallelism is opt-in per phase. Parser/typecheck can be parallel once
