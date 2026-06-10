@@ -55,9 +55,15 @@ jobs:
           - os: macos-15
             package_label: macos-arm64
             clang: clang
+            # 3-vCPU / 7GB hosted runner: 2 parallel test children is the
+            # safe RAM budget (each child runs under the 8GB per-process
+            # cap; see the test_jobs input in actions/sailfin-build).
+            test_jobs: 2
           - os: ubuntu-24.04
             package_label: linux-x86_64
             clang: clang-18
+            # 4-vCPU / 16GB hosted runner.
+            test_jobs: 4
 
     steps:
       - name: Checkout repository (tag)
@@ -124,6 +130,7 @@ jobs:
           target: ${{ matrix.package_label }}
           clang: ${{ matrix.clang }}
           seed_version: ${{ steps.seed.outputs.seed_version }}
+          test_jobs: ${{ matrix.test_jobs }}
 
       - name: Verify compiler version matches tag
         shell: bash {0}

@@ -28,6 +28,10 @@ inputs:
     description: "Test shard to run (unit-a|unit-b|int-e2e-caps|e2e-sh). Empty = run the full `make test` suite. See scripts/test_shards.sh."
     required: false
     default: ""
+  test_jobs:
+    description: "Parallel test children for the full-suite path (TEST_JOBS, forwarded to `make test` — see Makefile). Empty = serial (TEST_JOBS=1). Only consulted when `shard` is empty: the shard path parallelizes across CI legs instead. Pick N for the runner's RAM budget — each child carries its own footprint under the 8GB per-process cap (e.g. 4 on 4-vCPU/16GB ubuntu, 2 on 3-vCPU/7GB macos-15)."
+    required: false
+    default: ""
   package:
     description: "Build + upload dist/ packages ('true'/'false'). Set 'false' on non-primary shard legs so packaging runs once per OS."
     required: false
@@ -210,6 +214,11 @@ runs:
         run_tests() {
           if [ -n "${{ inputs.shard }}" ]; then
             make test-shard SHARD="${{ inputs.shard }}"
+          elif [ -n "${{ inputs.test_jobs }}" ]; then
+            # Full-suite path with parallel test children (#843 Track A).
+            # Forwarded only when explicitly set so the default invocation
+            # stays byte-identical to the historical `make test`.
+            make test TEST_JOBS="${{ inputs.test_jobs }}"
           else
             make test
           fi
