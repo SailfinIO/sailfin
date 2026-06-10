@@ -1,0 +1,153 @@
+// compiler/tests/integration/check_staging_equivalence_test.sfn
+//
+// Regression coverage for #1246: `sfn check` threads the resolved
+// self-executable into `prepare_project_capsules_for_check`, so the
+// resolver stages each cache-miss module's import-context (`.sfn-asm`
+// + `.layout-manifest` + `.srchash`) in a subprocess — bounding the
+// parent's arena the same way `sfn build` does — instead of the
+// in-process fallback that peaked 8.3GB on a cold
+// `check compiler/src/cli_main.sfn` (#1245).
+//
+// The acceptance contract is *equivalence*: the staged artifact set
+// produced by the subprocess path must be byte-identical to the set
+// the legacy in-process path produces. This test drives both paths
+// end-to-end through the *shipped* `build/native/sailfin` binary:
+//
+//   - Run A invokes the binary normally. `fn main` threads
+//     `binary_dir` from `exe_path()`, `_resolve_check_self_path`
+//     finds `<binary_dir>/sailfin`, and staging takes the
+//     subprocess-per-module branch of `_cr_stage_one`.
+//   - Run B invokes a byte-identical COPY of the binary under a
+//     different filename. `binary_dir` resolves to the copy's
+//     directory, `<binary_dir>/sailfin` does not exist, the resolved
+//     exe is "", and staging falls back to the legacy in-process
+//     branch — the pre-#1246 behavior, preserved for callers that
+//     can't resolve their own path. The trick hinges on `exe_path()`
+//     (Linux `/proc/self/exe`) / `realpath(argv[0])` resolving to
+//     the *invoked filename's* directory, so the `cp` (not symlink)
+//     under a non-`sailfin` name is what forces the miss.
+//
+// Each run uses its own work directory (staging writes to
+// `<cwd>/build/native/import-context`), so the two staged trees can
+// be `diff -r`'d whole: same file set, same bytes. Spawning the real
+// binary (rather than importing resolver entry points) matches
+// production exactly and avoids dragging the whole driver into the
+// test link — the same rationale as `emit_retry_test.sfn`.
+extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+
+fn _shell_capture(cmd: string) -> string ![io] {
+    return sailfin_runtime_shell_capture(cmd);
+}
+
+// Write a minimal two-module fixture: `main.sfn` relatively imports
+// `./helper`, so the resolver's relative-import walk stages `helper`
+// into the import-context even though no capsule.toml exists
+// (standalone files are valid `sfn check` input).
+fn _write_fixture(src_dir: string) ![io] {
+    process.run(["mkdir", "-p", src_dir]);
+    fs.writeFile(src_dir + "/helper.sfn", "fn helper_add(a: int, b: int) -> int {\n    return a + b;\n}\n\nexport { helper_add };\n");
+    fs.writeFile(src_dir + "/main.sfn", "import { helper_add } from \"./helper\";\n\nfn main() ![io] {\n    let total = helper_add(1, 2);\n    print.info(\"total: \" + number_to_string(total));\n}\n");
+}
+
+test "check staging: subprocess path stages byte-identical artifacts to in-process path" ![io] {
+    let root = fs.mkdtemp("sfn-check-stage-eq-");
+    assert root.length > 0;
+    let src_dir = root + "/src";
+    _write_fixture(src_dir);
+
+    // `printf '%s'` strips the trailing newline `realpath` emits —
+    // a raw capture would split the `sh -c` scripts below in two
+    // (same pattern as `_host_path` in `emit_retry_test.sfn`).
+    let exe = _shell_capture("printf '%s' \"$(realpath build/native/sailfin)\"");
+    assert exe.length > 0;
+
+    // Run A: shipped binary under its real name -> `binary_dir`
+    // resolves -> subprocess staging path.
+    let work_a = root + "/work_a";
+    process.run(["mkdir", "-p", work_a]);
+    let rc_a = process.run(["sh", "-c", "cd " + work_a + " && " + exe
+        + " check "
+        + src_dir
+        + "/main.sfn >/dev/null 2>&1"]);
+    assert rc_a == 0;
+
+    // Run B: byte-identical copy under a different filename ->
+    // `<binary_dir>/sailfin` misses -> resolved exe is "" ->
+    // legacy in-process staging path.
+    let work_b = root + "/work_b";
+    let bin_b = root + "/binb";
+    process.run(["mkdir", "-p", work_b]);
+    process.run(["mkdir", "-p", bin_b]);
+    process.run(["cp", exe, bin_b + "/sfn-renamed"]);
+    let rc_b = process.run(["sh", "-c", "cd " + work_b + " && " + bin_b
+        + "/sfn-renamed check "
+        + src_dir
+        + "/main.sfn >/dev/null 2>&1"]);
+    assert rc_b == 0;
+
+    // Guard against a vacuous pass: both runs must actually have
+    // staged at least one `.sfn-asm` (the fixture's relative import
+    // guarantees a non-empty resolution).
+    let staged_a = process.run(["sh", "-c", "find " + work_a
+        + "/build/native/import-context -name '*.sfn-asm' | grep -q ."]);
+    assert staged_a == 0;
+    let staged_b = process.run(["sh", "-c", "find " + work_b
+        + "/build/native/import-context -name '*.sfn-asm' | grep -q ."]);
+    assert staged_b == 0;
+
+    // The headline equivalence: identical file set, identical bytes
+    // (`.sfn-asm`, `.layout-manifest`, and `.srchash` sidecars all
+    // participate in the recursive diff).
+    let rc_diff = process.run(["diff", "-r", work_a
+        + "/build/native/import-context", work_b
+        + "/build/native/import-context"]);
+    assert rc_diff == 0;
+
+    process.run(["rm", "-rf", root]);
+}
+
+test "check staging: warm re-run is a cache hit (staged artifacts untouched)" ![io] {
+    let root = fs.mkdtemp("sfn-check-stage-warm-");
+    assert root.length > 0;
+    let src_dir = root + "/src";
+    _write_fixture(src_dir);
+
+    // `printf '%s'` strips the trailing newline `realpath` emits —
+    // a raw capture would split the `sh -c` scripts below in two
+    // (same pattern as `_host_path` in `emit_retry_test.sfn`).
+    let exe = _shell_capture("printf '%s' \"$(realpath build/native/sailfin)\"");
+    assert exe.length > 0;
+
+    let work = root + "/work";
+    process.run(["mkdir", "-p", work]);
+    let cmd = "cd " + work + " && " + exe + " check " + src_dir
+        + "/main.sfn >/dev/null 2>&1";
+
+    // Cold run stages the import-context.
+    let rc_cold = process.run(["sh", "-c", cmd]);
+    assert rc_cold == 0;
+
+    // Snapshot the staged tree (paths + content hashes + mtimes).
+    // `_cr_stage_one`'s cache hit short-circuits before the
+    // subprocess branch, so a warm run must not rewrite anything —
+    // pinning the "warm runs spawn nothing" half of #1246.
+    //
+    // Load-bearing fixture assumption: with NO capsule.toml, every
+    // source's canonical slug equals its path slug, so
+    // `_cr_write_capsule_slug_aliases` writes no `.slugalias` on
+    // either run. A capsule fixture with a scoped slug would rewrite
+    // the alias each run and flake the mtime half of this snapshot.
+    let snap_cmd = "cd " + work
+        + "/build/native/import-context && find . -type f | sort | xargs -r stat -c '%n %Y' && find . -type f | sort | xargs -r sha256sum";
+    let before = _shell_capture(snap_cmd);
+    assert before.length > 0;
+
+    // Warm run: byte-identical source -> content-hash cache hit.
+    let rc_warm = process.run(["sh", "-c", cmd]);
+    assert rc_warm == 0;
+
+    let after = _shell_capture(snap_cmd);
+    assert before == after;
+
+    process.run(["rm", "-rf", root]);
+}
