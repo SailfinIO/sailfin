@@ -23,6 +23,10 @@ on:
             - CHANGELOG.md
             - compiler/src/version.sfn
             - compiler/capsule.toml
+            # The release bump commit also stamps llms.txt's "> Version:"
+            # line (release.yml "Update version files"); keep bump commits
+            # from triggering branch CI, same as the other version files.
+            - llms.txt
             - 'site/**'
             - 'capsules/**/capsule.toml'
 

@@ -122,6 +122,13 @@ jobs:
           brew install jq llvm
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
+      # Slim release gate (#843): a prerelease tag is a mechanical
+      # version bump on a main SHA that already passed full PR CI and
+      # push:main validation, so prerelease legs build + package + smoke
+      # and delegate suite coverage to main CI and the nightly
+      # self-host. Stable (non-prerelease) tags keep the full suite —
+      # GA cuts are rare enough that the extra hour is worth the
+      # belt-and-braces. `test_jobs` only applies on that full path.
       - name: Build + test + package (via Makefile)
         uses: ./.github/actions/sailfin-build
         env:
@@ -131,6 +138,24 @@ jobs:
           clang: ${{ matrix.clang }}
           seed_version: ${{ steps.seed.outputs.seed_version }}
           test_jobs: ${{ matrix.test_jobs }}
+          mode: ${{ contains(env.RELEASE_TAG, '-') && 'build-package' || 'full' }}
+
+      # Smoke-test the built compiler end-to-end (compile + link + run a
+      # real program). Together with the two version verifications below
+      # this is the release-leg acceptance surface on the slim path.
+      - name: Smoke-test built compiler (hello-world)
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          if [ "${RUNNER_OS:-}" = "Linux" ]; then
+            ulimit -v 8388608 || true
+          fi
+          out="$(build/native/sailfin run examples/basics/hello-world.sfn)"
+          echo "$out"
+          if ! printf '%s' "$out" | grep -q "Hello, Sailfin!"; then
+            echo "[ci][error] hello-world smoke failed: expected 'Hello, Sailfin!' in output" >&2
+            exit 1
+          fi
 
       - name: Verify compiler version matches tag
         shell: bash {0}
