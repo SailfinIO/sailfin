@@ -22,12 +22,14 @@
 # 5-entry check and a warm 40-entry check:
 #
 #   - pre-#1247: the extra 35 entries re-scan the 10-module chain
-#     once each (~350MB of pre-mark arena, ~85 extra 4MiB pages).
+#     once each (measured +61 extra 4MiB pages against the pre-fix
+#     v0.7.0-alpha.29 seed binary).
 #   - post-#1247: the chain is scanned once per run regardless of
-#     entry count (delta is a handful of pages of per-entry BFS
-#     bookkeeping + unchanged per-file analysis scratch).
+#     entry count (measured +0 pages; delta is bounded by per-entry
+#     BFS bookkeeping + unchanged per-file analysis scratch).
 #
-# The threshold (24 pages = 96MB) sits ~3.5x away from both sides.
+# The threshold (24 pages = 96MB) sits ~2.5x below the measured
+# pre-fix delta and well above the measured post-fix delta.
 # NOTE: the bound is calibrated against the 4MiB default arena page
 # size (`_init_global_arena` in runtime/native/src/sailfin_arena.c);
 # if `SfnArenaPage` capacity changes, recalibrate the bound.
@@ -53,8 +55,6 @@ ulimit -v 8388608 2> /dev/null || true
 
 SCRATCH="$(mktemp -d -t sfn-check-scan-memo-XXXXXX)"
 trap 'rm -rf "$SCRATCH"' EXIT
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 run_test() {
     local name="$1"
