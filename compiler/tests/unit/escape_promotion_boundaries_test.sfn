@@ -249,6 +249,51 @@ test "drop emission: spawn-captured value emits no release at the spawner's scop
     assert drops.lines.length == 0;
 }
 
+test "shadowing: only the innermost matching binding is promoted AND consumed" {
+    // Mirrors `find_local_binding` / `promote_local_to_rc` resolution: when
+    // an inner-scope `let msg` shadows an outer `msg` and the inner one is
+    // sent, the outer binding never crossed the boundary — it must keep its
+    // arena kind and (critically) its owner drop, so neither field flips.
+    let outer = LocalBinding {
+        name: "msg",
+        pointer: "%l_outer",
+        llvm_type: "i8*",
+        type_annotation: "string",
+        ownership: null,
+        consumed: false,
+        scope_id: "fn:test",
+        scope_depth: 0,
+        allocation_kind: "arena",
+        init_sentinel: ""
+    };
+    let inner = LocalBinding {
+        name: "msg",
+        pointer: "%l_inner",
+        llvm_type: "i8*",
+        type_annotation: "string",
+        ownership: null,
+        consumed: false,
+        scope_id: "fn:test__inner",
+        scope_depth: 1,
+        allocation_kind: "arena",
+        init_sentinel: ""
+    };
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("ch", "i8*", "channel", null));
+    locals = append_local_binding(locals, outer);
+    locals = append_local_binding(locals, inner);
+    let promoted = promote_escaping_locals_for_boundaries("ch.send(msg)", locals, _no_params());
+    assert promoted.length == 3;
+    // Outer (older) binding: untouched on both axes.
+    assert promoted[1].pointer == "%l_outer";
+    assert promoted[1].allocation_kind == "arena";
+    assert ! promoted[1].consumed;
+    // Inner (most-recent) binding: promoted and consumed.
+    assert promoted[2].pointer == "%l_inner";
+    assert promoted[2].allocation_kind == "rc";
+    assert promoted[2].consumed;
+}
+
 // -----------------------------------------------------------------------------
 // Boundary-detection hygiene — shapes that must NOT promote.
 // -----------------------------------------------------------------------------
