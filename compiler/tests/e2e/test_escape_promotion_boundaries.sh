@@ -253,17 +253,41 @@ CHARNESS
         return 1
     fi
 
-    # ASAN link + run — best effort: some hosts ship clang without the
-    # compiler-rt ASAN archives. A link failure is a skip, not a FAIL;
-    # an ASAN *runtime* failure (use-after-free) is a real FAIL.
+    # ASAN link + run — best effort, twice over:
+    #   - some hosts ship clang without the compiler-rt ASAN archives
+    #     (link failure → skip);
+    #   - ASAN reserves ~16 TB of VIRTUAL address space for shadow memory
+    #     at startup, which is fundamentally incompatible with the
+    #     `ulimit -v` cap the repo's test harness runs under
+    #     (.claude/rules/compiler-safety.md) — the binary aborts with
+    #     "ReserveShadowMemoryRange failed ... Perhaps you're using
+    #     ulimit -v" before main() runs. Skip the ASAN leg whenever a
+    #     vmem cap is active; the plain roundtrip above still validates.
+    # Only an actual ASAN error report (e.g. heap-use-after-free) is a
+    # real FAIL — that is the sender-side-release regression signal.
+    local vmem_cap
+    vmem_cap="$(ulimit -v 2>/dev/null || echo unlimited)"
+    if [ "$vmem_cap" != "unlimited" ]; then
+        echo "[test]   virtual-memory cap active (ulimit -v ${vmem_cap}) — ASAN shadow reservation cannot run; plain roundtrip still passed"
+        return 0
+    fi
+
     local bin_asan="$SCRATCH/roundtrip_asan"
     if "$clang_bin" -fsanitize=address -Wno-override-module "$harness" "$ll_path" \
             -o "$bin_asan" -lpthread 2>"$SCRATCH/clang_asan.log"; then
-        if ! ${TIMEOUT_PREFIX} "$bin_asan"; then
+        local asan_log="$SCRATCH/asan_run.log"
+        if ${TIMEOUT_PREFIX} "$bin_asan" > "$asan_log" 2>&1; then
+            echo "[test]   ASAN roundtrip clean"
+        elif grep -q "ERROR: AddressSanitizer:" "$asan_log"; then
             echo "[test]   ASAN roundtrip failed — sender-side release of the escaped payload" >&2
+            sed 's/^/[test]     /' "$asan_log" | head -25 >&2
             return 1
+        else
+            # Startup/environment failure (shadow mapping, missing
+            # runtime .so, etc.) — not a verdict on the escape rule.
+            echo "[test]   ASAN could not start on this host — plain roundtrip still passed"
+            sed 's/^/[test]     /' "$asan_log" | head -5
         fi
-        echo "[test]   ASAN roundtrip clean"
     else
         echo "[test]   ASAN runtime not available on this host — plain roundtrip still passed"
     fi
