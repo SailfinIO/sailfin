@@ -1052,8 +1052,10 @@ fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] {
 // `static` in the C runtime, so it cannot be reached via `extern fn`;
 // the push path only ever realloc's `data`, never the header, so a
 // plain-malloc header is safe. An empty / unreachable environment
-// yields the empty array (never the null pointer); mid-walk OOM
-// returns the entries collected so far.
+// yields the empty array; the null pointer escapes only when the
+// 24-byte header malloc itself fails (the same OOM contract as the C
+// `sailfin_adapter_fs_list_directory_v2`), and mid-walk OOM returns
+// the entries collected so far.
 //
 // On Windows the cross-windows Makefile path skips this module and
 // the `#if defined(_WIN32)` shim in

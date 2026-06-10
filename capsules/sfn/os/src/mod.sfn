@@ -151,6 +151,11 @@ fn _env_index_of_eq(text: string) -> int {
 // `Env` as "empty environment" rather than "inherit", so
 // `env_from_current()` is the way to build an inheriting child env.
 //
+// Windows caveat: `process.environ()` is currently shimmed to return
+// an empty array on Windows (`runtime/native/src/sailfin_runtime.c`,
+// `_WIN32` block), so this snapshot is empty there until a real
+// `GetEnvironmentStringsA` enumeration lands.
+//
 // `![io]` — reading the process environment is an environment read,
 // the same gate as `env.get`.
 fn env_from_current() -> Env ![io] {
