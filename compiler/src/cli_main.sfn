@@ -55,6 +55,7 @@ import {
     prepare_project_capsules
 } from "./capsule_resolver";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./cli/context";
+import { sailfin_cli_main_v2 } from "./cli/main";
 import { handle_check_command } from "./cli_check";
 import {
     handle_add_command,
@@ -1611,11 +1612,17 @@ fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
 
 // Historical C ABI boundary — the now-retired C driver called
 // `sailfin_cli_main__cli_main` with an `int64_t` return type.
-// After M5.5 (#473) the only caller is `sailfin_cli_main_with_paths`
-// (driven from `fn main` in this module); the `int` return type
-// keeps the ABI shape stable in case any embedder still binds the
-// symbol externally.
-fn sailfin_cli_main(argv: string[]) -> int ![io, clock] {
+// After M5.5 (#473) the only callers are `sailfin_cli_main_v2`
+// (the `sfn/cli`-based dispatcher in `cli/main.sfn`, which falls
+// through here for every subcommand it does not own) and, transitively,
+// `sailfin_cli_main_with_paths` (driven from `fn main`). The `int`
+// return type keeps the ABI shape stable in case any embedder still
+// binds the symbol externally.
+//
+// CLI modularization epic #351, Issue 2.3: renamed from
+// `sailfin_cli_main` to `sailfin_cli_main_legacy` and kept verbatim;
+// v2 (`cli/main.sfn`) is the new front door and delegates here.
+fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     // Issue 2.2 (#1160): the driver-injected `--runtime-root` /
     // `--binary-dir` prefix is parsed by `cli/context.sfn` into a
     // CliContext; this body only consumes the result.
@@ -2560,15 +2567,21 @@ fn sailfin_cli_main_with_paths(argv: string[], runtime_root: string, binary_dir:
         composed.push(argv[i]);
         i += 1;
     }
-    return sailfin_cli_main(composed);
+    return sailfin_cli_main_v2(composed);
 }
 
 // Exported entrypoint for the native argv shim (legacy C-ABI
 // boundary). With the C driver retired in M5.5 (#473) it has no
 // remaining external caller; left in place defensively so any
 // embedder still wiring up the seed's symbol table can resolve it.
-fn native_cli_main(argv: string[]) -> int ![io] {
-    return sailfin_cli_main(argv);
+//
+// Issue 2.3 (#1161): now delegates to the imported `sailfin_cli_main_v2`
+// (`![io, clock]`). The cross-module import makes v2's `clock` effect
+// explicit at this call site, so the envelope grows from `![io]` to
+// `![io, clock]` — the same effect surface the live `@main` path
+// (`fn main` -> `sailfin_cli_main_with_paths` -> v2) already declares.
+fn native_cli_main(argv: string[]) -> int ![io, clock] {
+    return sailfin_cli_main_v2(argv);
 }
 
 // M5.5 (#473): the compiler binary's C-ABI entry point. The LLVM
