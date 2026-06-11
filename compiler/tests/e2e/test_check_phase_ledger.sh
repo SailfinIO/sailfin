@@ -53,19 +53,23 @@ run_test() {
 SCRATCH="$(mktemp -d -t sfn-check-ledger-XXXXXX)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
-# Read a flat-JSON string field without a hard jq dependency (mirrors
-# test_make_result_contract.sh's json_field).
+# Read a top-level JSON string/null field without a hard jq dependency.
+# Unlike test_make_result_contract.sh's flat-JSON helper, the check report
+# nests seven `"status"` keys inside phases[], so the jq-less fallback must
+# take the *first* occurrence of the key — a greedy/last match would shadow
+# the top-level value with a phase value. The report writes every top-level
+# field before phases[], so first-occurrence is the top-level value.
 json_field() {
-    local json="$1" field="$2"
+    local json="$1" field="$2" match
     if command -v jq >/dev/null 2>&1; then
         printf '%s' "$json" | jq -r ".${field} // \"null\"" 2>/dev/null
         return
     fi
-    if printf '%s' "$json" | grep -q "\"${field}\":null"; then
-        printf 'null'
-        return
-    fi
-    printf '%s' "$json" | sed -nE "s/.*\"${field}\":\"([^\"]*)\".*/\1/p"
+    match="$(printf '%s' "$json" | grep -oE "\"${field}\":(\"[^\"]*\"|null)" | head -n1)"
+    case "$match" in
+        *:null) printf 'null' ;;
+        *) printf '%s' "$match" | sed -E "s/.*:\"([^\"]*)\"/\1/" ;;
+    esac
 }
 
 # Run agent_report.sh for `--target check` over a stub that prints $1 (a banner
