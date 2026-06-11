@@ -36,6 +36,7 @@ import {
     Statement
 } from "./ast";
 import { Token } from "./token";
+import { is_identifier_char } from "./typecheck_types";
 
 // One tracked binding. `state` is the R0 lattice: "owned" on entry,
 // "moved" once E5 marks a move site. Shadowing is by position — the
@@ -231,9 +232,22 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         loop {
             if case_index >= statement.cases.length { break; }
             let case = statement.cases[case_index];
-            next = _scope_after_expression(case.pattern, next);
-            next = _scope_after_expression(case.guard, next);
-            next = _nested_block_scope(case.body, next);
+            // Arm scope: pattern-bound names (destructured fields,
+            // catch-all identifiers) enter as owned before the guard
+            // and body walk, mirroring
+            // `register_match_pattern_bindings` in typecheck.sfn —
+            // guards may reference pattern bindings.
+            let mut child = OwnershipScope {
+                bindings: _copy_bindings(next.bindings),
+                tracked: next.tracked
+            };
+            child = _enter_pattern_bindings(case.pattern, child);
+            child = _scope_after_expression(case.guard, child);
+            let child_out = _scope_after_block(case.body, child);
+            next = OwnershipScope {
+                bindings: next.bindings,
+                tracked: child_out.tracked
+            };
             case_index += 1;
         }
         return next;
@@ -282,6 +296,67 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         };
     }
     return scope;
+}
+
+// Mirror of `register_match_pattern_bindings` in typecheck.sfn: a
+// `Struct` pattern binds its field names, the colon-less shorthand
+// destructure (`Shape.Circle { radius }`) parses to `Raw` so the
+// names are recovered from the brace block, and a bare non-`_`
+// identifier is a catch-all binding. Literal patterns bind nothing.
+fn _enter_pattern_bindings(pattern: Expression?, scope: OwnershipScope) -> OwnershipScope {
+    if pattern == null { return scope; }
+    if pattern.variant == "Struct" {
+        let mut next = scope;
+        let mut index: int = 0;
+        loop {
+            if index >= pattern.fields.length { break; }
+            next = _enter_binding(next, pattern.fields[index].name, null);
+            index += 1;
+        }
+        return next;
+    }
+    if pattern.variant == "Raw" {
+        return _enter_raw_pattern_bindings(pattern.text, scope);
+    }
+    if pattern.variant == "Identifier" {
+        if pattern.name == "_" { return scope; }
+        return _enter_binding(scope, pattern.name, pattern.span);
+    }
+    return scope;
+}
+
+// Collect each identifier inside the `{ ... }` block of a raw
+// shorthand destructure as a binding — same recovery walk as
+// `register_raw_pattern_bindings` in typecheck.sfn.
+fn _enter_raw_pattern_bindings(text: string, scope: OwnershipScope) -> OwnershipScope {
+    let mut next = scope;
+    let mut in_block: boolean = false;
+    let mut token: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if !in_block {
+            if ch == "{" { in_block = true; }
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if token.length > 0 {
+                next = _enter_binding(next, token, null);
+                token = "";
+            }
+            break;
+        }
+        if is_identifier_char(ch) { token = token + ch; } else {
+            if token.length > 0 {
+                next = _enter_binding(next, token, null);
+                token = "";
+            }
+        }
+        index += 1;
+    }
+    return next;
 }
 
 // Expression walk: ownership state is not consumed by expressions in
@@ -488,10 +563,18 @@ fn check_ownership(program: Program) -> OwnershipWarning[] {
 
 // Build-path gate wrapper for `main.sfn`, shaped like
 // `validate_and_render_effects`: returns the count of error-severity
-// findings. Dormant Phase R0 mints no findings, so this is always 0 —
+// findings only — warning-severity findings never gate the build.
+// Dormant Phase R0 mints no findings at all, so this is always 0;
 // callers gate on `> 0` and the pass graduates to a real gate in E5/E6
 // without re-plumbing the call sites.
 fn run_ownership_checker(program: Program) -> int {
     let summary = analyze_program_ownership(program);
-    return summary.warnings.length;
+    let mut errors: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= summary.warnings.length { break; }
+        if summary.warnings[index].severity == "error" { errors += 1; }
+        index += 1;
+    }
+    return errors;
 }

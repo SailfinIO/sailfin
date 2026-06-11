@@ -79,6 +79,24 @@ test "ownership: struct methods and tests are walked" ![io] {
     assert summary.warnings.length == 0;
 }
 
+test "ownership: match arm pattern bindings are tracked" ![io] {
+    let source = "fn pick(v: int) -> int {\n    match v {\n        0 => {\n            return 0;\n        }\n        other => {\n            let d = other;\n            return d;\n        }\n    }\n    return v;\n}\n";
+    let program = parse_program(source);
+    let summary = analyze_program_ownership(program);
+    // param v + catch-all binding other + let d
+    assert summary.bindings_tracked == 3;
+    assert summary.warnings.length == 0;
+}
+
+test "ownership: match destructure pattern bindings are tracked" ![io] {
+    let source = "enum Shape {\n    Circle { radius: float },\n    Square { side: float }\n}\n\nfn area(shape: Shape) -> float {\n    match shape {\n        Shape.Circle { radius } => {\n            return 3.14 * radius * radius;\n        }\n        Shape.Square { side } => {\n            return side * side;\n        }\n    }\n    return 0.0;\n}\n";
+    let program = parse_program(source);
+    let summary = analyze_program_ownership(program);
+    // param shape + destructured radius + destructured side
+    assert summary.bindings_tracked == 3;
+    assert summary.warnings.length == 0;
+}
+
 test "ownership: lattice helpers flip owned to moved" ![io] {
     let mut bindings: OwnershipBinding[] = [];
     bindings.push(OwnershipBinding { name: "x", state: "owned", span: null });
