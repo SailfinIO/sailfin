@@ -116,9 +116,9 @@ doc, or `docs/runtime_architecture.md`, not here.
 | Deterministic drop emission | In flight | M1.5 epic #322 (`LocalBinding.allocation_kind` + `emit_scope_drops`); v0 escape rule is function-return promotion only |
 | Atomic intrinsics (M0) | **Shipped** | All six builtins lower to LLVM atomics, `seq_cst` at v0 (#323, #331–#335); arity/type validation `E0806` |
 | Interface conformance validation | Partial | Basic checks; variance not enforced |
-| `Affine<T>` / `Linear<T>` | Move-enforced | Move / use-after-move enforced on owned/affine-typed bindings (#1214, E5 of #1209): a moved binding that is read, passed, or returned again raises `E0901`; a second `let`-binding of a moved value raises `E0904`. Single-use (linear) enforcement on user wrappers is E7; shared borrows are Phase U |
+| `Affine<T>` / `Linear<T>` | Single-use enforced | Move / use-after-move enforced on owned/affine-typed bindings (#1214, E5 of #1209): a moved binding that is read, passed, or returned again raises `E0901`; a second `let`-binding of a moved value raises `E0904`. `Affine<T>` is at-most-once (the move rules are its whole story). `Linear<T>` is exactly-once: a linear value never consumed (moved/returned/passed/freed) before it leaves scope raises `E0907` (#1216, E7 of #1209). Shared borrows are Phase U |
 | `OwnedBuf` / `Slice` owned-buffer family | Ownership-enforced (buffers) | Library types in `runtime/sfn/memory/ownedbuf.sfn` (#1212, E3 of #1209): parse/typecheck/lower via the existing struct + i64 paths. `OwnedBuf` bindings are move-tracked (#1214, `E0901`/`E0904`); in-place mutation of a stale buffer raises `E0902`, use-after-free raises `E0903`, and a raw-pointer escape into an `extern fn` outside `unsafe` raises `E0906` (#1215, E6 of #1209). `Slice` view-lifetime tracking is Phase U. Pinned by `compiler/tests/e2e/test_owned_buf_roundtrip.sh` |
-| Ownership checker pass | Move + mutation/UAF/escape enforced | Standalone `compiler/src/ownership_checker.sfn` after effect-check (#1213 skeleton → #1214 move core → #1215 E6). Walks the effect-checker scope structure, tracks an `Owned`/`Moved`/`Freed` lattice per owned/affine binding, and gates the build on use-after-move (`E0901`), second-live-binding (`E0904`), in-place mutation of a possibly-aliased buffer (`E0902`), use-after-free (`E0903`), and raw-pointer FFI escape (`E0906`). Copyable values are untracked and the un-migrated runtime passes raw `*u8`/`Cast` args (never a bare owned identifier), so the compiler self-hosts unaffected. `unsafe { }` / `unsafe fn` interiors are skipped (#1211) |
+| Ownership checker pass | Move + mutation/UAF/escape + linear-consume enforced | Standalone `compiler/src/ownership_checker.sfn` after effect-check (#1213 skeleton → #1214 move core → #1215 E6 → #1216 E7). Walks the effect-checker scope structure, tracks an `Owned`/`Moved`/`Freed` lattice per owned/affine binding, and gates the build on use-after-move (`E0901`), second-live-binding (`E0904`), in-place mutation of a possibly-aliased buffer (`E0902`), use-after-free (`E0903`), raw-pointer FFI escape (`E0906`), and an unconsumed `Linear<T>` value at scope exit (`E0907`). Copyable values are untracked and the un-migrated runtime passes raw `*u8`/`Cast` args (never a bare owned identifier), so the compiler self-hosts unaffected. `unsafe { }` / `unsafe fn` interiors are skipped (#1211) |
 | `&T` / `&mut T` borrows | Parsed only | Exclusivity not checked |
 | `PII<T>` / `Secret<T>` | Parsed only | No taint enforcement; deferred post-1.0 |
 | `model`/`prompt`/`tool`/`pipeline` blocks | **Removed** | Moved to the post-1.0 `sfn/ai` capsule; the `![model]` effect stays |
@@ -248,8 +248,10 @@ Tracked in the [roadmap](https://sailfin.dev/roadmap) and
   fourth pillar). Move / use-after-move (`E0901`/`E0904`, #1214) plus in-place
   mutation of a possibly-aliased buffer (`E0902`), use-after-free (`E0903`), and
   raw-pointer FFI escape (`E0906`) are now enforced on owned/affine bindings
-  (`Affine<T>`, `Linear<T>`, `OwnedBuf`) (#1215, E6). Linear single-use (E7),
-  shared borrows, and `Slice` view lifetimes (Phase U) are still in flight.
+  (`Affine<T>`, `Linear<T>`, `OwnedBuf`) (#1215, E6). `Linear<T>` exactly-once
+  enforcement — an unconsumed linear value at scope exit raises `E0907` (#1216,
+  E7) — has landed. Shared borrows and `Slice` view lifetimes (Phase U) are
+  still in flight.
 - **Unenforced syntax** — `&T`, `&mut T`, `PII<T>`, `Secret<T>` are parsed but
   not enforced and are explicitly deferred post-1.0. Sailfin's safety story is
   **effects and capabilities** plus the bounded ownership floor above — not a

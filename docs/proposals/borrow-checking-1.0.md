@@ -386,6 +386,7 @@ new **`E09xx` ownership family**:
 | `E0904` | Second live reference to a unique value | `'<name>' is uniquely owned; this creates a second live binding — move it or take an explicit copy` |
 | `E0905` | Returning a reference to a value that does not outlive the caller | `'<name>' is local to this function; return an owned value or copy into the caller's buffer` |
 | `E0906` | Ownership violation across an `unsafe`/`extern` boundary without the required acknowledgement | `raw-pointer escape requires the call site to be inside an \`unsafe\` block / the buffer to be released to FFI` |
+| `E0907` | Linear value never consumed | `'<name>' is \`Linear<T>\`; a linear value must be used exactly once — move it, return it, pass it to a call, or free it before it goes out of scope` |
 
 Each diagnostic carries a **source span** (the offending use) **plus the span of
 the move/free that invalidated it** — the two-span shape that makes
@@ -743,7 +744,7 @@ safety"* — decomposed into pickable sub-issues. Sizes per the issue contract
 | E4 | **Ownership pass skeleton** — `ownership_checker.sfn` after effect-check; CFG/scope walk reusing effect-checker infra; **dormant** (warnings only) | feature | M | E2 | Phase R0; self-host stays green |
 | E5 | **Ownership dataflow: move/use-after-move** — `Owned`/`Moved` lattice, `E0901`/`E0904` | feature | M | E4 | Core analysis |
 | E6 | **In-place-mutation + UAF rules** — `E0902`/`E0903`, unique-receiver check for mutators/disposers | feature | M | E5 | Closes the #1205 hazard class |
-| E7 | **Enforce affine `Affine<T>`/`Linear<T>`** — flip the seven strip-sites to load-bearing single-use | feature | M | E5 | Option B substrate; opt-in |
+| E7 | **Enforce `Affine<T>`/`Linear<T>` single-use** — affine at-most-once is already covered by the E5 move rules (`is_owned_type`); E7 adds the linear *exactly-once* must-be-consumed sweep (`E0907`). The seven type-lowering strip-sites stay codegen-transparent (`Affine<T>`/`Linear<T>` are bit-identical to `T`); enforcement lives in `ownership_checker.sfn`, not the strip-sites. | feature | S | E5 | Option B substrate; opt-in |
 | E8 | **Migrate `memory/arena.sfn` + `string.sfn` to `OwnedBuf`** — grow-at-tip behind unique ownership; **Phase R1 enforcement on** | refactor | M | E3,E6 | #1205 determinism regression is the gate; land before #822 |
 | E9 | **Migrate `rc.sfn` / `mem.sfn` / `array.sfn`** | refactor | M | E8 | Rest of memory core |
 | E10 | **Diagnostics polish + docs** — `E09xx` fix-its, `CLAUDE.md`/roadmap/`runtime_audit.md` edits (§4-bis), preview chapter | docs | S | E6,E8 | The stance-reversal doc edits |

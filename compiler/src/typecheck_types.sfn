@@ -510,13 +510,42 @@ fn unwrap_ownership_wrapper(annotation: string) -> string {
 // The codegen inverse (copy-vs-move) lives in
 // `llvm/type_mapping.sfn:is_copy_type`; folding all three into one
 // source of truth is tracked as ownership-epic (#1209) follow-up.
+//
+// The affine/linear wrappers are recognised only in their *parametric*
+// form (`Affine<...>` / `Linear<...>`): they always wrap a payload type.
+// A bare `Affine`/`Linear` is a user-defined type name (e.g. `struct
+// Linear` in the `sfn/layers` capsule — a neural-net layer), so it must
+// NOT be classified as a uniquely-owned wrapper, or the move rules would
+// falsely move-track / `E0901` a `layer: Linear` passed to a call. This
+// matches `is_linear_type` below, which is parametric-only for the same
+// reason. `OwnedBuf` is a concrete (non-generic) runtime type used bare,
+// so its bare spelling stays load-bearing.
 fn is_owned_type(annotation: string) -> boolean {
     let trimmed = trim_text(annotation);
     if strings_equal(trimmed, "OwnedBuf") { return true; }
-    if strings_equal(trimmed, "Affine") { return true; }
-    if strings_equal(trimmed, "Linear") { return true; }
     if starts_with(trimmed, "OwnedBuf<") { return true; }
     if starts_with(trimmed, "Affine<") { return true; }
+    if starts_with(trimmed, "Linear<") { return true; }
+    return false;
+}
+
+// True iff a type annotation names a *linear* value (`Linear<T>`) — a
+// uniquely-owned value that must be used *exactly once* (consumed before
+// it leaves scope). The owned-but-not-linear wrappers (`OwnedBuf`,
+// `Affine<T>`) are at-most-once and never trigger the must-consume sweep;
+// only `Linear<T>` does. Kept beside `is_owned_type` so the linear test
+// and the owned test can't drift — the ownership pass
+// (`ownership_checker.sfn`) keys the `E0907` non-consumption rule off
+// this.
+//
+// Only the *parametric* form `Linear<...>` is the ownership wrapper: it
+// always wraps a payload type. A bare `Linear` is a user-defined type
+// name (e.g. `struct Linear` in the `sfn/layers` capsule — a neural-net
+// linear layer), so it must NOT be classified as the wrapper, or every
+// `layer: Linear` parameter would falsely fire `E0907`. Requiring the
+// `<` keeps the wrapper and the ordinary struct distinct.
+fn is_linear_type(annotation: string) -> boolean {
+    let trimmed = trim_text(annotation);
     if starts_with(trimmed, "Linear<") { return true; }
     return false;
 }
