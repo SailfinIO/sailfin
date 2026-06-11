@@ -1,0 +1,63 @@
+// Integration coverage for the E6 (#1215) ownership rules — the
+// in-place-mutation / use-after-free / raw-pointer-escape half of the
+// memory-safety epic (#1209). E4 (#1213) landed the pass dormant, E5
+// (#1214) turned on the move core, and E6 closes the #1205 hazard class
+// structurally: proving unique ownership makes grow-at-tip sound.
+//
+// These exercise the pass end-to-end through `parse_program` ->
+// `check_ownership` / `run_ownership_checker` on whole routines, pinning
+// the issue's acceptance line: "a program that mutates an aliased buffer
+// in place is rejected; the unique-owner path compiles."
+import { check_ownership, run_ownership_checker } from "../../src/ownership_checker";
+import { parse_program } from "../../src/parser/mod";
+
+test "ownership e6: aliased in-place mutation is rejected, unique owner compiles" ![io] {
+    // The unsound #1205 shape: `sink(buf)` moves `buf`, then the stale
+    // handle is mutated in place — its bytes are aliased by the move
+    // target. Exactly one E0902 fires.
+    let aliased = "fn sink(b: OwnedBuf) -> int {\n    return 1;\n}\n\nfn grow_at_tip_aliased(buf: OwnedBuf) -> int {\n    let n = sink(buf);\n    buf.append(suffix);\n    return n;\n}\n";
+    let aliased_program = parse_program(aliased);
+    let aliased_warnings = check_ownership(aliased_program);
+    assert aliased_warnings.length == 1;
+    assert aliased_warnings[0].code == "E0902";
+    assert aliased_warnings[0].binding_name == "buf";
+
+    // The sound counterpart: the unique owner is grown in place and
+    // returned. No alias exists, so grow-at-tip is provably sound and the
+    // gate stays transparent.
+    let unique = "fn grow_at_tip_unique(buf: OwnedBuf) -> OwnedBuf {\n    buf.append(suffix);\n    return buf;\n}\n";
+    let unique_program = parse_program(unique);
+    let unique_warnings = check_ownership(unique_program);
+    assert unique_warnings.length == 0;
+    assert run_ownership_checker(unique_program) == 0;
+}
+
+test "ownership e6: use after free is rejected, disposal alone compiles" ![io] {
+    // Release-to-zero-then-use (the rc.sfn hazard class): `free(buf)`
+    // disposes the owner, and the later read is use-after-free.
+    let uaf = "fn release_then_use(buf: OwnedBuf) -> int {\n    free(buf);\n    return owned_buf_len(buf);\n}\n";
+    let uaf_program = parse_program(uaf);
+    let uaf_warnings = check_ownership(uaf_program);
+    assert uaf_warnings.length == 1;
+    assert uaf_warnings[0].code == "E0903";
+
+    // Disposal with no subsequent use is sound.
+    let clean = "fn release(buf: OwnedBuf) -> int {\n    free(buf);\n    return 0;\n}\n";
+    let clean_program = parse_program(clean);
+    assert run_ownership_checker(clean_program) == 0;
+}
+
+test "ownership e6: raw-pointer escape is gated by the unsafe boundary" ![io] {
+    // A bare owned value passed into an `extern fn` escapes into FFI; the
+    // boundary check fires E0906 in safe code...
+    let escape = "extern fn raw_consume(p: * u8) -> void;\n\nfn leak(buf: OwnedBuf) -> void {\n    raw_consume(buf);\n}\n";
+    let escape_program = parse_program(escape);
+    let escape_warnings = check_ownership(escape_program);
+    assert escape_warnings.length == 1;
+    assert escape_warnings[0].code == "E0906";
+
+    // ...and is silent inside an `unsafe { }` region (author-asserted).
+    let acknowledged = "extern fn raw_consume(p: * u8) -> void;\n\nfn release_to_ffi(buf: OwnedBuf) -> void {\n    unsafe {\n        raw_consume(buf);\n    }\n}\n";
+    let acknowledged_program = parse_program(acknowledged);
+    assert run_ownership_checker(acknowledged_program) == 0;
+}

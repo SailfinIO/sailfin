@@ -117,8 +117,8 @@ doc, or `docs/runtime_architecture.md`, not here.
 | Atomic intrinsics (M0) | **Shipped** | All six builtins lower to LLVM atomics, `seq_cst` at v0 (#323, #331–#335); arity/type validation `E0806` |
 | Interface conformance validation | Partial | Basic checks; variance not enforced |
 | `Affine<T>` / `Linear<T>` | Move-enforced | Move / use-after-move enforced on owned/affine-typed bindings (#1214, E5 of #1209): a moved binding that is read, passed, or returned again raises `E0901`; a second `let`-binding of a moved value raises `E0904`. Single-use (linear) enforcement on user wrappers is E7; shared borrows are Phase U |
-| `OwnedBuf` / `Slice` owned-buffer family | Move-enforced (buffers) | Library types in `runtime/sfn/memory/ownedbuf.sfn` (#1212, E3 of #1209): parse/typecheck/lower via the existing struct + i64 paths. `OwnedBuf` bindings are now move-tracked by the ownership checker (#1214, `E0901`/`E0904`); in-place-mutation / use-after-free rules (`E0902`/`E0903`) are E6 (#1215); `Slice` view lifetimes are Phase U. Pinned by `compiler/tests/e2e/test_owned_buf_roundtrip.sh` |
-| Ownership checker pass | Move core enforced | Standalone `compiler/src/ownership_checker.sfn` after effect-check (#1213 skeleton → #1214 move enforcement). Walks the effect-checker scope structure, tracks an `Owned`/`Moved` lattice per owned/affine binding, and gates the build on use-after-move (`E0901`) / second-live-binding (`E0904`). Copyable values are untracked, so the compiler self-hosts unaffected. `unsafe { }` / `unsafe fn` interiors are skipped (#1211) |
+| `OwnedBuf` / `Slice` owned-buffer family | Ownership-enforced (buffers) | Library types in `runtime/sfn/memory/ownedbuf.sfn` (#1212, E3 of #1209): parse/typecheck/lower via the existing struct + i64 paths. `OwnedBuf` bindings are move-tracked (#1214, `E0901`/`E0904`); in-place mutation of a stale buffer raises `E0902`, use-after-free raises `E0903`, and a raw-pointer escape into an `extern fn` outside `unsafe` raises `E0906` (#1215, E6 of #1209). `Slice` view-lifetime tracking is Phase U. Pinned by `compiler/tests/e2e/test_owned_buf_roundtrip.sh` |
+| Ownership checker pass | Move + mutation/UAF/escape enforced | Standalone `compiler/src/ownership_checker.sfn` after effect-check (#1213 skeleton → #1214 move core → #1215 E6). Walks the effect-checker scope structure, tracks an `Owned`/`Moved`/`Freed` lattice per owned/affine binding, and gates the build on use-after-move (`E0901`), second-live-binding (`E0904`), in-place mutation of a possibly-aliased buffer (`E0902`), use-after-free (`E0903`), and raw-pointer FFI escape (`E0906`). Copyable values are untracked and the un-migrated runtime passes raw `*u8`/`Cast` args (never a bare owned identifier), so the compiler self-hosts unaffected. `unsafe { }` / `unsafe fn` interiors are skipped (#1211) |
 | `&T` / `&mut T` borrows | Parsed only | Exclusivity not checked |
 | `PII<T>` / `Secret<T>` | Parsed only | No taint enforcement; deferred post-1.0 |
 | `model`/`prompt`/`tool`/`pipeline` blocks | **Removed** | Moved to the post-1.0 `sfn/ai` capsule; the `![model]` effect stays |
@@ -128,7 +128,7 @@ doc, or `docs/runtime_architecture.md`, not here.
 | `spawn` | Parsed | Future-kind resolver + `E0813` (#1082); lowering is #1084 |
 | `\|>` pipeline operator | Not implemented | Planned post-1.0 |
 | Currency / time literals | Not implemented | Use numeric literals |
-| `unsafe` / `extern` | Parsed, marker only | `extern fn` declarations are fully shipped (see Runtime Migration); `unsafe { }` blocks and `unsafe fn` carry an `is_unsafe` AST marker for the ownership checker (#1211) — **not enforced** |
+| `unsafe` / `extern` | Boundary enforced | `extern fn` declarations are fully shipped (see Runtime Migration); `unsafe { }` blocks and `unsafe fn` carry an `is_unsafe` AST marker (#1211). The ownership checker skips `unsafe` interiors and treats the boundary as load-bearing: a bare owned value escaping into an `extern fn` outside `unsafe` raises `E0906` (#1215). Raw-pointer ops *inside* `unsafe` stay author-asserted |
 | Policy decorators (`@policy`) | Parsed only | No compiler or runtime effect |
 | `sfn fmt` | **Shipped** | Zero-config token-stream formatter, `--check`/`--write`, CI-enforced; architecture + limitations in `docs/proposals/fmt-architecture.md` |
 | `sfn check` | **Shipped** | Parse + typecheck + effect-check, no codegen; `--json` envelope; cross-module conformance; directory mode completes the full 156-file tree (~295 s — perf, not stability, is the open item) |
@@ -245,10 +245,11 @@ Tracked in the [roadmap](https://sailfin.dev/roadmap) and
   unrecoverable conditions.
 - **Ownership enforcement (in progress)** — the memory-safety epic (#1209)
   is landing a bounded ownership analysis as a 1.0 soundness floor (not a
-  fourth pillar). Move / use-after-move is now enforced on owned/affine
-  bindings (`Affine<T>`, `Linear<T>`, `OwnedBuf`) via `E0901`/`E0904` (#1214);
-  in-place-mutation / use-after-free (`E0902`/`E0903`), linear single-use, and
-  shared borrows are still in flight (E6/E7/Phase U).
+  fourth pillar). Move / use-after-move (`E0901`/`E0904`, #1214) plus in-place
+  mutation of a possibly-aliased buffer (`E0902`), use-after-free (`E0903`), and
+  raw-pointer FFI escape (`E0906`) are now enforced on owned/affine bindings
+  (`Affine<T>`, `Linear<T>`, `OwnedBuf`) (#1215, E6). Linear single-use (E7),
+  shared borrows, and `Slice` view lifetimes (Phase U) are still in flight.
 - **Unenforced syntax** — `&T`, `&mut T`, `PII<T>`, `Secret<T>` are parsed but
   not enforced and are explicitly deferred post-1.0. Sailfin's safety story is
   **effects and capabilities** plus the bounded ownership floor above — not a

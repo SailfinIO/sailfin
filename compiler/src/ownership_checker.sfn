@@ -2,14 +2,15 @@
 //
 // Standalone ownership-checker pass (D7) for the Sailfin self-hosted
 // compiler — the move core of the memory-safety epic (#1209). E4
-// (#1213) landed this pass dormant (Phase R0): it walked the scope /
-// lambda / `routine` structure and built the per-binding `Owned`/`Moved`
-// lattice but fired no rules. **E5 (#1214) turns the move half on.**
+// (#1213) landed this pass dormant (Phase R0); E5 (#1214) turned on the
+// move half (`E0901`/`E0904`). **E6 (#1215) adds the in-place-mutation,
+// use-after-free, and raw-pointer-escape rules** that close the #1205
+// hazard class structurally.
 //
-// What E5 enforces (scoped strictly to owned/affine-typed bindings —
-// `OwnedBuf`, `Affine<T>`, `Linear<T>`; every other value is copyable
-// and untracked, so the compiler's own source — which uses no owned
-// types — is unaffected and keeps self-hosting):
+// What this pass enforces (scoped strictly to owned/affine-typed
+// bindings — `OwnedBuf`, `Affine<T>`, `Linear<T>`; every other value is
+// copyable and untracked, so the compiler's own source — which uses no
+// owned types — is unaffected and keeps self-hosting):
 //
 //   - **Move sites** consume an owned binding (`Owned -> Moved`):
 //       * `let y = x;`        (a bare-identifier initializer)
@@ -18,29 +19,54 @@
 //   - **Use-after-move** — referencing a `Moved` owned binding:
 //       * a read / pass / return of the moved value  -> `E0901`
 //       * binding it to a fresh name (`let z = x;`)   -> `E0904`
-//         (a second live binding to a value that is no longer the
-//          unique owner)
+//   - **Disposal** consumes an owned binding (`Owned -> Freed`):
+//       * `free(x)` / `drop(x)`   (a disposer free-function call)
+//       * `x.free()` / `x.drop()` (a disposer method call)
+//   - **Use-after-free** — referencing a `Freed` owned binding -> `E0903`.
+//   - **In-place mutation of a stale (possibly-aliased) buffer**: a
+//     mutator method (`x.grow/.append/.set(...)`) on an owned receiver
+//     that is already `Moved`/`Freed` — the bytes are aliased by the
+//     move/free target -> `E0902`. Mutation through the *unique* live
+//     owner stays clean (the receiver keeps state `Owned`), which is the
+//     sound grow-at-tip path.
+//   - **Raw-pointer escape across the FFI boundary** — passing a bare
+//     owned identifier directly into an `extern fn` call outside an
+//     `unsafe` region -> `E0906`. The runtime's libc calls pass raw
+//     `* u8` / `Cast` arguments (untracked), never a bare owned
+//     identifier, so this stays dormant on the un-migrated runtime.
 //
-//   Diagnostics carry two locations — the offending use plus the move
-//   that invalidated it — embedded in the message (the `Diagnostic`
-//   model is single-caret; the move site rides in the note line, the
-//   same shape the effect checker uses for its "required by" pairs).
+//   Diagnostics carry two locations — the offending use plus the move /
+//   free that invalidated it — embedded in the message (the `Diagnostic`
+//   model is single-caret; the invalidating site rides in the note line,
+//   the same shape the effect checker uses for its "required by" pairs).
+//   `E0906` is a single-span boundary check (no second site).
 //
 // Model A (locked 2026-06-11): a rebind is a move. `let y = x` moves
 // `x` into `y`; a later reference to `x` is the violation. The clean
 // move-and-consume program (`let y = x; consume(y);`, `x` never touched
 // again) compiles with zero findings — no false positives.
 //
+// Self-host invariant (load-bearing): branch-local moves must NOT leak
+// to the parent walk. `_nested_block_scope` restores `bindings:
+// scope.bindings` on child-scope exit, so a `return self;` inside an
+// `if` (e.g. `owned_buf_append`'s several early returns) does not mark
+// `self` moved for the sibling/body reads that follow. The only owned-
+// typed runtime module (`runtime/sfn/memory/ownedbuf.sfn`) relies on
+// this to self-host clean. A future flow-sensitive join that propagated
+// branch moves outward would have to keep that file green.
+//
 // The `unsafe` boundary (E2 / #1211) is unchanged: `unsafe { }`
 // interiors and `unsafe fn` bodies are skipped — the author-asserted
-// raw-pointer region the checker must not second-guess.
+// raw-pointer region the checker must not second-guess. `E0906` needs no
+// extra region flag: an `unsafe { }` interior is already skipped before
+// any call site inside it is reached.
 //
-// Out of scope (later rungs): in-place-mutation / use-after-free
-// (`E0902`/`E0903`, E6 / #1215), affine/linear single-use enforcement
-// on user wrappers (E7), shared borrows (Phase U), and the opaque `Raw`
-// assignment form (`y = x` parses to `Raw` text — see #1214 `Out:`).
+// Out of scope (later rungs): affine/linear single-use enforcement on
+// user wrappers (E7), shared borrows / `Slice`-view alias tracking
+// (Phase U), the `E0905` return-of-local-reference rule (Phase U), and
+// the opaque `Raw` assignment form (`y = x` parses to `Raw` text).
 //
-// Proposal §3.2 / §3.3; epic #1209; this issue: #1214.
+// Proposal §3.2 / §3.3 / §4; epic #1209; this issue: #1215.
 import {
     Block,
     Expression,
@@ -55,12 +81,13 @@ import { Token, TokenKind } from "./token";
 import { Diagnostic, is_identifier_char, is_owned_type } from "./typecheck_types";
 
 // One tracked binding. `state` is the lattice: "owned" on entry,
-// "moved" once a move site consumes it. `is_owned` flags the bindings
-// the move rules apply to (owned/affine type); copyable bindings stay
-// `is_owned == false` and no rule ever fires on them. `moved_span`
-// records *where* the move happened so use-after-move diagnostics can
-// point back at it. Shadowing is by position — the most recently pushed
-// binding for a name wins.
+// "moved" once a move site consumes it, "freed" once a disposer consumes
+// it. `is_owned` flags the bindings the rules apply to (owned/affine
+// type); copyable bindings stay `is_owned == false` and no rule ever
+// fires on them. `moved_span` records *where* the move/free happened so
+// use-after-move / use-after-free diagnostics can point back at it.
+// Shadowing is by position — the most recently pushed binding for a name
+// wins.
 struct OwnershipBinding {
     name: string;
     state: string;
@@ -69,10 +96,11 @@ struct OwnershipBinding {
     moved_span: SourceSpan?;
 }
 
-// An ownership finding. E5 mints `severity == "error"` findings with a
-// `code` (`E0901`/`E0904`), the offending-use token (`trigger`), and the
-// move-site token (`moved_trigger`) so callers and tests can inspect
-// both spans structurally; the rendered message embeds both locations.
+// An ownership finding. Findings mint `severity == "error"` with a
+// `code` (`E0901`–`E0906`), the offending-use token (`trigger`), and the
+// move/free-site token (`moved_trigger`) so callers and tests can
+// inspect both spans structurally; the rendered message embeds both
+// locations.
 struct OwnershipWarning {
     routine_name: string;
     binding_name: string;
@@ -88,10 +116,14 @@ struct OwnershipWarning {
 // binding the walk has entered (the unit tests pin coverage through
 // it); `findings` is the accumulated diagnostic stream, propagated out
 // of every child scope even though child bindings are discarded.
+// `extern_names` is the program-level set of `extern fn` names, gathered
+// once and threaded read-only so the `E0906` escape check can recognize
+// an FFI callee without re-walking the program.
 struct OwnershipScope {
     bindings: OwnershipBinding[];
     tracked: int;
     findings: OwnershipWarning[];
+    extern_names: string[];
 }
 
 // Program-level result: the binding-coverage summary plus the findings
@@ -127,6 +159,36 @@ fn _span_location(span: SourceSpan?) -> string {
     if span == null { return ""; }
     let s: SourceSpan = span;
     return " at " + number_to_string(s.start_line) + ":" + number_to_string(s.start_column);
+}
+
+// The in-place mutator method set (proposal §3.2). A call of the shape
+// `x.grow/.append/.set(...)` on an owned receiver is an in-place
+// mutation: sound through the unique owner, an `E0902` violation on a
+// stale (moved/freed) receiver.
+fn _is_mutator_method(member: string) -> boolean {
+    if member == "grow" { return true; }
+    if member == "append" { return true; }
+    if member == "set" { return true; }
+    return false;
+}
+
+// Disposer names. `free`/`drop` consume an owned binding (`Owned ->
+// Freed`); a later use is use-after-free (`E0903`).
+fn _is_disposer_name(name: string) -> boolean {
+    if name == "free" { return true; }
+    if name == "drop" { return true; }
+    return false;
+}
+
+// Membership test for the `extern fn` name set.
+fn _name_in_list(names: string[], name: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= names.length { break; }
+        if names[index] == name { return true; }
+        index += 1;
+    }
+    return false;
 }
 
 // -------------------------------------------------------------------
@@ -172,6 +234,26 @@ fn _mark_binding_moved_at(bindings: OwnershipBinding[], name: string, move_span:
     return result;
 }
 
+// The Owned -> Freed transition, recording the disposal site in the
+// shared invalidating-site slot (`moved_span`). Mirrors
+// `_mark_binding_moved_at`.
+fn _mark_binding_freed_at(bindings: OwnershipBinding[], name: string, free_span: SourceSpan?) -> OwnershipBinding[] {
+    let last = _find_binding_index(bindings, name);
+    if last < 0 { return bindings; }
+    let mut result: OwnershipBinding[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if index == last {
+            result.push(OwnershipBinding {
+                name: bindings[index].name, state: "freed", span: bindings[index].span, is_owned: bindings[index].is_owned, moved_span: free_span
+            });
+        } else { result.push(bindings[index]); }
+        index += 1;
+    }
+    return result;
+}
+
 // Span-less wrapper retained for the lattice unit tests.
 fn mark_binding_moved(bindings: OwnershipBinding[], name: string) -> OwnershipBinding[] {
     return _mark_binding_moved_at(bindings, name, null);
@@ -186,7 +268,8 @@ fn _push_finding(scope: OwnershipScope, finding: OwnershipWarning) -> OwnershipS
     return OwnershipScope {
         bindings: scope.bindings,
         tracked: scope.tracked,
-        findings: findings
+        findings: findings,
+        extern_names: scope.extern_names
     };
 }
 
@@ -204,6 +287,29 @@ fn _make_finding(name: string, use_span: SourceSpan?, moved_span: SourceSpan?, c
             + "\nhelp: `"
             + name
             + "` is uniquely owned; move it or take an explicit copy";
+    } else if code == "E0902" {
+        message = "in-place mutation of possibly-aliased buffer `" + name + "`"
+            + use_loc
+            + "\nnote: `"
+            + name
+            + "` was moved here"
+            + moved_loc
+            + "\nhelp: `"
+            + name
+            + "` may be aliased by the move target; take a unique OwnedBuf, or use the copying concat path";
+    } else if code == "E0903" {
+        message = "use after free of `" + name + "`" + use_loc + "\nnote: `"
+            + name
+            + "` was freed here"
+            + moved_loc
+            + "\nhelp: `"
+            + name
+            + "` was disposed; do not use it after disposal";
+    } else if code == "E0906" {
+        message = "raw-pointer escape of owned value `" + name
+            + "` across an unsafe/extern boundary"
+            + use_loc
+            + "\nhelp: raw-pointer escape requires the call site to be inside an `unsafe` block, or the buffer to be released to FFI";
     } else {
         message = "use of moved value `" + name + "`" + use_loc + "\nnote: `"
             + name
@@ -224,14 +330,18 @@ fn _make_finding(name: string, use_span: SourceSpan?, moved_span: SourceSpan?, c
 
 // A reference to `name` in a *consuming* position (let initializer,
 // call argument, return value). When the binding is owned and already
-// moved this is use-after-move: `E0904` if the consuming site is a new
-// binding (`is_let_init`), `E0901` otherwise. When it is owned and live
-// this performs the `Owned -> Moved` transition.
+// freed this is use-after-free (`E0903`); already moved is
+// use-after-move (`E0904` if the consuming site is a new binding,
+// `E0901` otherwise). When it is owned and live this performs the
+// `Owned -> Moved` transition.
 fn _consume_identifier(scope: OwnershipScope, name: string, use_span: SourceSpan?, is_let_init: boolean) -> OwnershipScope {
     let index = _find_binding_index(scope.bindings, name);
     if index < 0 { return scope; }
     let binding = scope.bindings[index];
     if !binding.is_owned { return scope; }
+    if binding.state == "freed" {
+        return _push_finding(scope, _make_finding(name, use_span, binding.moved_span, "E0903"));
+    }
     if binding.state == "moved" {
         let mut code: string = "E0901";
         if is_let_init { code = "E0904"; }
@@ -241,11 +351,13 @@ fn _consume_identifier(scope: OwnershipScope, name: string, use_span: SourceSpan
     return OwnershipScope {
         bindings: moved,
         tracked: scope.tracked,
-        findings: scope.findings
+        findings: scope.findings,
+        extern_names: scope.extern_names
     };
 }
 
-// A read (non-consuming use) of `name`. Reading a moved owned binding is
+// A read (non-consuming use) of `name`. Reading a freed owned binding is
+// use-after-free (`E0903`); reading a moved owned binding is
 // use-after-move (`E0901`); reading a live binding is fine and does not
 // change state.
 fn _check_read(scope: OwnershipScope, name: string, use_span: SourceSpan?) -> OwnershipScope {
@@ -253,10 +365,42 @@ fn _check_read(scope: OwnershipScope, name: string, use_span: SourceSpan?) -> Ow
     if index < 0 { return scope; }
     let binding = scope.bindings[index];
     if !binding.is_owned { return scope; }
+    if binding.state == "freed" {
+        return _push_finding(scope, _make_finding(name, use_span, binding.moved_span, "E0903"));
+    }
     if binding.state == "moved" {
         return _push_finding(scope, _make_finding(name, use_span, binding.moved_span, "E0901"));
     }
     return scope;
+}
+
+// Walk a call's argument list as consuming positions. A bare-identifier
+// argument is a move; other arguments walk as ordinary expressions
+// (their interior reads count). When `extern_call` is true the callee is
+// a known `extern fn`: a *live* owned bare-identifier argument escaping
+// into FFI fires `E0906` before the move is recorded.
+fn _consume_call_args(arguments: Expression[], scope: OwnershipScope, extern_call: boolean) -> OwnershipScope {
+    let mut next = scope;
+    let mut index: int = 0;
+    loop {
+        if index >= arguments.length { break; }
+        let argument = arguments[index];
+        if argument.variant == "Identifier" {
+            if extern_call {
+                let ai = _find_binding_index(next.bindings, argument.name);
+                if ai >= 0 {
+                    if next.bindings[ai].is_owned {
+                        if next.bindings[ai].state == "owned" {
+                            next = _push_finding(next, _make_finding(argument.name, argument.span, null, "E0906"));
+                        }
+                    }
+                }
+            }
+            next = _consume_identifier(next, argument.name, argument.span, false);
+        } else { next = _scope_after_expression(argument, next); }
+        index += 1;
+    }
+    return next;
 }
 
 // -------------------------------------------------------------------
@@ -281,7 +425,8 @@ fn _enter_binding(scope: OwnershipScope, name: string, span: SourceSpan?, is_own
     return OwnershipScope {
         bindings: bindings,
         tracked: scope.tracked + 1,
-        findings: scope.findings
+        findings: scope.findings,
+        extern_names: scope.extern_names
     };
 }
 
@@ -292,13 +437,15 @@ fn _nested_block_scope(block: Block, scope: OwnershipScope) -> OwnershipScope {
     let child_in = OwnershipScope {
         bindings: _copy_bindings(scope.bindings),
         tracked: scope.tracked,
-        findings: scope.findings
+        findings: scope.findings,
+        extern_names: scope.extern_names
     };
     let child_out = _scope_after_block(block, child_in);
     return OwnershipScope {
         bindings: scope.bindings,
         tracked: child_out.tracked,
-        findings: child_out.findings
+        findings: child_out.findings,
+        extern_names: scope.extern_names
     };
 }
 
@@ -388,7 +535,8 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         let mut child = OwnershipScope {
             bindings: _copy_bindings(next.bindings),
             tracked: next.tracked,
-            findings: next.findings
+            findings: next.findings,
+            extern_names: next.extern_names
         };
         let target = statement.clause.target;
         if target.variant == "Identifier" {
@@ -398,7 +546,8 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         return OwnershipScope {
             bindings: next.bindings,
             tracked: child_out.tracked,
-            findings: child_out.findings
+            findings: child_out.findings,
+            extern_names: next.extern_names
         };
     }
     if statement.variant == "WithStatement" {
@@ -423,7 +572,8 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
             let mut child = OwnershipScope {
                 bindings: _copy_bindings(next.bindings),
                 tracked: next.tracked,
-                findings: next.findings
+                findings: next.findings,
+                extern_names: next.extern_names
             };
             child = _enter_pattern_bindings(case.pattern, child);
             child = _scope_after_expression(case.guard, child);
@@ -431,7 +581,8 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
             next = OwnershipScope {
                 bindings: next.bindings,
                 tracked: child_out.tracked,
-                findings: child_out.findings
+                findings: child_out.findings,
+                extern_names: next.extern_names
             };
             case_index += 1;
         }
@@ -444,7 +595,8 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
             let mut child = OwnershipScope {
                 bindings: _copy_bindings(next.bindings),
                 tracked: next.tracked,
-                findings: next.findings
+                findings: next.findings,
+                extern_names: next.extern_names
             };
             let catch_name = statement.catch_name;
             if catch_name != null {
@@ -454,7 +606,8 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
             next = OwnershipScope {
                 bindings: next.bindings,
                 tracked: child_out.tracked,
-                findings: child_out.findings
+                findings: child_out.findings,
+                extern_names: next.extern_names
             };
         }
         let finally_block = statement.finally_block;
@@ -485,12 +638,13 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         // Nested fns get a fresh routine scope; the binding count and
         // findings flow back. `unsafe fn` bodies are skipped (E2).
         if statement.is_unsafe { return scope; }
-        let summary = _analyze_routine_ownership(statement.signature.parameters, statement.body);
+        let summary = _analyze_routine_ownership(statement.signature.parameters, statement.body, scope.extern_names);
         let merged = _append_warnings(scope.findings, summary.warnings);
         return OwnershipScope {
             bindings: scope.bindings,
             tracked: scope.tracked + summary.bindings_tracked,
-            findings: merged
+            findings: merged,
+            extern_names: scope.extern_names
         };
     }
     return scope;
@@ -554,8 +708,9 @@ fn _enter_raw_pattern_bindings(text: string, scope: OwnershipScope) -> Ownership
 }
 
 // Expression walk. Reads of owned bindings are checked for
-// use-after-move; call arguments are consuming positions (pass-by-value
-// of an owned value is a move); lambdas open routine-like child scopes.
+// use-after-move / use-after-free; call arguments are consuming
+// positions (pass-by-value of an owned value is a move); lambdas open
+// routine-like child scopes.
 fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> OwnershipScope {
     if expression == null { return scope; }
     if expression.variant == "Identifier" {
@@ -572,19 +727,7 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
         return _scope_after_expression(expression.object, scope);
     }
     if expression.variant == "Call" {
-        let mut next = _scope_after_expression(expression.callee, scope);
-        let mut index: int = 0;
-        loop {
-            if index >= expression.arguments.length { break; }
-            let argument = expression.arguments[index];
-            // A bare-identifier argument is a move; other arguments
-            // walk as ordinary expressions (their interior reads count).
-            if argument.variant == "Identifier" {
-                next = _consume_identifier(next, argument.name, argument.span, false);
-            } else { next = _scope_after_expression(argument, next); }
-            index += 1;
-        }
-        return next;
+        return _scope_after_call(expression, scope);
     }
     if expression.variant == "Index" {
         let next = _scope_after_expression(expression.sequence, scope);
@@ -624,7 +767,8 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
         let mut child = OwnershipScope {
             bindings: _copy_bindings(scope.bindings),
             tracked: scope.tracked,
-            findings: scope.findings
+            findings: scope.findings,
+            extern_names: scope.extern_names
         };
         let mut index: int = 0;
         loop {
@@ -642,7 +786,8 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
         return OwnershipScope {
             bindings: scope.bindings,
             tracked: child_out.tracked,
-            findings: child_out.findings
+            findings: child_out.findings,
+            extern_names: scope.extern_names
         };
     }
     if expression.variant == "Range" {
@@ -681,6 +826,103 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
     return scope;
 }
 
+// Call-expression walk, split out so the ownership-relevant call shapes
+// (disposers, in-place mutators, FFI escapes) are classified before the
+// generic callee/argument walk:
+//
+//   - `free(x)` / `drop(x)` / `x.free()` / `x.drop()` on an owned
+//     binding -> disposal (`Owned -> Freed`); a stale receiver is
+//     use-after-free (`E0903`) / use-after-move (`E0901`).
+//   - `x.grow/.append/.set(...)` on an owned receiver -> in-place
+//     mutation: `E0902` on a stale (moved/freed) receiver; sound (no
+//     state change) through the unique live owner.
+//   - a bare owned identifier passed into an `extern fn` -> `E0906`.
+//
+// Anything else falls through to the generic walk (callee then args).
+fn _scope_after_call(expression: Expression, scope: OwnershipScope) -> OwnershipScope {
+    let callee = expression.callee;
+    // --- Disposer, free-function form: free(x) / drop(x) ---
+    if callee.variant == "Identifier" {
+        if _is_disposer_name(callee.name) {
+            if expression.arguments.length >= 1 {
+                let first = expression.arguments[0];
+                if first.variant == "Identifier" {
+                    let di = _find_binding_index(scope.bindings, first.name);
+                    if di >= 0 {
+                        let db = scope.bindings[di];
+                        if db.is_owned {
+                            if db.state == "freed" {
+                                return _push_finding(scope, _make_finding(first.name, first.span, db.moved_span, "E0903"));
+                            }
+                            if db.state == "moved" {
+                                return _push_finding(scope, _make_finding(first.name, first.span, db.moved_span, "E0901"));
+                            }
+                            let freed = _mark_binding_freed_at(scope.bindings, first.name, first.span);
+                            return OwnershipScope {
+                                bindings: freed,
+                                tracked: scope.tracked,
+                                findings: scope.findings,
+                                extern_names: scope.extern_names
+                            };
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // --- Method-call forms: x.free()/x.drop() (disposer) and
+    //     x.grow/.append/.set(...) (in-place mutator) ---
+    if callee.variant == "Member" {
+        let recv = callee.object;
+        if recv.variant == "Identifier" {
+            let ri = _find_binding_index(scope.bindings, recv.name);
+            if ri >= 0 {
+                let rb = scope.bindings[ri];
+                if rb.is_owned {
+                    if _is_disposer_name(callee.member) {
+                        if rb.state == "freed" {
+                            return _push_finding(scope, _make_finding(recv.name, recv.span, rb.moved_span, "E0903"));
+                        }
+                        if rb.state == "moved" {
+                            return _push_finding(scope, _make_finding(recv.name, recv.span, rb.moved_span, "E0901"));
+                        }
+                        let freed = _mark_binding_freed_at(scope.bindings, recv.name, recv.span);
+                        let after = OwnershipScope {
+                            bindings: freed,
+                            tracked: scope.tracked,
+                            findings: scope.findings,
+                            extern_names: scope.extern_names
+                        };
+                        return _consume_call_args(expression.arguments, after, false);
+                    }
+                    if _is_mutator_method(callee.member) {
+                        if rb.state == "moved" {
+                            let after = _push_finding(scope, _make_finding(recv.name, recv.span, rb.moved_span, "E0902"));
+                            return _consume_call_args(expression.arguments, after, false);
+                        }
+                        if rb.state == "freed" {
+                            let after = _push_finding(scope, _make_finding(recv.name, recv.span, rb.moved_span, "E0903"));
+                            return _consume_call_args(expression.arguments, after, false);
+                        }
+                        // Live unique owner: in-place mutation is sound;
+                        // the receiver stays `Owned` (not read-consumed).
+                        // Walk only the arguments.
+                        return _consume_call_args(expression.arguments, scope, false);
+                    }
+                }
+            }
+        }
+    }
+    // --- Generic walk: callee then arguments, with the E0906 FFI-escape
+    //     check active when the callee is a known extern fn. ---
+    let next = _scope_after_expression(expression.callee, scope);
+    let mut extern_call: boolean = false;
+    if callee.variant == "Identifier" {
+        if _name_in_list(scope.extern_names, callee.name) { extern_call = true; }
+    }
+    return _consume_call_args(expression.arguments, next, extern_call);
+}
+
 // -------------------------------------------------------------------
 // Routine / program analysis
 // -------------------------------------------------------------------
@@ -700,13 +942,33 @@ fn _append_warnings(warnings: OwnershipWarning[], additions: OwnershipWarning[])
     return result;
 }
 
-fn _analyze_routine_ownership(parameters: Parameter[], body: Block) -> OwnershipSummary {
+// Collect the program-level `extern fn` name set, threaded read-only
+// into every routine scope so the `E0906` escape check can recognize an
+// FFI callee. Only top-level extern declarations are gathered — an
+// extern declared in another compilation unit yields a (self-host-safe)
+// false negative, never a false positive.
+fn _gather_extern_names(program: Program) -> string[] {
+    let mut names: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "ExternFunctionDeclaration" {
+            names.push(statement.signature.name);
+        }
+        index += 1;
+    }
+    return names;
+}
+
+fn _analyze_routine_ownership(parameters: Parameter[], body: Block, extern_names: string[]) -> OwnershipSummary {
     let no_bindings: OwnershipBinding[] = [];
     let no_findings: OwnershipWarning[] = [];
     let mut scope = OwnershipScope {
         bindings: no_bindings,
         tracked: 0,
-        findings: no_findings
+        findings: no_findings,
+        extern_names: extern_names
     };
     let mut index: int = 0;
     loop {
@@ -727,14 +989,14 @@ fn _analyze_routine_ownership(parameters: Parameter[], body: Block) -> Ownership
     };
 }
 
-fn _statement_summary(statement: Statement) -> OwnershipSummary {
+fn _statement_summary(statement: Statement, extern_names: string[]) -> OwnershipSummary {
     if statement.variant == "FunctionDeclaration" {
         if statement.is_unsafe { return _empty_summary(); }
-        return _analyze_routine_ownership(statement.signature.parameters, statement.body);
+        return _analyze_routine_ownership(statement.signature.parameters, statement.body, extern_names);
     }
     if statement.variant == "TestDeclaration" {
         let no_parameters: Parameter[] = [];
-        return _analyze_routine_ownership(no_parameters, statement.body);
+        return _analyze_routine_ownership(no_parameters, statement.body, extern_names);
     }
     if statement.variant == "StructDeclaration" {
         let mut warnings: OwnershipWarning[] = [];
@@ -743,7 +1005,7 @@ fn _statement_summary(statement: Statement) -> OwnershipSummary {
         loop {
             if index >= statement.methods.length { break; }
             let method = statement.methods[index];
-            let summary = _analyze_routine_ownership(method.signature.parameters, method.body);
+            let summary = _analyze_routine_ownership(method.signature.parameters, method.body, extern_names);
             tracked = tracked + summary.bindings_tracked;
             warnings = _append_warnings(warnings, summary.warnings);
             index += 1;
@@ -757,14 +1019,15 @@ fn _statement_summary(statement: Statement) -> OwnershipSummary {
 }
 
 // Full-program analysis. Exposed (alongside the lattice helpers) so unit
-// tests can pin both the walk's coverage and the move-rule findings.
+// tests can pin both the walk's coverage and the rule findings.
 fn analyze_program_ownership(program: Program) -> OwnershipSummary {
+    let extern_names = _gather_extern_names(program);
     let mut warnings: OwnershipWarning[] = [];
     let mut tracked: int = 0;
     let mut index: int = 0;
     loop {
         if index >= program.statements.length { break; }
-        let summary = _statement_summary(program.statements[index]);
+        let summary = _statement_summary(program.statements[index], extern_names);
         tracked = tracked + summary.bindings_tracked;
         warnings = _append_warnings(warnings, summary.warnings);
         index += 1;
