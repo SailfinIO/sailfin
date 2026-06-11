@@ -35,7 +35,7 @@ import {
 } from "sfn/cli";
 
 import { sailfin_cli_main_legacy } from "../cli_main";
-import { number_to_string } from "../main";
+import { number_to_string } from "../num_format";
 import { resolve_compiler_version } from "../version";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";
 
