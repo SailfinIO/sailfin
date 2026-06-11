@@ -1,32 +1,46 @@
 // compiler/src/ownership_checker.sfn
 //
 // Standalone ownership-checker pass (D7) for the Sailfin self-hosted
-// compiler — E4 of the memory-safety epic (#1209), Phase R0
-// (**dormant**). Runs after the effect checker on every compile path
-// in `main.sfn`, walks the same scope / lambda / `routine` structure
-// the effect checker walks, and builds the per-binding `Owned`/`Moved`
-// ownership lattice. No rule fires today: the pass computes the state,
-// discards it, and emits zero diagnostics, so output IR is
-// byte-identical to a build without the pass.
+// compiler — the move core of the memory-safety epic (#1209). E4
+// (#1213) landed this pass dormant (Phase R0): it walked the scope /
+// lambda / `routine` structure and built the per-binding `Owned`/`Moved`
+// lattice but fired no rules. **E5 (#1214) turns the move half on.**
 //
-// What is real in R0:
-//   - the scope walk (blocks, if/else, loops, for, match, with, try,
-//     `routine` blocks, nested fns, struct methods, tests, lambdas)
-//   - per-binding state entry (`owned` on declaration / parameter)
-//   - the `unsafe` boundary: interiors of `unsafe { }` blocks and
-//     bodies of `unsafe fn` declarations are skipped — the E2 marker
-//     (#1211) is the author-asserted raw-pointer region the checker
-//     must not second-guess
-//   - the warning plumbing (`OwnershipWarning`, severity "warning")
+// What E5 enforces (scoped strictly to owned/affine-typed bindings —
+// `OwnedBuf`, `Affine<T>`, `Linear<T>`; every other value is copyable
+// and untracked, so the compiler's own source — which uses no owned
+// types — is unaffected and keeps self-hosting):
 //
-// What is NOT here yet (E5/E6 — those flip warnings to errors):
-//   - move detection / use-after-move (`mark_binding_moved` exists as
-//     the lattice transition E5 calls at move sites, but nothing in
-//     this pass invokes it)
-//   - in-place-mutation / UAF rules
-//   - any change to emitted IR or runtime behavior
+//   - **Move sites** consume an owned binding (`Owned -> Moved`):
+//       * `let y = x;`        (a bare-identifier initializer)
+//       * `f(..., x, ...)`    (a bare-identifier call argument)
+//       * `return x;`         (a bare-identifier return value)
+//   - **Use-after-move** — referencing a `Moved` owned binding:
+//       * a read / pass / return of the moved value  -> `E0901`
+//       * binding it to a fresh name (`let z = x;`)   -> `E0904`
+//         (a second live binding to a value that is no longer the
+//          unique owner)
 //
-// Proposal §3.1; epic #1209; this issue: #1213.
+//   Diagnostics carry two locations — the offending use plus the move
+//   that invalidated it — embedded in the message (the `Diagnostic`
+//   model is single-caret; the move site rides in the note line, the
+//   same shape the effect checker uses for its "required by" pairs).
+//
+// Model A (locked 2026-06-11): a rebind is a move. `let y = x` moves
+// `x` into `y`; a later reference to `x` is the violation. The clean
+// move-and-consume program (`let y = x; consume(y);`, `x` never touched
+// again) compiles with zero findings — no false positives.
+//
+// The `unsafe` boundary (E2 / #1211) is unchanged: `unsafe { }`
+// interiors and `unsafe fn` bodies are skipped — the author-asserted
+// raw-pointer region the checker must not second-guess.
+//
+// Out of scope (later rungs): in-place-mutation / use-after-free
+// (`E0902`/`E0903`, E6 / #1215), affine/linear single-use enforcement
+// on user wrappers (E7), shared borrows (Phase U), and the opaque `Raw`
+// assignment form (`y = x` parses to `Raw` text — see #1214 `Out:`).
+//
+// Proposal §3.2 / §3.3; epic #1209; this issue: #1214.
 import {
     Block,
     Expression,
@@ -35,68 +49,161 @@ import {
     SourceSpan,
     Statement
 } from "./ast";
-import { Token } from "./token";
-import { is_identifier_char } from "./typecheck_types";
+import { render_diagnostic } from "./diagnostics_render";
+import { starts_with } from "./string_utils";
+import { Token, TokenKind } from "./token";
+import { Diagnostic, is_identifier_char } from "./typecheck_types";
 
-// One tracked binding. `state` is the R0 lattice: "owned" on entry,
-// "moved" once E5 marks a move site. Shadowing is by position — the
-// most recently pushed binding for a name wins (`binding_state` scans
-// for the last match).
+// One tracked binding. `state` is the lattice: "owned" on entry,
+// "moved" once a move site consumes it. `is_owned` flags the bindings
+// the move rules apply to (owned/affine type); copyable bindings stay
+// `is_owned == false` and no rule ever fires on them. `moved_span`
+// records *where* the move happened so use-after-move diagnostics can
+// point back at it. Shadowing is by position — the most recently pushed
+// binding for a name wins.
 struct OwnershipBinding {
     name: string;
     state: string;
     span: SourceSpan?;
+    is_owned: boolean;
+    moved_span: SourceSpan?;
 }
 
-// Diagnostics plumbing for E5/E6. Severity is always "warning" in the
-// dormant phase; no factory in this file mints one today.
+// An ownership finding. E5 mints `severity == "error"` findings with a
+// `code` (`E0901`/`E0904`), the offending-use token (`trigger`), and the
+// move-site token (`moved_trigger`) so callers and tests can inspect
+// both spans structurally; the rendered message embeds both locations.
 struct OwnershipWarning {
     routine_name: string;
     binding_name: string;
     message: string;
     trigger: Token?;
     severity: string;
+    code: string;
+    moved_trigger: Token?;
 }
 
 // Threaded walk state. `bindings` is the lexical environment at the
 // current program point; `tracked` is the monotone count of every
-// binding the walk has entered (parameters, `let`s, lambda parameters,
-// catch names, `for` targets) — child scopes propagate it back even
-// though their bindings are discarded. The unit tests pin the walk's
-// coverage through this counter.
+// binding the walk has entered (the unit tests pin coverage through
+// it); `findings` is the accumulated diagnostic stream, propagated out
+// of every child scope even though child bindings are discarded.
 struct OwnershipScope {
     bindings: OwnershipBinding[];
     tracked: int;
+    findings: OwnershipWarning[];
 }
 
-// Program-level result: the discarded-state summary plus the (empty in
-// R0) warning stream.
+// Program-level result: the binding-coverage summary plus the findings
+// stream.
 struct OwnershipSummary {
     bindings_tracked: int;
     warnings: OwnershipWarning[];
 }
 
 // -------------------------------------------------------------------
-// Lattice helpers (consumed by E5; exercised by unit tests today)
+// Leaf helpers
 // -------------------------------------------------------------------
-// Resolve a name to its current ownership state. Returns "" when the
-// name is not bound; the last matching binding wins so shadowed names
-// resolve to the innermost declaration.
-fn binding_state(bindings: OwnershipBinding[], name: string) -> string {
-    let mut state: string = "";
-    let mut index: int = 0;
+// Strip leading/trailing ASCII whitespace so a type annotation like
+// `" OwnedBuf "` classifies the same as `"OwnedBuf"`.
+fn _trim(text: string) -> string {
+    let mut start: int = 0;
+    let mut end: int = text.length;
     loop {
-        if index >= bindings.length { break; }
-        if bindings[index].name == name { state = bindings[index].state; }
+        if start >= end { break; }
+        let ch = text[start];
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" { start += 1; } else {
+            break;
+        }
+    }
+    loop {
+        if end <= start { break; }
+        let ch = text[end - 1];
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" { end -= 1; } else {
+            break;
+        }
+    }
+    let mut result: string = "";
+    let mut index: int = start;
+    loop {
+        if index >= end { break; }
+        result = result + text[index];
         index += 1;
     }
-    return state;
+    return result;
 }
 
-// The Owned -> Moved lattice transition. E5 calls this at move sites;
-// nothing in the dormant pass does. Flips the most recent binding for
-// `name`; a miss returns the input unchanged.
-fn mark_binding_moved(bindings: OwnershipBinding[], name: string) -> OwnershipBinding[] {
+// Positive-integer formatter (local, mirroring `num_format` — kept
+// self-contained so this module's import closure stays narrow).
+fn _int_to_string(value: int) -> string {
+    if value == 0 { return "0"; }
+    let mut negative: boolean = false;
+    let mut working: int = value;
+    if working < 0 {
+        negative = true;
+        working = 0 - working;
+    }
+    let digits = "0123456789";
+    let mut remaining: int = working;
+    let mut output: string = "";
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp: int = remaining;
+        let mut quotient: int = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = digits[temp];
+        output = ch + output;
+        remaining = quotient;
+    }
+    if negative { output = "-" + output; }
+    return output;
+}
+
+// True iff a type annotation names an owned/affine value the move rules
+// apply to. String-based, mirroring `unwrap_ownership_wrapper`
+// (typecheck_types) and `is_copy_type` (llvm/type_mapping): the compiler
+// has no structural type info at this pass, only the annotation text.
+fn _is_owned_type(text: string) -> boolean {
+    let trimmed = _trim(text);
+    if trimmed == "OwnedBuf" { return true; }
+    if trimmed == "Affine" { return true; }
+    if trimmed == "Linear" { return true; }
+    if starts_with(trimmed, "Affine<") { return true; }
+    if starts_with(trimmed, "Linear<") { return true; }
+    if starts_with(trimmed, "OwnedBuf<") { return true; }
+    return false;
+}
+
+// Synthesize an identifier token from an AST span so the finding can
+// feed the shared diagnostic renderer (which keys carets off a Token).
+fn _token_from_span(name: string, span: SourceSpan?) -> Token? {
+    if span == null { return null; }
+    let s: SourceSpan = span;
+    return Token {
+        kind: TokenKind.Identifier(),
+        lexeme: name,
+        line: s.start_line,
+        column: s.start_column
+    };
+}
+
+// " at <line>:<col>" for a span, or "" when the span is unknown.
+fn _span_location(span: SourceSpan?) -> string {
+    if span == null { return ""; }
+    let s: SourceSpan = span;
+    return " at " + _int_to_string(s.start_line) + ":" + _int_to_string(s.start_column);
+}
+
+// -------------------------------------------------------------------
+// Lattice helpers (exercised by unit tests)
+// -------------------------------------------------------------------
+// Last index of `name` in `bindings`, or -1. The last match wins so
+// shadowed names resolve to the innermost declaration.
+fn _find_binding_index(bindings: OwnershipBinding[], name: string) -> int {
     let mut last: int = -1;
     let mut index: int = 0;
     loop {
@@ -104,19 +211,121 @@ fn mark_binding_moved(bindings: OwnershipBinding[], name: string) -> OwnershipBi
         if bindings[index].name == name { last = index; }
         index += 1;
     }
+    return last;
+}
+
+// Resolve a name to its current ownership state. Returns "" when the
+// name is not bound.
+fn binding_state(bindings: OwnershipBinding[], name: string) -> string {
+    let index = _find_binding_index(bindings, name);
+    if index < 0 { return ""; }
+    return bindings[index].state;
+}
+
+// The Owned -> Moved transition, recording the move site. Flips the
+// most recent binding for `name`; a miss returns the input unchanged.
+fn _mark_binding_moved_at(bindings: OwnershipBinding[], name: string, move_span: SourceSpan?) -> OwnershipBinding[] {
+    let last = _find_binding_index(bindings, name);
     if last < 0 { return bindings; }
     let mut result: OwnershipBinding[] = [];
-    index = 0;
+    let mut index: int = 0;
     loop {
         if index >= bindings.length { break; }
         if index == last {
             result.push(OwnershipBinding {
-                name: bindings[index].name, state: "moved", span: bindings[index].span
+                name: bindings[index].name, state: "moved", span: bindings[index].span, is_owned: bindings[index].is_owned, moved_span: move_span
             });
         } else { result.push(bindings[index]); }
         index += 1;
     }
     return result;
+}
+
+// Span-less wrapper retained for the lattice unit tests.
+fn mark_binding_moved(bindings: OwnershipBinding[], name: string) -> OwnershipBinding[] {
+    return _mark_binding_moved_at(bindings, name, null);
+}
+
+// -------------------------------------------------------------------
+// Rule firing
+// -------------------------------------------------------------------
+fn _push_finding(scope: OwnershipScope, finding: OwnershipWarning) -> OwnershipScope {
+    let mut findings = scope.findings;
+    findings.push(finding);
+    return OwnershipScope {
+        bindings: scope.bindings,
+        tracked: scope.tracked,
+        findings: findings
+    };
+}
+
+fn _make_finding(name: string, use_span: SourceSpan?, moved_span: SourceSpan?, code: string) -> OwnershipWarning {
+    let use_loc = _span_location(use_span);
+    let moved_loc = _span_location(moved_span);
+    let mut message: string = "";
+    if code == "E0904" {
+        message = "second live binding to uniquely-owned value `" + name + "`"
+            + use_loc
+            + "\nnote: `"
+            + name
+            + "` was moved here"
+            + moved_loc
+            + "\nhelp: `"
+            + name
+            + "` is uniquely owned; move it or take an explicit copy";
+    } else {
+        message = "use of moved value `" + name + "`" + use_loc + "\nnote: `"
+            + name
+            + "` was moved here"
+            + moved_loc
+            + "\nhelp: clone it before the move, or restructure so the second use precedes the move";
+    }
+    return OwnershipWarning {
+        routine_name: "",
+        binding_name: name,
+        message: message,
+        trigger: _token_from_span(name, use_span),
+        severity: "error",
+        code: code,
+        moved_trigger: _token_from_span(name, moved_span)
+    };
+}
+
+// A reference to `name` in a *consuming* position (let initializer,
+// call argument, return value). When the binding is owned and already
+// moved this is use-after-move: `E0904` if the consuming site is a new
+// binding (`is_let_init`), `E0901` otherwise. When it is owned and live
+// this performs the `Owned -> Moved` transition.
+fn _consume_identifier(scope: OwnershipScope, name: string, use_span: SourceSpan?, is_let_init: boolean) -> OwnershipScope {
+    let index = _find_binding_index(scope.bindings, name);
+    if index < 0 { return scope; }
+    let binding = scope.bindings[index];
+    if !binding.is_owned { return scope; }
+    if binding.state == "moved" {
+        let mut code: string = "E0901";
+        if is_let_init { code = "E0904"; }
+        return _push_finding(scope, _make_finding(name, use_span, binding.moved_span, code));
+    }
+    let moved = _mark_binding_moved_at(scope.bindings, name, use_span);
+    return OwnershipScope {
+        bindings: moved,
+        tracked: scope.tracked,
+        findings: scope.findings
+    };
+}
+
+// A read (non-consuming use) of `name`. Reading a moved owned binding is
+// use-after-move (`E0901`); reading a live binding is fine and does not
+// change state.
+fn _check_read(scope: OwnershipScope, name: string, use_span: SourceSpan?) -> OwnershipScope {
+    let index = _find_binding_index(scope.bindings, name);
+    if index < 0 { return scope; }
+    let binding = scope.bindings[index];
+    if !binding.is_owned { return scope; }
+    if binding.state == "moved" {
+        return _push_finding(scope, _make_finding(name, use_span, binding.moved_span, "E0901"));
+    }
+    return scope;
 }
 
 // -------------------------------------------------------------------
@@ -133,26 +342,32 @@ fn _copy_bindings(bindings: OwnershipBinding[]) -> OwnershipBinding[] {
     return result;
 }
 
-fn _enter_binding(scope: OwnershipScope, name: string, span: SourceSpan?) -> OwnershipScope {
+fn _enter_binding(scope: OwnershipScope, name: string, span: SourceSpan?, is_owned: boolean) -> OwnershipScope {
     let mut bindings = scope.bindings;
     bindings.push(OwnershipBinding {
-        name: name, state: "owned", span: span
+        name: name, state: "owned", span: span, is_owned: is_owned, moved_span: null
     });
-    return OwnershipScope { bindings: bindings, tracked: scope.tracked + 1 };
+    return OwnershipScope {
+        bindings: bindings,
+        tracked: scope.tracked + 1,
+        findings: scope.findings
+    };
 }
 
 // Walk a nested block as a child scope: the child sees the parent's
-// bindings (copied so child declarations cannot leak back), and only
-// the monotone `tracked` count flows out.
+// bindings (copied so child declarations cannot leak back); the
+// monotone `tracked` count and the accumulated `findings` flow out.
 fn _nested_block_scope(block: Block, scope: OwnershipScope) -> OwnershipScope {
     let child_in = OwnershipScope {
         bindings: _copy_bindings(scope.bindings),
-        tracked: scope.tracked
+        tracked: scope.tracked,
+        findings: scope.findings
     };
     let child_out = _scope_after_block(block, child_in);
     return OwnershipScope {
         bindings: scope.bindings,
-        tracked: child_out.tracked
+        tracked: child_out.tracked,
+        findings: child_out.findings
     };
 }
 
@@ -167,10 +382,47 @@ fn _scope_after_block(block: Block, scope: OwnershipScope) -> OwnershipScope {
     return current;
 }
 
+// True iff a `let`/parameter with this annotation + initializer should
+// be tracked as owned. Owned if the annotation names an owned type, or
+// (inference for the unannotated `let y = x;` chain) if the initializer
+// is a bare identifier already bound to an owned value.
+fn _binding_is_owned(type_text: string, has_type: boolean, initializer: Expression?, bindings: OwnershipBinding[]) -> boolean {
+    if has_type {
+        if _is_owned_type(type_text) { return true; }
+    }
+    if initializer != null {
+        if initializer.variant == "Identifier" {
+            let si = _find_binding_index(bindings, initializer.name);
+            if si >= 0 {
+                if bindings[si].is_owned { return true; }
+            }
+        }
+    }
+    return false;
+}
+
 fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> OwnershipScope {
     if statement.variant == "VariableDeclaration" {
-        let next = _scope_after_expression(statement.initializer, scope);
-        return _enter_binding(next, statement.name, statement.span);
+        let initializer = statement.initializer;
+        // Compute the new binding's owned-ness against the *pre-move*
+        // environment (so `let y = x;` inherits `x`'s owned flag).
+        let mut has_type: boolean = false;
+        let mut type_text: string = "";
+        let annotation = statement.type_annotation;
+        if annotation != null {
+            has_type = true;
+            type_text = annotation.text;
+        }
+        let owned_new = _binding_is_owned(type_text, has_type, initializer, scope.bindings);
+        // A bare-identifier initializer is a move; anything else is an
+        // ordinary expression walk (reads, nested lambdas, calls).
+        let mut next = scope;
+        if initializer != null {
+            if initializer.variant == "Identifier" {
+                next = _consume_identifier(scope, initializer.name, initializer.span, true);
+            } else { next = _scope_after_expression(initializer, scope); }
+        }
+        return _enter_binding(next, statement.name, statement.span, owned_new);
     }
     if statement.variant == "BlockStatement" {
         // E2 boundary (#1211): the interior of `unsafe { }` is the
@@ -204,16 +456,18 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         let next = _scope_after_expression(statement.clause.iterable, scope);
         let mut child = OwnershipScope {
             bindings: _copy_bindings(next.bindings),
-            tracked: next.tracked
+            tracked: next.tracked,
+            findings: next.findings
         };
         let target = statement.clause.target;
         if target.variant == "Identifier" {
-            child = _enter_binding(child, target.name, target.span);
+            child = _enter_binding(child, target.name, target.span, false);
         }
         let child_out = _scope_after_block(statement.body, child);
         return OwnershipScope {
             bindings: next.bindings,
-            tracked: child_out.tracked
+            tracked: child_out.tracked,
+            findings: child_out.findings
         };
     }
     if statement.variant == "WithStatement" {
@@ -232,21 +486,21 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         loop {
             if case_index >= statement.cases.length { break; }
             let case = statement.cases[case_index];
-            // Arm scope: pattern-bound names (destructured fields,
-            // catch-all identifiers) enter as owned before the guard
-            // and body walk, mirroring
-            // `register_match_pattern_bindings` in typecheck.sfn —
-            // guards may reference pattern bindings.
+            // Arm scope: pattern-bound names enter as owned (copyable,
+            // is_owned == false) before the guard and body walk,
+            // mirroring `register_match_pattern_bindings` in typecheck.
             let mut child = OwnershipScope {
                 bindings: _copy_bindings(next.bindings),
-                tracked: next.tracked
+                tracked: next.tracked,
+                findings: next.findings
             };
             child = _enter_pattern_bindings(case.pattern, child);
             child = _scope_after_expression(case.guard, child);
             let child_out = _scope_after_block(case.body, child);
             next = OwnershipScope {
                 bindings: next.bindings,
-                tracked: child_out.tracked
+                tracked: child_out.tracked,
+                findings: child_out.findings
             };
             case_index += 1;
         }
@@ -258,16 +512,18 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         if catch_block != null {
             let mut child = OwnershipScope {
                 bindings: _copy_bindings(next.bindings),
-                tracked: next.tracked
+                tracked: next.tracked,
+                findings: next.findings
             };
             let catch_name = statement.catch_name;
             if catch_name != null {
-                child = _enter_binding(child, catch_name, null);
+                child = _enter_binding(child, catch_name, null, false);
             }
             let child_out = _scope_after_block(catch_block, child);
             next = OwnershipScope {
                 bindings: next.bindings,
-                tracked: child_out.tracked
+                tracked: child_out.tracked,
+                findings: child_out.findings
             };
         }
         let finally_block = statement.finally_block;
@@ -277,7 +533,16 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         return next;
     }
     if statement.variant == "ReturnStatement" {
-        return _scope_after_expression(statement.expression, scope);
+        let expression = statement.expression;
+        if expression != null {
+            // `return x;` consumes a bare owned identifier (move /
+            // use-after-move); other return expressions walk as reads.
+            if expression.variant == "Identifier" {
+                return _consume_identifier(scope, expression.name, expression.span, false);
+            }
+            return _scope_after_expression(expression, scope);
+        }
+        return scope;
     }
     if statement.variant == "ThrowStatement" {
         return _scope_after_expression(statement.expression, scope);
@@ -286,23 +551,24 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         return _scope_after_expression(statement.expression, scope);
     }
     if statement.variant == "FunctionDeclaration" {
-        // Nested fns get a fresh routine scope; only the binding count
-        // flows back. `unsafe fn` bodies are skipped wholesale (E2).
+        // Nested fns get a fresh routine scope; the binding count and
+        // findings flow back. `unsafe fn` bodies are skipped (E2).
         if statement.is_unsafe { return scope; }
         let summary = _analyze_routine_ownership(statement.signature.parameters, statement.body);
+        let merged = _append_warnings(scope.findings, summary.warnings);
         return OwnershipScope {
             bindings: scope.bindings,
-            tracked: scope.tracked + summary.bindings_tracked
+            tracked: scope.tracked + summary.bindings_tracked,
+            findings: merged
         };
     }
     return scope;
 }
 
-// Mirror of `register_match_pattern_bindings` in typecheck.sfn: a
-// `Struct` pattern binds its field names, the colon-less shorthand
-// destructure (`Shape.Circle { radius }`) parses to `Raw` so the
-// names are recovered from the brace block, and a bare non-`_`
-// identifier is a catch-all binding. Literal patterns bind nothing.
+// Mirror of `register_match_pattern_bindings` in typecheck.sfn: pattern
+// names enter as copyable (is_owned == false) — destructured fields,
+// shorthand-destructure names recovered from a `Raw` brace block, and
+// bare catch-all identifiers.
 fn _enter_pattern_bindings(pattern: Expression?, scope: OwnershipScope) -> OwnershipScope {
     if pattern == null { return scope; }
     if pattern.variant == "Struct" {
@@ -310,7 +576,7 @@ fn _enter_pattern_bindings(pattern: Expression?, scope: OwnershipScope) -> Owner
         let mut index: int = 0;
         loop {
             if index >= pattern.fields.length { break; }
-            next = _enter_binding(next, pattern.fields[index].name, null);
+            next = _enter_binding(next, pattern.fields[index].name, null, false);
             index += 1;
         }
         return next;
@@ -320,14 +586,11 @@ fn _enter_pattern_bindings(pattern: Expression?, scope: OwnershipScope) -> Owner
     }
     if pattern.variant == "Identifier" {
         if pattern.name == "_" { return scope; }
-        return _enter_binding(scope, pattern.name, pattern.span);
+        return _enter_binding(scope, pattern.name, pattern.span, false);
     }
     return scope;
 }
 
-// Collect each identifier inside the `{ ... }` block of a raw
-// shorthand destructure as a binding — same recovery walk as
-// `register_raw_pattern_bindings` in typecheck.sfn.
 fn _enter_raw_pattern_bindings(text: string, scope: OwnershipScope) -> OwnershipScope {
     let mut next = scope;
     let mut in_block: boolean = false;
@@ -343,14 +606,14 @@ fn _enter_raw_pattern_bindings(text: string, scope: OwnershipScope) -> Ownership
         }
         if ch == "}" {
             if token.length > 0 {
-                next = _enter_binding(next, token, null);
+                next = _enter_binding(next, token, null, false);
                 token = "";
             }
             break;
         }
         if is_identifier_char(ch) { token = token + ch; } else {
             if token.length > 0 {
-                next = _enter_binding(next, token, null);
+                next = _enter_binding(next, token, null, false);
                 token = "";
             }
         }
@@ -359,11 +622,14 @@ fn _enter_raw_pattern_bindings(text: string, scope: OwnershipScope) -> Ownership
     return next;
 }
 
-// Expression walk: ownership state is not consumed by expressions in
-// R0 (that is E5's move detection) — the walk exists to reach lambda
-// bodies, which open routine-like child scopes of their own.
+// Expression walk. Reads of owned bindings are checked for
+// use-after-move; call arguments are consuming positions (pass-by-value
+// of an owned value is a move); lambdas open routine-like child scopes.
 fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> OwnershipScope {
     if expression == null { return scope; }
+    if expression.variant == "Identifier" {
+        return _check_read(scope, expression.name, expression.span);
+    }
     if expression.variant == "Unary" {
         return _scope_after_expression(expression.operand, scope);
     }
@@ -379,7 +645,12 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
         let mut index: int = 0;
         loop {
             if index >= expression.arguments.length { break; }
-            next = _scope_after_expression(expression.arguments[index], next);
+            let argument = expression.arguments[index];
+            // A bare-identifier argument is a move; other arguments
+            // walk as ordinary expressions (their interior reads count).
+            if argument.variant == "Identifier" {
+                next = _consume_identifier(next, argument.name, argument.span, false);
+            } else { next = _scope_after_expression(argument, next); }
             index += 1;
         }
         return next;
@@ -421,19 +692,26 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
     if expression.variant == "Lambda" {
         let mut child = OwnershipScope {
             bindings: _copy_bindings(scope.bindings),
-            tracked: scope.tracked
+            tracked: scope.tracked,
+            findings: scope.findings
         };
         let mut index: int = 0;
         loop {
             if index >= expression.parameters.length { break; }
             let parameter = expression.parameters[index];
-            child = _enter_binding(child, parameter.name, parameter.span);
+            let mut owned_param: boolean = false;
+            let p_annotation = parameter.type_annotation;
+            if p_annotation != null {
+                if _is_owned_type(p_annotation.text) { owned_param = true; }
+            }
+            child = _enter_binding(child, parameter.name, parameter.span, owned_param);
             index += 1;
         }
         let child_out = _scope_after_block(expression.body, child);
         return OwnershipScope {
             bindings: scope.bindings,
-            tracked: child_out.tracked
+            tracked: child_out.tracked,
+            findings: child_out.findings
         };
     }
     if expression.variant == "Range" {
@@ -493,21 +771,28 @@ fn _append_warnings(warnings: OwnershipWarning[], additions: OwnershipWarning[])
 
 fn _analyze_routine_ownership(parameters: Parameter[], body: Block) -> OwnershipSummary {
     let no_bindings: OwnershipBinding[] = [];
-    let mut scope = OwnershipScope { bindings: no_bindings, tracked: 0 };
+    let no_findings: OwnershipWarning[] = [];
+    let mut scope = OwnershipScope {
+        bindings: no_bindings,
+        tracked: 0,
+        findings: no_findings
+    };
     let mut index: int = 0;
     loop {
         if index >= parameters.length { break; }
-        scope = _enter_binding(scope, parameters[index].name, parameters[index].span);
+        let parameter = parameters[index];
+        let mut owned_param: boolean = false;
+        let annotation = parameter.type_annotation;
+        if annotation != null {
+            if _is_owned_type(annotation.text) { owned_param = true; }
+        }
+        scope = _enter_binding(scope, parameter.name, parameter.span, owned_param);
         index += 1;
     }
     let out = _scope_after_block(body, scope);
-    // Phase R0: the state is built and discarded — no rule inspects it
-    // yet, so the warning stream is empty by construction. E5/E6 mint
-    // `OwnershipWarning`s here and flip them to errors.
-    let warnings: OwnershipWarning[] = [];
     return OwnershipSummary {
         bindings_tracked: out.tracked,
-        warnings: warnings
+        warnings: out.findings
     };
 }
 
@@ -540,8 +825,8 @@ fn _statement_summary(statement: Statement) -> OwnershipSummary {
     return _empty_summary();
 }
 
-// Full-program analysis. Exposed (alongside the lattice helpers) so
-// unit tests can pin the walk's coverage via `bindings_tracked`.
+// Full-program analysis. Exposed (alongside the lattice helpers) so unit
+// tests can pin both the walk's coverage and the move-rule findings.
 fn analyze_program_ownership(program: Program) -> OwnershipSummary {
     let mut warnings: OwnershipWarning[] = [];
     let mut tracked: int = 0;
@@ -556,24 +841,36 @@ fn analyze_program_ownership(program: Program) -> OwnershipSummary {
     return OwnershipSummary { bindings_tracked: tracked, warnings: warnings };
 }
 
-// Warning-stream view, mirroring `validate_effects`' shape.
+// Findings-stream view, mirroring `validate_effects`' shape.
 fn check_ownership(program: Program) -> OwnershipWarning[] {
     return analyze_program_ownership(program).warnings;
 }
 
 // Build-path gate wrapper for `main.sfn`, shaped like
-// `validate_and_render_effects`: returns the count of error-severity
-// findings only — warning-severity findings never gate the build.
-// Dormant Phase R0 mints no findings at all, so this is always 0;
-// callers gate on `> 0` and the pass graduates to a real gate in E5/E6
-// without re-plumbing the call sites.
-fn run_ownership_checker(program: Program) -> int {
+// `validate_and_render_effects`: renders every error-severity finding to
+// stderr and returns the error count. Callers gate on `> 0`. Programs
+// with no owned/affine bindings (the compiler's own source) produce zero
+// findings, so the gate stays transparent for self-hosting.
+fn run_ownership_checker(program: Program) -> int ![io] {
     let summary = analyze_program_ownership(program);
+    let empty_lines: string[] = [];
     let mut errors: int = 0;
     let mut index: int = 0;
     loop {
         if index >= summary.warnings.length { break; }
-        if summary.warnings[index].severity == "error" { errors += 1; }
+        let finding = summary.warnings[index];
+        if finding.severity == "error" {
+            errors += 1;
+            let diagnostic = Diagnostic {
+                code: finding.code,
+                severity: "error",
+                message: finding.message,
+                file_path: "",
+                primary: finding.trigger,
+                suggestion: null
+            };
+            print.err(render_diagnostic(diagnostic, empty_lines, "ownership"));
+        }
         index += 1;
     }
     return errors;
