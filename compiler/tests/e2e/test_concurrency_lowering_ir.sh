@@ -61,7 +61,7 @@ assert_ir_contains() {
     return 0
 }
 
-# channel(N) → sfn_channel_create(i32 N) (#1091)
+# channel(N) → sfn_channel_create(i64 N, i64 8) (#1266; was 1-arg i32 in #1091)
 test_channel_lowers_to_channel_create() {
     assert_ir_contains "channel_create_call" \
 'fn main() ![io] {
@@ -70,13 +70,15 @@ test_channel_lowers_to_channel_create() {
         "sfn_channel_create"
 }
 
-# channel_create call carries an i32 capacity argument
-test_channel_create_has_i32_cap() {
-    assert_ir_contains "channel_create_i32" \
+# channel_create call carries the capacity AND the elem_size operand,
+# matching runtime/sfn/concurrency/channel.sfn (§2.6.4): v0 channels are
+# monomorphized to pointer-sized elements, so elem_size is 8.
+test_channel_create_has_cap_and_elem_size() {
+    assert_ir_contains "channel_create_i64" \
 'fn main() ![io] {
-    let ch = channel(0);
+    let ch = channel(4);
 }' \
-        "sfn_channel_create(i32"
+        "sfn_channel_create(i64 4, i64 8)"
 }
 
 # spawn:int <lambda> → sfn_spawn_int (#1090 flip)
@@ -111,7 +113,7 @@ fn main() ![net, io] {
 }
 
 run_test "channel(N) lowers to sfn_channel_create (#1091)" test_channel_lowers_to_channel_create
-run_test "channel_create carries i32 capacity argument (#1091)" test_channel_create_has_i32_cap
+run_test "channel_create carries i64 capacity + elem_size arguments (#1266)" test_channel_create_has_cap_and_elem_size
 run_test "spawn:int lowers to sfn_spawn_int (#1090)" test_spawn_int_lowers
 run_test "parallel [task] lowers to sfn_spawn_task (#1091)" test_parallel_lowers_to_spawn_task
 run_test "serve(handler, port) lowers to sfn_serve (#1092)" test_serve_lowers_to_serve_start

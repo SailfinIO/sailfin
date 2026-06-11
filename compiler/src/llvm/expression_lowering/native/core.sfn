@@ -738,6 +738,264 @@ fn resolve_borrow_base(target: string, locals: LocalBinding[]) -> string {
     return resolve_borrow_base_impl(target, locals);
 }
 
+// ── Channel send / receive bespoke lowering (#1266) ──────────────────
+// `runtime/sfn/concurrency/channel.sfn` implements the §2.6.4 surface:
+//   sfn_channel_create(capacity: i64, elem_size: i64) -> * u8
+//   sfn_channel_send(ch: * u8, elem: * u8) -> i64     elem POINTS AT bytes
+//   sfn_channel_recv(ch: * u8) -> * u8                pointer to malloc'd copy
+// The generic descriptor call path passes the element VALUE where the
+// runtime expects a POINTER to the element bytes (and vice versa on
+// receive), so `send` / `receive` on a `channel`-annotated base lower
+// bespoke here instead:
+//   - send spills the 8-byte element value to a stack slot and passes
+//     the slot pointer (the runtime memcpy's it into the buffer);
+//   - receive calls `sfn_channel_recv`, null-checks the returned copy
+//     (null = closed + drained), and loads the element value out of it.
+// v0 channels are monomorphized to pointer-sized elements (elem_size 8),
+// matching the `i64 8` operand `channel(N)` create lowering passes. The
+// element LOAD type on receive is driven by the caller's expected LLVM
+// type: `i64` / `double` load the primitive directly; everything else
+// (strings, structs, unannotated) loads the stored `i8*` and defers to
+// the normal coercion paths. The malloc'd copy `sfn_channel_recv`
+// returns is leaked in v0 (no consumer-side drop seam yet).
+// Returns null when the call is not a channel send/receive so the
+// caller falls through to the normal resolution pipeline.
+fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult? ![io] {
+    let field = member_target.field;
+    let mut is_channel_op: boolean = false;
+    if field == "send" { is_channel_op = true; }
+    if field == "receive" { is_channel_op = true; }
+    if !is_channel_op { return null; }
+    let base = trim_text(member_target.base);
+    if !is_simple_identifier(base) { return null; }
+    let mut base_annotation: string = "";
+    let base_local = find_local_binding(locals, base);
+    if base_local != null { base_annotation = base_local.type_annotation; } else {
+        let base_parameter = find_parameter_binding(bindings, base);
+        if base_parameter != null {
+            base_annotation = base_parameter.type_annotation;
+        }
+    }
+    if base_annotation != "channel" { return null; }
+    if field == "send" {
+        if argument_entries.length != 1 { return null; }
+    }
+    if field == "receive" {
+        if argument_entries.length != 0 { return null; }
+    }
+
+    let mut ch_lines: string[] = lines;
+    let mut ch_temp: int = temp_index;
+    let mut ch_diag: string[] = [];
+    let mut ch_constants: StringConstant[] = empty_string_constant_set();
+
+    // Lower the channel handle (an opaque i8*).
+    let base_lowered = lower_expression(base, bindings, locals, ch_temp, ch_lines, functions, context, "");
+    ch_diag = extend_string_array(ch_diag, base_lowered.diagnostics);
+    ch_lines = base_lowered.lines;
+    ch_temp = base_lowered.temp_index;
+    ch_constants = merge_string_constants(ch_constants, base_lowered.string_constants);
+    if base_lowered.operand == null {
+        ch_diag.push("llvm lowering: channel `" + field
+            + "`: could not lower channel handle `"
+            + base
+            + "`");
+        return ExpressionResult {
+            lines: ch_lines,
+            temp_index: ch_temp,
+            operand: null,
+            diagnostics: ch_diag,
+            string_constants: ch_constants
+        };
+    }
+    let mut ch_handle = base_lowered.operand;
+    if ch_handle.llvm_type != "i8*" {
+        let handle_coerced = coerce_operand_to_type(ch_handle, "i8*", ch_temp, ch_lines, true, null);
+        ch_diag = extend_string_array(ch_diag, handle_coerced.diagnostics);
+        ch_lines = handle_coerced.lines;
+        ch_temp = handle_coerced.temp_index;
+        if handle_coerced.operand != null {
+            ch_handle = handle_coerced.operand;
+        }
+    }
+
+    if field == "send" {
+        let value_lowered = lower_expression(argument_entries[0], bindings, locals, ch_temp, ch_lines, functions, context, "");
+        ch_diag = extend_string_array(ch_diag, value_lowered.diagnostics);
+        ch_lines = value_lowered.lines;
+        ch_temp = value_lowered.temp_index;
+        ch_constants = merge_string_constants(ch_constants, value_lowered.string_constants);
+        if value_lowered.operand == null {
+            ch_diag.push("llvm lowering: channel send: could not lower element `"
+                + argument_entries[0]
+                + "`");
+            return ExpressionResult {
+                lines: ch_lines,
+                temp_index: ch_temp,
+                operand: null,
+                diagnostics: ch_diag,
+                string_constants: ch_constants
+            };
+        }
+        // Normalize the element to an 8-byte first-class value so the
+        // stack slot matches the channel's elem_size (8). String
+        // aggregates pass their data pointer; narrow integers widen.
+        let mut elem_type: string = value_lowered.operand.llvm_type;
+        let mut elem_value: string = value_lowered.operand.value;
+        if elem_type == "{i8*, i64}" {
+            let data_ptr = format_temp_name(ch_temp);
+            ch_temp += 1;
+            ch_lines.push("  " + data_ptr + " = extractvalue {i8*, i64} "
+                + elem_value
+                + ", 0");
+            elem_type = "i8*";
+            elem_value = data_ptr;
+        }
+        // Widen every narrow integer to i64 so the spill slot covers the
+        // full 8-byte elem_size — an i8/i16/i32 alloca would leave the
+        // runtime's memcpy reading uninitialized stack bytes past it.
+        let mut _send_widen_from: string = "";
+        if elem_type == "i8" { _send_widen_from = "i8"; }
+        if elem_type == "i16" { _send_widen_from = "i16"; }
+        if elem_type == "i32" { _send_widen_from = "i32"; }
+        if _send_widen_from.length > 0 {
+            let widened = format_temp_name(ch_temp);
+            ch_temp += 1;
+            ch_lines.push("  " + widened + " = sext " + _send_widen_from + " "
+                + elem_value
+                + " to i64");
+            elem_type = "i64";
+            elem_value = widened;
+        }
+        if elem_type == "i1" {
+            let widened_bool = format_temp_name(ch_temp);
+            ch_temp += 1;
+            ch_lines.push("  " + widened_bool + " = zext i1 " + elem_value
+                + " to i64");
+            elem_type = "i64";
+            elem_value = widened_bool;
+        }
+        // Spill the value to a stack slot and pass the SLOT pointer —
+        // the runtime memcpy's elem_size bytes out of it.
+        let slot = format_temp_name(ch_temp);
+        ch_temp += 1;
+        ch_lines.push("  " + slot + " = alloca " + elem_type);
+        ch_lines.push("  store " + elem_type + " " + elem_value + ", "
+            + elem_type
+            + "* "
+            + slot);
+        let slot_i8 = format_temp_name(ch_temp);
+        ch_temp += 1;
+        ch_lines.push("  " + slot_i8 + " = bitcast " + elem_type + "* " + slot
+            + " to i8*");
+        let send_rc = format_temp_name(ch_temp);
+        ch_temp += 1;
+        ch_lines.push("  " + send_rc + " = call i64 @sfn_channel_send(i8* "
+            + ch_handle.value
+            + ", i8* "
+            + slot_i8
+            + ")");
+        let send_operand = LLVMOperand { llvm_type: "i64", value: send_rc };
+        return ExpressionResult {
+            lines: ch_lines,
+            temp_index: ch_temp,
+            operand: send_operand,
+            diagnostics: ch_diag,
+            string_constants: ch_constants
+        };
+    }
+
+    // receive: call, null-check the malloc'd copy, load the element.
+    // Narrow integer expected types (i1/i8/i16/i32) load the full i64
+    // slot and truncate after the phi — the send side widened them to
+    // 8 bytes, and an i64 load + trunc is endian-agnostic where a
+    // narrow load from the slot pointer would not be.
+    let mut load_type: string = "i8*";
+    let mut null_default: string = "null";
+    let mut recv_trunc_to: string = "";
+    if expected_type == "i64" {
+        load_type = "i64";
+        null_default = "0";
+    }
+    if expected_type == "double" {
+        load_type = "double";
+        null_default = "0.0";
+    }
+    let mut _recv_narrow: boolean = false;
+    if expected_type == "i1" { _recv_narrow = true; }
+    if expected_type == "i8" { _recv_narrow = true; }
+    if expected_type == "i16" { _recv_narrow = true; }
+    if expected_type == "i32" { _recv_narrow = true; }
+    if _recv_narrow {
+        load_type = "i64";
+        null_default = "0";
+        recv_trunc_to = expected_type;
+    }
+    let recv_id = number_to_string(ch_temp);
+    let raw_ptr = format_temp_name(ch_temp);
+    ch_temp += 1;
+    ch_lines.push("  " + raw_ptr + " = call i8* @sfn_channel_recv(i8* "
+        + ch_handle.value
+        + ")");
+    let is_null = format_temp_name(ch_temp);
+    ch_temp += 1;
+    ch_lines.push("  " + is_null + " = icmp eq i8* " + raw_ptr + ", null");
+    let load_label = "chan_recv_load_" + recv_id;
+    let null_label = "chan_recv_null_" + recv_id;
+    let done_label = "chan_recv_done_" + recv_id;
+    ch_lines.push("  br i1 " + is_null + ", label %" + null_label + ", label %"
+        + load_label);
+    ch_lines.push("");
+    ch_lines.push(load_label + ":");
+    let slot_typed = format_temp_name(ch_temp);
+    ch_temp += 1;
+    ch_lines.push("  " + slot_typed + " = bitcast i8* " + raw_ptr + " to "
+        + load_type
+        + "*");
+    let loaded = format_temp_name(ch_temp);
+    ch_temp += 1;
+    ch_lines.push("  " + loaded + " = load " + load_type + ", " + load_type
+        + "* "
+        + slot_typed);
+    ch_lines.push("  br label %" + done_label);
+    ch_lines.push("");
+    ch_lines.push(null_label + ":");
+    ch_lines.push("  br label %" + done_label);
+    ch_lines.push("");
+    ch_lines.push(done_label + ":");
+    let recv_out = format_temp_name(ch_temp);
+    ch_temp += 1;
+    ch_lines.push("  " + recv_out + " = phi " + load_type + " [ " + loaded
+        + ", %"
+        + load_label
+        + " ], [ "
+        + null_default
+        + ", %"
+        + null_label
+        + " ]");
+    let mut recv_result_type: string = load_type;
+    let mut recv_result_value: string = recv_out;
+    if recv_trunc_to.length > 0 {
+        let narrowed = format_temp_name(ch_temp);
+        ch_temp += 1;
+        ch_lines.push("  " + narrowed + " = trunc i64 " + recv_out + " to "
+            + recv_trunc_to);
+        recv_result_type = recv_trunc_to;
+        recv_result_value = narrowed;
+    }
+    let recv_operand = LLVMOperand {
+        llvm_type: recv_result_type,
+        value: recv_result_value
+    };
+    return ExpressionResult {
+        lines: ch_lines,
+        temp_index: ch_temp,
+        operand: recv_operand,
+        diagnostics: ch_diag,
+        string_constants: ch_constants
+    };
+}
+
 fn lower_expression(expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
     let trimmed = trim_text(expression);
     let mut diagnostics: string[] = [];
@@ -975,17 +1233,26 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     }
 
     // ── channel(<capacity>) / channel:<kind>(<capacity>) ───────────────
-    // Both forms lower to `sfn_channel_create(i32 capacity)` (#1091).
-    // The kind qualifier is recorded for future typed-channel work (#1091)
-    // but the runtime ABI is uniform today (opaque i8* channel handle).
+    // Both forms lower to `sfn_channel_create(i64 capacity, i64 elem_size)`
+    // matching `runtime/sfn/concurrency/channel.sfn` (#1266, was 1-arg i32
+    // in #1091). v0 monomorphizes every channel to pointer-sized elements,
+    // so `elem_size` is the constant 8. The kind qualifier is recorded for
+    // future typed-channel work but the runtime ABI is uniform today
+    // (opaque i8* channel handle).
     if starts_with(stripped, "channel(") {
         let chan_inner = trim_text(substring(stripped, 8, stripped.length));
-        let cap_text = trim_text(substring(chan_inner, 0, chan_inner.length > 0? chan_inner.length - 1: 0));
+        // The end index is computed in a standalone statement (not a
+        // ternary inside the call argument): the inline form mis-lowered
+        // and produced an empty capacity text, dropping the capacity
+        // operand entirely (`channel(4)` emitted `i32 0`).
+        let mut chan_inner_end: int = 0;
+        if chan_inner.length > 0 { chan_inner_end = chan_inner.length - 1; }
+        let cap_text = trim_text(substring(chan_inner, 0, chan_inner_end));
         let empty_chan_constants: StringConstant[] = [];
         let mut chan_lines: string[] = lines;
         let mut chan_temp: int = temp_index;
         let mut chan_diag: string[] = diagnostics;
-        let mut cap_llvm: string = "i32 0";
+        let mut cap_llvm: string = "i64 0";
         if cap_text.length > 0 {
             let cap_lowered = lower_expression(cap_text, bindings, locals, chan_temp, chan_lines, functions, context, "");
             chan_diag = extend_string_array(chan_diag, cap_lowered.diagnostics);
@@ -994,21 +1261,21 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             if cap_lowered.operand != null {
                 let cap_op = cap_lowered.operand;
                 let mut cap_val: string = cap_op.value;
-                if cap_op.llvm_type != "i32" {
+                if cap_op.llvm_type == "i32" {
                     let cap_cast = format_temp_name(chan_temp);
                     chan_temp += 1;
-                    chan_lines.push("  " + cap_cast + " = trunc i64 " + cap_op.value
-                        + " to i32");
+                    chan_lines.push("  " + cap_cast + " = sext i32 " + cap_op.value
+                        + " to i64");
                     cap_val = cap_cast;
                 }
-                cap_llvm = "i32 " + cap_val;
+                cap_llvm = "i64 " + cap_val;
             }
         }
         let chan_result = format_temp_name(chan_temp);
         chan_temp += 1;
         chan_lines.push("  " + chan_result + " = call i8* @sfn_channel_create("
             + cap_llvm
-            + ")");
+            + ", i64 8)");
         let chan_operand = LLVMOperand {
             llvm_type: "i8*",
             value: chan_result
@@ -1027,10 +1294,11 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         let mut chantyped_lines: string[] = lines;
         let mut chantyped_temp: int = temp_index;
         let mut chantyped_diag: string[] = diagnostics;
-        let mut typed_cap_llvm: string = "i32 0";
+        let mut typed_cap_llvm: string = "i64 0";
         if paren_pos >= 0 {
             let inner_start = paren_pos + 1;
-            let inner_end = stripped.length > 0? stripped.length - 1: 0;
+            let mut inner_end: int = 0;
+            if stripped.length > 0 { inner_end = stripped.length - 1; }
             let typed_cap_text = trim_text(substring(stripped, inner_start, inner_end));
             if typed_cap_text.length > 0 {
                 let typed_cap_lowered = lower_expression(typed_cap_text, bindings, locals, chantyped_temp, chantyped_lines, functions, context, "");
@@ -1040,16 +1308,16 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 if typed_cap_lowered.operand != null {
                     let typed_cap_op = typed_cap_lowered.operand;
                     let mut typed_cap_val: string = typed_cap_op.value;
-                    if typed_cap_op.llvm_type != "i32" {
+                    if typed_cap_op.llvm_type == "i32" {
                         let typed_cap_cast = format_temp_name(chantyped_temp);
                         chantyped_temp += 1;
                         chantyped_lines.push("  " + typed_cap_cast
-                            + " = trunc i64 "
+                            + " = sext i32 "
                             + typed_cap_op.value
-                            + " to i32");
+                            + " to i64");
                         typed_cap_val = typed_cap_cast;
                     }
-                    typed_cap_llvm = "i32 " + typed_cap_val;
+                    typed_cap_llvm = "i64 " + typed_cap_val;
                 }
             }
         }
@@ -1058,7 +1326,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         chantyped_lines.push("  " + chantyped_result
             + " = call i8* @sfn_channel_create("
             + typed_cap_llvm
-            + ")");
+            + ", i64 8)");
         let chantyped_operand = LLVMOperand {
             llvm_type: "i8*",
             value: chantyped_result
@@ -1743,6 +2011,17 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             // Rewrite `xs.concat(ys)` into `concat(xs, ys)` early (for simple identifier receivers)
             // so we don't accidentally sanitize `xs.concat` into an undefined `@xsconcat` symbol.
             let member_target = parse_member_access(target);
+            // #1266: `send` / `receive` on a `channel`-annotated base
+            // lower bespoke so the by-pointer element contract of
+            // `runtime/sfn/concurrency/channel.sfn` is respected (send
+            // spills the value to a stack slot; receive loads the
+            // element out of the runtime's malloc'd copy). `close`
+            // stays on the descriptor path — its ABI is a plain
+            // (i8*) -> void call with no element indirection.
+            if member_target.success {
+                let channel_lowered = _try_lower_channel_method(member_target, argument_entries, bindings, locals, temp_index, lines, functions, context, expected_type);
+                if channel_lowered != null { return channel_lowered; }
+            }
             if member_target.success {
                 if member_target.field == "concat" {
                     let receiver_name = trim_text(member_target.base);

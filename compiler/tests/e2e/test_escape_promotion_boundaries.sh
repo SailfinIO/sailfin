@@ -24,11 +24,13 @@
 #      as a heap-use-after-free.
 #
 #      The harness stubs the channel with a single-slot C mailbox and
-#      `sfn_rc_release` with `free`: the compiler-emitted channel calls
-#      (`sfn_channel_receive`, 1-arg create) do not yet match the
-#      `runtime/sfn/concurrency/channel.sfn` ABI (`sfn_channel_recv`,
-#      2-arg create), so the real runtime cannot link against emitted
-#      programs — channel SEMANTICS are not under test here, the
+#      `sfn_rc_release` with `free`. The stubs match the
+#      `runtime/sfn/concurrency/channel.sfn` ABI (#1266): send receives
+#      a POINTER to the element bytes and returns i64; recv returns a
+#      pointer to the stored element bytes. The real runtime would link
+#      too (see test_channel_runtime_roundtrip.sh), but the stub keeps
+#      this harness hermetic so `sfn_rc_release` can be interposed as
+#      `free` — channel SEMANTICS are not under test here, the
 #      sender-side drop behaviour is.
 #
 # The per-rule unit coverage (promotion + consumption + drop suppression,
@@ -200,10 +202,13 @@ SAILFIN
  * dereference becomes a heap-use-after-free that ASAN reports (and the
  * plain run computes from freed memory).
  *
- * The single-slot mailbox stands in for the real channel runtime: the
- * compiler-emitted channel ABI does not yet link against
- * runtime/sfn/concurrency/channel.sfn (symbol/arity mismatch), and
- * channel semantics are not under test — sender-side drops are.
+ * The single-slot mailbox stands in for the real channel runtime so
+ * sfn_rc_release can be interposed as free; it follows the
+ * runtime/sfn/concurrency/channel.sfn by-pointer ABI (#1266): send
+ * gets a pointer to the element bytes (the emitted code spills the
+ * value to a stack slot), recv returns a pointer to the stored bytes
+ * (the emitted code loads the element back out). Channel semantics
+ * are not under test — sender-side drops are.
  */
 #include <pthread.h>
 #include <stdio.h>
@@ -218,8 +223,8 @@ void *sfn_alloc_struct(long n) { return calloc(1, (size_t)n); }
 void sfn_rc_release(void *p) { free(p); }
 
 static void *slot = NULL;
-void sfn_channel_send(void *ch, void *elem) { (void)ch; slot = elem; }
-void *sfn_channel_receive(void *ch) { (void)ch; return slot; }
+long sfn_channel_send(void *ch, void *elem) { (void)ch; slot = *(void **)elem; return 1; }
+void *sfn_channel_recv(void *ch) { (void)ch; return &slot; }
 
 static void *producer_thread(void *ch) {
     produce__escape_payload(ch);

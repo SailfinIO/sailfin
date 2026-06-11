@@ -123,7 +123,7 @@ doc, or `docs/runtime_architecture.md`, not here.
 | `model`/`prompt`/`tool`/`pipeline` blocks | **Removed** | Moved to the post-1.0 `sfn/ai` capsule; the `![model]` effect stays |
 | `routine { }` blocks | Parsed | Frontend nodes only (#1079/#1081); no typecheck or lowering yet |
 | `await` | Parsed | Typing helpers exist (#1082, `E0814`) but are **not wired into the live walk** (pending #829); lowering is #1084 |
-| `channel()` | Parsed | Typing helpers (#1082, `E0815`) helper-only; `channel<T>` parsing pending (#829); lowering is #1084 |
+| `channel()` | Works (v0, untyped) | Bounded MPMC channels run end-to-end: `channel(N)` → `sfn_channel_create(i64 cap, i64 elem_size)`, `send`/`receive`/`close` lower against `runtime/sfn/concurrency/channel.sfn` with the by-pointer element ABI (#1085/#1091, aligned #1266). Pointer-sized elements only; `channel<T>` parsing pending (#829) |
 | `spawn` | Parsed | Future-kind resolver + `E0813` (#1082); lowering is #1084 |
 | `\|>` pipeline operator | Not implemented | Planned post-1.0 |
 | Currency / time literals | Not implemented | Use numeric literals |
