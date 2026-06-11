@@ -217,8 +217,9 @@ json_val() {
 # Map the wrapped target to the tool JSON artifact the Makefile captured under
 # the same JSON=1 gate: the BuildReport from #1120 (compile/rebuild), the test
 # jsonl from #1121 (test*), the check-fast envelope from #1122 (check-fast).
-# Echoes the path, or empty for a target with no single-tool artifact (today
-# only `check`, whose seven-phase ledger is issue F).
+# Echoes the path, or empty for a target with no single-tool artifact. `check`
+# has none but is handled separately by compose_check_phases (#1124); an empty
+# result here therefore means an unexpected target outside the wrapped set.
 tool_artifact_path() {
 	case "$TARGET" in
 		compile | rebuild) printf '%s' "build/native/.build-report.json" ;;
@@ -293,19 +294,85 @@ artifact_looks_intact_no_jq() {
 	return 0
 }
 
-# Compose the one-element phases[] array (#1123) from the captured tool
-# artifact. Echoes a JSON array literal:
+# The ordered seven-phase ledger for `make check` (#1124, epic #1056 Phase 2).
+PHASES_CHECK="compile first-pass-tests seedcheck-build seedcheck-smoke seedcheck-tests stage3-build fixed-point"
+
+# Compose the seven-phase `make check` ledger (#1124). Echoes a JSON array of
+# seven `{"name":<phase>,"status":<s>}` entries in pipeline order. Each phase's
+# status is derived from the human banners `check-impl` prints (the same marker
+# set `detect_check_phase` keys off), with phases after the failing/last-reached
+# one marked `skipped`:
+#   - phases the run advanced PAST (a later phase's start banner appeared) -> pass
+#   - the last-reached phase -> mirrors the verdict: fail / warn / pass
+#   - phases never reached -> skipped
+# `compile` is the first thing check-impl runs, so it is always reached.
+# The fixed-point `stage2 != stage3` mismatch is the lone `warn` (exit 0),
+# and seedcheck-smoke fails independently of the build/test phases.
+compose_check_phases() {
+	# Reached flags per phase, parallel to PHASES_CHECK. compile is unconditional.
+	local r_compile=1 r_fptests=0 r_scbuild=0 r_scsmoke=0 r_sctests=0 r_s3build=0 r_fixed=0
+	out_has '\[check\] running test suite on first-pass binary' && r_fptests=1
+	out_has 'proceeding to seedcheck build|verifying seed selfhost \(stage2\)' && r_scbuild=1
+	out_has 'validating seedcheck binary can run programs' && r_scsmoke=1
+	out_has 'running test suite with seedcheck binary' && r_sctests=1
+	out_has 'building stage3 for fixed-point' && r_s3build=1
+	out_has 'comparing stage2 vs stage3' && r_fixed=1
+
+	local reached=("$r_compile" "$r_fptests" "$r_scbuild" "$r_scsmoke" "$r_sctests" "$r_s3build" "$r_fixed")
+
+	# Latest reached phase (1-based). compile guarantees at least 1.
+	local last=1 i
+	for i in 0 1 2 3 4 5 6; do
+		[ "${reached[$i]}" -eq 1 ] && last=$((i + 1))
+	done
+
+	# The last-reached phase mirrors the verdict; nondeterminism is the warn.
+	local last_status="pass"
+	if [ "$STATUS" = "fail" ]; then
+		last_status="fail"
+	elif [ "$STATUS" = "warn" ]; then
+		last_status="warn"
+	fi
+
+	local names=($PHASES_CHECK)
+	local out="[" first=1 idx pstatus
+	for i in 0 1 2 3 4 5 6; do
+		idx=$((i + 1))
+		if [ "$idx" -lt "$last" ]; then
+			pstatus="pass"
+		elif [ "$idx" -eq "$last" ]; then
+			pstatus="$last_status"
+		else
+			pstatus="skipped"
+		fi
+		[ "$first" -eq 1 ] || out="${out},"
+		first=0
+		out="${out}{\"name\":$(json_val "${names[$i]}"),\"status\":$(json_val "$pstatus")}"
+	done
+	printf '%s]' "$out"
+}
+
+# Compose the phases[] array. `check` gets the seven-phase ledger (#1124);
+# every other wrapped target gets the one-element entry (#1123) composed from
+# the captured tool artifact:
 #   - non-test target, artifact present + parseable:
 #       [{"name":<target>,"status":<s>,"report":<artifact>}]
 #   - test target, jsonl present with a summary event:
 #       [{"name":<target>,"status":<s>,"passed":N,"failed":N,"report":<jsonl>}]
-#   - `check` (no single-tool artifact): a synthetic single entry
-#       [{"name":"check","status":<s>}] — issue F expands this to seven phases.
 #   - artifact expected but missing/unparseable: "[]" (graceful degrade).
+#   - no tool artifact and not `check` (unexpected target): a synthetic single
+#       entry [{"name":<target>,"status":<s>}].
 # Phase status mirrors the verdict: "fail" when STATUS is fail, else "pass"
-# (a `warn` target — check's nondeterminism — ran every phase, so the phase
-# itself is "pass"; the warn signal lives on the top-level status).
+# (a `warn` target — check's nondeterminism — ran every phase, so the
+# single-tool phase itself is "pass"; the warn signal lives on the top-level
+# status).
 compose_phases() {
+	# `make check`'s seven-phase ledger supersedes the single synthetic entry.
+	if [ "$TARGET" = "check" ]; then
+		compose_check_phases
+		return
+	fi
+
 	local phase_status="pass"
 	[ "$STATUS" = "fail" ] && phase_status="fail"
 	local name_json status_json
@@ -315,9 +382,8 @@ compose_phases() {
 	local artifact
 	artifact="$(tool_artifact_path)"
 
-	# No single-tool artifact (today: `check`). Emit a synthetic one-element
-	# phase from the verdict so the report is never empty; issue F grows this
-	# into the seven-phase ledger.
+	# No single-tool artifact and not `check` (unexpected target). Emit a
+	# synthetic one-element phase from the verdict so the report is never empty.
 	if [ -z "$artifact" ]; then
 		printf '[{"name":%s,"status":%s}]' "$name_json" "$status_json"
 		return

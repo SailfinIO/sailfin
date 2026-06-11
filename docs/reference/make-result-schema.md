@@ -3,9 +3,9 @@
 Status: epic #1056 of `docs/proposals/agent-output-orchestration.md`. The
 always-last verdict block ships now (Phase 1, #1059). The opt-in per-target
 full report file (`build/agent-report.<target>.json`, #1119) carries a composed
-single-entry `phases[]` built from the matching tool JSON (#1123); the
-seven-phase `check` ledger and precise `first_error` extraction are later
-phases.
+`phases[]`: a single entry built from the matching tool JSON for the
+single-tool targets (#1123), and the ordered **seven-phase ledger** for
+`make check` (#1124). Precise `first_error` extraction is a later phase.
 
 Every agent-facing `make` target ends — on success **and** on failure — by
 printing a single greppable verdict block as the **last lines of its output**,
@@ -181,17 +181,16 @@ fields, plus a self-referential `report` and a composed `phases` array.
 ### `phases[]`
 
 For the single-tool targets, `phases` carries **one** entry composed from the
-tool JSON the Makefile teed under the same `JSON=1` gate. The seven-phase
-ledger for `make check` is a later issue; `check` gets a single synthetic entry
-here.
+tool JSON the Makefile teed under the same `JSON=1` gate. `make check` is the
+exception: it carries the ordered **seven-phase ledger** (see below).
 
 | Field | Type | Notes |
 |---|---|---|
-| `name` | string | The phase name. Single-tool targets echo the target (`compile`, `test-unit`, `check-fast`, …); `check` is the lone synthetic `check` entry until the seven-phase ledger lands. |
-| `status` | string | `pass` \| `fail` \| `skipped`. Mirrors the verdict: `fail` when the target failed, else `pass` (a `warn` target ran every phase, so the phase is `pass`). |
-| `passed` | number | **Test targets only.** Count of passing tests, tallied from the `summary` event(s) of the `sfn test --json` jsonl (`build/agent-test.<target>.jsonl`). |
-| `failed` | number | **Test targets only.** Count of failing tests, from the same `summary` tally. |
-| `report` | string | Path to the captured tool JSON for this phase: `build/native/.build-report.json` (`compile`/`rebuild`, the `sfn build --json` BuildReport), `build/agent-test.<target>.jsonl` (test targets), or `build/agent-check-fast.json` (`check-fast`, the `sailfin-check/1` envelope). Omitted on the synthetic `check` entry, which has no single tool artifact. |
+| `name` | string | The phase name. Single-tool targets echo the target (`compile`, `test-unit`, `check-fast`, …); `check` carries the seven check phases. |
+| `status` | string | `pass` \| `warn` \| `fail` \| `skipped`. Mirrors the verdict per phase (see the ledger rules below). For single-tool targets: `fail` when the target failed, else `pass` (a `warn` target ran every phase, so the phase is `pass`). |
+| `passed` | number | **Single-tool test targets only.** Count of passing tests, tallied from the `summary` event(s) of the `sfn test --json` jsonl (`build/agent-test.<target>.jsonl`). |
+| `failed` | number | **Single-tool test targets only.** Count of failing tests, from the same `summary` tally. |
+| `report` | string | Path to the captured tool JSON for this phase: `build/native/.build-report.json` (`compile`/`rebuild`, the `sfn build --json` BuildReport), `build/agent-test.<target>.jsonl` (test targets), or `build/agent-check-fast.json` (`check-fast`, the `sailfin-check/1` envelope). Omitted on the `check` ledger entries, whose per-phase tool artifacts are a later phase. |
 
 **Per-target artifact map.** The composer reads the artifact captured under the
 gate by the matching Makefile wiring:
@@ -201,12 +200,42 @@ gate by the matching Makefile wiring:
 | `compile`, `rebuild` | `build/native/.build-report.json` | BuildReport `schema_version "1"` |
 | `test`, `test-unit`, `test-integration`, `test-e2e`, `test-capsules` | `build/agent-test.<target>.jsonl` | `sfn test --json` jsonl `schema_version 1` |
 | `check-fast` | `build/agent-check-fast.json` | `sailfin-check/1` |
-| `check` | — (synthetic single entry) | — |
+| `check` | — (seven-phase ledger; see below) | — |
 
 **Graceful degradation.** When the expected tool artifact is missing or does
 not parse, `phases` degrades to `[]` and the report keeps the verdict-derived
 top-level fields — the verdict block and the stream-after-verdict invariant are
 never broken by a missing or malformed artifact.
+
+### Seven-phase `check` ledger
+
+`make check` runs seven phases in a fixed pipeline order. Under the report gate,
+`build/agent-report.check.json` carries all seven as `phases[]` entries
+(`{"name":…,"status":…}`) — observability only; the ledger never alters what
+`check-impl` runs or its human output. The phases, in order:
+
+`compile`, `first-pass-tests`, `seedcheck-build`, `seedcheck-smoke`,
+`seedcheck-tests`, `stage3-build`, `fixed-point`.
+
+Per-phase status is derived from the human banners `check-impl` prints (the same
+marker set the top-level `phase` field keys off):
+
+- A phase the run advanced **past** (a later phase's start banner appeared) is
+  `pass` — control reaching a later phase proves the earlier ones completed.
+- The **last-reached** phase mirrors the top-level verdict: `fail` on a failure,
+  `warn` on the `fixed-point` nondeterminism mismatch, else `pass`.
+- Phases that were **never reached** (the run stopped earlier) are `skipped`.
+
+`compile` is the first thing `check-impl` runs, so it is always reached. The
+`seedcheck-smoke` phase (the hello-world viability step) can fail
+**independently** of the build and test phases — a `seedcheck-smoke` `fail`
+marks `seedcheck-tests`, `stage3-build`, and `fixed-point` `skipped`. The
+`fixed-point` `stage2 != stage3` mismatch is the lone phase `warn`: it pairs
+with top-level `status:"warn"` / `failure:"nondeterminism"` and **exit 0**.
+
+```json
+{"schema_version":"sailfin-make/1","target":"check","status":"warn","failure":"nondeterminism","phase":"fixed-point","first_error":null,"report":"build/agent-report.check.json","phases":[{"name":"compile","status":"pass"},{"name":"first-pass-tests","status":"pass"},{"name":"seedcheck-build","status":"pass"},{"name":"seedcheck-smoke","status":"pass"},{"name":"seedcheck-tests","status":"pass"},{"name":"stage3-build","status":"pass"},{"name":"fixed-point","status":"warn"}]}
+```
 
 ## Implementation
 
