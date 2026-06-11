@@ -117,6 +117,7 @@ doc, or `docs/runtime_architecture.md`, not here.
 | Atomic intrinsics (M0) | **Shipped** | All six builtins lower to LLVM atomics, `seq_cst` at v0 (#323, #331–#335); arity/type validation `E0806` |
 | Interface conformance validation | Partial | Basic checks; variance not enforced |
 | `Affine<T>` / `Linear<T>` | Parsed only | Not enforced; deferred post-1.0 |
+| `OwnedBuf` / `Slice` owned-buffer family | Surface only | Library types in `runtime/sfn/memory/ownedbuf.sfn` (#1212, E3 of #1209): parse/typecheck/lower via the existing struct + i64 paths; ownership **not enforced** — move semantics land with the ownership checker (#1214/#1215); view lifetimes in a later phase (Phase U). Pinned by `compiler/tests/e2e/test_owned_buf_roundtrip.sh` |
 | `&T` / `&mut T` borrows | Parsed only | Exclusivity not checked |
 | `PII<T>` / `Secret<T>` | Parsed only | No taint enforcement; deferred post-1.0 |
 | `model`/`prompt`/`tool`/`pipeline` blocks | **Removed** | Moved to the post-1.0 `sfn/ai` capsule; the `![model]` effect stays |

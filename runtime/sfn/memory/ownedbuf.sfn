@@ -1,0 +1,280 @@
+// runtime/sfn/memory/ownedbuf.sfn
+//
+// OwnedBuf / Slice — the owned-buffer type family SURFACE (issue
+// #1212, E3 of the ownership epic #1209). This module defines the
+// type pair and its safe-looking API as plain library structs and
+// free functions; it deliberately ships **no enforcement**. The
+// bodies are raw/unsafe-internal: nothing stops a caller from using
+// a consumed `OwnedBuf` or outliving a `Slice`'s backing buffer
+// today. Move semantics land with the ownership-checker rules
+// (#1214/#1215); view lifetimes in a later phase (Phase U).
+//
+// API surface (eight public functions + one byte-load helper):
+//
+//   owned_buf_new(arena_addr, initial_cap)            → OwnedBuf
+//   owned_buf_append(self, suffix_addr, suffix_len)   → OwnedBuf (consume-and-return)
+//   owned_buf_len(self)                               → i64
+//   owned_buf_cap(self)                               → i64
+//   owned_buf_byte_at(self, index)                    → i64 (-1 on OOB)
+//   owned_buf_slice(self, start, end)                 → Slice
+//   slice_len(self)                                   → i64
+//   slice_byte_at(self, index)                        → i64 (-1 on OOB)
+//
+// Layout. `OwnedBuf` is a 32-byte (four i64 slot) unique, growable
+// byte buffer; `Slice` is a 16-byte (two i64 slot) non-owning,
+// read-only byte view. Pointer-typed fields ride as `i64` slots —
+// the `_addr` discipline shared with `runtime/sfn/memory/arena.sfn`
+// (see its file header): the seed compiler silently drops stores to
+// `* T` struct fields routed through a `* StructTy` pointer, so
+// every storage field whose bytes are a 64-bit address carries the
+// `_addr` suffix and the `i64` type.
+//
+// Extension seams (D1 mandate — the family grows without rewrite):
+//
+// 1. `Borrowed` ownership state → E6. `OwnedBuf` is the
+//    unique/owned state; `Slice` is the read-only borrow. The seam
+//    is the **name pair**: E6 keys the ownership checker on
+//    `"OwnedBuf"` (any fn taking `self: OwnedBuf` consumes/moves
+//    it — `owned_buf_append`'s consume-and-return signature is the
+//    contract) and on `"Slice"` (the `Borrowed` state — its
+//    lifetime must not exceed its backing `OwnedBuf`, E0905). E6
+//    adds checker logic only; no struct-shape change is needed.
+// 2. Region-scoped buffers (future `RegionBuf`). The `arena_addr`
+//    field is the region seam: a region-scoped variant is a new
+//    struct in this module (`RegionBuf { ptr_addr, len, cap,
+//    region_addr }`) reusing the same i64 layout and the same
+//    `owned_buf_*`-style API — zero compiler change per new family
+//    member, which is the library-type payoff over compiler
+//    registration.
+// 3. View lifetimes / generic `Slice<T>` (Phase U). `Slice` is
+//    deliberately concrete over bytes. Generic `Slice<T>` lands
+//    when generic-struct-body lowering ships (currently unvalidated
+//    under the seed — no generic struct definition exists in the
+//    tree); until then, typed views are `Slice` plus caller-side
+//    element-width arithmetic.
+// 4. Effect neutrality. No effect clauses — memory primitives sit
+//    below the I/O layer (arena.sfn discipline), so the family
+//    composes under any caller's effect set. Adapters add `![io]`
+//    etc.; the primitives never do. Future members inherit this.
+//
+// Why inline `extern fn` declarations rather than imports? The same
+// reason `arena.sfn` / `rc.sfn` / `string.sfn` inline theirs:
+// cross-module extern resolution through the seed compiler still
+// hits the issue-#306 `cannot resolve return type for call to …`
+// fatal. The `sfn_arena_sfn_alloc` / `sfn_arena_sfn_realloc`
+// declarations match the export signatures in
+// `runtime/sfn/memory/arena.sfn` exactly; linking this module
+// therefore requires the arena module (or the C arena's namesakes
+// once M3 renames land).
+//
+// Growth discipline. `owned_buf_append` consumes `self` and returns
+// the (possibly relocated) buffer. When the buffer is arena-backed
+// (`arena_addr != 0`) growth routes through `sfn_arena_sfn_realloc`,
+// inheriting the arena's grow-if-at-tip fast path; the old storage
+// "leaks" into the arena and is reclaimed at reset/destroy, matching
+// the arena contract. When `arena_addr == 0` the buffer is
+// libc-backed: growth is `malloc` + `memcpy` (the old block is
+// intentionally not freed here — releasing libc-backed storage is an
+// E5/E6 concern once moves make "last owner" provable). Capacities
+// are rounded up to a multiple of 8 so the word-load byte reader
+// below never touches bytes outside the allocation.
+//
+// Byte reads. The seed compiler does not yet lower single-byte
+// loads/stores through a `* u8` slot (the codegen gap documented in
+// `mem.sfn` / `rc.sfn` / `arena.sfn`), so `_owned_buf_load_byte`
+// reads the enclosing 8-aligned i64 word via `atomic_load` and
+// shift/masks the byte out — correct on the little-endian targets
+// the compiler supports (x86_64, arm64), and in-bounds because
+// every backing allocation is 8-aligned with a capacity that is a
+// multiple of 8.
+//
+// Pinned by `compiler/tests/e2e/test_owned_buf_roundtrip.sh`:
+// typecheck + fmt + LLVM IR shape (`%OwnedBuf = type { i64, i64,
+// i64, i64 }`, `%Slice = type { i64, i64 }`, the nine `define`s,
+// the four extern `declare`s) + a clang-linked roundtrip harness
+// (new → append → len/byte_at → grow → slice). Surface assertions
+// also live in `compiler/tests/unit/owned_buf_surface_test.sfn`.
+extern fn malloc(size: usize) -> * u8;
+
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+extern fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8;
+
+extern fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, align: usize) -> * u8;
+
+// `OwnedBuf` — unique, growable byte buffer (32 bytes, four i64
+// slots). `ptr_addr` is the address of the byte storage (unsafe
+// interior — never hand it out past the owner), `len` is the bytes
+// written so far, `cap` the bytes allocated (always a multiple of
+// 8, see the file header), and `arena_addr` the owning arena handle
+// for grow-at-tip (`0` = libc-backed). E6 makes uniqueness real;
+// today this is the surface only.
+struct OwnedBuf {
+    ptr_addr: i64;
+    len: i64;
+    cap: i64;
+    arena_addr: i64;
+}
+
+// `Slice` — non-owning, read-only byte view (16 bytes, two i64
+// slots). Concrete (non-generic) over bytes, matching the
+// `SfnSlice { data, len }` intent. `ptr_addr` points into a backing
+// `OwnedBuf`'s bytes; `len` is the number of bytes in the view.
+// E8/Phase-U give it lifetime teeth; today it is a plain pair.
+struct Slice {
+    ptr_addr: i64;
+    len: i64;
+}
+
+// `_owned_buf_load_byte(addr)` reads the byte at `addr` via the
+// enclosing 8-aligned i64 word (see the file header for why a
+// direct `* u8` load is off the table under the seed). Little-
+// endian extraction: the byte at `addr` occupies bits
+// `[(addr - word) * 8, … + 8)` of the word at `word = (addr / 8) * 8`.
+// The arithmetic-shift fill above the byte is masked off by `& 255`.
+// Callers bounds-check before calling; `addr` must lie inside an
+// 8-aligned allocation whose size is a multiple of 8.
+fn _owned_buf_load_byte(addr: i64) -> i64 {
+    let word_addr: i64 = (addr / 8) * 8;
+    let shift: i64 = (addr - word_addr) * 8;
+    let slot: * i64 = word_addr as * i64;
+    let word: i64 = atomic_load(slot);
+    let shifted: i64 = word >> shift;
+    return shifted & 255;
+}
+
+// `owned_buf_new(arena_addr, initial_cap)` constructs an empty
+// `OwnedBuf` backed by the arena at `arena_addr` (or by libc
+// `malloc` when `arena_addr == 0`) with at least `initial_cap`
+// bytes of storage. The capacity is rounded up to a multiple of 8
+// (word-load discipline, file header). A non-positive `initial_cap`
+// — or an allocation failure — yields a valid empty buffer with no
+// storage (`ptr_addr == 0`, `cap == 0`); the first append allocates.
+fn owned_buf_new(arena_addr: i64, initial_cap: i64) -> OwnedBuf {
+    let mut cap: i64 = 0;
+    let mut ptr_addr: i64 = 0;
+    if initial_cap > 0 {
+        let stepped: i64 = (initial_cap + 7) / 8;
+        cap = stepped * 8;
+        if arena_addr != 0 {
+            let storage: * u8 = sfn_arena_sfn_alloc(arena_addr as * u8, cap as usize, 8 as usize);
+            ptr_addr = storage as i64;
+        } else {
+            let heap: * u8 = malloc(cap as usize);
+            ptr_addr = heap as i64;
+        }
+        if ptr_addr == 0 { cap = 0; }
+    }
+    return OwnedBuf {
+        ptr_addr: ptr_addr,
+        len: 0,
+        cap: cap,
+        arena_addr: arena_addr
+    };
+}
+
+// `owned_buf_append(self, suffix_addr, suffix_len)` consumes `self`
+// (a move — E6 enforces; today by convention), appends `suffix_len`
+// bytes read from `suffix_addr`, and returns the (possibly
+// relocated) buffer. Growth doubles the capacity (minimum 16,
+// rounded to a multiple of 8) and routes through
+// `sfn_arena_sfn_realloc` for arena-backed buffers — the
+// grow-if-at-tip fast path — or `malloc` + `memcpy` for libc-backed
+// ones (see the file header for the old-block policy). A null or
+// non-positive suffix, an allocation failure, or an i64 length
+// overflow returns the buffer unchanged.
+fn owned_buf_append(self: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedBuf {
+    if suffix_addr == 0 { return self; }
+    if suffix_len <= 0 { return self; }
+
+    let needed: i64 = self.len + suffix_len;
+    // i64 overflow guard: with suffix_len > 0, `needed` must exceed
+    // `self.len`; a wrap would skip the grow path below and memcpy
+    // past the allocation. Refuse instead of corrupting.
+    if needed < self.len { return self; }
+    let mut ptr_addr: i64 = self.ptr_addr;
+    let mut cap: i64 = self.cap;
+
+    if needed > cap {
+        let mut new_cap: i64 = cap + cap;
+        if new_cap < needed { new_cap = needed; }
+        if new_cap < 16 { new_cap = 16; }
+        let stepped: i64 = (new_cap + 7) / 8;
+        new_cap = stepped * 8;
+        // Round-up overflow guard: if the multiple-of-8 step wrapped,
+        // new_cap no longer covers `needed` — refuse rather than
+        // under-allocate. (The doubling wrap above is already clamped
+        // by the `new_cap < needed` line.)
+        if new_cap < needed { return self; }
+
+        if self.arena_addr != 0 {
+            let grown: * u8 = sfn_arena_sfn_realloc(self.arena_addr as * u8, ptr_addr as * u8, cap as usize, new_cap as usize, 8 as usize);
+            if grown as i64 == 0 { return self; }
+            ptr_addr = grown as i64;
+        } else {
+            let fresh: * u8 = malloc(new_cap as usize);
+            if fresh as i64 == 0 { return self; }
+            if ptr_addr != 0 {
+                if self.len > 0 {
+                    memcpy(fresh, ptr_addr as * u8, self.len as usize);
+                }
+            }
+            ptr_addr = fresh as i64;
+        }
+        cap = new_cap;
+    }
+
+    let dst_addr: i64 = ptr_addr + self.len;
+    memcpy(dst_addr as * u8, suffix_addr as * u8, suffix_len as usize);
+
+    return OwnedBuf {
+        ptr_addr: ptr_addr,
+        len: needed,
+        cap: cap,
+        arena_addr: self.arena_addr
+    };
+}
+
+// `owned_buf_len(self)` — bytes currently written. Pure field read.
+fn owned_buf_len(self: OwnedBuf) -> i64 { return self.len; }
+
+// `owned_buf_cap(self)` — bytes currently allocated. Pure field read.
+fn owned_buf_cap(self: OwnedBuf) -> i64 { return self.cap; }
+
+// `owned_buf_byte_at(self, index)` — the byte at `index`, or `-1`
+// when `index` is outside `[0, len)`. The in-range read is the
+// word-load described in the file header.
+fn owned_buf_byte_at(self: OwnedBuf, index: i64) -> i64 {
+    if index < 0 { return -1; }
+    if index >= self.len { return -1; }
+    return _owned_buf_load_byte(self.ptr_addr + index);
+}
+
+// `owned_buf_slice(self, start, end)` — non-owning view over
+// `self[start..end)`. The range is clamped into `[0, len]` and an
+// inverted range collapses to an empty view, so the returned
+// `Slice` always covers valid bytes of the backing buffer.
+// E8/Phase-U give the view lifetime teeth; today it is a
+// `{ptr_addr, len}` construction.
+fn owned_buf_slice(self: OwnedBuf, start: i64, end: i64) -> Slice {
+    let mut from: i64 = start;
+    if from < 0 { from = 0; }
+    if from > self.len { from = self.len; }
+    let mut to: i64 = end;
+    if to < from { to = from; }
+    if to > self.len { to = self.len; }
+    return Slice { ptr_addr: self.ptr_addr + from, len: to - from };
+}
+
+// `slice_len(self)` — bytes in the view. Pure field read.
+fn slice_len(self: Slice) -> i64 { return self.len; }
+
+// `slice_byte_at(self, index)` — the byte at `index` within the
+// view, or `-1` when `index` is outside `[0, len)`. Same word-load
+// read as `owned_buf_byte_at`; in-bounds because the view's bytes
+// lie inside the backing buffer's 8-aligned allocation.
+fn slice_byte_at(self: Slice, index: i64) -> i64 {
+    if index < 0 { return -1; }
+    if index >= self.len { return -1; }
+    return _owned_buf_load_byte(self.ptr_addr + index);
+}
