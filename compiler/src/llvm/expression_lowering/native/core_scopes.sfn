@@ -7,6 +7,7 @@
 // `infer_borrow_base_scope`, lifetime region creation/release, and scope ID
 // construction (`format_root_scope_id`, `make_child_scope_id`).
 import { NativeEnum, NativeStruct } from "../../../native_ir";
+import { char_at, substring } from "../../../string_utils";
 import {
     LLVMOperand,
     LifetimeRegionMetadata,
@@ -17,9 +18,18 @@ import {
     ScopeMetadata,
     StructLiteralField
 } from "../../types";
-import { starts_with } from "../../utils";
+import {
+    is_identifier_part_char,
+    is_identifier_start_char,
+    is_simple_identifier,
+    starts_with,
+    trim_text
+} from "../../utils";
 import { bindings_find_parameter_binding } from "../bindings";
+import { find_call_site } from "./core_calls";
+import { parse_member_access } from "./core_parse";
 import { sanitize_symbol } from "./core_text";
+import { is_heap_type } from "./core_type_mapping";
 
 fn find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {
     return bindings_find_parameter_binding(bindings, name);
@@ -227,6 +237,238 @@ fn promote_local_to_rc(locals: LocalBinding[], name: string) -> LocalBinding[] {
         index += 1;
     }
     return result;
+}
+
+// ── M4 (#1094): escape promotion at channel-send / spawn-capture ──────
+//
+// M1.5.5 (#329) promotes owned heap locals to `rc` only at function-return
+// boundaries; `docs/runtime_audit.md` §M1.5 explicitly deferred the
+// closure-capture and channel-send boundaries until those features landed.
+// With the M4 scheduler (#1090) and channels (#1091) shipped, a value moved
+// across one of these boundaries crosses *threads*: the sender's scope-exit
+// drop (or a future arena rewind) would free memory the receiver/worker
+// still reads — a cross-thread use-after-free.
+//
+// The rule mirrors the return-boundary precedent in
+// `lower_return_instruction` exactly: the escaping local is promoted
+// (`arena` → `rc`, via `promote_local_to_rc`) *and* marked consumed, so
+// `emit_scope_drops` / `emit_guarded_scope_drops` skip it. Ownership has
+// transferred across the boundary — the receiver/worker owns the value now,
+// and the sender must never release it. Non-heap (`is_heap_type == false`)
+// and borrowed bindings are never touched.
+//
+// Detection is deliberately conservative and textual:
+//   - spawn-capture: when the expression contains the bare `spawn` keyword
+//     outside string literals (`spawn fn() -> int { ... }`,
+//     `spawn:int worker`, `parallel [spawn a(), spawn b()]`), every
+//     identifier token in the expression that names a heap-typed local is
+//     treated as escaping. This covers raw lambda-body capture text and the
+//     lifted `<closure_pair ... captures=name:type;...>` marker form alike.
+//   - channel-send: for `ch.send(args)` where `ch` is a `channel`-typed
+//     local, only the argument text escapes.
+//
+// Over-promotion (an identifier mentioned near a spawn that does not really
+// escape) suppresses a release that would otherwise fire — a leak, not a
+// correctness bug. Under-promotion would be a cross-thread UAF, so ties
+// break toward promoting. General move/ownership enforcement (Affine /
+// Linear) remains post-1.0 and is out of scope here.
+// Mark ONLY the innermost (last) binding matching `name` as consumed,
+// mirroring the binding `find_local_binding` resolves and the one
+// `promote_local_to_rc` rewrites. `bindings_mark_local_consumed` (the
+// helper the return path uses) flips every same-named binding, which
+// would wrongly suppress the drop of an outer-scope local shadowed by
+// the escaping one — the outer value never crossed the boundary and its
+// owner-drop must still fire.
+fn _mark_last_local_consumed(locals: LocalBinding[], name: string) -> LocalBinding[] {
+    let mut target_index: int = -1;
+    let mut scan: int = locals.length;
+    loop {
+        if scan <= 0 { break; }
+        scan -= 1;
+        if locals[scan].name == name {
+            target_index = scan;
+            break;
+        }
+    }
+    if target_index < 0 { return locals; }
+    let mut result: LocalBinding[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= locals.length { break; }
+        let entry = locals[index];
+        let mut updated = entry;
+        if index == target_index {
+            updated = LocalBinding {
+                name: entry.name,
+                pointer: entry.pointer,
+                llvm_type: entry.llvm_type,
+                type_annotation: entry.type_annotation,
+                ownership: entry.ownership,
+                consumed: true,
+                scope_id: entry.scope_id,
+                scope_depth: entry.scope_depth,
+                allocation_kind: entry.allocation_kind,
+                init_sentinel: entry.init_sentinel
+            };
+        }
+        result.push(updated);
+        index += 1;
+    }
+    return result;
+}
+
+// Promote one named local across an escape boundary: heap-typed, non-borrow
+// bindings flip `arena` → `rc` and are marked consumed (drop suppressed at
+// every scope-exit site). Unknown names and non-heap bindings are no-ops, so
+// callers can feed arbitrary identifier tokens through this filter.
+// Both the promotion and the consumption target the innermost (last)
+// matching binding — the same one `find_local_binding` resolves — so a
+// shadowed outer local keeps its own allocation kind AND its owner drop.
+fn promote_escaping_local(locals: LocalBinding[], name: string) -> LocalBinding[] {
+    let binding = find_local_binding(locals, name);
+    if binding == null { return locals; }
+    if !is_heap_type(binding.llvm_type) { return locals; }
+    if binding.ownership != null {
+        if binding.ownership.variant == "Borrow" { return locals; }
+    }
+    let promoted = promote_local_to_rc(locals, name);
+    return _mark_last_local_consumed(promoted, name);
+}
+
+// Collect every identifier token in `text`, skipping string-literal
+// contents and member-access fields (a token immediately preceded by `.`
+// names a field/method, not a local — this also keeps `process.spawn(...)`
+// from registering a bare `spawn` keyword token). Longer identifiers that
+// merely contain a keyword (`spawn_with_env`, `respawn`) stay single
+// tokens, so word-boundary checks against the result are exact.
+fn _escape_scan_identifier_tokens(text: string) -> string[] {
+    let mut tokens: string[] = [];
+    let mut in_double: boolean = false;
+    let mut in_single: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = char_at(text, index);
+        if in_double {
+            if escape_next { escape_next = false; } else if ch == "\\" {
+                escape_next = true;
+            } else if ch == "\"" { in_double = false; }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape_next { escape_next = false; } else if ch == "\\" {
+                escape_next = true;
+            } else if ch == "'" { in_single = false; }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if is_identifier_start_char(ch) {
+            let start = index;
+            loop {
+                if index >= text.length { break; }
+                if !is_identifier_part_char(char_at(text, index)) { break; }
+                index += 1;
+            }
+            let mut is_member_field: boolean = false;
+            if start > 0 {
+                if char_at(text, start - 1) == "." { is_member_field = true; }
+            }
+            if !is_member_field {
+                tokens.push(substring(text, start, index));
+            }
+            continue;
+        }
+        index += 1;
+    }
+    return tokens;
+}
+
+// When `trimmed` is a channel send — `<base>.send(<args>)` with `<base>` a
+// simple identifier naming a `channel`-typed local or parameter (the same
+// two bases the #1091 call-resolution channel-method branch accepts) —
+// return the raw argument text. Returns the empty string for every other
+// shape.
+fn _channel_send_arguments_text(trimmed: string, locals: LocalBinding[], bindings: ParameterBinding[]) -> string {
+    if trimmed.length == 0 { return ""; }
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != ")" {
+        return "";
+    }
+    let call_index = find_call_site(trimmed);
+    if call_index < 0 { return ""; }
+    let target = trim_text(substring(trimmed, 0, call_index));
+    let member = parse_member_access(target);
+    if !member.success { return ""; }
+    if member.field != "send" { return ""; }
+    let base = trim_text(member.base);
+    if !is_simple_identifier(base) { return ""; }
+    let mut base_annotation: string = "";
+    let binding = find_local_binding(locals, base);
+    if binding != null { base_annotation = binding.type_annotation; } else {
+        let parameter = bindings_find_parameter_binding(bindings, base);
+        if parameter != null { base_annotation = parameter.type_annotation; }
+    }
+    if base_annotation != "channel" { return ""; }
+    return substring(trimmed, call_index + 1, trimmed.length - 1);
+}
+
+// Public entry point: apply the conservative escape rule above to one
+// statement / initializer expression, returning the (possibly) rewritten
+// locals. `bindings` is consulted only to recognise a channel-typed
+// *parameter* base (`fn producer(ch: channel) { ch.send(msg); }`); the
+// promotion itself always targets locals — parameters are owned by the
+// caller's frame and already excluded from `emit_scope_drops`. Call sites:
+// `lower_expression_statement` (bare expression statements like
+// `ch.send(msg);` / `spawn worker(msg);`) and `lower_let_instruction`
+// (initializers like `let f = spawn fn() ... ;`).
+fn promote_escaping_locals_for_boundaries(expression: string, locals: LocalBinding[], bindings: ParameterBinding[]) -> LocalBinding[] {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 { return locals; }
+    let tokens = _escape_scan_identifier_tokens(trimmed);
+    let mut has_spawn: boolean = false;
+    let mut scan: int = 0;
+    loop {
+        if scan >= tokens.length { break; }
+        if tokens[scan] == "spawn" {
+            has_spawn = true;
+            break;
+        }
+        scan += 1;
+    }
+    if has_spawn {
+        // Spawn-capture boundary: every identifier in the expression is
+        // conservatively treated as escaping into the worker task.
+        let mut current = locals;
+        let mut index: int = 0;
+        loop {
+            if index >= tokens.length { break; }
+            current = promote_escaping_local(current, tokens[index]);
+            index += 1;
+        }
+        return current;
+    }
+    let send_arguments = _channel_send_arguments_text(trimmed, locals, bindings);
+    if send_arguments.length == 0 { return locals; }
+    let argument_tokens = _escape_scan_identifier_tokens(send_arguments);
+    let mut current_locals = locals;
+    let mut argument_index: int = 0;
+    loop {
+        if argument_index >= argument_tokens.length { break; }
+        current_locals = promote_escaping_local(current_locals, argument_tokens[argument_index]);
+        argument_index += 1;
+    }
+    return current_locals;
 }
 
 fn append_local_binding(values: LocalBinding[], value: LocalBinding) -> LocalBinding[] {

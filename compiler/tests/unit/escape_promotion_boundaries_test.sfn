@@ -1,0 +1,338 @@
+// Round-trip pin for the channel-send / spawn-capture escape-promotion
+// rule (issue #1094, M4 follow-up to M1.5.5 / #329).
+//
+// M1.5.5 promotes owned heap locals to "rc" only at function-return
+// boundaries. Channel-send and spawn-capture move owned data ACROSS
+// threads; without escape promotion at those boundaries the sender's
+// scope-exit drop would free data the receiver/worker still reads — a
+// cross-thread use-after-free. `promote_escaping_locals_for_boundaries`
+// extends the conservative rule: the escaping local is promoted
+// (`arena` → `rc`) AND marked consumed, so `emit_scope_drops` skips it
+// (ownership transferred across the boundary — leak-biased, never UAF).
+//
+// Acceptance criteria covered (paraphrased from #1094):
+//
+//   1. A heap-typed local sent on a channel (`ch.send(msg)` with `ch` a
+//      `channel`-typed local) flips to "rc" and is marked consumed.
+//   2. A heap-typed local captured by a spawned task (`spawn fn() ...`)
+//      flips to "rc" and is marked consumed.
+//   3. The promoted-and-consumed binding emits NO drop at sender scope
+//      exit (`emit_scope_drops` produces zero lines for it).
+//
+// Plus hygiene cases: non-channel `.send(...)` receivers, non-heap
+// arguments, borrows, `process.spawn(...)` member access, identifiers
+// that merely contain the keyword (`spawn_with_env`), and `spawn`
+// appearing inside string literals must all leave the locals untouched.
+import {
+    append_local_binding,
+    find_local_binding,
+    promote_escaping_locals_for_boundaries
+} from "../../src/llvm/expression_lowering/native/core_scopes";
+import { emit_scope_drops } from "../../src/llvm/lowering/instructions_helpers";
+import { LocalBinding, OwnershipInfo, ParameterBinding } from "../../src/llvm/types";
+
+fn _no_params() -> ParameterBinding[] {
+    let empty: ParameterBinding[] = [];
+    return empty;
+}
+
+fn _make_parameter(name: string, llvm_type: string, type_annotation: string) -> ParameterBinding {
+    return ParameterBinding {
+        name: name,
+        llvm_name: "%" + name,
+        llvm_type: llvm_type,
+        type_annotation: type_annotation,
+        consumed: false,
+        span: null
+    };
+}
+
+fn _make_binding(name: string, llvm_type: string, type_annotation: string, ownership: OwnershipInfo?) -> LocalBinding {
+    return LocalBinding {
+        name: name,
+        pointer: "%l_" + name,
+        llvm_type: llvm_type,
+        type_annotation: type_annotation,
+        ownership: ownership,
+        consumed: false,
+        scope_id: "fn:test",
+        scope_depth: 0,
+        allocation_kind: "arena",
+        init_sentinel: ""
+    };
+}
+
+fn _borrow_ownership() -> OwnershipInfo {
+    return OwnershipInfo {
+        variant: "Borrow",
+        base: "x",
+        mutable: false,
+        span: null,
+        region_id: -1
+    };
+}
+
+// Channel + heap message pair used by most send-boundary cases.
+fn _channel_locals() -> LocalBinding[] {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("ch", "i8*", "channel", null));
+    locals = append_local_binding(locals, _make_binding("msg", "i8*", "string", null));
+    return locals;
+}
+
+// -----------------------------------------------------------------------------
+// Channel-send boundary (#1094 acceptance criterion 1).
+// -----------------------------------------------------------------------------
+test "channel send: heap argument flips arena -> rc and is marked consumed" {
+    let locals = _channel_locals();
+    let promoted = promote_escaping_locals_for_boundaries("ch.send(msg)", locals, _no_params());
+    let msg_binding = find_local_binding(promoted, "msg");
+    assert msg_binding != null;
+    assert msg_binding.allocation_kind == "rc";
+    assert msg_binding.consumed;
+}
+
+test "channel send: the channel handle itself is not the escaping value" {
+    // Only the argument text escapes; the base (`ch`) is the boundary, not
+    // the payload, and must keep its arena kind so its own lifecycle is
+    // unchanged.
+    let locals = _channel_locals();
+    let promoted = promote_escaping_locals_for_boundaries("ch.send(msg)", locals, _no_params());
+    let ch_binding = find_local_binding(promoted, "ch");
+    assert ch_binding != null;
+    assert ch_binding.allocation_kind == "arena";
+    assert ! ch_binding.consumed;
+}
+
+test "channel send: non-channel receiver does not trigger promotion" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("obj", "%Mailbox*", "Mailbox", null));
+    locals = append_local_binding(locals, _make_binding("msg", "i8*", "string", null));
+    let promoted = promote_escaping_locals_for_boundaries("obj.send(msg)", locals, _no_params());
+    let msg_binding = find_local_binding(promoted, "msg");
+    assert msg_binding != null;
+    assert msg_binding.allocation_kind == "arena";
+    assert ! msg_binding.consumed;
+}
+
+test "channel send: non-heap argument stays arena (no bogus rc-release target)" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("ch", "i8*", "channel", null));
+    locals = append_local_binding(locals, _make_binding("n", "i64", "int", null));
+    let promoted = promote_escaping_locals_for_boundaries("ch.send(n)", locals, _no_params());
+    let n_binding = find_local_binding(promoted, "n");
+    assert n_binding != null;
+    assert n_binding.allocation_kind == "arena";
+    assert ! n_binding.consumed;
+}
+
+test "channel send: borrowed argument is never promoted (borrow base owns the resource)" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("ch", "i8*", "channel", null));
+    locals = append_local_binding(locals, _make_binding("view", "i8*", "string", _borrow_ownership()));
+    let promoted = promote_escaping_locals_for_boundaries("ch.send(view)", locals, _no_params());
+    let view_binding = find_local_binding(promoted, "view");
+    assert view_binding != null;
+    assert view_binding.allocation_kind == "arena";
+}
+
+test "channel send: let-initializer shape `ch.send(msg)` promotes (call sites pass raw text)" {
+    // `lower_let_instruction` feeds the initializer text of
+    // `let ok = ch.send(msg);` through the same entry point — pin that the
+    // bare call text (no statement context) is sufficient.
+    let locals = _channel_locals();
+    let promoted = promote_escaping_locals_for_boundaries("  ch.send(msg)  ", locals, _no_params());
+    let msg_binding = find_local_binding(promoted, "msg");
+    assert msg_binding != null;
+    assert msg_binding.allocation_kind == "rc";
+    assert msg_binding.consumed;
+}
+
+test "channel send: channel-typed PARAMETER base promotes the local argument" {
+    // `fn producer(ch: channel) { ch.send(msg); }` — the #1091 channel-method
+    // resolution accepts a parameter base, so the escape rule must too. The
+    // promotion still targets the *local* `msg`; the parameter `ch` lives in
+    // the caller's frame and is not a drop candidate.
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("msg", "i8*", "string", null));
+    let mut params: ParameterBinding[] = [];
+    params.push(_make_parameter("ch", "i8*", "channel"));
+    let promoted = promote_escaping_locals_for_boundaries("ch.send(msg)", locals, params);
+    let msg_binding = find_local_binding(promoted, "msg");
+    assert msg_binding != null;
+    assert msg_binding.allocation_kind == "rc";
+    assert msg_binding.consumed;
+}
+
+// -----------------------------------------------------------------------------
+// Spawn-capture boundary (#1094 acceptance criterion 2).
+// -----------------------------------------------------------------------------
+test "spawn: heap local named in a spawned lambda body flips arena -> rc and is consumed" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("data", "i8*", "string", null));
+    let promoted = promote_escaping_locals_for_boundaries("spawn fn() -> int { return use_data(data); }", locals, _no_params());
+    let data_binding = find_local_binding(promoted, "data");
+    assert data_binding != null;
+    assert data_binding.allocation_kind == "rc";
+    assert data_binding.consumed;
+}
+
+test "spawn: typed spawn (`spawn:int ...`) promotes heap locals in the operand" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("payload", "i8*", "string", null));
+    let promoted = promote_escaping_locals_for_boundaries("spawn:int make_task(payload)", locals, _no_params());
+    let payload_binding = find_local_binding(promoted, "payload");
+    assert payload_binding != null;
+    assert payload_binding.allocation_kind == "rc";
+    assert payload_binding.consumed;
+}
+
+test "spawn: parallel task lists promote every captured heap local" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("left", "i8*", "string", null));
+    locals = append_local_binding(locals, _make_binding("right", "i8*", "string", null));
+    let promoted = promote_escaping_locals_for_boundaries("parallel [spawn work(left), spawn work(right)]", locals, _no_params());
+    let left_binding = find_local_binding(promoted, "left");
+    let right_binding = find_local_binding(promoted, "right");
+    assert left_binding != null;
+    assert right_binding != null;
+    assert left_binding.allocation_kind == "rc";
+    assert right_binding.allocation_kind == "rc";
+}
+
+test "spawn: non-heap locals named in the spawned task stay arena" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("count", "i64", "int", null));
+    let promoted = promote_escaping_locals_for_boundaries("spawn fn() -> int { return count + 1; }", locals, _no_params());
+    let count_binding = find_local_binding(promoted, "count");
+    assert count_binding != null;
+    assert count_binding.allocation_kind == "arena";
+    assert ! count_binding.consumed;
+}
+
+// -----------------------------------------------------------------------------
+// Drop suppression at sender scope exit (#1094 acceptance criterion 3).
+// -----------------------------------------------------------------------------
+test "drop emission: sent value emits no release at the sender's scope exit" {
+    // Contrast pin: an owned rc binding in this scope WOULD drop...
+    let mut owned: LocalBinding[] = [];
+    let mut rc_binding = _make_binding("kept", "i8*", "string", null);
+    rc_binding = LocalBinding {
+        name: rc_binding.name,
+        pointer: rc_binding.pointer,
+        llvm_type: rc_binding.llvm_type,
+        type_annotation: rc_binding.type_annotation,
+        ownership: rc_binding.ownership,
+        consumed: false,
+        scope_id: rc_binding.scope_id,
+        scope_depth: rc_binding.scope_depth,
+        allocation_kind: "rc",
+        init_sentinel: ""
+    };
+    owned = append_local_binding(owned, rc_binding);
+    let owned_drops = emit_scope_drops(owned, "fn:test", 0);
+    assert owned_drops.lines.length > 0;
+
+    // ...but the same value routed through a channel-send boundary is
+    // promoted AND consumed, so the sender's scope-exit drop site skips it.
+    let locals = _channel_locals();
+    let promoted = promote_escaping_locals_for_boundaries("ch.send(msg)", locals, _no_params());
+    let sent_drops = emit_scope_drops(promoted, "fn:test", 0);
+    assert sent_drops.lines.length == 0;
+}
+
+test "drop emission: spawn-captured value emits no release at the spawner's scope exit" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("data", "i8*", "string", null));
+    let promoted = promote_escaping_locals_for_boundaries("spawn fn() -> int { return use_data(data); }", locals, _no_params());
+    let drops = emit_scope_drops(promoted, "fn:test", 0);
+    assert drops.lines.length == 0;
+}
+
+test "shadowing: only the innermost matching binding is promoted AND consumed" {
+    // Mirrors `find_local_binding` / `promote_local_to_rc` resolution: when
+    // an inner-scope `let msg` shadows an outer `msg` and the inner one is
+    // sent, the outer binding never crossed the boundary — it must keep its
+    // arena kind and (critically) its owner drop, so neither field flips.
+    let outer = LocalBinding {
+        name: "msg",
+        pointer: "%l_outer",
+        llvm_type: "i8*",
+        type_annotation: "string",
+        ownership: null,
+        consumed: false,
+        scope_id: "fn:test",
+        scope_depth: 0,
+        allocation_kind: "arena",
+        init_sentinel: ""
+    };
+    let inner = LocalBinding {
+        name: "msg",
+        pointer: "%l_inner",
+        llvm_type: "i8*",
+        type_annotation: "string",
+        ownership: null,
+        consumed: false,
+        scope_id: "fn:test__inner",
+        scope_depth: 1,
+        allocation_kind: "arena",
+        init_sentinel: ""
+    };
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("ch", "i8*", "channel", null));
+    locals = append_local_binding(locals, outer);
+    locals = append_local_binding(locals, inner);
+    let promoted = promote_escaping_locals_for_boundaries("ch.send(msg)", locals, _no_params());
+    assert promoted.length == 3;
+    // Outer (older) binding: untouched on both axes.
+    assert promoted[1].pointer == "%l_outer";
+    assert promoted[1].allocation_kind == "arena";
+    assert ! promoted[1].consumed;
+    // Inner (most-recent) binding: promoted and consumed.
+    assert promoted[2].pointer == "%l_inner";
+    assert promoted[2].allocation_kind == "rc";
+    assert promoted[2].consumed;
+}
+
+// -----------------------------------------------------------------------------
+// Boundary-detection hygiene — shapes that must NOT promote.
+// -----------------------------------------------------------------------------
+test "hygiene: process.spawn_with_env is a longer identifier, not a spawn boundary" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("cmd", "i8*", "string", null));
+    let promoted = promote_escaping_locals_for_boundaries("process.spawn_with_env(cmd)", locals, _no_params());
+    let cmd_binding = find_local_binding(promoted, "cmd");
+    assert cmd_binding != null;
+    assert cmd_binding.allocation_kind == "arena";
+    assert ! cmd_binding.consumed;
+}
+
+test "hygiene: member-access spawn (process.spawn) is not the spawn keyword" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("cmd", "i8*", "string", null));
+    let promoted = promote_escaping_locals_for_boundaries("process.spawn(cmd)", locals, _no_params());
+    let cmd_binding = find_local_binding(promoted, "cmd");
+    assert cmd_binding != null;
+    assert cmd_binding.allocation_kind == "arena";
+    assert ! cmd_binding.consumed;
+}
+
+test "hygiene: 'spawn' inside a string literal is not a boundary" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("msg", "i8*", "string", null));
+    let promoted = promote_escaping_locals_for_boundaries("log(\"spawn it later\", msg)", locals, _no_params());
+    let msg_binding = find_local_binding(promoted, "msg");
+    assert msg_binding != null;
+    assert msg_binding.allocation_kind == "arena";
+    assert ! msg_binding.consumed;
+}
+
+test "hygiene: plain calls without a boundary leave locals untouched" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("msg", "i8*", "string", null));
+    let promoted = promote_escaping_locals_for_boundaries("log_message(msg)", locals, _no_params());
+    let msg_binding = find_local_binding(promoted, "msg");
+    assert msg_binding != null;
+    assert msg_binding.allocation_kind == "arena";
+    assert ! msg_binding.consumed;
+}

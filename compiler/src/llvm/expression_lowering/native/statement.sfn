@@ -60,6 +60,7 @@ import {
     find_local_binding,
     infer_borrow_base_scope,
     make_lifetime_region_metadata,
+    promote_escaping_locals_for_boundaries,
     promote_local_to_rc
 } from "./core_scopes";
 import { is_heap_type } from "./core_type_mapping";
@@ -365,6 +366,13 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
             current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
         }
     }
+    // M4 (#1094): conservative escape promotion at channel-send /
+    // spawn-capture boundaries (`ch.send(msg);`, `spawn worker(msg);`).
+    // Mirrors the M1.5.5 return-boundary rule in
+    // `lower_return_instruction`: the escaping heap local is promoted to
+    // `rc` and marked consumed so the sender's scope-exit drops skip it —
+    // the receiver/worker thread owns the value now.
+    current_locals = promote_escaping_locals_for_boundaries(expression, current_locals, current_bindings);
     return ExpressionStatementResult {
         lines: current_lines,
         temp_index: current_temp,
