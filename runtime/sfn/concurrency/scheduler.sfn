@@ -87,9 +87,10 @@ struct PthreadMutex {
     _opaque7: i64;
 }
 
-// Opaque storage for a `pthread_cond_t`. 48 bytes on Linux x86_64
-// (glibc) — six 8-byte slots. Opaque to Sailfin; libpthread owns
-// the bytes via a `* PthreadCond` view passed to `pthread_cond_*`.
+// Opaque storage for a `pthread_cond_t`. 48 bytes on both supported
+// targets (Linux x86_64 glibc and macOS arm64) — six 8-byte slots, so
+// unlike the mutex it needs no max-sizing. Opaque to Sailfin; libpthread
+// owns the bytes via a `* PthreadCond` view passed to `pthread_cond_*`.
 struct PthreadCond {
     _opaque0: i64;
     _opaque1: i64;
