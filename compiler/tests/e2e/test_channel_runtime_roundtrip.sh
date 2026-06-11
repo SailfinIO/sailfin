@@ -144,6 +144,21 @@ fn main() ![io] {
         "struct prod: 42"
 }
 
+# ── (2c) bool payloads exercise the narrow-int widen/trunc path ──────
+# Send zext-widens i1 to the 8-byte slot; receive loads the i64 slot and
+# truncates back to the annotated i1 (#1269 review hardening).
+test_bool_roundtrip() {
+    run_and_expect "bool_roundtrip" \
+'fn main() ![io] {
+    let ch = channel(2);
+    ch.send(true);
+    let b: bool = ch.receive();
+    if b { print.info("bool ok"); } else { print.info("bool wrong"); }
+    ch.close();
+}' \
+        "bool ok"
+}
+
 # ── (3) closed + drained channel yields the null-guarded default ─────
 test_closed_channel_drain() {
     run_and_expect "closed_drain" \
@@ -160,6 +175,7 @@ test_closed_channel_drain() {
 run_test "runtime: int payloads round-trip via sailfin run (#1266)" test_int_roundtrip
 run_test "runtime: string payload survives the by-pointer contract (#1266)" test_string_roundtrip
 run_test "runtime: struct payload round-trips across producer/consumer fns (#1266)" test_struct_roundtrip_across_functions
+run_test "runtime: bool payload round-trips via the narrow-int path (#1266)" test_bool_roundtrip
 run_test "runtime: receive on a closed+empty channel returns the default (#1266)" test_closed_channel_drain
 
 echo "[summary] $PASS passed, $FAIL failed"

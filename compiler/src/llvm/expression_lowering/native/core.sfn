@@ -851,10 +851,18 @@ fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries:
             elem_type = "i8*";
             elem_value = data_ptr;
         }
-        if elem_type == "i32" {
+        // Widen every narrow integer to i64 so the spill slot covers the
+        // full 8-byte elem_size — an i8/i16/i32 alloca would leave the
+        // runtime's memcpy reading uninitialized stack bytes past it.
+        let mut _send_widen_from: string = "";
+        if elem_type == "i8" { _send_widen_from = "i8"; }
+        if elem_type == "i16" { _send_widen_from = "i16"; }
+        if elem_type == "i32" { _send_widen_from = "i32"; }
+        if _send_widen_from.length > 0 {
             let widened = format_temp_name(ch_temp);
             ch_temp += 1;
-            ch_lines.push("  " + widened + " = sext i32 " + elem_value
+            ch_lines.push("  " + widened + " = sext " + _send_widen_from + " "
+                + elem_value
                 + " to i64");
             elem_type = "i64";
             elem_value = widened;
@@ -898,8 +906,13 @@ fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries:
     }
 
     // receive: call, null-check the malloc'd copy, load the element.
+    // Narrow integer expected types (i1/i8/i16/i32) load the full i64
+    // slot and truncate after the phi — the send side widened them to
+    // 8 bytes, and an i64 load + trunc is endian-agnostic where a
+    // narrow load from the slot pointer would not be.
     let mut load_type: string = "i8*";
     let mut null_default: string = "null";
+    let mut recv_trunc_to: string = "";
     if expected_type == "i64" {
         load_type = "i64";
         null_default = "0";
@@ -907,6 +920,16 @@ fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries:
     if expected_type == "double" {
         load_type = "double";
         null_default = "0.0";
+    }
+    let mut _recv_narrow: boolean = false;
+    if expected_type == "i1" { _recv_narrow = true; }
+    if expected_type == "i8" { _recv_narrow = true; }
+    if expected_type == "i16" { _recv_narrow = true; }
+    if expected_type == "i32" { _recv_narrow = true; }
+    if _recv_narrow {
+        load_type = "i64";
+        null_default = "0";
+        recv_trunc_to = expected_type;
     }
     let recv_id = number_to_string(ch_temp);
     let raw_ptr = format_temp_name(ch_temp);
@@ -950,7 +973,20 @@ fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries:
         + ", %"
         + null_label
         + " ]");
-    let recv_operand = LLVMOperand { llvm_type: load_type, value: recv_out };
+    let mut recv_result_type: string = load_type;
+    let mut recv_result_value: string = recv_out;
+    if recv_trunc_to.length > 0 {
+        let narrowed = format_temp_name(ch_temp);
+        ch_temp += 1;
+        ch_lines.push("  " + narrowed + " = trunc i64 " + recv_out + " to "
+            + recv_trunc_to);
+        recv_result_type = recv_trunc_to;
+        recv_result_value = narrowed;
+    }
+    let recv_operand = LLVMOperand {
+        llvm_type: recv_result_type,
+        value: recv_result_value
+    };
     return ExpressionResult {
         lines: ch_lines,
         temp_index: ch_temp,
