@@ -200,3 +200,126 @@ test "ownership: a clean return moves the owned value with no findings" ![io] {
     assert warnings.length == 0;
     assert run_ownership_checker(program) == 0;
 }
+
+// -------------------------------------------------------------------
+// E6 (#1215): use-after-free (E0903), in-place mutation of a stale
+// buffer (E0902), and raw-pointer escape across the FFI boundary (E0906)
+// -------------------------------------------------------------------
+test "ownership: use after free emits E0903 with both spans" ![io] {
+    // `free(buf)` disposes `buf` (Owned -> Freed); the later
+    // `owned_buf_len(buf)` reads the freed value — use-after-free.
+    let source = "fn f(buf: OwnedBuf) -> int {\n    free(buf);\n    return owned_buf_len(buf);\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0903";
+    assert warnings[0].severity == "error";
+    assert warnings[0].binding_name == "buf";
+    // Two-span diagnostic: the offending use and the disposal site.
+    assert warnings[0].trigger != null;
+    assert warnings[0].moved_trigger != null;
+}
+
+test "ownership: disposal with no later use compiles clean" ![io] {
+    // `free(buf)` is the last touch of `buf`; disposal itself is sound,
+    // only use-*after*-free is an error.
+    let source = "fn f(buf: OwnedBuf) -> int {\n    free(buf);\n    return 0;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 0;
+    assert run_ownership_checker(program) == 0;
+}
+
+test "ownership: disposer method form x.free() then use emits E0903" ![io] {
+    // The method-call disposer form `buf.free()` disposes `buf`; a later
+    // read is use-after-free.
+    let source = "fn f(buf: OwnedBuf) -> int {\n    buf.free();\n    return owned_buf_len(buf);\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0903";
+    assert warnings[0].binding_name == "buf";
+}
+
+test "ownership: in-place mutation of a moved buffer emits E0902" ![io] {
+    // `sink(buf)` moves `buf`; the later `buf.append(suffix)` mutates the
+    // stale handle in place — its bytes are aliased by the move target.
+    let source = "fn sink(b: OwnedBuf) -> int {\n    return 1;\n}\n\nfn f(buf: OwnedBuf) -> int {\n    let n = sink(buf);\n    buf.append(suffix);\n    return n;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0902";
+    assert warnings[0].severity == "error";
+    assert warnings[0].binding_name == "buf";
+    assert warnings[0].trigger != null;
+    assert warnings[0].moved_trigger != null;
+}
+
+test "ownership: in-place mutation of a freed buffer emits E0903" ![io] {
+    // `free(buf)` disposes `buf`; the later `buf.append(suffix)` mutates
+    // the freed handle in place — use-after-free reached via the mutator
+    // branch (not a plain read).
+    let source = "fn f(buf: OwnedBuf) -> int {\n    free(buf);\n    buf.append(suffix);\n    return 0;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0903";
+    assert warnings[0].binding_name == "buf";
+}
+
+test "ownership: unique-owner grow-at-tip compiles clean" ![io] {
+    // The acceptance regression: an `OwnedBuf` with no live alias is
+    // mutated in place through its unique owner, then returned. In-place
+    // mutation does not consume the receiver, so the `return buf` move is
+    // valid and no rule fires.
+    let source = "fn f(buf: OwnedBuf) -> OwnedBuf {\n    buf.append(suffix);\n    return buf;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 0;
+    assert run_ownership_checker(program) == 0;
+}
+
+test "ownership: in-place mutation of the live owner does not consume it" ![io] {
+    // Two consecutive in-place mutations followed by a move: the receiver
+    // stays `Owned` across the mutators, so only the final `return buf`
+    // moves it — no false positive.
+    let source = "fn f(buf: OwnedBuf) -> OwnedBuf {\n    buf.append(a);\n    buf.append(b);\n    return buf;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 0;
+    assert run_ownership_checker(program) == 0;
+}
+
+test "ownership: owned value escaping into an extern fn emits E0906" ![io] {
+    // Passing a bare owned identifier directly into an `extern fn` call
+    // outside an `unsafe` region is a raw-pointer escape.
+    let source = "extern fn raw_consume(p: * u8) -> void;\n\nfn f(buf: OwnedBuf) -> void {\n    raw_consume(buf);\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0906";
+    assert warnings[0].severity == "error";
+    assert warnings[0].binding_name == "buf";
+    assert warnings[0].trigger != null;
+}
+
+test "ownership: owned value into an extern fn inside unsafe is clean" ![io] {
+    // The same escape inside an `unsafe { }` block is the author-asserted
+    // boundary the checker skips — no E0906.
+    let source = "extern fn raw_consume(p: * u8) -> void;\n\nfn f(buf: OwnedBuf) -> void {\n    unsafe {\n        raw_consume(buf);\n    }\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 0;
+    assert run_ownership_checker(program) == 0;
+}
+
+test "ownership: free of a raw pointer is untracked" ![io] {
+    // The self-host fence: `free` over a raw `* u8` (an untracked,
+    // non-owned type — the current un-migrated runtime shape) fires
+    // nothing. E0903/E0906 are scoped to owned/affine bindings only.
+    let source = "fn g(p: * u8) -> int {\n    free(p);\n    return 0;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 0;
+    assert run_ownership_checker(program) == 0;
+}
