@@ -50,9 +50,9 @@ import {
     Statement
 } from "./ast";
 import { render_diagnostic } from "./diagnostics_render";
-import { starts_with } from "./string_utils";
+import { number_to_string } from "./num_format";
 import { Token, TokenKind } from "./token";
-import { Diagnostic, is_identifier_char } from "./typecheck_types";
+import { Diagnostic, is_identifier_char, is_owned_type } from "./typecheck_types";
 
 // One tracked binding. `state` is the lattice: "owned" on entry,
 // "moved" once a move site consumes it. `is_owned` flags the bindings
@@ -104,80 +104,11 @@ struct OwnershipSummary {
 // -------------------------------------------------------------------
 // Leaf helpers
 // -------------------------------------------------------------------
-// Strip leading/trailing ASCII whitespace so a type annotation like
-// `" OwnedBuf "` classifies the same as `"OwnedBuf"`.
-fn _trim(text: string) -> string {
-    let mut start: int = 0;
-    let mut end: int = text.length;
-    loop {
-        if start >= end { break; }
-        let ch = text[start];
-        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" { start += 1; } else {
-            break;
-        }
-    }
-    loop {
-        if end <= start { break; }
-        let ch = text[end - 1];
-        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" { end -= 1; } else {
-            break;
-        }
-    }
-    let mut result: string = "";
-    let mut index: int = start;
-    loop {
-        if index >= end { break; }
-        result = result + text[index];
-        index += 1;
-    }
-    return result;
-}
-
-// Positive-integer formatter (local, mirroring `num_format` — kept
-// self-contained so this module's import closure stays narrow).
-fn _int_to_string(value: int) -> string {
-    if value == 0 { return "0"; }
-    let mut negative: boolean = false;
-    let mut working: int = value;
-    if working < 0 {
-        negative = true;
-        working = 0 - working;
-    }
-    let digits = "0123456789";
-    let mut remaining: int = working;
-    let mut output: string = "";
-    loop {
-        if remaining <= 0 { break; }
-        let mut temp: int = remaining;
-        let mut quotient: int = 0;
-        loop {
-            if temp < 10 { break; }
-            temp -= 10;
-            quotient += 1;
-        }
-        let ch = digits[temp];
-        output = ch + output;
-        remaining = quotient;
-    }
-    if negative { output = "-" + output; }
-    return output;
-}
-
-// True iff a type annotation names an owned/affine value the move rules
-// apply to. String-based, mirroring `unwrap_ownership_wrapper`
-// (typecheck_types) and `is_copy_type` (llvm/type_mapping): the compiler
-// has no structural type info at this pass, only the annotation text.
-fn _is_owned_type(text: string) -> boolean {
-    let trimmed = _trim(text);
-    if trimmed == "OwnedBuf" { return true; }
-    if trimmed == "Affine" { return true; }
-    if trimmed == "Linear" { return true; }
-    if starts_with(trimmed, "Affine<") { return true; }
-    if starts_with(trimmed, "Linear<") { return true; }
-    if starts_with(trimmed, "OwnedBuf<") { return true; }
-    return false;
-}
-
+// Owned/affine-type classification (`OwnedBuf`, `Affine<T>`, `Linear<T>`)
+// is shared with the typecheck side via `is_owned_type` in
+// `typecheck_types.sfn` so the two passes can't drift as new owned
+// wrappers are added. Integer formatting reuses `number_to_string` from
+// `num_format.sfn`.
 // Synthesize an identifier token from an AST span so the finding can
 // feed the shared diagnostic renderer (which keys carets off a Token).
 fn _token_from_span(name: string, span: SourceSpan?) -> Token? {
@@ -195,7 +126,7 @@ fn _token_from_span(name: string, span: SourceSpan?) -> Token? {
 fn _span_location(span: SourceSpan?) -> string {
     if span == null { return ""; }
     let s: SourceSpan = span;
-    return " at " + _int_to_string(s.start_line) + ":" + _int_to_string(s.start_column);
+    return " at " + number_to_string(s.start_line) + ":" + number_to_string(s.start_column);
 }
 
 // -------------------------------------------------------------------
@@ -278,7 +209,7 @@ fn _make_finding(name: string, use_span: SourceSpan?, moved_span: SourceSpan?, c
             + name
             + "` was moved here"
             + moved_loc
-            + "\nhelp: clone it before the move, or restructure so the second use precedes the move";
+            + "\nhelp: copy it before the move, or restructure so the second use precedes the move";
     }
     return OwnershipWarning {
         routine_name: "",
@@ -388,7 +319,7 @@ fn _scope_after_block(block: Block, scope: OwnershipScope) -> OwnershipScope {
 // is a bare identifier already bound to an owned value.
 fn _binding_is_owned(type_text: string, has_type: boolean, initializer: Expression?, bindings: OwnershipBinding[]) -> boolean {
     if has_type {
-        if _is_owned_type(type_text) { return true; }
+        if is_owned_type(type_text) { return true; }
     }
     if initializer != null {
         if initializer.variant == "Identifier" {
@@ -702,7 +633,7 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
             let mut owned_param: boolean = false;
             let p_annotation = parameter.type_annotation;
             if p_annotation != null {
-                if _is_owned_type(p_annotation.text) { owned_param = true; }
+                if is_owned_type(p_annotation.text) { owned_param = true; }
             }
             child = _enter_binding(child, parameter.name, parameter.span, owned_param);
             index += 1;
@@ -784,7 +715,7 @@ fn _analyze_routine_ownership(parameters: Parameter[], body: Block) -> Ownership
         let mut owned_param: boolean = false;
         let annotation = parameter.type_annotation;
         if annotation != null {
-            if _is_owned_type(annotation.text) { owned_param = true; }
+            if is_owned_type(annotation.text) { owned_param = true; }
         }
         scope = _enter_binding(scope, parameter.name, parameter.span, owned_param);
         index += 1;

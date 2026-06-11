@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-`Affine<T>` and `Linear<T>` wrappers are parsed, and **move / use-after-move is
+`Affine<T>` and `Linear<T>` wrappers are parsed, and **move / use-after-move are
 now enforced** on owned/affine-typed bindings (epic #1209, E5 / #1214). A value
 of an owned type (`OwnedBuf`, `Affine<T>`, `Linear<T>`) is *moved* when it is
 rebound (`let y = x;`), passed to a call (`f(x)`), or returned (`return x;`).
