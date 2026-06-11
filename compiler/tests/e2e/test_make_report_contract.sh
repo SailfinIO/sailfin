@@ -139,11 +139,12 @@ verdict_json() {
 
 # Read a flat-JSON string field. Prefers jq when present (also validates
 # the line parses); falls back to a sed extraction of "<field>":"<value>"
-# / "<field>":null. Mirrors the sibling test's helper. NOTE: the sed branch
-# assumes the field is the only/last `"<field>":` in the string, which holds
-# for the top-level verdict line; report-file fields with nested duplicates
-# (e.g. `report` also appearing inside `phases[]`) are read via jq-backed
-# helpers below, so they never hit this branch on a jq host (CI has jq).
+# / "<field>":null. Mirrors the sibling test's helper. The greedy sed branch
+# returns the last `"<field>":` occurrence — safe here because this helper is
+# applied ONLY to the single-line verdict block, whose fields are each flat
+# and single-occurrence. Report-FILE reads (which nest the same keys inside
+# phases[]) go through report_file_field's first-occurrence extraction below,
+# never this helper.
 json_field() {
     local json="$1" field="$2"
     if command -v jq >/dev/null 2>&1; then
@@ -170,15 +171,24 @@ assert_parses_json() {
 }
 
 # Read a top-level field from a report FILE. Prefers jq (correctly ignores
-# duplicate keys nested under phases[]); falls back to json_field on the
-# file's single-line content for jq-less hosts.
+# duplicate keys nested under phases[]). The jq-less fallback must NOT
+# delegate to json_field above: a report file nests the same keys inside
+# phases[] (e.g. a top-level "report" plus phases[].report when a rebuild
+# populated the artifact), and json_field's greedy sed would return the
+# *last* (nested) occurrence. write_report_file emits every top-level field
+# before phases[], so a first-occurrence match selects the top-level value —
+# the same idiom test_check_phase_ledger.sh uses for its nested status keys.
 report_file_field() {
-    local file="$1" field="$2"
+    local file="$1" field="$2" match
     if command -v jq >/dev/null 2>&1; then
         jq -r ".${field} // \"null\"" "$file" 2>/dev/null
         return
     fi
-    json_field "$(cat "$file")" "$field"
+    match="$(grep -oE "\"${field}\":(\"[^\"]*\"|null)" "$file" | head -n1)"
+    case "$match" in
+        *:null) printf 'null' ;;
+        *) printf '%s' "$match" | sed -E "s/.*:\"([^\"]*)\"/\1/" ;;
+    esac
 }
 
 # ---- Case 1: gate OFF -> no report file, verdict report:null ----
