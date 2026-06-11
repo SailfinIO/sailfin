@@ -1,0 +1,91 @@
+// Regression coverage for the dormant ownership-checker pass (#1213).
+//
+// E4 of the memory-safety epic (#1209), D7 = standalone pass, Phase R0
+// (dormant). The pass runs after the effect checker, walks the same
+// scope / lambda / `routine` structure, builds per-binding
+// `Owned`/`Moved` state, and discards it — zero warnings, zero errors,
+// no IR impact. These tests pin:
+//
+//   - the dormant contract: no warnings on any input, gate returns 0
+//   - the walk's binding coverage via `bindings_tracked` (params,
+//     `let`s, nested blocks, lambdas)
+//   - the E2 `unsafe` boundary (#1211): `unsafe { }` interiors and
+//     `unsafe fn` bodies are skipped
+//   - the Owned -> Moved lattice helpers E5 will call at move sites
+import {
+    OwnershipBinding,
+    analyze_program_ownership,
+    binding_state,
+    check_ownership,
+    mark_binding_moved,
+    run_ownership_checker
+} from "../../src/ownership_checker";
+import { parse_program } from "../../src/parser/mod";
+
+test "ownership: dormant pass emits no warnings" ![io] {
+    let source = "fn main() ![io] {\n    let x = 1;\n    let y = x;\n    print.info(\"hi\");\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 0;
+    assert run_ownership_checker(program) == 0;
+}
+
+test "ownership: tracks parameter and let bindings" ![io] {
+    let source = "fn add(a: int, b: int) -> int {\n    let total = a + b;\n    return total;\n}\n";
+    let program = parse_program(source);
+    let summary = analyze_program_ownership(program);
+    assert summary.bindings_tracked == 3;
+    assert summary.warnings.length == 0;
+}
+
+test "ownership: nested block bindings are tracked but scoped" ![io] {
+    let source = "fn f() {\n    let a = 1;\n    {\n        let b = 2;\n    }\n    let c = 3;\n}\n";
+    let program = parse_program(source);
+    let summary = analyze_program_ownership(program);
+    assert summary.bindings_tracked == 3;
+    assert summary.warnings.length == 0;
+}
+
+test "ownership: unsafe block interior is skipped" ![io] {
+    let source = "fn f() {\n    let outside = 1;\n    unsafe {\n        let inside = 2;\n    }\n}\n";
+    let program = parse_program(source);
+    let summary = analyze_program_ownership(program);
+    assert summary.bindings_tracked == 1;
+    assert summary.warnings.length == 0;
+}
+
+test "ownership: unsafe fn body is skipped" ![io] {
+    let source = "unsafe fn raw(p: int) -> int {\n    let x = p;\n    return x;\n}\n";
+    let program = parse_program(source);
+    let summary = analyze_program_ownership(program);
+    assert summary.bindings_tracked == 0;
+    assert summary.warnings.length == 0;
+}
+
+test "ownership: lambda parameters and body bindings are tracked" ![io] {
+    let source = "fn f() {\n    let g = fn (n: int) -> int {\n        let m = n + 1;\n        return m;\n    };\n}\n";
+    let program = parse_program(source);
+    let summary = analyze_program_ownership(program);
+    // g + lambda parameter n + lambda-body m
+    assert summary.bindings_tracked == 3;
+    assert summary.warnings.length == 0;
+}
+
+test "ownership: struct methods and tests are walked" ![io] {
+    let source = "struct Point {\n    x: int;\n    fn shifted(self, dx: int) -> int {\n        let nx = self.x + dx;\n        return nx;\n    }\n}\n";
+    let program = parse_program(source);
+    let summary = analyze_program_ownership(program);
+    assert summary.bindings_tracked >= 2;
+    assert summary.warnings.length == 0;
+}
+
+test "ownership: lattice helpers flip owned to moved" ![io] {
+    let mut bindings: OwnershipBinding[] = [];
+    bindings.push(OwnershipBinding { name: "x", state: "owned", span: null });
+    assert binding_state(bindings, "x") == "owned";
+    assert binding_state(bindings, "missing") == "";
+    let updated = mark_binding_moved(bindings, "x");
+    assert binding_state(updated, "x") == "moved";
+    let untouched = mark_binding_moved(updated, "missing");
+    assert binding_state(untouched, "x") == "moved";
+}

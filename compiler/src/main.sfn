@@ -32,6 +32,7 @@ import { native_text_passes_lowering_gate } from "./llvm/lowering/lowering_core"
 import { runtime_helper_call_names } from "./llvm/runtime_helpers";
 import { LayoutManifest } from "./native_ir";
 import { number_to_string } from "./num_format";
+import { run_ownership_checker } from "./ownership_checker";
 import { parse_program } from "./parser/mod";
 import { load_prelude_global_names } from "./prelude_globals";
 import { collect_reexport_violations } from "./reexport_check";
@@ -87,6 +88,10 @@ fn compile_to_sailfin(source: string) -> string ![io] {
     if validate_and_render_effects(program, source, "main", empty_import_symbols()) > 0 {
         return "";
     }
+    // E4 ownership pass (#1213): dormant Phase R0 — builds and discards
+    // per-binding ownership state after the effect gate. Always 0 today;
+    // E5/E6 flip it to a real gate without re-plumbing call sites.
+    if run_ownership_checker(program) > 0 { return ""; }
     return emit_program(program);
 }
 
@@ -206,6 +211,8 @@ fn compile_to_llvm(source: string) -> string ![io] {
     if validate_and_render_effects(program, source, "main", empty_import_symbols()) > 0 {
         return "";
     }
+    // E4 ownership pass (#1213): dormant Phase R0 gate.
+    if run_ownership_checker(program) > 0 { return ""; }
     let trace_emit = _env_flag("SAILFIN_TRACE_EMIT") || _legacy_flag_file("build/sailfin/.trace_emit");
     let native_text = emit_native_text_with_module_name(program, "main");
     if trace_emit {
@@ -259,6 +266,8 @@ fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] 
     if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         return false;
     }
+    // E4 ownership pass (#1213): dormant Phase R0 gate.
+    if run_ownership_checker(program) > 0 { return false; }
     let native_text = emit_native_text_with_module_name(program, module_name);
     if native_text.length == 0 { return false; }
     return print_llvm_ir_from_text(native_text, module_name);
@@ -282,6 +291,8 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
     if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         return "";
     }
+    // E4 ownership pass (#1213): dormant Phase R0 gate.
+    if run_ownership_checker(program) > 0 { return ""; }
     let trace_emit = _env_flag("SAILFIN_TRACE_EMIT") || _legacy_flag_file("build/sailfin/.trace_emit");
     let native_text = emit_native_text_with_module_name(program, module_name);
     if trace_emit {
@@ -341,6 +352,12 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
         return "";
     }
     if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
+        print.err(_timing_line(module_name, "parse", t_parse));
+        print.err(_timing_line(module_name, "typecheck", t_typecheck));
+        return "";
+    }
+    // E4 ownership pass (#1213): dormant Phase R0 gate.
+    if run_ownership_checker(program) > 0 {
         print.err(_timing_line(module_name, "parse", t_parse));
         print.err(_timing_line(module_name, "typecheck", t_typecheck));
         return "";
@@ -466,6 +483,8 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
     if validate_and_render_effects_with_capabilities(program, source, module_name, imported_function_effects, imported_capabilities_required) > 0 {
         return false;
     }
+    // E4 ownership pass (#1213): dormant Phase R0 gate.
+    if run_ownership_checker(program) > 0 { return false; }
     if trace {
         print.err("test compiler (imports): emit_native_with_module_name start (module="
             + module_name
@@ -518,6 +537,8 @@ fn compile_to_native_text_with_module(source: string, module_name: string) -> st
     if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         return "";
     }
+    // E4 ownership pass (#1213): dormant Phase R0 gate.
+    if run_ownership_checker(program) > 0 { return ""; }
     let trace_emit = _env_flag("SAILFIN_TRACE_EMIT") || _legacy_flag_file("build/sailfin/.trace_emit");
     let text = emit_native_text_with_module_name(program, module_name);
     if trace_emit {
@@ -543,6 +564,8 @@ fn write_native_text_file_with_module(source: string, module_name: string, out_p
     if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         return false;
     }
+    // E4 ownership pass (#1213): dormant Phase R0 gate.
+    if run_ownership_checker(program) > 0 { return false; }
     return emit_native_text_to_file_with_module_name(program, module_name, out_path);
 }
 
@@ -655,6 +678,8 @@ fn compile_to_llvm_file_with_module_imports(source: string, module_name: string,
     if validate_and_render_effects(program, source, module_name, imports) > 0 {
         return false;
     }
+    // E4 ownership pass (#1213): dormant Phase R0 gate.
+    if run_ownership_checker(program) > 0 { return false; }
 
     let native_text = emit_native_text_with_module_name(program, module_name);
     if native_text.length == 0 {
