@@ -28,7 +28,13 @@
 //     that is already `Moved`/`Freed` — the bytes are aliased by the
 //     move/free target -> `E0902`. Mutation through the *unique* live
 //     owner stays clean (the receiver keeps state `Owned`), which is the
-//     sound grow-at-tip path.
+//     sound grow-at-tip path. These mutator methods denote an in-place
+//     `&mut self` surface (proposal §3.2), *distinct from* the shipped
+//     consume-and-return free function `owned_buf_append(self) ->
+//     OwnedBuf` (§4.2): the free-function form moves its bare-identifier
+//     receiver and is already covered by the move rules above, so the
+//     two surfaces are complementary, not contradictory. E8 settles
+//     which surface the migrated runtime uses.
 //   - **Raw-pointer escape across the FFI boundary** — passing a bare
 //     owned identifier directly into an `extern fn` call outside an
 //     `unsafe` region -> `E0906`. The runtime's libc calls pass raw
@@ -907,6 +913,24 @@ fn _scope_after_call(expression: Expression, scope: OwnershipScope) -> Ownership
                         // Live unique owner: in-place mutation is sound;
                         // the receiver stays `Owned` (not read-consumed).
                         // Walk only the arguments.
+                        //
+                        // `.grow/.append/.set` denote an in-place `&mut
+                        // self` mutator (proposal §3.2) — NOT sugar for
+                        // the shipped consume-and-return free function
+                        // `owned_buf_append(self: OwnedBuf, ...) ->
+                        // OwnedBuf`. The two surfaces are complementary
+                        // and both sound: the free-function form is a
+                        // bare-identifier argument, so the *move* rules
+                        // (E0901/E0904) already cover it (`buf` dies, the
+                        // returned buffer is the new unique owner); the
+                        // in-place method form is covered here by E0902
+                        // (a stale receiver is the violation; the unique
+                        // live owner grows in place without consuming).
+                        // Keeping the live-owner mutator non-consuming is
+                        // what makes `buf.append(x); return buf;` — the
+                        // sound grow-at-tip path the issue requires to
+                        // compile clean — legal. Which surface the
+                        // migrated runtime adopts is settled by E8.
                         return _consume_call_args(expression.arguments, scope, false);
                     }
                 }
