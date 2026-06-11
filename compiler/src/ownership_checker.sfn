@@ -944,9 +944,18 @@ fn _append_warnings(warnings: OwnershipWarning[], additions: OwnershipWarning[])
 
 // Collect the program-level `extern fn` name set, threaded read-only
 // into every routine scope so the `E0906` escape check can recognize an
-// FFI callee. Only top-level extern declarations are gathered — an
-// extern declared in another compilation unit yields a (self-host-safe)
-// false negative, never a false positive.
+// FFI callee. Only top-level extern declarations *in this compilation
+// unit* are gathered. An extern resolved implicitly — the prelude /
+// `runtime/sfn/**` externs the compiler treats as in-scope without a
+// local re-declaration (e.g. `memcpy`, `malloc`; see
+// `prelude_globals.load_prelude_global_names`) — is therefore NOT
+// matched, so `E0906` is a deliberate false negative for those callees
+// at E6. This is self-host-safe (never a false positive) and avoids
+// forcing this pure pass to take an `![io]` dependency on the prelude
+// FS scan; widening to implicitly-linked externs (with an extern-only
+// name source) is a follow-up. In practice the common bypass is already
+// blocked upstream: passing a bare owned value to a `* u8`-typed extern
+// parameter is a typecheck error before this pass runs.
 fn _gather_extern_names(program: Program) -> string[] {
     let mut names: string[] = [];
     let mut index: int = 0;
