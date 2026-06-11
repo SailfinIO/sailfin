@@ -51,7 +51,7 @@
 //
 // v0 limitations (follow-up waves): (1) per-connection `Task`
 // handles are fire-and-forget — never `sfn_task_join`ed or
-// destroyed — so each connection leaks one 120-byte `Task`. Reaping
+// destroyed — so each connection leaks one 144-byte `Task`. Reaping
 // fire-and-forget tasks needs a scheduler-side completion sweep
 // (separate issue); the connection `ctx` pair IS freed by the
 // worker. (2) No keep-alive (`Connection: close` semantics, one

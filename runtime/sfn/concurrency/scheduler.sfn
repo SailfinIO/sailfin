@@ -57,33 +57,40 @@
 // is expressed as a run of 8-byte `i64` slots whose total size
 // equals the platform `sizeof`.
 //
-// Sizes below are for **Linux x86_64 (glibc)**, the supported
-// self-hosting build target:
-//   - `pthread_mutex_t` = 40 bytes -> 5 i64 slots
-//   - `pthread_cond_t`  = 48 bytes -> 6 i64 slots
-// For reference, macOS arm64 differs:
-//   - `pthread_mutex_t` = 64 bytes (8-byte sig + 56-byte opaque)
-//   - `pthread_cond_t`  = 48 bytes (8-byte sig + 40-byte opaque)
-// A platform-conditional split (per §2.9 Q7) is deferred until
-// Sailfin grows `cfg`-style conditional compilation; this
-// skeleton sizes for the build platform and documents the macOS
-// values here. The handles are opaque: only libpthread reads or
-// writes their bytes, so the slot names are deliberately generic.
-// Opaque storage for a `pthread_mutex_t`. 40 bytes on Linux x86_64
-// (glibc) — five 8-byte slots. Never read field-by-field from
-// Sailfin; the bytes belong to libpthread, reached through a
-// `* PthreadMutex` view passed to `pthread_mutex_*`.
+// The two self-hosting build targets disagree on `pthread_mutex_t`:
+//   - Linux x86_64 (glibc): `pthread_mutex_t` = 40 bytes, `pthread_cond_t` = 48 bytes
+//   - macOS arm64 (LP64):   `pthread_mutex_t` = 64 bytes (8-byte sig + 56-byte
+//     opaque), `pthread_cond_t` = 48 bytes (8-byte sig + 40-byte opaque)
+// A platform-conditional split (per §2.9 Q7) is deferred until Sailfin
+// grows `cfg`-style conditional compilation. Until then the opaque storage
+// is sized to the **maximum** across both targets so neither platform's
+// `pthread_*_init` overruns the embedded handle: mutex -> 64 bytes (8 slots,
+// covering macOS; the 24-byte slack on Linux is never read), cond -> 48 bytes
+// (6 slots, identical on both). Under-sizing the mutex to 40 bytes overran the
+// `Task` allocation by 24 bytes on macOS arm64, corrupting heap metadata and
+// faulting a later `malloc` inside the allocator under parallel load (#1265).
+// The handles are opaque: only libpthread reads or writes their bytes, so the
+// slot names are deliberately generic.
+// Opaque storage for a `pthread_mutex_t`. 64 bytes — eight 8-byte slots,
+// sized to the larger macOS arm64 layout (Linux glibc uses only the first
+// 40). Never read field-by-field from Sailfin; the bytes belong to
+// libpthread, reached through a `* PthreadMutex` view passed to
+// `pthread_mutex_*`.
 struct PthreadMutex {
     _opaque0: i64;
     _opaque1: i64;
     _opaque2: i64;
     _opaque3: i64;
     _opaque4: i64;
+    _opaque5: i64;
+    _opaque6: i64;
+    _opaque7: i64;
 }
 
-// Opaque storage for a `pthread_cond_t`. 48 bytes on Linux x86_64
-// (glibc) — six 8-byte slots. Opaque to Sailfin; libpthread owns
-// the bytes via a `* PthreadCond` view passed to `pthread_cond_*`.
+// Opaque storage for a `pthread_cond_t`. 48 bytes on both supported
+// targets (Linux x86_64 glibc and macOS arm64) — six 8-byte slots, so
+// unlike the mutex it needs no max-sizing. Opaque to Sailfin; libpthread
+// owns the bytes via a `* PthreadCond` view passed to `pthread_cond_*`.
 struct PthreadCond {
     _opaque0: i64;
     _opaque1: i64;
@@ -101,8 +108,8 @@ struct PthreadCond {
 // atomic intrinsics (0 = pending, 1 = complete). `cond` / `mutex`
 // are embedded by value: the awaiter blocks on `cond` under
 // `mutex` until the worker sets `done` and signals (§2.6.3).
-// Linux x86_64 layout: four i64s (32 B) + PthreadCond (48 B) +
-// PthreadMutex (40 B) = 120 bytes.
+// Layout (max-sized handles): four i64s (32 B) + PthreadCond (48 B) +
+// PthreadMutex (64 B) = 144 bytes.
 struct Task {
     fn_ptr: i64;
     ctx: i64;
@@ -231,11 +238,11 @@ extern fn atoi(s: * u8) -> i32;
 // mutex, so the atomic ordering is stronger than required but never
 // wrong.
 //
-// `TaskQueue` byte size on Linux x86_64 (glibc): five `i64` cursors
-// (40 B) + `PthreadMutex` (40 B) + two `PthreadCond` (96 B) = 176
+// `TaskQueue` byte size (max-sized handles): five `i64` cursors
+// (40 B) + `PthreadMutex` (64 B) + two `PthreadCond` (96 B) = 200
 // bytes. This constant is the single layout dependency the
 // allocator path encodes; it must track the struct above.
-fn _sfn_taskqueue_struct_size() -> i64 { return 176; }
+fn _sfn_taskqueue_struct_size() -> i64 { return 200; }
 
 // Largest ring capacity whose byte size (`cap * 8`) still fits in a
 // positive `i64`: floor((2^63 - 1) / 8) = 0x0FFF_FFFF_FFFF_FFFF. A
@@ -484,10 +491,10 @@ fn sfn_scheduler_resolve_thread_count() -> i64 {
 // `Task.result`, sets `Task.done` with a seq_cst atomic store, and
 // signals `Task.cond`. The done flag + cond/mutex live by value in the
 // `Task` (see the struct header) so no extra allocation is needed.
-// `Task` byte size on Linux x86_64 (glibc): four i64s (32 B) +
-// PthreadCond (48 B) + PthreadMutex (40 B) = 120 bytes. Tracks the
+// `Task` byte size (max-sized handles): four i64s (32 B) +
+// PthreadCond (48 B) + PthreadMutex (64 B) = 144 bytes. Tracks the
 // struct above; the allocator path is the only layout dependency.
-fn _sfn_task_struct_size() -> i64 { return 120; }
+fn _sfn_task_struct_size() -> i64 { return 144; }
 
 // Byte offset of `Task.done` (field 4) — three leading i64s precede it.
 // `done` is reached by offset arithmetic rather than `& task.done`
