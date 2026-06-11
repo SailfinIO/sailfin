@@ -5,9 +5,36 @@ sidebar:
   order: 4
 ---
 
-`Affine<T>` and `Linear<T>` wrappers are parsed today but move/consume rules
-are not enforced. `&T`/`&mut T` borrows are parsed but exclusivity is not checked.
-Full enforcement is a 1.0 requirement.
+`Affine<T>` and `Linear<T>` wrappers are parsed, and **move / use-after-move are
+now enforced** on owned/affine-typed bindings (epic #1209, E5 / #1214). A value
+of an owned type (`OwnedBuf`, `Affine<T>`, `Linear<T>`) is *moved* when it is
+rebound (`let y = x;`), passed to a call (`f(x)`), or returned (`return x;`).
+After the move the original binding is dead:
+
+- reading, passing, or returning it again raises **`E0901`** (use of a moved
+  value);
+- binding it to a fresh name again (`let z = x;`) raises **`E0904`** (a second
+  live binding to a value that is no longer uniquely owned).
+
+Each diagnostic points at the offending use and notes the move that invalidated
+it. Ordinary copyable values are unaffected. Still to come: in-place-mutation /
+use-after-free rules (`E0902`/`E0903`, E6), linear single-use enforcement on
+user wrappers (E7), and `&T`/`&mut T` borrow exclusivity (Phase U). Full
+enforcement is a 1.0 requirement.
+
+```sfn
+fn consume(b: OwnedBuf) -> int { return 1; }
+
+fn ok(buf: OwnedBuf) -> int {
+    let inner = buf;        // moves buf into inner
+    return consume(inner);  // consumes inner; neither is used again
+}
+
+fn bad(buf: OwnedBuf) -> int {
+    let n = consume(buf);   // moves buf
+    return buf.length;      // E0901: use of moved value `buf`
+}
+```
 
 ## OwnedBuf / Slice (surface only)
 

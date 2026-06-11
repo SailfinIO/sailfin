@@ -502,6 +502,25 @@ fn unwrap_ownership_wrapper(annotation: string) -> string {
     return unwrap_ownership_wrapper(trim_text(inner));
 }
 
+// True iff a type annotation names a uniquely-owned / affine value
+// (`OwnedBuf`, `Affine<T>`, `Linear<T>`). Shared classifier so the
+// ownership checker (`ownership_checker.sfn`) and the typecheck side
+// stay in lockstep as new owned wrappers are added — the move rules key
+// off this, mirroring the prefix set `unwrap_ownership_wrapper` strips.
+// The codegen inverse (copy-vs-move) lives in
+// `llvm/type_mapping.sfn:is_copy_type`; folding all three into one
+// source of truth is tracked as ownership-epic (#1209) follow-up.
+fn is_owned_type(annotation: string) -> boolean {
+    let trimmed = trim_text(annotation);
+    if strings_equal(trimmed, "OwnedBuf") { return true; }
+    if strings_equal(trimmed, "Affine") { return true; }
+    if strings_equal(trimmed, "Linear") { return true; }
+    if starts_with(trimmed, "OwnedBuf<") { return true; }
+    if starts_with(trimmed, "Affine<") { return true; }
+    if starts_with(trimmed, "Linear<") { return true; }
+    return false;
+}
+
 // The element kind carried by a future type, or null when `type_text` is not
 // one of the six future spellings. `await x` yields this kind (the await→T
 // rule). Futures surface as the runtime pointer spellings
