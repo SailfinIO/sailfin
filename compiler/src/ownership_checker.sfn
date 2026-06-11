@@ -1,0 +1,580 @@
+// compiler/src/ownership_checker.sfn
+//
+// Standalone ownership-checker pass (D7) for the Sailfin self-hosted
+// compiler — E4 of the memory-safety epic (#1209), Phase R0
+// (**dormant**). Runs after the effect checker on every compile path
+// in `main.sfn`, walks the same scope / lambda / `routine` structure
+// the effect checker walks, and builds the per-binding `Owned`/`Moved`
+// ownership lattice. No rule fires today: the pass computes the state,
+// discards it, and emits zero diagnostics, so output IR is
+// byte-identical to a build without the pass.
+//
+// What is real in R0:
+//   - the scope walk (blocks, if/else, loops, for, match, with, try,
+//     `routine` blocks, nested fns, struct methods, tests, lambdas)
+//   - per-binding state entry (`owned` on declaration / parameter)
+//   - the `unsafe` boundary: interiors of `unsafe { }` blocks and
+//     bodies of `unsafe fn` declarations are skipped — the E2 marker
+//     (#1211) is the author-asserted raw-pointer region the checker
+//     must not second-guess
+//   - the warning plumbing (`OwnershipWarning`, severity "warning")
+//
+// What is NOT here yet (E5/E6 — those flip warnings to errors):
+//   - move detection / use-after-move (`mark_binding_moved` exists as
+//     the lattice transition E5 calls at move sites, but nothing in
+//     this pass invokes it)
+//   - in-place-mutation / UAF rules
+//   - any change to emitted IR or runtime behavior
+//
+// Proposal §3.1; epic #1209; this issue: #1213.
+import {
+    Block,
+    Expression,
+    Parameter,
+    Program,
+    SourceSpan,
+    Statement
+} from "./ast";
+import { Token } from "./token";
+import { is_identifier_char } from "./typecheck_types";
+
+// One tracked binding. `state` is the R0 lattice: "owned" on entry,
+// "moved" once E5 marks a move site. Shadowing is by position — the
+// most recently pushed binding for a name wins (`binding_state` scans
+// for the last match).
+struct OwnershipBinding {
+    name: string;
+    state: string;
+    span: SourceSpan?;
+}
+
+// Diagnostics plumbing for E5/E6. Severity is always "warning" in the
+// dormant phase; no factory in this file mints one today.
+struct OwnershipWarning {
+    routine_name: string;
+    binding_name: string;
+    message: string;
+    trigger: Token?;
+    severity: string;
+}
+
+// Threaded walk state. `bindings` is the lexical environment at the
+// current program point; `tracked` is the monotone count of every
+// binding the walk has entered (parameters, `let`s, lambda parameters,
+// catch names, `for` targets) — child scopes propagate it back even
+// though their bindings are discarded. The unit tests pin the walk's
+// coverage through this counter.
+struct OwnershipScope {
+    bindings: OwnershipBinding[];
+    tracked: int;
+}
+
+// Program-level result: the discarded-state summary plus the (empty in
+// R0) warning stream.
+struct OwnershipSummary {
+    bindings_tracked: int;
+    warnings: OwnershipWarning[];
+}
+
+// -------------------------------------------------------------------
+// Lattice helpers (consumed by E5; exercised by unit tests today)
+// -------------------------------------------------------------------
+// Resolve a name to its current ownership state. Returns "" when the
+// name is not bound; the last matching binding wins so shadowed names
+// resolve to the innermost declaration.
+fn binding_state(bindings: OwnershipBinding[], name: string) -> string {
+    let mut state: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if bindings[index].name == name { state = bindings[index].state; }
+        index += 1;
+    }
+    return state;
+}
+
+// The Owned -> Moved lattice transition. E5 calls this at move sites;
+// nothing in the dormant pass does. Flips the most recent binding for
+// `name`; a miss returns the input unchanged.
+fn mark_binding_moved(bindings: OwnershipBinding[], name: string) -> OwnershipBinding[] {
+    let mut last: int = -1;
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if bindings[index].name == name { last = index; }
+        index += 1;
+    }
+    if last < 0 { return bindings; }
+    let mut result: OwnershipBinding[] = [];
+    index = 0;
+    loop {
+        if index >= bindings.length { break; }
+        if index == last {
+            result.push(OwnershipBinding {
+                name: bindings[index].name, state: "moved", span: bindings[index].span
+            });
+        } else { result.push(bindings[index]); }
+        index += 1;
+    }
+    return result;
+}
+
+// -------------------------------------------------------------------
+// Scope plumbing
+// -------------------------------------------------------------------
+fn _copy_bindings(bindings: OwnershipBinding[]) -> OwnershipBinding[] {
+    let mut result: OwnershipBinding[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        result.push(bindings[index]);
+        index += 1;
+    }
+    return result;
+}
+
+fn _enter_binding(scope: OwnershipScope, name: string, span: SourceSpan?) -> OwnershipScope {
+    let mut bindings = scope.bindings;
+    bindings.push(OwnershipBinding {
+        name: name, state: "owned", span: span
+    });
+    return OwnershipScope { bindings: bindings, tracked: scope.tracked + 1 };
+}
+
+// Walk a nested block as a child scope: the child sees the parent's
+// bindings (copied so child declarations cannot leak back), and only
+// the monotone `tracked` count flows out.
+fn _nested_block_scope(block: Block, scope: OwnershipScope) -> OwnershipScope {
+    let child_in = OwnershipScope {
+        bindings: _copy_bindings(scope.bindings),
+        tracked: scope.tracked
+    };
+    let child_out = _scope_after_block(block, child_in);
+    return OwnershipScope {
+        bindings: scope.bindings,
+        tracked: child_out.tracked
+    };
+}
+
+fn _scope_after_block(block: Block, scope: OwnershipScope) -> OwnershipScope {
+    let mut current = scope;
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        current = _scope_after_statement(block.statements[index], current);
+        index += 1;
+    }
+    return current;
+}
+
+fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> OwnershipScope {
+    if statement.variant == "VariableDeclaration" {
+        let next = _scope_after_expression(statement.initializer, scope);
+        return _enter_binding(next, statement.name, statement.span);
+    }
+    if statement.variant == "BlockStatement" {
+        // E2 boundary (#1211): the interior of `unsafe { }` is the
+        // author-asserted raw-pointer region — the checker skips it.
+        if statement.is_unsafe { return scope; }
+        return _nested_block_scope(statement.body, scope);
+    }
+    if statement.variant == "IfStatement" {
+        let mut next = _scope_after_expression(statement.condition, scope);
+        next = _nested_block_scope(statement.then_block, next);
+        let else_branch = statement.else_branch;
+        if else_branch != null {
+            let else_body = else_branch.body;
+            if else_body != null {
+                next = _nested_block_scope(else_body, next);
+            }
+            let else_statement = else_branch.statement;
+            if else_statement != null {
+                next = _scope_after_statement(else_statement, next);
+            }
+        }
+        return next;
+    }
+    if statement.variant == "LoopStatement" {
+        return _nested_block_scope(statement.body, scope);
+    }
+    if statement.variant == "RoutineStatement" {
+        return _nested_block_scope(statement.body, scope);
+    }
+    if statement.variant == "ForStatement" {
+        let next = _scope_after_expression(statement.clause.iterable, scope);
+        let mut child = OwnershipScope {
+            bindings: _copy_bindings(next.bindings),
+            tracked: next.tracked
+        };
+        let target = statement.clause.target;
+        if target.variant == "Identifier" {
+            child = _enter_binding(child, target.name, target.span);
+        }
+        let child_out = _scope_after_block(statement.body, child);
+        return OwnershipScope {
+            bindings: next.bindings,
+            tracked: child_out.tracked
+        };
+    }
+    if statement.variant == "WithStatement" {
+        let mut next = scope;
+        let mut clause_index: int = 0;
+        loop {
+            if clause_index >= statement.clauses.length { break; }
+            next = _scope_after_expression(statement.clauses[clause_index].expression, next);
+            clause_index += 1;
+        }
+        return _nested_block_scope(statement.body, next);
+    }
+    if statement.variant == "MatchStatement" {
+        let mut next = _scope_after_expression(statement.expression, scope);
+        let mut case_index: int = 0;
+        loop {
+            if case_index >= statement.cases.length { break; }
+            let case = statement.cases[case_index];
+            // Arm scope: pattern-bound names (destructured fields,
+            // catch-all identifiers) enter as owned before the guard
+            // and body walk, mirroring
+            // `register_match_pattern_bindings` in typecheck.sfn —
+            // guards may reference pattern bindings.
+            let mut child = OwnershipScope {
+                bindings: _copy_bindings(next.bindings),
+                tracked: next.tracked
+            };
+            child = _enter_pattern_bindings(case.pattern, child);
+            child = _scope_after_expression(case.guard, child);
+            let child_out = _scope_after_block(case.body, child);
+            next = OwnershipScope {
+                bindings: next.bindings,
+                tracked: child_out.tracked
+            };
+            case_index += 1;
+        }
+        return next;
+    }
+    if statement.variant == "TryStatement" {
+        let mut next = _nested_block_scope(statement.try_block, scope);
+        let catch_block = statement.catch_block;
+        if catch_block != null {
+            let mut child = OwnershipScope {
+                bindings: _copy_bindings(next.bindings),
+                tracked: next.tracked
+            };
+            let catch_name = statement.catch_name;
+            if catch_name != null {
+                child = _enter_binding(child, catch_name, null);
+            }
+            let child_out = _scope_after_block(catch_block, child);
+            next = OwnershipScope {
+                bindings: next.bindings,
+                tracked: child_out.tracked
+            };
+        }
+        let finally_block = statement.finally_block;
+        if finally_block != null {
+            next = _nested_block_scope(finally_block, next);
+        }
+        return next;
+    }
+    if statement.variant == "ReturnStatement" {
+        return _scope_after_expression(statement.expression, scope);
+    }
+    if statement.variant == "ThrowStatement" {
+        return _scope_after_expression(statement.expression, scope);
+    }
+    if statement.variant == "ExpressionStatement" {
+        return _scope_after_expression(statement.expression, scope);
+    }
+    if statement.variant == "FunctionDeclaration" {
+        // Nested fns get a fresh routine scope; only the binding count
+        // flows back. `unsafe fn` bodies are skipped wholesale (E2).
+        if statement.is_unsafe { return scope; }
+        let summary = _analyze_routine_ownership(statement.signature.parameters, statement.body);
+        return OwnershipScope {
+            bindings: scope.bindings,
+            tracked: scope.tracked + summary.bindings_tracked
+        };
+    }
+    return scope;
+}
+
+// Mirror of `register_match_pattern_bindings` in typecheck.sfn: a
+// `Struct` pattern binds its field names, the colon-less shorthand
+// destructure (`Shape.Circle { radius }`) parses to `Raw` so the
+// names are recovered from the brace block, and a bare non-`_`
+// identifier is a catch-all binding. Literal patterns bind nothing.
+fn _enter_pattern_bindings(pattern: Expression?, scope: OwnershipScope) -> OwnershipScope {
+    if pattern == null { return scope; }
+    if pattern.variant == "Struct" {
+        let mut next = scope;
+        let mut index: int = 0;
+        loop {
+            if index >= pattern.fields.length { break; }
+            next = _enter_binding(next, pattern.fields[index].name, null);
+            index += 1;
+        }
+        return next;
+    }
+    if pattern.variant == "Raw" {
+        return _enter_raw_pattern_bindings(pattern.text, scope);
+    }
+    if pattern.variant == "Identifier" {
+        if pattern.name == "_" { return scope; }
+        return _enter_binding(scope, pattern.name, pattern.span);
+    }
+    return scope;
+}
+
+// Collect each identifier inside the `{ ... }` block of a raw
+// shorthand destructure as a binding — same recovery walk as
+// `register_raw_pattern_bindings` in typecheck.sfn.
+fn _enter_raw_pattern_bindings(text: string, scope: OwnershipScope) -> OwnershipScope {
+    let mut next = scope;
+    let mut in_block: boolean = false;
+    let mut token: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if !in_block {
+            if ch == "{" { in_block = true; }
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if token.length > 0 {
+                next = _enter_binding(next, token, null);
+                token = "";
+            }
+            break;
+        }
+        if is_identifier_char(ch) { token = token + ch; } else {
+            if token.length > 0 {
+                next = _enter_binding(next, token, null);
+                token = "";
+            }
+        }
+        index += 1;
+    }
+    return next;
+}
+
+// Expression walk: ownership state is not consumed by expressions in
+// R0 (that is E5's move detection) — the walk exists to reach lambda
+// bodies, which open routine-like child scopes of their own.
+fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> OwnershipScope {
+    if expression == null { return scope; }
+    if expression.variant == "Unary" {
+        return _scope_after_expression(expression.operand, scope);
+    }
+    if expression.variant == "Binary" {
+        let next = _scope_after_expression(expression.left, scope);
+        return _scope_after_expression(expression.right, next);
+    }
+    if expression.variant == "Member" {
+        return _scope_after_expression(expression.object, scope);
+    }
+    if expression.variant == "Call" {
+        let mut next = _scope_after_expression(expression.callee, scope);
+        let mut index: int = 0;
+        loop {
+            if index >= expression.arguments.length { break; }
+            next = _scope_after_expression(expression.arguments[index], next);
+            index += 1;
+        }
+        return next;
+    }
+    if expression.variant == "Index" {
+        let next = _scope_after_expression(expression.sequence, scope);
+        return _scope_after_expression(expression.index, next);
+    }
+    if expression.variant == "Array" {
+        let mut next = scope;
+        let mut index: int = 0;
+        loop {
+            if index >= expression.elements.length { break; }
+            next = _scope_after_expression(expression.elements[index], next);
+            index += 1;
+        }
+        return next;
+    }
+    if expression.variant == "Object" {
+        let mut next = scope;
+        let mut index: int = 0;
+        loop {
+            if index >= expression.fields.length { break; }
+            next = _scope_after_expression(expression.fields[index].value, next);
+            index += 1;
+        }
+        return next;
+    }
+    if expression.variant == "Struct" {
+        let mut next = scope;
+        let mut index: int = 0;
+        loop {
+            if index >= expression.fields.length { break; }
+            next = _scope_after_expression(expression.fields[index].value, next);
+            index += 1;
+        }
+        return next;
+    }
+    if expression.variant == "Lambda" {
+        let mut child = OwnershipScope {
+            bindings: _copy_bindings(scope.bindings),
+            tracked: scope.tracked
+        };
+        let mut index: int = 0;
+        loop {
+            if index >= expression.parameters.length { break; }
+            let parameter = expression.parameters[index];
+            child = _enter_binding(child, parameter.name, parameter.span);
+            index += 1;
+        }
+        let child_out = _scope_after_block(expression.body, child);
+        return OwnershipScope {
+            bindings: scope.bindings,
+            tracked: child_out.tracked
+        };
+    }
+    if expression.variant == "Range" {
+        let next = _scope_after_expression(expression.start, scope);
+        return _scope_after_expression(expression.end, next);
+    }
+    if expression.variant == "Cast" {
+        return _scope_after_expression(expression.operand, scope);
+    }
+    if expression.variant == "TryOperator" {
+        return _scope_after_expression(expression.operand, scope);
+    }
+    if expression.variant == "Spawn" {
+        return _scope_after_expression(expression.operand, scope);
+    }
+    if expression.variant == "Await" {
+        return _scope_after_expression(expression.operand, scope);
+    }
+    if expression.variant == "Channel" {
+        return _scope_after_expression(expression.capacity, scope);
+    }
+    if expression.variant == "Parallel" {
+        let mut next = scope;
+        let mut index: int = 0;
+        loop {
+            if index >= expression.tasks.length { break; }
+            next = _scope_after_expression(expression.tasks[index], next);
+            index += 1;
+        }
+        return next;
+    }
+    if expression.variant == "Serve" {
+        let next = _scope_after_expression(expression.handler, scope);
+        return _scope_after_expression(expression.port, next);
+    }
+    return scope;
+}
+
+// -------------------------------------------------------------------
+// Routine / program analysis
+// -------------------------------------------------------------------
+fn _empty_summary() -> OwnershipSummary {
+    let warnings: OwnershipWarning[] = [];
+    return OwnershipSummary { bindings_tracked: 0, warnings: warnings };
+}
+
+fn _append_warnings(warnings: OwnershipWarning[], additions: OwnershipWarning[]) -> OwnershipWarning[] {
+    let mut result = warnings;
+    let mut index: int = 0;
+    loop {
+        if index >= additions.length { break; }
+        result.push(additions[index]);
+        index += 1;
+    }
+    return result;
+}
+
+fn _analyze_routine_ownership(parameters: Parameter[], body: Block) -> OwnershipSummary {
+    let no_bindings: OwnershipBinding[] = [];
+    let mut scope = OwnershipScope { bindings: no_bindings, tracked: 0 };
+    let mut index: int = 0;
+    loop {
+        if index >= parameters.length { break; }
+        scope = _enter_binding(scope, parameters[index].name, parameters[index].span);
+        index += 1;
+    }
+    let out = _scope_after_block(body, scope);
+    // Phase R0: the state is built and discarded — no rule inspects it
+    // yet, so the warning stream is empty by construction. E5/E6 mint
+    // `OwnershipWarning`s here and flip them to errors.
+    let warnings: OwnershipWarning[] = [];
+    return OwnershipSummary {
+        bindings_tracked: out.tracked,
+        warnings: warnings
+    };
+}
+
+fn _statement_summary(statement: Statement) -> OwnershipSummary {
+    if statement.variant == "FunctionDeclaration" {
+        if statement.is_unsafe { return _empty_summary(); }
+        return _analyze_routine_ownership(statement.signature.parameters, statement.body);
+    }
+    if statement.variant == "TestDeclaration" {
+        let no_parameters: Parameter[] = [];
+        return _analyze_routine_ownership(no_parameters, statement.body);
+    }
+    if statement.variant == "StructDeclaration" {
+        let mut warnings: OwnershipWarning[] = [];
+        let mut tracked: int = 0;
+        let mut index: int = 0;
+        loop {
+            if index >= statement.methods.length { break; }
+            let method = statement.methods[index];
+            let summary = _analyze_routine_ownership(method.signature.parameters, method.body);
+            tracked = tracked + summary.bindings_tracked;
+            warnings = _append_warnings(warnings, summary.warnings);
+            index += 1;
+        }
+        return OwnershipSummary {
+            bindings_tracked: tracked,
+            warnings: warnings
+        };
+    }
+    return _empty_summary();
+}
+
+// Full-program analysis. Exposed (alongside the lattice helpers) so
+// unit tests can pin the walk's coverage via `bindings_tracked`.
+fn analyze_program_ownership(program: Program) -> OwnershipSummary {
+    let mut warnings: OwnershipWarning[] = [];
+    let mut tracked: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let summary = _statement_summary(program.statements[index]);
+        tracked = tracked + summary.bindings_tracked;
+        warnings = _append_warnings(warnings, summary.warnings);
+        index += 1;
+    }
+    return OwnershipSummary { bindings_tracked: tracked, warnings: warnings };
+}
+
+// Warning-stream view, mirroring `validate_effects`' shape.
+fn check_ownership(program: Program) -> OwnershipWarning[] {
+    return analyze_program_ownership(program).warnings;
+}
+
+// Build-path gate wrapper for `main.sfn`, shaped like
+// `validate_and_render_effects`: returns the count of error-severity
+// findings only — warning-severity findings never gate the build.
+// Dormant Phase R0 mints no findings at all, so this is always 0;
+// callers gate on `> 0` and the pass graduates to a real gate in E5/E6
+// without re-plumbing the call sites.
+fn run_ownership_checker(program: Program) -> int {
+    let summary = analyze_program_ownership(program);
+    let mut errors: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= summary.warnings.length { break; }
+        if summary.warnings[index].severity == "error" { errors += 1; }
+        index += 1;
+    }
+    return errors;
+}
