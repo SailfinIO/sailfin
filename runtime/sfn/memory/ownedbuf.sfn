@@ -6,7 +6,8 @@
 // free functions; it deliberately ships **no enforcement**. The
 // bodies are raw/unsafe-internal: nothing stops a caller from using
 // a consumed `OwnedBuf` or outliving a `Slice`'s backing buffer
-// today. Move semantics land in E5/E6; view lifetimes in E8.
+// today. Move semantics land with the ownership-checker rules
+// (#1214/#1215); view lifetimes in a later phase (Phase U).
 //
 // API surface (eight public functions + one byte-load helper):
 //
@@ -180,13 +181,17 @@ fn owned_buf_new(arena_addr: i64, initial_cap: i64) -> OwnedBuf {
 // `sfn_arena_sfn_realloc` for arena-backed buffers — the
 // grow-if-at-tip fast path — or `malloc` + `memcpy` for libc-backed
 // ones (see the file header for the old-block policy). A null or
-// non-positive suffix, or an allocation failure, returns the buffer
-// unchanged.
+// non-positive suffix, an allocation failure, or an i64 length
+// overflow returns the buffer unchanged.
 fn owned_buf_append(self: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedBuf {
     if suffix_addr == 0 { return self; }
     if suffix_len <= 0 { return self; }
 
     let needed: i64 = self.len + suffix_len;
+    // i64 overflow guard: with suffix_len > 0, `needed` must exceed
+    // `self.len`; a wrap would skip the grow path below and memcpy
+    // past the allocation. Refuse instead of corrupting.
+    if needed < self.len { return self; }
     let mut ptr_addr: i64 = self.ptr_addr;
     let mut cap: i64 = self.cap;
 
@@ -196,6 +201,11 @@ fn owned_buf_append(self: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedB
         if new_cap < 16 { new_cap = 16; }
         let stepped: i64 = (new_cap + 7) / 8;
         new_cap = stepped * 8;
+        // Round-up overflow guard: if the multiple-of-8 step wrapped,
+        // new_cap no longer covers `needed` — refuse rather than
+        // under-allocate. (The doubling wrap above is already clamped
+        // by the `new_cap < needed` line.)
+        if new_cap < needed { return self; }
 
         if self.arena_addr != 0 {
             let grown: * u8 = sfn_arena_sfn_realloc(self.arena_addr as * u8, ptr_addr as * u8, cap as usize, new_cap as usize, 8 as usize);

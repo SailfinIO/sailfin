@@ -18,5 +18,6 @@ buffer) and `Slice` is the non-owning, read-only byte view over it. Today this
 is the **surface only** — the types parse, typecheck, and lower, but the
 ownership checker does not yet enforce moves on `OwnedBuf` or lifetimes on
 `Slice`. Enforcement attaches to these names in later phases of the ownership
-epic (moves in E5/E6, view lifetimes in E8). `Slice` is deliberately concrete
+epic (#1209): move semantics with the ownership-checker rules (#1214/#1215),
+view lifetimes in a later phase (Phase U). `Slice` is deliberately concrete
 over bytes; a generic `Slice<T>` is deferred until generic struct bodies lower.
