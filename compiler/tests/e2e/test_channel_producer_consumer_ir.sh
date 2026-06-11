@@ -92,7 +92,7 @@ fn main() ![io] {
         "sfn_channel_send"
 }
 
-# channel(N) + ch.receive() → sfn_channel_create + sfn_channel_receive in IR
+# channel(N) + ch.receive() → sfn_channel_create + sfn_channel_recv in IR (#1266)
 test_channel_receive_lowers() {
     assert_ir_contains "channel_receive_call" \
 'fn consumer(ch: channel) ![io] -> int {
@@ -102,7 +102,7 @@ fn main() ![io] {
     let ch = channel(4);
     let val = consumer(ch);
 }' \
-        "sfn_channel_receive"
+        "sfn_channel_recv"
 }
 
 # channel(N) → sfn_channel_create is already covered by
@@ -151,7 +151,7 @@ SAILFIN
     fi
 
     local ok=1
-    for sym in sfn_channel_create sfn_channel_send sfn_channel_receive; do
+    for sym in sfn_channel_create sfn_channel_send sfn_channel_recv; do
         if ! grep -q "$sym" "$out_path" 2>/dev/null; then
             echo "[test]   pc_full.ll missing symbol: $sym" >&2
             ok=0
@@ -167,7 +167,7 @@ SAILFIN
 }
 
 run_test "channel send lowers to sfn_channel_send (#1091)" test_channel_send_lowers
-run_test "channel receive lowers to sfn_channel_receive (#1091)" test_channel_receive_lowers
+run_test "channel receive lowers to sfn_channel_recv (#1266)" test_channel_receive_lowers
 run_test "channel create in producer/consumer context (#1091)" test_channel_create_lowers_in_pc_context
 run_test "full producer/consumer program: all three sfn_channel_* symbols (#1091)" test_channel_full_producer_consumer_ir
 

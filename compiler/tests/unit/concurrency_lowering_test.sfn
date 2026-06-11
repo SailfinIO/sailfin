@@ -18,9 +18,10 @@ fn _contains(haystack: string, needle: string) -> boolean {
     return index_of(haystack, needle) >= 0;
 }
 
-// `channel(N)` lowers to `sfn_channel_create(i32 cap)` and `spawn:int
-// <fn>` lowers to `sfn_spawn_int` — the Sailfin concurrency runtime
-// surface (M4 Wave 2 flip, #1090/#1091), which replaced the former
+// `channel(N)` lowers to `sfn_channel_create(i64 cap, i64 elem_size)` —
+// the `runtime/sfn/concurrency/channel.sfn` ABI (#1266; was 1-arg i32
+// in #1091) — and `spawn:int <fn>` lowers to `sfn_spawn_int` (M4 Wave 2
+// flip, #1090/#1091), which replaced the former
 // `sailfin_{runtime,adapter}_*` C-archive symbols.
 // Both are verified from a single LLVM emission to avoid arena OOM.
 test "lowering: channel and spawn emit correct runtime helper symbols (#1085)" ![io] {
@@ -31,6 +32,6 @@ test "lowering: channel and spawn emit correct runtime helper symbols (#1085)" !
     let native = emit_native_text_with_module_name(program, "concurrency_lowering_test");
     let ir = lower_to_llvm_ir_from_text(native, "concurrency_lowering_test");
     assert _contains(ir, "@sfn_channel_create");
-    assert _contains(ir, "sfn_channel_create(i32");
+    assert _contains(ir, "sfn_channel_create(i64 4, i64 8");
     assert _contains(ir, "sfn_spawn_int");
 }
