@@ -78,7 +78,8 @@ fn _build_main_routine(declared_effects: string[]) -> Statement {
     return Statement.FunctionDeclaration {
         signature: _signature("main", declared_effects, span),
         body: body_block,
-        decorators: empty_decorators
+        decorators: empty_decorators,
+        is_unsafe: false
     };
 }
 

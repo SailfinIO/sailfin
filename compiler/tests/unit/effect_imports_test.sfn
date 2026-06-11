@@ -97,7 +97,8 @@ fn _routine_calling(routine_name: string, callee_name: string, span_line: int) -
     return Statement.FunctionDeclaration {
         signature: _signature(routine_name, empty_effects, span),
         body: body_block,
-        decorators: empty_decorators
+        decorators: empty_decorators,
+        is_unsafe: false
     };
 }
 
@@ -276,7 +277,8 @@ test "validate_effects_with_imports: declared effect on caller suppresses violat
     let routine_stmt = Statement.FunctionDeclaration {
         signature: _signature("run", ["net"], span),
         body: body_block,
-        decorators: empty_decorators
+        decorators: empty_decorators,
+        is_unsafe: false
     };
 
     let program = Program { statements: [import_stmt, routine_stmt] };
@@ -307,7 +309,8 @@ test "validate_effects_with_imports: same-named in-module fn does not trigger E0
     let routine_stmt = Statement.FunctionDeclaration {
         signature: _signature("run", empty_effects, span),
         body: body_block,
-        decorators: empty_decorators
+        decorators: empty_decorators,
+        is_unsafe: false
     };
 
     // No import declaration in the program, so localize produces

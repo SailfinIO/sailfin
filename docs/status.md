@@ -126,7 +126,7 @@ doc, or `docs/runtime_architecture.md`, not here.
 | `spawn` | Parsed | Future-kind resolver + `E0813` (#1082); lowering is #1084 |
 | `\|>` pipeline operator | Not implemented | Planned post-1.0 |
 | Currency / time literals | Not implemented | Use numeric literals |
-| `unsafe` / `extern` | Parsed only | `extern fn` declarations are fully shipped (see Runtime Migration); `unsafe` enforcement not active |
+| `unsafe` / `extern` | Parsed, marker only | `extern fn` declarations are fully shipped (see Runtime Migration); `unsafe { }` blocks and `unsafe fn` carry an `is_unsafe` AST marker for the ownership checker (#1211) — **not enforced** |
 | Policy decorators (`@policy`) | Parsed only | No compiler or runtime effect |
 | `sfn fmt` | **Shipped** | Zero-config token-stream formatter, `--check`/`--write`, CI-enforced; architecture + limitations in `docs/proposals/fmt-architecture.md` |
 | `sfn check` | **Shipped** | Parse + typecheck + effect-check, no codegen; `--json` envelope; cross-module conformance; directory mode completes the full 156-file tree (~295 s — perf, not stability, is the open item) |

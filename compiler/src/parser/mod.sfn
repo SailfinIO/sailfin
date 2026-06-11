@@ -152,12 +152,12 @@ fn parse_statement(initial_parser: Parser) -> StatementParseResult {
         return parse_lifecycle_hook(parser, decorators, "after_all");
     }
     if identifier_matches(token, "fn") {
-        return parse_function(parser, false, decorators);
+        return parse_function(parser, false, decorators, false);
     }
     if identifier_matches(token, "async") {
         let lookahead = skip_trivia(parser_advance_raw(parser));
         if identifier_matches(parser_peek_raw(lookahead), "fn") {
-            return parse_function(parser, true, decorators);
+            return parse_function(parser, true, decorators, false);
         }
     }
     if identifier_matches(token, "extern") {
@@ -167,6 +167,9 @@ fn parse_statement(initial_parser: Parser) -> StatementParseResult {
         let lookahead = skip_trivia(parser_advance_raw(parser));
         if identifier_matches(parser_peek_raw(lookahead), "extern") {
             return parse_extern_function(parser, true, decorators);
+        }
+        if identifier_matches(parser_peek_raw(lookahead), "fn") {
+            return parse_function(parser, false, decorators, true);
         }
     }
     if identifier_matches(token, "struct") {

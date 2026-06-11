@@ -79,7 +79,8 @@ fn _make_spawn_fn(name: string, effects: string[], span_line: int) -> Statement 
     return Statement.FunctionDeclaration {
         signature: _signature(name, effects, span_line),
         body: body_block,
-        decorators: no_decorators
+        decorators: no_decorators,
+        is_unsafe: false
     };
 }
 
@@ -105,7 +106,8 @@ fn _make_serve_fn(name: string, effects: string[], span_line: int) -> Statement 
     return Statement.FunctionDeclaration {
         signature: _signature(name, effects, span_line),
         body: body_block,
-        decorators: no_decorators
+        decorators: no_decorators,
+        is_unsafe: false
     };
 }
 
@@ -139,7 +141,8 @@ fn _make_channel_send_fn(name: string, effects: string[], span_line: int) -> Sta
     return Statement.FunctionDeclaration {
         signature: _signature(name, effects, span_line),
         body: body_block,
-        decorators: no_decorators
+        decorators: no_decorators,
+        is_unsafe: false
     };
 }
 
@@ -171,7 +174,8 @@ fn _make_channel_receive_fn(name: string, effects: string[], span_line: int) -> 
     return Statement.FunctionDeclaration {
         signature: _signature(name, effects, span_line),
         body: body_block,
-        decorators: no_decorators
+        decorators: no_decorators,
+        is_unsafe: false
     };
 }
 

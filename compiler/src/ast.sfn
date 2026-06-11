@@ -267,6 +267,7 @@ enum Statement {
         signature: FunctionSignature;
         body: Block;
         decorators: Decorator[];
+        is_unsafe: boolean;
     },
     ExternFunctionDeclaration {
         signature: FunctionSignature;
@@ -332,6 +333,7 @@ enum Statement {
     },
     BlockStatement {
         body: Block;
+        is_unsafe: boolean;
     },
     ReturnStatement {
         expression: Expression?;

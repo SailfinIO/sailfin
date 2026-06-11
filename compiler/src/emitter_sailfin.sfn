@@ -129,7 +129,7 @@ fn emit_statement(builder: TextBuilder, statement: Statement) -> TextBuilder {
         return emit_variable(builder, statement);
     }
     if statement.variant == "FunctionDeclaration" {
-        return emit_function(builder, statement.signature, statement.body, statement.decorators);
+        return emit_function(builder, statement.signature, statement.body, statement.decorators, statement.is_unsafe);
     }
     if statement.variant == "StructDeclaration" {
         return emit_struct(builder, statement);
@@ -181,9 +181,10 @@ fn emit_variable(builder: TextBuilder, statement: Statement) -> TextBuilder {
     return builder_emit_line(builder, prefix + ";");
 }
 
-fn emit_function(builder: TextBuilder, signature: FunctionSignature, body: Block, decorators: Decorator[]) -> TextBuilder {
+fn emit_function(builder: TextBuilder, signature: FunctionSignature, body: Block, decorators: Decorator[], is_unsafe: boolean) -> TextBuilder {
     let mut current = emit_decorators(builder, decorators);
-    let header = format_function_header(signature);
+    let mut header = format_function_header(signature);
+    if is_unsafe { header = "unsafe " + header; }
     return emit_block_with_header(current, header, body);
 }
 
@@ -365,6 +366,9 @@ fn emit_block_statement(builder: TextBuilder, statement: Statement) -> TextBuild
         return emit_if(builder, statement);
     }
     if statement.variant == "BlockStatement" {
+        if statement.is_unsafe {
+            return emit_block_with_header(builder, "unsafe", statement.body);
+        }
         return emit_block(builder, statement.body);
     }
     if statement.variant == "ForStatement" {
@@ -378,7 +382,7 @@ fn emit_block_statement(builder: TextBuilder, statement: Statement) -> TextBuild
         return builder_emit_line(builder, line);
     }
     if statement.variant == "FunctionDeclaration" {
-        return emit_function(builder, statement.signature, statement.body, statement.decorators);
+        return emit_function(builder, statement.signature, statement.body, statement.decorators, statement.is_unsafe);
     }
     if statement.variant == "MatchStatement" {
         return emit_match(builder, statement);

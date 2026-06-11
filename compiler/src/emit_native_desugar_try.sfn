@@ -823,7 +823,10 @@ fn dt_nested(statement: Statement, id: int) -> DtStmt {
     if statement.variant == "BlockStatement" {
         let body_result = dt_block(statement.body, id);
         return DtStmt {
-            statement: Statement.BlockStatement { body: body_result.block },
+            statement: Statement.BlockStatement {
+                body: body_result.block,
+                is_unsafe: statement.is_unsafe
+            },
             next_id: body_result.next_id
         };
     }

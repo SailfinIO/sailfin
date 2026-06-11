@@ -66,7 +66,8 @@ fn _function_declaring(name: string, effects: string[], span_line: int) -> State
     return Statement.FunctionDeclaration {
         signature: _signature(name, effects, _span(span_line, 4)),
         body: _empty_block(),
-        decorators: empty_decorators
+        decorators: empty_decorators,
+        is_unsafe: false
     };
 }
 
