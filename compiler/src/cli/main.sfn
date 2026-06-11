@@ -1,0 +1,117 @@
+// compiler/src/cli/main.sfn
+//
+// Compiler CLI skeleton — `sailfin_cli_main_v2` (CLI modularization
+// epic #351, Issue 2.3 — proposal §5 Phase 2, §7 Issue 2.3, Risk R2).
+//
+// v2 builds a root `Command` via `sfn/cli`, registers ONLY the
+// `version` subcommand, and parses with `sfn/cli`'s pure, non-exiting
+// `parse()`. It handles `version` / `--version` / `-V` itself — printing
+// the version and returning a canonical `EXIT_*` code — and falls
+// through to the verbatim legacy dispatch (`sailfin_cli_main_legacy`)
+// for every other subcommand. Migrating `version` into its own
+// `commands/version.sfn` is Issue 2.4; handling it inline here proves
+// the dispatch path.
+//
+// Risk R2 (proposal §8): `sfn/cli`'s `run()` calls `process.exit()` on
+// --help/--version/parse errors, which would terminate the process out
+// from under the `int`-returning CLI contract (and any embedder that
+// binds the entry symbol). v2 therefore uses `parse()` exclusively and
+// never `run()`, so the resolved exit code always flows back to the
+// caller (`native_cli_main` / `sailfin_cli_main_with_paths`).
+//
+// Return-type note: the issue sketch writes `-> number`, but exit codes
+// are integers — the `EXIT_*` constants are `int`, the legacy dispatch
+// returns `int`, and the C-shim entry (`native_cli_main`) returns `int`.
+// v2 returns `int` so the code threads through that chain without a
+// numeric coercion.
+import {
+    Command,
+    EXIT_OK,
+    ParseResult,
+    command,
+    parse,
+    subcommand,
+    with_subcommand
+} from "sfn/cli";
+
+import { sailfin_cli_main_legacy } from "../cli_main";
+import { number_to_string } from "../num_format";
+import { resolve_compiler_version } from "../version";
+import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";
+
+// Cold-path `SAILFIN_TRACE_ARGV` trace, byte-identical to the block at
+// the top of `sailfin_cli_main_legacy`. v2 owns the `version` paths now,
+// so it must reproduce this trace for the argv it acts on — otherwise
+// `version` / `--version` / `-V` (which never reach legacy) would emit no
+// argv trace under the toggle, regressing
+// `test_compiler_debug_toggle_env_vars.sh`. Fall-through commands trace
+// in legacy as before (no duplication: this only fires on the paths v2
+// handles itself).
+fn _v2_trace_argv(argv: string[]) ![io] {
+    print.err("cli: argv.len=" + number_to_string(argv.length));
+    let mut trace_index: int = 0;
+    loop {
+        if trace_index >= argv.length { break; }
+        print.err("cli: argv[" + number_to_string(trace_index) + "]=" + argv[trace_index]);
+        trace_index += 1;
+    }
+}
+
+fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
+    // Parse the driver-injected `--runtime-root` / `--binary-dir` prefix
+    // (Issue 2.2) so `binary_dir` is available for version resolution
+    // and the user-visible args can be sliced off the front.
+    let ctx: CliContext = parse_driver_prefix(argv);
+    let start_index: int = driver_prefix_length(argv);
+
+    let mut args: string[] = [];
+    let mut i: int = start_index;
+    loop {
+        if i >= argv.length { break; }
+        args.push(argv[i]);
+        i += 1;
+    }
+
+    // Root command registers ONLY `version`. The version string is not
+    // set on the command (`with_version`) because v2 prints it itself —
+    // resolving it eagerly here would add a filesystem read to every
+    // `build` / `run` invocation. `parse()` skips argv[0] (the program
+    // name), so a synthetic "sfn" head is prepended before parsing.
+    let root: Command = with_subcommand(command("sfn", "Sailfin compiler"), command("version", "Print the compiler version"));
+
+    let mut parse_argv: string[] = ["sfn"];
+    let mut j: int = 0;
+    loop {
+        if j >= args.length { break; }
+        parse_argv.push(args[j]);
+        j += 1;
+    }
+
+    let result: ParseResult = parse(root, parse_argv);
+    let mut handled_version: boolean = false;
+    if result.ok {
+        // `sfn version` — the registered subcommand matched.
+        if strings_equal(subcommand(result.matches), "version") {
+            handled_version = true;
+        }
+    } else {
+        // `sfn --version` / `sfn -V` — the built-in version flag.
+        if strings_equal(result.error.kind, "version_requested") {
+            handled_version = true;
+        }
+    }
+    if handled_version {
+        // Reproduce the legacy cold-path argv trace for the paths v2
+        // owns; legacy never runs for these, so without this the
+        // `SAILFIN_TRACE_ARGV` toggle would go silent on `version`.
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        print("sfn " + resolve_compiler_version(ctx.binary_dir));
+        return EXIT_OK;
+    }
+
+    // Every other subcommand (and help, parse errors, the bare
+    // invocation) falls through to the verbatim legacy dispatch, which
+    // re-parses the driver prefix off the original argv itself — so the
+    // full, unsliced `argv` is forwarded unchanged.
+    return sailfin_cli_main_legacy(argv);
+}
