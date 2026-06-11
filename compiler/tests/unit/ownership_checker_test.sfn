@@ -405,12 +405,15 @@ test "ownership: double-consume of a Linear value still emits E0901" ![io] {
     assert warnings[0].binding_name == "v";
 }
 
-test "ownership: a bare `Linear` user struct is not swept (no false E0907)" ![io] {
-    // Only the parametric wrapper `Linear<T>` is linear. A user type
-    // simply named `Linear` (e.g. the `sfn/layers` neural-net layer) is
-    // not the ownership wrapper, so an unconsumed `Linear` parameter must
-    // NOT fire E0907. Regression for the name collision.
-    let source = "fn forward(layer: Linear) -> int {\n    return 0;\n}\n";
+test "ownership: a bare `Linear` user struct is untracked (no E0907 or E0901)" ![io] {
+    // Only the parametric wrappers `Affine<T>`/`Linear<T>` are owned. A
+    // user type simply named `Linear` (e.g. the `sfn/layers` neural-net
+    // layer) is neither linear nor uniquely-owned, so it must be fully
+    // copyable: an unconsumed `Linear` parameter must NOT fire E0907, and
+    // passing it twice as a bare identifier must NOT fire E0901/E0904.
+    // Regression for the wrapper name collision (covers both is_linear_type
+    // and is_owned_type staying parametric-only).
+    let source = "fn sink(b: int) -> int {\n    return 0;\n}\n\nfn forward(layer: Linear) -> int {\n    let a = sink(layer);\n    let c = sink(layer);\n    return a + c;\n}\n";
     let program = parse_program(source);
     let warnings = check_ownership(program);
     assert warnings.length == 0;
