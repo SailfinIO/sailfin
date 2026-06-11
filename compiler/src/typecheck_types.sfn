@@ -521,6 +521,27 @@ fn is_owned_type(annotation: string) -> boolean {
     return false;
 }
 
+// True iff a type annotation names a *linear* value (`Linear<T>`) — a
+// uniquely-owned value that must be used *exactly once* (consumed before
+// it leaves scope). The owned-but-not-linear wrappers (`OwnedBuf`,
+// `Affine<T>`) are at-most-once and never trigger the must-consume sweep;
+// only `Linear<T>` does. Kept beside `is_owned_type` so the linear test
+// and the owned test can't drift — the ownership pass
+// (`ownership_checker.sfn`) keys the `E0907` non-consumption rule off
+// this.
+//
+// Only the *parametric* form `Linear<...>` is the ownership wrapper: it
+// always wraps a payload type. A bare `Linear` is a user-defined type
+// name (e.g. `struct Linear` in the `sfn/layers` capsule — a neural-net
+// linear layer), so it must NOT be classified as the wrapper, or every
+// `layer: Linear` parameter would falsely fire `E0907`. Requiring the
+// `<` keeps the wrapper and the ordinary struct distinct.
+fn is_linear_type(annotation: string) -> boolean {
+    let trimmed = trim_text(annotation);
+    if starts_with(trimmed, "Linear<") { return true; }
+    return false;
+}
+
 // The element kind carried by a future type, or null when `type_text` is not
 // one of the six future spellings. `await x` yields this kind (the await→T
 // rule). Futures surface as the runtime pointer spellings

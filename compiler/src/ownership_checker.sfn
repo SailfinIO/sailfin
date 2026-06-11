@@ -3,9 +3,11 @@
 // Standalone ownership-checker pass (D7) for the Sailfin self-hosted
 // compiler — the move core of the memory-safety epic (#1209). E4
 // (#1213) landed this pass dormant (Phase R0); E5 (#1214) turned on the
-// move half (`E0901`/`E0904`). **E6 (#1215) adds the in-place-mutation,
-// use-after-free, and raw-pointer-escape rules** that close the #1205
-// hazard class structurally.
+// move half (`E0901`/`E0904`). E6 (#1215) added the in-place-mutation,
+// use-after-free, and raw-pointer-escape rules that close the #1205
+// hazard class structurally. **E7 (#1216) adds the linear
+// must-be-consumed rule (`E0907`)**: a `Linear<T>` value must be used
+// exactly once.
 //
 // What this pass enforces (scoped strictly to owned/affine-typed
 // bindings — `OwnedBuf`, `Affine<T>`, `Linear<T>`; every other value is
@@ -40,6 +42,14 @@
 //     `unsafe` region -> `E0906`. The runtime's libc calls pass raw
 //     `* u8` / `Cast` arguments (untracked), never a bare owned
 //     identifier, so this stays dormant on the un-migrated runtime.
+//   - **Linear value never consumed** — a `Linear<T>` binding (param or
+//     `let`, and any `let` that inherits linearity by moving a linear
+//     value into a fresh name) still in state `Owned` at scope exit was
+//     never consumed -> `E0907`. Swept at routine and nested-block
+//     boundaries. `OwnedBuf`/`Affine<T>` are at-most-once (not linear)
+//     and exempt. Consumption is recognized straight-line within the
+//     declaring scope (the narrow 1.0 subset; branch-local moves are not
+//     lifted, matching the use-after-move analysis).
 //
 //   Diagnostics carry two locations — the offending use plus the move /
 //   free that invalidated it — embedded in the message (the `Diagnostic`
@@ -67,12 +77,12 @@
 // extra region flag: an `unsafe { }` interior is already skipped before
 // any call site inside it is reached.
 //
-// Out of scope (later rungs): affine/linear single-use enforcement on
-// user wrappers (E7), shared borrows / `Slice`-view alias tracking
-// (Phase U), the `E0905` return-of-local-reference rule (Phase U), and
-// the opaque `Raw` assignment form (`y = x` parses to `Raw` text).
+// Out of scope (later rungs): shared borrows / `Slice`-view alias
+// tracking (Phase U), the `E0905` return-of-local-reference rule
+// (Phase U), and the opaque `Raw` assignment form (`y = x` parses to
+// `Raw` text).
 //
-// Proposal §3.2 / §3.3 / §4; epic #1209; this issue: #1215.
+// Proposal §3.2 / §3.3 / §4; epic #1209; this issue: #1216.
 import {
     Block,
     Expression,
@@ -84,13 +94,22 @@ import {
 import { render_diagnostic } from "./diagnostics_render";
 import { number_to_string } from "./num_format";
 import { Token, TokenKind } from "./token";
-import { Diagnostic, is_identifier_char, is_owned_type } from "./typecheck_types";
+import {
+    Diagnostic,
+    is_identifier_char,
+    is_linear_type,
+    is_owned_type
+} from "./typecheck_types";
 
 // One tracked binding. `state` is the lattice: "owned" on entry,
 // "moved" once a move site consumes it, "freed" once a disposer consumes
 // it. `is_owned` flags the bindings the rules apply to (owned/affine
 // type); copyable bindings stay `is_owned == false` and no rule ever
-// fires on them. `moved_span` records *where* the move/free happened so
+// fires on them. `is_linear` additionally flags the subset that must be
+// consumed *exactly once* (`Linear<T>`): such a binding still in state
+// "owned" at scope exit is unconsumed and fires `E0907`. Affine/`OwnedBuf`
+// bindings are at-most-once (`is_linear == false`) and are exempt from
+// that sweep. `moved_span` records *where* the move/free happened so
 // use-after-move / use-after-free diagnostics can point back at it.
 // Shadowing is by position — the most recently pushed binding for a name
 // wins.
@@ -99,11 +118,12 @@ struct OwnershipBinding {
     state: string;
     span: SourceSpan?;
     is_owned: boolean;
+    is_linear: boolean;
     moved_span: SourceSpan?;
 }
 
 // An ownership finding. Findings mint `severity == "error"` with a
-// `code` (`E0901`–`E0906`), the offending-use token (`trigger`), and the
+// `code` (`E0901`–`E0907`), the offending-use token (`trigger`), and the
 // move/free-site token (`moved_trigger`) so callers and tests can
 // inspect both spans structurally; the rendered message embeds both
 // locations.
@@ -232,7 +252,7 @@ fn _mark_binding_moved_at(bindings: OwnershipBinding[], name: string, move_span:
         if index >= bindings.length { break; }
         if index == last {
             result.push(OwnershipBinding {
-                name: bindings[index].name, state: "moved", span: bindings[index].span, is_owned: bindings[index].is_owned, moved_span: move_span
+                name: bindings[index].name, state: "moved", span: bindings[index].span, is_owned: bindings[index].is_owned, is_linear: bindings[index].is_linear, moved_span: move_span
             });
         } else { result.push(bindings[index]); }
         index += 1;
@@ -252,7 +272,7 @@ fn _mark_binding_freed_at(bindings: OwnershipBinding[], name: string, free_span:
         if index >= bindings.length { break; }
         if index == last {
             result.push(OwnershipBinding {
-                name: bindings[index].name, state: "freed", span: bindings[index].span, is_owned: bindings[index].is_owned, moved_span: free_span
+                name: bindings[index].name, state: "freed", span: bindings[index].span, is_owned: bindings[index].is_owned, is_linear: bindings[index].is_linear, moved_span: free_span
             });
         } else { result.push(bindings[index]); }
         index += 1;
@@ -316,6 +336,14 @@ fn _make_finding(name: string, use_span: SourceSpan?, moved_span: SourceSpan?, c
             + "` across an unsafe/extern boundary"
             + use_loc
             + "\nhelp: raw-pointer escape requires the call site to be inside an `unsafe` block, or the buffer to be released to FFI";
+    } else if code == "E0907" {
+        message = "linear value `" + name + "` is never consumed" + use_loc
+            + "\nnote: `"
+            + name
+            + "` is `Linear<T>`; a linear value must be used exactly once"
+            + "\nhelp: consume `"
+            + name
+            + "` (move it, return it, pass it to a call, or free it) before it goes out of scope";
     } else {
         message = "use of moved value `" + name + "`" + use_loc + "\nnote: `"
             + name
@@ -423,10 +451,10 @@ fn _copy_bindings(bindings: OwnershipBinding[]) -> OwnershipBinding[] {
     return result;
 }
 
-fn _enter_binding(scope: OwnershipScope, name: string, span: SourceSpan?, is_owned: boolean) -> OwnershipScope {
+fn _enter_binding(scope: OwnershipScope, name: string, span: SourceSpan?, is_owned: boolean, is_linear: boolean) -> OwnershipScope {
     let mut bindings = scope.bindings;
     bindings.push(OwnershipBinding {
-        name: name, state: "owned", span: span, is_owned: is_owned, moved_span: null
+        name: name, state: "owned", span: span, is_owned: is_owned, is_linear: is_linear, moved_span: null
     });
     return OwnershipScope {
         bindings: bindings,
@@ -434,6 +462,39 @@ fn _enter_binding(scope: OwnershipScope, name: string, span: SourceSpan?, is_own
         findings: scope.findings,
         extern_names: scope.extern_names
     };
+}
+
+// Scope-exit sweep for the linear must-be-consumed rule (`E0907`).
+// Walks `bindings[start..]` — the bindings *declared in the scope that is
+// now exiting* — and flags any that are still linear-and-`owned`
+// (i.e. never moved or freed) as unconsumed. A linear value consumed in
+// the same scope reaches state "moved"/"freed" and is skipped. The sweep
+// pushes findings into `scope` and returns it. `start` lets callers limit
+// the walk to a scope's own declarations: 0 for a routine boundary
+// (params + body-level lets), or the parent binding count for a nested
+// block (block-local lets only).
+//
+// Limitation (narrow 1.0 subset): consumption is recognized only when it
+// happens in the same lexical scope as the declaration. A linear value
+// consumed solely inside a nested block does not propagate its
+// "moved"/"freed" state back to the declaring scope (branch-local moves
+// are deliberately not lifted, mirroring the use-after-move analysis), so
+// it would still be flagged here. Consume linear values on a straight-line
+// path within their declaring scope.
+fn _sweep_unconsumed_linear(scope: OwnershipScope, bindings: OwnershipBinding[], start: int) -> OwnershipScope {
+    let mut next = scope;
+    let mut index = start;
+    loop {
+        if index >= bindings.length { break; }
+        let binding = bindings[index];
+        if binding.is_linear {
+            if binding.state == "owned" {
+                next = _push_finding(next, _make_finding(binding.name, binding.span, null, "E0907"));
+            }
+        }
+        index += 1;
+    }
+    return next;
 }
 
 // Walk a nested block as a child scope: the child sees the parent's
@@ -447,10 +508,13 @@ fn _nested_block_scope(block: Block, scope: OwnershipScope) -> OwnershipScope {
         extern_names: scope.extern_names
     };
     let child_out = _scope_after_block(block, child_in);
+    // Sweep the block's own declarations (positions >= the parent count)
+    // for unconsumed linear bindings before they are discarded.
+    let swept = _sweep_unconsumed_linear(child_out, child_out.bindings, scope.bindings.length);
     return OwnershipScope {
         bindings: scope.bindings,
-        tracked: child_out.tracked,
-        findings: child_out.findings,
+        tracked: swept.tracked,
+        findings: swept.findings,
         extern_names: scope.extern_names
     };
 }
@@ -485,6 +549,28 @@ fn _binding_is_owned(type_text: string, has_type: boolean, initializer: Expressi
     return false;
 }
 
+// True iff a `let`/parameter with this annotation + initializer is
+// *linear* (`Linear<T>`, must be consumed exactly once). Mirrors
+// `_binding_is_owned` for the linear subset: linear if the annotation
+// names a linear type, or (inference for `let y = x;`) if the
+// initializer is a bare identifier already bound to a linear value — a
+// linear value moved into a fresh binding is still linear and the new
+// binding inherits the obligation.
+fn _binding_is_linear(type_text: string, has_type: boolean, initializer: Expression?, bindings: OwnershipBinding[]) -> boolean {
+    if has_type {
+        if is_linear_type(type_text) { return true; }
+    }
+    if initializer != null {
+        if initializer.variant == "Identifier" {
+            let si = _find_binding_index(bindings, initializer.name);
+            if si >= 0 {
+                if bindings[si].is_linear { return true; }
+            }
+        }
+    }
+    return false;
+}
+
 fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> OwnershipScope {
     if statement.variant == "VariableDeclaration" {
         let initializer = statement.initializer;
@@ -498,6 +584,7 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
             type_text = annotation.text;
         }
         let owned_new = _binding_is_owned(type_text, has_type, initializer, scope.bindings);
+        let linear_new = _binding_is_linear(type_text, has_type, initializer, scope.bindings);
         // A bare-identifier initializer is a move; anything else is an
         // ordinary expression walk (reads, nested lambdas, calls).
         let mut next = scope;
@@ -506,7 +593,7 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
                 next = _consume_identifier(scope, initializer.name, initializer.span, true);
             } else { next = _scope_after_expression(initializer, scope); }
         }
-        return _enter_binding(next, statement.name, statement.span, owned_new);
+        return _enter_binding(next, statement.name, statement.span, owned_new, linear_new);
     }
     if statement.variant == "BlockStatement" {
         // E2 boundary (#1211): the interior of `unsafe { }` is the
@@ -546,7 +633,7 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
         };
         let target = statement.clause.target;
         if target.variant == "Identifier" {
-            child = _enter_binding(child, target.name, target.span, false);
+            child = _enter_binding(child, target.name, target.span, false, false);
         }
         let child_out = _scope_after_block(statement.body, child);
         return OwnershipScope {
@@ -606,7 +693,7 @@ fn _scope_after_statement(statement: Statement, scope: OwnershipScope) -> Owners
             };
             let catch_name = statement.catch_name;
             if catch_name != null {
-                child = _enter_binding(child, catch_name, null, false);
+                child = _enter_binding(child, catch_name, null, false, false);
             }
             let child_out = _scope_after_block(catch_block, child);
             next = OwnershipScope {
@@ -667,7 +754,7 @@ fn _enter_pattern_bindings(pattern: Expression?, scope: OwnershipScope) -> Owner
         let mut index: int = 0;
         loop {
             if index >= pattern.fields.length { break; }
-            next = _enter_binding(next, pattern.fields[index].name, null, false);
+            next = _enter_binding(next, pattern.fields[index].name, null, false, false);
             index += 1;
         }
         return next;
@@ -677,7 +764,7 @@ fn _enter_pattern_bindings(pattern: Expression?, scope: OwnershipScope) -> Owner
     }
     if pattern.variant == "Identifier" {
         if pattern.name == "_" { return scope; }
-        return _enter_binding(scope, pattern.name, pattern.span, false);
+        return _enter_binding(scope, pattern.name, pattern.span, false, false);
     }
     return scope;
 }
@@ -697,14 +784,14 @@ fn _enter_raw_pattern_bindings(text: string, scope: OwnershipScope) -> Ownership
         }
         if ch == "}" {
             if token.length > 0 {
-                next = _enter_binding(next, token, null, false);
+                next = _enter_binding(next, token, null, false, false);
                 token = "";
             }
             break;
         }
         if is_identifier_char(ch) { token = token + ch; } else {
             if token.length > 0 {
-                next = _enter_binding(next, token, null, false);
+                next = _enter_binding(next, token, null, false, false);
                 token = "";
             }
         }
@@ -781,11 +868,13 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
             if index >= expression.parameters.length { break; }
             let parameter = expression.parameters[index];
             let mut owned_param: boolean = false;
+            let mut linear_param: boolean = false;
             let p_annotation = parameter.type_annotation;
             if p_annotation != null {
                 if is_owned_type(p_annotation.text) { owned_param = true; }
+                if is_linear_type(p_annotation.text) { linear_param = true; }
             }
-            child = _enter_binding(child, parameter.name, parameter.span, owned_param);
+            child = _enter_binding(child, parameter.name, parameter.span, owned_param, linear_param);
             index += 1;
         }
         let child_out = _scope_after_block(expression.body, child);
@@ -1008,17 +1097,22 @@ fn _analyze_routine_ownership(parameters: Parameter[], body: Block, extern_names
         if index >= parameters.length { break; }
         let parameter = parameters[index];
         let mut owned_param: boolean = false;
+        let mut linear_param: boolean = false;
         let annotation = parameter.type_annotation;
         if annotation != null {
             if is_owned_type(annotation.text) { owned_param = true; }
+            if is_linear_type(annotation.text) { linear_param = true; }
         }
-        scope = _enter_binding(scope, parameter.name, parameter.span, owned_param);
+        scope = _enter_binding(scope, parameter.name, parameter.span, owned_param, linear_param);
         index += 1;
     }
     let out = _scope_after_block(body, scope);
+    // Routine-boundary sweep: any linear parameter or body-level `let`
+    // still in state "owned" was never consumed -> E0907.
+    let swept = _sweep_unconsumed_linear(out, out.bindings, 0);
     return OwnershipSummary {
-        bindings_tracked: out.tracked,
-        warnings: out.findings
+        bindings_tracked: swept.tracked,
+        warnings: swept.findings
     };
 }
 

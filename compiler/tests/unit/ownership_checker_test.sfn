@@ -104,7 +104,7 @@ test "ownership: match destructure pattern bindings are tracked" ![io] {
 test "ownership: lattice helpers flip owned to moved" ![io] {
     let mut bindings: OwnershipBinding[] = [];
     bindings.push(OwnershipBinding {
-        name: "x", state: "owned", span: null, is_owned: true, moved_span: null
+        name: "x", state: "owned", span: null, is_owned: true, is_linear: false, moved_span: null
     });
     assert binding_state(bindings, "x") == "owned";
     assert binding_state(bindings, "missing") == "";
@@ -322,4 +322,108 @@ test "ownership: free of a raw pointer is untracked" ![io] {
     let warnings = check_ownership(program);
     assert warnings.length == 0;
     assert run_ownership_checker(program) == 0;
+}
+
+// -------------------------------------------------------------------
+// E7 (#1216): linear must-be-consumed (exactly-once) enforcement.
+// `Linear<T>` is owned AND must be consumed before it leaves scope; a
+// linear binding still "owned" at scope exit fires E0907. `Affine<T>` /
+// `OwnedBuf` are at-most-once and are exempt from this sweep.
+// -------------------------------------------------------------------
+test "ownership: unconsumed Linear parameter emits E0907" ![io] {
+    // `v` is never moved/freed: a linear value that leaves scope unused.
+    let source = "fn f(v: Linear<int>) -> int {\n    return 0;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0907";
+    assert warnings[0].severity == "error";
+    assert warnings[0].binding_name == "v";
+    // Single-span diagnostic: the declaration site, no second site.
+    assert warnings[0].trigger != null;
+    assert warnings[0].moved_trigger == null;
+}
+
+test "ownership: Linear consumed by return compiles clean" ![io] {
+    // `return v;` consumes the linear value — exactly-once satisfied.
+    let source = "fn f(v: Linear<int>) -> Linear<int> {\n    return v;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 0;
+    assert run_ownership_checker(program) == 0;
+}
+
+test "ownership: Linear consumed by a call compiles clean" ![io] {
+    // Passing `v` as a call argument moves it (consumes the linear
+    // obligation); `sink` takes a copyable param so it adds no finding.
+    let source = "fn sink(b: int) -> int {\n    return 0;\n}\n\nfn f(v: Linear<int>) -> int {\n    return sink(v);\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 0;
+    assert run_ownership_checker(program) == 0;
+}
+
+test "ownership: Linear consumed by free compiles clean" ![io] {
+    // `free(v)` disposes the linear value (Owned -> Freed): consumed.
+    let source = "fn f(v: Linear<int>) -> int {\n    free(v);\n    return 0;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 0;
+    assert run_ownership_checker(program) == 0;
+}
+
+test "ownership: Linear inherited by a let must also be consumed" ![io] {
+    // `let w = v;` moves the linear `v` into `w` (consuming `v`); `w`
+    // inherits the linear obligation and is itself never consumed -> E0907
+    // fires on `w`, not `v`.
+    let source = "fn f(v: Linear<int>) -> int {\n    let w = v;\n    return 0;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0907";
+    assert warnings[0].binding_name == "w";
+}
+
+test "ownership: unconsumed Affine value is not swept" ![io] {
+    // Affine is at-most-once: leaving it unused is fine. Guards against the
+    // sweep over-firing on owned-but-not-linear bindings.
+    let source = "fn f(v: Affine<int>) -> int {\n    return 0;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 0;
+    assert run_ownership_checker(program) == 0;
+}
+
+test "ownership: double-consume of a Linear value still emits E0901" ![io] {
+    // The affine (at-most-once) half still holds for linear values: a
+    // second consuming use after the move is use-after-move.
+    let source = "fn sink(b: int) -> int {\n    return 0;\n}\n\nfn f(v: Linear<int>) -> int {\n    let a = sink(v);\n    let c = sink(v);\n    return a + c;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0901";
+    assert warnings[0].binding_name == "v";
+}
+
+test "ownership: a bare `Linear` user struct is not swept (no false E0907)" ![io] {
+    // Only the parametric wrapper `Linear<T>` is linear. A user type
+    // simply named `Linear` (e.g. the `sfn/layers` neural-net layer) is
+    // not the ownership wrapper, so an unconsumed `Linear` parameter must
+    // NOT fire E0907. Regression for the name collision.
+    let source = "fn forward(layer: Linear) -> int {\n    return 0;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 0;
+    assert run_ownership_checker(program) == 0;
+}
+
+test "ownership: unconsumed block-local Linear let emits E0907" ![io] {
+    // A linear `let` declared inside a nested block and never consumed is
+    // swept at the block boundary (validates the nested-scope sweep).
+    let source = "fn f(c: bool) -> int {\n    if c {\n        let w: Linear<int> = make();\n    }\n    return 0;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0907";
+    assert warnings[0].binding_name == "w";
 }
