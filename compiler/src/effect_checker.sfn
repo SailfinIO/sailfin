@@ -518,6 +518,13 @@ fn collect_effects_from_statement(statement: Statement, imports: ImportSymbolTab
     if statement.variant == "LoopStatement" {
         return collect_effects_from_block(statement.body, imports);
     }
+    if statement.variant == "RoutineStatement" {
+        // A `routine { }` body runs in the enclosing function's capability
+        // context (it lowers to a nursery scope, #1181), so its effects must
+        // be collected transitively — an effectful call inside a routine is
+        // not a capability escape hatch. Shaped like LoopStatement.
+        return collect_effects_from_block(statement.body, imports);
+    }
     if statement.variant == "MatchStatement" {
         let mut required = collect_effects_from_expression(statement.expression, imports);
         let mut case_index: int = 0;

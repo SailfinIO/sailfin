@@ -766,6 +766,22 @@ fn _rewrite_statement(ctx: LiftContext, statement: Statement) -> StatementRewrit
             }
         };
     }
+    if statement.variant == "RoutineStatement" {
+        // Descend into `routine { }` bodies so lambdas spawned inside a
+        // nursery are lifted to top-level `sfn_lambda_*` functions like
+        // any other block (#1181). Without this, an in-routine
+        // `spawn fn() -> T { ... }` emits a bare `<lambda>` placeholder
+        // and the spawn never lowers to a real `sfn_spawn_*` call —
+        // shaped like LoopStatement (block body + decorators).
+        let body_result = _rewrite_block(ctx, statement.body);
+        return StatementRewriteResult {
+            ctx: body_result.ctx,
+            statement: Statement.RoutineStatement {
+                body: body_result.block,
+                decorators: statement.decorators
+            }
+        };
+    }
     if statement.variant == "WithStatement" {
         let mut current_ctx: LiftContext = ctx;
         let mut new_clauses: WithClause[] = [];

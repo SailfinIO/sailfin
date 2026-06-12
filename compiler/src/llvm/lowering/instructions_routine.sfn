@@ -1,0 +1,284 @@
+// compiler/src/llvm/lowering/instructions_routine.sfn
+//
+// Control-flow handler: `routine { }` structured-concurrency nursery
+// lowering (issue #1181, epic #965 M4). A `routine` is an unconditional
+// single-path scope — unlike `if`/`loop` it has no condition and no
+// back-edge, so it needs no branch or phi machinery. The handler:
+//
+//   1. emits `call i64 @sfn_nursery_enter()` at scope entry, pushing a
+//      fresh per-thread nursery (runtime/sfn/concurrency/nursery.sfn);
+//   2. lowers the body inline — every `spawn` in the body's dynamic
+//      extent registers itself against the current nursery inside
+//      `sfn_spawn` (runtime/sfn/concurrency/future.sfn), so no compiler
+//      handle-tracking is needed;
+//   3. emits `call i64 @sfn_nursery_exit(...)` at scope exit — the
+//      structured-join barrier that blocks until every registered child
+//      has completed, so no task spawned inside the routine outlives it.
+//
+// v0 rejects non-local exit (`return`/`throw`/`break`/`continue`) that
+// crosses the routine boundary: such an exit would branch past the join,
+// leaking unjoined tasks. Failing closed with a diagnostic is the v0
+// stance (issue #1181); lifting the restriction (emitting the join on
+// every exit edge) is a follow-up.
+import { NativeFunction, NativeInstruction } from "../../native_ir";
+import { format_temp_name } from "../expressions_helpers";
+import { make_child_scope_id } from "../lifetime";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
+import {
+    BlockLoweringResult,
+    LifetimeRegionMetadata,
+    LocalBinding,
+    LocalMutation,
+    LoopContext,
+    ParameterBinding,
+    RoutineStructure,
+    StringConstant,
+    TypeContext
+} from "../types";
+import { extend_string_array, number_to_string } from "../utils";
+import { lower_instruction_range } from "./instructions";
+import { emit_scope_drops, extend_lifetime_regions, extend_mutations } from "./instructions_helpers";
+import { get_instruction_tag } from "./lowering_native_helpers";
+
+// Find the `.endroutine` (tag 23) matching the `.routine` at
+// `start_index`, tracking nested routines so an inner nursery's
+// `.endroutine` does not close the outer one. Mirrors
+// `collect_loop_structure`.
+fn collect_routine_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> RoutineStructure {
+    let mut diagnostics: string[] = [];
+    let body_start = start_index + 1;
+    let mut depth: int = 0;
+    let mut index: int = body_start;
+    let mut limit: int = end;
+    if limit > instructions.length { limit = instructions.length; }
+    loop {
+        if index >= limit {
+            diagnostics.push("llvm lowering: unterminated `.routine` in `"
+                + function_name
+                + "`");
+            return RoutineStructure {
+                body_start: body_start,
+                body_end: limit,
+                next_index: limit - 1,
+                diagnostics: diagnostics
+            };
+        }
+        let _tag = get_instruction_tag(instructions, index);
+        if _tag == 22 {  // nested Routine
+            depth += 1;
+            index += 1;
+            continue;
+        }
+        if _tag == 23 {  // EndRoutine
+            if depth == 0 {
+                return RoutineStructure {
+                    body_start: body_start,
+                    body_end: index,
+                    next_index: index,
+                    diagnostics: diagnostics
+                };
+            }
+            depth -= 1;
+            index += 1;
+            continue;
+        }
+        index += 1;
+    }
+
+    return RoutineStructure {
+        body_start: body_start,
+        body_end: limit,
+        next_index: limit,
+        diagnostics: diagnostics
+    };
+}
+
+// Scan the routine's direct extent for non-local control flow that would
+// escape the nursery before its join (v0 fail-closed, issue #1181):
+//   - `return` / `throw` anywhere in the body (any nesting) escape the
+//     routine;
+//   - `break` / `continue` escape only when not inside a loop that is
+//     itself inside the routine (loop-depth 0).
+// Instructions inside a *nested* routine are skipped — the inner
+// routine's own handler reports them, so each escape is flagged once.
+fn collect_routine_escape_diagnostics(instructions: NativeInstruction[], body_start: int, body_end: int, function_name: string) -> string[] {
+    let mut diagnostics: string[] = [];
+    let mut loop_depth: int = 0;
+    let mut routine_depth: int = 0;
+    let mut index: int = body_start;
+    loop {
+        if index >= body_end { break; }
+        let _tag = get_instruction_tag(instructions, index);
+
+        if _tag == 22 {  // nested Routine — its handler owns its body
+            routine_depth += 1;
+            index += 1;
+            continue;
+        }
+        if _tag == 23 {  // EndRoutine
+            if routine_depth > 0 { routine_depth -= 1; }
+            index += 1;
+            continue;
+        }
+        if routine_depth > 0 {
+            index += 1;
+            continue;
+        }
+
+        if _tag == 6 {
+            loop_depth += 1;
+        }  // For
+        if _tag == 8 {
+            loop_depth += 1;
+        }  // Loop
+        if _tag == 7 {  // EndFor
+            if loop_depth > 0 { loop_depth -= 1; }
+        }
+        if _tag == 9 {  // EndLoop
+            if loop_depth > 0 { loop_depth -= 1; }
+        }
+
+        if _tag == 0 {  // Return
+            diagnostics.push("[fatal] llvm lowering: `return` inside `routine` in `"
+                + function_name
+                + "` would exit the nursery before its spawned tasks join; "
+                + "structured concurrency forbids non-local exit from a "
+                + "`routine` (issue #1181) — restructure so the routine "
+                + "completes normally.");
+        }
+        if _tag == 19 {  // Throw
+            diagnostics.push("[fatal] llvm lowering: `throw` inside `routine` in `"
+                + function_name
+                + "` would exit the nursery before its spawned tasks join; "
+                + "structured concurrency forbids non-local exit from a "
+                + "`routine` (issue #1181).");
+        }
+        if _tag == 10 {  // Break
+            if loop_depth == 0 {
+                diagnostics.push("[fatal] llvm lowering: `break` inside `routine` in `"
+                    + function_name
+                    + "` targets a loop outside the routine and would exit "
+                    + "the nursery before its spawned tasks join (issue #1181).");
+            }
+        }
+        if _tag == 11 {  // Continue
+            if loop_depth == 0 {
+                diagnostics.push("[fatal] llvm lowering: `continue` inside `routine` in `"
+                    + function_name
+                    + "` targets a loop outside the routine and would exit "
+                    + "the nursery before its spawned tasks join (issue #1181).");
+            }
+        }
+
+        index += 1;
+    }
+    return diagnostics;
+}
+
+fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], end: int, context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
+    let mut current_allocas: string[] = allocas;
+    let mut current_bindings: ParameterBinding[] = bindings;
+    let mut current_temp: int = temp_index;
+    let mut current_block_counter: int = block_counter;
+    let mut current_next_local: int = next_local_id;
+    let mut current_next_region: int = next_region_id;
+    let mut lifetime_regions: LifetimeRegionMetadata[] = [];
+    let mut collected_mutations: LocalMutation[] = [];
+    let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
+
+    let structure = collect_routine_structure(function.instructions, start_index, end, function.name);
+    let mut _cd: int = 0;
+    loop {
+        if _cd >= structure.diagnostics.length { break; }
+        diagnostics.push(structure.diagnostics[_cd]);
+        _cd += 1;
+    }
+
+    // v0 fail-closed: reject non-local exit out of the routine.
+    let escape_diagnostics = collect_routine_escape_diagnostics(function.instructions, structure.body_start, structure.body_end, function.name);
+    let mut _ed: int = 0;
+    loop {
+        if _ed >= escape_diagnostics.length { break; }
+        diagnostics.push(escape_diagnostics[_ed]);
+        _ed += 1;
+    }
+
+    // Nursery entry: push a fresh per-thread nursery and hold its handle.
+    let nursery_temp = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + nursery_temp + " = call i64 @sfn_nursery_enter()");
+
+    // Lower the body inline. Spawns within register against the nursery
+    // at runtime; no compiler handle-tracking is needed.
+    let body_scope_id = make_child_scope_id(scope_id, nursery_temp);
+    let body_result = lower_instruction_range(function, structure.body_start, structure.body_end, llvm_return, current_bindings, locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, body_scope_id, scope_depth
+        + 1, current_label);
+
+    let mut _bd: int = 0;
+    loop {
+        if _bd >= body_result.diagnostics.length { break; }
+        diagnostics.push(body_result.diagnostics[_bd]);
+        _bd += 1;
+    }
+    lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
+    current_lines = extend_string_array(current_lines, body_result.lines);
+    current_allocas = body_result.allocas;
+    current_temp = body_result.temp_index;
+    current_block_counter = body_result.block_counter;
+    current_next_local = body_result.next_local_id;
+    current_bindings = body_result.bindings;
+    current_next_region = body_result.next_lifetime_region_id;
+    collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
+    collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
+
+    // If the body fell through (no terminator), drop its owned RC locals
+    // and emit the structured-join barrier. A terminated body (its own
+    // diagnostic already flagged any escaping exit) skips the join — the
+    // build fails on the diagnostic regardless.
+    if !body_result.terminated {
+        let drop_result = emit_scope_drops(body_result.locals, body_scope_id, current_temp);
+        let mut _dr: int = 0;
+        loop {
+            if _dr >= drop_result.lines.length { break; }
+            current_lines.push(drop_result.lines[_dr]);
+            _dr += 1;
+        }
+        current_temp = drop_result.next_temp;
+
+        // The structured-join barrier: blocks until every registered child
+        // completes. Its i64 return is the nursery fault code (0 = clean).
+        // The fail-closed guarantee is enforced at the spawn site —
+        // `sfn_spawn` (future.sfn) fails the spawn and never enqueues a task
+        // it cannot register, so no untracked task reaches exit — making the
+        // exit code a defense-in-depth / forward seam here. Surfacing a
+        // non-zero fault as a language-level throw/abort needs the
+        // nursery→exception bridge, which is explicitly v0-deferred (the
+        // `parent`/`faulted` fields in `Nursery` are the seam for it); the
+        // lowering therefore does not branch on the code in v0.
+        let exit_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + exit_temp
+            + " = call i64 @sfn_nursery_exit(i64 "
+            + nursery_temp
+            + ")");
+    }
+
+    return BlockLoweringResult {
+        lines: current_lines,
+        allocas: current_allocas,
+        locals: locals,
+        bindings: current_bindings,
+        temp_index: current_temp,
+        block_counter: current_block_counter,
+        diagnostics: diagnostics,
+        terminated: body_result.terminated,
+        next_local_id: current_next_local,
+        lifetime_regions: lifetime_regions,
+        next_lifetime_region_id: current_next_region,
+        next_index: structure.next_index + 1,
+        mutations: collected_mutations,
+        string_constants: collected_string_constants
+    };
+}

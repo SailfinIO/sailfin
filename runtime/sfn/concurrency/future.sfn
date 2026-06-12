@@ -89,7 +89,17 @@ extern fn sfn_task_create(fn_ptr: i64, ctx: i64) -> * u8;
 
 extern fn sfn_task_join(task: * u8) -> * u8;
 
+extern fn sfn_task_destroy(task: * u8) -> void;
+
 extern fn sfn_scheduler_create(queue: * u8) -> * u8;
+
+// Nursery registration (#1181). `sfn_spawn` consults the per-thread
+// current nursery and registers each task it creates so a `routine { }`
+// can join it at scope exit. A zero current nursery (no active routine)
+// makes `register` a no-op — the spawn proceeds unowned, as before.
+extern fn sfn_nursery_current() -> i64;
+
+extern fn sfn_nursery_register(n: i64, task: i64) -> i64;
 
 // ── Global scheduler lazy init ────────────────────────────────
 // Returns the queue address, creating the queue + pool on first call.
@@ -122,6 +132,25 @@ fn sfn_spawn(fn_ptr: i64, ctx: i64, result_size: i64) -> * u8 {
 
     let task: * u8 = sfn_task_create(fn_ptr, ctx);
     if task as i64 == 0 { return null; }
+
+    // Register against the current nursery (if any) BEFORE enqueue so a
+    // `routine { }` owns this task and joins it at scope exit. A null
+    // current nursery is a no-op (the spawn proceeds unowned, as before).
+    // If registration fails (OOM growing the nursery list, returns 0), we
+    // must NOT enqueue: an untracked task the nursery cannot join could
+    // outlive the routine, breaking the structured guarantee. Fail closed
+    // — destroy the unregistered task and fail the spawn (return null) so
+    // nothing escapes the nursery. This mirrors the OOM-returns-null
+    // discipline above; the nursery also records the fault (returned by
+    // `sfn_nursery_exit`) as a forward seam for fault propagation.
+    let current_nursery: i64 = sfn_nursery_current();
+    if current_nursery != 0 {
+        let registered: i64 = sfn_nursery_register(current_nursery, task as i64);
+        if registered == 0 {
+            sfn_task_destroy(task);
+            return null;
+        }
+    }
 
     sfn_taskqueue_enqueue(queue_addr as * u8, task);
     return task;

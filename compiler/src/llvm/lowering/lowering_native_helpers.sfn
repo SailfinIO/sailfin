@@ -276,7 +276,9 @@ fn get_instruction_tag(instructions: NativeInstruction[], idx: int) -> int {
         NativeInstruction.EndTry => return 18,
         NativeInstruction.Throw { expression, span } => return 19,
         NativeInstruction.Noop => return 20,
-        NativeInstruction.Unknown { text } => return 21
+        NativeInstruction.Unknown { text } => return 21,
+        NativeInstruction.Routine => return 22,
+        NativeInstruction.EndRoutine => return 23
     }
     return 21;
 }

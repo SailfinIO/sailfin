@@ -35,6 +35,10 @@ CONC_DIR="$REPO_ROOT/runtime/sfn/concurrency"
 PARALLEL="$CONC_DIR/parallel.sfn"
 FUTURE="$CONC_DIR/future.sfn"
 SCHEDULER="$CONC_DIR/scheduler.sfn"
+# future.sfn's sfn_spawn registers each task against the current nursery
+# (#1181), so the standalone link must include nursery.sfn to resolve
+# sfn_nursery_current / sfn_nursery_register.
+NURSERY="$CONC_DIR/nursery.sfn"
 
 SCRATCH="$(mktemp -d -t sfn-parallel-combinator-XXXXXX)"
 trap 'rm -rf "$SCRATCH"' EXIT
@@ -171,6 +175,12 @@ test_roundtrip() {
         cat "$SCRATCH/sched_emit.log"
         return 1
     fi
+    local nll="$SCRATCH/nursery.ll"
+    if ! "$BINARY" emit -o "$nll" llvm "$NURSERY" > "$SCRATCH/nursery_emit.log" 2>&1; then
+        echo "[test]   sfn emit llvm failed on nursery.sfn:"
+        cat "$SCRATCH/nursery_emit.log"
+        return 1
+    fi
 
     local harness="$SCRATCH/harness.c"
     cat > "$harness" <<'CHARNESS'
@@ -284,7 +294,7 @@ CHARNESS
     # the scheduler's mutex/cond externs; `-lm` mirrors the scheduler
     # harness (integer-literal lowering can leave libm references).
     local bin="$SCRATCH/roundtrip"
-    if ! "$clang_bin" -Wno-override-module "$harness" "$pll" "$fll" "$sll" \
+    if ! "$clang_bin" -Wno-override-module "$harness" "$pll" "$fll" "$sll" "$nll" \
             -o "$bin" -lpthread -lm 2>"$SCRATCH/clang.log"; then
         echo "[test]   clang failed to link parallel roundtrip:"
         cat "$SCRATCH/clang.log"

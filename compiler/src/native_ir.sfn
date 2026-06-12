@@ -24,6 +24,8 @@ enum NativeInstruction {
     If { condition: string },
     Else,
     EndIf,
+    Routine,
+    EndRoutine,
     For {
         target: string;
         iterable: string;

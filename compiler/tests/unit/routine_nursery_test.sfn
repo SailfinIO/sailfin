@@ -1,0 +1,55 @@
+// Unit IR-shape test for `routine { }` structured-concurrency nursery
+// lowering — issue #1181, epic #965 (M4). Verifies that a `routine`
+// block lowers to a real nursery scope (`sfn_nursery_enter` at entry,
+// `sfn_nursery_exit` at exit) that brackets the spawns in its body,
+// rather than the retired v0 transparent-scope `.if 1 > 0` / `.endif`
+// shim.
+//
+// Strategy mirrors concurrency_lowering_test.sfn: exactly ONE
+// `lower_to_llvm_ir_from_text` call for the whole program — lowering
+// invokes clang and accumulates arena memory, so multiple calls in one
+// test process OOM/segfault.
+//
+// The body uses the `spawn <fn>()` call form (lowers to `sfn_spawn_task`)
+// rather than an inline-lambda spawn: the inline-lambda value surface
+// (#1085/#1090) is a separate, still-incomplete codegen path and is out
+// of scope here — this test asserts the *nursery* scope shape, i.e. that
+// the routine brackets its spawns with enter/exit. The runtime join
+// semantics (registration + join-before-exit by observation) are covered
+// by the e2e behavioral harness in
+// `compiler/tests/e2e/test_routine_nursery.sh`.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+// A `routine` that spawns a task must lower to a nursery scope:
+// `@sfn_nursery_enter` opens it, the spawn lowers inside it, and
+// `@sfn_nursery_exit` (the structured-join barrier) closes it — with the
+// spawn positioned BETWEEN enter and exit so the nursery brackets it.
+// The presence of the nursery calls also proves the old always-true `If`
+// shim is gone: a shimmed routine emitted no nursery calls at all.
+test "lowering: routine lowers to a nursery scope around its spawns (#1181)" ![io] {
+    let source = "fn work() -> int { return 1; }\n" + "fn main() ![io] {\n"
+        + "    routine {\n"
+        + "        let f = spawn work();\n"
+        + "    }\n"
+        + "}";
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "routine_nursery_test");
+    let ir = lower_to_llvm_ir_from_text(native, "routine_nursery_test");
+
+    // The nursery runtime surface is declared and called.
+    assert index_of(ir, "@sfn_nursery_enter") >= 0;
+    assert index_of(ir, "@sfn_nursery_exit") >= 0;
+    assert index_of(ir, "@sfn_spawn_task") >= 0;
+
+    // Structured ordering: enter < spawn < exit — the spawn is bracketed
+    // by the nursery and joined before control leaves the routine.
+    let enter_at = index_of(ir, "call i64 @sfn_nursery_enter");
+    let spawn_at = index_of(ir, "call i8* @sfn_spawn_task");
+    let exit_at = index_of(ir, "call i64 @sfn_nursery_exit");
+    assert enter_at >= 0;
+    assert spawn_at > enter_at;
+    assert exit_at > spawn_at;
+}

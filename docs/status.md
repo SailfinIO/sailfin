@@ -122,7 +122,7 @@ doc, or `docs/runtime_architecture.md`, not here.
 | `&T` / `&mut T` borrows | Parsed only | Exclusivity not checked |
 | `PII<T>` / `Secret<T>` | Parsed only | No taint enforcement; deferred post-1.0 |
 | `model`/`prompt`/`tool`/`pipeline` blocks | **Removed** | Moved to the post-1.0 `sfn/ai` capsule; the `![model]` effect stays |
-| `routine { }` blocks | Parsed | Frontend nodes only (#1079/#1081); no typecheck or lowering yet |
+| `routine { }` blocks | Works (v0 nursery) | Lowers to a real structured-concurrency nursery (#1181): `sfn_nursery_enter`/`sfn_nursery_exit` (`runtime/sfn/concurrency/nursery.sfn`) bracket the body, `sfn_spawn` registers each task against the per-thread current nursery, and exit blocks (join-all) until every child completes — no task spawned in the routine outlives its scope. Non-local exit (`return`/`throw`/`break`/`continue`) out of a routine is rejected fail-closed. v0: join-all (no cancel-on-fault), join-without-destroy, per-thread (no cross-thread inheritance). Parser/emit are #1079/#1081/#1084 |
 | `await` | Parsed | Typing helpers exist (#1082, `E0814`) but are **not wired into the live walk** (pending #829); lowering is #1084 |
 | `channel()` | Works (v0, untyped) | Bounded MPMC channels run end-to-end: `channel(N)` → `sfn_channel_create(i64 cap, i64 elem_size)`, `send`/`receive`/`close` lower against `runtime/sfn/concurrency/channel.sfn` with the by-pointer element ABI (#1085/#1091, aligned #1266). Pointer-sized elements only; `channel<T>` parsing pending (#829) |
 | `spawn` | Parsed | Future-kind resolver + `E0813` (#1082); lowering is #1084 |
@@ -190,9 +190,12 @@ Capsules ship under `capsules/sfn/` and are imported by bare name
 - **Concurrency runtime (v0, M4):** `runtime/sfn/concurrency/` ships the
   worker-pool scheduler with the task lifecycle
   (`sfn_task_create/run/join/destroy`, #1089), the `sfn_spawn` / `sfn_await`
-  surface (#1090), channels, and the `sfn_parallel` fan-out/join combinator
-  (#1093). Language-construct lowering (`routine`/`await`/`spawn`/`channel`)
-  is #1084. Design: `docs/runtime_architecture.md` §2.6.
+  surface (#1090), channels, the `sfn_parallel` fan-out/join combinator
+  (#1093), and the structured-concurrency **nursery** (`nursery.sfn`,
+  `sfn_nursery_enter/register/exit`, #1181) that `routine { }` lowers to.
+  Language-construct lowering: `routine` → nursery scope (#1181); `channel`
+  end-to-end (#1085/#1091); `spawn`/`await` value-surface lowering is #1084.
+  Design: `docs/runtime_architecture.md` §2.6.
 
 ### Runtime Migration (C → Sailfin)
 

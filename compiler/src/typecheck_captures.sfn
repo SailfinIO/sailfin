@@ -220,6 +220,13 @@ fn walk_statement(scope: LocalBinding[], stmt: Statement) -> CaptureWalkResult {
     if stmt.variant == "LoopStatement" {
         return walk_block(scope, stmt.body);
     }
+    if stmt.variant == "RoutineStatement" {
+        // Descend into `routine { }` bodies so lambdas spawned inside a
+        // nursery get capture records and are lifted (#1181) — without
+        // this the lambda-lifting pass treats them as capturing and
+        // emits a bare `<lambda>`. Shaped like LoopStatement.
+        return walk_block(scope, stmt.body);
+    }
     if stmt.variant == "MatchStatement" {
         let mut result = walk_expression(scope, stmt.expression);
         let mut i: int = 0;

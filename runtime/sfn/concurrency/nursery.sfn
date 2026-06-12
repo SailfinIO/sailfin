@@ -1,0 +1,237 @@
+// runtime/sfn/concurrency/nursery.sfn — structured-concurrency nursery
+// surface for `routine { }` (issue #1181, epic #965 M4).
+//
+// A nursery is the dynamic-extent owner of every task spawned inside a
+// `routine { }` scope. The compiler lowers `routine` entry to
+// `sfn_nursery_enter` (which pushes a fresh nursery onto a per-thread
+// stack) and `routine` exit to `sfn_nursery_exit` (which blocks until
+// every registered child has completed, then pops the nursery). Each
+// `spawn` funnels through `sfn_spawn` (future.sfn), which consults the
+// per-thread current nursery via `sfn_nursery_current` and registers the
+// new task with `sfn_nursery_register`. The net structured guarantee:
+// **no task spawned while a nursery is current on the executing thread
+// outlives that nursery's scope** — the join at exit is unconditional.
+//
+// ── Per-thread current-nursery register ───────────────────────
+// The current nursery is a *thread-local* i64 (the top-of-stack
+// `Nursery*` for the executing thread, 0 = none). Thread-local is
+// load-bearing: two threads each inside their own `routine` must see
+// their own nursery, so a process-global would be incorrect. The seed
+// lowers a module-level `thread_local let mut` to an `internal
+// thread_local global` in LLVM IR (verified end-to-end), so this needs
+// no pthread-TLS key boilerplate.
+//
+// ── Pointer-as-address convention ─────────────────────────────
+// Follows scheduler.sfn / future.sfn: heap pointers stored in globals
+// or struct fields are kept as i64 addresses and cast to typed `* T` at
+// use. Pointer-offset arithmetic uses the three-statement
+// `address → add → cast` split (NOT the inline `(p as i64 + N) as * T`
+// form) to dodge the cast-of-pointer-arithmetic miscompile documented
+// in scheduler.sfn (PR #1187).
+//
+// ── v0 scope (issue #1181) ────────────────────────────────────
+// - join-all at exit (NOT cancel-siblings-on-fault — deferred).
+// - join-without-destroy: the nursery joins each child but does NOT
+//   free the `Task` allocation, because user code may also hold the
+//   future and `await` it after the routine. Freeing here would be a
+//   use-after-free. The bounded leak (one `Task` per spawned child) is
+//   acceptable pre-1.0 and closes with the future-ownership work.
+// - per-thread nursery (NO cross-thread inheritance): a child task
+//   runs on a worker whose current-nursery is null; if that task body
+//   opens its own `routine`, that inner nursery is established on the
+//   worker thread and works correctly. Inheriting the parent nursery
+//   into the child's thread is a post-v0 follow-up.
+// - `faulted`: set when a registration cannot grow its list (OOM).
+//   `sfn_nursery_exit` returns the fault code so the lowering has a
+//   seam to later propagate a child fault as a thrown error.
+// ── Opaque pthread handle storage ─────────────────────────────
+// Mirrors scheduler.sfn exactly: a `PthreadMutex` is 64 bytes (max-sized
+// for macOS arm64; Linux glibc reads only the first 40). Opaque to
+// Sailfin — libpthread owns the bytes through a `* PthreadMutex` view.
+struct PthreadMutex {
+    _opaque0: i64;
+    _opaque1: i64;
+    _opaque2: i64;
+    _opaque3: i64;
+    _opaque4: i64;
+    _opaque5: i64;
+    _opaque6: i64;
+    _opaque7: i64;
+}
+
+// A nursery: the owner of the tasks spawned in a `routine` scope.
+// `parent` is the enclosing nursery on this thread's stack (0 if
+// outermost), restored as current at exit. `tasks_addr` points at a
+// `capacity`-slot i64 buffer of registered `Task` addresses; `count` is
+// the live registration total. `faulted` records an OOM that prevented
+// a registration from being recorded (0 = clean, 1 = faulted). `mutex`
+// guards `tasks_addr`/`count`/`capacity`/`faulted` — a child running on
+// a worker could register concurrently if cross-thread inheritance is
+// ever added, and the lock is cheap insurance that matches the queue
+// discipline. Layout (Linux x86_64): five i64s (40 B) + PthreadMutex
+// (64 B) = 104 bytes.
+struct Nursery {
+    parent: i64;
+    tasks_addr: i64;
+    count: i64;
+    capacity: i64;
+    faulted: i64;
+    mutex: PthreadMutex;
+}
+
+// ── Externs ───────────────────────────────────────────────────
+// Re-declared locally (scheduler.sfn / future.sfn discipline: the seed
+// resolves imported *defined* functions unreliably, so runtime modules
+// re-declare the extern surface they call). `realloc(null, n)` behaves
+// as `malloc(n)`, so the growable list seeds from a null buffer.
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+
+extern fn pthread_mutex_init(m: * PthreadMutex, attr: * PthreadMutexAttr) -> i32;
+
+extern fn pthread_mutex_lock(m: * PthreadMutex) -> i32;
+
+extern fn pthread_mutex_unlock(m: * PthreadMutex) -> i32;
+
+extern fn pthread_mutex_destroy(m: * PthreadMutex) -> i32;
+
+// The single-task join surface from the scheduler (#1089). The nursery
+// blocks on each registered task here; the result pointer is discarded
+// (the nursery owns completion ordering, not result aggregation — a
+// user `await` reads the result separately).
+extern fn sfn_task_join(task: * u8) -> * u8;
+
+// ── Per-thread current nursery ────────────────────────────────
+// Top-of-stack `Nursery*` for the executing thread (0 = none). Lowered
+// to an `internal thread_local global i64` — genuinely per-thread.
+thread_local let mut _sfn_g_current_nursery: i64 = 0;
+
+// `sfn_nursery_current()` — the active nursery on this thread, or 0.
+// `sfn_spawn` (future.sfn) calls this on every spawn to decide whether
+// the new task is owned by a nursery.
+fn sfn_nursery_current() -> i64 { return _sfn_g_current_nursery; }
+
+// Byte size of a `Nursery` (five i64s + 64-byte mutex). The allocator
+// path is the only layout dependency; tracks the struct above.
+fn _sfn_nursery_struct_size() -> i64 { return 104; }
+
+// Initial registration-list capacity, grown by doubling. Most routines
+// spawn a handful of tasks; 8 covers the common case without a regrow.
+fn _sfn_nursery_initial_capacity() -> i64 { return 8; }
+
+// `sfn_nursery_enter()` — allocate a nursery, link it to the current
+// thread-local as `parent`, push it as the new current, and return its
+// address (`Nursery*` as i64). The registration list is allocated lazily
+// on first `register`, so a routine that spawns nothing pays only the
+// struct + mutex. On allocation/init failure returns 0 and leaves the
+// current register UNCHANGED (the caller's `sfn_nursery_exit(0)` is a
+// null-safe no-op). OOM is already catastrophic; v0 does not abort the
+// process, matching the scheduler's OOM-returns-null discipline — the
+// known corner is that a top-level routine whose `enter` OOMs runs its
+// body with no nursery, so its spawns escape (documented, post-v0).
+fn sfn_nursery_enter() -> i64 {
+    let nursery_ptr: * u8 = malloc(_sfn_nursery_struct_size() as usize);
+    if nursery_ptr as i64 == 0 { return 0; }
+
+    let nursery: * Nursery = nursery_ptr as * Nursery;
+    let mutex_rc: i32 = pthread_mutex_init(nursery.mutex, null);
+    if mutex_rc != 0 {
+        free(nursery_ptr);
+        return 0;
+    }
+
+    nursery.parent = _sfn_g_current_nursery;
+    nursery.tasks_addr = 0;
+    nursery.count = 0;
+    nursery.capacity = 0;
+    nursery.faulted = 0;
+
+    _sfn_g_current_nursery = nursery_ptr as i64;
+    return nursery_ptr as i64;
+}
+
+// `sfn_nursery_register(n, task)` — record `task` (a `Task*` from
+// `sfn_spawn`, as i64) against nursery `n` so it is joined at exit.
+// Appends under the mutex, growing the list (double, seeded at 8) when
+// full. A null/zero `n` means there is no nursery to own the task — a
+// no-op that returns 1 (the spawn proceeds unowned, which is the
+// no-routine case). On OOM growing the list, sets `faulted` and returns
+// 0: the task is NOT recorded, so the caller still enqueues it (it is
+// not leaked half-created) and the fault surfaces at exit — failure
+// closed, never a silent drop. Returns 1 on success.
+fn sfn_nursery_register(n: i64, task: i64) -> i64 {
+    if n == 0 { return 1; }
+
+    let nursery: * Nursery = n as * Nursery;
+    pthread_mutex_lock(nursery.mutex);
+
+    if nursery.count >= nursery.capacity {
+        let mut new_cap: i64 = nursery.capacity * 2;
+        if new_cap < _sfn_nursery_initial_capacity() {
+            new_cap = _sfn_nursery_initial_capacity();
+        }
+        let old_buf: * u8 = nursery.tasks_addr as * u8;
+        let new_buf: * u8 = realloc(old_buf, (new_cap * 8) as usize);
+        if new_buf as i64 == 0 {
+            nursery.faulted = 1;
+            pthread_mutex_unlock(nursery.mutex);
+            return 0;
+        }
+        nursery.tasks_addr = new_buf as i64;
+        nursery.capacity = new_cap;
+    }
+
+    // Append at slot `count`. Three-statement offset split (not the
+    // inline `(base + idx*8) as * i64`) to stay clear of the
+    // cast-of-pointer-arithmetic miscompile.
+    let base: i64 = nursery.tasks_addr;
+    let slot_addr: i64 = base + nursery.count * 8;
+    let slot: * i64 = slot_addr as * i64;
+    atomic_store(slot, task);
+    nursery.count = nursery.count + 1;
+
+    pthread_mutex_unlock(nursery.mutex);
+    return 1;
+}
+
+// `sfn_nursery_exit(n)` — the structured-join barrier. Blocks on every
+// registered task (`sfn_task_join`, FIFO) so control cannot leave the
+// routine until all children have completed, then pops `n` from the
+// thread-local stack (restoring `parent` as current), frees the list
+// buffer and the `Nursery`, and returns the fault code (0 = clean, 1 =
+// a registration faulted). Tasks are joined but NOT destroyed (v0
+// join-without-destroy — a user may still hold and `await` the future;
+// see the module header). The `mutex` is not held across the joins: by
+// the time exit runs, the routine body has returned, so no further
+// registration can race (per-thread nursery, no cross-thread
+// inheritance in v0). Null-safe: a zero `n` returns 0.
+fn sfn_nursery_exit(n: i64) -> i64 {
+    if n == 0 { return 0; }
+
+    let nursery: * Nursery = n as * Nursery;
+
+    let mut i: i64 = 0;
+    loop {
+        if i >= nursery.count { break; }
+        let base: i64 = nursery.tasks_addr;
+        let slot_addr: i64 = base + i * 8;
+        let slot: * i64 = slot_addr as * i64;
+        let task_addr: i64 = atomic_load(slot);
+        if task_addr != 0 { sfn_task_join(task_addr as * u8); }
+        i = i + 1;
+    }
+
+    let fault: i64 = nursery.faulted;
+
+    // Pop: restore the enclosing nursery as current before tearing down.
+    _sfn_g_current_nursery = nursery.parent;
+
+    if nursery.tasks_addr != 0 { free(nursery.tasks_addr as * u8); }
+    pthread_mutex_destroy(nursery.mutex);
+    free(n as * u8);
+
+    return fault;
+}
