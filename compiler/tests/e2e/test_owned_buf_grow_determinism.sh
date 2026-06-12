@@ -91,17 +91,16 @@ test_layout_unification() {
         echo "[test]   string.sfn did not emit '$shape' — layout drift vs ownedbuf.sfn"
         return 1
     fi
-    # The migrated string surface must carry the owned/Slice return ABI.
+    # The migrated string surface must carry the owned-move return ABI.
+    # (`sfn_str_sfn_slice` is NOT migrated — a non-owning `Slice` view over
+    # an immediate-codepoint pseudo-pointer is unsound until the C runtime
+    # retires that encoding; tracked at #1283. It keeps its `* u8` body.)
     if ! grep -qE '^define %OwnedBuf\* @sfn_str_sfn_append\(%OwnedBuf\* ' "$str_ll"; then
         echo "[test]   string.sfn missing 'define %OwnedBuf* @sfn_str_sfn_append(%OwnedBuf* ...)'"
         return 1
     fi
     if ! grep -qE '^define %OwnedBuf\* @sfn_str_sfn_concat\(' "$str_ll"; then
         echo "[test]   string.sfn missing 'define %OwnedBuf* @sfn_str_sfn_concat(...)'"
-        return 1
-    fi
-    if ! grep -qE '^define %Slice\* @sfn_str_sfn_slice\(' "$str_ll"; then
-        echo "[test]   string.sfn missing 'define %Slice* @sfn_str_sfn_slice(...)'"
         return 1
     fi
     return 0

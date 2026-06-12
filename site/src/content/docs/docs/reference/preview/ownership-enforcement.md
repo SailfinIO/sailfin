@@ -66,9 +66,16 @@ types:
 - `sfn_str_sfn_append(buf: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedBuf`
   — consume-and-return move; raw grow-at-tip interior behind `unsafe { }` in arena.sfn.
 - `sfn_str_sfn_concat(a: *u8, b: *u8) -> OwnedBuf` — returns owned buffer built
-  via the global arena; no arena-stranded raw `*u8` return.
-- `sfn_str_sfn_slice(text: *u8, start: f64, end: f64) -> Slice` — non-owning
-  view; no allocation, no arena-lifetime hazard.
+  via the global arena (gated on `sfn_arena_enabled()`, libc-backed when the arena
+  is opted out); no arena-stranded raw `*u8` return.
+
+`sfn_str_sfn_slice` is **not** migrated. A non-owning `Slice` over `text` is unsound
+while the runtime still produces immediate-codepoint tagged pseudo-pointers
+(`(byte << 32)`, `runtime/native/src/sailfin_runtime.c`): `text + start` is then not
+a real address, and the view would let it escape and be dereferenced later. So
+`slice` keeps its allocating `*u8` body until that encoding is retired (with the C
+runtime deletion, #822) and the `string` → `{i8*, i64}` aggregate flip (M1.A.2)
+lands. Both dependencies are tracked at **#1283**.
 
 The grow-at-tip `unsafe { }` block in `sfn_arena_sfn_realloc` and the raw
 extern alloc/realloc/memcpy interiors of `owned_buf_new` / `owned_buf_append`

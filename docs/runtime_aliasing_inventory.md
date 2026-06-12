@@ -127,7 +127,7 @@ Source: `runtime/sfn/string.sfn` — 14 sites (1 in-place-mutation, 4 use-after-
 
 | File | Lines | Symbol | Hazard | Notes |
 |---|---|---|---|---|
-| `runtime/sfn/string.sfn` | 159-161 | `sfn_str_sfn_slice` | use-after-free | **RESOLVED — Phase R1 (#1217).** Migrated: `sfn_str_sfn_slice(text: *u8, start: f64, end: f64) -> Slice` now returns a non-owning `Slice` view (no allocation), eliminating the arena-stranding hazard. Line numbers are stale (body rewritten). |
+| `runtime/sfn/string.sfn` | 159-161 | `sfn_str_sfn_slice` | use-after-free | **DEFERRED — #1283.** #1217 attempted `-> Slice` but a non-owning view over an immediate-codepoint pseudo-pointer (`(byte << 32)`, still produced in `sailfin_runtime.c`) is unsound; reverted to the allocating `* u8` / `substring_unchecked` body. A sound `slice -> Slice` is gated on retiring the immediate-pointer encoding (#822 / M1.A.2). The allocating body's arena-stranding hazard persists until then. |
 | `runtime/sfn/string.sfn` | 170 | `sfn_str_sfn_to_cstr` | shared-mutable-alias | Identity return hands the string's own data pointer back as a C-string view — a second live raw handle to the same bytes, typically passed to externs that may retain it past the backing store's (arena) lifetime. |
 | `runtime/sfn/string.sfn` | 179 | `sfn_str_sfn_from_cstr` | shared-mutable-alias | Adopts a foreign NUL-terminated C buffer as a Sailfin string without copying — the C-side owner and the Sailfin handle alias the same bytes with no ownership transfer. |
 | `runtime/sfn/string.sfn` | 179 | `sfn_str_sfn_from_cstr` | use-after-free | The adopted buffer's lifetime stays with the foreign C caller; if the C side frees or reuses it, the Sailfin string handle reads freed memory. |

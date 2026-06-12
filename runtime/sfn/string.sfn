@@ -43,15 +43,19 @@
 // Once the seed catches up, a follow-up PR can flip these to a
 // cross-module import without touching the bodies.
 //
-// #1217 (Phase R1): `OwnedBuf` / `Slice` are inlined here — definitions
-// byte-identical to `runtime/sfn/memory/ownedbuf.sfn:112-127` (four-slot
-// / two-slot i64 layout, the `_addr` discipline) — and the grow/append
-// move logic is reproduced through the private `_str_buf_*` helpers
-// below. They are NOT imported from ownedbuf.sfn: a cross-module call
-// whose return type is the `OwnedBuf` aggregate still hits the issue
-// #306 `cannot resolve return type for call to …` fatal at the capsule
-// build's per-module emission (an inline `extern fn` can't carry the
-// struct either — externs are C-ABI-only, E0805). Same-module calls to
+// #1217 (Phase R1): `OwnedBuf` is inlined here — definition
+// byte-identical to `runtime/sfn/memory/ownedbuf.sfn:112-117` (four-slot
+// i64 layout, the `_addr` discipline) — and the grow/append move logic
+// is reproduced through the private `_str_buf_*` helpers below. It is
+// NOT imported from ownedbuf.sfn: the runtime-sfn-source emit path
+// (`_compile_runtime_sfn_sources` in cli_main.sfn) emits each runtime
+// module standalone and does NOT thread a sibling runtime module's
+// signatures, so a cross-module call whose return type is the `OwnedBuf`
+// aggregate hits `cannot resolve return type for call to …` at
+// `core_call_emission.sfn:368` (an inline `extern fn` can't carry the
+// struct either — externs are C-ABI-only, E0805). This is the #999
+// class of bug, but in an emit path #999's fix did not cover; tracked
+// at #1283 (NOT the closed, unrelated #306). Same-module calls to
 // `_str_buf_new` / `_str_buf_append` resolve fine, and those helpers
 // route growth through the **C** arena externs (`sfn_arena_alloc` /
 // `sfn_arena_realloc`, like `sfn_arena_global`) — the always-linked
@@ -59,19 +63,14 @@
 // string.sfn stays self-contained for every seed and link set (it is
 // not guaranteed that `arena.sfn` is linked wherever string.sfn is; the
 // synthetic-workspace link test pins exactly that). The LLVM `%OwnedBuf
-// = type { i64, i64, i64, i64 }` / `%Slice = type { i64, i64 }`
-// aggregates unify at link with ownedbuf.sfn's. Once #306 lands the
-// `OwnedBuf`/`Slice` surface collapses to a single import.
+// = type { i64, i64, i64, i64 }` aggregate unifies at link with
+// ownedbuf.sfn's. Once #1283 lands, the inline struct + `_str_buf_*`
+// duplication collapses to a single import.
 struct OwnedBuf {
     ptr_addr: i64;
     len: i64;
     cap: i64;
     arena_addr: i64;
-}
-
-struct Slice {
-    ptr_addr: i64;
-    len: i64;
 }
 
 extern fn malloc(size: usize) -> * u8;
@@ -168,11 +167,19 @@ extern fn sfn_str_from_byte(byte_value: i64) -> * u8;
 
 extern fn sfn_int_to_str(value: i64) -> * u8;
 
-// #1217 (Phase R1): the process-global arena handle the owned `concat`
-// builds into. C-ABI (`-> * u8`), so it stays an inline extern (same
-// discipline as the libc externs above); when the arena is disabled
-// the handle is `0` and `owned_buf_new` falls back to libc storage.
+// #1217 (Phase R1): the process-global arena `concat` builds into, and
+// the arena-mode probe that gates it. `sfn_arena_global()` ALWAYS
+// returns a live arena handle — it is NOT null when the arena is
+// disabled — so callers must gate on `sfn_arena_enabled()` first (the
+// discipline every other runtime module follows, e.g.
+// `runtime/sfn/memory/arena.sfn`'s mark/rewind). Under
+// `SAILFIN_USE_ARENA=0` (ASAN / diagnostics), `concat` therefore passes
+// `arena_addr = 0` and `_str_buf_new` falls back to libc storage. Both
+// are C-ABI (`-> * u8` / `-> bool`), so they stay inline externs (same
+// discipline as the libc externs above).
 extern fn sfn_arena_global() -> * u8;
+
+extern fn sfn_arena_enabled() -> bool;
 
 // `sfn_str_sfn_len(s)` — Sailfin-side length recovery for the
 // SfnString aggregate. Architect spec
@@ -193,27 +200,24 @@ fn sfn_str_sfn_len(s: * u8) -> i64 {
 // strategy until the aggregate flip lands.
 fn sfn_str_sfn_eq(a: * u8, b: * u8) -> bool { return strings_equal(a, b); }
 
-// `sfn_str_sfn_slice(text, start, end)` — non-owning view over
-// `text[start..end]`. Architect spec returns
-// `SfnSlice { data: text.data + start, len: end - start }`,
-// strictly non-allocating.
-// #1217 (Phase R1): `slice` now returns a non-owning `Slice` view
-// (proposal §5.1 "slice returns `Slice`"), the strictly non-allocating
-// shape the architect spec calls for — `{ data: text + start, len: end
-// - start }` over the backing bytes, no arena copy. `Slice` is not an
-// owned type, so the ownership checker leaves it untracked (no E0905
-// view-lifetime teeth until Phase U). The range is clamped into
-// `[0, ∞)` with an inverted range collapsing to empty. Params are
-// unchanged (`* u8` data, `f64` start/end) so no call site needs a
-// coercion shim; only the return type flips off the legacy
-// `substring_unchecked` allocation.
-fn sfn_str_sfn_slice(text: * u8, start: f64, end: f64) -> Slice {
-    let text_addr: i64 = text as i64;
-    let mut lo: i64 = start as i64;
-    if lo < 0 { lo = 0; }
-    let mut hi: i64 = end as i64;
-    if hi < lo { hi = lo; }
-    return Slice { ptr_addr: text_addr + lo, len: hi - lo };
+// `sfn_str_sfn_slice(text, start, end)` — substring view over
+// `text[start..end]`. The architect spec's end-state returns a
+// non-owning `SfnSlice { data: text.data + start, len: end - start }`,
+// but a non-owning view CANNOT be made sound over today's string
+// representation: `text` may be an immediate-codepoint tagged
+// pseudo-pointer (`(cp << 32)`, still produced + guarded throughout
+// `runtime/native/src/sailfin_runtime.c`), so `text + start` is not a
+// real address and any later deref of the view reads arbitrary memory.
+// A sound `slice -> Slice` therefore depends on the SfnString aggregate
+// flip retiring the immediate-pseudo-pointer encoding (tracked at #1283
+// — was the comment-only "M1.A.2" tag). Until then `slice` keeps the
+// allocating `* u8` body (delegating to the C `substring_unchecked`,
+// which materialises a real buffer and clamps the `f64` indices via
+// `_clamp_to_i64`), so #1217 migrates only `append`/`concat` onto the
+// owned surface. The `f64` start/end shape mirrors the registry
+// signature so call sites need no coercion shim.
+fn sfn_str_sfn_slice(text: * u8, start: f64, end: f64) -> * u8 {
+    return substring_unchecked(text, start, end);
 }
 
 // `sfn_str_sfn_to_cstr(s)` — NUL-terminated C string view of `s`.
@@ -248,7 +252,7 @@ fn sfn_str_sfn_from_cstr(s: * u8) -> * u8 { return s; }
 // suffix_addr, suffix_len)` — #1217 (Phase R1): same-module copies of
 // `owned_buf_new` / `owned_buf_append` (ownedbuf.sfn), reproduced here
 // because string.sfn cannot make the cross-module struct-returning call
-// (issue #306 — see the OwnedBuf header above). They are the move
+// (#1283 — see the OwnedBuf header above). They are the move
 // substrate `sfn_str_sfn_append` / `_concat` build on: `_str_buf_append`
 // consumes `self` (a unique `OwnedBuf`) and returns the (possibly
 // relocated) buffer, routing growth through the C-ABI arena externs
@@ -331,18 +335,20 @@ fn _str_buf_append(self: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedBu
 // fresh buffer. The result is the unique owner of its bytes, so the
 // chained-append grow-at-tip the architect spec describes is sound by
 // construction — no aliasing of either input's storage (the #1205
-// hazard class). Storage is the process-global arena
-// (`sfn_arena_global`); when the arena is disabled the handle is `0`
-// and `_str_buf_new` falls back to libc-backed storage. Params are
-// unchanged (`* u8`, `* u8`) — the byte lengths are recovered via the
-// local `sfn_str_sfn_len`. The two `_str_buf_append` calls are
+// hazard class). Storage is the process-global arena when arena mode is
+// on, gated on `sfn_arena_enabled()` so the `SAILFIN_USE_ARENA=0`
+// opt-out (ASAN / diagnostics) is honored — when disabled, `arena_addr`
+// is `0` and `_str_buf_new` falls back to libc-backed storage. Params
+// are unchanged (`* u8`, `* u8`) — the byte lengths are recovered via
+// the local `sfn_str_sfn_len`. The two `_str_buf_append` calls are
 // same-module moves of the unique buffer (consume-and-return); the raw
 // extern interior they route through sits behind `unsafe` inside the
 // helper.
 fn sfn_str_sfn_concat(a: * u8, b: * u8) -> OwnedBuf {
     let a_len: i64 = sfn_str_sfn_len(a);
     let b_len: i64 = sfn_str_sfn_len(b);
-    let arena_addr: i64 = sfn_arena_global() as i64;
+    let mut arena_addr: i64 = 0;
+    if sfn_arena_enabled() { arena_addr = sfn_arena_global() as i64; }
     let total: i64 = a_len + b_len;
     let buf: OwnedBuf = _str_buf_new(arena_addr, total);
     let grown: OwnedBuf = _str_buf_append(buf, a as i64, a_len);
