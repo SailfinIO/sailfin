@@ -52,8 +52,8 @@ compiles / has no frontend dependency" on faith. The cheapest probe is a
 throwaway `.sfn` snippet run through the current seed:
 
 ```bash
-ulimit -v 8388608 && build/seed/bin/sailfin check /tmp/probe.sfn
-ulimit -v 8388608 && build/seed/bin/sailfin emit -o /tmp/probe.ll llvm /tmp/probe.sfn
+build/seed/bin/sailfin check /tmp/probe.sfn
+build/seed/bin/sailfin emit -o /tmp/probe.ll llvm /tmp/probe.sfn
 ```
 
 Confirm the construct the issue depends on can actually be **expressed and
@@ -141,7 +141,7 @@ gh issue create \
 
 ## Verification
 \`\`\`bash
-ulimit -v 8388608 && timeout 60 build/native/sailfin run path/to/example.sfn
+timeout 60 build/native/sailfin run path/to/example.sfn
 \`\`\`
 
 ## Size

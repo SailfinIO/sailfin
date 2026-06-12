@@ -62,7 +62,6 @@ Examples:
 Before opening the PR, confirm the target binary actually downloads:
 
 ```bash
-ulimit -v 8388608
 SEED_VERSION="<target>" make fetch-seed
 ```
 

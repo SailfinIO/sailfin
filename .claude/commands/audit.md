@@ -19,6 +19,6 @@ Quick sanity check of the current workspace. Designed to be run on its own (`/au
 
 ## Constraints
 
-- Respect the memory cap — the `PreToolUse` hook will block compiler invocations without `ulimit -v 8388608`.
+- The compiler self-caps memory at 8 GiB on Linux (`SAILFIN_MEM_LIMIT` overrides; never disable outside sanitizer legs).
 - This is a **read-only** audit. Do not edit source, do not commit, do not push.
 - Report findings in ≤ 10 lines; longer reports defeat the purpose of a recurring audit.

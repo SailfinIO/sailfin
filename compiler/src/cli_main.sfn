@@ -153,6 +153,17 @@ extern fn realpath(path: * u8, resolved: * u8) -> * u8;
 // Pinned by `compiler/tests/e2e/test_arena_default_on.sh`.
 extern fn sailfin_runtime_install_arena_telemetry(label: * u8);
 
+// Self-applied compiler memory budget (`runtime/sfn/platform/rlimit.sfn`).
+// `fn main` calls this before any compilation work so every `sfn`
+// invocation runs under an 8 GiB `RLIMIT_AS` on Linux without caller
+// cooperation — replacing the repo's historical `ulimit -v 8388608`
+// shell-prefix ritual (and the PreToolUse hook that enforced it).
+// `SAILFIN_MEM_LIMIT=<bytes>` overrides; `unlimited` disables (ASAN);
+// an inherited external cap always wins; no-op on macOS/Windows.
+// Advisory: a non-zero return never blocks the build. Pinned by
+// `compiler/tests/e2e/test_mem_limit_selfcap.sh`.
+extern fn apply_default_mem_limit() -> i32;
+
 fn _usage() -> string {
     let mut out: string = "usage: sfn <command> [options]\n";
     out = out + "\n";
@@ -2890,6 +2901,13 @@ fn _arena_telemetry_label(argv: string[]) -> string {
 }
 
 fn main(argv: string[]) -> int ![io, clock] {
+    // Memory budget first — before argv parsing, telemetry, or any
+    // allocation-heavy work, so a runaway compile can never outgrow
+    // the host (issue #1245: an uncapped 8.3 GB `sfn check`
+    // regression killed a 16 GB CI runner). The return value is
+    // advisory; a failed setrlimit must never block a build.
+    apply_default_mem_limit();
+
     // Arena-stats process-exit telemetry — formerly registered by
     // the C driver's pre-main. The C-side function is a no-op
     // unless `SAILFIN_DUMP_ARENA_STATS` is truthy; we always call

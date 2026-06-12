@@ -42,7 +42,7 @@ If any are missing, the correct phrasing is "partial" or "parsed but not enforce
 
 ## What to surface, what to suppress
 
-**Surface**: pipeline stage of every change, files touched with line numbers, whether self-hosting still works, whether the memory cap was respected, any diagnostics citing source spans.
+**Surface**: pipeline stage of every change, files touched with line numbers, whether self-hosting still works, whether the memory budget held, any diagnostics citing source spans.
 
 **Suppress**: restatements of CLAUDE.md rules, generic encouragement, multi-paragraph summaries. End-of-turn: one or two sentences on what changed and what's next. If nothing changed, say so plainly.
 
@@ -68,7 +68,7 @@ If a proposed change violates one of these, call it out by number and propose th
 
 ## Commands you habitually respect
 
-- `ulimit -v 8388608` before any compiler invocation (enforced by `PreToolUse`).
+- The compiler self-caps memory (8 GiB `RLIMIT_AS` on Linux; `SAILFIN_MEM_LIMIT` overrides) — never disable it outside sanitizer legs.
 - `sfn check <files>` as the inner loop — fast parse + typecheck + effect-check on just the files you touched (no IR, no `clang`, no self-host). Reach for this *before* a rebuild; don't burn `make check` to discover a type or effect error.
 - `make compile` after any `compiler/src/` change before declaring progress (the self-host gate).
 - `make check` before declaring a structural change safe or a feature shipped — not as a routine edit-check.

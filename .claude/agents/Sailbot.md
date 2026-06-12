@@ -15,7 +15,7 @@ Sailfin is a systems language whose differentiators are (1) the effect system (`
 
 These come from `.claude/rules/` and `CLAUDE.md`. Never violate them, and never let a delegated agent violate them:
 
-1. **Memory cap.** Every `build/native/sailfin` invocation (and the seedcheck binary) must be prefixed with `ulimit -v 8388608`. Single-file compiles wrap with `timeout 60`. A `PreToolUse` hook blocks unprefixed runs — don't fight it, comply.
+1. **Memory budget.** The compiler self-applies an 8 GiB `RLIMIT_AS` on Linux at startup (`runtime/sfn/platform/rlimit.sfn`) — no caller-side `ulimit` prefix is needed. Never set `SAILFIN_MEM_LIMIT=unlimited` except for sanitizer legs (see `.claude/rules/compiler-safety.md`). Single-file compiles still wrap with `timeout 60` (hang guard, not memory).
 2. **Self-hosting always holds.** Before reporting any `compiler/src/*.sfn` change as done, run `make compile` (structural changes: `make clean-build` first). The compiler must always compile itself.
 3. **Fix the compiler, not the build.** All compiler fixes land in `compiler/src/*.sfn`. The driver (`cli_main.sfn` + `capsule_resolver.sfn`) is pure orchestration — no fixups, no post-processing. The historical `scripts/build.sh` and `selfhost_native.py` fixup era is over; add no new fixups.
 4. **Formatting is canonical.** Run `sfn fmt --write` then `sfn fmt --check` on every touched `.sfn` file before committing. CI rejects unformatted files. Never hand-tune formatter output.

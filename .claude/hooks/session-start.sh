@@ -9,7 +9,7 @@ cd "${CLAUDE_PROJECT_DIR:-$(pwd)}"
 echo "## Sailfin session bootstrap"
 
 if [[ -x build/native/sailfin ]]; then
-  version=$(ulimit -v 8388608 2>/dev/null; timeout 5 build/native/sailfin version 2>/dev/null | head -n1 || echo "(version probe failed)")
+  version=$(timeout 5 build/native/sailfin version 2>/dev/null | head -n1 || echo "(version probe failed)")
   echo "- compiler: build/native/sailfin present — $version"
 else
   echo "- compiler: build/native/sailfin MISSING — run \`make compile\` to self-host from the seed"
@@ -43,7 +43,7 @@ version_pin=$(grep -E '^version' compiler/capsule.toml 2>/dev/null | head -n1 | 
 cat <<'MSG'
 
 Reminders:
-- Always `ulimit -v 8388608` before running the compiler (the PreToolUse hook will block otherwise).
+- The compiler self-caps memory at 8 GiB on Linux (`SAILFIN_MEM_LIMIT` to override); still wrap single-file compiles with `timeout 60`.
 - Work lives on the `claude/*` branch; PRs auto-close issues via `Closes #N`.
 - Roadmap: site/src/pages/roadmap.astro. Status: docs/status.md.
 MSG

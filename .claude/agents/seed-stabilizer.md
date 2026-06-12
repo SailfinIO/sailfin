@@ -86,9 +86,8 @@ See `docs/build-performance.md` for the full root cause analysis and optimizatio
 
 ## Safety Rules
 
-- **Always use `ulimit -v 8388608`** before running the compiler (8GB memory cap)
-- **Always use `timeout 60`** for single-file compilations
-- **Never run the compiler without a memory cap** — runaway compilation can crash WSL
+- **The compiler self-caps memory** (8 GiB `RLIMIT_AS` on Linux at startup; `SAILFIN_MEM_LIMIT` overrides — see `.claude/rules/compiler-safety.md`). Never disable it outside sanitizer legs.
+- **Always use `timeout 60`** for single-file compilations (hang guard)
 - **Always verify with `make compile`** after proposing a change — the compiler must self-host
 
 ## Principles

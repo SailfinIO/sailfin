@@ -32,12 +32,12 @@ Implement the feature **one pipeline stage at a time**, following the architect'
 
 After each stage, run targeted tests to verify:
 ```bash
-ulimit -v 8388608 && make test-unit
+make test-unit
 ```
 
 After all stages are complete, verify self-hosting:
 ```bash
-ulimit -v 8388608 && make compile
+make compile
 ```
 
 If any step fails, diagnose the root cause before proceeding. Do not skip stages or batch multiple stages without testing.
@@ -63,12 +63,12 @@ If the reviewer flags issues, fix them before proceeding. Re-run the reviewer af
 Spawn the **test-runner** agent to run the full validation suite:
 
 ```bash
-ulimit -v 8388608 && make test
+make test
 ```
 
 Then verify self-hosting still works:
 ```bash
-ulimit -v 8388608 && make compile
+make compile
 ```
 
 If tests fail, diagnose and fix. Do not proceed to documentation with failing tests.
@@ -90,6 +90,6 @@ Spawn the **docs-updater** agent to update documentation in this order:
 
 - The compiler must self-host after every stage (`make compile` must pass)
 - Keep changes minimal and focused — do not refactor surrounding code
-- Always apply `ulimit -v 8388608` before running the compiler
+- The compiler self-caps memory (8 GiB on Linux); see `.claude/rules/compiler-safety.md`
 - Never proceed past the design gate without user approval
 - If the feature requires a self-hosting migration (new syntax used by the compiler itself), the architect's plan must include the seed transition strategy
