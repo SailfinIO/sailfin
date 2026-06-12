@@ -146,6 +146,15 @@ Source: `runtime/sfn/string.sfn` — 14 sites (1 in-place-mutation, 4 use-after-
 
 Source: `runtime/sfn/memory/rc.sfn` — 6 sites (3 in-place-mutation, 1 use-after-free, 2 shared-mutable-alias).
 
+> **Phase R1 (#1218, E9 of #1209):** the raw allocation/header-init interior
+> (`sfn_rc_sfn_alloc`) and the release-to-zero `free` (`sfn_rc_sfn_release`) are
+> now wrapped in `unsafe { }` — the author-asserted raw region completing the
+> memory-core migration after E8 (#1217). The release-to-zero `free` is bounded
+> by the `prev == 1` last-reference proof (the structural analogue of the
+> ownership checker's no-live-alias `E0903` proof). The atomic refcount header
+> remains intentionally shared across handles by construction; `unsafe`
+> acknowledges that raw region rather than eliminating the alias.
+
 | File | Lines | Symbol | Hazard | Notes |
 |---|---|---|---|---|
 | `runtime/sfn/memory/rc.sfn` | 92-94 | `sfn_rc_sfn_alloc` | in-place-mutation | Initializes RcHeader fields (refcount=1 at line 93, drop_fn at line 94) by storing through the casted malloc pointer; buffer is fresh here but these same header bytes are later mutated through derived aliases by retain/release, so included conservatively. |
@@ -158,6 +167,16 @@ Source: `runtime/sfn/memory/rc.sfn` — 6 sites (3 in-place-mutation, 1 use-afte
 ### memory/mem
 
 Source: `runtime/sfn/memory/mem.sfn` — 9 sites (3 in-place-mutation, 2 use-after-free, 4 shared-mutable-alias).
+
+> **Phase R1 (#1218, E9 of #1209):** the raw interiors of `copy_bytes`
+> (`memcpy`), `get_field` (safe-buffer `malloc` + zero-fill), `bounds_check`
+> (`write`/`abort` failure path), `free` (libc `free`), and `sfn_alloc_struct`
+> (arena `alloc`/`memset` + `calloc`) are now wrapped in `unsafe { }` — the
+> author-asserted raw region completing the memory-core migration after E8
+> (#1217). The fresh-allocation interiors (`get_field`, `sfn_alloc_struct`) are
+> uniquely owned at the zero-fill, so the in-place writes are sound; the
+> caller-supplied `copy_bytes`/`free` boundaries stay raw-by-contract under the
+> descriptor ABI and `unsafe` marks them explicitly.
 
 | File | Lines | Symbol | Hazard | Notes |
 |---|---|---|---|---|
@@ -174,6 +193,16 @@ Source: `runtime/sfn/memory/mem.sfn` — 9 sites (3 in-place-mutation, 2 use-aft
 ### array
 
 Source: `runtime/sfn/array.sfn` — 11 sites (2 in-place-mutation, 2 use-after-free, 7 shared-mutable-alias).
+
+> **Phase R1 (#1218, E9 of #1209):** the in-place push/grow and concat raw
+> element-storage trampolines (`sfn_array_sfn_push_slot`,
+> `sfn_array_sfn_push_string`, `sfn_array_sfn_concat`, routing through the `_v2`
+> C entrypoints) are now wrapped in `unsafe { }` — the author-asserted raw
+> region completing the memory-core migration after E8 (#1217). The in-place
+> grow is sound under the caller's unique ownership of the array (no live
+> alias — the #1205 hazard class). The remaining stubs (`create`/`push`/`slice`/
+> `map`/`filter`/`reduce`) touch no raw storage. Element-storage soundness over
+> aliased inputs lands with the arena-backed bodies (M3 per §2.1.1).
 
 | File | Lines | Symbol | Hazard | Notes |
 |---|---|---|---|---|

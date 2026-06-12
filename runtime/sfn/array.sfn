@@ -98,7 +98,13 @@ fn sfn_array_sfn_push(arr: * u8, elem_ptr: * u8, elem_size: i64, arena: * u8) ->
 // accepted to lock the spec ABI but ignored until M3 ships the
 // arena-backed body.
 fn sfn_array_sfn_concat(a: * u8, b: * u8, elem_size: i64, arena: * u8) -> * u8 {
-    return sailfin_runtime_concat_v2(a, b);
+    // Allocate-and-copy over raw element storage (#1218 / E9, proposal
+    // §5.1): the `_v2` concat allocates a fresh backing buffer and copies
+    // both spans. The raw element-storage interior is the author-asserted
+    // unsafe region; the result is a freshly-owned array — no alias of
+    // either input's storage (the #1205 hazard class, structurally closed
+    // for the array core).
+    unsafe { return sailfin_runtime_concat_v2(a, b); }
 }
 
 // `sfn_array_sfn_slice(arr, start, end)` — non-allocating view per
@@ -126,7 +132,12 @@ fn sfn_array_sfn_slice(arr: * u8, start: i64, end: i64) -> * u8 { return arr; }
 // (`sailfin_runtime.c:6761`), with the same `max(cap*2, len+1, 8)`
 // growth schedule.
 fn sfn_array_sfn_push_string(arr: * u8, text: * u8) -> * u8 {
-    return sailfin_runtime_append_string_v2(arr, text);
+    // In-place string-element push/grow (#1218 / E9, proposal §5.1): the
+    // `_v2` append reallocs `arr`'s backing buffer in place and writes
+    // the new element. The raw element-storage interior is the
+    // author-asserted unsafe region; soundness is the caller's unique
+    // ownership of `arr` (the in-place grow has no live alias).
+    unsafe { return sailfin_runtime_append_string_v2(arr, text); }
 }
 
 // `sfn_array_sfn_push_slot(data_ptr, len_ptr, cap_ptr, elem_size)` —
@@ -140,7 +151,16 @@ fn sfn_array_sfn_push_string(arr: * u8, text: * u8) -> * u8 {
 // When `sfn_array_sfn_push` grows a real body (M3), this wrapper
 // retires.
 fn sfn_array_sfn_push_slot(data_ptr: * * u8, len_ptr: * i64, cap_ptr: * i64, elem_size: i64) -> * u8 {
-    return sailfin_runtime_array_push_slot_v2(data_ptr, len_ptr, cap_ptr, elem_size);
+    // In-place push/grow over raw element storage (#1218 / E9, proposal
+    // §5.1): the `_v2` slot helper reallocs the backing buffer in place
+    // and returns the next writable slot. The raw `* * u8` / `* i64`
+    // element-storage handles are the author-asserted unsafe region;
+    // soundness is the caller's unique ownership of the array being
+    // pushed — the in-place grow has no live alias (the #1205 hazard
+    // class, structurally closed for the array core).
+    unsafe {
+        return sailfin_runtime_array_push_slot_v2(data_ptr, len_ptr, cap_ptr, elem_size);
+    }
 }
 
 // `sfn_array_sfn_map(arr, mapper) -> arr` — placeholder per §2.3.3.
