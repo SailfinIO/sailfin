@@ -127,13 +127,13 @@ Source: `runtime/sfn/string.sfn` — 14 sites (1 in-place-mutation, 4 use-after-
 
 | File | Lines | Symbol | Hazard | Notes |
 |---|---|---|---|---|
-| `runtime/sfn/string.sfn` | 159-161 | `sfn_str_sfn_slice` | use-after-free | Returns a fresh substring buffer from substring_unchecked; verified in C: allocation goes through _rt_malloc -> sfn_arena_alloc(sfn_arena_global()) when the arena is enabled, so an arena reset/recycle invalidates the returned * u8 while caller-held handles persist (planned SfnSlice form would instead return an interior pointer into text). |
+| `runtime/sfn/string.sfn` | 159-161 | `sfn_str_sfn_slice` | use-after-free | **RESOLVED — Phase R1 (#1217).** Migrated: `sfn_str_sfn_slice(text: *u8, start: f64, end: f64) -> Slice` now returns a non-owning `Slice` view (no allocation), eliminating the arena-stranding hazard. Line numbers are stale (body rewritten). |
 | `runtime/sfn/string.sfn` | 170 | `sfn_str_sfn_to_cstr` | shared-mutable-alias | Identity return hands the string's own data pointer back as a C-string view — a second live raw handle to the same bytes, typically passed to externs that may retain it past the backing store's (arena) lifetime. |
 | `runtime/sfn/string.sfn` | 179 | `sfn_str_sfn_from_cstr` | shared-mutable-alias | Adopts a foreign NUL-terminated C buffer as a Sailfin string without copying — the C-side owner and the Sailfin handle alias the same bytes with no ownership transfer. |
 | `runtime/sfn/string.sfn` | 179 | `sfn_str_sfn_from_cstr` | use-after-free | The adopted buffer's lifetime stays with the foreign C caller; if the C side frees or reuses it, the Sailfin string handle reads freed memory. |
-| `runtime/sfn/string.sfn` | 191-193 | `sfn_str_sfn_concat` | use-after-free | Result comes from the legacy C concat whose allocation is arena-routed (_rt_malloc -> sfn_arena_alloc when arena enabled; verified in sailfin_runtime.c), so the returned raw * u8 is stranded by any arena reset while callers still hold it. |
-| `runtime/sfn/string.sfn` | 206-208 | `sfn_str_sfn_append` | in-place-mutation | Verified in the C body: sailfin_runtime_string_append uses sfn_arena_realloc's grow-if-at-tip path (or heap realloc) and then memcpy's the suffix into out+buf_len — extending/writing buf's existing allocation in place while other handles may reference those bytes (the #892 'stale in-place-append window' bug was exactly this). |
-| `runtime/sfn/string.sfn` | 206-208 | `sfn_str_sfn_append` | use-after-free | Verified in the C body: 'buf is CONSUMED: caller transfers ownership, old pointer becomes invalid' — realloc/sfn_arena_realloc may relocate, so caller-held copies of the old buf pointer become stale after the call. |
+| `runtime/sfn/string.sfn` | 191-193 | `sfn_str_sfn_concat` | use-after-free | **RESOLVED — Phase R1 (#1217).** Migrated: `sfn_str_sfn_concat(a: *u8, b: *u8) -> OwnedBuf` now returns an `OwnedBuf` built via the global arena; the raw-* u8 strandable return is gone. Line numbers are stale (body rewritten). Hazard closed by ownership transfer. |
+| `runtime/sfn/string.sfn` | 206-208 | `sfn_str_sfn_append` | in-place-mutation | **RESOLVED — Phase R1 (#1217).** Migrated: `sfn_str_sfn_append(buf: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedBuf` is now a consume-and-return move; the grow-at-tip raw interior is behind `unsafe { }` in arena.sfn and reachable only through the unique `OwnedBuf` owner, so the in-place mutation is no longer reachable via an alias. Line numbers are stale. |
+| `runtime/sfn/string.sfn` | 206-208 | `sfn_str_sfn_append` | use-after-free | **RESOLVED — Phase R1 (#1217).** The buf-is-CONSUMED contract is now enforced by the ownership checker (E5, #1214/#1215): the old binding is dead after the move-return; no caller-held stale copy can survive. Line numbers are stale. |
 | `runtime/sfn/string.sfn` | 259-261 | `sfn_str_sfn_grapheme_at` | shared-mutable-alias | Verified: the C runtime returns the immediate-codepoint tagged pseudo-pointer itself for 1-byte clusters (sailfin_runtime.c comment 'returns the immediate pseudo-pointer itself at index 0') — a raw i8*-shaped value that is not a real allocation, so storing/dereferencing/freeing it as a pointer is unsound. |
 | `runtime/sfn/string.sfn` | 306-308 | `sfn_str_sfn_from_codepoint` | shared-mutable-alias | Forwards a fresh _rt_malloc'd buffer (heap or global arena, per the C body) out as a raw * u8 with no tracked owner or free discipline at the Sailfin layer; callers cast/store it freely, so multiple untracked handles to one buffer can arise. |
 | `runtime/sfn/string.sfn` | 319-321 | `sfn_str_sfn_from_byte` | shared-mutable-alias | Same pattern as from_codepoint — C-side _rt_malloc'd 1-byte NUL-terminated buffer returned as raw * u8 with untracked ownership; prelude's char_from_code casts and propagates it as string. |
@@ -557,16 +557,25 @@ sites for the whole epic and the first targets for E8/E9:
    address equality with no containment check against the page. The companion
    rows at lines 354-357 (`use-after-free`, relocating path) and 356
    (`in-place-mutation`, the relocation `memcpy`) complete the realloc surface.
+   **Phase R1 (#1217):** the grow-at-tip path inside `sfn_arena_sfn_realloc` is
+   now wrapped in `unsafe { }` (author-asserted raw region). It remains reachable
+   from safe Sailfin code only through a unique `OwnedBuf`; the ownership checker
+   (E5, #1214/#1215) proves no live alias at the mutation site.
 2. **String append over that realloc** — `runtime/sfn/string.sfn`,
    `sfn_str_sfn_append`, lines 206-208 (one `in-place-mutation` row, one
-   `use-after-free` row): the C body (`sailfin_runtime_string_append`) rides
-   `sfn_arena_realloc`'s grow-if-at-tip path and memcpy's the suffix into
+   `use-after-free` row): the C body (`sailfin_runtime_string_append`) rode
+   `sfn_arena_realloc`'s grow-if-at-tip path and memcpy'd the suffix into
    `out+buf_len`, mutating `buf`'s existing allocation while other handles may
    reference those bytes (the #892 "stale in-place-append window" was this
-   exact site), and the documented buf-is-CONSUMED contract means caller-held
+   exact site), and the documented buf-is-CONSUMED contract meant caller-held
    copies of the old pointer go stale whenever the realloc relocates.
+   **Phase R1 (#1217):** `sfn_str_sfn_append` is now a consume-and-return move
+   (`OwnedBuf -> OwnedBuf`); the raw realloc interior is behind `unsafe { }` in
+   arena.sfn; uniqueness is enforced by the ownership checker. Both rows are
+   annotated RESOLVED above. The interim copy-on-alias fallback is tracked
+   separately on #1205 and is out of scope for #1217.
 
-Neither site can be made sound by local fixes alone: the fix is either proving
-unique ownership of the buffer at the call site (E8) or forcing the copy path
-(E9). Every other row in this inventory is the same decision applied to a
-different site.
+The #1205 corruption class is **structurally closed** by Phase R1: the hazard
+is eliminated by uniqueness enforcement rather than call-site whack-a-mole.
+Every other row in this inventory is the same decision applied to a different
+site, still pending later E8/E9 work.
