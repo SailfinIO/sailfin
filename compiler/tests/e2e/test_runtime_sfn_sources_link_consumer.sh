@@ -114,7 +114,15 @@ ll-sources = ["ir/runtime_globals.ll"]
 # local / array index in the linked IR) now references them, so mem.sfn
 # is required too or the link fails with "undefined reference to
 # `sfn_mem_bounds_check`".
-sfn-sources = ["../sfn/test_marker.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/io.sfn", "../sfn/string.sfn", "../sfn/array.sfn", "../sfn/memory/mem.sfn"]
+# #1289 (#1283 Gap 1) collapsed string.sfn's inlined OwnedBuf/_str_buf_*
+# copy into an `import { OwnedBuf, owned_buf_new, owned_buf_append } from
+# "./memory/ownedbuf"`, so string.sfn is no longer self-contained:
+# ownedbuf.sfn must be listed (its `.sfn-asm` is staged by #1288 so
+# string.sfn's emit resolves the cross-module struct-returning call) and
+# arena.sfn must be listed (ownedbuf's `sfn_arena_sfn_*` externs resolve
+# to its defines at link). Without both, string.sfn's emit dies with
+# "cannot resolve return type for call to `owned_buf_new`".
+sfn-sources = ["../sfn/test_marker.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/io.sfn", "../sfn/memory/arena.sfn", "../sfn/memory/ownedbuf.sfn", "../sfn/string.sfn", "../sfn/array.sfn", "../sfn/memory/mem.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm"]
 prelude-entry = "../prelude.sfn"
@@ -150,8 +158,9 @@ EOF
     # `@sfn_to_debug_string` (string.sfn), and `@sfn_array_sfn_*`
     # (array.sfn). io.sfn additionally imports `./platform/libc`
     # (`write`), so libc.sfn must exist on disk for the consumer's
-    # `sfn emit` to resolve the extern. string.sfn / array.sfn have
-    # no imports.
+    # `sfn emit` to resolve the extern. array.sfn has no imports;
+    # string.sfn imports `./memory/ownedbuf` (#1289), so ownedbuf.sfn
+    # must exist on disk too (symlinked below).
     ln -s "$REPO_ROOT/runtime/sfn/io.sfn" "$ws/runtime/sfn/io.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/string.sfn" "$ws/runtime/sfn/string.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/array.sfn" "$ws/runtime/sfn/array.sfn"
@@ -161,6 +170,14 @@ EOF
     # its externs), so a bare symlink suffices.
     mkdir -p "$ws/runtime/sfn/memory"
     ln -s "$REPO_ROOT/runtime/sfn/memory/mem.sfn" "$ws/runtime/sfn/memory/mem.sfn"
+    # #1289 dep — string.sfn now imports `./memory/ownedbuf`
+    # (`OwnedBuf` / `owned_buf_new` / `owned_buf_append`). ownedbuf.sfn
+    # must be on disk for string.sfn's emit to resolve the import, and
+    # arena.sfn must be on disk + linked because ownedbuf's inline
+    # `sfn_arena_sfn_*` externs resolve to arena.sfn's defines. Both
+    # inline their own externs, so bare symlinks suffice.
+    ln -s "$REPO_ROOT/runtime/sfn/memory/arena.sfn" "$ws/runtime/sfn/memory/arena.sfn"
+    ln -s "$REPO_ROOT/runtime/sfn/memory/ownedbuf.sfn" "$ws/runtime/sfn/memory/ownedbuf.sfn"
 
     # The sfn-source under test. Tiny self-contained module.
     cat > "$ws/runtime/sfn/test_marker.sfn" <<'EOF'

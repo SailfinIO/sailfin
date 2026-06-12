@@ -65,8 +65,10 @@
 // same reason `runtime/sfn/memory/rc.sfn`, `runtime/sfn/string.sfn`,
 // and `runtime/sfn/array.sfn` inline their externs: cross-module
 // extern resolution through the seed compiler hits the `cannot
-// resolve return type for call to …` fatal that issue #306 has not
-// closed yet, surfacing during emission. Inlining the three
+// resolve return type for call to …` fatal (the struct-return gap of
+// #1283 Gap 1; #1288 fixed the runtime-sfn-source emit path, but
+// de-inlining these C-ABI externs is separate follow-up work),
+// surfacing during emission. Inlining the three
 // declarations we need keeps this module self-contained for every
 // seed. Once the cross-module path lands, a follow-up PR flips
 // these to imports without touching the bodies. Note that libc

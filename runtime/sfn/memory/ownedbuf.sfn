@@ -60,8 +60,10 @@
 // Why inline `extern fn` declarations rather than imports? The same
 // reason `arena.sfn` / `rc.sfn` / `string.sfn` inline theirs:
 // cross-module extern resolution through the seed compiler still
-// hits the issue-#306 `cannot resolve return type for call to …`
-// fatal. The `sfn_arena_sfn_alloc` / `sfn_arena_sfn_realloc`
+// hits the `cannot resolve return type for call to …` fatal (the
+// struct-return gap of #1283 Gap 1; #1288 fixed the
+// runtime-sfn-source emit path, but de-inlining these C-ABI externs
+// is separate follow-up work). The `sfn_arena_sfn_alloc` / `sfn_arena_sfn_realloc`
 // declarations match the export signatures in
 // `runtime/sfn/memory/arena.sfn` exactly; linking this module
 // therefore requires the arena module (or the C arena's namesakes

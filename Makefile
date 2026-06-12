@@ -1059,7 +1059,7 @@ ci-cross-windows:
 	: "readlink reference once the MinGW stub is gone; Windows selects the"; \
 	: "GetModuleFileNameA leg instead. The rest are target-independent IR"; \
 	: "compiled for mingw. Each <module>:<source> pair is space-separated."; \
-	RUNTIME_MODS="prelude:runtime/prelude.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn"; \
+	RUNTIME_MODS="prelude:runtime/prelude.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn ownedbuf:runtime/sfn/memory/ownedbuf.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn"; \
 	RUNTIME_OBJS=""; \
 	for pair in $$RUNTIME_MODS; do \
 		mod="$${pair%%:*}"; \
