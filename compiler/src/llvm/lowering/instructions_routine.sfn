@@ -247,6 +247,16 @@ fn lower_routine_instruction(function: NativeFunction, start_index: int, llvm_re
         }
         current_temp = drop_result.next_temp;
 
+        // The structured-join barrier: blocks until every registered child
+        // completes. Its i64 return is the nursery fault code (0 = clean).
+        // The fail-closed guarantee is enforced at the spawn site —
+        // `sfn_spawn` (future.sfn) fails the spawn and never enqueues a task
+        // it cannot register, so no untracked task reaches exit — making the
+        // exit code a defense-in-depth / forward seam here. Surfacing a
+        // non-zero fault as a language-level throw/abort needs the
+        // nursery→exception bridge, which is explicitly v0-deferred (the
+        // `parent`/`faulted` fields in `Nursery` are the seam for it); the
+        // lowering therefore does not branch on the code in v0.
         let exit_temp = format_temp_name(current_temp);
         current_temp += 1;
         current_lines.push("  " + exit_temp
