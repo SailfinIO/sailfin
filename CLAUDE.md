@@ -204,8 +204,11 @@ When adding features or making design choices:
   is a library concern or post-1.0. Don't dilute the core with half-finished
   ownership, AI syntax, or GPU features.
 - **Don't ship unfinished safety claims.** "Parsed but not enforced" is worse than
-  absent — it teaches users to ignore the feature. Ownership, taint, and AI
-  constructs stay out of marketing until enforced end-to-end.
+  absent — it teaches users to ignore the feature. Taint and AI constructs stay
+  out of marketing until enforced end-to-end. **Exception:** runtime
+  ownership/aliasing enforcement *is* shipped end-to-end for the native runtime
+  (Phase R1, epic #1209), so it may be documented as enforced for that surface;
+  user-facing ownership stays previewed until Phase U.
 - **Libraries over keywords.** A keyword can never become a variable name. Only
   add keywords for constructs that can't be library functions. AI constructs
   (`model`, `prompt`, `tool`, `pipeline`) are migrating to the `sfn/ai` capsule;
@@ -235,9 +238,17 @@ Prefer the new forms where the parser already accepts them. Full plan:
 
 - No pipeline operator (`|>`) — use function calls
 - No currency literals — use numeric literals with comments (`0.05 // USD`)
-- `Affine<T>` / `Linear<T>` parsed but **not enforced** (post-1.0). The native
-  backend tracks some ownership metadata internally; no user-facing guarantees.
-  Sailfin's safety story is effects and capabilities, **not** borrow checking.
+- **Ownership/aliasing analysis** — a bounded unique-ownership / no-aliased-mutation
+  / no-use-after-free analysis is **enforced on the native runtime** for 1.0 as a
+  memory-safety floor (`ownership_checker.sfn`, epic #1209; closes the #1205
+  aliasing-corruption hazard structurally). It is **not a fourth pillar** — it is a
+  soundness requirement in the same category as type checking, not a marketed
+  differentiator; the three pillars stay effects, capabilities, concurrency.
+  `Affine<T>` / `Linear<T>` are enforced single-use where used (`E0901`/`E0907`);
+  `OwnedBuf` / `Slice` carry the runtime's owned-buffer surface. **User-facing
+  ownership and full borrow checking remain post-1.0** (Phase U). The model is a
+  deliberately **extensible floor** built upward from (D1 expansion mandate),
+  **not** a Rust-style borrow checker. See `reference/preview/ownership.md`.
 - `PII<T>` / `Secret<T>` parsed, no runtime enforcement (post-1.0)
 - `model` / `prompt` / `tool` / `pipeline` blocks emit metadata only (migrating
   to the `sfn/ai` capsule)
