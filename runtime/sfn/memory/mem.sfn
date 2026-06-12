@@ -89,22 +89,29 @@ fn _sfn_mem_safe_buf_size() -> i64 { return 4096; }
 // `(i8*, i8*) -> i8*`.
 fn sfn_mem_get_field(base: * u8, field: * u8) -> * u8 {
     if sfn_mem_get_field_buf_addr == 0 {
-        let size: i64 = _sfn_mem_safe_buf_size();
-        let buf: * u8 = malloc(size as usize);
-        if buf as i64 == 0 { return buf; }
-        // Zero-fill so the buffer reads as empty/false/0 for every
-        // type interpretation (matches the C static's zero-init).
-        let mut i: i64 = 0;
-        loop {
-            if i >= size { break; }
-            let slot: * u8 = buf + i;
-            let byte_slot: * i64 = slot as * i64;
-            // Zero a full 8-byte word at a time; `size` (4096) is a
-            // multiple of 8 so the loop never writes past the buffer.
-            atomic_store(byte_slot, 0);
-            i = i + 8;
+        // Raw safe-buffer allocation + zero-fill interior (#1218 / E9,
+        // proposal §5.1): the libc `malloc` and the raw-pointer word
+        // stores are the author-asserted unsafe region. The buffer is
+        // freshly allocated and uniquely owned here, so the in-place
+        // zero-fill is sound.
+        unsafe {
+            let size: i64 = _sfn_mem_safe_buf_size();
+            let buf: * u8 = malloc(size as usize);
+            if buf as i64 == 0 { return buf; }
+            // Zero-fill so the buffer reads as empty/false/0 for every
+            // type interpretation (matches the C static's zero-init).
+            let mut i: i64 = 0;
+            loop {
+                if i >= size { break; }
+                let slot: * u8 = buf + i;
+                let byte_slot: * i64 = slot as * i64;
+                // Zero a full 8-byte word at a time; `size` (4096) is a
+                // multiple of 8 so the loop never writes past the buffer.
+                atomic_store(byte_slot, 0);
+                i = i + 8;
+            }
+            sfn_mem_get_field_buf_addr = buf as i64;
         }
-        sfn_mem_get_field_buf_addr = buf as i64;
     }
     return sfn_mem_get_field_buf_addr as * u8;
 }
@@ -117,7 +124,11 @@ fn sfn_mem_copy_bytes(dest: * u8, src: * u8, length: i64) -> void {
     if dest as i64 == 0 { return; }
     if src as i64 == 0 { return; }
     if length <= 0 { return; }
-    memcpy(dest, src, length as usize);
+    // Raw byte copy (#1218 / E9, proposal §5.1): the libc `memcpy` over
+    // two caller-supplied raw pointers is the author-asserted unsafe
+    // region. The null/length guards above bound the access; the caller
+    // owns the `dest`/`src` lifetimes at this descriptor-routed boundary.
+    unsafe { memcpy(dest, src, length as usize); }
 }
 
 // `sfn_mem_bounds_check(index, length)` — aborts with a diagnostic on
@@ -152,8 +163,13 @@ fn sfn_mem_bounds_check(index: i64, length: i64) -> void {
         // 36 bytes including the trailing newline (the literal has no
         // NUL in its byte length; `write` takes an explicit count).
         let msg: * u8 = "[stage2-native] bounds_check failed\n" as * u8;
-        write(2, msg, 36 as usize);
-        abort();
+        // Raw diagnostic + termination (#1218 / E9, proposal §5.1): the
+        // libc `write` to fd 2 and `abort()` are the author-asserted
+        // unsafe FFI region.
+        unsafe {
+            write(2, msg, 36 as usize);
+            abort();
+        }
     }
 }
 
@@ -169,7 +185,12 @@ fn sfn_mem_bounds_check(index: i64, length: i64) -> void {
 fn sfn_mem_free(ptr: * u8) -> void {
     if ptr as i64 == 0 { return; }
     if sfn_arena_enabled() { return; }
-    free(ptr);
+    // Raw disposal (#1218 / E9, proposal §5.1): the libc `free` is the
+    // author-asserted unsafe region. The null guard and the arena-mode
+    // no-op guard above keep an arena pointer from reaching libc `free`;
+    // the malloc-fallback boxed-return path that emits `runtime.free`
+    // hands a uniquely-owned allocation here.
+    unsafe { free(ptr); }
 }
 
 // `sfn_alloc_struct(size_bytes)` — faithful port of
@@ -190,10 +211,17 @@ fn sfn_mem_free(ptr: * u8) -> void {
 // call site through `RuntimeCallOverrides.return_attributes`.
 fn sfn_alloc_struct(size_bytes: i64) -> * u8 {
     if size_bytes <= 0 { return 0 as * u8; }
-    if sfn_arena_enabled() {
-        let p: * u8 = sfn_arena_alloc(sfn_arena_global(), size_bytes as usize, 8 as usize);
-        if p as i64 != 0 { memset(p, 0, size_bytes as usize); }
-        return p;
+    // Raw allocation + zero-fill interior (#1218 / E9, proposal §5.1):
+    // the arena bump allocator, `memset`, and the libc `calloc` fallback
+    // are the author-asserted unsafe region. The returned block is
+    // freshly allocated and uniquely owned, so the in-place zero-fill is
+    // sound.
+    unsafe {
+        if sfn_arena_enabled() {
+            let p: * u8 = sfn_arena_alloc(sfn_arena_global(), size_bytes as usize, 8 as usize);
+            if p as i64 != 0 { memset(p, 0, size_bytes as usize); }
+            return p;
+        }
+        return calloc(1 as usize, size_bytes as usize);
     }
-    return calloc(1 as usize, size_bytes as usize);
 }

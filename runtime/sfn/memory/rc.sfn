@@ -87,12 +87,22 @@ struct RcHeader {
 // ship (Phase 1 of the runtime prereqs in CLAUDE.md). Architect
 // spec: §2.1.2 of `docs/runtime_architecture.md`.
 fn sfn_rc_sfn_alloc(size: i64, drop_fn: * u8) -> * u8 {
-    let header_ptr = malloc((size + 16) as usize);
-    if header_ptr as i64 == 0 { return header_ptr; }
-    let header = header_ptr as * RcHeader;
-    header.refcount = 1;
-    header.drop_fn = drop_fn;
-    return header_ptr + 16;
+    // Raw allocation + header-init interior (#1218 / E9, proposal §5.1):
+    // the libc `malloc`, the raw-pointer header field stores, and the
+    // payload pointer arithmetic are the author-asserted unsafe region.
+    // The freshly-allocated block is uniquely owned by construction — no
+    // alias exists yet — so the in-place header initialisation is sound.
+    // Completes the memory-core migration after E8 (#1217) by giving
+    // rc.sfn the same explicit unsafe boundary the arena/string hot path
+    // already carries.
+    unsafe {
+        let header_ptr = malloc((size + 16) as usize);
+        if header_ptr as i64 == 0 { return header_ptr; }
+        let header = header_ptr as * RcHeader;
+        header.refcount = 1;
+        header.drop_fn = drop_fn;
+        return header_ptr + 16;
+    }
 }
 
 // `sfn_rc_sfn_retain(payload)` atomically increments the
@@ -121,5 +131,14 @@ fn sfn_rc_sfn_release(payload: * u8) -> void {
     let slots = payload as * i64;
     let refcount_ptr = slots - 2;
     let prev = atomic_sub(refcount_ptr, 1);
-    if prev == 1 { free(refcount_ptr as * u8); }
+    // Release-to-zero disposal (#1218 / E9, proposal §5.1): the `prev ==
+    // 1` guard proves this release dropped the *last* live reference —
+    // no other alias can still observe the header — so the raw libc
+    // `free` is sound. This is the structural analogue of the ownership
+    // checker's no-live-alias proof for `E0903` (use-after-free): the
+    // raw-pointer free is the author-asserted unsafe region, and the
+    // atomic refcount reaching zero is the uniqueness proof.
+    if prev == 1 {
+        unsafe { free(refcount_ptr as * u8); }
+    }
 }
