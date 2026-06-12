@@ -1045,7 +1045,11 @@ ci-cross-windows:
 	: "runtime/native/capsule.toml's sfn-sources (+ the prelude-entry),"; \
 	: "MINUS process.sfn — Windows resolves @sfn_process_run from the"; \
 	: "_WIN32 C wrapper in sailfin_runtime.c, so linking the Sailfin"; \
-	: "object too would duplicate the symbol. A guard test"; \
+	: "object too would duplicate the symbol — and MINUS"; \
+	: "platform/rlimit.sfn, whose getrlimit/setrlimit libc externs do"; \
+	: "not exist under mingw; Windows resolves @apply_default_mem_limit"; \
+	: "from the weak no-op stub in runtime/native/ir/runtime_globals.ll"; \
+	: "instead. A guard test"; \
 	: "(compiler/tests/e2e/test_cross_windows_runtime_modules.sh) asserts"; \
 	: "this list stays in sync with the manifest (Risk R4). clock is"; \
 	: "re-emitted with SAILFIN_TARGET_OS=Windows for the errno->_errno"; \

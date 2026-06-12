@@ -58,12 +58,16 @@ prelude_val="$(echo "$prelude_line" \
     | sed -E 's/^[^=]*=//; s/[[:space:]]//g; s/"//g')"
 
 # Expected cross-windows source set: prelude-entry + every sfn-source,
-# minus process.sfn and the pthread-dependent concurrency/* modules,
-# normalized to repo-relative paths.
+# minus process.sfn, the pthread-dependent concurrency/* modules, and
+# platform/rlimit.sfn (its getrlimit/setrlimit libc externs do not
+# exist under mingw; Windows resolves @apply_default_mem_limit from
+# the weak no-op stub in runtime/native/ir/runtime_globals.ll
+# instead), normalized to repo-relative paths.
 expected="$( { echo "$prelude_val"; echo "$sfn_vals"; } \
     | norm \
     | grep -v '^runtime/sfn/process\.sfn$' \
     | grep -v '^runtime/sfn/concurrency/' \
+    | grep -v '^runtime/sfn/platform/rlimit\.sfn$' \
     | grep -v '^$' \
     | sort -u )"
 
@@ -100,6 +104,26 @@ if echo "$actual" | grep -q '^runtime/sfn/process\.sfn$'; then
     fail "process.sfn is in RUNTIME_MODS — would duplicate the _WIN32 C @sfn_process_run"
 else
     ok "process.sfn excluded from cross-windows RUNTIME_MODS"
+fi
+
+# The rlimit.sfn exclusion must stay meaningful too: in the manifest
+# (so Linux/macOS get the real self-cap), NOT in RUNTIME_MODS (mingw
+# cannot resolve its getrlimit/setrlimit externs), and the weak
+# Windows stub must exist in runtime_globals.ll.
+if echo "$sfn_vals" | norm | grep -q '^runtime/sfn/platform/rlimit\.sfn$'; then
+    ok "rlimit.sfn present in manifest sfn-sources (exclusion is meaningful)"
+else
+    fail "rlimit.sfn no longer in manifest — revisit the cross-windows exclusion"
+fi
+if echo "$actual" | grep -q '^runtime/sfn/platform/rlimit\.sfn$'; then
+    fail "rlimit.sfn is in RUNTIME_MODS — getrlimit/setrlimit cannot resolve under mingw"
+else
+    ok "rlimit.sfn excluded from cross-windows RUNTIME_MODS"
+fi
+if grep -q 'define weak i32 @apply_default_mem_limit' "$REPO_ROOT/runtime/native/ir/runtime_globals.ll"; then
+    ok "weak @apply_default_mem_limit stub present in runtime_globals.ll"
+else
+    fail "missing weak @apply_default_mem_limit stub in runtime_globals.ll — Windows link would break"
 fi
 
 echo ""

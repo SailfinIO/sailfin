@@ -43,6 +43,15 @@
 // long-form rationale, the `as * u8` cast-quirk note, and the
 // inline-numeric-literal convention for constants the seed cannot
 // yet spell as char literals).
+//
+// Windows cross-link: this module is excluded from the
+// `ci-cross-windows` bridge's RUNTIME_MODS (mingw has no
+// getrlimit/setrlimit, so the externs cannot resolve in a static
+// link — the process.sfn exclusion precedent). The Windows binary
+// resolves `apply_default_mem_limit` from the weak no-op stub in
+// `runtime/native/ir/runtime_globals.ll`; on Linux/macOS this
+// module's strong definition wins. Sync pinned by
+// `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.
 // Overlay matching the Linux x86_64 `struct rlimit`: two 8-byte
 // unsigned slots (`rlim_cur`, `rlim_max`), 16 bytes total, no
 // padding. `RLIM_INFINITY` is all-bits-set, which reads back as
