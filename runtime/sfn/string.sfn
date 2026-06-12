@@ -42,6 +42,45 @@
 // every seed, regardless of which libc declarations have shipped.
 // Once the seed catches up, a follow-up PR can flip these to a
 // cross-module import without touching the bodies.
+//
+// #1217 (Phase R1): `OwnedBuf` is inlined here — definition
+// byte-identical to `runtime/sfn/memory/ownedbuf.sfn:112-117` (four-slot
+// i64 layout, the `_addr` discipline) — and the grow/append move logic
+// is reproduced through the private `_str_buf_*` helpers below. It is
+// NOT imported from ownedbuf.sfn: the runtime-sfn-source emit path
+// (`_compile_runtime_sfn_sources` in cli_main.sfn) emits each runtime
+// module standalone and does NOT thread a sibling runtime module's
+// signatures, so a cross-module call whose return type is the `OwnedBuf`
+// aggregate hits `cannot resolve return type for call to …` at
+// `core_call_emission.sfn:368` (an inline `extern fn` can't carry the
+// struct either — externs are C-ABI-only, E0805). This is the #999
+// class of bug, but in an emit path #999's fix did not cover; tracked
+// at #1283 (NOT the closed, unrelated #306). Same-module calls to
+// `_str_buf_new` / `_str_buf_append` resolve fine, and those helpers
+// route growth through the **C** arena externs (`sfn_arena_alloc` /
+// `sfn_arena_realloc`, like `sfn_arena_global`) — the always-linked
+// production allocator — NOT the Sailfin `sfn_arena_sfn_*` exports, so
+// string.sfn stays self-contained for every seed and link set (it is
+// not guaranteed that `arena.sfn` is linked wherever string.sfn is; the
+// synthetic-workspace link test pins exactly that). The LLVM `%OwnedBuf
+// = type { i64, i64, i64, i64 }` aggregate unifies at link with
+// ownedbuf.sfn's. Once #1283 lands, the inline struct + `_str_buf_*`
+// duplication collapses to a single import.
+struct OwnedBuf {
+    ptr_addr: i64;
+    len: i64;
+    cap: i64;
+    arena_addr: i64;
+}
+
+extern fn malloc(size: usize) -> * u8;
+
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+extern fn sfn_arena_alloc(arena: * u8, size: usize, align: usize) -> * u8;
+
+extern fn sfn_arena_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, align: usize) -> * u8;
+
 extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
 
 extern fn memchr(s: * u8, c: i32, n: usize) -> * u8;
@@ -128,6 +167,20 @@ extern fn sfn_str_from_byte(byte_value: i64) -> * u8;
 
 extern fn sfn_int_to_str(value: i64) -> * u8;
 
+// #1217 (Phase R1): the process-global arena `concat` builds into, and
+// the arena-mode probe that gates it. `sfn_arena_global()` ALWAYS
+// returns a live arena handle — it is NOT null when the arena is
+// disabled — so callers must gate on `sfn_arena_enabled()` first (the
+// discipline every other runtime module follows, e.g.
+// `runtime/sfn/memory/arena.sfn`'s mark/rewind). Under
+// `SAILFIN_USE_ARENA=0` (ASAN / diagnostics), `concat` therefore passes
+// `arena_addr = 0` and `_str_buf_new` falls back to libc storage. Both
+// are C-ABI (`-> * u8` / `-> bool`), so they stay inline externs (same
+// discipline as the libc externs above).
+extern fn sfn_arena_global() -> * u8;
+
+extern fn sfn_arena_enabled() -> bool;
+
 // `sfn_str_sfn_len(s)` — Sailfin-side length recovery for the
 // SfnString aggregate. Architect spec
 // (`runtime_architecture.md` §2.2): direct field access on the
@@ -147,15 +200,22 @@ fn sfn_str_sfn_len(s: * u8) -> i64 {
 // strategy until the aggregate flip lands.
 fn sfn_str_sfn_eq(a: * u8, b: * u8) -> bool { return strings_equal(a, b); }
 
-// `sfn_str_sfn_slice(text, start, end)` — non-owning view over
-// `text[start..end]`. Architect spec returns
-// `SfnSlice { data: text.data + start, len: end - start }`,
-// strictly non-allocating. Today's body still allocates a fresh
-// NUL-terminated buffer in the runtime arena (delegating to the
-// legacy `substring_unchecked` C entrypoint) because the rest of
-// the compiler hasn't grown an `SfnSlice` operand type yet. The
-// `f64` start/end shape mirrors the registry signature so call-
-// site arguments don't need a coercion shim during the flip.
+// `sfn_str_sfn_slice(text, start, end)` — substring view over
+// `text[start..end]`. The architect spec's end-state returns a
+// non-owning `SfnSlice { data: text.data + start, len: end - start }`,
+// but a non-owning view CANNOT be made sound over today's string
+// representation: `text` may be an immediate-codepoint tagged
+// pseudo-pointer (`(cp << 32)`, still produced + guarded throughout
+// `runtime/native/src/sailfin_runtime.c`), so `text + start` is not a
+// real address and any later deref of the view reads arbitrary memory.
+// A sound `slice -> Slice` therefore depends on the SfnString aggregate
+// flip retiring the immediate-pseudo-pointer encoding (tracked at #1283
+// — was the comment-only "M1.A.2" tag). Until then `slice` keeps the
+// allocating `* u8` body (delegating to the C `substring_unchecked`,
+// which materialises a real buffer and clamps the `f64` indices via
+// `_clamp_to_i64`), so #1217 migrates only `append`/`concat` onto the
+// owned surface. The `f64` start/end shape mirrors the registry
+// signature so call sites need no coercion shim.
 fn sfn_str_sfn_slice(text: * u8, start: f64, end: f64) -> * u8 {
     return substring_unchecked(text, start, end);
 }
@@ -188,23 +248,129 @@ fn sfn_str_sfn_from_cstr(s: * u8) -> * u8 { return s; }
 // (M1.A.2 hasn't landed). The user-emission hot path bypasses
 // this wrapper entirely and lands on the C entrypoint
 // `sfn_str_concat`, which has the real arena ABI.
-fn sfn_str_sfn_concat(a: * u8, b: * u8) -> * u8 {
-    return sailfin_runtime_string_concat(a, b);
+// `_str_buf_new(arena_addr, initial_cap)` / `_str_buf_append(self,
+// suffix_addr, suffix_len)` — #1217 (Phase R1): same-module copies of
+// `owned_buf_new` / `owned_buf_append` (ownedbuf.sfn), reproduced here
+// because string.sfn cannot make the cross-module struct-returning call
+// (#1283 — see the OwnedBuf header above). They are the move
+// substrate `sfn_str_sfn_append` / `_concat` build on: `_str_buf_append`
+// consumes `self` (a unique `OwnedBuf`) and returns the (possibly
+// relocated) buffer, routing growth through the C-ABI arena externs
+// (`sfn_arena_realloc` grow-if-at-tip, or `malloc` + `memcpy` when
+// libc-backed). The raw extern interior sits behind `unsafe` per §5.1;
+// the unique-owner move-return stays in checked code. Soundness of the
+// in-place grow-at-tip is the caller's unique ownership, which the
+// checker proves at every `sfn_str_sfn_append` / `_concat` call site.
+fn _str_buf_new(arena_addr: i64, initial_cap: i64) -> OwnedBuf {
+    let mut cap: i64 = 0;
+    let mut ptr_addr: i64 = 0;
+    if initial_cap > 0 {
+        let stepped: i64 = (initial_cap + 7) / 8;
+        cap = stepped * 8;
+        unsafe {
+            if arena_addr != 0 {
+                let storage: * u8 = sfn_arena_alloc(arena_addr as * u8, cap as usize, 8 as usize);
+                ptr_addr = storage as i64;
+            } else {
+                let heap: * u8 = malloc(cap as usize);
+                ptr_addr = heap as i64;
+            }
+        }
+        if ptr_addr == 0 { cap = 0; }
+    }
+    return OwnedBuf {
+        ptr_addr: ptr_addr,
+        len: 0,
+        cap: cap,
+        arena_addr: arena_addr
+    };
 }
 
-// `sfn_str_sfn_append(buf, suffix)` — proof-of-life append
-// trampoline. Architect spec:
-// `(*SfnString, SfnString, *Arena) -> void`, using
-// `sfn_arena_realloc`'s grow-if-at-tip path for the chained-
-// concat fast lane. Today's body returns the new buffer (legacy
-// pointer convention) because the Sailfin frontend can't
-// declare a `*SfnString` out-parameter yet. The compiler
-// currently has no callers of `string.append` (the descriptor
-// row is metadata + symbol parking for the first caller), so
-// this trampoline is purely for symmetric namespace
-// presence — same as wave 1a's slice/from_cstr.
-fn sfn_str_sfn_append(buf: * u8, suffix: * u8) -> * u8 {
-    return sailfin_runtime_string_append(buf, suffix);
+fn _str_buf_append(self: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedBuf {
+    if suffix_addr == 0 { return self; }
+    if suffix_len <= 0 { return self; }
+    let needed: i64 = self.len + suffix_len;
+    if needed < self.len { return self; }
+    let mut ptr_addr: i64 = self.ptr_addr;
+    let mut cap: i64 = self.cap;
+    if needed > cap {
+        let mut new_cap: i64 = cap + cap;
+        if new_cap < needed { new_cap = needed; }
+        if new_cap < 16 { new_cap = 16; }
+        let stepped: i64 = (new_cap + 7) / 8;
+        new_cap = stepped * 8;
+        if new_cap < needed { return self; }
+        unsafe {
+            if self.arena_addr != 0 {
+                let grown: * u8 = sfn_arena_realloc(self.arena_addr as * u8, ptr_addr as * u8, cap as usize, new_cap as usize, 8 as usize);
+                if grown as i64 == 0 { return self; }
+                ptr_addr = grown as i64;
+            } else {
+                let fresh: * u8 = malloc(new_cap as usize);
+                if fresh as i64 == 0 { return self; }
+                if ptr_addr != 0 {
+                    if self.len > 0 {
+                        memcpy(fresh, ptr_addr as * u8, self.len as usize);
+                    }
+                }
+                ptr_addr = fresh as i64;
+            }
+        }
+        cap = new_cap;
+    }
+    unsafe {
+        let dst_addr: i64 = ptr_addr + self.len;
+        memcpy(dst_addr as * u8, suffix_addr as * u8, suffix_len as usize);
+    }
+    return OwnedBuf {
+        ptr_addr: ptr_addr,
+        len: needed,
+        cap: cap,
+        arena_addr: self.arena_addr
+    };
+}
+
+// #1217 (Phase R1): `concat` now returns an owned `OwnedBuf` (proposal
+// §5.1 "concat returns owned") built by appending both operands into a
+// fresh buffer. The result is the unique owner of its bytes, so the
+// chained-append grow-at-tip the architect spec describes is sound by
+// construction — no aliasing of either input's storage (the #1205
+// hazard class). Storage is the process-global arena when arena mode is
+// on, gated on `sfn_arena_enabled()` so the `SAILFIN_USE_ARENA=0`
+// opt-out (ASAN / diagnostics) is honored — when disabled, `arena_addr`
+// is `0` and `_str_buf_new` falls back to libc-backed storage. Params
+// are unchanged (`* u8`, `* u8`) — the byte lengths are recovered via
+// the local `sfn_str_sfn_len`. The two `_str_buf_append` calls are
+// same-module moves of the unique buffer (consume-and-return); the raw
+// extern interior they route through sits behind `unsafe` inside the
+// helper.
+fn sfn_str_sfn_concat(a: * u8, b: * u8) -> OwnedBuf {
+    let a_len: i64 = sfn_str_sfn_len(a);
+    let b_len: i64 = sfn_str_sfn_len(b);
+    let mut arena_addr: i64 = 0;
+    if sfn_arena_enabled() { arena_addr = sfn_arena_global() as i64; }
+    let total: i64 = a_len + b_len;
+    let buf: OwnedBuf = _str_buf_new(arena_addr, total);
+    let grown: OwnedBuf = _str_buf_append(buf, a as i64, a_len);
+    return _str_buf_append(grown, b as i64, b_len);
+}
+
+// `sfn_str_sfn_append(buf, suffix_addr, suffix_len)` — #1217 (Phase
+// R1): the append hot path, now a **move** over `OwnedBuf` (proposal
+// §5.1 "`sfn_str_sfn_append` takes/returns `OwnedBuf` (move)"). It
+// consumes the unique `buf`, appends `suffix_len` bytes from
+// `suffix_addr`, and returns the (possibly relocated) buffer —
+// delegating to the same-module `_str_buf_append`, which routes growth
+// through the arena's grow-if-at-tip realloc. Because the caller's `buf`
+// is the unique live owner (the ownership checker proves it; no alias),
+// the in-place grow-at-tip is sound — this is the structural close of
+// the #1205 aliasing hazard. The delegation is a same-module move (not
+// an extern), so it stays in checked code; the raw extern interior sits
+// behind `unsafe` inside `_str_buf_append`. The compiler has no callers
+// of `string.append` yet (the descriptor row is symbol-parking), so the
+// signature flip breaks no call site.
+fn sfn_str_sfn_append(buf: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedBuf {
+    return _str_buf_append(buf, suffix_addr, suffix_len);
 }
 
 // M2.5 (#403) wave-2 trampolines — UTF-8 + numeric formatting.

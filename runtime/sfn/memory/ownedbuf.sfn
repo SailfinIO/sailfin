@@ -156,12 +156,16 @@ fn owned_buf_new(arena_addr: i64, initial_cap: i64) -> OwnedBuf {
     if initial_cap > 0 {
         let stepped: i64 = (initial_cap + 7) / 8;
         cap = stepped * 8;
-        if arena_addr != 0 {
-            let storage: * u8 = sfn_arena_sfn_alloc(arena_addr as * u8, cap as usize, 8 as usize);
-            ptr_addr = storage as i64;
-        } else {
-            let heap: * u8 = malloc(cap as usize);
-            ptr_addr = heap as i64;
+        // Raw allocation interior (#1217, proposal §5.1): the extern
+        // alloc/`malloc` calls are the author-asserted unsafe region.
+        unsafe {
+            if arena_addr != 0 {
+                let storage: * u8 = sfn_arena_sfn_alloc(arena_addr as * u8, cap as usize, 8 as usize);
+                ptr_addr = storage as i64;
+            } else {
+                let heap: * u8 = malloc(cap as usize);
+                ptr_addr = heap as i64;
+            }
         }
         if ptr_addr == 0 { cap = 0; }
     }
@@ -207,25 +211,36 @@ fn owned_buf_append(self: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedB
         // by the `new_cap < needed` line.)
         if new_cap < needed { return self; }
 
-        if self.arena_addr != 0 {
-            let grown: * u8 = sfn_arena_sfn_realloc(self.arena_addr as * u8, ptr_addr as * u8, cap as usize, new_cap as usize, 8 as usize);
-            if grown as i64 == 0 { return self; }
-            ptr_addr = grown as i64;
-        } else {
-            let fresh: * u8 = malloc(new_cap as usize);
-            if fresh as i64 == 0 { return self; }
-            if ptr_addr != 0 {
-                if self.len > 0 {
-                    memcpy(fresh, ptr_addr as * u8, self.len as usize);
+        // Raw grow interior (#1217, proposal §5.1): the in-place
+        // grow-at-tip realloc and the relocate+`memcpy` fallback are
+        // the author-asserted unsafe region. Soundness is the caller's
+        // unique ownership of `self` (no live alias), which the
+        // ownership checker proves at every call site.
+        unsafe {
+            if self.arena_addr != 0 {
+                let grown: * u8 = sfn_arena_sfn_realloc(self.arena_addr as * u8, ptr_addr as * u8, cap as usize, new_cap as usize, 8 as usize);
+                if grown as i64 == 0 { return self; }
+                ptr_addr = grown as i64;
+            } else {
+                let fresh: * u8 = malloc(new_cap as usize);
+                if fresh as i64 == 0 { return self; }
+                if ptr_addr != 0 {
+                    if self.len > 0 {
+                        memcpy(fresh, ptr_addr as * u8, self.len as usize);
+                    }
                 }
+                ptr_addr = fresh as i64;
             }
-            ptr_addr = fresh as i64;
         }
         cap = new_cap;
     }
 
-    let dst_addr: i64 = ptr_addr + self.len;
-    memcpy(dst_addr as * u8, suffix_addr as * u8, suffix_len as usize);
+    // Append the suffix into the (possibly relocated) tail. Raw byte
+    // copy behind `unsafe`; the destination is uniquely owned.
+    unsafe {
+        let dst_addr: i64 = ptr_addr + self.len;
+        memcpy(dst_addr as * u8, suffix_addr as * u8, suffix_len as usize);
+    }
 
     return OwnedBuf {
         ptr_addr: ptr_addr,

@@ -53,15 +53,39 @@ fn drop_it(v: Linear<int>) -> int { return 0; }    // E0907: linear `v` is never
 fn keep_it(v: Linear<int>) -> int { return drop_it(v); }  // ok: `v` is consumed by the call
 ```
 
-## OwnedBuf / Slice (surface only)
+## OwnedBuf / Slice — Phase R1 landed (#1217)
 
 The owned-buffer type family ships as library types in
 `runtime/sfn/memory/ownedbuf.sfn`: `OwnedBuf` is the unique, growable byte
-buffer (`owned_buf_append` consumes it and returns the possibly-relocated
-buffer) and `Slice` is the non-owning, read-only byte view over it. Today this
-is the **surface only** — the types parse, typecheck, and lower, but the
-ownership checker does not yet enforce moves on `OwnedBuf` or lifetimes on
-`Slice`. Enforcement attaches to these names in later phases of the ownership
-epic (#1209): move semantics with the ownership-checker rules (#1214/#1215),
-view lifetimes in a later phase (Phase U). `Slice` is deliberately concrete
-over bytes; a generic `Slice<T>` is deferred until generic struct bodies lower.
+buffer and `Slice` is the non-owning, read-only byte view over it.
+
+**Phase R1 (memory/string core — #1217, epic #1209 E8) has landed.** The
+hot-path string functions in `runtime/sfn/string.sfn` are migrated onto these
+types:
+
+- `sfn_str_sfn_append(buf: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedBuf`
+  — consume-and-return move; raw grow-at-tip interior behind `unsafe { }` in arena.sfn.
+- `sfn_str_sfn_concat(a: *u8, b: *u8) -> OwnedBuf` — returns owned buffer built
+  via the global arena (gated on `sfn_arena_enabled()`, libc-backed when the arena
+  is opted out); no arena-stranded raw `*u8` return.
+
+`sfn_str_sfn_slice` is **not** migrated. A non-owning `Slice` over `text` is unsound
+while the runtime still produces immediate-codepoint tagged pseudo-pointers
+(`(byte << 32)`, `runtime/native/src/sailfin_runtime.c`): `text + start` is then not
+a real address, and the view would let it escape and be dereferenced later. So
+`slice` keeps its allocating `*u8` body until that encoding is retired (with the C
+runtime deletion, #822) and the `string` → `{i8*, i64}` aggregate flip (M1.A.2)
+lands. Both dependencies are tracked at **#1283**.
+
+The grow-at-tip `unsafe { }` block in `sfn_arena_sfn_realloc` and the raw
+extern alloc/realloc/memcpy interiors of `owned_buf_new` / `owned_buf_append`
+are similarly wrapped. The unique-owner move-return stays in checked code.
+
+The ownership checker (E5/E6, #1214/#1215) proves no live alias at the
+mutation site, structurally closing the #1205 aliasing hazard class.
+
+Still to come: `&T`/`&mut T` borrow exclusivity and lifetime enforcement on
+`Slice` views (`E0905`, Phase U). The full `SfnString`-aggregate flip (concat/slice
+operating over the aggregate end-state) is gated on M1.A.2. `Slice` is
+deliberately concrete over bytes; a generic `Slice<T>` is deferred until generic
+struct bodies lower.

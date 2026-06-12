@@ -341,20 +341,28 @@ fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usiz
     let extra: i64 = new_size_i - old_size_i;
 
     // Grow-if-at-tip: `ptr` was the last allocation on this page AND
-    // the page can fit `extra` more bytes.
-    if ptr_addr + old_size_i == tip_addr {
-        if used + extra <= page.capacity {
-            page.used = used + extra;
-            return ptr;
+    // the page can fit `extra` more bytes. The in-place bump and the
+    // relocate+memcpy fallback are the author-asserted raw region
+    // (#1217, proposal §5.1): soundness is guaranteed by the *caller*
+    // holding a unique `OwnedBuf` (`owned_buf_append`), which the
+    // ownership checker proves — the in-place mutation of a
+    // possibly-aliased buffer (the #1205 hazard) is unreachable from
+    // safe code. The bump arithmetic stays `unsafe`-internal.
+    unsafe {
+        if ptr_addr + old_size_i == tip_addr {
+            if used + extra <= page.capacity {
+                page.used = used + extra;
+                return ptr;
+            }
         }
-    }
 
-    // Otherwise: fresh allocation + memcpy. The old buffer stays
-    // resident in the arena (reclaimed at reset/destroy).
-    let new_ptr: * u8 = sfn_arena_sfn_alloc(arena, new_size, align);
-    if new_ptr as i64 == 0 { return new_ptr; }
-    memcpy(new_ptr, ptr, old_size_i as usize);
-    return new_ptr;
+        // Otherwise: fresh allocation + memcpy. The old buffer stays
+        // resident in the arena (reclaimed at reset/destroy).
+        let new_ptr: * u8 = sfn_arena_sfn_alloc(arena, new_size, align);
+        if new_ptr as i64 == 0 { return new_ptr; }
+        memcpy(new_ptr, ptr, old_size_i as usize);
+        return new_ptr;
+    }
 }
 
 // ====================================================================
