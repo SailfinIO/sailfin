@@ -136,18 +136,21 @@ async function withServer<T>(
   }
 }
 
-test("tools/list exposes all six tools with correct names", async () => {
+test("tools/list exposes all nine tools with correct names", async () => {
   const workspace = makeStubWorkspace();
   await withServer(workspace, async (client) => {
     const resp = await client.request("tools/list");
     const result = resp.result as { tools: Array<{ name: string }> };
     const names = result.tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
+      "sailfin_build",
       "sailfin_check",
       "sailfin_diagnostics",
       "sailfin_emit_llvm",
       "sailfin_emit_native",
       "sailfin_fmt_check",
+      "sailfin_fmt_write",
+      "sailfin_test",
       "sailfin_version",
     ]);
   });
@@ -386,6 +389,121 @@ test("sailfin_diagnostics flags isError when envelope does not parse", async () 
     assert.equal(
       result.structuredContent!.raw_stdout,
       "this is not JSON at all",
+    );
+  });
+});
+
+test("sailfin_fmt_write passes through to the compiler and reports ok", async () => {
+  const workspace = makeStubWorkspace({ stdoutBody: "formatted foo.sfn" });
+  await writeStubSfn(workspace, "foo.sfn");
+  await withServer(workspace, async (client) => {
+    const resp = await client.request("tools/call", {
+      name: "sailfin_fmt_write",
+      arguments: { path: "foo.sfn" },
+    });
+    const result = resp.result as {
+      content: Array<{ type: string; text: string }>;
+      isError?: boolean;
+      structuredContent?: { exit: number };
+    };
+    assert.notEqual(result.isError, true);
+    assert.ok(result.content[0].text.includes("formatted foo.sfn"));
+    assert.equal(result.structuredContent!.exit, 0);
+  });
+});
+
+test("sailfin_build requires exactly one of path or project", async () => {
+  const workspace = makeStubWorkspace();
+  await withServer(workspace, async (client) => {
+    // Neither provided.
+    const neither = await client.request("tools/call", {
+      name: "sailfin_build",
+      arguments: {},
+    });
+    const neitherResult = neither.result as {
+      content: Array<{ type: string; text: string }>;
+      isError?: boolean;
+    };
+    assert.equal(neitherResult.isError, true);
+    assert.ok(
+      neitherResult.content[0].text.includes("exactly one of"),
+      `expected mutual-exclusion error, got: ${neitherResult.content[0].text}`,
+    );
+
+    // Both provided.
+    const both = await client.request("tools/call", {
+      name: "sailfin_build",
+      arguments: { path: "foo.sfn", project: "compiler" },
+    });
+    const bothResult = both.result as {
+      content: Array<{ type: string; text: string }>;
+      isError?: boolean;
+    };
+    assert.equal(bothResult.isError, true);
+    assert.ok(bothResult.content[0].text.includes("exactly one of"));
+  });
+});
+
+test("sailfin_build with a single file passes through to the compiler", async () => {
+  const workspace = makeStubWorkspace({ stdoutBody: "built foo" });
+  await writeStubSfn(workspace, "foo.sfn");
+  await withServer(workspace, async (client) => {
+    const resp = await client.request("tools/call", {
+      name: "sailfin_build",
+      arguments: { path: "foo.sfn" },
+    });
+    const result = resp.result as {
+      content: Array<{ type: string; text: string }>;
+      isError?: boolean;
+      structuredContent?: { exit: number };
+    };
+    assert.notEqual(result.isError, true);
+    assert.ok(result.content[0].text.includes("built foo"));
+    assert.equal(result.structuredContent!.exit, 0);
+  });
+});
+
+test("sailfin_test passes a suite path through and surfaces failures", async () => {
+  const workspace = makeStubWorkspace({
+    exitCode: 1,
+    stdoutBody: "",
+    stderrBody: "1 test failed in unit",
+  });
+  // The stub ignores argv; a directory path still resolves inside the
+  // workspace, which is all the wrapper guards on.
+  mkdirSync(path.join(workspace, "compiler", "tests", "unit"), {
+    recursive: true,
+  });
+  await withServer(workspace, async (client) => {
+    const resp = await client.request("tools/call", {
+      name: "sailfin_test",
+      arguments: { path: "compiler/tests/unit", name: "parses", jobs: 2 },
+    });
+    const result = resp.result as {
+      content: Array<{ type: string; text: string }>;
+      isError?: boolean;
+      structuredContent?: { exit: number; stderr: string };
+    };
+    assert.equal(result.isError, true, "non-zero test exit surfaces as isError");
+    assert.ok(result.content[0].text.includes("1 test failed in unit"));
+    assert.equal(result.structuredContent!.exit, 1);
+  });
+});
+
+test("sailfin_test rejects a path outside the workspace", async () => {
+  const workspace = makeStubWorkspace();
+  await withServer(workspace, async (client) => {
+    const resp = await client.request("tools/call", {
+      name: "sailfin_test",
+      arguments: { path: "../../etc" },
+    });
+    const result = resp.result as {
+      content: Array<{ type: string; text: string }>;
+      isError?: boolean;
+    };
+    assert.equal(result.isError, true);
+    assert.ok(
+      result.content[0].text.includes("Refusing path outside workspace"),
     );
   });
 });

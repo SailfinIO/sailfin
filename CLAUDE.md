@@ -69,6 +69,17 @@ and `make check` are different tools, not fast/slow versions of the same one:
 Don't burn `make check` to discover a type or effect error `sfn check` would have
 caught in seconds. (Use `build/native/sailfin check <path>` if `sfn` is not on `PATH`.)
 
+**MCP tools (agentic clients).** When running as an MCP client (e.g. Claude Code
+with the `sailfin` server registered in `.mcp.json`), prefer the `sailfin_*` tools
+for the inner loop instead of shelling out: `sailfin_check` / `sailfin_diagnostics`
+(fast static analysis, JSON envelope), `sailfin_fmt_write` + `sailfin_fmt_check`
+(format then verify a touched file), `sailfin_build` (build a `.sfn` file or capsule),
+and `sailfin_test` (a targeted suite dir or a single `_test.sfn` file, with `-k` to
+run one named test). Each is a pure passthrough to one `sailfin` subcommand. They
+do **not** replace `make compile` (the compiler self-host needs seed + extern
+pre-staging the tools deliberately don't replicate) or `make check` — use those
+for the self-host invariant and the full gate. See `tools/mcp-server/README.md`.
+
 ## Compiler Pipeline
 
 `compiler/src/` follows this flow:

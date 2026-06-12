@@ -9,9 +9,17 @@
 //   - sailfin_emit_native     — emit .sfn-asm IR
 //   - sailfin_emit_llvm       — emit LLVM IR
 //   - sailfin_fmt_check       — formatting diagnostics (no rewrite)
+//   - sailfin_fmt_write       — reformat in place (canonical)
+//   - sailfin_build           — build a .sfn file / capsule to a binary
+//   - sailfin_test            — run a targeted suite or single test
 //
 // Every tool goes through runSailfin(), which enforces the timeout
 // and keeps invocations inside the workspace.
+//
+// Design rule: every tool is a *pure passthrough* to a single `sailfin`
+// subcommand. No build/test orchestration lives here — e.g. compiler
+// self-host (seed resolution + extern pre-staging) stays in `make
+// compile`, and sailfin_build deliberately does not replicate it.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -97,6 +105,67 @@ const pathSchema = z
   .string()
   .min(1)
   .describe("Path to a .sfn file, relative to the Sailfin workspace root.");
+
+const buildFileSchema = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    "Path to a single .sfn file to build, relative to the workspace root. Mutually exclusive with `project`.",
+  );
+
+const projectSchema = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    "Path to a Sailfin capsule directory (containing capsule.toml), relative to the workspace root. Built via `-p`. Mutually exclusive with `path`.",
+  );
+
+const testPathSchema = z
+  .string()
+  .min(1)
+  .describe(
+    "Path to a test suite directory (e.g. compiler/tests/unit) or a single _test.sfn file, relative to the workspace root. Required — target one file or one suite, not the whole tree.",
+  );
+
+const nameFilterSchema = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    "Only run tests whose name contains this substring (maps to `-k`). Use to run a single named test.",
+  );
+
+const jobsSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(256)
+  .optional()
+  .describe(
+    "Max concurrent per-file test children (maps to `--jobs`). Each child is a full compiler invocation under its own 8 GiB cap, so size to available RAM. Defaults to serial (1).",
+  );
+
+const jsonSchema = z
+  .boolean()
+  .optional()
+  .describe("Emit machine-readable output instead of human text (--json).");
+
+const fmtWritePathSchema = z
+  .string()
+  .min(1)
+  .describe(
+    "Path to a .sfn file or directory to reformat in place, relative to the workspace root.",
+  );
+
+// Cold builds (especially macOS) and broad test suites take minutes, not
+// seconds — give them headroom over runSailfin's 60s default. Both block
+// the MCP channel for their duration, which is why sailfin_test requires a
+// path (no accidental whole-tree run) and sailfin_build is per-target.
+const BUILD_TIMEOUT_MS = 600_000; // 10 min
+const TEST_TIMEOUT_MS = 600_000; // 10 min
+const FMT_WRITE_TIMEOUT_MS = 120_000; // 2 min — dir-wide fmt touches many files
 
 server.registerTool(
   "sailfin_version",
@@ -243,6 +312,86 @@ server.registerTool(
     const out = await withResolvedPath(userPath, async (abs) => {
       const result = await runSailfin(["fmt", "--check", abs]);
       return formatResult("sailfin fmt --check", result);
+    });
+    return out as ToolResult;
+  },
+);
+
+server.registerTool(
+  "sailfin_fmt_write",
+  {
+    title: "Format-write a .sfn file or directory",
+    description:
+      "Run `sailfin fmt --write` against a .sfn file or directory, reformatting in place. Formatting is canonical and zero-config. Pair with sailfin_fmt_check: run this to fix the drift the check reports before committing (CI runs `fmt --check` and fails on unformatted files).",
+    inputSchema: { path: fmtWritePathSchema },
+  },
+  async ({ path: userPath }) => {
+    const out = await withResolvedPath(userPath, async (abs) => {
+      const result = await runSailfin(["fmt", "--write", abs], {
+        timeoutMs: FMT_WRITE_TIMEOUT_MS,
+      });
+      return formatResult("sailfin fmt --write", result);
+    });
+    return out as ToolResult;
+  },
+);
+
+server.registerTool(
+  "sailfin_build",
+  {
+    title: "Build a Sailfin file or capsule to a binary",
+    description:
+      "Compile a Sailfin source file or capsule to a native binary via `sailfin build`. Provide exactly one of `path` (a single .sfn file) or `project` (a capsule directory, built via -p). Optionally `json` for machine-readable output. Pure passthrough — this does NOT self-host the compiler itself: the self-host build needs seed resolution + extern pre-staging that lives in `make compile`, and this tool deliberately does not replicate it. Runs under a 10-minute timeout (cold builds take minutes).",
+    inputSchema: { path: buildFileSchema, project: projectSchema, json: jsonSchema },
+  },
+  async ({ path: userPath, project, json }) => {
+    const hasPath = typeof userPath === "string" && userPath.length > 0;
+    const hasProject = typeof project === "string" && project.length > 0;
+    if (hasPath === hasProject) {
+      return errorResult(
+        "sailfin_build: provide exactly one of `path` (a .sfn file) or `project` (a capsule directory).",
+      );
+    }
+    const target = (hasPath ? userPath : project) as string;
+    const out = await withResolvedPath(target, async (abs) => {
+      const args = hasProject ? ["build", "-p", abs] : ["build", abs];
+      if (json) {
+        args.push("--json");
+      }
+      const result = await runSailfin(args, { timeoutMs: BUILD_TIMEOUT_MS });
+      return formatResult("sailfin build", result);
+    });
+    return out as ToolResult;
+  },
+);
+
+server.registerTool(
+  "sailfin_test",
+  {
+    title: "Run a targeted Sailfin test suite or single test",
+    description:
+      "Run a Sailfin test suite directory (e.g. compiler/tests/unit) or a single _test.sfn file via `sailfin test <path>`. Optionally pass `name` to run only tests whose name contains it (-k), `jobs` for parallelism (--jobs), and `json` for the jsonl event stream (--json). `path` is required so an agent targets one file or one suite — the broad suites (compiler/tests/integration, compiler/tests/e2e) can take many minutes, and the full serial suite is intentionally not exposed as one call. Runs under a 10-minute timeout.",
+    inputSchema: {
+      path: testPathSchema,
+      name: nameFilterSchema,
+      jobs: jobsSchema,
+      json: jsonSchema,
+    },
+  },
+  async ({ path: userPath, name, jobs, json }) => {
+    const out = await withResolvedPath(userPath, async (abs) => {
+      const args = ["test", abs];
+      if (typeof name === "string" && name.length > 0) {
+        args.push("-k", name);
+      }
+      if (typeof jobs === "number") {
+        args.push("--jobs", String(jobs));
+      }
+      if (json) {
+        args.push("--json");
+      }
+      const result = await runSailfin(args, { timeoutMs: TEST_TIMEOUT_MS });
+      return formatResult("sailfin test", result);
     });
     return out as ToolResult;
   },
