@@ -67,8 +67,9 @@ fn main() -> int {
 }
 EOF
 
-# `timeout` / `ulimit -v` are Linux-only; apply best-effort so the
-# test also runs on macos-arm64 (matching the #632 e2e test).
+# `timeout` is Linux-only here; apply best-effort so the test also
+# runs on macos-arm64 (matching the #632 e2e test). Memory is
+# governed by the compiler's own self-applied budget (#1291).
 TIMEOUT_PREFIX=""
 if command -v timeout >/dev/null 2>&1; then TIMEOUT_PREFIX="timeout 120"; fi
 
