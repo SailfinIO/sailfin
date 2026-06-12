@@ -70,14 +70,17 @@ import {
     handle_test_command
 } from "./cli_commands";
 import {
+    _atomic_rename_into_place,
     _env_flag,
     _legacy_flag_file,
+    _mktemp_sibling_cmd,
     _resolve_linker,
     _sha256_of_file_cmd,
     _shell_read_cmd,
     _shell_single_quote_arg
 } from "./cli_commands_utils";
 import { emit_llvm_with_retry, emit_parse_nonneg_int } from "./emit_helpers";
+import { resolve_import_module_slug_for_module } from "./llvm/imports";
 import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_with_module,
@@ -89,6 +92,7 @@ import {
     print_native_text_with_module_gated,
     write_native_text_file_with_module_gated
 } from "./main";
+import { parse_native_imports_for_import } from "./native_ir_api";
 import { RuntimeCapsuleArtifacts, runtime_capsule_from_root } from "./runtime_capsule_resolver";
 import {
     toml_get_build_kind,
@@ -1093,7 +1097,31 @@ struct RuntimeEmitResult {
     stats: CacheStats;
 }
 
-fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string) -> RuntimeEmitResult ![io] {
+// #1288: fold staged sibling-dep content into the runtime object
+// cache key. The emitted `.ll`/`.o` of a module with sibling imports
+// depends on those siblings' signatures/layouts, so editing a
+// sibling (e.g. a future `ownedbuf.sfn`) must bust the cached `.o`
+// of every module that imports it — otherwise the link silently
+// reuses a stale-ABI object. Modules without a `.import-deps`
+// sidecar keep the base key byte-for-byte (the pre-#1288 contract).
+// An unhashable dep returns "" so the caller falls back to the
+// always-recompile path, mirroring `runtime_object_cache_key`.
+fn _runtime_obj_key_with_sibling_deps(base_key: string, ctx_root: string, slug: string) -> string ![io] {
+    if base_key.length == 0 { return ""; }
+    let deps = _read_import_deps(ctx_root, slug);
+    let mut key = base_key;
+    let mut i: int = 0;
+    loop {
+        if i >= deps.length { break; }
+        let dep_hash = _sha256_of_file_cmd(deps[i]);
+        if dep_hash.length == 0 { return ""; }
+        key = key + "\n" + dep_hash;
+        i += 1;
+    }
+    return key;
+}
+
+fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string) -> RuntimeEmitResult ![io] {
     let mut stats = empty_cache_stats();
     let slug = module_name_from_path(src);
     let ll_path = _path_join(out_dir, cap_prefix + _path_basename(src)
@@ -1113,7 +1141,7 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
     // surfacing as `Undefined symbols ... link failed` (#969). This
     // mirrors the `_clang_compile_runtime_capsule_objects` c-source
     // path so the sfn-source + prelude emit invalidates identically.
-    let key = runtime_object_cache_key(src, opt_flag);
+    let key = _runtime_obj_key_with_sibling_deps(runtime_object_cache_key(src, opt_flag), ctx_root, slug);
     if key.length == 0 { stats.invalid_keys = stats.invalid_keys + 1; }
     let shared_suffix = cap_prefix + _path_basename(src) + opt_flag;
     if _runtime_obj_cache_hit(obj_path, key) {
@@ -1134,10 +1162,19 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
     // for the child; everything else inherits from the parent (PATH,
     // HOME, PWD, etc.). The shell-quote escaping protects against
     // paths that contain spaces or shell metacharacters.
+    // #1288: `--import-context` points at the private rt-import-context
+    // root. A module with a staged `.import-deps` sidecar threads its
+    // sibling sfn-source signatures into the emit
+    // (`compile_to_llvm_file_with_module_imports`, #957/#999); a module
+    // without one — including the `prelude-entry`, which shares this
+    // emit path but is never staged — reads an absent sidecar, gets an
+    // empty dep list, and degrades to the exact pre-#1288 legacy emit.
     let cmd = "SAILFIN_TRACE_EMIT= SAILFIN_SKIP_TYPECHECK= SAILFIN_TRACE_TEST_RUNNER= SAILFIN_DUMP_TEST_SOURCES= SAILFIN_NO_LEGACY_PROBE=1 "
         + _shell_single_quote_arg(self_path)
         + " emit --module-name "
         + _shell_single_quote_arg(slug)
+        + " --import-context "
+        + _shell_single_quote_arg(ctx_root)
         + " -o "
         + _shell_single_quote_arg(ll_path)
         + " llvm "
@@ -1162,6 +1199,199 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
         _runtime_obj_shared_cache_publish(shared_cache_root, key, obj_path, shared_suffix);
     }
     return RuntimeEmitResult { obj_path: obj_path, stats: stats };
+}
+
+// #1288 (Gap 1 of #1283): root of the PRIVATE import-context tree
+// for runtime sfn-source emits, sibling to the runtime `.o` cache
+// under `out_dir` (`build/sailfin` by default, work-dir aware).
+//
+// Deliberately NOT the shared cwd-relative
+// `build/native/import-context/` tree: artifacts staged there are
+// consulted by `collect_imported_module_context_for_module`'s
+// on-disk lookup during EVERY emit in that cwd. The prelude imports
+// the runtime modules (`runtime/prelude.sfn` → `./sfn/array`,
+// `./sfn/string`, …), so publishing runtime `.sfn-asm` into the
+// shared tree makes the prelude's lowering load those entries and
+// render imported-signature `declare`s that conflict with the
+// runtime-helper descriptor declares it also emits (e.g.
+// `declare i8* @sfn_array_push_string(i8*, i8*)` vs the
+// descriptor's `{ i8**, i64, i64 }*` form — clang then rejects the
+// IR with "invalid redefinition"). A private root threaded
+// explicitly via `--import-context` reaches exactly the sfn-source
+// child emits and nothing else.
+fn _runtime_sfn_ctx_root(out_dir: string) -> string {
+    return _path_join(out_dir, "rt-import-context");
+}
+
+// Stage one runtime sfn-source's native `.sfn-asm` into the private
+// import-context root so a SIBLING sfn-source importing a
+// struct-returning fn (e.g. `string.sfn` → `./memory/ownedbuf`)
+// resolves the callee's signature via the #957/#999 threading
+// (`--import-context` → `.import-deps` →
+// `compile_to_llvm_file_with_module_imports`). This is the
+// runtime-emit-path mirror of the resolver's capsule staging; the
+// Makefile's #812 loop provides on-disk artifacts for the four
+// `runtime/sfn/platform/*` extern modules only, which is why
+// `clock.sfn → ./platform/posix` worked while a struct-returning
+// sibling import died at `core_call_emission.sfn`'s "cannot resolve
+// return type" fatal. A pointer/i64-returning callee can be worked
+// around with an inline `extern fn`; a struct-by-value return
+// cannot (E0805) — staging, not per-module duplication, is the fix.
+// No `.layout-manifest` sidecar is needed on this path: the struct
+// shape travels inside the threaded native text.
+//
+// Content-keyed with the #632-style `.key` sidecar so warm builds
+// skip the child emit, and published via temp + atomic rename
+// (#1011) so a concurrent reader never observes a torn artifact.
+// The `native` emit stage is import-context-free by design (#906),
+// so staging order across the sfn-sources list does not matter.
+fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, ctx_root: string) -> boolean ![io] {
+    let slug = module_name_from_path(src);
+    let asm_path = ctx_root + "/" + slug + ".sfn-asm";
+    let key = runtime_object_cache_key(src, "");
+    if _runtime_obj_cache_hit(asm_path, key) { return true; }
+    _ensure_dir(_dirname(asm_path));
+    let staged = _mktemp_sibling_cmd(asm_path);
+    let mut emit_target: string = asm_path;
+    if staged.length > 0 { emit_target = staged; }
+    // Same env-clearing `sh -c` contract as `_emit_runtime_sfn_to_obj`
+    // (see the race-safety note on `_compile_runtime_sfn_sources`).
+    // `--no-resolve-gate` (#906): this is a build-internal per-module
+    // NATIVE emit with no import context of its own, so the lowering
+    // dry-run gate would falsely reject the very cross-module calls
+    // this staging exists to resolve; the build's LLVM emit stage
+    // owns fail-closed.
+    let cmd = "SAILFIN_TRACE_EMIT= SAILFIN_SKIP_TYPECHECK= SAILFIN_TRACE_TEST_RUNNER= SAILFIN_DUMP_TEST_SOURCES= SAILFIN_NO_LEGACY_PROBE=1 "
+        + _shell_single_quote_arg(self_path)
+        + " emit --module-name "
+        + _shell_single_quote_arg(slug)
+        + " --no-resolve-gate -o "
+        + _shell_single_quote_arg(emit_target)
+        + " native "
+        + _shell_single_quote_arg(src);
+    let rc = process.run(["sh", "-c", cmd]);
+    if rc != 0 {
+        print("sfn build: failed to stage runtime sfn-source import-context for "
+            + src
+            + " (child exit="
+            + number_to_string(rc)
+            + ")");
+        if staged.length > 0 { process.run(["rm", "-f", staged]); }
+        return false;
+    }
+    // Empty-output probe, mirroring the Makefile #812 staging's
+    // `[ -s "$asm_path" ]` guard.
+    let probe = fs.readFile(emit_target);
+    if probe.length == 0 {
+        print("sfn build: staged runtime sfn-source import-context is empty for "
+            + src);
+        if staged.length > 0 { process.run(["rm", "-f", staged]); }
+        return false;
+    }
+    if staged.length > 0 {
+        if !_atomic_rename_into_place(staged, asm_path) {
+            print("sfn build: failed to publish runtime sfn-source import-context for "
+                + src);
+            process.run(["rm", "-f", staged]);
+            return false;
+        }
+    }
+    _runtime_obj_cache_record(asm_path, key);
+    return true;
+}
+
+// Write a module's `.import-deps` sidecar (one staged sibling
+// `.sfn-asm` path per line — the exact shape `_read_import_deps`
+// parses and the resolver's `_cr_stage_import_deps` writes). Only
+// imports that resolve to a STAGED SIBLING sfn-source are listed;
+// platform extern modules (`./platform/posix`, …) are not
+// sfn-sources, keep riding the on-disk #812 artifacts, and a module
+// with no sibling imports gets no sidecar at all — its child emit
+// then degrades to the exact pre-#1288 legacy path.
+fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: string, staged_slugs: string[]) -> void ![io] {
+    let deps_path = ctx_root + "/" + slug + ".import-deps";
+    let asm_text = fs.readFile(asm_path);
+    let entries = parse_native_imports_for_import(asm_text);
+    let mut deps: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= entries.length { break; }
+        if entries[i].kind == "import" {
+            let dep_slug = resolve_import_module_slug_for_module(entries[i].module, slug);
+            let mut si: int = 0;
+            loop {
+                if si >= staged_slugs.length { break; }
+                if staged_slugs[si] == dep_slug {
+                    deps = deps + ctx_root + "/" + dep_slug + ".sfn-asm\n";
+                    break;
+                }
+                si += 1;
+            }
+        }
+        i += 1;
+    }
+    if deps.length == 0 {
+        // No sibling imports: drop any stale sidecar from a previous
+        // build so the emit can't thread context the module no longer
+        // declares.
+        if fs.exists(deps_path) { fs.deleteFile(deps_path); }
+        return;
+    }
+    // #1011: a concurrent `--import-context` emit reads this sidecar;
+    // publish atomically (temp sibling + rename) so a peer never sees
+    // a partial dep list. Mirrors `_cr_stage_import_deps`'s publish,
+    // including its plain-write fallback when `mktemp` is unavailable.
+    let tmp = _mktemp_sibling_cmd(deps_path);
+    if tmp.length == 0 {
+        fs.writeFile(deps_path, deps);
+        return;
+    }
+    fs.writeFile(tmp, deps);
+    if !_atomic_rename_into_place(tmp, deps_path) {
+        print("sfn build: failed to publish runtime sfn-source import-deps for "
+            + slug);
+        process.run(["rm", "-f", tmp]);
+    }
+}
+
+// Stage import-context artifacts + `.import-deps` sidecars for EVERY
+// sfn-source across the runtime capsules before any of them is
+// emitted to LLVM. Runs inside `_compile_runtime_sfn_sources` (and
+// therefore inside its `SAILFIN_DISABLE_RUNTIME_SFN_SOURCES` gate).
+// Fail-closed: a staging failure aborts the link the same way an
+// emit failure does — a missing sibling artifact would otherwise
+// surface later as the far less actionable "cannot resolve return
+// type" fatal in whichever module imports it.
+fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: RuntimeCapsuleArtifacts[], ctx_root: string) -> boolean ![io] {
+    let mut staged_slugs: string[] = [];
+    let mut staged_asm_paths: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= runtime_capsules.length { break; }
+        let cap = runtime_capsules[i];
+        let mut si: int = 0;
+        loop {
+            if si >= cap.sfn_sources.length { break; }
+            let src = cap.sfn_sources[si];
+            if !_stage_one_runtime_sfn_import_context(self_path, src, ctx_root) {
+                return false;
+            }
+            let slug = module_name_from_path(src);
+            staged_slugs.push(slug);
+            staged_asm_paths.push(ctx_root + "/" + slug + ".sfn-asm");
+            si += 1;
+        }
+        i += 1;
+    }
+    // Second pass (all siblings now staged): derive each module's
+    // sibling deps from its own `.import` entries.
+    let mut di: int = 0;
+    loop {
+        if di >= staged_slugs.length { break; }
+        _write_runtime_sfn_import_deps(staged_asm_paths[di], staged_slugs[di], ctx_root, staged_slugs);
+        di += 1;
+    }
+    return true;
 }
 
 fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string) -> RuntimeLinkInputs ![io] {
@@ -1206,6 +1436,12 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
             + "\")");
         return _failed_runtime_link_inputs();
     }
+    // #1288: stage every sfn-source's import-context artifacts FIRST
+    // so each module's llvm emit below can resolve sibling imports.
+    let ctx_root = _runtime_sfn_ctx_root(out_dir);
+    if !_stage_runtime_sfn_import_context(self_path, runtime_capsules, ctx_root) {
+        return _failed_runtime_link_inputs();
+    }
     let mut i: int = 0;
     loop {
         if i >= runtime_capsules.length { break; }
@@ -1215,7 +1451,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            let emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root);
+            let emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root);
             stats = merge_cache_stats(stats, emit.stats);
             if emit.obj_path.length == 0 {
                 return _failed_runtime_link_inputs();
@@ -1298,7 +1534,11 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
             let cap = runtime_capsules[pi];
             if cap.prelude_entry.length > 0 {
                 let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
-                let prelude_emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root);
+                // #1288: the prelude is never staged, so it has no
+                // `.import-deps` sidecar — the threaded context root
+                // is inert here and the prelude keeps its legacy
+                // descriptor-based emit byte-for-byte (#940 Risk R2).
+                let prelude_emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir));
                 stats = merge_cache_stats(stats, prelude_emit.stats);
                 if prelude_emit.obj_path.length == 0 {
                     return _failed_runtime_link_inputs();
