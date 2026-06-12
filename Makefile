@@ -871,7 +871,7 @@ rebuild-impl:
 	fi; \
 	if [ "$$build_rc" -ne 0 ] || [ ! -f build/sailfin/program ]; then \
 		echo "[rebuild][error] sfn build failed (exit=$$build_rc) or did not produce build/sailfin/program" >&2; \
-		echo "[rebuild][error] expected the alpha.6+ seed's subprocess-stage path to keep the cold build under the 8 GB ulimit" >&2; \
+		echo "[rebuild][error] expected the seed's subprocess-stage path to keep the cold build under the 8 GiB memory budget" >&2; \
 		echo "[rebuild][error] if this is a regression, rerun with BUILD_ARGS='--cache-trace' to bisect, or fall back to the prior seed via .seed-version" >&2; \
 		if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then rm -f build/native/.build-report.json; fi; \
 		exit 1; \

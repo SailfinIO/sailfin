@@ -422,8 +422,9 @@ fn _cr_shell_quote(value: string) -> string {
 // to [1, 8] for system-memory safety — each worker subprocess
 // holds its own arena + parser state, so 8 workers × ~500 MB ≈
 // 4 GB peak total memory across the parent + worker processes,
-// keeping us under the 8 GB ulimit even when the parent's own
-// resolver state is at peak). Returns 1 on any read failure or
+// keeping us under the compiler's self-applied 8 GiB memory budget
+// even when the parent's own resolver state is at peak; each worker
+// inherits that RLIMIT_AS). Returns 1 on any read failure or
 // when nproc isn't on PATH, which keeps the legacy serial
 // behavior as the safe default.
 //

@@ -14,7 +14,7 @@ This skill runs the same validation pipeline as CI: clean build, first-pass test
 .claude/skills/check/scripts/run-check.sh
 ```
 
-The script applies `ulimit -v 8388608` for every compiler invocation, writes a timestamped log to `build/logs/check-<ts>.log`, and exits non-zero on failure with the last 80 lines of the log on stdout.
+The script writes a timestamped log to `build/logs/check-<ts>.log`, and exits non-zero on failure with the last 80 lines of the log on stdout.
 
 ## Interpreting failures
 

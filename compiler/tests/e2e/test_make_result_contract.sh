@@ -90,7 +90,7 @@ run_make() {
     # the verdict block — which is make's own framing noise, not the
     # wrapped target's output. Suppressing it keeps the captured log
     # clean; assert_final_block tolerates any residual make framing too.
-    ( ulimit -v 8388608 2>/dev/null || true
+    (
       env -u SAILFIN_INNER ${TIMEOUT_PREFIX} make --no-print-directory "$@" ) \
         > "$logfile" 2>&1
     return 0
@@ -259,7 +259,7 @@ STUB
 chmod +x "$FAKESEED"
 
 BREAK_LOG="$SCRATCH/break.log"
-( ulimit -v 8388608 2>/dev/null || true
+(
   env -u SAILFIN_INNER FORCE=1 SEED_NATIVE="$FAKESEED" \
       ${TIMEOUT_PREFIX} make --no-print-directory compile ) \
     > "$BREAK_LOG" 2>&1 || true

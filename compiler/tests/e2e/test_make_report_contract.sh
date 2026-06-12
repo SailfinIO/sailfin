@@ -103,7 +103,7 @@ CHECKFAST_REPORT="build/agent-report.check-fast.json"
 run_make_json() {
     local logfile="$1"
     shift
-    ( ulimit -v 8388608 2>/dev/null || true
+    (
       env -u SAILFIN_INNER ${TIMEOUT_PREFIX} \
           make JSON=1 --no-print-directory "$@" ) \
         > "$logfile" 2>&1
@@ -118,7 +118,7 @@ run_make_json() {
 run_make_off() {
     local logfile="$1"
     shift
-    ( ulimit -v 8388608 2>/dev/null || true
+    (
       env -u SAILFIN_INNER -u SAILFIN_AGENT_REPORT ${TIMEOUT_PREFIX} \
           make --no-print-directory "$@" ) \
         > "$logfile" 2>&1

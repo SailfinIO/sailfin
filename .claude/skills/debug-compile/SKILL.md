@@ -16,7 +16,7 @@ Diagnose, fix, and verify a Sailfin compilation failure without chasing symptoms
 .claude/skills/debug-compile/scripts/isolate.sh path/to/file.sfn
 ```
 
-This emits both `.sfn-asm` and LLVM IR under `build/debug/<basename>.{asm,ll,stderr}` with `ulimit -v 8388608` + `timeout 60` applied. Read the stderr for the diagnostic span.
+This emits both `.sfn-asm` and LLVM IR under `build/debug/<basename>.{asm,ll,stderr}` with `timeout 60` applied (on Linux the compiler self-caps memory at 8 GiB). Read the stderr for the diagnostic span.
 
 ### If the target is a self-hosting build
 

@@ -25,7 +25,6 @@ Both gates run inside one second-pass invocation. Reproducing locally
 is a single command; everything else is reading its output.
 
 ```bash
-ulimit -v 8388608
 make compile                             # self-host from the pinned seed
 
 # First pass — warm the cache. Mirrors the workflow.
@@ -78,7 +77,6 @@ git bisect good <known-good-sha>          # last successful build-quality.yml ru
 
 git bisect run bash -c '
   set -euo pipefail
-  ulimit -v 8388608
   make compile >/dev/null 2>&1 || exit 125    # 125 = skip (build broken here)
   build/native/sailfin build -p compiler \
     --work-dir build/det-pass1 --json >/dev/null

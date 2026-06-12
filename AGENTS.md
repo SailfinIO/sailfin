@@ -31,7 +31,7 @@
 
 ## Codex Workflow Notes
 
-- Codex-specific repository setup lives under `.codex/`: `config.toml` enables hooks/skills, `hooks/` mirrors the Claude session and memory-cap safeguards, `skills/` holds reusable Sailfin workflows, and `prompts/` contains web/CLI prompt templates.
+- Codex-specific repository setup lives under `.codex/`: `config.toml` enables hooks/skills, `hooks/` mirrors the Claude session safeguards, `skills/` holds reusable Sailfin workflows, and `prompts/` contains web/CLI prompt templates.
 - For autonomous issue pickup in Codex web or CLI, use `.codex/prompts/pickup.md`; it mirrors the Claude `/pickup` flow but branches as `codex/<issue>-<slug>`.
-- Before running Sailfin compiler or make verification commands from Codex, preserve the safety invariant: `ulimit -v 8388608 && <command>`.
+- The compiler self-applies its 8 GiB memory budget on Linux at startup (`SAILFIN_MEM_LIMIT` overrides; see `.claude/rules/compiler-safety.md`) — no `ulimit` prefix is needed. Wrap single-file compiles with `timeout 60` (hang guard).
 - If Codex does not auto-load repo-local skills/hooks in a given environment, explicitly mention the relevant `.codex/skills/*/SKILL.md` file in the prompt and follow `.codex/README.md`.

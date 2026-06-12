@@ -104,7 +104,7 @@ string.
 | `test-failure` | One or more tests failed assertions. | Read the failing test's output. |
 | `nondeterminism` | stage2 ≠ stage3 fixed-point mismatch (`make check`). | Pairs with `status:"warn"`, exit `0`. Re-run once; if it persists, escalate to `seed-stabilizer`. |
 | `setup-error` | Bad path, missing seed, staging/env failure. | Fix the invocation/env, not the source. |
-| `oom` | Hit the 8 GB `ulimit -v` cap. | Escalate (memory regression) — do **not** blind-retry. |
+| `oom` | Hit the compiler's self-applied 8 GiB memory budget (`RLIMIT_AS`, #1291). | Escalate (memory regression) — do **not** blind-retry. |
 | `timeout` | Wall-clock `timeout` tripped (exit 124, or SIGKILL 137). | Re-run or escalate per phase. |
 
 `nondeterminism` is the only class that pairs with `status:"warn"`; every other

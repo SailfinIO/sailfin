@@ -47,11 +47,11 @@ BINARY="$(realpath "$BINARY")"
 PASS=0
 FAIL=0
 
-# Cap memory like every other compiler invocation in this repo. The
-# pre-fix failure mode is a few hundred extra MB on this synthetic
-# tree — well under the cap — so the cap only guards against runaway
-# regressions, it never fires on the expected paths.
-ulimit -v 8388608 2> /dev/null || true
+# No caller-side cap: the compiler self-applies its 8 GiB memory
+# budget on Linux (#1291). The pre-fix failure mode is a few hundred
+# extra MB on this synthetic tree — well under the budget — so the
+# budget only guards against runaway regressions, it never fires on
+# the expected paths.
 
 SCRATCH="$(mktemp -d -t sfn-check-scan-memo-XXXXXX)"
 trap 'rm -rf "$SCRATCH"' EXIT

@@ -20,16 +20,5 @@
         }
       ]
     }
-  ],
-  "PreToolUse": [
-    {
-      "matcher": "Bash|Shell|LocalShell|exec_command",
-      "hooks": [
-        {
-          "type": "command",
-          "command": ".codex/hooks/check-ulimit.sh"
-        }
-      ]
-    }
   ]
 }

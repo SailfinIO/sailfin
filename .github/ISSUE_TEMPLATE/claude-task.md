@@ -56,7 +56,7 @@ optional `area:*`).
 
 <!-- Exact commands a reviewer can run to confirm the change works. -->
 ```bash
-ulimit -v 8388608 && timeout 60 build/native/sailfin run path/to/example.sfn
+timeout 60 build/native/sailfin run path/to/example.sfn
 ```
 
 ## Size

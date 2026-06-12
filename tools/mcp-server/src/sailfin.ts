@@ -8,7 +8,6 @@ import { existsSync } from "node:fs";
 import { realpathSync } from "node:fs";
 import path from "node:path";
 
-const MEMORY_CAP_KB = 8 * 1024 * 1024; // 8 GB virtual memory
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024; // 8 MiB per stream
 
@@ -107,8 +106,9 @@ export async function runSailfin(
   const cwd = opts.cwd ?? workspaceRoot();
   const bin = compilerPath();
 
-  // We use `/usr/bin/env bash -lc` so we can set `ulimit -v` before
-  // exec. Node's child_process does not support rlimits directly.
+  // We use `/usr/bin/env bash -lc` to run under the user's shell
+  // environment. (The historical `ulimit -v` preamble is gone — the
+  // compiler self-applies its 8 GiB memory budget on Linux, #1291.)
   //
   // `-l` sources the user's login profile (~/.bash_profile etc.). This
   // is deliberate — we need the user's PATH so `build/native/sailfin`
@@ -116,10 +116,7 @@ export async function runSailfin(
   // poisoned shell profile can influence the execution environment;
   // acceptable for a local dev tool, revisit if this server ever runs
   // with untrusted callers.
-  const cmd = [
-    `ulimit -v ${MEMORY_CAP_KB}`,
-    `exec ${shellEscape(bin)} ${args.map(shellEscape).join(" ")}`,
-  ].join(" && ");
+  const cmd = `exec ${shellEscape(bin)} ${args.map(shellEscape).join(" ")}`;
 
   const started = Date.now();
   return new Promise<SailfinResult>((resolve) => {

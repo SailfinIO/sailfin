@@ -14,7 +14,7 @@ Part of the "AI agents are users" strategy described in [`CLAUDE.md`](../../CLAU
 | `sailfin_emit_llvm` | `sailfin emit llvm <path>` | Emit LLVM IR. Use for lowering-stage or linker diagnosis. |
 | `sailfin_fmt_check` | `sailfin fmt --check <path>` | Report formatting differences without rewriting. |
 
-Every tool runs under `ulimit -v 8388608` + a 60-second timeout (same safety envelope as the [`compiler-safety` rule](../../.claude/rules/compiler-safety.md)), and refuses paths that resolve outside the workspace root.
+Every tool runs under a 60-second timeout, and the compiler self-applies its 8 GiB memory budget on Linux (see the [`compiler-safety` rule](../../.claude/rules/compiler-safety.md)); paths that resolve outside the workspace root are refused.
 
 ## Build
 

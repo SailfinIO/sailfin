@@ -59,7 +59,7 @@ do_module() {
         rm -rf "$mod_cwd/build/sailfin"
         mkdir -p "$mod_cwd/build/sailfin"
         local out="$OUT_DIR/${safe}.iter${k}.ll"
-        ( ulimit -v 8388608 2>/dev/null || true
+        (
           cd "$mod_cwd" || exit 99
           timeout 60 "$SEED" emit -o "$out" llvm "$src"
         ) 2>/dev/null
