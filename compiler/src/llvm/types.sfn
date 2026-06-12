@@ -584,6 +584,16 @@ struct LoopStructure {
     diagnostics: string[];
 }
 
+// Span of a `routine { }` body (issue #1181): the instruction range
+// between `.routine` and its matching `.endroutine`. Mirrors
+// `LoopStructure`; the routine lowering has no loop/phi machinery.
+struct RoutineStructure {
+    body_start: int;
+    body_end: int;
+    next_index: int;
+    diagnostics: string[];
+}
+
 struct TryStructure {
     try_start: int;
     try_end: int;

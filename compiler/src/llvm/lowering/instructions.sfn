@@ -51,6 +51,7 @@ import { lower_if_instruction } from "./instructions_if";
 import { lower_let_instruction } from "./instructions_let";
 import { append_loop_context, last_loop_context, lower_loop_instruction } from "./instructions_loops";
 import { lower_match_instruction } from "./instructions_match";
+import { lower_routine_instruction } from "./instructions_routine";
 import { lower_throw_instruction, lower_try_instruction } from "./instructions_try";
 import { get_instruction_tag } from "./lowering_native_helpers";
 import { find_last_label } from "./phi";
@@ -385,6 +386,32 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
             }
         }
         if !_tag_handled {
+            if _instr_tag == 22 {
+                let lowered = lower_routine_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
+                let mut _cir: int = 0;
+                loop {
+                    if _cir >= lowered.diagnostics.length { break; }
+                    diagnostics.push(lowered.diagnostics[_cir]);
+                    _cir += 1;
+                }
+                collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
+                current_lines = lowered.lines;
+                current_allocas = lowered.allocas;
+                current_locals = lowered.locals;
+                current_bindings = lowered.bindings;
+                current_temp = lowered.temp_index;
+                current_block_counter = lowered.block_counter;
+                current_next_local = lowered.next_local_id;
+                current_next_region = lowered.next_lifetime_region_id;
+                current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+                terminated = lowered.terminated;
+                index = lowered.next_index;
+                active_label = find_last_label(current_lines, active_label);
+                _tag_handled = true;
+            }
+        }
+        if !_tag_handled {
             if _instr_tag == 12 {
                 let lowered = lower_match_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
                 let mut _ci2: int = 0;
@@ -540,6 +567,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: int, end: int,
             if _instr_tag == 7 { _is_terminator = true; }
             if _instr_tag == 9 { _is_terminator = true; }
             if _instr_tag == 14 { _is_terminator = true; }
+            if _instr_tag == 23 { _is_terminator = true; }
             if _is_terminator {
                 // Return directly to avoid seed loop-break bug.
                 return BlockLoweringResult {

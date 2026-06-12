@@ -524,6 +524,22 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "await_string", symbol: "sfn_await_string", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
+    // Structured-concurrency nursery surface (#1181). The `routine { }`
+    // lowering emits `call`s to these; the runtime bodies live in
+    // runtime/sfn/concurrency/nursery.sfn. Registered as async-runtime
+    // targets so `async_runtime_declare_lines` emits their forward
+    // declares into the preamble (and skips them in the module that
+    // *defines* them, dodging the declare+define redefinition error).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "nursery_enter", symbol: "sfn_nursery_enter", return_type: "i64", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "nursery_register", symbol: "sfn_nursery_register", return_type: "i64", parameter_types: ["i64", "i64"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "nursery_exit", symbol: "sfn_nursery_exit", return_type: "i64", parameter_types: ["i64"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_log_execution_fn", symbol: "sfn_log_execution", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_log_execution", c_abi_return_type: null
     });
@@ -1380,5 +1396,8 @@ fn is_async_runtime_target(target: string) -> boolean {
     if target == "spawn_string" { return true; }
     if target == "spawn_string_ctx" { return true; }
     if target == "await_string" { return true; }
+    if target == "nursery_enter" { return true; }
+    if target == "nursery_register" { return true; }
+    if target == "nursery_exit" { return true; }
     return false;
 }

@@ -945,12 +945,49 @@ spawn+await.
 listening socket, dispatching each connection to the thread pool. Blocking
 accept, thread-pool dispatch. No async I/O in v0.
 
-#### 2.6.7 Future Considerations for Concurrency
+#### 2.6.7 Routine Nursery (Structured Concurrency)
 
-Post-1.0, the scheduler can evolve toward work-stealing, and `routine` blocks
-can introduce structured concurrency with cancellation and nurseries. The v0
-thread pool + mutex design does not preclude this — it is a simpler starting
-point that validates the API surface.
+`routine { }` is a structured-concurrency boundary, not a plain block. It
+lowers (issue #1181) to a real nursery scope backed by
+`runtime/sfn/concurrency/nursery.sfn`:
+
+- **Entry.** The lowering emits `call i64 @sfn_nursery_enter()`, which
+  allocates a `Nursery`, links it to the executing thread's previous current
+  nursery as `parent`, and pushes it as the new current. The current nursery
+  is a per-thread `thread_local` register (`_sfn_g_current_nursery`) — two
+  threads each inside their own `routine` must not clobber each other's
+  nursery, so a process-global would be incorrect.
+- **Registration.** Every `spawn` funnels through the base `sfn_spawn`
+  (`future.sfn`), which consults `sfn_nursery_current()` and calls
+  `sfn_nursery_register(n, task)` before enqueueing — so the nursery owns
+  tasks spawned anywhere in its *dynamic extent* (including in callees), not
+  just lexically inside the block. The registration list is a mutex-guarded
+  growable buffer of `Task` addresses.
+- **Exit.** The lowering emits `call i64 @sfn_nursery_exit(...)`, a
+  structured-join barrier that `sfn_task_join`s every registered child (the
+  #1089 single-task join), then pops the nursery (restoring `parent` as
+  current). Control cannot leave the routine until all children have
+  completed: **no task spawned in a routine outlives its scope.**
+
+Fail-closed stances: non-local exit (`return`/`throw`/`break`/`continue`) out
+of a routine is rejected at lowering (it would branch past the join and leak
+tasks); a registration that cannot grow its list sets the nursery's `faulted`
+flag (returned by `sfn_nursery_exit`) rather than silently dropping the task.
+
+v0 deliberately defers: cancel-siblings-on-fault (it does join-all, not
+cancel-all); freeing joined `Task` allocations (join-without-destroy, because
+a user may also `await` the future — closes with future-ownership work); and
+cross-thread nursery inheritance (a child task runs on a worker whose current
+nursery is null; a nested `routine` on that worker establishes its own
+nursery correctly).
+
+#### 2.6.8 Future Considerations for Concurrency
+
+Post-1.0, the scheduler can evolve toward work-stealing, and the `routine`
+nursery (§2.6.7) can grow cancellation tokens and cancel-on-fault propagation
+(the `parent` link and `faulted` code are the forward-compatible seams). The
+v0 thread pool + mutex design does not preclude this — it is a simpler
+starting point that validates the API surface.
 
 ### 2.7 Capability Adapters
 
