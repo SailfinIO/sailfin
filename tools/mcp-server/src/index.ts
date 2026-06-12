@@ -111,10 +111,10 @@ const buildFileSchema = z
   .min(1)
   .optional()
   .describe(
-    "Path to a single .sfn file to build, relative to the workspace root. Mutually exclusive with `project`.",
+    "Path to a single .sfn file to build, relative to the workspace root. Mutually exclusive with `capsule`.",
   );
 
-const projectSchema = z
+const capsuleSchema = z
   .string()
   .min(1)
   .optional()
@@ -341,20 +341,20 @@ server.registerTool(
   {
     title: "Build a Sailfin file or capsule to a binary",
     description:
-      "Compile a Sailfin source file or capsule to a native binary via `sailfin build`. Provide exactly one of `path` (a single .sfn file) or `project` (a capsule directory, built via -p). Optionally `json` for machine-readable output. Pure passthrough — this does NOT self-host the compiler itself: the self-host build needs seed resolution + extern pre-staging that lives in `make compile`, and this tool deliberately does not replicate it. Runs under a 10-minute timeout (cold builds take minutes).",
-    inputSchema: { path: buildFileSchema, project: projectSchema, json: jsonSchema },
+      "Compile a Sailfin source file or capsule to a native binary via `sailfin build`. Provide exactly one of `path` (a single .sfn file) or `capsule` (a capsule directory, built via -p). Optionally `json` for machine-readable output. Pure passthrough — this does NOT self-host the compiler itself: the self-host build needs seed resolution + extern pre-staging that lives in `make compile`, and this tool deliberately does not replicate it. Runs under a 10-minute timeout (cold builds take minutes).",
+    inputSchema: { path: buildFileSchema, capsule: capsuleSchema, json: jsonSchema },
   },
-  async ({ path: userPath, project, json }) => {
+  async ({ path: userPath, capsule, json }) => {
     const hasPath = typeof userPath === "string" && userPath.length > 0;
-    const hasProject = typeof project === "string" && project.length > 0;
-    if (hasPath === hasProject) {
+    const hasCapsule = typeof capsule === "string" && capsule.length > 0;
+    if (hasPath === hasCapsule) {
       return errorResult(
-        "sailfin_build: provide exactly one of `path` (a .sfn file) or `project` (a capsule directory).",
+        "sailfin_build: provide exactly one of `path` (a .sfn file) or `capsule` (a capsule directory).",
       );
     }
-    const target = (hasPath ? userPath : project) as string;
+    const target = (hasPath ? userPath : capsule) as string;
     const out = await withResolvedPath(target, async (abs) => {
-      const args = hasProject ? ["build", "-p", abs] : ["build", abs];
+      const args = hasCapsule ? ["build", "-p", abs] : ["build", abs];
       if (json) {
         args.push("--json");
       }

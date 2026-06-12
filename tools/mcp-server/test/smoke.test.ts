@@ -433,7 +433,7 @@ test("sailfin_build requires exactly one of path or project", async () => {
     // Both provided.
     const both = await client.request("tools/call", {
       name: "sailfin_build",
-      arguments: { path: "foo.sfn", project: "compiler" },
+      arguments: { path: "foo.sfn", capsule: "compiler" },
     });
     const bothResult = both.result as {
       content: Array<{ type: string; text: string }>;
