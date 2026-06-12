@@ -76,7 +76,7 @@ if command -v timeout >/dev/null 2>&1; then TIMEOUT_PREFIX="timeout 120"; fi
 # summary (`[cache] ...`) prints to stderr (#915); 2>&1 captures it.
 do_build() {
     local work="$1" log="$2"
-    ( ulimit -v 8388608 2>/dev/null || true
+    (
       SAILFIN_BUILD_CACHE_DIR="$SHARED_CACHE" \
         ${TIMEOUT_PREFIX} "$BINARY" build "$SCRATCH/hello.sfn" \
         -o "$SCRATCH/hello-$(basename "$work")" --work-dir "$work" ) >"$log" 2>&1

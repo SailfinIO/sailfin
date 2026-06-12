@@ -51,7 +51,6 @@ mkdir -p "$SCRATCH/build/native/import-context/fixtures"
 SHARED_ASM="$SCRATCH/build/native/import-context/fixtures/cross_module_int_signature_shared.sfn-asm"
 IMPORTER_LL="$SCRATCH/importer.ll"
 
-ulimit -v 8388608 2>/dev/null || true
 
 run_test() {
     local name="$1"

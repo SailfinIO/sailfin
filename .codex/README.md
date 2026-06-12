@@ -35,7 +35,7 @@ The hooks are intentionally conservative:
 
 - `SessionStart` adds a compact compiler/seed/branch snapshot.
 - `UserPromptSubmit` adds branch, dirty-file count, and unpushed commit count.
-- `PreToolUse` blocks `make`, `build/native/sailfin`, and `build/native/sailfin-seedcheck` commands unless the command includes `ulimit -v 8388608`.
+- (Retired) The former `PreToolUse` ulimit guard is gone — the compiler self-applies its 8 GiB memory budget on Linux at startup (#1291).
 
 The memory cap duplicates the project rule in `AGENTS.md` because uncapped Sailfin compiler runs can exhaust local WSL or IDE hosts.
 

@@ -34,7 +34,6 @@ FAIL=0
 SCRATCH="$(mktemp -d -t sfn-bool-coerce-XXXXXX)"
 trap 'rm -rf "$SCRATCH"' EXIT
 
-ulimit -v 8388608 2>/dev/null || true
 
 run_test() {
     local name="$1"

@@ -95,7 +95,7 @@ if command -v timeout >/dev/null 2>&1; then TIMEOUT_PREFIX="timeout 120"; fi
 # objects land under "$WORK/sailfin/" instead of the repo's
 # build/sailfin/.
 do_build() {
-    ( ulimit -v 8388608 2>/dev/null || true
+    (
       ${TIMEOUT_PREFIX} "$BINARY" build "$SCRATCH/hello.sfn" \
         -o "$SCRATCH/hello" --work-dir "$WORK" ) >"$SCRATCH/build.log" 2>&1
 }

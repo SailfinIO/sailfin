@@ -16,5 +16,5 @@ Required workflow:
 6. Run the issue's verification commands plus the Sailfin safety checks from .codex/skills/sailfin-check/SKILL.md.
 7. Commit the changes and open a PR with `Closes #<issue>`.
 
-Never run Sailfin compiler or make verification commands without `ulimit -v 8388608 &&`.
+The compiler self-caps memory at 8 GiB on Linux; wrap single-file compiles with `timeout 60`.
 ```

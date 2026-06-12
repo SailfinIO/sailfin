@@ -10,7 +10,7 @@
 //   - sailfin_emit_llvm       — emit LLVM IR
 //   - sailfin_fmt_check       — formatting diagnostics (no rewrite)
 //
-// Every tool goes through runSailfin(), which enforces ulimit + timeout
+// Every tool goes through runSailfin(), which enforces the timeout
 // and keeps invocations inside the workspace.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

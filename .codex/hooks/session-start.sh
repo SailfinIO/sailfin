@@ -10,14 +10,14 @@ cd "$repo_root"
 printf '## Sailfin Codex session bootstrap\n'
 
 if [[ -x build/native/sailfin ]]; then
-  version=$(ulimit -v 8388608 2>/dev/null; timeout 5 build/native/sailfin version 2>/dev/null | head -n1 || true)
+  version=$(timeout 5 build/native/sailfin version 2>/dev/null | head -n1 || true)
   if [[ -n "$version" ]]; then
     printf -- '- compiler: build/native/sailfin present — %s\n' "$version"
   else
     printf -- '- compiler: build/native/sailfin present — version probe failed\n'
   fi
 else
-  printf -- '- compiler: build/native/sailfin MISSING — run `ulimit -v 8388608 && make compile` to self-host from the seed\n'
+  printf -- '- compiler: build/native/sailfin MISSING — run `make compile` to self-host from the seed\n'
 fi
 
 if compgen -G 'build/seed/*' >/dev/null; then
@@ -41,7 +41,7 @@ version_pin=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/version =
 cat <<'MSG'
 
 Reminders:
-- Always prefix Sailfin compiler or make invocations with `ulimit -v 8388608 &&`.
+- The compiler self-caps memory at 8 GiB on Linux (`SAILFIN_MEM_LIMIT` to override); wrap single-file compiles with `timeout 60`.
 - Prefer feature branches named `codex/<issue-or-topic>-<slug>`.
 - Status source of truth: docs/status.md. Roadmap: site/src/pages/roadmap.astro.
 - For issue pickup, use .codex/prompts/pickup.md as the web/CLI prompt template.

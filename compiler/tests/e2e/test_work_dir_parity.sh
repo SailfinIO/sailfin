@@ -17,7 +17,7 @@
 #   - the set of `.ll` filenames under `<DIR>/native/import-context/`
 #     is identical between the two runs
 #   - per-build `timeout 600` (10 min)
-#   - `ulimit -v 8388608` virtual-memory cap honored
+#   - the compiler's self-applied 8 GiB memory budget (#1291) governs
 #   - temp directories cleaned up on success and failure
 #
 # Usage:
@@ -31,11 +31,6 @@ BINARY="$(realpath "$BINARY")"
 # REPO_ROOT is captured before any `cd` so the build invocations can
 # resolve `compiler/capsule.toml` regardless of the test's CWD.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-
-# Cap virtual memory at 8 GB for every compiler subprocess this test
-# spawns. Mandatory on Linux per `.claude/rules/compiler-safety.md`;
-# best-effort on macOS where `ulimit -v` is unsupported.
-ulimit -v 8388608 2>/dev/null || true
 
 # macOS doesn't ship `timeout(1)`; coreutils provides `gtimeout`. Pick
 # whichever is available and fall back to "no timeout" if neither
