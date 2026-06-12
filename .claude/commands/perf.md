@@ -17,7 +17,7 @@ The argument can be:
 Capture the current performance profile **before any changes**:
 
 ```bash
-ulimit -v 8388608 && make bench 2>&1 | tee build/bench-baseline.txt
+make bench 2>&1 | tee build/bench-baseline.txt
 ```
 
 Record:
@@ -29,7 +29,7 @@ Record:
 If the target is a hot path that's not directly visible in `make bench`, write a focused micro-benchmark — a small `.sfn` file that exercises the path heavily — and time it:
 
 ```bash
-ulimit -v 8388608 && /usr/bin/time -v build/native/sailfin emit native /tmp/bench_hotpath.sfn 2>&1 | tee build/bench-baseline-hotpath.txt
+/usr/bin/time -v build/native/sailfin emit native /tmp/bench_hotpath.sfn 2>&1 | tee build/bench-baseline-hotpath.txt
 ```
 
 Save the baseline numbers in a comment for later comparison.
@@ -67,7 +67,7 @@ Apply the fix. Keep the change minimal — perf fixes that also refactor are har
 
 After every meaningful change:
 ```bash
-ulimit -v 8388608 && make compile    # self-hosts
+make compile    # self-hosts
 ```
 
 If a step breaks self-hosting, stop and diagnose before continuing.
@@ -79,7 +79,7 @@ If a step breaks self-hosting, stop and diagnose before continuing.
 Capture the post-fix profile **with the same methodology as Phase 1**:
 
 ```bash
-ulimit -v 8388608 && make bench 2>&1 | tee build/bench-after.txt
+make bench 2>&1 | tee build/bench-after.txt
 # plus any micro-benchmark you ran in Phase 1
 ```
 
@@ -104,14 +104,14 @@ Compute the deltas:
 Spawn the **test-runner** agent:
 
 ```bash
-ulimit -v 8388608 && make test
+make test
 ```
 
 Performance fixes that break tests are net negative. Full suite must pass.
 
 Also run `/check` for the full self-hosting validation:
 ```bash
-ulimit -v 8388608 && make check
+make check
 ```
 
 ---
@@ -142,4 +142,4 @@ Closes #<N>
 - **Keep the change minimal.** Don't bundle refactoring with a perf fix.
 - **Self-hosting wins.** If a faster compiler can't compile itself, it isn't faster.
 - **Watch RSS, not just time.** Memory pressure cascades — a fix that halves time but doubles RSS often regresses overall.
-- **Always apply `ulimit -v 8388608`** before running the compiler.
+- The compiler self-caps memory (8 GiB on Linux); see `.claude/rules/compiler-safety.md`.

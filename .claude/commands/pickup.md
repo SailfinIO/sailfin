@@ -324,8 +324,8 @@ decide.
 Walk through every acceptance criterion in the issue body. Each must pass before opening the PR:
 
 ```bash
-ulimit -v 8388608 && make compile    # self-hosts
-ulimit -v 8388608 && make test       # no regressions
+make compile    # self-hosts
+make test       # no regressions
 # plus any issue-specific verification commands
 ```
 
@@ -407,7 +407,7 @@ If anything was deferred or scope was adjusted mid-flight, surface it explicitly
 - **Never declare done with unchecked acceptance criteria.** If a criterion can't be met, comment and pause.
 - **Never push to main directly.** Always work on the `claude/<N>-<slug>` branch and open a PR.
 - **Always link the issue in the PR.** `Closes #N` ensures auto-close on merge.
-- **Always apply `ulimit -v 8388608`** before running the compiler.
+- The compiler self-caps memory (8 GiB on Linux); see `.claude/rules/compiler-safety.md`.
 - **Never skip Phase 1.5.** The `## Required in pinned seed` precheck (and its legacy fallback) prevents the failure mode that broke the original #489 attempt — a compiler-source migration picked up against a seed that predated its dependency. If the precheck fails, halt and comment; do not attempt to triple-bootstrap a workaround binary.
 - **One issue per session.** Don't try to bundle multiple issues — they were sized to be standalone.
 - **Every label flip must be paired with a board sync.** Run

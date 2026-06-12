@@ -11,8 +11,8 @@ Before committing changes that touch any `.sfn` file:
    round-trip. If `--check` still flags a file, re-run `--write` and read
    the diff before committing — `fmt` may have collapsed or expanded a
    construct in a way that's worth knowing about.
-3. Memory cap and timeout still apply: prefix with `ulimit -v 8388608` and
-   wrap with `timeout 30` per file.
+3. Timeouts still apply: wrap with `timeout 30` per file. (The compiler
+   self-applies its memory budget — see `compiler-safety.md`.)
 
 Formatting is canonical — never hand-tune indentation, brace placement,
 or import ordering after `fmt` has run. If the formatter produces output

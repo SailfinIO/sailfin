@@ -1,0 +1,197 @@
+// runtime/sfn/platform/rlimit.sfn
+//
+// Pure-Sailfin self-applied memory budget for the compiler driver.
+//
+// History: every compiler invocation used to require a caller-side
+// `ulimit -v 8388608` prefix (enforced by a PreToolUse hook and prose
+// in `.claude/rules/compiler-safety.md`) so a runaway compile could
+// not exhaust the host — uncapped regressions have killed WSL
+// instances and CI runner agents outright (issue #1245). That guard
+// now lives in the toolchain itself: `fn main` in
+// `compiler/src/cli_main.sfn` calls `apply_default_mem_limit()`
+// before any compilation work, so `sfn build` / `check` / `test` /
+// `emit` self-cap without any caller cooperation. Compiled user
+// programs are NOT capped — the call site is the compiler driver,
+// not the shared runtime init, so the budget scopes to the
+// toolchain exactly the way the old shell prefix did.
+//
+// Policy (mirrors the retired shell-level contract):
+//   - Linux only. Darwin does not honor `RLIMIT_AS` (`setrlimit`
+//     fails with EINVAL) and Windows uses job objects; both return
+//     early via the `/proc/self/status` existence probe — the same
+//     platform scope the external `ulimit -v` rule always had.
+//   - An inherited cap always wins. If `RLIMIT_AS` is already finite
+//     (CI step-level `ulimit -v`, a parent compiler process, a
+//     cautious user shell), the limit is left untouched — the
+//     driver never loosens an external budget.
+//   - `SAILFIN_MEM_LIMIT=<bytes>` overrides the 8 GiB default
+//     (values below 1 MiB are rejected as misconfiguration — a
+//     suffixed value like "4G" would otherwise strtoll to 4 bytes
+//     and kill the process at startup). `unlimited` / `off` / `0`
+//     disables the self-cap entirely; ASAN/TSAN runs need this —
+//     sanitizer shadow reservation requires ~16 TB of virtual
+//     address space and aborts under any finite `RLIMIT_AS`.
+//   - `SAILFIN_TRACE_MEM_LIMIT=1` reports the decision on stderr.
+//
+// The limit is inherited across fork/exec, so the per-module emit
+// subprocesses, `clang`, and `llvm-link` children all run under the
+// same budget — matching the old shell-level `ulimit -v` behavior.
+//
+// Extern discipline: declarations are inlined per the #306
+// cross-module-extern workaround used throughout this directory
+// (see `runtime/sfn/platform/exec.sfn`'s module header for the
+// long-form rationale, the `as * u8` cast-quirk note, and the
+// inline-numeric-literal convention for constants the seed cannot
+// yet spell as char literals).
+// Overlay matching the Linux x86_64 `struct rlimit`: two 8-byte
+// unsigned slots (`rlim_cur`, `rlim_max`), 16 bytes total, no
+// padding. `RLIM_INFINITY` is all-bits-set, which reads back as
+// `-1` through the `i64` view — every "is there a finite cap?"
+// comparison below is against `-1`.
+struct RLimit {
+    cur: i64;
+    max: i64;
+}
+
+// ── libc / runtime externs (#306 inline re-declarations) ────────
+// `getrlimit` / `setrlimit` take `struct rlimit *`; declared here
+// with a `* u8` surface and cast at the call site, mirroring how
+// `process.sfn` passes its `PollSlot` buffer to `pipe(2)`.
+extern fn getrlimit(resource: i32, rlim: * u8) -> i32;
+
+extern fn setrlimit(resource: i32, rlim: * u8) -> i32;
+
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn getenv(name: * u8) -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+
+extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
+
+// C runtime's NUL-terminated string equality (also wrapped by
+// `sfn_str_sfn_eq` in `runtime/sfn/string.sfn`).
+extern fn strings_equal(a: * u8, b: * u8) -> bool;
+
+// `strtoll(s, NULL, 10)` — the `end` out-parameter is always passed
+// `null`, so the `* u8` surface (vs. the true `char **`) never
+// carries a write.
+extern fn strtoll(s: * u8, end: * u8, base: i32) -> i64;
+
+// Pure-Sailfin stat-based existence probe
+// (`runtime/sfn/adapters/filesystem.sfn`).
+extern fn sfn_fs_exists(path: * u8) -> bool;
+
+// `SAILFIN_TRACE_MEM_LIMIT` gate: non-empty and not `"0"`.
+fn _mem_limit_trace_enabled() -> bool {
+    let s_env: string = "SAILFIN_TRACE_MEM_LIMIT";
+    let v: * u8 = getenv(s_env as * u8);
+    if v as i64 == 0 { return false; }
+    let s_empty: string = "";
+    if memcmp(v, s_empty as * u8, 1 as usize) == 0 { return false; }
+    let s_zero: string = "0";
+    if strings_equal(v, s_zero as * u8) { return false; }
+    return true;
+}
+
+// Stderr trace line. `2` is the stderr fd (inline-numeric per the
+// module-header convention).
+fn _mem_limit_trace(msg: string) ![io] {
+    if !_mem_limit_trace_enabled() { return; }
+    let p: * u8 = msg as * u8;
+    write(2, p, strlen(p));
+}
+
+// Apply the compiler's default memory budget. Returns 0 when the
+// budget is in place (or intentionally absent: non-Linux, disabled
+// via env, or an inherited cap already governs), -1 on an
+// unexpected getrlimit/setrlimit/malloc failure — callers treat
+// that as advisory, not fatal: a missing budget never blocks a
+// build, it only removes the guardrail.
+fn apply_default_mem_limit() -> i32 ![io] {
+    // Linux gate: /proc is the cheapest reliable probe and avoids
+    // both a `uname` subprocess and a wrong-constant hazard
+    // (`RLIMIT_AS` is 9 on Linux but 5 on Darwin — calling resource
+    // 9 there would silently target RLIMIT_NPROC).
+    let s_proc: string = "/proc/self/status";
+    if !sfn_fs_exists(s_proc as * u8) { return 0; }
+
+    // 8 GiB — the historical repo-wide cap (`ulimit -v 8388608`).
+    let mut target: i64 = 8589934592;
+    let mut explicit: bool = false;
+
+    let s_env: string = "SAILFIN_MEM_LIMIT";
+    let env_val: * u8 = getenv(s_env as * u8);
+    if env_val as i64 != 0 {
+        let s_empty: string = "";
+        if memcmp(env_val, s_empty as * u8, 1 as usize) != 0 {
+            let s_unlimited: string = "unlimited";
+            let s_off: string = "off";
+            let s_zero: string = "0";
+            if strings_equal(env_val, s_unlimited as * u8) || strings_equal(env_val, s_off as * u8)
+                || strings_equal(env_val, s_zero as * u8) {
+                let m_off: string = "[mem-limit] self-cap disabled via SAILFIN_MEM_LIMIT\n";
+                _mem_limit_trace(m_off);
+                return 0;
+            }
+            let parsed: i64 = strtoll(env_val, null, 10);
+            if parsed >= 1048576 {
+                target = parsed;
+                explicit = true;
+            } else {
+                // Below 1 MiB (or unparsable) is misconfiguration —
+                // most likely a suffixed value like "4G" that
+                // strtoll truncates to 4. Keep the default rather
+                // than installing a budget that kills the process
+                // at the first allocation.
+                let m_bad: string = "[mem-limit] invalid SAILFIN_MEM_LIMIT (want bytes >= 1048576, or 'unlimited') — keeping the 8 GiB default\n";
+                _mem_limit_trace(m_bad);
+            }
+        }
+    }
+
+    let buf: * u8 = malloc(16 as usize);
+    if buf as i64 == 0 { return -1; }
+    let rl: * RLimit = buf as * RLimit;
+    if getrlimit(9, buf) != 0 {
+        free(buf);
+        return -1;
+    }
+
+    if !explicit && rl.cur != -1 {
+        // An external cap (CI harness, parent process, user shell)
+        // already governs — never loosen it from inside.
+        free(buf);
+        let m_inherit: string = "[mem-limit] inherited RLIMIT_AS cap left in place\n";
+        _mem_limit_trace(m_inherit);
+        return 0;
+    }
+
+    let mut cur: i64 = target;
+    if rl.max != -1 {
+        if cur > rl.max {
+            // Cannot raise the soft limit above a finite hard cap.
+            cur = rl.max;
+        }
+    }
+    rl.cur = cur;
+    let rc: i32 = setrlimit(9, buf);
+    free(buf);
+    if rc != 0 {
+        let m_fail: string = "[mem-limit] setrlimit(RLIMIT_AS) failed — continuing without a self-cap\n";
+        _mem_limit_trace(m_fail);
+        return -1;
+    }
+    if explicit {
+        let m_env: string = "[mem-limit] RLIMIT_AS set from SAILFIN_MEM_LIMIT\n";
+        _mem_limit_trace(m_env);
+    } else {
+        let m_def: string = "[mem-limit] RLIMIT_AS set to the 8 GiB default\n";
+        _mem_limit_trace(m_def);
+    }
+    return 0;
+}

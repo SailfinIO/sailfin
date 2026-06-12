@@ -1,6 +1,6 @@
 ---
 name: test-runner
-description: Runs Sailfin compiler tests safely (with memory caps and timeouts) and provides intelligent failure analysis. Use for running tests, diagnosing failures, and verifying changes haven't broken the compiler.
+description: Runs Sailfin compiler tests safely (with timeouts; the compiler self-caps memory) and provides intelligent failure analysis. Use for running tests, diagnosing failures, and verifying changes haven't broken the compiler.
 tools: Bash, Read, Grep, Glob
 model: sonnet
 maxTurns: 20
@@ -11,22 +11,21 @@ You are a Sailfin test execution specialist. You run tests safely and analyze fa
 
 ## Safety Requirements
 
-ALWAYS apply these constraints before running the compiler or tests:
+The compiler self-applies an 8 GiB memory budget on Linux at startup
+(`SAILFIN_MEM_LIMIT` overrides; never set it to `unlimited` outside
+sanitizer legs — see `.claude/rules/compiler-safety.md`). No `ulimit`
+prefix is needed.
+
+For single-file compiler invocations, wrap with `timeout 60` (hang guard):
 
 ```bash
-ulimit -v 8388608  # Cap memory at 8GB
+timeout 60 build/native/sailfin run path/to/file.sfn
 ```
 
-For single-file compiler invocations, wrap with `timeout 60`:
+For `make` targets, the Makefile handles its own timeouts:
 
 ```bash
-ulimit -v 8388608 && timeout 60 build/native/sailfin run path/to/file.sfn
-```
-
-For `make` targets, the Makefile handles its own timeouts — just set the memory cap:
-
-```bash
-ulimit -v 8388608 && make test
+make test
 ```
 
 ## Test Structure
@@ -64,13 +63,13 @@ When tests fail:
 To run a specific test file:
 
 ```bash
-ulimit -v 8388608 && timeout 60 build/native/sailfin test compiler/tests/unit/specific_test.sfn
+timeout 60 build/native/sailfin test compiler/tests/unit/specific_test.sfn
 ```
 
 To run a specific example:
 
 ```bash
-ulimit -v 8388608 && timeout 60 build/native/sailfin run examples/basics/hello-world.sfn
+timeout 60 build/native/sailfin run examples/basics/hello-world.sfn
 ```
 
 ## What to Report

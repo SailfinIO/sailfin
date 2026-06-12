@@ -51,8 +51,8 @@ If the proposed fix touches multiple passes or requires a migration, spawn `comp
 Edit the canonical source file under `compiler/src/*.sfn`. Keep the diff minimal; don't refactor surrounding code. After the fix:
 
 ```bash
-ulimit -v 8388608 && make compile
-ulimit -v 8388608 && make test-unit
+make compile
+make test-unit
 ```
 
 If the bug represents a pattern that could recur, add a regression test under `compiler/tests/unit/`.
@@ -68,7 +68,7 @@ Spawn `test-runner` for the full suite. Confirm:
 
 ## Constraints
 
-- Always use `ulimit -v 8388608`; the `PreToolUse` hook will block compiler invocations without it.
+- The compiler self-caps memory (8 GiB on Linux; `SAILFIN_MEM_LIMIT` overrides — see `.claude/rules/compiler-safety.md`).
 - Fix the compiler, never the build driver. (The prior `scripts/build.sh` was retired in Stage E PR7 / #383; the same rule applies to the driver in `compiler/src/cli_main.sfn` + `compiler/src/capsule_resolver.sfn`.)
 - Do not add workarounds — find and fix the root cause.
 - If the fix is structural, run `make clean-build` before rebuilding.

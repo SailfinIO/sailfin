@@ -33,7 +33,7 @@ The script writes the normalized version to `.seed-version` (single line, no tra
 ### 4. Fetch the new seed
 
 ```bash
-ulimit -v 8388608 && make fetch-seed
+make fetch-seed
 ```
 
 `make fetch-seed` reads `.seed-version` and downloads the binary into `build/seed/bin/sailfin`. If the release does not exist on GitHub, the fetch fails — restore the previous pin and surface the error to the user.
@@ -41,7 +41,7 @@ ulimit -v 8388608 && make fetch-seed
 ### 5. Smoke-verify the new seed
 
 ```bash
-ulimit -v 8388608 && build/seed/bin/sailfin version
+build/seed/bin/sailfin version
 ```
 
 Confirm the binary prints the expected version string. If it mismatches, abort and restore.
@@ -51,7 +51,7 @@ Confirm the binary prints the expected version string. If it mismatches, abort a
 If the user asked for a full compile verify (`--compile` flag or equivalent):
 
 ```bash
-ulimit -v 8388608 && make compile
+make compile
 ```
 
 This takes ~13 minutes and is optional for a pin-only change. Recommend it before merging the PR.

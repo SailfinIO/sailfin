@@ -13,7 +13,6 @@ Run targeted tests for a specific compiler feature or area.
 
 2. Run the targeted tests:
    ```
-   ulimit -v 8388608
    timeout 60 build/native/sailfin test <test_file>
    ```
 
@@ -26,5 +25,5 @@ Run targeted tests for a specific compiler feature or area.
 
 ## Important
 
-- Always use `ulimit -v 8388608` before running the compiler.
+- The compiler self-caps memory (8 GiB on Linux); see `.claude/rules/compiler-safety.md`.
 - If you can't find tests for the feature, say so — don't skip this step silently.
