@@ -4,13 +4,15 @@
 // epic #351, Issue 2.3 — proposal §5 Phase 2, §7 Issue 2.3, Risk R2).
 //
 // v2 builds a root `Command` via `sfn/cli`, registers ONLY the
-// `version` subcommand, and parses with `sfn/cli`'s pure, non-exiting
-// `parse()`. It handles `version` / `--version` / `-V` itself — printing
-// the version and returning a canonical `EXIT_*` code — and falls
-// through to the verbatim legacy dispatch (`sailfin_cli_main_legacy`)
-// for every other subcommand. Migrating `version` into its own
-// `commands/version.sfn` is Issue 2.4; handling it inline here proves
-// the dispatch path.
+// `version` subcommand (from `commands/version.sfn`), and parses with
+// `sfn/cli`'s pure, non-exiting `parse()`. It dispatches `version` /
+// `--version` / `-V` to `version.run` — which prints the version and
+// returns a canonical `EXIT_*` code — and falls through to the verbatim
+// legacy dispatch (`sailfin_cli_main_legacy`) for every other
+// subcommand. As of Issue 2.4 the root is composed from
+// `version.command_def()` and the handler is `version.run`, establishing
+// the per-subcommand `command_def()` + `run()` pattern that all of
+// Phase 3 follows.
 //
 // Risk R2 (proposal §8): `sfn/cli`'s `run()` calls `process.exit()` on
 // --help/--version/parse errors, which would terminate the process out
@@ -26,7 +28,6 @@
 // numeric coercion.
 import {
     Command,
-    EXIT_OK,
     ParseResult,
     command,
     parse,
@@ -36,7 +37,7 @@ import {
 
 import { sailfin_cli_main_legacy } from "../cli_main";
 import { number_to_string } from "../num_format";
-import { resolve_compiler_version } from "../version";
+import { command_def, run } from "./commands/version";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";
 
 // Cold-path `SAILFIN_TRACE_ARGV` trace, byte-identical to the block at
@@ -72,12 +73,13 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         i += 1;
     }
 
-    // Root command registers ONLY `version`. The version string is not
-    // set on the command (`with_version`) because v2 prints it itself —
+    // Root command registers ONLY `version`, sourced from its own
+    // module via `command_def()`. The version string is not set on the
+    // command (`with_version`) because `version.run` prints it itself —
     // resolving it eagerly here would add a filesystem read to every
     // `build` / `run` invocation. `parse()` skips argv[0] (the program
     // name), so a synthetic "sfn" head is prepended before parsing.
-    let root: Command = with_subcommand(command("sfn", "Sailfin compiler"), command("version", "Print the compiler version"));
+    let root: Command = with_subcommand(command("sfn", "Sailfin compiler"), command_def());
 
     let mut parse_argv: string[] = ["sfn"];
     let mut j: int = 0;
@@ -105,8 +107,11 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         // owns; legacy never runs for these, so without this the
         // `SAILFIN_TRACE_ARGV` toggle would go silent on `version`.
         if ctx.trace_argv { _v2_trace_argv(argv); }
-        print("sfn " + resolve_compiler_version(ctx.binary_dir));
-        return EXIT_OK;
+        // Dispatch to the `version` command's `run`. On the `--version` /
+        // `-V` flag path `result.ok` is false, but `result.matches` still
+        // reflects the accumulated parse state; `version.run` ignores it,
+        // so passing it on both paths keeps the dispatch uniform.
+        return run(result.matches, ctx);
     }
 
     // Every other subcommand (and help, parse errors, the bare
