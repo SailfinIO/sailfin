@@ -29,11 +29,6 @@ The contract:
 memory budget does not guard against hangs. `make` targets handle their
 own timeouts.
 
-**Transition caveat:** the pinned seed predates the self-cap, so
-`make compile` / `make rebuild` runs the seed uncapped until the next
-`/pin-seed` carries `runtime/sfn/platform/rlimit.sfn`. CI workflows keep
-their step-level `ulimit -v 8388608` lines as defense in depth until then.
-
 **Sanitizers (ASAN/TSAN) are incompatible with any finite address-space
 cap.** AddressSanitizer reserves ~16 TB of *virtual* address space for its
 shadow memory at startup (ThreadSanitizer uses the same shadow-reservation

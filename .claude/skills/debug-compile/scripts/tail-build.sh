@@ -10,7 +10,7 @@ mkdir -p build/debug
 ts=$(date -u +%Y%m%dT%H%M%SZ)
 log="build/debug/compile-${ts}.log"
 
-if ( ulimit -v 8388608 && make compile ) >"$log" 2>&1; then
+if make compile >"$log" 2>&1; then
   echo "make compile succeeded — nothing to debug. Log at $log"
   exit 0
 fi

@@ -147,9 +147,8 @@ jobs:
         shell: bash {0}
         run: |
           set -euo pipefail
-          if [ "${RUNNER_OS:-}" = "Linux" ]; then
-            ulimit -v 8388608 || true
-          fi
+          # The compiler self-applies its 8 GiB memory budget on Linux
+          # (#1291) — no step-level ulimit needed.
           out="$(build/native/sailfin run examples/basics/hello-world.sfn)"
           echo "$out"
           if ! printf '%s' "$out" | grep -q "Hello, Sailfin!"; then

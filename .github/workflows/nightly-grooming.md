@@ -145,7 +145,6 @@ one `needs-design` issue that follows the handoff contract. Stop.
    ## Verification
 
    ```bash
-   ulimit -v 8388608
    make compile
    make test-unit        # or test-integration, or test-e2e
    ```

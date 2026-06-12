@@ -204,15 +204,11 @@ runs:
       shell: bash {0}
       run: |
         set -euo pipefail
-        # Memory cap (.claude/rules/compiler-safety.md): on Linux, cap each
-        # compiler invocation at 8 GB virtual so a runaway compile (e.g. a
-        # #892 corruption hitting a bad allocation) fails *cleanly* per-test
-        # instead of OOM-killing the whole hosted runner ("runner received
-        # shutdown signal"). ulimit is inherited by `make` and every test
-        # child it forks. Darwin does not honor RLIMIT_AS, so skip on macOS.
-        if [ "${RUNNER_OS:-}" = "Linux" ]; then
-          ulimit -v 8388608 || true
-        fi
+        # No step-level ulimit: since seed 0.7.0-alpha.33 the compiler
+        # self-applies an 8 GiB RLIMIT_AS on Linux at startup (#1291,
+        # .claude/rules/compiler-safety.md), inherited by every test
+        # child it forks, so a runaway compile fails cleanly per-test
+        # instead of OOM-killing the hosted runner.
         # Empty shard = full suite (release workflows + back-compat).
         # A shard name runs only that disjoint slice; the union across
         # legs equals `make test` (asserted by the shard-cover lint).

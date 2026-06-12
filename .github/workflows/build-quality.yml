@@ -148,11 +148,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # Memory cap matches .claude/rules/compiler-safety.md. Per
-          # the rules: 8GB ceiling on any compiler invocation, so a
-          # runaway compile can't take down the runner before the
-          # job timeout fires.
-          ulimit -v 8388608
+          # No step-level ulimit: since seed 0.7.0-alpha.33 the
+          # compiler self-applies an 8 GiB RLIMIT_AS at startup
+          # (#1291), so a runaway compile can't take down the runner.
           make compile \
             CLANG="${CLANG:-clang-18}" \
             SEED_NATIVE="build/seed/bin/sailfin"
@@ -162,7 +160,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ulimit -v 8388608
           # Cold build into a dedicated work-dir. Populates
           # `build/cache/v1` with every content-addressed entry the
           # determinism pass needs in step 4. The BuildReport JSON is
@@ -182,7 +179,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ulimit -v 8388608
           # Second pass against a sibling `--work-dir`. The
           # `--check-determinism` flag internally re-invokes this
           # compiler against a sibling-of-the-sibling work-dir, snapshots
@@ -382,7 +378,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          ulimit -v 8388608
           make compile \
             CLANG="${CLANG:-clang-18}" \
             SEED_NATIVE="build/seed/bin/sailfin"
@@ -400,7 +395,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ulimit -v 8388608 || true
           run_shard() { make test-shard SHARD="$1"; }
           for shard in $(bash scripts/test_shards.sh sfn-names); do
             echo "[warm] shard $shard"

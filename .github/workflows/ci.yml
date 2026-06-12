@@ -112,15 +112,12 @@ jobs:
           # arena-reset path that keeps per-file scratch bounded across
           # the full tree. `check` emits no IR and invokes no clang.
           #
-          # ulimit -v mirrors the repo-wide compiler-safety rule (every
-          # compiler invocation runs under an 8GB virtual cap). Without
-          # it, a runaway allocation in the seed checker exhausts the
-          # runner VM and kills the runner agent itself — the job dies
-          # as an unexplained "runner received a shutdown signal" with
-          # no diagnosable output (observed on #1243). Under the cap a
-          # runaway dies as a clean non-zero exit instead, and time -v
-          # records the peak RSS either way.
-          ulimit -v 8388608
+          # No step-level ulimit: since seed 0.7.0-alpha.33 the compiler
+          # self-applies an 8 GiB RLIMIT_AS at startup (#1291,
+          # runtime/sfn/platform/rlimit.sfn), so a runaway allocation
+          # dies as a clean non-zero exit instead of exhausting the
+          # runner VM and killing the runner agent (the #1243 failure
+          # mode). time -v records the peak RSS either way.
           SAILFIN_USE_ARENA=1 /usr/bin/time -v \
             build/seed/bin/sailfin check compiler/src/
 

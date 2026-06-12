@@ -18,7 +18,7 @@ ts=$(date -u +%Y%m%dT%H%M%SZ)
 log="build/logs/check-${ts}.log"
 
 echo "==> make clean-build" | tee "$log"
-if ! ( ulimit -v 8388608 && make clean-build ) >>"$log" 2>&1; then
+if ! make clean-build >>"$log" 2>&1; then
   status=$?
   echo "clean-build failed (exit $status). Tail of $log:"
   tail -n 80 "$log"
@@ -28,7 +28,7 @@ if ! ( ulimit -v 8388608 && make clean-build ) >>"$log" 2>&1; then
 fi
 
 echo "==> make check" | tee -a "$log"
-if ! ( ulimit -v 8388608 && make check ) >>"$log" 2>&1; then
+if ! make check >>"$log" 2>&1; then
   status=$?
   echo "check failed (exit $status). Tail of $log:"
   tail -n 80 "$log"
