@@ -762,24 +762,35 @@ fn _should_retry_test(exit_code: int, retries_disabled: boolean) -> boolean {
 }
 
 // #1303: a test child that dies by signal (SIGSEGV/SIGABRT/SIGBUS/
-// SIGKILL → exit codes > 128) never flushes its stdio buffer, so the
-// parent re-emits an EMPTY captured stream — the crash leaves no
+// SIGKILL) usually can't flush its stdio buffer, so the parent re-emits
+// a truncated-or-empty captured stream — the crash often leaves no
 // `test:` banner, no assertion, no phase trace. The failing file is
 // still named in the suite banner and the run still exits non-zero (the
-// signal exit code is caught by `handle_wait`), but a reader sees an
-// unexplained gap rather than an attributed failure. `timeout`'s own
-// 124/125 codes are NOT signal deaths (the child was killed by the
-// wrapper, which prints its own message) and stay below this threshold.
-fn _is_signal_exit(exit_code: int) -> boolean { return exit_code > 128; }
+// signal exit code is caught by `handle_wait`), but a reader can be left
+// with an unexplained gap rather than an attributed failure.
+//
+// `handle_wait` reports a signaled child as `128 + signal`. POSIX
+// signals run 1..64 (SIGRTMAX on Linux), so the signal range is exactly
+// (128, 192]. We bound to that window rather than `> 128` so a normal
+// process that legitimately exits 193..255 (e.g. 255 on an internal
+// error) is NOT misattributed as a crash. `timeout`'s own 124/125/126/
+// 127 codes sit below the window, so a wall-clock kill (which prints its
+// own message) never trips this path either.
+fn _is_signal_exit(exit_code: int) -> boolean {
+    return exit_code > 128 && exit_code <= 192;
+}
 
 // Emit a synthetic, attributed FAIL line for a signal-killed child whose
-// own output was lost to the unflushed buffer. Gated by the caller on
+// own output didn't make it out before the crash. Gated by the caller on
 // `!json_output` (the jsonl stream stays pure; the `--json` summary
 // already counts the file via the `sf_counts` missing-summary fallback).
+// The wording stops short of asserting total output loss — a child may
+// have flushed some lines before the signal — so it points at the likely
+// cause (crash before stdio flush) without overclaiming.
 fn _emit_crash_diagnostic(basename: string, exit_code: int) -> void ![io] {
     print("[test] FAIL: " + basename + " (exit code " + number_to_string(exit_code)
-        + " — child terminated by signal; captured output lost to the "
-        + "unflushed crash buffer)");
+        + " — child terminated by signal; output may be truncated "
+        + "(crash before stdio flush))");
 }
 
 // Resolve the path to this compiler binary so the multi-file runner
