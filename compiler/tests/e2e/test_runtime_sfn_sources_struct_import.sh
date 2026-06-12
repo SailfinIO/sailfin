@@ -95,9 +95,13 @@ kind = "runtime"
 # Same shape as test_runtime_sfn_sources_link_consumer.sh's manifest
 # (see that file for why each real runtime module is required at
 # link time). The interesting entries are structlib/structuse.
+# arena.sfn + ownedbuf.sfn are required because string.sfn now imports
+# `./memory/ownedbuf` (#1289): ownedbuf.sfn so string's emit resolves
+# the cross-module struct-returning call, arena.sfn so ownedbuf's
+# `sfn_arena_sfn_*` externs resolve at link.
 c-sources = ["src/sailfin_arena.c", "src/sailfin_runtime.c"]
 ll-sources = ["ir/runtime_globals.ll"]
-sfn-sources = ["../sfn/structlib.sfn", "../sfn/structuse.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/io.sfn", "../sfn/string.sfn", "../sfn/array.sfn", "../sfn/memory/mem.sfn"]
+sfn-sources = ["../sfn/structlib.sfn", "../sfn/structuse.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/io.sfn", "../sfn/memory/arena.sfn", "../sfn/memory/ownedbuf.sfn", "../sfn/string.sfn", "../sfn/array.sfn", "../sfn/memory/mem.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm"]
 prelude-entry = "../prelude.sfn"
@@ -116,6 +120,11 @@ EOF
     ln -s "$REPO_ROOT/runtime/sfn/string.sfn" "$ws/runtime/sfn/string.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/array.sfn" "$ws/runtime/sfn/array.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/memory/mem.sfn" "$ws/runtime/sfn/memory/mem.sfn"
+    # #1289 — string.sfn imports `./memory/ownedbuf`; ownedbuf's inline
+    # `sfn_arena_sfn_*` externs resolve to arena.sfn at link. Both must
+    # be on disk for the emit + link to succeed.
+    ln -s "$REPO_ROOT/runtime/sfn/memory/arena.sfn" "$ws/runtime/sfn/memory/arena.sfn"
+    ln -s "$REPO_ROOT/runtime/sfn/memory/ownedbuf.sfn" "$ws/runtime/sfn/memory/ownedbuf.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/platform/posix.sfn" "$ws/runtime/sfn/platform/posix.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/platform/libc.sfn" "$ws/runtime/sfn/platform/libc.sfn"
 
