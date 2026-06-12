@@ -1,0 +1,69 @@
+// Integration coverage for the `version` subcommand module
+// (`compiler/src/cli/commands/version.sfn`) — CLI modularization epic
+// #351, Issue 2.4.
+//
+// Issue 2.4 extracts `version` into its own module exporting the
+// per-command `command_def()` + `run(matches, ctx)` pair and composes
+// the v2 root from `command_def()`. These tests pin that contract in
+// isolation — the whole point of the per-command pattern is that a
+// subcommand is testable without standing up the full
+// `cli/main -> cli_main -> @main` binary chain (which the end-to-end
+// `test_cli_v2_exit_codes.sh` still covers against the real binary).
+//
+// Both `sfn version` (the registered subcommand) and `sfn --version`
+// (the built-in `parse()` version flag) are exercised, mirroring the v2
+// dispatch in `cli/main.sfn`: on success the matched subcommand is
+// "version"; on the flag path `parse()` reports `version_requested` and
+// `result.matches` still carries the accumulated state that `run`
+// uniformly accepts. `run` returns `EXIT_OK` (0) on every version path.
+import {
+    command,
+    parse,
+    subcommand,
+    with_subcommand
+} from "sfn/cli";
+
+import { command_def, run } from "../../src/cli/commands/version";
+import { CliContext } from "../../src/cli/context";
+
+fn _empty_ctx() -> CliContext {
+    return CliContext {
+        runtime_root: "",
+        binary_dir: "",
+        registry_url: "",
+        trace_argv: false
+    };
+}
+
+test "version command: command_def is a bare 'version' subcommand" {
+    let def = command_def();
+    assert strings_equal(def.name, "version");
+    assert def.description.length > 0;
+    // `version` takes no positionals or flags.
+    assert def.args.length == 0;
+    assert def.flags.length == 0;
+}
+
+test "version command: 'sfn version' routes to the version subcommand" ![io] {
+    let root = with_subcommand(command("sfn", "Sailfin compiler"), command_def());
+    let result = parse(root, ["sfn", "version"]);
+    assert result.ok;
+    assert strings_equal(subcommand(result.matches), "version");
+
+    let code = run(result.matches, _empty_ctx());
+    assert code == 0;
+}
+
+test "version command: 'sfn --version' flag still dispatches run to EXIT_OK" ![io] {
+    let root = with_subcommand(command("sfn", "Sailfin compiler"), command_def());
+    let result = parse(root, ["sfn", "--version"]);
+    // The built-in version flag surfaces through the error channel, not
+    // a matched subcommand — exactly the path v2 keys on.
+    assert ! result.ok;
+    assert strings_equal(result.error.kind, "version_requested");
+
+    // `run` ignores `matches`; passing the accumulated matches keeps the
+    // dispatch uniform across the subcommand and flag paths.
+    let code = run(result.matches, _empty_ctx());
+    assert code == 0;
+}

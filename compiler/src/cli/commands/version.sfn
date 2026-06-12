@@ -1,0 +1,51 @@
+// compiler/src/cli/commands/version.sfn
+//
+// `version` subcommand (CLI modularization epic #351, Issue 2.4 —
+// proposal §4.2 per-command `command_def()`/`run()` pattern, §7
+// Issue 2.4). This is the proof-of-concept that establishes the
+// per-subcommand module shape every Phase 3 command will follow:
+//
+//   - `command_def() -> Command` returns the command's `sfn/cli`
+//     definition (name, description, args, flags) so the root command in
+//     `cli/main.sfn` can register it via `with_subcommand` without
+//     knowing the command's internals.
+//   - `run(matches, ctx) -> int ![io]` executes the command against the
+//     parsed `Matches` and the `CliContext` driver state, returning a
+//     canonical `EXIT_*` code that threads back to the C-shim entry
+//     (`native_cli_main`) unchanged.
+//
+// `version` takes no arguments or flags, so `run` ignores `matches` and
+// prints `sfn <resolved-version>` — byte-identical to the inline v2
+// handling it replaces (Issue 2.3) and the legacy `version` arm it
+// supersedes. Version resolution stays in `version.sfn`
+// (`resolve_compiler_version`, which reads `capsule.toml` / the build
+// stamp); this module only formats and prints the resolved string.
+//
+// Return-type note: the issue sketch writes `-> number`, but exit codes
+// are integers — the `EXIT_*` constants are `int`, `cli/main.sfn`'s v2
+// dispatch returns `int`, and the C-shim entry returns `int`. `run`
+// returns `int` so the code threads through that chain without a numeric
+// coercion (matching the same decision recorded in `cli/main.sfn`).
+import {
+    Command,
+    EXIT_OK,
+    Matches,
+    command
+} from "sfn/cli";
+
+import { resolve_compiler_version } from "../../version";
+import { CliContext } from "../context";
+
+// The `sfn/cli` definition for `version`, registered on the v2 root via
+// `with_subcommand`. No args or flags — `version` is a bare subcommand.
+fn command_def() -> Command {
+    return command("version", "Print the compiler version");
+}
+
+// Print the resolved compiler version. `matches` is part of the
+// per-command contract but unused here (version takes no input);
+// `ctx.binary_dir` seeds `resolve_compiler_version`'s dev-build lookup.
+fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    print("sfn " + resolve_compiler_version(ctx.binary_dir));
+    return EXIT_OK;
+}

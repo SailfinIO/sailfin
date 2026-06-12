@@ -1928,12 +1928,8 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
         if args.length > 0 {
             let cmd_check = args[0];
             let eq_emit = strings_equal(cmd_check, "emit");
-            let eq_version = strings_equal(cmd_check, "version");
             if eq_emit { print.err("cli: eq_emit=true"); } else {
                 print.err("cli: eq_emit=false");
-            }
-            if eq_version { print.err("cli: eq_version=true"); } else {
-                print.err("cli: eq_version=false");
             }
         }
     }
@@ -1941,19 +1937,11 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     // Pre-compute command checks to avoid patterns the compiler drops
     // (&&-chained .length checks with function calls get dropped from IR)
     let cmd = args[0];
-    let mut _let7: boolean = false;
-    if strings_equal(cmd, "--version") { _let7 = true; }
-    if strings_equal(cmd, "-V") { _let7 = true; }
-    let is_version_flag = _let7;
     let is_emit_flag = strings_equal(cmd, "--emit");
     let mut _let8: boolean = false;
     if strings_equal(cmd, "emit") { _let8 = true; }
     if is_emit_flag { _let8 = true; }
     let is_emit = _let8;
-    let mut _let9: boolean = false;
-    if strings_equal(cmd, "version") { _let9 = true; }
-    if is_version_flag { _let9 = true; }
-    let is_version = _let9;
     let is_build = strings_equal(cmd, "build");
     let is_run = strings_equal(cmd, "run");
     let is_test = strings_equal(cmd, "test");
@@ -1972,17 +1960,6 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     let is_check = strings_equal(cmd, "check");
     if trace_argv {
         if is_emit { print.err("cli: cmd_is_emit=true"); }
-        if is_version { print.err("cli: cmd_is_version=true"); }
-    }
-
-    if is_version {
-        if args.length != 1 {
-            print(_usage());
-
-            return 2;
-        }
-        print("sfn " + resolve_compiler_version(binary_dir));
-        return 0;
     }
 
     if is_emit {
