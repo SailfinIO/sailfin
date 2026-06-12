@@ -48,9 +48,10 @@
 // `ci-cross-windows` bridge's RUNTIME_MODS (mingw has no
 // getrlimit/setrlimit, so the externs cannot resolve in a static
 // link — the process.sfn exclusion precedent). The Windows binary
-// resolves `apply_default_mem_limit` from the weak no-op stub in
-// `runtime/native/ir/runtime_globals.ll`; on Linux/macOS this
-// module's strong definition wins. Sync pinned by
+// resolves `apply_default_mem_limit` from the strong no-op stub in
+// `runtime/native/ir/windows_stubs.ll`, which only the
+// cross-windows link consumes — Linux/macOS link this module's
+// definition and never see the stub. Sync pinned by
 // `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.
 // Overlay matching the Linux x86_64 `struct rlimit`: two 8-byte
 // unsigned slots (`rlim_cur`, `rlim_max`), 16 bytes total, no

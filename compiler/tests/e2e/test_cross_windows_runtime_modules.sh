@@ -61,8 +61,9 @@ prelude_val="$(echo "$prelude_line" \
 # minus process.sfn, the pthread-dependent concurrency/* modules, and
 # platform/rlimit.sfn (its getrlimit/setrlimit libc externs do not
 # exist under mingw; Windows resolves @apply_default_mem_limit from
-# the weak no-op stub in runtime/native/ir/runtime_globals.ll
-# instead), normalized to repo-relative paths.
+# the strong no-op stub in runtime/native/ir/windows_stubs.ll, which
+# only the cross-windows link consumes), normalized to repo-relative
+# paths.
 expected="$( { echo "$prelude_val"; echo "$sfn_vals"; } \
     | norm \
     | grep -v '^runtime/sfn/process\.sfn$' \
@@ -108,8 +109,10 @@ fi
 
 # The rlimit.sfn exclusion must stay meaningful too: in the manifest
 # (so Linux/macOS get the real self-cap), NOT in RUNTIME_MODS (mingw
-# cannot resolve its getrlimit/setrlimit externs), and the weak
-# Windows stub must exist in runtime_globals.ll.
+# cannot resolve its getrlimit/setrlimit externs), and the strong
+# Windows stub must exist in windows_stubs.ll — which in turn must
+# stay OUT of the manifest's ll-sources (it would duplicate the real
+# definition on Linux/macOS).
 if echo "$sfn_vals" | norm | grep -q '^runtime/sfn/platform/rlimit\.sfn$'; then
     ok "rlimit.sfn present in manifest sfn-sources (exclusion is meaningful)"
 else
@@ -120,10 +123,21 @@ if echo "$actual" | grep -q '^runtime/sfn/platform/rlimit\.sfn$'; then
 else
     ok "rlimit.sfn excluded from cross-windows RUNTIME_MODS"
 fi
-if grep -q 'define weak i32 @apply_default_mem_limit' "$REPO_ROOT/runtime/native/ir/runtime_globals.ll"; then
-    ok "weak @apply_default_mem_limit stub present in runtime_globals.ll"
+if grep -q 'define i32 @apply_default_mem_limit' "$REPO_ROOT/runtime/native/ir/windows_stubs.ll"; then
+    ok "strong @apply_default_mem_limit stub present in windows_stubs.ll"
 else
-    fail "missing weak @apply_default_mem_limit stub in runtime_globals.ll — Windows link would break"
+    fail "missing @apply_default_mem_limit stub in windows_stubs.ll — Windows link would break"
+fi
+ll_line="$(grep -E '^ll-sources[[:space:]]*=' "$MANIFEST" | head -n1 || true)"
+if echo "$ll_line" | grep -q 'windows_stubs'; then
+    fail "windows_stubs.ll is in ll-sources — would duplicate @apply_default_mem_limit on Linux/macOS"
+else
+    ok "windows_stubs.ll absent from ll-sources (cross-windows-only object)"
+fi
+if grep -q 'windows_stubs\.ll' "$MAKEFILE"; then
+    ok "windows_stubs.ll wired into the Makefile cross-windows link"
+else
+    fail "windows_stubs.ll not referenced by the Makefile — Windows link would break"
 fi
 
 echo ""

@@ -1048,7 +1048,7 @@ ci-cross-windows:
 	: "object too would duplicate the symbol — and MINUS"; \
 	: "platform/rlimit.sfn, whose getrlimit/setrlimit libc externs do"; \
 	: "not exist under mingw; Windows resolves @apply_default_mem_limit"; \
-	: "from the weak no-op stub in runtime/native/ir/runtime_globals.ll"; \
+	: "from the strong no-op stub in runtime/native/ir/windows_stubs.ll"; \
 	: "instead. A guard test"; \
 	: "(compiler/tests/e2e/test_cross_windows_runtime_modules.sh) asserts"; \
 	: "this list stays in sync with the manifest (Risk R4). clock is"; \
@@ -1095,6 +1095,11 @@ ci-cross-windows:
 		-o "$$WIN_OBJ/sailfin_runtime.o"; \
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/native/ir/runtime_globals.ll \
 		-o "$$WIN_OBJ/runtime_globals.o"; \
+	: "Windows-only strong stubs for symbols whose Sailfin modules are"; \
+	: "excluded from RUNTIME_MODS (see runtime/native/ir/windows_stubs.ll"; \
+	: "for the per-symbol rationale and the weak-vs-strong COFF note)."; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/native/ir/windows_stubs.ll \
+		-o "$$WIN_OBJ/windows_stubs.o"; \
 	\
 	echo "[cross-windows] compiling cross-module shim (if present)..."; \
 	SHIM_O=""; \
@@ -1110,6 +1115,7 @@ ci-cross-windows:
 		"$$WIN_OBJ/sailfin_arena.o" \
 		"$$WIN_OBJ/sailfin_runtime.o" \
 		"$$WIN_OBJ/runtime_globals.o" \
+		"$$WIN_OBJ/windows_stubs.o" \
 		"$$WIN_OBJ/native.linked.o" \
 		$$RUNTIME_OBJS \
 		$$SHIM_O \
