@@ -966,6 +966,39 @@ rebuild-impl:
 			[ -f "$$manifest_path" ] || touch "$$manifest_path"; \
 		fi; \
 	done
+	@# #1289 (#1283 Gap 1): runtime/sfn/string.sfn imports OwnedBuf /
+	@# owned_buf_new / owned_buf_append from ./memory/ownedbuf. The
+	@# hand-rolled cross-windows RUNTIME_MODS loop (ci-cross-windows)
+	@# emits string.sfn standalone and, unlike #1288's
+	@# _compile_runtime_sfn_sources path, stages no sibling context of
+	@# its own — so without ownedbuf's `.sfn-asm` + layout-manifest staged
+	@# here the cold emit dies with "cannot resolve return type for call
+	@# to owned_buf_new". owned_buf_new returns OwnedBuf BY VALUE, so the
+	@# layout-manifest (the struct layout) is required alongside the fn
+	@# signature, not just the signature. Same staging shape as the
+	@# platform loop above; the rm forces a canonical NATIVE_OUT re-emit.
+	@rm -f build/native/import-context/runtime/sfn/memory/ownedbuf.sfn-asm build/native/import-context/runtime/sfn/memory/ownedbuf.layout-manifest
+	@mkdir -p build/native/import-context/runtime/sfn/memory
+	@set -e; \
+	ob_asm="build/native/import-context/runtime/sfn/memory/ownedbuf.sfn-asm"; \
+	ob_manifest="build/native/import-context/runtime/sfn/memory/ownedbuf.layout-manifest"; \
+	if [ ! -f "$$ob_asm" ]; then \
+		echo "[rebuild] staging runtime/sfn/memory/ownedbuf.sfn-asm..."; \
+		if ! $(NATIVE_OUT) emit --module-name "runtime/sfn/memory/ownedbuf" -o "$$ob_asm" native "runtime/sfn/memory/ownedbuf.sfn" >/dev/null; then \
+			echo "[rebuild][error] emit native failed for runtime/sfn/memory/ownedbuf.sfn" >&2; \
+			rm -f "$$ob_asm"; \
+			exit 1; \
+		fi; \
+		if [ ! -s "$$ob_asm" ]; then \
+			echo "[rebuild][error] emit native produced empty $$ob_asm" >&2; \
+			rm -f "$$ob_asm"; \
+			exit 1; \
+		fi; \
+	fi; \
+	if [ ! -f "$$ob_manifest" ]; then \
+		grep '^\.layout' "$$ob_asm" > "$$ob_manifest" 2>/dev/null || :; \
+		[ -f "$$ob_manifest" ] || touch "$$ob_manifest"; \
+	fi
 	@echo "[rebuild] built $(NATIVE_OUT)"
 
 # =============================================================================
