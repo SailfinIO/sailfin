@@ -554,11 +554,21 @@ Implications for this audit:
    it once in C — as a temporary unblocker — or doing it once in Sailfin — as
    the real runtime primitive — should be a single decision, not two.
 2. **The compiler must gain real drop signals before a safe runtime is
-   possible.** Per `CLAUDE.md`, ownership types are deferred post-1.0; the
-   runtime instead relies on conservative drop emission keyed off
+   possible.** The runtime relies on conservative drop emission keyed off
    compiler-known allocation kinds (M1.5, epic #322). Until M1.5 ships,
    the runtime can't trust any drop the compiler claims to emit. This is
    the reason `SAILFIN_ENABLE_STRING_FREE` is off by default today.
+   **Stance update (epic #1209, D1/D9):** the broader "ownership types are
+   deferred post-1.0" framing no longer holds for the runtime surface. A
+   bounded unique-ownership / no-aliased-mutation / no-use-after-free
+   analysis is now **enforced on the native runtime** for 1.0
+   (`ownership_checker.sfn`) as the *structural* fix for the in-place
+   grow-at-tip aliasing corruption (#1205) — proving a buffer is uniquely
+   owned makes the in-place mutation sound rather than trusting a
+   compiler-emitted drop after the fact. Drop emission (M1.5) and ownership
+   enforcement are complementary: drops reclaim memory, ownership proves no
+   live alias is stomped. User-facing ownership and full borrow checking
+   remain post-1.0 (Phase U).
 3. **Files-as-GC is cheap to delete but expensive to replace.** ~336 dotfile
    references to `build/sailfin/.xxx` IPC temp paths remain. Every one of those
    is a latent allocation that needs a real drop when IPC goes away.
@@ -612,11 +622,18 @@ compiler features that do not exist in the current toolchain.
    (function return in v0; closure capture and channel send once those land).
    This supersedes the previous prereq pair (drop emission as a separate
    bullet, plus a "move/consume enforcement (or explicit removal)" bullet
-   for ownership types). Per `CLAUDE.md`, ownership types
-   (`Affine<T>` / `Linear<T>`) are **deferred post-1.0** — the runtime trusts
-   compiler-emitted drops keyed off allocation kind, not move-semantics
-   enforcement. See `docs/runtime_architecture.md` §3.1 for the seam
-   (`LocalBinding.allocation_kind` + `emit_scope_drops`) and #322 for the
+   for ownership types). **Stance update (epic #1209, D1):** for the runtime
+   surface specifically, ownership enforcement is **no longer deferred** — a
+   bounded unique-ownership / no-aliased-mutation / no-use-after-free analysis
+   (`ownership_checker.sfn`, the `E09xx` diagnostic family) is enforced on the
+   native runtime for 1.0 as the structural fix for #1205, and `Affine<T>` /
+   `Linear<T>` are enforced single-use where used (`E0901`/`E0907`). The
+   runtime now both trusts compiler-emitted drops keyed off allocation kind
+   **and** has its in-place mutation proven sound by unique ownership; the two
+   are complementary, not alternatives. User-facing ownership / full borrow
+   checking stay post-1.0 (Phase U). See `docs/runtime_architecture.md` §3.1
+   for the drop seam (`LocalBinding.allocation_kind` + `emit_scope_drops`),
+   `reference/preview/ownership.md` for the ownership model, and #322 for the
    sub-issue split.
 6. **`extern fn` with typed linker-resolved symbols.** ✅ **Shipped 2026-05-01.**
    The Sailfin runtime must reach platform syscalls (`pthread_create`,
@@ -751,11 +768,13 @@ Entrypoints that are C-based today and must be gone by 1.0:
 Reordered from the previous audit to reflect the April 2026 reality.
 
 - **M0 — Compiler prerequisites** (roadmap §0). Integer types, `Result<T, E>`,
-  closures-with-capture. Per `CLAUDE.md`, ownership enforcement
-  (`Affine<T>` / `Linear<T>`) is **deferred post-1.0**; the runtime instead
-  relies on conservative drop emission keyed off compiler-known allocation
-  kinds (M1.5). The runtime rewrite cannot produce a better runtime than
-  the compiler can describe.
+  closures-with-capture. The runtime relies on conservative drop emission keyed
+  off compiler-known allocation kinds (M1.5). **Stance update (epic #1209):**
+  bounded ownership/aliasing enforcement on the native runtime is **no longer
+  deferred** — it ships at 1.0 as the structural fix for #1205 (the
+  `E09xx` family in `ownership_checker.sfn`); only *user-facing* ownership and
+  full borrow checking remain post-1.0 (Phase U). The runtime rewrite cannot
+  produce a better runtime than the compiler can describe.
 - **M0.5 — Arena allocator in C** *(optional unblocker)*. If the compiler
   perf work needs a temporary memory-reclamation primitive before M1, it lives
   in the C runtime and is deleted at M3. Scope: bump allocator, reset per
