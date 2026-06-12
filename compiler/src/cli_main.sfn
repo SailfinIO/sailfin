@@ -1337,7 +1337,21 @@ fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: stri
         if fs.exists(deps_path) { fs.deleteFile(deps_path); }
         return;
     }
-    fs.writeFile(deps_path, deps);
+    // #1011: a concurrent `--import-context` emit reads this sidecar;
+    // publish atomically (temp sibling + rename) so a peer never sees
+    // a partial dep list. Mirrors `_cr_stage_import_deps`'s publish,
+    // including its plain-write fallback when `mktemp` is unavailable.
+    let tmp = _mktemp_sibling_cmd(deps_path);
+    if tmp.length == 0 {
+        fs.writeFile(deps_path, deps);
+        return;
+    }
+    fs.writeFile(tmp, deps);
+    if !_atomic_rename_into_place(tmp, deps_path) {
+        print("sfn build: failed to publish runtime sfn-source import-deps for "
+            + slug);
+        process.run(["rm", "-f", tmp]);
+    }
 }
 
 // Stage import-context artifacts + `.import-deps` sidecars for EVERY
