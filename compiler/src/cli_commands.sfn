@@ -761,6 +761,27 @@ fn _should_retry_test(exit_code: int, retries_disabled: boolean) -> boolean {
     return false;
 }
 
+// #1303: a test child that dies by signal (SIGSEGV/SIGABRT/SIGBUS/
+// SIGKILL → exit codes > 128) never flushes its stdio buffer, so the
+// parent re-emits an EMPTY captured stream — the crash leaves no
+// `test:` banner, no assertion, no phase trace. The failing file is
+// still named in the suite banner and the run still exits non-zero (the
+// signal exit code is caught by `handle_wait`), but a reader sees an
+// unexplained gap rather than an attributed failure. `timeout`'s own
+// 124/125 codes are NOT signal deaths (the child was killed by the
+// wrapper, which prints its own message) and stay below this threshold.
+fn _is_signal_exit(exit_code: int) -> boolean { return exit_code > 128; }
+
+// Emit a synthetic, attributed FAIL line for a signal-killed child whose
+// own output was lost to the unflushed buffer. Gated by the caller on
+// `!json_output` (the jsonl stream stays pure; the `--json` summary
+// already counts the file via the `sf_counts` missing-summary fallback).
+fn _emit_crash_diagnostic(basename: string, exit_code: int) -> void ![io] {
+    print("[test] FAIL: " + basename + " (exit code " + number_to_string(exit_code)
+        + " — child terminated by signal; captured output lost to the "
+        + "unflushed crash buffer)");
+}
+
 // Resolve the path to this compiler binary so the multi-file runner
 // can re-invoke itself (`<self> test <file>`) once per test for
 // process isolation. Mirrors `_resolve_self_path` in `cli_main.sfn`:
@@ -1588,6 +1609,14 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
             // file and eat the parallelism win.
             let pool_base_env = _pool_env_snapshot();
             let mut handles: int[] = [];
+            // #1303: indices (and their original exit codes) of children
+            // that hit a signal-kill (137/139) retry. Their retry is
+            // deferred to a serial tail after the pool drains so it runs
+            // in isolation rather than under the same memory pressure
+            // that crashed the first attempt — see the deferral comment
+            // in the reap block below.
+            let mut retry_pending: int[] = [];
+            let mut retry_rc: int[] = [];
             let mut launched: int = 0;
             let mut ti: int = 0;
             loop {
@@ -1609,20 +1638,33 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
                 let path = test_files[ti];
                 let suite_idx = file_suite_index[ti];
                 let child_scratch = sub_root + "/sub-" + number_to_string(ti);
-                let mut rc = _reap_test_child(handles[ti]);
+                let rc = _reap_test_child(handles[ti]);
                 if _should_retry_test(rc, sub_retries_disabled) {
-                    // Same gate as the serial loop: RETRY banner is a
-                    // human-mode artifact, suppressed in JSON mode.
-                    if !json_output {
-                        print("[test] RETRY: " + _package_basename(path)
-                            + " (exit code "
-                            + number_to_string(rc)
-                            + ", retrying once)");
-                    }
-                    let retry_handle = process.spawn_with_env(_pool_child_argv(timeout_cmd, timeout_secs, self_exe, path, name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, child_scratch, sub_root, update_snapshots, json_output));
-                    rc = _reap_test_child(retry_handle);
+                    // #1303: defer signal-kill (137/139) retries to the
+                    // isolated serial tail after the pool drains.
+                    // Re-spawning the retry inline here runs it while up
+                    // to `jobs-1` other children are still live — the
+                    // same sustained memory pressure that produced the
+                    // transient crash — so it tends to crash again (the
+                    // flaky 148/150 signature for the two adjacent
+                    // heavy-lowering atomic tests). Replaying it once the
+                    // window has emptied matches the isolation that
+                    // passes 3/3 deterministically, so a transient
+                    // 137/139 self-heals. Accounting + JSON aggregation
+                    // for this file are deferred to the drain loop below.
+                    retry_pending.push(ti);
+                    retry_rc.push(rc);
+                    ti += 1;
+                    continue;
                 }
                 if rc == 0 { suites[suite_idx].pass_count += 1; } else {
+                    // #1303: a signal-kill that reaches here (rather than
+                    // the deferred tail) means retries are disabled
+                    // (`SAILFIN_TEST_RETRY=0`); surface the lost crash
+                    // explicitly so the failure is attributed, not a gap.
+                    if !json_output && _is_signal_exit(rc) {
+                        _emit_crash_diagnostic(_package_basename(path), rc);
+                    }
                     suites[suite_idx].fail_count += 1;
                     suites[suite_idx].failed_files.push(_package_basename(path));
                     if overall_rc == 0 { overall_rc = rc; }
@@ -1644,6 +1686,66 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
                     } else { sf_failed += sf_counts[ti]; }
                 }
                 ti += 1;
+            }
+            // #1303 serial retry tail. The pool has fully drained, so
+            // each replay runs alone — the same isolation an in-process
+            // `sailfin test <file>` enjoys, where these tests pass 3/3.
+            // Mirrors exactly what the inline retry used to do (banner
+            // gate, spawn/reap, pass/fail accounting, JSON sub-frame
+            // aggregation) — only the timing changed. `SAILFIN_TEST_RETRY=0`
+            // is already honoured upstream: `_should_retry_test` returns
+            // false under `sub_retries_disabled`, so nothing is ever
+            // pushed onto `retry_pending` and this loop is a no-op.
+            let mut ri: int = 0;
+            loop {
+                if ri >= retry_pending.length { break; }
+                let rti = retry_pending[ri];
+                let rpath = test_files[rti];
+                let rsuite_idx = file_suite_index[rti];
+                let rchild_scratch = sub_root + "/sub-" + number_to_string(rti);
+                if !json_output {
+                    print("[test] RETRY: " + _package_basename(rpath)
+                        + " (exit code "
+                        + number_to_string(retry_rc[ri])
+                        + ", retrying once)");
+                }
+                // Drop any partial `_subframe_summary.json` the crashed
+                // first attempt may have left in this reused scratch dir.
+                // Otherwise, if the retry also crashes before writing its
+                // own summary, the `fs.exists` aggregation below would
+                // read the stale partial and undercount failures (a
+                // `--json`-only, double-crash edge — never affects the
+                // exit code). Unlinking first makes the fallback to
+                // `sf_counts[rti]` fire on a double crash.
+                let stale_sf = rchild_scratch + "/_subframe_summary.json";
+                if fs.exists(stale_sf) { fs.deleteFile(stale_sf); }
+                let retry_handle = process.spawn_with_env(_pool_child_argv(timeout_cmd, timeout_secs, self_exe, rpath, name_filter, tag_filter, json_output, no_test_cache), _pool_child_env(pool_base_env, rchild_scratch, sub_root, update_snapshots, json_output));
+                let rc = _reap_test_child(retry_handle);
+                if rc == 0 { suites[rsuite_idx].pass_count += 1; } else {
+                    // #1303: the isolated retry also died. The RETRY
+                    // banner above already named the file; add the
+                    // attributed crash line so the final FAIL isn't a
+                    // bare unexplained gap (its own output was lost to
+                    // the unflushed crash buffer).
+                    if !json_output && _is_signal_exit(rc) {
+                        _emit_crash_diagnostic(_package_basename(rpath), rc);
+                    }
+                    suites[rsuite_idx].fail_count += 1;
+                    suites[rsuite_idx].failed_files.push(_package_basename(rpath));
+                    if overall_rc == 0 { overall_rc = rc; }
+                }
+                if json_output {
+                    let sf_file = rchild_scratch + "/_subframe_summary.json";
+                    if fs.exists(sf_file) {
+                        let sf_raw = fs.readFile(sf_file);
+                        sf_passed += _extract_json_uint_after(sf_raw, "\"passed\":");
+                        sf_failed += _extract_json_uint_after(sf_raw, "\"failed\":");
+                        sf_skipped += _extract_json_uint_after(sf_raw, "\"skipped\":");
+                        sf_tb_hits += _extract_json_uint_after(sf_raw, "\"test_bin_hits\":");
+                        sf_tb_misses += _extract_json_uint_after(sf_raw, "\"test_bin_misses\":");
+                    } else { sf_failed += sf_counts[rti]; }
+                }
+                ri += 1;
             }
         } else {
             let mut ti: int = 0;
@@ -1673,6 +1775,12 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
                     rc = _run_test_child(timeout_cmd, timeout_secs, child_scratch, sub_root, self_exe, path, name_filter, tag_filter, update_snapshots, json_output, no_test_cache);
                 }
                 if rc == 0 { suites[suite_idx].pass_count += 1; } else {
+                    // #1303: serial path — a signal-kill (after the
+                    // inline retry, if any) lost its own output to the
+                    // unflushed crash buffer; surface an attributed FAIL.
+                    if !json_output && _is_signal_exit(rc) {
+                        _emit_crash_diagnostic(_package_basename(path), rc);
+                    }
                     suites[suite_idx].fail_count += 1;
                     suites[suite_idx].failed_files.push(_package_basename(path));
                     if overall_rc == 0 { overall_rc = rc; }

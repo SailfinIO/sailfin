@@ -216,12 +216,30 @@ fn sfn_alloc_struct(size_bytes: i64) -> * u8 {
     // are the author-asserted unsafe region. The returned block is
     // freshly allocated and uniquely owned, so the in-place zero-fill is
     // sound.
+    let mut result: * u8 = 0 as * u8;
     unsafe {
         if sfn_arena_enabled() {
-            let p: * u8 = sfn_arena_alloc(sfn_arena_global(), size_bytes as usize, 8 as usize);
-            if p as i64 != 0 { memset(p, 0, size_bytes as usize); }
-            return p;
-        }
-        return calloc(1 as usize, size_bytes as usize);
+            result = sfn_arena_alloc(sfn_arena_global(), size_bytes as usize, 8 as usize);
+            if result as i64 != 0 {
+                memset(result, 0, size_bytes as usize);
+            }
+        } else { result = calloc(1 as usize, size_bytes as usize); }
     }
+    // #1303: host out-of-memory. The arena `_page_create` malloc or the
+    // libc `calloc` fallback returned NULL rather than aborting. The
+    // lowered call sites GEP+store into the returned base with no
+    // null-check, so propagating NULL surfaces as a bare SIGSEGV
+    // (exit 139) with no diagnostic — the flaky-crash signature under
+    // concurrent `make check` memory pressure. Abort with a clear marker
+    // so a genuine OOM is triage-able rather than a mystery segfault.
+    // The cast-compare and the `write`/`abort` are not raw-pointer
+    // derefs (cf. `sfn_mem_free`'s out-of-`unsafe` `ptr as i64 == 0`),
+    // so they sit outside the unsafe region. 49 bytes incl. the trailing
+    // newline (`write` takes an explicit count, matching `bounds_check`).
+    if result as i64 == 0 {
+        let msg: * u8 = "[sailfin-oom] sfn_alloc_struct allocation failed\n" as * u8;
+        write(2, msg, 49 as usize);
+        abort();
+    }
+    return result;
 }
