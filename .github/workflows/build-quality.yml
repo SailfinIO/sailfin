@@ -161,7 +161,7 @@ jobs:
         run: |
           set -euo pipefail
           # Cold build into a dedicated work-dir. Populates
-          # `build/cache/v1` with every content-addressed entry the
+          # `build/cache/v2` with every content-addressed entry the
           # determinism pass needs in step 4. The BuildReport JSON is
           # captured but unused — the gate assertions read pass2.json,
           # which contains the warm-cache run plus the determinism

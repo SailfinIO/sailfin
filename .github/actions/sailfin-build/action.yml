@@ -204,11 +204,15 @@ runs:
       shell: bash {0}
       run: |
         set -euo pipefail
-        # No step-level ulimit: since seed 0.7.0-alpha.33 the compiler
-        # self-applies an 8 GiB RLIMIT_AS on Linux at startup (#1291,
-        # .claude/rules/compiler-safety.md), inherited by every test
-        # child it forks, so a runaway compile fails cleanly per-test
-        # instead of OOM-killing the hosted runner.
+        # No step-level ulimit: since seed 0.7.0-alpha.33 every sailfin
+        # invocation self-applies an 8 GiB RLIMIT_AS on Linux at its own
+        # startup (#1291, .claude/rules/compiler-safety.md) — each
+        # per-test compiler process is capped independently, and the
+        # subprocesses IT spawns (emit workers, clang, compiled test
+        # programs) inherit that cap. Non-compiler processes the suite
+        # runs directly are not capped; they were never the OOM vector.
+        # A runaway compile thus fails cleanly per-test instead of
+        # OOM-killing the hosted runner.
         # Empty shard = full suite (release workflows + back-compat).
         # A shard name runs only that disjoint slice; the union across
         # legs equals `make test` (asserted by the shard-cover lint).
