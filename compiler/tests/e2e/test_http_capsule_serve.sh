@@ -278,7 +278,19 @@ while time.time() < deadline:
 if data is None:
     print("NO_RESPONSE", flush=True)
     sys.exit(1)
-sys.stdout.write(data.decode("utf-8", "replace"))
+text = data.decode("utf-8", "replace")
+sys.stdout.write(text)
+# Validate the echoed body EXACTLY (not just markers): split off the
+# response body after the header terminator and compare byte-for-byte
+# against what we sent. This is the Wave 3 acceptance criterion, so a
+# truncated or padded body must fail.
+sep = "\r\n\r\n"
+idx = text.find(sep)
+resp_body = text[idx + len(sep):] if idx >= 0 else ""
+if resp_body == body:
+    sys.stdout.write("\n__BODY_EXACT_MATCH__\n")
+else:
+    sys.stdout.write("\n__BODY_MISMATCH__ got=%r want=%r\n" % (resp_body, body))
 sys.stdout.flush()
 PYEOF
 
@@ -302,10 +314,10 @@ PYEOF
         cat "$out"
         bad=$((bad + 1))
     fi
-    # The echoed body must contain the start and end markers of what we
-    # sent — proof the full Content-Length body was drained, not truncated.
-    if ! grep -q "payload-payload-" "$out" || ! grep -q "END" "$out"; then
-        echo "[test]   echoed body did not round-trip the POST payload, got:"
+    # The echoed body must equal the sent body byte-for-byte — proof the
+    # full Content-Length body was drained, not truncated or padded.
+    if ! grep -q "__BODY_EXACT_MATCH__" "$out"; then
+        echo "[test]   echoed body did not round-trip the POST payload exactly, got:"
         cat "$out"
         bad=$((bad + 1))
     fi

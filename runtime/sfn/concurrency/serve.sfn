@@ -202,22 +202,29 @@ fn _serve_send_all(fd: i32, buf: * u8, total: i64) -> bool {
 // where `header_end` is the offset just past the `\r\n\r\n`
 // terminator). Case-insensitive on the header name (RFC 7230 §3.2).
 // Returns the non-negative value, or -1 when no Content-Length header
-// is present in the head. The match must fall inside the header block
-// — a later occurrence (e.g. inside an already-buffered body) is
-// ignored via the offset guard. v0 takes the first match and does not
-// anchor to a line start, so a pathological header literally named to
-// embed `content-length:` could be misread; real clients do not do
-// this and the value is bounded by `max_body` regardless.
+// is present in the head.
+//
+// The search is anchored to a header-line start by matching the
+// CRLF-prefixed name `\r\ncontent-length:` — every header is preceded
+// by the CRLF that terminates the request line or the prior header, so
+// this matches only a real header field, never a `content-length:`
+// substring sitting inside another header's name or value (e.g.
+// `X: content-length: 999`). Without the anchor such a substring could
+// be misread and make the body-drain loop block on bytes the client
+// never sends (DoS / hang). The match must also begin inside the
+// header block: a match whose name starts at/after the blank-line
+// terminator (a body that happens to open with `content-length:`) is
+// rejected by the `off + 2 >= header_end` guard.
 fn _serve_content_length(buf: * u8, header_end: i64) -> i64 {
-    let needle: string = "content-length:";
+    let needle: string = "\r\ncontent-length:";
     let hit: * u8 = strcasestr(buf, needle as * u8);
     if hit as i64 == 0 { return 0 - 1; }
-    // Ignore a match that lands at/after the header terminator.
+    // `off` points at the CRLF; the header name starts at `off + 2`.
     let off: i64 = (hit as i64) - (buf as i64);
-    if off >= header_end { return 0 - 1; }
-    // The value starts after the 15-char "content-length:" token;
+    if off + 2 >= header_end { return 0 - 1; }
+    // The value starts after the 17-char "\r\ncontent-length:" token;
     // strtoll skips leading whitespace and parses the decimal length.
-    let value_ptr: * u8 = _serve_ptr_off(hit, 15);
+    let value_ptr: * u8 = _serve_ptr_off(hit, 17);
     return strtoll(value_ptr, null, 10);
 }
 
