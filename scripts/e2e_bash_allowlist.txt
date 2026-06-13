@@ -22,7 +22,6 @@ test_async_coerce_refusal.sh
 test_atomic_add_sub_compile.sh
 test_atomic_cas_compile.sh
 test_binary_capsule_walker.sh
-test_bool_numeric_coercion.sh
 test_build_diagnostics_format.sh
 test_build_json_schema.sh
 test_call_emission_no_polling.sh
@@ -61,7 +60,6 @@ test_errno_reader.sh
 test_escape_promotion_boundaries.sh
 test_exe_path_intrinsic_platform.sh
 test_exe_path_reader.sh
-test_export_from.sh
 test_fmt.sh
 test_fn_reference_pthread.sh
 # Server-loopback test: starts a background blocking sfn/http server and
