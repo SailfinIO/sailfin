@@ -2,7 +2,7 @@
 name: compiler-architect
 description: Opus-powered architect for designing compiler features, refactors, and fixes that account for self-hosting constraints, the full pipeline, and the 1.0 roadmap. Use when you need a forward-thinking plan before implementing.
 tools: Read, Grep, Glob, Bash, Write
-model: opus
+model: fable
 effort: high
 maxTurns: 30
 color: purple
@@ -85,6 +85,23 @@ and seed cuts). Apply these:
   call to a C API often needs a frontend primitive that does not exist yet
   (e.g. taking a function's address for a `pthread_create` start routine).
   Surface a missing primitive as an explicit predecessor, not a surprise.
+- **Audit C↔Sailfin symbol-flip coexistence — expressibility is not enough.**
+  "Can Sailfin express a real body?" is only half the question for any flip of
+  a `runtime/sfn/**` symbol during the C→Sailfin migration window. The other
+  half is the **link-time coexistence picture**, because the C and Sailfin
+  runtimes link into the same binary until `sailfin_runtime.c` is deleted. For
+  every flipped symbol, run the audit in `.claude/rules/c-sailfin-migration.md`:
+  who *defines* it (a bare `sfn_*` is often C-defined with only a `_sfn_`
+  infix façade on the Sailfin side), who *calls* it (C-internal callers + the
+  `static`-ify implication), whether it's prototyped in a `.h` (header-edit +
+  Files-Affected expansion), whether it shares a **mutable struct/header layout**
+  with the other runtime (the #1205-class heap-corruption hazard — arena handle
+  #1309, array header+canary #1316), and whether the **emitted ABI** matches the
+  Sailfin body's signature (an `OwnedBuf`-vs-`SfnString` mismatch is real design
+  work, not a rename). The grooming under-scope this exists to prevent: framing a
+  link-ownership flip (which touches `sailfin_runtime.c` + `.h`) as a 2-file
+  rename, and missing a divergent shared-struct layout. The readiness signal is
+  the `nm` relink gate in that rule, not the prose of a closed "ported" issue.
 
 ## Reference Documents
 
