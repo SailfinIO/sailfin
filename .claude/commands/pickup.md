@@ -266,6 +266,46 @@ Read the full issue body to extract:
 
 ---
 
+## Phase 2.5: SCOPE PRE-FLIGHT (runtime symbol-flip issues)
+
+If the issue flips a `runtime/sfn/**` symbol from its C body to Sailfin —
+any `area:runtime` issue that "ports" / "de-trampolines" / "flips" an
+`sfn_*` / `sailfin_runtime_*` / `sailfin_adapter_*` symbol during the
+C→Sailfin migration (epic #1308) — **validate the issue's scope against
+reality before writing code.** This catches the Files-Affected gap and the
+shared-struct layout hazard in seconds rather than mid-implementation, and
+lets you proceed confidently when the scope *is* right. Run the audit in
+`.claude/rules/c-sailfin-migration.md` for each flipped symbol:
+
+```bash
+# Who defines it, who calls it, is it in a header? (per symbol S)
+grep -cE "S[[:space:]]*\(" runtime/native/src/sailfin_runtime.c   # C definition + callers
+grep -nw S runtime/native/include/sailfin_runtime.h              # header prototype?
+grep -rnE "fn S[ (]" runtime/sfn                                  # Sailfin definition (bare vs _sfn_ infix)
+```
+
+Then reconcile against the issue body:
+
+- **Files Affected mismatch** — if the symbol is C-defined and the registry
+  emits the bare name (a link-ownership flip), the issue MUST list
+  `runtime/native/src/sailfin_runtime.c` (and `sailfin_runtime.h` if the
+  symbol is prototyped there). If it lists only the `runtime/sfn/**` file,
+  the scope is wrong — pause via the Phase 3 scope-adjustment path below.
+- **Shared-struct layout hazard** — if the symbol reads/writes a struct or
+  header convention the *other* runtime also touches (arena handle #1309,
+  array header+canary #1316), confirm the issue carries a no-corruption /
+  ASAN-interleave acceptance criterion. If it doesn't, pause.
+- **Emitted-ABI mismatch** — if the registry row's `return_type` (in
+  `compiler/src/llvm/runtime_helpers.sfn`) differs from the Sailfin body's
+  signature (e.g. `{i8*, i64}` vs `OwnedBuf`), that's an architect decision,
+  not a pickup — pause and escalate.
+
+If the audit confirms the scope, proceed. If it surfaces a gap, use the
+Phase 3 scope-adjustment mechanism (comment, `needs-grooming`, resync) —
+do not silently expand the Files Affected set or invent a layout fix.
+
+---
+
 ## Phase 3: DISPATCH TO WORKFLOW
 
 Based on the issue's `type:*` label, follow the appropriate workflow. Use the issue body as the brief — don't redo the design work the architect already produced during grooming.

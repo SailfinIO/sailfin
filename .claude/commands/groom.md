@@ -66,6 +66,30 @@ instead of as a planned predecessor). If the probe fails, the prerequisite
 is a **frontend issue that must be groomed first** — make it an explicit
 `Blocked by` / `Required in pinned seed` predecessor, not a surprise.
 
+### C↔Sailfin symbol-flip coexistence (gate)
+
+Expressibility (the probe above) is only half the question for any issue
+that **flips a `runtime/sfn/**` symbol from its C body to Sailfin** during
+the migration window (epic #1308). The C and Sailfin runtimes link into the
+same binary until `sailfin_runtime.c` is deleted, so a flip is a *link-time
+symbol-ownership change*, not a rename — and the trap is framing it as a
+2-file edit when it touches `sailfin_runtime.c` + a header, or missing a
+divergent shared-struct layout (the #1205-class heap-corruption hazard).
+
+Before any such issue goes `claude-ready`, run the audit in
+`.claude/rules/c-sailfin-migration.md` for each flipped symbol — who
+defines it (a bare `sfn_*` is often C-defined with only a `_sfn_` infix
+façade), who calls it (C-internal callers → `static`-ify + header edit),
+whether it shares a mutable struct/header layout with the other runtime
+(arena handle #1309, array header #1316), and whether the emitted ABI
+matches the Sailfin body (an `OwnedBuf`-vs-`SfnString` mismatch is an
+architect decision, not a rename). Expand **Files Affected** to the honest
+set (`sailfin_runtime.c` + `.h` for a link-ownership flip), add the `nm`
+relink gate to **Acceptance Criteria**, and flag any layout hazard for an
+ASAN interleave test. This is the under-scope that the compiler-architect
+must catch during Phase 2 decomposition — do not let "ported to Sailfin"
+prose stand in for the verified relink gate.
+
 ### Don't over-decompose: bundle a capability with its single consumer
 
 Splitting is not free. Prefer **one issue/PR** for a compiler capability plus
