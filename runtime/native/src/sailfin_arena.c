@@ -160,7 +160,8 @@ void *sfn_arena_realloc(SfnArena *arena, void *ptr, size_t old_size,
  * `sfn_arena_enabled` preserves the exact env semantics documented
  * there: unset → on (default); empty / "0" / "false" → off; anything
  * else → on. `sfn_arena_global` creates a 4 MiB-page handle on first
- * call and aborts with the same fd-2 diagnostic on OOM.
+ * call and `abort()`s (bare, no diagnostic — printing one would
+ * re-enter sfn_alloc_struct → sfn_arena_global and recurse) on OOM.
  */
 
 /* ------------------------------------------------------------------ */

@@ -333,7 +333,7 @@ fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
 // `sfn_arena_realloc`/`reset`/`destroy`/`print_stats`/`mark`/`rewind`
 // keep operating on the **same shared 40-byte global handle** these
 // produce, so the layout-match above is the deciding correctness
-// constraint. The 24→40 shrink and the rest of the C arena retire in
+// constraint. The 40→24 shrink and the rest of the C arena retire in
 // #822.
 //
 // `create` and `alloc` are thin forwarders to the `sfn_arena_sfn_*`
