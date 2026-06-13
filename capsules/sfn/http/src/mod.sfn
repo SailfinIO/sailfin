@@ -4,11 +4,12 @@
 // All operations require the `net` effect; server operations also require `io`.
 //
 // Internal layout — this barrel re-exports the public surface. Sources live in:
-//   - types.sfn  Request, Response, ServerConfig
-//   - wire.sfn   parse_request, serialize_response, header, query_param,
-//                reason_phrase, response, response_with_status,
-//                json_response, not_found
-//   - mod.sfn    client (get, post) + serve (server entry point)
+//   - types.sfn   Request, Response, ServerConfig
+//   - wire.sfn    parse_request, serialize_response, header, query_param,
+//                 reason_phrase, response, response_with_status,
+//                 json_response, not_found
+//   - server.sfn  serve (typed HTTP server on the M4 runtime)
+//   - mod.sfn     client (get, post)
 //
 // Build-out tracked by epic #1321; design in docs/proposals/sfn-http-capsule.md.
 // ---- Types ----
@@ -27,6 +28,9 @@ export {
     not_found
 } from "./wire";
 
+// ---- Server ----
+export { serve } from "./server";
+
 // ---- Client ----
 fn get(url: string) -> string ![net] {
     // HTTP GET request. Returns the response body as a string.
@@ -36,19 +40,4 @@ fn get(url: string) -> string ![net] {
 fn post(url: string, body: string) -> string ![net] {
     // HTTP POST request. Returns the response body as a string.
     return http.post(url, body);
-}
-
-// ---- Server ----
-fn serve(handler: any, config: any? = null) -> void ![io, net] {
-    // Start an HTTP server that dispatches requests to the handler function.
-    //
-    // Usage:
-    //   import { serve, response } from "http"
-    //
-    //   serve(fn(req) {
-    //       return response("Hello, Sailfin!")
-    //   }, { port: 8080 })
-    //
-    // Full implementation pending runtime HTTP adapter.
-    print("[sfn/http] serve is not yet fully implemented");
 }

@@ -1412,7 +1412,15 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     // server accept loop in `runtime/sfn/concurrency/serve.sfn` (#1092).
     // The serve call does not return (it runs an accept loop), so the
     // result operand is void / null.
-    if starts_with(stripped, "serve(") {
+    //
+    // GATE (#1323): only the *builtin* concurrency `serve` takes this path.
+    // If `serve` resolves to a user-defined / imported function (e.g. the
+    // typed `sfn/http` capsule `serve(handler: * fn (Request) -> Response,
+    // port)`), fall through to normal call lowering so the imported
+    // function is invoked — it registers a trampoline and calls
+    // `sfn_serve_framed`. The bare builtin (no `serve` in scope) is
+    // unchanged, so `test_runtime_serve.sh` stays green.
+    if starts_with(stripped, "serve(") && find_function_by_name_or_import(functions, "serve") == null {
         let serve_inner_start = index_of(stripped, "(");
         let serve_inner_end = find_last_index_of_char(stripped, ")");
         let empty_serve_constants: StringConstant[] = [];

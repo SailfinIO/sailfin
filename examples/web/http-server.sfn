@@ -1,13 +1,38 @@
 // examples/web/http-server.sfn
+//
+// A minimal HTTP/1.1 server in native Sailfin using the sfn/http capsule.
+//
+// This is the entry of a consumer capsule: to build/run it, the capsule's
+// `capsule.toml` must declare the dependency
+//
+//     [dependencies]
+//     "sfn/http" = "*"
+//
+// (capsule functions are only staged into a consumer's codegen through a
+// declared dependency — a loose `sfn run` of a manifest-less file cannot
+// resolve them). Then:  build/native/sailfin run src/main.sfn
+//
+// The handler is a TOP-LEVEL function `fn(Request) -> Response`, passed
+// address-taken (`as * fn (Request) -> Response`). Closures are not
+// supported as handlers in v0. The server blocks (one server per process)
+// and requires `![net, io]`.
+import {
+    serve,
+    Request,
+    Response,
+    response,
+    json_response,
+    not_found
+} from "sfn/http";
 
-import { serve } from "http";
-
-fn main() ![net] {
-    serve(fn(req, res) {
-        if req.path == "/" {
-            res.send("Welcome to Sailfin!");
-        } else {
-            res.send("404 Not Found", 404);
-        }
-    }, { port: 8080 });
+fn handle(req: Request) -> Response {
+    if strings_equal(req.path, "/") {
+        return response("Welcome to Sailfin!");
+    }
+    if strings_equal(req.path, "/health") {
+        return json_response("{\"status\":\"ok\"}");
+    }
+    return not_found();
 }
+
+fn main() ![net, io] { serve(handle as * fn (Request) -> Response, 8080); }

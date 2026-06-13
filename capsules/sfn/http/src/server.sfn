@@ -1,0 +1,75 @@
+// sfn/http — typed HTTP server (`serve`).
+//
+// Wave 2 of epic #1321. Wires the capsule's typed `fn(Request) -> Response`
+// handler onto the runtime's framed accept loop (`sfn_serve_framed`,
+// runtime/sfn/concurrency/serve.sfn). The runtime speaks a raw
+// `fn(* u8 request) -> * u8 response` ABI and sends the handler's return
+// verbatim; this module supplies a trampoline that parses the raw request
+// into a `Request`, invokes the user handler, and serializes the
+// `Response` back to bytes — so status codes and headers reach the wire.
+//
+// Handler ABI. The user handler must be a TOP-LEVEL function passed
+// address-taken: `serve(my_handler as * fn (Request) -> Response, 8080)`.
+// The language requires the explicit address cast (a bare fn value is
+// rejected, E0808), which also means closures cannot be passed — exactly
+// the v0 restriction the design calls for, enforced by the type system.
+//
+// Single server per process: one module-global handler slot, and
+// `sfn_serve_framed` never returns (it owns the accept loop + pool).
+//
+// Extern + low-level cast surface (extern fn, `* fn` casts, i64 pointer
+// addresses) mirrors the runtime modules — see runtime/sfn/concurrency/
+// serve.sfn. `sfn_serve_framed` is defined in the always-linked runtime,
+// so the extern resolves at link time (like the libc externs in the
+// client adapter). The extern carries no effect annotation (externs may
+// not); enforcement rides on `serve`'s own `![net, io]`.
+import { Request, Response } from "./types";
+import { parse_request, serialize_response } from "./wire";
+
+extern fn sfn_serve_framed(handler: * u8, port: i32) -> void;
+
+// Handler code pointer, set by `serve` before the accept loop starts and
+// read by `_sfn_http_trampoline` on pool-worker threads. Written once
+// before any worker runs, so no synchronization is needed (single server
+// per process). 0 = no handler registered.
+let mut _sfn_http_handler_addr: i64 = 0;
+
+// `_sfn_http_trampoline(raw)` — the raw `fn(* u8) -> * u8` boundary the
+// runtime dispatches to. Parses the request, calls the registered typed
+// handler, and serializes the response to full HTTP/1.1 bytes. Must be a
+// top-level function so its address is a bare code pointer.
+fn _sfn_http_trampoline(raw: string) -> string {
+    if _sfn_http_handler_addr == 0 {
+        return serialize_response(Response {
+            status: 500, headers: [], body: ""
+        });
+    }
+    let entry: * fn (Request) -> Response = _sfn_http_handler_addr as * fn (Request) -> Response;
+    let req: Request = parse_request(raw);
+    let resp: Response = entry(req);
+    return serialize_response(resp);
+}
+
+// `serve(handler, port)` — start a blocking HTTP/1.1 server that
+// dispatches each request to `handler`. Does not return.
+//
+// Usage (from a capsule that declares `[dependencies] "sfn/http" = "*"`):
+//   import { serve, Request, Response, response, not_found } from "sfn/http";
+//
+//   fn handle(req: Request) -> Response {
+//       if req.path == "/" { return response("Hello, Sailfin!"); }
+//       return not_found();
+//   }
+//
+//   fn main() ![net, io] {
+//       serve(handle as * fn (Request) -> Response, 8080);
+//   }
+//
+// `handler` must be a top-level function (closures are not supported in
+// v0). v0 limits (matching the runtime): HTTP/1.1, blocking accept, no
+// TLS, no keep-alive, GET-shaped request bodies (POST bodies land in a
+// follow-up), text responses only.
+fn serve(handler: * fn (Request) -> Response, port: int = 8080) -> void ![net, io] {
+    _sfn_http_handler_addr = handler as i64;
+    sfn_serve_framed(_sfn_http_trampoline as * u8, port as i32);
+}
