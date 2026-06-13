@@ -107,11 +107,17 @@ test "export-from: inline re-export chain builds, links, and runs" ![io] {
     // The i8*-fallback regression prints `*-FAIL` lines instead of `*-ok`.
     assert find(out, "FAIL", 0) < 0;
 
-    // Every checkpoint must round-trip through the re-export shim.
-    assert find(out, "bool-yes-ok", 0) >= 0;
-    assert find(out, "bool-no-ok", 0) >= 0;
-    assert find(out, "let-truthy-ok", 0) >= 0;
-    assert find(out, "let-falsy-ok", 0) >= 0;
-    assert find(out, "string-strip-ok", 0) >= 0;
-    assert find(out, "string-unchanged-ok", 0) >= 0;
+    // Every checkpoint must round-trip through the re-export shim. Match each
+    // line-anchored (faithful to the legacy `grep -qx`): pad the captured
+    // output with newlines and require `\n<checkpoint>\n`, so a checkpoint
+    // can never be satisfied by a substring of a longer/garbled line — a
+    // formatting regression that prefixes or suffixes the text stays loud.
+    let padded = "\n" + out + "\n";
+    let expected: string[] = ["bool-yes-ok", "bool-no-ok", "let-truthy-ok", "let-falsy-ok", "string-strip-ok", "string-unchanged-ok"];
+    let mut i: int = 0;
+    loop {
+        if i >= expected.length { break; }
+        assert find(padded, "\n" + expected[i] + "\n", 0) >= 0;
+        i += 1;
+    }
 }
