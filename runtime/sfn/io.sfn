@@ -28,16 +28,22 @@
 //      need an SfnString-typed Sailfin parameter; the bytes arrive as
 //      the data pointer + length.)
 //
-//      Immediate-codepoint caveat (pre-M1.A.2). A real `{i8*, i64}`
-//      aggregate always carries a real pointer + byte length, so the
-//      length-aware `write(2)` body is correct for it. The legacy
-//      tagged-pointer "immediate codepoint" string encoding (a single
-//      grapheme smuggled in the `.data` slot as `cp << 32` or a
-//      near-null ASCII byte) is decoded by the surviving C
-//      `_print_line` path but **not** by these native bodies. The
-//      length-carrying consumers (`sfn_log_execution`, `sfn_print_sfn`)
-//      below therefore stay on the immediate-decoding C entrypoints;
-//      see #822 / #1136 for the encoding's retirement.
+//      Immediate-codepoint handling (pre-M1.A.2). A real `{i8*, i64}`
+//      aggregate carries a real pointer + byte length, so the
+//      length-aware `write(2)` body is correct for it. But pre-M1.A.2 a
+//      single grapheme can still arrive as a legacy tagged-pointer
+//      "immediate codepoint" — `.data` smuggling the codepoint as
+//      `cp << 32` or a near-null ASCII byte, with no real buffer to
+//      read. The native bodies guard for that shape (`_sfn_is_immediate`,
+//      mirroring the C `_is_immediate_codepoint_string` classification)
+//      and route only those tagged/NULL pointers to the immediate-
+//      decoding C `sailfin_runtime_print_*` entrypoints; every real
+//      string takes the native `write(2)` hot path. This keeps output
+//      byte-identical to the retired C `_print_line` across both shapes.
+//      The C printers stay until #822 / #1136 retire the encoding; the
+//      guard retires with them. The length-free cstring consumers
+//      (`sfn_log_execution`, `sfn_print_sfn`) likewise stay on the C
+//      entrypoints (their `* u8` arg has no length to drive `write`).
 //
 //   2. The `sfn_getenv_sfn` / `sfn_home_dir_sfn` proof-of-life family.
 //      These still forward to the `sailfin_runtime_{getenv,home_dir}` C
@@ -69,7 +75,13 @@ extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
 
 extern fn sailfin_runtime_print_raw(msg: * u8) -> void;
 
+extern fn sailfin_runtime_print_err(msg: * u8) -> void;
+
 extern fn sailfin_runtime_print_info(msg: * u8) -> void;
+
+extern fn sailfin_runtime_print_warn(msg: * u8) -> void;
+
+extern fn sailfin_runtime_print_error(msg: * u8) -> void;
 
 extern fn sailfin_runtime_getenv(name: * u8) -> * u8;
 
@@ -82,36 +94,45 @@ let STDOUT_FD: i32 = 1;
 
 let STDERR_FD: i32 = 2;
 
-// POSIX `EINTR` — the only `write(2)` failure that warrants a resume.
-// The value is 4 on both Linux and macOS (same constant `clock.sfn`'s
-// `nanosleep` loop uses).
-let EINTR: i32 = 4;
-
 fn sfn_write_fd(fd: i32, buf: * u8, count: usize) -> i64 ![io] {
     return write(fd, buf, count);
 }
 
+// Is `data` a legacy immediate-codepoint tagged pointer rather than a
+// real string buffer? Pre-M1.A.2 a single grapheme can arrive with no
+// backing buffer: either a near-null ASCII byte (`1..=0x7f`, and NULL
+// `0` which the C printers no-op) or the codepoint shifted into the
+// upper 32 bits (`cp << 32`, so the low 32 bits are zero and the value
+// is non-zero). Mirrors the C `_is_immediate_codepoint_string`
+// classification (`runtime/native/src/sailfin_runtime.c`). A real
+// string pointer is `> 0x7f` with a non-zero low word, so it never
+// matches. Pointer math only — no syscall, no `errno` (which keeps this
+// module free of the glibc-only `__errno_location` that does not link
+// on the Windows cross-compile).
+fn _sfn_is_immediate(data: * u8) -> bool {
+    let raw: i64 = data as i64;
+    if raw >= 0 && raw <= 127 { return true; }
+    if raw != 0 && (raw & 4294967295) == 0 { return true; }
+    return false;
+}
+
 // Write exactly `len` bytes of `data` to `fd`, looping over short
-// writes. `write(2)` may flush fewer bytes than requested (signals,
-// pipe back-pressure) or fail with `EINTR` when a signal lands before
-// any byte is written; advance on partial writes and resume on `EINTR`
-// so output is not silently truncated, matching the "write it all"
-// contract of the retired C `fputs` + `fflush` path. Any other error
-// (or a `0` return) stops the loop. `len <= 0` is a no-op (the guard
-// trips immediately), so a zero-length prefix passes a harmless
-// untouched pointer. The `EINTR` errno read uses the same host-aware
-// `sailfin_intrinsic_errno_location` + `sailfin_intrinsic_pointer_read_i32`
-// sentinel chain as `clock.sfn` (#887 / #875).
+// writes — `write(2)` may flush fewer bytes than requested (pipe
+// back-pressure), so advance until the whole buffer is delivered.
+// A non-positive return (error or EOF) stops the loop best-effort,
+// mirroring the retired C `fputs` + `fflush` path without its stdio
+// buffering. `len <= 0` is a no-op (the guard trips immediately), so a
+// zero-length prefix passes a harmless untouched pointer. Callers must
+// pass a real buffer; immediate-codepoint pointers are filtered by
+// `_sfn_is_immediate` before reaching here.
 fn _sfn_write_all(fd: i32, data: * u8, len: i64) -> void ![io] {
     let mut off: i64 = 0;
     loop {
         if off >= len { break; }
         let chunk: * u8 = (data as i64 + off) as * u8;
         let n: i64 = write(fd, chunk, (len - off) as usize);
-        if n > 0 { off = off + n; } else if n < 0 {
-            let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
-            if err != EINTR { break; }
-        } else { break; }
+        if n <= 0 { break; }
+        off = off + n;
     }
 }
 
@@ -131,30 +152,50 @@ fn _sfn_print_line(fd: i32, prefix: * u8, prefix_len: i64, data: * u8, len: i64)
 // `sfn_print(data, len)` — raw stdout line. Mirrors the retired C
 // `sailfin_runtime_print_raw`: the message bytes followed by `'\n'`.
 fn sfn_print(data: * u8, len: i64) -> void ![io] {
+    if _sfn_is_immediate(data) {
+        sailfin_runtime_print_raw(data);
+        return;
+    }
     let empty: string = "";
     _sfn_print_line(STDOUT_FD, empty as * u8, 0, data, len);
 }
 
 // `sfn_print_err(data, len)` — raw stderr line.
 fn sfn_print_err(data: * u8, len: i64) -> void ![io] {
+    if _sfn_is_immediate(data) {
+        sailfin_runtime_print_err(data);
+        return;
+    }
     let empty: string = "";
     _sfn_print_line(STDERR_FD, empty as * u8, 0, data, len);
 }
 
 // `sfn_print_info(data, len)` — `[info] `-prefixed stdout line.
 fn sfn_print_info(data: * u8, len: i64) -> void ![io] {
+    if _sfn_is_immediate(data) {
+        sailfin_runtime_print_info(data);
+        return;
+    }
     let prefix: string = "[info] ";
     _sfn_print_line(STDOUT_FD, prefix as * u8, 7, data, len);
 }
 
 // `sfn_print_warn(data, len)` — `[warn] `-prefixed stderr line.
 fn sfn_print_warn(data: * u8, len: i64) -> void ![io] {
+    if _sfn_is_immediate(data) {
+        sailfin_runtime_print_warn(data);
+        return;
+    }
     let prefix: string = "[warn] ";
     _sfn_print_line(STDERR_FD, prefix as * u8, 7, data, len);
 }
 
 // `sfn_print_error(data, len)` — `[error] `-prefixed stderr line.
 fn sfn_print_error(data: * u8, len: i64) -> void ![io] {
+    if _sfn_is_immediate(data) {
+        sailfin_runtime_print_error(data);
+        return;
+    }
     let prefix: string = "[error] ";
     _sfn_print_line(STDERR_FD, prefix as * u8, 8, data, len);
 }

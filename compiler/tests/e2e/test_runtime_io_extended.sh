@@ -273,12 +273,19 @@ test_hello_world_runs() {
 # AC2 of #1310: print.info/warn/error output (prefix + newline) must
 # byte-match the retired C `_print_line`. info + raw go to stdout (fd 1),
 # err/warn/error go to stderr (fd 2), each line is `prefix + msg + "\n"`.
-# The native `write(2)` bodies must reproduce that exactly.
+# The native `write(2)` bodies must reproduce that exactly. The
+# `grapheme_at("hi", 0)` line exercises the immediate-codepoint
+# tagged-pointer string case (a single grapheme with no real backing
+# buffer pre-M1.A.2): the native bodies must route it through the
+# decoding C printer via `_sfn_is_immediate` and still emit `[info] h`,
+# not silently drop it.
 test_print_prefix_output() {
     local probe="$SCRATCH/print_probe.sfn"
     cat > "$probe" <<'PROBE'
+import { grapheme_at } from "sfn/strings";
 fn main() -> void ![io] {
     print.info("alpha");
+    print.info(grapheme_at("hi", 0));
     print.warn("bravo");
     print.error("charlie");
     print.err("delta");
@@ -292,8 +299,9 @@ PROBE
         cat "$err"
         return 1
     fi
-    # stdout: print.info (prefixed) then bare print, in order.
-    local want_out=$'[info] alpha\necho'
+    # stdout: print.info "alpha", print.info of the immediate grapheme
+    # 'h' (decoded, not dropped), then bare print "echo", in order.
+    local want_out=$'[info] alpha\n[info] h\necho'
     if [ "$(cat "$out")" != "$want_out" ]; then
         echo "[test]   stdout mismatch."
         echo "[test]     want: $(printf '%q' "$want_out")"
@@ -307,6 +315,7 @@ PROBE
     if ! grep -qxF 'delta' "$err"; then echo "[test]   missing raw 'delta' on stderr"; return 1; fi
     # The [info]/raw stdout lines must NOT have leaked onto stderr...
     if grep -qxF '[info] alpha' "$err"; then echo "[test]   '[info] alpha' wrongly on stderr (should be stdout)"; return 1; fi
+    if grep -qxF '[info] h' "$err"; then echo "[test]   '[info] h' wrongly on stderr (should be stdout)"; return 1; fi
     if grep -qxF 'echo' "$err"; then echo "[test]   raw 'echo' wrongly on stderr (should be stdout)"; return 1; fi
     # ...and the fd-2 lines must NOT have leaked onto stdout (symmetric).
     if grep -qxF 'delta' "$out"; then echo "[test]   raw 'delta' wrongly on stdout (should be stderr)"; return 1; fi
