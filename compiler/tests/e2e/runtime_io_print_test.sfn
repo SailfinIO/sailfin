@@ -1,0 +1,108 @@
+// End-to-end behavioral test for the native `write(2)` print family in
+// `runtime/sfn/io.sfn` (#1310, C4/R3 of #1308).
+//
+// Native replacement for the byte-exact behavioral assertions that
+// lived in the retired `test_runtime_io_extended.sh` (migrated to
+// sfn/test per epic #842). Builds the fixture at
+// `compiler/tests/e2e/fixtures/io_print_probe.sfn`, runs it, and pins
+// the user-visible output: each `print.*` surface lands its
+// `prefix + message + '\n'` on the correct file descriptor — info/raw on
+// stdout (fd 1), err/warn/error on stderr (fd 2) — byte-identical to the
+// retired C `_print_line`. This is the acceptance gate that the native
+// bodies reproduce the legacy printer's bytes and fd routing.
+//
+// Parallel-runner isolation: `sfn build` writes the top module's IR to
+// `<cache-dir>/program.ll` (default `build/sailfin`), so a build-spawning
+// test must thread `SAILFIN_TEST_SCRATCH` (+ `PATH` for clang/linker) to
+// its nested build to avoid clobbering a sibling build under the pool.
+// See `.claude/rules/no-bash-e2e.md` and `sailfin_main_entry_test.sfn`.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _fixture_src() -> string ![io] {
+    return fs.readFile("compiler/tests/e2e/fixtures/io_print_probe.sfn");
+}
+
+// Child environment for the spawned `sfn build`. `run_capture` treats an
+// empty array as the *empty* environment, so the build's `PATH` (clang +
+// linker) and the runner's per-file `SAILFIN_TEST_SCRATCH` (the
+// `program.ll` cache dir, #1333) must be threaded explicitly.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A fresh out-of-tree marker path (survives the `with_tmp_dir`
+// teardown), with any stale value removed so each run starts clean.
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-io-print-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Build + run the print probe; stash captured stdout to `out_marker` and
+// stderr to `err_marker`. Returns the run's exit code, or `-100` if the
+// build itself failed.
+fn _build_and_run(out_marker: string, err_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        fs.writeFile(err_marker, err);
+        return run_exit;
+    });
+}
+
+test "io print: prefixes + fd routing are byte-exact end-to-end" ![io] {
+    let out_marker = _marker("stdout");
+    let err_marker = _marker("stderr");
+    let exit = _build_and_run(out_marker, err_marker);
+    // Reject the `-100` build-failure sentinel before reading markers.
+    assert exit == 0;
+
+    let out = fs.readFile(out_marker);
+    let err = fs.readFile(err_marker);
+    if fs.exists(out_marker) { fs.deleteFile(out_marker); }
+    if fs.exists(err_marker) { fs.deleteFile(err_marker); }
+
+    // stdout: info (prefixed) + raw print, each on its own line.
+    assert find(out, "[info] alpha\n", 0) >= 0;
+    assert find(out, "echo\n", 0) >= 0;
+    // stderr: warn/error (prefixed) + raw err.
+    assert find(err, "[warn] bravo\n", 0) >= 0;
+    assert find(err, "[error] charlie\n", 0) >= 0;
+    assert find(err, "delta\n", 0) >= 0;
+
+    // fd routing is symmetric: fd-2 lines must not leak to stdout, and
+    // fd-1 lines must not leak to stderr.
+    assert find(out, "bravo", 0) < 0;
+    assert find(out, "charlie", 0) < 0;
+    assert find(out, "delta", 0) < 0;
+    assert find(err, "alpha", 0) < 0;
+    assert find(err, "echo", 0) < 0;
+}

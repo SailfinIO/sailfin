@@ -35,8 +35,76 @@ test "lowering: runtime/sfn/io.sfn lowers the imported libc write call" ![io] {
     let native = emit_native_text_with_module_name(program, "runtime/sfn/io");
     let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/io");
 
-    // The imported extern is declared and called against — the
-    // cross-module resolution the skeleton exists to prove.
+    // The inlined extern is declared and called against.
     assert _contains(ir, "declare i64 @write(");
     assert _contains(ir, "call i64 @write(");
+}
+
+// Symbol-surface coverage for the print-family flip (#1310, C4/R3 of
+// #1308). Replaces the emit-shape / no-bare-canonical-define / routing
+// assertions that lived in the retired `test_runtime_io_extended.sh`
+// (migrated to native sfn/test per epic #842). Lowers the REAL io.sfn
+// in-process and pins the new ownership: io.sfn now defines the bare
+// `sfn_print*` symbols directly (native `write(2)` bodies), keeps the
+// surviving `_sfn_` infix exports, and must NOT define the still-C-owned
+// `sfn_getenv` / `sfn_home_dir` canonical names (their flip is C7).
+test "lowering: io.sfn defines the bare native sfn_print* family" ![io] {
+    let source = fs.readFile("runtime/sfn/io.sfn");
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "runtime/sfn/io");
+    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/io");
+
+    // Bare canonical printers — now Sailfin-defined.
+    assert _contains(ir, "define void @sfn_print(");
+    assert _contains(ir, "define void @sfn_print_err(");
+    assert _contains(ir, "define void @sfn_print_info(");
+    assert _contains(ir, "define void @sfn_print_warn(");
+    assert _contains(ir, "define void @sfn_print_error(");
+    // Surviving Sailfin exports (prelude import + baselines).
+    assert _contains(ir, "define void @sfn_print_sfn(");
+    assert _contains(ir, "@sfn_getenv_sfn(");
+    assert _contains(ir, "@sfn_home_dir_sfn(");
+    assert _contains(ir, "@sfn_write_fd(");
+}
+
+test "lowering: io.sfn still forwards env reads to the C entrypoints (C7 not flipped)" ![io] {
+    let source = fs.readFile("runtime/sfn/io.sfn");
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "runtime/sfn/io");
+    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/io");
+
+    // getenv / home_dir are NOT flipped to native yet (C7 of #1308):
+    // io.sfn's `sfn_getenv_sfn` / `sfn_home_dir_sfn` forward to the C
+    // `sailfin_runtime_*` trampolines, so the bare canonical names stay
+    // C-owned and io.sfn defines no colliding native body. (The bare
+    // `@sfn_getenv` / `@sfn_home_dir` appear only as registry-preamble
+    // `declare`s, so an absence check on them would be a false negative.)
+    assert _contains(ir, "@sailfin_runtime_getenv");
+    assert _contains(ir, "@sailfin_runtime_home_dir");
+}
+
+test "lowering: io.sfn immediate-codepoint guard routes to the C decoders" ![io] {
+    let source = fs.readFile("runtime/sfn/io.sfn");
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "runtime/sfn/io");
+    let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/io");
+
+    // Tagged immediate-codepoint pointers (pre-M1.A.2) can't be decoded
+    // by the length-aware native printers, so the bare bodies fall back
+    // to the immediate-decoding C `sailfin_runtime_print_*` entrypoints.
+    assert _contains(ir, "@sailfin_runtime_print_raw");
+    assert _contains(ir, "@sailfin_runtime_print_info");
+}
+
+// User-emission routing: a `print.info(...)` call site flips to the bare
+// `@sfn_print_info` runtime symbol against the SfnString aggregate ABI
+// (the registry's `native_signature`), the call site the native io.sfn
+// body links against — not the legacy `@sailfin_runtime_print_info` C
+// entrypoint.
+test "lowering: print.info user call routes to @sfn_print_info" ![io] {
+    let program = parse_program("fn main() -> void ![io] { print.info(\"x\"); }");
+    let native = emit_native_text_with_module_name(program, "io_probe");
+    let ir = lower_to_llvm_ir_from_text(native, "io_probe");
+
+    assert _contains(ir, "call void @sfn_print_info({i8*, i64}");
 }

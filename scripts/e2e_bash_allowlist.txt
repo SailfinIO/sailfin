@@ -105,7 +105,6 @@ test_runtime_exec_path.sh
 test_runtime_helper_declare_integrity.sh
 test_runtime_implicit_capsule_link.sh
 test_runtime_int_helpers_legacy_path.sh
-test_runtime_io_extended.sh
 test_runtime_memory_arena.sh
 test_runtime_memory_arena_mark.sh
 test_runtime_memory_mem.sh

@@ -1,80 +1,77 @@
 // runtime/sfn/io.sfn
 //
-// Sailfin-native I/O service wrappers — M2.8 (#401, epic #389).
-// Two layers coexist in this module:
+// Sailfin-native I/O service wrappers. Two families live here:
 //
-//   1. `sfn_write_fd` — the earlier proof-of-life shipped under
-//      M2.7 (#303). A direct call into `extern fn write` for any
-//      fd / buf / count tuple. The compiler does not lower any
-//      user-facing surface to this helper today; it exists so the
-//      runtime/sfn layer demonstrates that a Sailfin module can
-//      reach `runtime/sfn/platform/libc.sfn` declarations and
-//      compile against linker-resolved extern symbols.
+//   1. The bare `sfn_print` / `sfn_print_err` / `sfn_print_info` /
+//      `sfn_print_warn` / `sfn_print_error` printers — the canonical
+//      symbols the compiler emits `call`s against (registered in
+//      `compiler/src/llvm/runtime_helpers.sfn` with
+//      `native_signature: "sfn_print*"`). As of C4/R3 of the C→Sailfin
+//      runtime-retirement epic (#1308, issue #1310) these are **real
+//      native bodies** that write directly to fd 1 / fd 2 via the
+//      `write(2)` syscall — no longer C trampolines. The prior C
+//      definitions in `runtime/native/src/sailfin_runtime.c`
+//      (`sfn_print*`, the SfnString-by-value trampolines) are removed
+//      in the same change; this module's TU is now the sole definition
+//      site for these symbols.
 //
-//   2. The `sfn_print_sfn_*` / `sfn_getenv_sfn` / `sfn_home_dir_sfn`
-//      proof-of-life family (this PR). Mirrors the M2.4a string
-//      module's `sfn_str_sfn_*` infix discipline: the canonical
-//      user-facing names — the ones the new compiler emits `call`s
-//      against — are `sfn_print`, `sfn_print_err`, `sfn_print_info`,
-//      `sfn_print_warn`, `sfn_print_error`, `sfn_getenv`, and
-//      `sfn_home_dir`, provided by the C trampolines in
-//      `runtime/native/src/sailfin_runtime.c`. This module's
-//      exports use the `_sfn_` infix so the Sailfin definitions
-//      coexist with the C trampolines without a link-time
-//      collision (mirrors `runtime/sfn/memory/arena.sfn`'s
-//      `sfn_arena_sfn_*` parallel namespace). When the
-//      aggregate-typed parameter flip (M1.A.2) lands, the C
-//      trampolines retire and the bare `sfn_print*` /
-//      `sfn_getenv` / `sfn_home_dir` names move into this module
-//      in a single rollback-safe rename.
+//      ABI: the registry calls these with the SfnString aggregate
+//      passed by value, `call void @sfn_print({i8*, i64} %s)`. The
+//      System V / AAPCS classification of a two-eightbyte
+//      `{i8*, i64}` struct is two integer registers — identical to a
+//      `(data: * u8, len: i64)` pair. So the native bodies below take
+//      `(data, len)` two-scalar parameters, which lower to
+//      `define void @sfn_print(i8*, i64)` and link object-compatibly
+//      against the aggregate-by-value call site — exactly the coercion
+//      clang applied to the retired C `void sfn_print(SfnString)`.
+//      (This sidesteps the aggregate-by-value *parameter* gap: we never
+//      need an SfnString-typed Sailfin parameter; the bytes arrive as
+//      the data pointer + length.)
 //
-// Architect spec (`docs/runtime_architecture.md` §2.8):
-//   - `sfn_print(msg: SfnString) -> void` — `extern fn write` fd=1,
-//     buf=msg.data, len=msg.len.
-//   - `sfn_print_err(msg: SfnString) -> void` — fd=2.
-//   - `sfn_print_info / warn / error(msg: SfnString) -> void` —
-//     prepend prefix, delegate to `sfn_print` / `sfn_print_err`.
-//   - `sfn_getenv(name: SfnString, *Arena) -> SfnString` —
-//     NUL-marshal name, call `extern fn getenv`, wrap via
-//     `sfn_str_from_cstr`.
-//   - `sfn_home_dir(*Arena) -> SfnString` — `sfn_getenv("HOME", arena)`.
+//      Immediate-codepoint handling (pre-M1.A.2). A real `{i8*, i64}`
+//      aggregate carries a real pointer + byte length, so the
+//      length-aware `write(2)` body is correct for it. But pre-M1.A.2 a
+//      single grapheme can still arrive as a legacy tagged-pointer
+//      "immediate codepoint" — `.data` smuggling the codepoint as
+//      `cp << 32` or a near-null ASCII byte, with no real buffer to
+//      read. The native bodies guard for that shape (`_sfn_is_immediate`,
+//      mirroring the C `_is_immediate_codepoint_string` classification)
+//      and route only those tagged/NULL pointers to the immediate-
+//      decoding C `sailfin_runtime_print_*` entrypoints; every real
+//      string takes the native `write(2)` hot path. This keeps output
+//      byte-identical to the retired C `_print_line` across both shapes.
+//      The C printers stay until #822 / #1136 retire the encoding; the
+//      guard retires with them. The length-free cstring consumers
+//      (`sfn_log_execution`, `sfn_print_sfn`) likewise stay on the C
+//      entrypoints (their `* u8` arg has no length to drive `write`).
 //
-// Status: trampoline bodies. The bodies below take the legacy
-// `* u8` (NUL-terminated `i8*`) shape and forward to the existing C
-// runtime entrypoints. The Sailfin frontend lowers `string` to
-// `i8*` for parameters/locals today (M1.A only locked the
-// literal/aggregate shape, not the type-mapping flip slated for
-// M1.A.2), so SfnString aggregate parameters are not yet
-// expressible in Sailfin source. The function *names* are the
-// migration unit — once M1.A.2 lands the bodies can be rewritten
-// in-place against the aggregate shape (calling `write(1, msg.data,
-// msg.len)` and the like) without touching any caller. The C
-// trampolines in `sailfin_runtime.c` already accept the SfnString
-// aggregate today, so user emission is already calling the
-// canonical names against the canonical ABI.
+//   2. The `sfn_getenv_sfn` / `sfn_home_dir_sfn` proof-of-life family.
+//      These still forward to the `sailfin_runtime_{getenv,home_dir}` C
+//      entrypoints — their flip is C7 of #1308, not this issue.
 //
-// Effects: `![io]` on every adapter. The platform extern itself
-// (`write`, `getenv`) carries no effect annotation — adapters wrap
-// the primitive with the effect, matching the §3.6 effect-on-
-// wrapper rule.
+// Linkage: this file is listed in `runtime/native/capsule.toml`'s
+// `sfn-sources` array; `_compile_runtime_sfn_sources` in
+// `compiler/src/cli_main.sfn` compiles it to a `.o` (via
+// `_emit_runtime_sfn_to_obj`, `mangle_symbols=false`) and threads it
+// into the final link, so the `fn` names below keep their bare
+// `@sfn_*` symbols — the same mechanism that defines `@sfn_sleep` in
+// `runtime/sfn/clock.sfn`.
 //
-// Extern declarations split across two surfaces:
+// Effects: `![io]` on every adapter. The platform externs (`write`)
+// carry no effect annotation — adapters wrap the primitive with the
+// effect, matching the §3.6 effect-on-wrapper rule.
 //
-//   - `write` from `runtime/sfn/platform/libc.sfn` (imported) —
-//     mirrors the pre-existing `sfn_write_fd` baseline. The seed
-//     compiler's libc snapshot has carried `write` since the
-//     `sfn_write_fd` proof-of-life shipped under M2.7 (#303), so
-//     the cross-module import resolves cleanly. Adapters that
-//     reach for new libc surfaces (e.g. `lseek` / `dup2`) that the
-//     seed snapshot may not yet declare should follow the
-//     `arena.sfn` / `string.sfn` discipline and inline locally.
-//
-//   - `sailfin_runtime_*` C runtime entrypoints (inlined below).
-//     These are *not* platform libc declarations — they're C
-//     trampolines defined in `runtime/native/src/sailfin_runtime.c`
-//     and not part of any `runtime/sfn/platform/*.sfn` skeleton.
-//     Inlining is the only declaration site available.
-import { write } from "./platform/libc";
+// Extern declarations are inlined rather than imported. The runtime
+// `sfn-source` emit path (`_emit_runtime_sfn_to_obj`) resolves imported
+// *extern* signatures only for the platform symbols the seed snapshot
+// pre-stages; reaching for any other libc surface through an `import`
+// fails the isolated per-module emit with "cannot resolve return type
+// for call to …". So `write` is declared locally here, mirroring the
+// `arena.sfn` / `string.sfn` / `process.sfn` discipline. The
+// `sailfin_runtime_*` C entrypoints are likewise C trampolines (not
+// platform libc), retired by #1308 C7 / #822; inlining is their only
+// declaration site.
+extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
 
 extern fn sailfin_runtime_print_raw(msg: * u8) -> void;
 
@@ -90,66 +87,153 @@ extern fn sailfin_runtime_getenv(name: * u8) -> * u8;
 
 extern fn sailfin_runtime_home_dir() -> * u8;
 
+// stdout / stderr file descriptors — the `write(2)` targets for the
+// print family. Matches the C `_print_line` stream routing: raw/info to
+// stdout (fd 1), err/warn/error to stderr (fd 2).
+let STDOUT_FD: i32 = 1;
+
+let STDERR_FD: i32 = 2;
+
 fn sfn_write_fd(fd: i32, buf: * u8, count: usize) -> i64 ![io] {
     return write(fd, buf, count);
 }
 
-// `sfn_print_sfn(msg)` — raw stdout. Architect spec writes the
-// `msg.len` bytes of the aggregate to fd=1 with a trailing
-// newline; today's body delegates to the C entrypoint so the
-// newline / flush policy stays consistent with the legacy printer.
+// Is `data` a legacy immediate-codepoint tagged pointer rather than a
+// real string buffer? Pre-M1.A.2 a single grapheme can arrive with no
+// backing buffer: either a near-null ASCII byte (`1..=0x7f`, and NULL
+// `0` which the C printers no-op) or the codepoint shifted into the
+// upper 32 bits (`cp << 32`, so the low 32 bits are zero and the value
+// is non-zero). Mirrors the C `_is_immediate_codepoint_string`
+// classification (`runtime/native/src/sailfin_runtime.c`). A real
+// string pointer is `> 0x7f` with a non-zero low word, so it never
+// matches. Pointer math only — no syscall, no `errno` (which keeps this
+// module free of the glibc-only `__errno_location` that does not link
+// on the Windows cross-compile).
+fn _sfn_is_immediate(data: * u8) -> bool {
+    let raw: i64 = data as i64;
+    if raw >= 0 && raw <= 127 { return true; }
+    if raw != 0 && (raw & 4294967295) == 0 { return true; }
+    return false;
+}
+
+// Write exactly `len` bytes of `data` to `fd`, looping over short
+// writes — `write(2)` may flush fewer bytes than requested (pipe
+// back-pressure), so advance until the whole buffer is delivered.
+// A non-positive return (error or EOF) stops the loop best-effort,
+// mirroring the retired C `fputs` + `fflush` path without its stdio
+// buffering. `len <= 0` is a no-op (the guard trips immediately), so a
+// zero-length prefix passes a harmless untouched pointer. Callers must
+// pass a real buffer; immediate-codepoint pointers are filtered by
+// `_sfn_is_immediate` before reaching here.
+fn _sfn_write_all(fd: i32, data: * u8, len: i64) -> void ![io] {
+    let mut off: i64 = 0;
+    loop {
+        if off >= len { break; }
+        let chunk: * u8 = (data as i64 + off) as * u8;
+        let n: i64 = write(fd, chunk, (len - off) as usize);
+        if n <= 0 { break; }
+        off = off + n;
+    }
+}
+
+// Shared printer: optional `prefix` (`prefix_len` bytes), then the
+// `len`-byte message, then a single `'\n'` — three `write(2)` calls in
+// order, byte-identical to the retired C `_print_line`
+// (`fputs(prefix); fputs(msg); fputc('\n')`). The prefix is emitted as
+// its own `write` rather than a concat, so there is no dependency on
+// the string-concat flip (C5 / #1310 `Out:`).
+fn _sfn_print_line(fd: i32, prefix: * u8, prefix_len: i64, data: * u8, len: i64) -> void ![io] {
+    _sfn_write_all(fd, prefix, prefix_len);
+    _sfn_write_all(fd, data, len);
+    let nl: string = "\n";
+    _sfn_write_all(fd, nl as * u8, 1);
+}
+
+// `sfn_print(data, len)` — raw stdout line. Mirrors the retired C
+// `sailfin_runtime_print_raw`: the message bytes followed by `'\n'`.
+fn sfn_print(data: * u8, len: i64) -> void ![io] {
+    if _sfn_is_immediate(data) {
+        sailfin_runtime_print_raw(data);
+        return;
+    }
+    let empty: string = "";
+    _sfn_print_line(STDOUT_FD, empty as * u8, 0, data, len);
+}
+
+// `sfn_print_err(data, len)` — raw stderr line.
+fn sfn_print_err(data: * u8, len: i64) -> void ![io] {
+    if _sfn_is_immediate(data) {
+        sailfin_runtime_print_err(data);
+        return;
+    }
+    let empty: string = "";
+    _sfn_print_line(STDERR_FD, empty as * u8, 0, data, len);
+}
+
+// `sfn_print_info(data, len)` — `[info] `-prefixed stdout line.
+fn sfn_print_info(data: * u8, len: i64) -> void ![io] {
+    if _sfn_is_immediate(data) {
+        sailfin_runtime_print_info(data);
+        return;
+    }
+    let prefix: string = "[info] ";
+    _sfn_print_line(STDOUT_FD, prefix as * u8, 7, data, len);
+}
+
+// `sfn_print_warn(data, len)` — `[warn] `-prefixed stderr line.
+fn sfn_print_warn(data: * u8, len: i64) -> void ![io] {
+    if _sfn_is_immediate(data) {
+        sailfin_runtime_print_warn(data);
+        return;
+    }
+    let prefix: string = "[warn] ";
+    _sfn_print_line(STDERR_FD, prefix as * u8, 7, data, len);
+}
+
+// `sfn_print_error(data, len)` — `[error] `-prefixed stderr line.
+fn sfn_print_error(data: * u8, len: i64) -> void ![io] {
+    if _sfn_is_immediate(data) {
+        sailfin_runtime_print_error(data);
+        return;
+    }
+    let prefix: string = "[error] ";
+    _sfn_print_line(STDERR_FD, prefix as * u8, 8, data, len);
+}
+
+// `sfn_print_sfn(msg)` — NUL-terminated-cstring entry kept for the
+// `runtime/prelude.sfn` import. Stays on the immediate-decoding C
+// `sailfin_runtime_print_raw` path: `msg` is a legacy `* u8` that may
+// be an immediate-codepoint tagged pointer (pre-M1.A.2), which the
+// native length-aware printer cannot decode. Retires with the encoding
+// (#822 / #1136).
 fn sfn_print_sfn(msg: * u8) -> void ![io] { sailfin_runtime_print_raw(msg); }
 
-// `sfn_print_err_sfn(msg)` — raw stderr.
-fn sfn_print_err_sfn(msg: * u8) -> void ![io] {
-    sailfin_runtime_print_err(msg);
-}
-
-// `sfn_print_info_sfn(msg)` — `[info]`-prefixed stdout.
-fn sfn_print_info_sfn(msg: * u8) -> void ![io] {
-    sailfin_runtime_print_info(msg);
-}
-
-// `sfn_print_warn_sfn(msg)` — `[warn]`-prefixed stderr.
-fn sfn_print_warn_sfn(msg: * u8) -> void ![io] {
-    sailfin_runtime_print_warn(msg);
-}
-
-// `sfn_print_error_sfn(msg)` — `[error]`-prefixed stderr.
-fn sfn_print_error_sfn(msg: * u8) -> void ![io] {
-    sailfin_runtime_print_error(msg);
-}
-
-// `sfn_getenv_sfn(name)` — environment-variable read. Architect
-// spec: `(SfnString, *Arena) -> SfnString` — NUL-marshal name into
-// the arena, call `extern fn getenv`, wrap result via
-// `sfn_str_from_cstr`. M2.8b (#726) shipped the aggregate ABI on
-// the bare C trampoline (`sfn_getenv` in `sailfin_runtime.c`); the
-// `_sfn_` infix proof-of-life body below keeps the legacy `* u8`
-// shape because the Sailfin frontend can't take SfnString
-// aggregate parameters or a `*SfnArena` slot today (M1.A.2). The
-// user-emission hot path bypasses this wrapper entirely and lands
-// on `@sfn_getenv` against the real aggregate ABI.
+// `sfn_getenv_sfn(name)` — environment-variable read. Still forwards to
+// the C `sailfin_runtime_getenv` (the aggregate-return + arena-threaded
+// flip is C7 of #1308). The user-emission hot path bypasses this
+// wrapper and lands on `@sfn_getenv` against the real aggregate ABI.
 fn sfn_getenv_sfn(name: * u8) -> * u8 ![io] {
     return sailfin_runtime_getenv(name);
 }
 
-// `sfn_home_dir_sfn()` — `getenv("HOME")` (or `USERPROFILE` on
-// Windows; the C trampoline handles the platform fork). Architect
-// spec: `(*Arena) -> SfnString` — `sfn_getenv("HOME", arena)`. Same
-// proof-of-life constraint as `sfn_getenv_sfn`: the bare
-// `sfn_home_dir` trampoline carries the aggregate ABI; this body
-// stays a `* u8` forwarder until M1.A.2.
+// `sfn_home_dir_sfn()` — `getenv("HOME")` (or `USERPROFILE` on Windows;
+// the C trampoline handles the platform fork). Same C7 deferral as
+// `sfn_getenv_sfn`.
 fn sfn_home_dir_sfn() -> * u8 ![io] { return sailfin_runtime_home_dir(); }
 
-// #925 (sub-issue of #390): `sfn_log_execution(value)` — port of the C
-// `sailfin_runtime_log_execution`, the body the `@logExecution`
-// decorator lowers to (via `emit_runtime_call("runtime_log_execution_fn",
-// …)` at `emission.sfn:470`). Semantics preserved byte-for-byte: print
-// the value through `[info]`-prefixed stdout when non-NULL, then return
-// it unchanged. Carries `![io]` for the print. Descriptor ABI is
-// `(i8*) -> i8*`. The NULL guard uses the `as i64 == 0` idiom (no null
-// comparison on raw `* u8` until `Result<T, E>` lands).
+// #925 (sub-issue of #390): `sfn_log_execution(value)` — the body the
+// `@logExecution` decorator lowers to (via
+// `emit_runtime_call("runtime_log_execution_fn", …)` at
+// `emission.sfn:470`; aliased through `runtime_log_execution_fn` in
+// `runtime/prelude.sfn`). Semantics preserved: print the value through
+// the `[info] `-prefixed stdout line when non-NULL, then return it
+// unchanged. Stays on the immediate-decoding C `sailfin_runtime_print_info`
+// path: `value` is a legacy `* u8` that may be an immediate-codepoint
+// tagged pointer (e.g. a `char_at` / `grapheme_at` result), which the
+// native length-aware printer cannot decode (and `strlen` on a tagged
+// pointer would fault). Carries `![io]` for the print. Descriptor ABI
+// is `(i8*) -> i8*`. The NULL guard uses the `as i64 == 0` idiom (no
+// null comparison on raw `* u8` until `Result<T, E>` lands).
 fn sfn_log_execution(value: * u8) -> * u8 ![io] {
     if value as i64 != 0 { sailfin_runtime_print_info(value); }
     return value;

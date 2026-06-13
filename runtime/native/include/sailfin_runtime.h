@@ -73,22 +73,12 @@ extern "C"
     void sailfin_runtime_print_warn(char *msg);
     void sailfin_runtime_print_error(char *msg);
 
-    /* M2.8 (#401): SfnString migration trampolines for the print
-     * family. Mirrors the M2.4a wave-1 trampolines (`sfn_str_len`,
-     * `sfn_str_eq`, ...). The compiler's runtime_helpers.sfn
-     * registry now carries `native_signature: "sfn_print*"` on the
-     * print/console descriptors, and fresh user emission lands on
-     * these symbols against the `{i8*, i64}` SfnString ABI. The
-     * bodies forward to the legacy `sailfin_runtime_print_*`
-     * entrypoints — today's SfnString.data is always NUL-terminated
-     * (literal lowering writes a trailing 0; arena-routed concat
-     * preserves the +1 byte), so the legacy `char*` consumers
-     * remain valid until the length-aware bodies arrive. */
-    void sfn_print(SfnString s);
-    void sfn_print_err(SfnString s);
-    void sfn_print_info(SfnString s);
-    void sfn_print_warn(SfnString s);
-    void sfn_print_error(SfnString s);
+    /* The bare `sfn_print*` SfnString-by-value trampolines (M2.8 #401)
+     * are now defined natively in `runtime/sfn/io.sfn` over `write(2)`
+     * (#1310, C4/R3 of #1308); their C definitions and these prototypes
+     * were removed so the `extern` declaration does not collide with the
+     * Sailfin definition site. The `sailfin_runtime_print_*` entrypoints
+     * above remain for internal C callers until #822. */
 
     /* `sailfin_runtime_sleep` and the `sfn_sleep` C trampoline were
      * deleted in PR 2 of the sleep migration (issue #397). The
