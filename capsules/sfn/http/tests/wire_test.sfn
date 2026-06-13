@@ -1,0 +1,104 @@
+// Tests for the sfn/http wire layer (Wave 1 of epic #1321):
+// parse_request / serialize_response / header / query_param.
+//
+// Pure parse/serialize coverage — no runtime, socket, or serve path is
+// exercised here (that is Wave 2). Serialization is asserted by exact
+// string equality because the output is deterministic.
+import {
+    Request,
+    Response,
+    parse_request,
+    serialize_response,
+    header,
+    query_param,
+    reason_phrase,
+    not_found
+} from "../src/mod";
+
+test "parse_request: GET request line, path, query, and headers" {
+    let raw = "GET /search?q=sail&n=2 HTTP/1.1\r\nHost: localhost\r\nAccept: */*\r\n\r\n";
+    let req = parse_request(raw);
+    assert strings_equal(req.method, "GET");
+    assert strings_equal(req.path, "/search");
+    assert strings_equal(req.query, "q=sail&n=2");
+    assert strings_equal(req.body, "");
+    assert req.headers.length == 2;
+    assert strings_equal(req.headers[0], "Host: localhost");
+    assert strings_equal(req.headers[1], "Accept: */*");
+}
+
+test "parse_request: POST carries the body after the blank line" {
+    let raw = "POST /submit HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\nhello";
+    let req = parse_request(raw);
+    assert strings_equal(req.method, "POST");
+    assert strings_equal(req.path, "/submit");
+    assert strings_equal(req.query, "");
+    assert strings_equal(req.body, "hello");
+    assert req.headers.length == 2;
+}
+
+test "parse_request: bare path with no query yields an empty query" {
+    let req = parse_request("GET / HTTP/1.1\r\n\r\n");
+    assert strings_equal(req.path, "/");
+    assert strings_equal(req.query, "");
+    assert req.headers.length == 0;
+}
+
+test "serialize_response: status line, custom header, framing (exact bytes)" {
+    let rsp = Response {
+        status: 404,
+        headers: ["X-Custom: yes"],
+        body: "nope"
+    };
+    let out = serialize_response(rsp);
+    let expected = "HTTP/1.1 404 Not Found\r\nX-Custom: yes\r\nContent-Length: 4\r\nConnection: close\r\n\r\nnope";
+    assert strings_equal(out, expected);
+}
+
+test "serialize_response: drops headers carrying CR or LF (injection guard)" {
+    let rsp = Response {
+        status: 200,
+        headers: ["Evil: a\r\nInjected: b"],
+        body: "hi"
+    };
+    let out = serialize_response(rsp);
+    let expected = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi";
+    assert strings_equal(out, expected);
+}
+
+test "reason_phrase: known codes mapped, unknown falls back to Status" {
+    assert strings_equal(reason_phrase(200), "OK");
+    assert strings_equal(reason_phrase(500), "Internal Server Error");
+    assert strings_equal(reason_phrase(599), "Status");
+}
+
+test "header: case-insensitive lookup returns the trimmed value" {
+    let req = parse_request("GET / HTTP/1.1\r\nHost:   example.com  \r\nX-Token: abc\r\n\r\n");
+    let host = header(req, "HOST");
+    assert host != null;
+    if host != null { assert strings_equal(host, "example.com"); }
+    let token = header(req, "x-token");
+    assert token != null;
+    if token != null { assert strings_equal(token, "abc"); }
+    assert header(req, "x-missing") == null;
+}
+
+test "query_param: keyed lookup, valueless key, and absent key" {
+    let req = parse_request("GET /p?a=1&flag&b=two HTTP/1.1\r\n\r\n");
+    let a = query_param(req, "a");
+    assert a != null;
+    if a != null { assert strings_equal(a, "1"); }
+    let b = query_param(req, "b");
+    assert b != null;
+    if b != null { assert strings_equal(b, "two"); }
+    let flag = query_param(req, "flag");
+    assert flag != null;
+    if flag != null { assert strings_equal(flag, ""); }
+    assert query_param(req, "missing") == null;
+}
+
+test "not_found: default body and 404 status" {
+    let rsp = not_found();
+    assert rsp.status == 404;
+    assert strings_equal(rsp.body, "Not Found");
+}

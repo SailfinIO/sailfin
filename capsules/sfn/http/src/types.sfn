@@ -1,0 +1,33 @@
+// sfn/http — shared wire types.
+//
+// `Request` / `Response` / `ServerConfig` live here (not in `mod.sfn`) so
+// the wire layer (`wire.sfn`) and the barrel (`mod.sfn`) can both depend on
+// them without an import cycle — the same `types.sfn` split `sfn/cli` uses.
+// Re-exported from `mod.sfn` as part of the public surface.
+// An inbound HTTP request, as parsed from the raw request bytes by
+// `wire.parse_request`. `query` is the raw query string after `?` (no
+// percent-decoding in v0); `headers` are raw "Name: value" lines.
+struct Request {
+    method: string;
+    path: string;
+    query: string;
+    headers: string[];
+    body: string;
+}
+
+// An outbound HTTP response. `headers` are raw "Name: value" lines;
+// `wire.serialize_response` adds `Content-Length` and `Connection: close`
+// and drops any header carrying a CR or LF (injection guard).
+struct Response {
+    status: int;
+    headers: string[];
+    body: string;
+}
+
+// Server bind configuration. v0 honors `port` only — the runtime binds
+// `INADDR_ANY`, so `host` is carried for forward-compatibility but not yet
+// enforced (see docs/proposals/sfn-http-capsule.md §2).
+struct ServerConfig {
+    port: int;
+    host: string;
+}
