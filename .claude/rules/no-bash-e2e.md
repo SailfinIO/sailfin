@@ -89,16 +89,25 @@ Two builds of different sources then **overwrite each other's
 (classic symptom: one fixture's binary emitting another's output). It is
 non-deterministic and shows up only under the pool.
 
-The fix is simple: the compiler routes that cache dir under
-`SAILFIN_TEST_SCRATCH` when set (#1333), and the runner mints a unique
-scratch per test file — so just **thread `SAILFIN_TEST_SCRATCH` through**
-to the spawned compiler. `run_capture`'s empty `env` array is the *empty*
-environment (not "inherit"), so pass it explicitly:
+`run_capture`'s empty `env` array is the *empty* environment (**not**
+"inherit"), so a build-spawning test must thread the variables the nested
+compile needs explicitly — most importantly **`PATH`**: the nested build
+runs `clang` and its linker (`mold`/`lld`/`ld`), and with no `PATH` the
+linker is not found (`clang: error: ... "ld" doesn't exist`) and the build
+fails. Also thread `SAILFIN_TEST_SCRATCH`: the compiler routes the
+`program.ll` build-cache dir under it (#1333), so a parallel run
+(`--jobs N>1`) does not collide on the fixed `build/sailfin`.
 
 ```sfn
 fn _child_env() -> string[] ![io] {
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
     let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
     return e;
 }

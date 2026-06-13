@@ -27,17 +27,22 @@ fn _sfn_bin() -> string ![io] {
     return "build/native/sailfin";
 }
 
-// Bare dispatch compiles+runs the file. `process.run_capture` treats an
-// empty array as the *empty* environment, so thread the runner's per-file
-// `SAILFIN_TEST_SCRATCH` through: the compiler routes the `program.ll`
-// build-cache dir under it (#1333), isolating this compile from sibling
-// test files' concurrent builds. Unlike `sfn build`, bare dispatch /
-// `run` has no `--work-dir`, so the scratch passthrough is the only
-// isolation lever — and it suffices because the runner mints a unique
-// scratch per file.
+// Bare dispatch compiles+runs the file, so the spawned compiler needs a
+// real environment. `process.run_capture` treats an empty array as the
+// *empty* environment, so thread `PATH` (+ `HOME`/`TMPDIR`) — without
+// `PATH` the nested compile's linker is not found and the build fails —
+// plus the runner's per-file `SAILFIN_TEST_SCRATCH`, under which the
+// compiler routes the `program.ll` build-cache dir (#1333) so a parallel
+// run does not collide on `build/sailfin`.
 fn _child_env() -> string[] ![io] {
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
     let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
     return e;
 }

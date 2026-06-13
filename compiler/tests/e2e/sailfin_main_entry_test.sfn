@@ -58,14 +58,22 @@ fn _fixture_src() -> string ![io] {
 
 // Child environment for the spawned `sfn build`. `process.run_capture`
 // treats an empty array as the *empty* environment (not "inherit"), so
-// thread the runner's per-file `SAILFIN_TEST_SCRATCH` through: the
-// compiler routes the `program.ll` build-cache dir under it (#1333),
-// isolating this build from sibling test files' concurrent builds. Empty
-// when unset (a bare `sfn test <file>` run), where there is no concurrent
-// sibling to collide with.
+// the relevant variables must be threaded explicitly:
+//   - `PATH` (+ `HOME`/`TMPDIR`): the nested build runs `clang` and its
+//     linker (`mold`/`lld`/`ld`); without `PATH` the linker is not found
+//     and the build fails with `clang: error: ... "ld" doesn't exist`.
+//   - `SAILFIN_TEST_SCRATCH`: the runner's per-file scratch, which the
+//     compiler routes the `program.ll` build-cache dir under (#1333) so a
+//     parallel run (`--jobs N>1`) does not collide on `build/sailfin`.
 fn _child_env() -> string[] ![io] {
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
     let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
     return e;
 }
@@ -94,25 +102,12 @@ fn _build_and_run(out_marker: string, extra: string) -> int ![io] {
         let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
         let _bo = process.capture_take_stdout();
         let _be = process.capture_take_stderr();
-        print.err("DBG1333 build_exit=" + number_to_string(build_exit)
-            + " scratch=["
-            + env.get("SAILFIN_TEST_SCRATCH")
-            + "] bo=["
-            + _bo
-            + "] be=["
-            + _be
-            + "]");
         if build_exit != 0 { return -100; }
         let mut run_argv: string[] = [binpath];
         if extra.length > 0 { run_argv.push(extra); }
         let run_exit = process.run_capture(run_argv, []);
         let out = process.capture_take_stdout();
         let _re = process.capture_take_stderr();
-        print.err("DBG1333 run_exit=" + number_to_string(run_exit) + " out=["
-            + out
-            + "] rerr=["
-            + _re
-            + "]");
         fs.writeFile(out_marker, out);
         return run_exit;
     });
