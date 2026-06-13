@@ -30,6 +30,27 @@ fn _sfn_bin() -> string ![io] {
     return "build/native/sailfin";
 }
 
+// Child environment for the spawned `sfn emit`. `process.run_capture` treats
+// an empty array as the *empty* environment (not "inherit"), so the relevant
+// variables must be threaded explicitly:
+//   - `PATH` (+ `HOME`/`TMPDIR`): keeps any subprocess the compiler shells out
+//     to (e.g. `mkdir`) resolvable.
+//   - `SAILFIN_TEST_SCRATCH`: the runner's per-file scratch, which the
+//     compiler routes its build-cache dir under (#1333) so a parallel run
+//     (`--jobs N>1`) does not collide on the fixed `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
 // Lower `fixture` to a standalone `.ll` via `sfn emit llvm` and return the
 // IR text. Writes the `.ll` to a unique scratch path keyed by `tag` so
 // parallel sub-tests do not collide; returns "" on emit failure so the
@@ -40,7 +61,7 @@ fn _emit_llvm(fixture: string, tag: string) -> string ![io] {
     fs.createDirectory(dir, true);
     let ll = dir + "/sfn-drop-emission-" + tag + ".ll";
     if fs.exists(ll) { fs.deleteFile(ll); }
-    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", fixture], []);
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", fixture], _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     if exit != 0 { return ""; }
