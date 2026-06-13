@@ -347,6 +347,14 @@ fn _serve_conn_worker(ctx: * u8) -> * u8 {
 // The `sfn/http` capsule's typed `serve` serializes status + headers in
 // Sailfin and registers a trampoline as the handler, so framing is the
 // handler's job here. Same 16-byte [client_fd][handler] ctx.
+//
+// Ownership: the worker does NOT free the handler's returned `response`
+// buffer (it has no way to know the handler's allocation discipline). A
+// handler that allocates a fresh response per request therefore leaks one
+// buffer per connection until a request-scoped arena lands (same class as
+// the documented fire-and-forget `Task` leak; same caveat applies to the
+// unframed `_serve_conn_worker`). v0 servers are expected to be short-lived
+// or tolerate this; the bounded fix is tracked with the arena work.
 fn _serve_conn_worker_framed(ctx: * u8) -> * u8 {
     if ctx as i64 == 0 { return null; }
     let base: i64 = ctx as i64;

@@ -2,15 +2,20 @@
 //
 // A minimal HTTP/1.1 server in native Sailfin using the sfn/http capsule.
 //
-// This is the entry of a consumer capsule: to build/run it, the capsule's
-// `capsule.toml` must declare the dependency
+// This file is illustrative. To actually build/run it, place it as the
+// entry of a consumer capsule (e.g. copy it to `myapp/src/main.sfn`)
+// whose `myapp/capsule.toml` declares the dependency:
 //
+//     [build]
+//     entry = "src/main.sfn"
 //     [dependencies]
 //     "sfn/http" = "*"
 //
-// (capsule functions are only staged into a consumer's codegen through a
-// declared dependency — a loose `sfn run` of a manifest-less file cannot
-// resolve them). Then:  build/native/sailfin run src/main.sfn
+// then, from the capsule root:  build/native/sailfin run src/main.sfn
+//
+// (Capsule functions are only staged into a consumer's codegen through a
+// declared dependency — running this file in place under examples/web/,
+// with no capsule.toml, cannot resolve the `sfn/http` import.)
 //
 // The handler is a TOP-LEVEL function `fn(Request) -> Response`, passed
 // address-taken (`as * fn (Request) -> Response`). Closures are not

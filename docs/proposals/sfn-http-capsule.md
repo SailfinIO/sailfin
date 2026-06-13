@@ -15,15 +15,17 @@ Turn the `sfn/http` capsule into a real, typed HTTP/1.1 server (and incrementall
 client) surface so users can write web servers in native Sailfin:
 
 ```sfn
-import { serve, Request, Response, response, not_found } from "http";
+// In a consumer capsule whose capsule.toml declares [dependencies] "sfn/http" = "*"
+import { serve, Request, Response, response, not_found } from "sfn/http";
 
 fn handler(req: Request) -> Response {
-    if req.path == "/" { return response("Welcome to Sailfin!"); }
+    if strings_equal(req.path, "/") { return response("Welcome to Sailfin!"); }
     return not_found();
 }
 
 fn main() ![net, io] {
-    serve(handler, 8080);
+    // Handlers are top-level fns passed address-taken (closures unsupported in v0).
+    serve(handler as * fn (Request) -> Response, 8080);
 }
 ```
 
