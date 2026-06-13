@@ -53,6 +53,15 @@ jobs:
       - name: Assert shard map covers the full test surface
         shell: bash
         run: make test-shard-cover
+      # Warn-first anti-regrowth ratchet for e2e bash scripts (#1327,
+      # test-infra Phase 3 / #842). Flags any compiler/tests/e2e/test_*.sh
+      # not on scripts/e2e_bash_allowlist.txt as a GitHub annotation; does
+      # NOT fail the build yet (RATCHET_MODE defaults to warn). Flip to
+      # `RATCHET_MODE: fail` once the #842 batch ports drain the allowlist
+      # down to the permanent hold-outs.
+      - name: Lint — no new e2e bash scripts (warn-first)
+        shell: bash
+        run: scripts/lint_no_new_e2e_bash.sh
 
   # Fast static-analysis pre-flight: run `sfn check` over the whole
   # compiler tree using the *pinned seed* binary (no self-host build
