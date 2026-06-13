@@ -1,6 +1,6 @@
 ---
 name: seed-stabilizer
-description: Diagnoses compiler bugs affecting self-hosting correctness and build performance (miscompilation, LLVM IR errors, memory/perf regressions). Use when builds fail, produce wrong output, or regress in speed/memory. Requires deep IR analysis — use Opus.
+description: Diagnoses compiler bugs affecting self-hosting correctness and build performance (miscompilation, LLVM IR errors, memory/perf regressions). Use when builds fail, produce wrong output, or regress in speed/memory. Requires deep IR analysis — runs on Fable 5.
 tools: Read, Grep, Glob, Bash
 model: fable
 effort: high

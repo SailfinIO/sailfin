@@ -279,9 +279,9 @@ lets you proceed confidently when the scope *is* right. Run the audit in
 
 ```bash
 # Who defines it, who calls it, is it in a header? (per symbol S)
-grep -cE "\bS\s*\(" runtime/native/src/sailfin_runtime.c   # C definition + callers
-grep -nE "\bS\b" runtime/native/include/sailfin_runtime.h  # header prototype?
-grep -rnE "fn S\b" runtime/sfn                              # Sailfin definition (bare vs _sfn_ infix)
+grep -cE "S[[:space:]]*\(" runtime/native/src/sailfin_runtime.c   # C definition + callers
+grep -nw S runtime/native/include/sailfin_runtime.h              # header prototype?
+grep -rnE "fn S[ (]" runtime/sfn                                  # Sailfin definition (bare vs _sfn_ infix)
 ```
 
 Then reconcile against the issue body:

@@ -11,16 +11,16 @@ Files Affected list or the "just rename it" framing as correct.
 
 For symbol `S` (e.g. `sfn_str_concat`, `sfn_arena_alloc`):
 
-1. **Who defines it?** `grep -nE '^\s*[A-Za-z_].*\bS\s*\(' runtime/native/src/*.c`
-   and `grep -rnE 'fn S\b' runtime/sfn`. A bare `sfn_*` that the registry
+1. **Who defines it?** `grep -nE '^[[:space:]]*[A-Za-z_].*S[[:space:]]*\(' runtime/native/src/*.c`
+   and `grep -rnE 'fn S[ (]' runtime/sfn`. A bare `sfn_*` that the registry
    emits is frequently **C-defined** with only a `sfn_<mod>_sfn_*` infix
    proof-of-life on the Sailfin side — the "port" is a façade.
-2. **Who calls it?** `grep -cE '\bS\s*\(' runtime/native/src/sailfin_runtime.c`.
+2. **Who calls it?** `grep -cE 'S[[:space:]]*\(' runtime/native/src/sailfin_runtime.c`.
    If the C runtime calls `S` internally (count > its definition count),
    `static`-ifying the C copy gives that caller a private static copy
    while emitted code binds to the Sailfin definition — usually fine, but
    never silently delete a C body with live internal callers.
-3. **Header collision?** `grep -nE '\bS\b' runtime/native/include/*.h`. If
+3. **Header collision?** `grep -nw S runtime/native/include/*.h`. If
    `S` is prototyped in a header, `static`-ifying the C definition collides
    with the `extern` prototype — the `.h` must be edited too. **Add both
    `.c` and `.h` to Files Affected.**
@@ -62,8 +62,13 @@ would pass: zero the `c-sources`/`ll-sources` in
 confirm no undefined symbols:
 
 ```bash
-nm -u build/sailfin/*.o | grep -E '(sfn_|sailfin_runtime_|sailfin_adapter_)' \
-  | sort -u | comm -12 - <(<symbols the C sources define>)   # → expected empty
+# symbols the Sailfin-compiled objects still demand:
+nm -u build/sailfin/*.o \
+  | grep -oE 'sfn_[a-z0-9_]+|sailfin_(runtime|adapter)_[a-z0-9_]+' | sort -u > /tmp/undef.txt
+# symbols the C runtime sources define:
+grep -rhoE 'sfn_[a-z0-9_]+|sailfin_(runtime|adapter)_[a-z0-9_]+' \
+  runtime/native/src/sailfin_runtime.c runtime/native/src/sailfin_arena.c | sort -u > /tmp/cdefs.txt
+comm -12 /tmp/undef.txt /tmp/cdefs.txt   # → expected empty
 ```
 
 Until that intersection is empty, the C runtime is still load-bearing —
