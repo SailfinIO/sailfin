@@ -1,0 +1,84 @@
+// Regression test for issue #537: a boolean (`i1`) flowing into a numeric
+// (`int`/`float`) binding must refuse to compile with the `[fatal]` ABI
+// primitive mismatch diagnostic and the `as int` / `as float` fix-it,
+// instead of silently `zext`/`uitofp`-widening.
+//
+// Native replacement for the former `test_bool_numeric_coercion.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). It drives `sfn test`
+// over two fixtures with the runtime `process.*` builtins and asserts on
+// the captured output, pinning two behaviours:
+//   1. `let n: int = b` (b: boolean) refuses, exits non-zero, surfaces the
+//      #537 bool fix-it phrasing, and never runs the fixture's assertion
+//      (a ran assertion would mean the gate was bypassed and partial IR
+//      executed).
+//   2. `let n: int = b as int` keeps compiling — the explicit cast is the
+//      supported escape valve and must not be over-refused.
+//
+// The cast fixture links and runs, so the nested `sfn test` needs `PATH`
+// for `clang`/the linker and `SAILFIN_TEST_SCRATCH` for parallel-runner
+// build-cache isolation — see `_child_env` and `.claude/rules/no-bash-e2e.md`.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _refuse_fixture() -> string {
+    return "compiler/tests/e2e/fixtures/bool_into_int_refusal.sfn";
+}
+
+fn _cast_fixture() -> string {
+    return "compiler/tests/e2e/fixtures/bool_into_int_cast_ok.sfn";
+}
+
+// Child environment for the spawned `sfn test`. `process.run_capture`
+// treats an empty array as the *empty* environment (not "inherit"), so the
+// variables the nested compile needs are threaded explicitly: `PATH`
+// (+ `HOME`/`TMPDIR`) for the linker the cast fixture invokes, and
+// `SAILFIN_TEST_SCRATCH` so the `program.ll` build cache routes per-
+// invocation (#1333) rather than colliding on the fixed `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+test "bool->int binding refuses with the #537 fix-it" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "test", _refuse_fixture()], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let combined = out + err;
+
+    // The refusal must exit non-zero — compilation should not have produced
+    // a runnable binary.
+    assert exit != 0;
+    // The canonical #537 diagnostic and fix-it phrasing.
+    assert find(combined, "ABI primitive mismatch", 0) >= 0;
+    assert find(combined, "add `as int` or `as float` to disambiguate", 0) >= 0;
+    // The bool kind detail.
+    assert find(combined, "(bool)", 0) >= 0;
+    // The fixture's assertion must never run — if it did, the gate was
+    // bypassed and partial IR executed.
+    assert find(combined, "assertion failed", 0) < 0;
+}
+
+test "bool->int via explicit `as int` compiles and runs" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "test", _cast_fixture()], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let combined = out + err;
+
+    // The explicit cast is the supported escape valve — it must compile.
+    assert exit == 0;
+    // And must not surface the #537 refusal (no over-reach).
+    assert find(combined, "ABI primitive mismatch", 0) < 0;
+}

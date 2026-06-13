@@ -1,0 +1,117 @@
+// End-to-end regression test for #508 — inline `export { X } from "./Y"`.
+//
+// Native replacement for the former `test_export_from.sh` (test-infra
+// Phase 3, epic #842; ratchet #1327). Builds and runs the multi-file
+// fixture under `compiler/tests/e2e/fixtures/export_from/`, which chains
+//   main.sfn → middle.sfn (inline re-export) → origin.sfn (defines)
+// and verifies every checkpoint prints `*-ok`, never `*-FAIL`.
+//
+// Before #508, a barrel that re-exported a symbol via the inline
+// `export { X } from "./Y"` form wrote a `.export` line but no `.fn X`
+// signature into its `.sfn-asm`, so the barrel's LLVM IR carried no shim
+// from `X__<barrel_slug>` to `X__<origin_slug>`. Consumers importing `X`
+// through the barrel mangled their call sites with the BARREL slug, and
+// the linker reported an undefined reference (`__middle`). This test
+// builds the chain end-to-end and asserts the six `-ok` lines print, so a
+// dropped-guard (i8* fallback) or link-time regression is loud.
+//
+// Distinct from `reexport_test.sfn`, which covers the BARE
+// `import; export { X };` shape.
+//
+// Build hygiene / parallel-runner isolation (the load-bearing detail):
+// `sfn build` writes the top-level module's IR to `<cache-dir>/program.ll`,
+// defaulting to the FIXED `build/sailfin`
+// (`cli_main.sfn::_resolve_sailfin_cache_dir_for_work`). Under the parallel
+// `sfn test` pool two concurrent builds would clobber each other's
+// `program.ll` and cross-contaminate binaries. The compiler routes that
+// cache dir under `SAILFIN_TEST_SCRATCH` when set (#1333), so this
+// build-spawning test threads `SAILFIN_TEST_SCRATCH` (and `PATH` for the
+// linker) through to its nested `sfn build` — see `_child_env` and
+// `.claude/rules/no-bash-e2e.md`.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The fixture's entry module. Relative imports (`./middle`, `./origin`)
+// resolve from this path, and the fixture carries its own `capsule.toml`,
+// so building it in place does not auto-discover `runtime/native`.
+fn _fixture_main() -> string {
+    return "compiler/tests/e2e/fixtures/export_from/main.sfn";
+}
+
+// Child environment for the spawned `sfn build`. `process.run_capture`
+// treats an empty array as the *empty* environment (not "inherit"), so the
+// relevant variables must be threaded explicitly:
+//   - `PATH` (+ `HOME`/`TMPDIR`): the nested build runs `clang` and its
+//     linker; without `PATH` the linker is not found and the build fails.
+//   - `SAILFIN_TEST_SCRATCH`: the runner's per-file scratch, which the
+//     compiler routes the `program.ll` build-cache dir under (#1333) so a
+//     parallel run does not collide on `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A fresh marker-file path under the runner's scratch dir (or `/tmp`), with
+// any stale value removed so each run starts clean. Lives outside the
+// `with_tmp_dir` tree so the captured output survives teardown.
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-export-from-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Build the export_from chain to a binary in a temp dir, run it, stash the
+// run's combined stdout+stderr to `out_marker`, and return the run's exit
+// code (or `-100` if the build itself failed).
+fn _build_and_run(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let binpath = dir + "/export_from_main";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, _fixture_main()], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(out_marker, out + err);
+        return run_exit;
+    });
+}
+
+test "export-from: inline re-export chain builds, links, and runs" ![io] {
+    let marker = _marker("run");
+    let exit = _build_and_run(marker);
+    // Assert the build+run succeeded (`-100` == build failure) before
+    // touching the marker: on a build failure the marker is never written.
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+
+    // The i8*-fallback regression prints `*-FAIL` lines instead of `*-ok`.
+    assert find(out, "FAIL", 0) < 0;
+
+    // Every checkpoint must round-trip through the re-export shim.
+    assert find(out, "bool-yes-ok", 0) >= 0;
+    assert find(out, "bool-no-ok", 0) >= 0;
+    assert find(out, "let-truthy-ok", 0) >= 0;
+    assert find(out, "let-falsy-ok", 0) >= 0;
+    assert find(out, "string-strip-ok", 0) >= 0;
+    assert find(out, "string-unchanged-ok", 0) >= 0;
+}
