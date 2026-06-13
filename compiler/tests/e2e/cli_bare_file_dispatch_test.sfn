@@ -27,19 +27,33 @@ fn _sfn_bin() -> string ![io] {
     return "build/native/sailfin";
 }
 
+// Child environment for the spawned compiler. `process.run_capture`
+// treats an empty array as the *empty* environment (not "inherit"), and
+// the compiler honours `SAILFIN_TEST_SCRATCH` as its build scratch root
+// (`cli_commands.sfn::_test_scratch_root`, default `build/sailfin`).
+// Thread the runner's per-file scratch through so a nested compile does
+// not fall back to the shared default and race with sibling test files
+// under a parallel runner.
+fn _child_env() -> string[] ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    let mut e: string[] = [];
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
 // `sailfin examples/basics/hello-world.sfn` (a single `.sfn` positional,
 // no subcommand) compiles and runs the file, printing its output and
 // exiting 0. The path is relative to the runner's working directory
 // (the repo root), matching the legacy script's `cd "$REPO_ROOT"`.
 test "bare-file: 'sailfin <file.sfn>' compiles, runs, and exits 0" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "examples/basics/hello-world.sfn"], []);
+    let exit = process.run_capture([_sfn_bin(), "examples/basics/hello-world.sfn"], _child_env());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit == 0;
 }
 
 test "bare-file: 'sailfin <file.sfn>' prints the program's output" ![io] {
-    let _exit = process.run_capture([_sfn_bin(), "examples/basics/hello-world.sfn"], []);
+    let _exit = process.run_capture([_sfn_bin(), "examples/basics/hello-world.sfn"], _child_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert find(out, "Hello, Sailfin!", 0) >= 0;
@@ -50,7 +64,7 @@ test "bare-file: 'sailfin <file.sfn>' prints the program's output" ![io] {
 // branch and exit non-zero — NOT silently invoke `run` on a non-Sailfin
 // path.
 test "bare-file: non-.sfn positional falls through to 'unknown command'" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "not-a-known-subcommand"], []);
+    let exit = process.run_capture([_sfn_bin(), "not-a-known-subcommand"], _child_env());
     let out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert exit != 0;
