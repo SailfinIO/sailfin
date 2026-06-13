@@ -48,6 +48,13 @@ Test files live in:
 - `compiler/tests/e2e/` — End-to-end tests with real Sailfin programs
 - `compiler/tests/e2e/fixtures/` — Example source files used by e2e tests
 
+New e2e tests are `*_test.sfn` using `sfn/test`, **not** bash scripts — a
+warn-first CI lint (`scripts/lint_no_new_e2e_bash.sh`) flags new
+`compiler/tests/e2e/test_*.sh`. See `.claude/rules/no-bash-e2e.md` for the
+native e2e recipe and `compiler/tests/e2e/guillermo_test.sfn` for the
+canonical "run the compiler and assert on output" exemplar. The legacy
+`*.sh` scripts are being migrated under epic #842.
+
 ## Failure Analysis
 
 When tests fail:

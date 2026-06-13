@@ -1,0 +1,143 @@
+# e2e bash-script allowlist — test-infra Phase 3 (#842), ratchet #1327
+#
+# Every compiler/tests/e2e/test_*.sh listed here is GRANDFATHERED: it
+# predates the sfn/test migration. New scripts NOT on this list are
+# flagged by scripts/lint_no_new_e2e_bash.sh (warn-first; will fail CI
+# once the batch ports in #842 are done).
+#
+# As 3.1 batch ports land, DELETE the migrated script's line here so the
+# allowlist shrinks toward the permanent hold-outs below.
+#
+# Permanent hold-outs (genuinely cannot be sfn/test pre-1.0 — see #842):
+#   test_check_compiler_src.sh   — not a test; becomes a make target
+#   test_publish.sh              — needs an sfn/http server stub (registry mock)
+#   test_sfn_package.sh          — needs a Sailfin tar-inspection lib
+#   test_llms_txt_sync.sh        — docs-sync CI invariant, not compile-and-run
+#
+# Format: one bare script basename per line; '#' comments and blank lines ignored.
+
+test_arena_default_on.sh
+test_array_aggregate_shape.sh
+test_async_coerce_refusal.sh
+test_atomic_add_sub_compile.sh
+test_atomic_cas_compile.sh
+test_binary_capsule_walker.sh
+test_bool_numeric_coercion.sh
+test_build_diagnostics_format.sh
+test_build_json_schema.sh
+test_call_emission_no_polling.sh
+test_capsule_artifact_sidecar.sh
+test_capsule_build.sh
+test_capsule_byname_import_link.sh
+test_capsule_dead_strip_guard.sh
+test_capsule_ir_layout.sh
+test_channel_producer_consumer_ir.sh
+test_channel_runtime_roundtrip.sh
+test_check_compiler_src.sh
+test_check_cross_module_conformance.sh
+test_check_effect_call_site_caret.sh
+test_check_json_schema.sh
+test_check_phase_ledger.sh
+test_check_resolver_scan_memo.sh
+test_cli_bare_file_dispatch.sh
+test_cli_v2_exit_codes.sh
+test_clock_gettime_reader.sh
+test_clock_monotonic_id_sentinel.sh
+test_closure_capture.sh
+test_compiler_debug_toggle_env_vars.sh
+test_concurrency_lowering_ir.sh
+test_config.sh
+test_cross_module_int_signature.sh
+test_cross_module_signature_resolution.sh
+test_cross_windows_runtime_modules.sh
+test_drop_emission_escape_promotion.sh
+test_drop_emission_function_body.sh
+test_drop_emission_mid_exit.sh
+test_drop_emission_try_catch.sh
+test_effect_gate_build_path.sh
+test_effect_gate_build_path_entry.sh
+test_enum_tag_access.sh
+test_errno_locator_platform.sh
+test_errno_reader.sh
+test_escape_promotion_boundaries.sh
+test_exe_path_intrinsic_platform.sh
+test_exe_path_reader.sh
+test_export_from.sh
+test_fmt.sh
+test_fn_reference_pthread.sh
+# Server-loopback test: starts a background blocking sfn/http server and
+# drives it with a socket client — the direct sibling of test_runtime_serve.sh
+# (same hold-out class), which sfn/test cannot express pre-1.0. (#1323)
+test_http_capsule_serve.sh
+test_lifecycle_hook_ordering.sh
+test_linker_selection.sh
+test_llms_txt_sync.sh
+test_lock.sh
+test_login.sh
+test_lowering_no_bare_runtime_emissions.sh
+test_make_report_contract.sh
+test_make_result_contract.sh
+test_mem_limit_selfcap.sh
+test_monotonic_millis_advances.sh
+test_no_duplicate_declares.sh
+test_numeric_bitwise.sh
+test_numeric_cast.sh
+test_numeric_int_default.sh
+test_numeric_int_float.sh
+test_owned_buf_grow_determinism.sh
+test_owned_buf_roundtrip.sh
+test_plain_fn_ptr_call.sh
+test_pointer_read_intrinsic.sh
+test_publish.sh
+test_reexport.sh
+test_result_prelude_discriminant.sh
+test_routine_nursery.sh
+test_run_cache_flags.sh
+test_runner_jobs_parallel.sh
+test_runner_json_multifile.sh
+test_runner_state_marker.sh
+test_runtime_adapter_filesystem.sh
+test_runtime_adapter_http.sh
+test_runtime_array.sh
+test_runtime_c_cache_invalidates.sh
+test_runtime_char_from_code.sh
+test_runtime_exception_frames.sh
+test_runtime_exec_path.sh
+test_runtime_helper_declare_integrity.sh
+test_runtime_implicit_capsule_link.sh
+test_runtime_int_helpers_legacy_path.sh
+test_runtime_io_extended.sh
+test_runtime_memory_arena.sh
+test_runtime_memory_arena_mark.sh
+test_runtime_memory_mem.sh
+test_runtime_memory_rc.sh
+test_runtime_obj_shared_cache.sh
+test_runtime_parallel_combinator.sh
+test_runtime_process.sh
+test_runtime_scheduler_skeleton.sh
+test_runtime_serve.sh
+test_runtime_sfn_sources_active.sh
+test_runtime_sfn_sources_link_consumer.sh
+test_runtime_sfn_sources_struct_import.sh
+test_runtime_string_allocating.sh
+test_runtime_string_basic.sh
+test_runtime_string_immediate.sh
+test_runtime_string_utf8_numeric.sh
+test_runtime_type_meta.sh
+test_sailfin_main_entry.sh
+test_sailfin_main_panic.sh
+test_sfn_package.sh
+test_sleep_eintr_resume.sh
+test_sleep_routes_to_sfn_clock.sh
+test_sleep_unit_semantics.sh
+test_string_aggregate_shape.sh
+test_struct_field_pointer_roundtrip.sh
+test_struct_field_separator.sh
+test_subprocess_emit_clean_env.sh
+test_sync_rejects_unimplemented_concurrency.sh
+test_test_bin_cache.sh
+test_thread_local_lowering.sh
+test_try_catch_frames.sh
+test_update_snapshots_flag.sh
+test_work_dir_flag.sh
+test_work_dir_parity.sh

@@ -1,0 +1,41 @@
+// End-to-end test for the `sfn guillermo` easter-egg command.
+//
+// Native replacement for the former `test_guillermo.sh` (test-infra
+// Phase 3, epic #842; ratchet exemplar #1327). This is the canonical
+// "run the compiler binary and assert on its output" e2e pattern — see
+// `.claude/rules/no-bash-e2e.md`. It drives a subprocess with the runtime
+// `process.*` builtins (the same primitives `sfn/test`'s own
+// `assert_compiles` uses) and asserts on the captured output.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so a
+// caller must itself be `![pure]` — they cannot be used from an `![io]`
+// test like this one. For subprocess-output assertions use
+// `sfn/strings::find`; for compile-as-test assertions use the `![io]`
+// `assert_compiles` / `assert_does_not_compile`. (Making the matchers
+// usable from `![io]` tests is tracked against #842.)
+import { find } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn) so CI can point the
+// test at any compiler without editing it.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+test "guillermo: command exits 0" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "guillermo"], []);
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+test "guillermo: output contains the mascot greeting" ![io] {
+    let _exit = process.run_capture([_sfn_bin(), "guillermo"], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // The greeting may land on stdout or stderr; assert against both.
+    assert find(out + err, "Guillermo", 0) >= 0;
+}
