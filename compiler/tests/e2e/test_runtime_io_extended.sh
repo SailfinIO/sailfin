@@ -305,8 +305,13 @@ PROBE
     if ! grep -qxF '[warn] bravo' "$err"; then echo "[test]   missing '[warn] bravo' on stderr"; return 1; fi
     if ! grep -qxF '[error] charlie' "$err"; then echo "[test]   missing '[error] charlie' on stderr"; return 1; fi
     if ! grep -qxF 'delta' "$err"; then echo "[test]   missing raw 'delta' on stderr"; return 1; fi
-    # The [info]/raw lines must NOT have leaked onto stderr.
+    # The [info]/raw stdout lines must NOT have leaked onto stderr...
     if grep -qxF '[info] alpha' "$err"; then echo "[test]   '[info] alpha' wrongly on stderr (should be stdout)"; return 1; fi
+    if grep -qxF 'echo' "$err"; then echo "[test]   raw 'echo' wrongly on stderr (should be stdout)"; return 1; fi
+    # ...and the fd-2 lines must NOT have leaked onto stdout (symmetric).
+    if grep -qxF 'delta' "$out"; then echo "[test]   raw 'delta' wrongly on stdout (should be stderr)"; return 1; fi
+    if grep -qxF '[warn] bravo' "$out"; then echo "[test]   '[warn] bravo' wrongly on stdout (should be stderr)"; return 1; fi
+    if grep -qxF '[error] charlie' "$out"; then echo "[test]   '[error] charlie' wrongly on stdout (should be stderr)"; return 1; fi
     return 0
 }
 

@@ -28,6 +28,17 @@
 //      need an SfnString-typed Sailfin parameter; the bytes arrive as
 //      the data pointer + length.)
 //
+//      Immediate-codepoint caveat (pre-M1.A.2). A real `{i8*, i64}`
+//      aggregate always carries a real pointer + byte length, so the
+//      length-aware `write(2)` body is correct for it. The legacy
+//      tagged-pointer "immediate codepoint" string encoding (a single
+//      grapheme smuggled in the `.data` slot as `cp << 32` or a
+//      near-null ASCII byte) is decoded by the surviving C
+//      `_print_line` path but **not** by these native bodies. The
+//      length-carrying consumers (`sfn_log_execution`, `sfn_print_sfn`)
+//      below therefore stay on the immediate-decoding C entrypoints;
+//      see #822 / #1136 for the encoding's retirement.
+//
 //   2. The `sfn_getenv_sfn` / `sfn_home_dir_sfn` proof-of-life family.
 //      These still forward to the `sailfin_runtime_{getenv,home_dir}` C
 //      entrypoints — their flip is C7 of #1308, not this issue.
@@ -40,23 +51,25 @@
 // `@sfn_*` symbols — the same mechanism that defines `@sfn_sleep` in
 // `runtime/sfn/clock.sfn`.
 //
-// Effects: `![io]` on every adapter. The platform externs (`write`,
-// `strlen`, `getenv`) carry no effect annotation — adapters wrap the
-// primitive with the effect, matching the §3.6 effect-on-wrapper rule.
+// Effects: `![io]` on every adapter. The platform externs (`write`)
+// carry no effect annotation — adapters wrap the primitive with the
+// effect, matching the §3.6 effect-on-wrapper rule.
 //
-// Extern declarations split across two surfaces:
-//
-//   - `write` / `strlen` from `runtime/sfn/platform/libc.sfn`
-//     (imported). The seed compiler's libc snapshot has carried both
-//     since the `sfn_write_fd` / string proof-of-life shipped, so the
-//     cross-module import resolves cleanly.
-//
-//   - `sailfin_runtime_{getenv,home_dir}` C runtime entrypoints
-//     (inlined below). These are *not* platform libc declarations —
-//     they're C trampolines defined in
-//     `runtime/native/src/sailfin_runtime.c`, retired by #1308 C7 /
-//     #822. Inlining is the only declaration site available.
-import { write, strlen } from "./platform/libc";
+// Extern declarations are inlined rather than imported. The runtime
+// `sfn-source` emit path (`_emit_runtime_sfn_to_obj`) resolves imported
+// *extern* signatures only for the platform symbols the seed snapshot
+// pre-stages; reaching for any other libc surface through an `import`
+// fails the isolated per-module emit with "cannot resolve return type
+// for call to …". So `write` is declared locally here, mirroring the
+// `arena.sfn` / `string.sfn` / `process.sfn` discipline. The
+// `sailfin_runtime_*` C entrypoints are likewise C trampolines (not
+// platform libc), retired by #1308 C7 / #822; inlining is their only
+// declaration site.
+extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+
+extern fn sailfin_runtime_print_raw(msg: * u8) -> void;
+
+extern fn sailfin_runtime_print_info(msg: * u8) -> void;
 
 extern fn sailfin_runtime_getenv(name: * u8) -> * u8;
 
@@ -69,26 +82,36 @@ let STDOUT_FD: i32 = 1;
 
 let STDERR_FD: i32 = 2;
 
+// POSIX `EINTR` — the only `write(2)` failure that warrants a resume.
+// The value is 4 on both Linux and macOS (same constant `clock.sfn`'s
+// `nanosleep` loop uses).
+let EINTR: i32 = 4;
+
 fn sfn_write_fd(fd: i32, buf: * u8, count: usize) -> i64 ![io] {
     return write(fd, buf, count);
 }
 
 // Write exactly `len` bytes of `data` to `fd`, looping over short
 // writes. `write(2)` may flush fewer bytes than requested (signals,
-// pipe back-pressure); advance until the whole buffer is delivered or
-// the syscall reports an error / EOF (`n <= 0`). This reproduces the
-// "write it all" contract of the retired C `fputs` + `fflush` path
-// without its stdio buffering. `len <= 0` is a no-op (the loop guard
+// pipe back-pressure) or fail with `EINTR` when a signal lands before
+// any byte is written; advance on partial writes and resume on `EINTR`
+// so output is not silently truncated, matching the "write it all"
+// contract of the retired C `fputs` + `fflush` path. Any other error
+// (or a `0` return) stops the loop. `len <= 0` is a no-op (the guard
 // trips immediately), so a zero-length prefix passes a harmless
-// untouched pointer.
+// untouched pointer. The `EINTR` errno read uses the same host-aware
+// `sailfin_intrinsic_errno_location` + `sailfin_intrinsic_pointer_read_i32`
+// sentinel chain as `clock.sfn` (#887 / #875).
 fn _sfn_write_all(fd: i32, data: * u8, len: i64) -> void ![io] {
     let mut off: i64 = 0;
     loop {
         if off >= len { break; }
         let chunk: * u8 = (data as i64 + off) as * u8;
         let n: i64 = write(fd, chunk, (len - off) as usize);
-        if n <= 0 { break; }
-        off = off + n;
+        if n > 0 { off = off + n; } else if n < 0 {
+            let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
+            if err != EINTR { break; }
+        } else { break; }
     }
 }
 
@@ -137,12 +160,12 @@ fn sfn_print_error(data: * u8, len: i64) -> void ![io] {
 }
 
 // `sfn_print_sfn(msg)` — NUL-terminated-cstring entry kept for the
-// `runtime/prelude.sfn` import. Repointed onto the native `sfn_print`
-// by recovering the byte length via `strlen`; no longer forwards to a C
-// printer.
-fn sfn_print_sfn(msg: * u8) -> void ![io] {
-    if msg as i64 != 0 { sfn_print(msg, strlen(msg) as i64); }
-}
+// `runtime/prelude.sfn` import. Stays on the immediate-decoding C
+// `sailfin_runtime_print_raw` path: `msg` is a legacy `* u8` that may
+// be an immediate-codepoint tagged pointer (pre-M1.A.2), which the
+// native length-aware printer cannot decode. Retires with the encoding
+// (#822 / #1136).
+fn sfn_print_sfn(msg: * u8) -> void ![io] { sailfin_runtime_print_raw(msg); }
 
 // `sfn_getenv_sfn(name)` — environment-variable read. Still forwards to
 // the C `sailfin_runtime_getenv` (the aggregate-return + arena-threaded
@@ -163,13 +186,14 @@ fn sfn_home_dir_sfn() -> * u8 ![io] { return sailfin_runtime_home_dir(); }
 // `emission.sfn:470`; aliased through `runtime_log_execution_fn` in
 // `runtime/prelude.sfn`). Semantics preserved: print the value through
 // the `[info] `-prefixed stdout line when non-NULL, then return it
-// unchanged. Now routes through the native `sfn_print_info` (recovering
-// the byte length via `strlen`) instead of the retired C
-// `sailfin_runtime_print_info`. Carries `![io]` for the print.
-// Descriptor ABI is `(i8*) -> i8*`. The NULL guard uses the
-// `as i64 == 0` idiom (no null comparison on raw `* u8` until
-// `Result<T, E>` lands).
+// unchanged. Stays on the immediate-decoding C `sailfin_runtime_print_info`
+// path: `value` is a legacy `* u8` that may be an immediate-codepoint
+// tagged pointer (e.g. a `char_at` / `grapheme_at` result), which the
+// native length-aware printer cannot decode (and `strlen` on a tagged
+// pointer would fault). Carries `![io]` for the print. Descriptor ABI
+// is `(i8*) -> i8*`. The NULL guard uses the `as i64 == 0` idiom (no
+// null comparison on raw `* u8` until `Result<T, E>` lands).
 fn sfn_log_execution(value: * u8) -> * u8 ![io] {
-    if value as i64 != 0 { sfn_print_info(value, strlen(value) as i64); }
+    if value as i64 != 0 { sailfin_runtime_print_info(value); }
     return value;
 }
