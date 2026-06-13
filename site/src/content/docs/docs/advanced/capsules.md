@@ -296,16 +296,16 @@ entry = "src/main.sfn"
 ```sfn
 // src/main.sfn
 import { log } from "sfn/log";
-import { serve } from "http";
+import { serve, Request, Response, response } from "sfn/http";
 
-fn handle_request(req, res) ![io] {
-    print("Received: {{req.path}}");
-    res.send("OK");
+fn handle_request(req: Request) -> Response {
+    log.info("Received: {{req.path}}");
+    return response("OK");
 }
 
 fn main() ![io, net] {
     log.info("Starting server on :8080");
-    serve(handle_request, { port: 8080 });
+    serve(handle_request as * fn (Request) -> Response, 8080);
 }
 ```
 

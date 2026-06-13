@@ -725,12 +725,256 @@ The `Response` object returned by `http.get` and `http.post` has the following f
 
 The following HTTP features are planned for a future release:
 
-- Request headers and custom `Content-Type`
 - Authentication helpers (Bearer, Basic)
 - Timeout and retry configuration
 - `http.put`, `http.delete`, `http.patch`
 - Streaming response bodies
 - `websocket.connect` for WebSocket support
+- TLS, keep-alive, per-request allocation cleanup, and a typed routing layer (sfn/http Waves 3+)
+
+---
+
+## `sfn/http` capsule
+
+The `sfn/http` capsule (v0.4.0, epic #1321, PR #1326) ships a pure-Sailfin HTTP/1.1 wire layer — request parsing, response serialization, header/query accessors, response builders, and a blocking `serve` — alongside thin wrappers over the runtime HTTP client.
+
+**Declare the dependency in `capsule.toml` before importing:**
+
+```toml
+[dependencies]
+"sfn/http" = "*"
+```
+
+Capsule functions are only staged into a consumer's codegen through a declared dependency. A loose `sfn run` of a manifest-less file cannot resolve them.
+
+Import the functions and types you need:
+
+```sfn
+import { serve, Request, Response, response, not_found } from "sfn/http";
+```
+
+All server functions require the `![net, io]` effect; the client wrappers require `![net]`.
+
+---
+
+### Types
+
+#### `Request`
+
+```sfn
+struct Request {
+    method: string;
+    path: string;
+    query: string;
+    headers: string[];
+    body: string;
+}
+```
+
+An incoming HTTP request. `headers` are raw `"Name: value"` lines. `query` is the raw string after `?` with no percent-decoding in v0. `body` is populated for POST/PUT in a future wave — **do not rely on `body` for non-GET requests in v0**.
+
+---
+
+#### `Response`
+
+```sfn
+struct Response {
+    status: int;
+    headers: string[];
+    body: string;
+}
+```
+
+An outgoing HTTP response. `headers` are raw `"Name: value"` lines; framing headers (`Content-Length`, `Connection`, `Transfer-Encoding`) and any header containing CR/LF are added or dropped automatically by `serialize_response`.
+
+---
+
+#### `ServerConfig`
+
+```sfn
+struct ServerConfig {
+    port: int;
+    host: string;
+}
+```
+
+Carried for forward compatibility. **`host` is not enforced in v0** — the runtime binds `INADDR_ANY` regardless of this field. The v0 `serve` function takes a bare `port: int`, not a `ServerConfig`.
+
+---
+
+### Server
+
+#### `serve(handler: * fn (Request) -> Response, port: int = 8080) -> void ![net, io]`
+
+Start a blocking HTTP/1.1 server on `port`. Dispatches each accepted connection to `handler` and does not return. Only one server per process is supported in v0.
+
+The handler **must be a top-level named function passed address-taken**. Closures are not supported as handlers in v0; the type system enforces this.
+
+```sfn
+import { serve, Request, Response, response, not_found } from "sfn/http";
+
+fn handle(req: Request) -> Response {
+    if strings_equal(req.path, "/") { return response("Welcome to Sailfin!"); }
+    return not_found();
+}
+
+fn main() ![net, io] {
+    serve(handle as * fn (Request) -> Response, 8080);
+}
+```
+
+---
+
+### Response builders
+
+#### `response(body: string) -> Response`
+
+Build a 200 OK response with the given body.
+
+```sfn
+fn handle(req: Request) -> Response {
+    return response("Hello, world!");
+}
+```
+
+---
+
+#### `response_with_status(status: int, body: string) -> Response`
+
+Build a response with an explicit HTTP status code.
+
+```sfn
+fn handle(req: Request) -> Response {
+    return response_with_status(201, "Created");
+}
+```
+
+---
+
+#### `json_response(body: string) -> Response`
+
+Build a 200 OK response with `Content-Type: application/json`. The caller is responsible for producing valid JSON in `body`.
+
+```sfn
+fn handle(req: Request) -> Response {
+    return json_response("{\"ok\": true}");
+}
+```
+
+---
+
+#### `not_found(body: string = "Not Found") -> Response`
+
+Build a 404 Not Found response.
+
+```sfn
+fn handle(req: Request) -> Response {
+    if strings_equal(req.path, "/") { return response("OK"); }
+    return not_found();
+}
+```
+
+---
+
+### Wire helpers
+
+#### `parse_request(raw: string) -> Request`
+
+Parse a raw HTTP/1.1 request string into a `Request`. Used internally by `serve`; exposed for testing and custom I/O loops.
+
+```sfn
+let req = parse_request("GET /hello?name=world HTTP/1.1\r\nHost: localhost\r\n\r\n");
+```
+
+---
+
+#### `serialize_response(rsp: Response) -> string`
+
+Serialize a `Response` to a raw HTTP/1.1 response string. Emits the status line (using an internal reason-phrase table), the user-supplied headers, `Content-Length`, and `Connection: close`. Any user header containing CR or LF is silently dropped (injection guard). Headers that name `Content-Length`, `Connection`, or `Transfer-Encoding` are also dropped to prevent response smuggling.
+
+```sfn
+let raw = serialize_response(Response { status: 200, headers: [], body: "OK" });
+```
+
+---
+
+#### `header(req: Request, name: string) -> string?`
+
+Case-insensitive header lookup. Returns the trimmed header value, or `null` if the header is absent.
+
+```sfn
+fn handle(req: Request) -> Response {
+    let ct = header(req, "Content-Type");
+    if ct == null { return response_with_status(400, "Missing Content-Type"); }
+    return response("OK");
+}
+```
+
+---
+
+#### `query_param(req: Request, name: string) -> string?`
+
+Look up a query-string parameter by name. Returns the raw (non-percent-decoded) value, or `null` if the parameter is absent.
+
+```sfn
+fn handle(req: Request) -> Response {
+    let name = query_param(req, "name");
+    if name == null { return response("Hello, stranger!"); }
+    return response("Hello, " + name + "!");
+}
+```
+
+---
+
+#### `reason_phrase(status: int) -> string`
+
+Return the standard reason phrase for common HTTP status codes (e.g. `200` → `"OK"`, `404` → `"Not Found"`). Returns `"Status"` for codes not in the table.
+
+```sfn
+let phrase = reason_phrase(418); // "Status"
+```
+
+---
+
+### Client
+
+The following wrappers call the underlying runtime HTTP client and return the response **body string** directly (distinct from the `runtime.http` client which returns a `Response` struct with both `body` and `status`).
+
+#### `get(url: string) -> string ![net]`
+
+Perform an HTTP GET request and return the response body.
+
+```sfn
+import { get } from "sfn/http";
+
+fn fetch_data(url: string) -> string ![net] {
+    return get(url);
+}
+```
+
+---
+
+#### `post(url: string, body: string) -> string ![net]`
+
+Perform an HTTP POST request with the given body and return the response body.
+
+```sfn
+import { post } from "sfn/http";
+
+fn submit(url: string, payload: string) -> string ![net] {
+    return post(url, payload);
+}
+```
+
+---
+
+### v0 limitations
+
+- **HTTP/1.1 only, blocking accept, no TLS, no keep-alive** (`Connection: close` on every response).
+- **POST/PUT body unreliable** — request body draining for non-GET methods is a follow-up; do not rely on `Request.body` being populated in v0.
+- **`host` binding not enforced** — the server always binds `INADDR_ANY` regardless of `ServerConfig.host`.
+- **Per-request allocations are not freed** — a known leak; acceptable for short-lived or v0 servers but not production long-running processes.
+- **One server per process** — multiple concurrent `serve` calls in one process are not supported in v0.
 
 ---
 

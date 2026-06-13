@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-06-10. Seed pinned to `0.7.0-alpha.31` (`.seed-version`);
+Updated: 2026-06-13. Seed pinned to `0.7.0-alpha.31` (`.seed-version`);
 the compiler version source of truth is `compiler/capsule.toml`.
 
 This document is the **current-state source of truth**: what ships today,
@@ -166,7 +166,7 @@ Capsules ship under `capsules/sfn/` and are imported by bare name
 | `sfn/time` | `"time"` | Shipped | `clock` | Sleep, monotonic timing, elapsed |
 | `sfn/cli` | `"cli"` | Shipped | `io` | Arg parsing, subcommands, help generation, terminal styling |
 | `sfn/test` | `"test"` | Partial | None (pure tier) / `io` | Assertions: legacy `assert_*` (`![io]`), `pure_assert_*`, free-function `expect_*` tier, snapshot tier (#977). Fluent `expect(x).to_be(y)` deferred on generic monomorphization + cross-module method-dispatch ABI |
-| `sfn/http` | `"http"` | Partial | `net`, `io` | GET/POST client (via C runtime); server stubbed |
+| `sfn/http` | `"sfn/http"` | Partial (Waves 1–2 shipped) | `net`, `io` | GET/POST client wrappers; pure-Sailfin wire layer (parse/serialize/accessors); typed HTTP/1.1 `serve` on the M4 runtime (`sfn_serve_framed`). v0 limits: blocking/single-process, no TLS, no keep-alive, POST body unreliable. Wave 3+ (TLS, keep-alive, routing) pending. (#1321, PR #1326 merged; #1328 in review) |
 | `sfn/net` | `"net"` | Stubbed | `net`, `io` | TCP/UDP socket API (pending runtime intrinsics) |
 | `sfn/sync` | `"sync"` | Stubbed | `io` | channel/parallel/spawn API (pending concurrency runtime) |
 | `sfn/tensor` | `"tensor"` | Shipped (CPU) | `gpu` (planned) | Tensor ops, matmul, transpose; no GPU dispatch yet |
