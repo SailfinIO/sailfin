@@ -23,6 +23,20 @@
 // `main`, which would collide with the emitted `@main` at link time.
 // This mirrors the legacy script's "copy out of the repo tree" step.
 //
+// Parallel-runner isolation (the load-bearing detail): each nested
+// `sfn build` is given its own `--work-dir` under the temp dir. Without
+// it, `sfn build` stages the user module's `.sfn-asm` at the FIXED,
+// basename-keyed `build/native/import-context/<slug>.sfn-asm`
+// (`capsule_resolver.sfn::_cr_import_context_root`); two builds whose
+// source share a basename (here every fixture is copied to `probe.sfn`)
+// then overwrite each other's staged IR under the parallel `sfn test`
+// pool, producing a cross-contaminated binary (e.g. this entry probe
+// emitting the panic probe's `boom`). `--work-dir` relocates that
+// staging per build, which is the supported isolation mechanism — and
+// the pattern every build-spawning e2e test must use (see
+// `.claude/rules/no-bash-e2e.md`). The underlying default-path collision
+// is tracked as a separate compiler-correctness fix.
+//
 // `with_tmp_dir`'s body returns an `int` and assertions run on that
 // return value outside the closure (the `sfn/test` idiom — see
 // `capsules/sfn/test/tests/fixtures_test.sfn`). Captured stdout is
@@ -39,20 +53,6 @@ fn _sfn_bin() -> string ![io] {
 
 fn _fixture_src() -> string ![io] {
     return fs.readFile("compiler/tests/e2e/fixtures/sailfin_main_entry_probe.sfn");
-}
-
-// Child environment for the spawned `sfn build`. `process.run_capture`
-// treats an empty array as the *empty* environment (not "inherit"), and
-// the compiler honours `SAILFIN_TEST_SCRATCH` as its build scratch root
-// (`cli_commands.sfn::_test_scratch_root`, default `build/sailfin`).
-// Thread the runner's per-file scratch through so the nested build does
-// not fall back to the shared default and race with sibling test files
-// under a parallel runner.
-fn _child_env() -> string[] ![io] {
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    let mut e: string[] = [];
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
 }
 
 // A fresh marker-file path under the runner's scratch dir (or `/tmp`),
@@ -76,13 +76,14 @@ fn _build_and_run(out_marker: string, extra: string) -> int ![io] {
         let srcpath = dir + "/probe.sfn";
         fs.writeFile(srcpath, _fixture_src());
         let binpath = dir + "/probe";
-        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let workdir = dir + "/wd";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "--work-dir", workdir, "-o", binpath, srcpath], []);
         let _bo = process.capture_take_stdout();
         let _be = process.capture_take_stderr();
         if build_exit != 0 { return -100; }
         let mut run_argv: string[] = [binpath];
         if extra.length > 0 { run_argv.push(extra); }
-        let run_exit = process.run_capture(run_argv, _child_env());
+        let run_exit = process.run_capture(run_argv, []);
         let out = process.capture_take_stdout();
         let _re = process.capture_take_stderr();
         fs.writeFile(out_marker, out);
