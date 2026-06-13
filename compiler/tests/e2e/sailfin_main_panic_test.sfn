@@ -1,0 +1,148 @@
+// End-to-end test for the M5.3 `@main` lowering's top-level exception
+// frame (#471).
+//
+// Native replacement for the former `test_sailfin_main_panic.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Builds a fixture
+// whose `fn main` throws an uncaught exception
+// (`compiler/tests/e2e/fixtures/sailfin_main_panic_probe.sfn`), runs it,
+// and asserts:
+//
+//   1. exit code 1   — the wrapper's catch landing pad returned
+//                      `ret i32 1` instead of bubbling out to
+//                      `sfn_throw`'s `abort()` path (SIGABRT, not 1).
+//   2. message printed — the wrapper called
+//                      `sailfin_runtime_panic_emit(msg)` from the catch
+//                      block; stderr carries the thrown string.
+//   3. no internal symbol — `objdump --syms <bin>` shows no
+//                      `sailfin_user_main__*` symbol, confirming the
+//                      user body was inlined into `@main` via the
+//                      `internal` + `alwaysinline` linkage and stripped
+//                      at the -O2 link.
+//
+// Build hygiene matches `sailfin_main_entry_test.sfn`: the fixture is
+// written into a fresh temp dir (via `with_tmp_dir`) before building so
+// `sfn build` does not pull in native_driver.c's colliding `main`, and
+// each nested `sfn build` threads the runner's per-file
+// `SAILFIN_TEST_SCRATCH` through (`_child_env`) so the compiler routes the
+// `program.ll` build-cache dir under it per invocation (#1333),
+// preventing concurrent builds in the parallel `sfn test` pool from
+// clobbering each other's `build/sailfin/program.ll`. See
+// `sailfin_main_entry_test.sfn` for the full rationale and
+// `.claude/rules/no-bash-e2e.md` for the required pattern.
+//
+// The symbol check (3) runs `objdump` as a subprocess. When `objdump`
+// is unavailable (e.g. macOS dev boxes) the spawn fails and the check
+// is skipped rather than failed — CI is Linux, where it is the
+// canonical path.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _fixture_src() -> string ![io] {
+    return fs.readFile("compiler/tests/e2e/fixtures/sailfin_main_panic_probe.sfn");
+}
+
+// See `sailfin_main_entry_test.sfn::_child_env`: thread `PATH`
+// (+ `HOME`/`TMPDIR`) so the nested build's `clang`/linker is found, plus
+// the runner's per-file `SAILFIN_TEST_SCRATCH` so the `program.ll`
+// build-cache dir is isolated per invocation (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-main-panic-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Build the panic-probe fixture in a temp dir, run it, and stash the
+// run's captured stderr to `err_marker`. Returns the run's exit code,
+// or `-100` if the build itself failed.
+fn _build_and_run(err_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let _ro = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(err_marker, err);
+        return run_exit;
+    });
+}
+
+// Build the panic-probe fixture, then dump its symbols with `objdump`,
+// stashing the symbol table to `sym_marker`. Returns the `objdump` exit
+// code: `< 0` means `objdump` could not be spawned (skip the check),
+// `-100` means the fixture build failed.
+fn _build_and_dump_syms(sym_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let dump_exit = process.run_capture(["objdump", "--syms", binpath], []);
+        let syms = process.capture_take_stdout();
+        let _de = process.capture_take_stderr();
+        fs.writeFile(sym_marker, syms);
+        return dump_exit;
+    });
+}
+
+test "main-panic: uncaught throw exits 1 and stderr carries the message" ![io] {
+    let marker = _marker("err");
+    let exit = _build_and_run(marker);
+    // Assert the expected exit code (also rejects the `-100` build-failure
+    // sentinel) before reading the marker: on a build failure the marker
+    // is never written, so reading it first would surface as an unrelated
+    // error rather than this clean assertion.
+    assert exit == 1;
+    let err = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(err, "boom", 0) >= 0;
+}
+
+test "main-panic: no sailfin_user_main__* symbol survives the -O2 link" ![io] {
+    let marker = _marker("syms");
+    let dump_exit = _build_and_dump_syms(marker);
+    // The fixture build must have succeeded (`-100` == build failure)
+    // before the marker is meaningful.
+    assert dump_exit != -100;
+    let syms = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // Only a clean `objdump` run (exit 0) yields a trustworthy symbol
+    // table. A negative exit means `objdump` could not be spawned
+    // (unavailable, e.g. macOS) and a positive exit means it ran but
+    // errored — in both cases stdout is unreliable (often empty), which
+    // would make the absence check pass vacuously, so skip it. CI is
+    // Linux, where the exit-0 path is the canonical one.
+    if dump_exit == 0 {
+        assert syms.length > 0;
+        assert find(syms, "sailfin_user_main__", 0) < 0;
+    }
+}

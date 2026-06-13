@@ -1783,9 +1783,22 @@ fn _resolve_sailfin_cache_dir(cache_dir: string) -> string {
 // non-empty `work_dir` rebases under `<work_dir>/sailfin` so a
 // `sfn build --work-dir <root>` invocation writes nothing under
 // `./build/`.
-fn _resolve_sailfin_cache_dir_for_work(work_dir: string) -> string {
-    if work_dir.length == 0 { return "build/sailfin"; }
-    return work_dir + "/sailfin";
+// Resolve the cache dir for the top-level module's `program.ll`/`program.o`
+// and related driver scratch. With `--work-dir` it lives under
+// `<work_dir>/sailfin`. Otherwise it honours `SAILFIN_TEST_SCRATCH`
+// (#1333): without that isolation, two concurrent `sfn build`s of
+// different sources both write the fixed `build/sailfin/program.ll` and
+// clobber each other's IR, producing a cross-contaminated binary under
+// the parallel `sfn test` pool. Read via the `env.get` builtin so it
+// works even when the child env carries no PATH (a `run_capture` child
+// given only `SAILFIN_TEST_SCRATCH`). Self-host sets no
+// `SAILFIN_TEST_SCRATCH`, so it keeps the stable `build/sailfin` path —
+// matching the resolver's `_cr_scratch_root` default for the dep `.ll`s.
+fn _resolve_sailfin_cache_dir_for_work(work_dir: string) -> string ![io] {
+    if work_dir.length > 0 { return work_dir + "/sailfin"; }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch; }
+    return "build/sailfin";
 }
 
 struct _CapsuleBuildSpec {

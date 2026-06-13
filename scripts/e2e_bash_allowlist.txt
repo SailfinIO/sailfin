@@ -39,7 +39,6 @@ test_check_effect_call_site_caret.sh
 test_check_json_schema.sh
 test_check_phase_ledger.sh
 test_check_resolver_scan_memo.sh
-test_cli_bare_file_dispatch.sh
 test_cli_v2_exit_codes.sh
 test_clock_gettime_reader.sh
 test_clock_monotonic_id_sentinel.sh
@@ -124,8 +123,6 @@ test_runtime_string_basic.sh
 test_runtime_string_immediate.sh
 test_runtime_string_utf8_numeric.sh
 test_runtime_type_meta.sh
-test_sailfin_main_entry.sh
-test_sailfin_main_panic.sh
 test_sfn_package.sh
 test_sleep_eintr_resume.sh
 test_sleep_routes_to_sfn_clock.sh

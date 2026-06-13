@@ -33,6 +33,12 @@
 // binary (rather than importing resolver entry points) matches
 // production exactly and avoids dragging the whole driver into the
 // test link — the same rationale as `emit_retry_test.sfn`.
+//
+// Each spawned `check` clears `SAILFIN_TEST_SCRATCH` (`SAILFIN_TEST_SCRATCH=`
+// prefix): the parent test runner sets it per-file, and the compiler now
+// routes the import-context staging under it (#1333). This test asserts on
+// the CWD-relative default (`<cwd>/build/native/import-context`), so it
+// must opt out of that redirection to exercise the default path.
 extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
 
 fn _shell_capture(cmd: string) -> string ![io] {
@@ -65,7 +71,9 @@ test "check staging: subprocess path stages byte-identical artifacts to in-proce
     // resolves -> subprocess staging path.
     let work_a = root + "/work_a";
     process.run(["mkdir", "-p", work_a]);
-    let rc_a = process.run(["sh", "-c", "cd " + work_a + " && " + exe
+    let rc_a = process.run(["sh", "-c", "cd " + work_a
+        + " && SAILFIN_TEST_SCRATCH= "
+        + exe
         + " check "
         + src_dir
         + "/main.sfn >/dev/null 2>&1"]);
@@ -79,7 +87,9 @@ test "check staging: subprocess path stages byte-identical artifacts to in-proce
     process.run(["mkdir", "-p", work_b]);
     process.run(["mkdir", "-p", bin_b]);
     process.run(["cp", exe, bin_b + "/sfn-renamed"]);
-    let rc_b = process.run(["sh", "-c", "cd " + work_b + " && " + bin_b
+    let rc_b = process.run(["sh", "-c", "cd " + work_b
+        + " && SAILFIN_TEST_SCRATCH= "
+        + bin_b
         + "/sfn-renamed check "
         + src_dir
         + "/main.sfn >/dev/null 2>&1"]);
@@ -120,7 +130,8 @@ test "check staging: warm re-run is a cache hit (staged artifacts untouched)" ![
 
     let work = root + "/work";
     process.run(["mkdir", "-p", work]);
-    let cmd = "cd " + work + " && " + exe + " check " + src_dir
+    let cmd = "cd " + work + " && SAILFIN_TEST_SCRATCH= " + exe + " check "
+        + src_dir
         + "/main.sfn >/dev/null 2>&1";
 
     // Cold run stages the import-context.

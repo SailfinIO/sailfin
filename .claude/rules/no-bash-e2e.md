@@ -68,6 +68,58 @@ The supported building blocks (all already shipped):
   argument. There is **no** `with_env`/`with_cwd` fixture (process-global
   `setenv`/`chdir` is unsound under the future parallel runner — see
   `fixtures.sfn`); always scope env to the child you spawn.
+- **Build a binary to run it:** when a test must compile a fixture to an
+  executable (not just frontend-check it), thread `SAILFIN_TEST_SCRATCH`
+  through to the spawned compiler so its staging stays per-invocation —
+  **mandatory** under the parallel pool. See the dedicated section below
+  for the why.
+
+## Build-and-run tests must isolate the build
+
+A test that spawns a full `sfn build` (compile a fixture to a binary and
+execute it — e.g. `sailfin_main_entry_test.sfn`,
+`sailfin_main_panic_test.sfn`) or uses bare dispatch / `sfn run` to
+compile+run a file (`cli_bare_file_dispatch_test.sfn`) runs inside the
+parallel `int-e2e-caps` pool (`sailfin test --jobs N`), so **multiple
+compiles run concurrently**. A compile writes the top-level module's IR
+to `<cache-dir>/program.ll`, where `<cache-dir>` defaults to the fixed
+`build/sailfin` (`cli_main.sfn::_resolve_sailfin_cache_dir_for_work`).
+Two builds of different sources then **overwrite each other's
+`build/sailfin/program.ll`**, producing a cross-contaminated binary
+(classic symptom: one fixture's binary emitting another's output). It is
+non-deterministic and shows up only under the pool.
+
+`run_capture`'s empty `env` array is the *empty* environment (**not**
+"inherit"), so a build-spawning test must thread the variables the nested
+compile needs explicitly — most importantly **`PATH`**: the nested build
+runs `clang` and its linker (`mold`/`lld`/`ld`), and with no `PATH` the
+linker is not found (`clang: error: ... "ld" doesn't exist`) and the build
+fails. Also thread `SAILFIN_TEST_SCRATCH`: the compiler routes the
+`program.ll` build-cache dir under it (#1333), so a parallel run
+(`--jobs N>1`) does not collide on the fixed `build/sailfin`.
+
+```sfn
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+// ...
+let exit = process.run_capture(
+    [_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+```
+
+This works for `sfn build`, `sfn run`, and bare dispatch alike (it is the
+only lever for the latter two, which have no `--work-dir`). For a caller
+*outside* the test runner (no `SAILFIN_TEST_SCRATCH`), `sfn build
+--work-dir <dir>` is the equivalent explicit per-invocation isolation.
 
 ## When bash is still allowed
 
