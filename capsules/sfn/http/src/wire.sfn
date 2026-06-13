@@ -141,8 +141,10 @@ fn reason_phrase(status: int) -> string {
 // missing final blank line and of bare-LF line endings (CR is stripped
 // when present). `method`/`path`/`query` come from the request line;
 // `headers` are the raw "Name: value" lines up to the blank-line
-// terminator; `body` is whatever follows it (GET-shaped in v0 — the
-// runtime does not yet drain Content-Length; see Wave 3 / #1324).
+// terminator; `body` is whatever follows it. The runtime drains the
+// `Content-Length` body before handing the raw request here (Wave 3 /
+// #1324), so `body` is reliable for POST/PUT; chunked encoding stays
+// out of scope (post-1.0).
 fn parse_request(raw: string) -> Request {
     let total = raw.length;
 
