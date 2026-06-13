@@ -2,45 +2,30 @@
 //
 // Provides a unified API for making HTTP requests and serving HTTP responses.
 // All operations require the `net` effect; server operations also require `io`.
+//
+// Internal layout — this barrel re-exports the public surface. Sources live in:
+//   - types.sfn  Request, Response, ServerConfig
+//   - wire.sfn   parse_request, serialize_response, header, query_param,
+//                reason_phrase, response, response_with_status,
+//                json_response, not_found
+//   - mod.sfn    client (get, post) + serve (server entry point)
+//
+// Build-out tracked by epic #1321; design in docs/proposals/sfn-http-capsule.md.
 // ---- Types ----
-struct Request {
-    method: string;
-    path: string;
-    headers: string[];
-    body: string;
-}
+export { Request, Response, ServerConfig } from "./types";
 
-struct Response {
-    status: int;
-    headers: string[];
-    body: string;
-}
-
-struct ServerConfig {
-    port: int;
-    host: string;
-}
-
-// ---- Response helpers ----
-fn response(body: string) -> Response {
-    return Response { status: 200, headers: [], body: body };
-}
-
-fn response_with_status(status: int, body: string) -> Response {
-    return Response { status: status, headers: [], body: body };
-}
-
-fn json_response(body: string) -> Response {
-    return Response {
-        status: 200,
-        headers: ["Content-Type: application/json"],
-        body: body
-    };
-}
-
-fn not_found(body: string = "Not Found") -> Response {
-    return Response { status: 404, headers: [], body: body };
-}
+// ---- Wire layer + response builders ----
+export {
+    parse_request,
+    serialize_response,
+    header,
+    query_param,
+    reason_phrase,
+    response,
+    response_with_status,
+    json_response,
+    not_found
+} from "./wire";
 
 // ---- Client ----
 fn get(url: string) -> string ![net] {
@@ -54,7 +39,7 @@ fn post(url: string, body: string) -> string ![net] {
 }
 
 // ---- Server ----
-fn serve(handler: any, config: any?) -> void ![io, net] {
+fn serve(handler: any, config: any? = null) -> void ![io, net] {
     // Start an HTTP server that dispatches requests to the handler function.
     //
     // Usage:
