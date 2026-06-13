@@ -971,7 +971,7 @@ fn submit(url: string, payload: string) -> string ![net] {
 ### v0 limitations
 
 - **HTTP/1.1 only, blocking accept, no TLS, no keep-alive** (`Connection: close` on every response).
-- **POST/PUT body unreliable** — request body draining for non-GET methods is a follow-up; do not rely on `Request.body` being populated in v0.
+- **`Content-Length` bodies only** — POST/PUT request bodies are drained via `Content-Length` (capped at 1 MiB; over-cap requests get a `500`), so `Request.body` is reliable. Chunked transfer-encoding is not decoded (post-1.0).
 - **`host` binding not enforced** — the server always binds `INADDR_ANY` regardless of `ServerConfig.host`.
 - **Per-request allocations are not freed** — a known leak; acceptable for short-lived or v0 servers but not production long-running processes.
 - **One server per process** — multiple concurrent `serve` calls in one process are not supported in v0.

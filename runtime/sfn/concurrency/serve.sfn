@@ -43,11 +43,12 @@
 // in place of the legacy `@sailfin_adapter_serve_start`.
 //
 // Scope: HTTP/1.1 only — NO TLS (post-1.0), and blocking accept —
-// NO async I/O (v0). Request parsing is minimal: the raw request
-// head is handed to the handler verbatim (GET-shaped v0; bodies are
-// read up to the header terminator). The response is always
-// `200 OK` with a `Content-Length`; a null handler return becomes a
-// `500`.
+// NO async I/O (v0). Request parsing is minimal: the raw request is
+// handed to the handler verbatim. `Content-Length` request bodies ARE
+// drained (capped at 1 MiB; over-cap → `500`), so POST/PUT handlers
+// see a reliable body; chunked transfer-encoding is out of scope
+// (post-1.0). The default `sfn_serve` response is always `200 OK` with
+// a `Content-Length`; a null handler return becomes a `500`.
 //
 // v0 limitations (follow-up waves): (1) per-connection `Task`
 // handles are fire-and-forget — never `sfn_task_join`ed or
@@ -89,6 +90,15 @@ extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
 extern fn strlen(s: * u8) -> usize;
 
 extern fn strstr(haystack: * u8, needle: * u8) -> * u8;
+
+// `strcasestr` (GNU/BSD libc) — case-insensitive `strstr`, used to
+// locate the `Content-Length` request header regardless of casing
+// (RFC 7230 §3.2 header names are case-insensitive). Present on both
+// targets (glibc + Darwin). `strtoll` parses the decimal value (the
+// `end` out-param is always passed `null`, mirroring `rlimit.sfn`).
+extern fn strcasestr(haystack: * u8, needle: * u8) -> * u8;
+
+extern fn strtoll(s: * u8, end: * u8, base: i32) -> i64;
 
 // ── BSD sockets (libc) ────────────────────────────────────────
 // `addr` is spelled `* u8` (the `net.sfn` opaque-handle policy:
@@ -187,26 +197,70 @@ fn _serve_send_all(fd: i32, buf: * u8, total: i64) -> bool {
     return true;
 }
 
-// `_serve_recv_request(fd)` — read the request head into a growing
-// libc buffer (doubling like `http.sfn`'s `_recv_all`), stopping
-// once the `\r\n\r\n` header terminator is seen, on EOF, or on a
-// `recv` error. Returns a NUL-terminated, caller-owned buffer (null
-// on OOM / error). v0 reads only up to the header terminator —
-// request bodies past the headers are not drained (GET-shaped v0).
+// `_serve_content_length(buf, header_end)` — extract the declared
+// `Content-Length` from the request head (bytes `[0, header_end)`,
+// where `header_end` is the offset just past the `\r\n\r\n`
+// terminator). Case-insensitive on the header name (RFC 7230 §3.2).
+// Returns the non-negative value, or -1 when no Content-Length header
+// is present in the head.
 //
-// A client that never sends the `\r\n\r\n` terminator must not be
-// able to force unbounded growth (DoS / OOM), so the header read is
-// capped at `max_request` bytes — once exceeded without a terminator
-// the request is rejected (buffer freed, null returned, which the
-// worker turns into a `500` + connection close).
+// The search is anchored to a header-line start by matching the
+// CRLF-prefixed name `\r\ncontent-length:` — every header is preceded
+// by the CRLF that terminates the request line or the prior header, so
+// this matches only a real header field, never a `content-length:`
+// substring sitting inside another header's name or value (e.g.
+// `X: content-length: 999`). Without the anchor such a substring could
+// be misread and make the body-drain loop block on bytes the client
+// never sends (DoS / hang). The match must also begin inside the
+// header block: a match whose name starts at/after the blank-line
+// terminator (a body that happens to open with `content-length:`) is
+// rejected by the `off + 2 >= header_end` guard.
+fn _serve_content_length(buf: * u8, header_end: i64) -> i64 {
+    let needle: string = "\r\ncontent-length:";
+    let hit: * u8 = strcasestr(buf, needle as * u8);
+    if hit as i64 == 0 { return 0 - 1; }
+    // `off` points at the CRLF; the header name starts at `off + 2`.
+    let off: i64 = (hit as i64) - (buf as i64);
+    if off + 2 >= header_end { return 0 - 1; }
+    // The value starts after the 17-char "\r\ncontent-length:" token;
+    // strtoll skips leading whitespace and parses the decimal length.
+    let value_ptr: * u8 = _serve_ptr_off(hit, 17);
+    return strtoll(value_ptr, null, 10);
+}
+
+// `_serve_recv_request(fd)` — read a full request (head + body) into a
+// growing libc buffer (doubling like `http.sfn`'s `_recv_all`).
+// Returns a NUL-terminated, caller-owned buffer (null on OOM / error /
+// over-cap body, which the worker turns into a `500` + connection
+// close).
+//
+// Phase 1 reads until the `\r\n\r\n` header terminator, on EOF, or on
+// a `recv` error. A client that never sends the terminator must not be
+// able to force unbounded growth (slow-loris / unbounded-header DoS),
+// so the header read is capped at `max_header` bytes — once exceeded
+// without a terminator the request is rejected.
+//
+// Phase 2 honors `Content-Length`: any body bytes past the header
+// terminator are drained so `Request.body` is reliable for POST/PUT.
+// `recv` may already have buffered part (or all) of the body alongside
+// the headers, so only the shortfall is read. The body is capped at
+// `max_body` (1 MiB) — an over-cap declared length is rejected up front
+// (null → `500`) rather than risking an unbounded allocation or a hang.
+// Chunked transfer-encoding is out of scope (post-1.0); only an
+// explicit `Content-Length` body is drained.
 fn _serve_recv_request(fd: i32) -> * u8 {
-    let max_request: i64 = 65536;
+    let max_header: i64 = 65536;
+    let max_body: i64 = 1048576;
     let mut capacity: i64 = 4096;
     let mut len: i64 = 0;
     let mut buf: * u8 = malloc((capacity + 1) as usize);
     if buf as i64 == 0 { return null; }
     let chunk: i64 = 4096;
     let terminator: string = "\r\n\r\n";
+
+    // Phase 1 — read the header block. `header_end` is the offset just
+    // past the `\r\n\r\n` terminator, or -1 if EOF arrived first.
+    let mut header_end: i64 = 0 - 1;
     loop {
         if len + chunk > capacity {
             let new_cap: i64 = capacity * 2;
@@ -226,14 +280,64 @@ fn _serve_recv_request(fd: i32) -> * u8 {
         if n == 0 { break; }
         len = len + n;
         memset(_serve_ptr_off(buf, len), 0, 1 as usize);
-        // Stop as soon as the full header block has arrived.
-        if (strstr(buf, terminator as * u8) as i64) != 0 { break; }
+        let term_ptr: * u8 = strstr(buf, terminator as * u8);
+        if (term_ptr as i64) != 0 {
+            header_end = ((term_ptr as i64) - (buf as i64)) + 4;
+            break;
+        }
         // Reject a request that exceeds the header cap without a
         // terminator (slow-loris / unbounded-header DoS guard).
-        if len >= max_request {
+        if len >= max_header {
             free(buf);
             return null;
         }
+    }
+
+    // EOF before the headers completed: return what we have.
+    if header_end < 0 {
+        memset(_serve_ptr_off(buf, len), 0, 1 as usize);
+        return buf;
+    }
+
+    // Phase 2 — drain the Content-Length body, if any.
+    let content_length: i64 = _serve_content_length(buf, header_end);
+    if content_length <= 0 {
+        memset(_serve_ptr_off(buf, len), 0, 1 as usize);
+        return buf;
+    }
+    // Over-cap body: reject before allocating / blocking on recv.
+    if content_length > max_body {
+        free(buf);
+        return null;
+    }
+
+    let body_target: i64 = header_end + content_length;
+    loop {
+        if len >= body_target { break; }
+        if body_target > capacity {
+            let mut new_cap: i64 = capacity;
+            loop {
+                if new_cap >= body_target { break; }
+                new_cap = new_cap * 2;
+            }
+            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            if new_buf as i64 == 0 {
+                free(buf);
+                return null;
+            }
+            buf = new_buf;
+            capacity = new_cap;
+        }
+        let want: i64 = body_target - len;
+        let n: i64 = recv(fd, _serve_ptr_off(buf, len), want, 0);
+        if n < 0 {
+            free(buf);
+            return null;
+        }
+        // Client closed before sending the full declared body: return
+        // what arrived (the handler sees a short body rather than a hang).
+        if n == 0 { break; }
+        len = len + n;
     }
     memset(_serve_ptr_off(buf, len), 0, 1 as usize);
     return buf;
