@@ -68,6 +68,10 @@ The supported building blocks (all already shipped):
   argument. There is **no** `with_env`/`with_cwd` fixture (process-global
   `setenv`/`chdir` is unsound under the future parallel runner — see
   `fixtures.sfn`); always scope env to the child you spawn.
+- **Build a binary to run it:** when a test must compile a fixture to an
+  executable (not just frontend-check it), give each nested `sfn build` a
+  per-build `--work-dir` inside the test's `with_tmp_dir` — **mandatory**
+  under the parallel pool. See the dedicated section below for the why.
 
 ## Build-and-run tests must isolate the build (`--work-dir`)
 
