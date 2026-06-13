@@ -10,9 +10,9 @@
 #
 #   1. emit shape — emitted IR carries a `define` for
 #                   `sfn_arena_sfn_mark` (→ double) and
-#                   `sfn_arena_sfn_rewind` (double →) plus a `declare`
-#                   for the C `sfn_arena_global` / `sfn_arena_enabled`
-#                   the bodies read.
+#                   `sfn_arena_sfn_rewind` (double →) plus a `define`
+#                   for `sfn_arena_global` / `sfn_arena_enabled` (now
+#                   Sailfin-owned, #1309) the bodies read.
 #   2. coexistence — the ported pair uses the module's `sfn_arena_sfn_*`
 #                    infix; assert it does NOT emit bare
 #                    `sfn_arena_mark` / `sfn_arena_rewind` (those names
@@ -76,16 +76,21 @@ test_emit_define_shape() {
     return "$missing"
 }
 
-test_emit_global_declares() {
+test_emit_global_defines() {
     local ll="$SCRATCH/arena.ll"
     if [ ! -f "$ll" ]; then
         echo "[test]   $ll missing — test_emit_define_shape must run first"
         return 1
     fi
+    # #1309: the global-arena handle + arena-mode probe that mark/rewind
+    # read are now DEFINED in arena.sfn (they replaced the removed C
+    # namesakes), so the bodies call the local Sailfin defs rather than
+    # an extern `declare`. A regression that reverts ownership to C
+    # (extern `declare` instead of `define`) trips this.
     local missing=0
     for sym in sfn_arena_enabled sfn_arena_global; do
-        if ! grep -qE "^declare .* @${sym}\(" "$ll"; then
-            echo "[test]   missing 'declare ... @${sym}(' in arena.ll"
+        if ! grep -qE "^define .* @${sym}\(" "$ll"; then
+            echo "[test]   missing 'define ... @${sym}(' in arena.ll"
             missing=$((missing + 1))
         fi
     done
@@ -161,11 +166,21 @@ extern void   sfn_arena_sfn_rewind(double encoded_mark);
 void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }
 void sfn_type_register(void *meta) { (void)meta; }
 
-/* The Sailfin allocator bodies also declared in arena.ll reference
- * `malloc`/`free`/`memcpy`/`realloc` — all satisfied by libc. The
- * arena globals (`sfn_arena_enabled` / `sfn_arena_global`) come from
- * the linked sailfin_arena.c. We force arena mode on by setting the
- * env var before the first `sfn_arena_global()` call. */
+/* #1309: arena.sfn's `sfn_arena_enabled` / `sfn_arena_global` build
+ * their `SAILFIN_USE_ARENA` / probe literals via `sfn_alloc_struct`, so
+ * the emitted arena.ll references it. A calloc-backed stub satisfies the
+ * link; the mark/rewind roundtrip drives real allocations through the
+ * arena (`sfn_arena_alloc`) and never relies on this stub's bytes. */
+void *sfn_alloc_struct(long size_bytes) { return calloc(1, (size_t)size_bytes); }
+
+/* The Sailfin allocator bodies in arena.ll reference
+ * `malloc`/`free`/`memcpy` — all satisfied by libc. #1309 moved
+ * `sfn_arena_enabled` / `sfn_arena_global` / `sfn_arena_alloc` /
+ * `sfn_arena_create` INTO arena.ll (the C namesakes were removed); this
+ * harness links arena.ll for those and sailfin_arena.c for the still-C
+ * `sfn_arena_realloc`/`reset`/`destroy`/`print_stats`/`mark`/`rewind`
+ * that share the same global handle. We force arena mode on by setting
+ * the env var before the first `sfn_arena_global()` call. */
 int main(void) {
     /* ---- DISABLED arena: mark→0.0, rewind inert (genuine no-op) ----
      * Run first, in a forked child that never enables the arena (the
@@ -272,7 +287,7 @@ CHARNESS
 }
 
 run_test "sfn emit llvm produces define for sfn_arena_sfn_mark / _rewind" test_emit_define_shape
-run_test "sfn emit llvm declares C arena globals (enabled/global)" test_emit_global_declares
+run_test "sfn emit llvm defines arena globals (enabled/global) in Sailfin" test_emit_global_defines
 run_test "ported pair does not collide with bare C arena mark/rewind" test_no_bare_c_arena_collision
 run_test "mark → alloc → rewind reclaims post-mark bump (real C arena)" test_mark_rewind_roundtrip
 

@@ -234,21 +234,19 @@ extern int64_t slice_byte_at(void *slice, int64_t index);
  * test_runtime_memory_arena.sh — see its harness header for the
  * rationale on each). `sfn_alloc_struct` backs the boxed-struct
  * returns; a plain malloc suffices because every box is fully
- * initialized by a whole-aggregate store before use. */
+ * initialized by a whole-aggregate store before use.
+ *
+ * #1309: `sfn_arena_enabled` / `sfn_arena_global` are now DEFINED in
+ * arena.ll (they replaced the removed C namesakes), so stubbing them
+ * here would be a duplicate-symbol link error — the linked arena.ll
+ * provides them. They pull in `sfn_alloc_struct` (their probe literals)
+ * which the stub below satisfies. */
 void sailfin_runtime_mark_persistent(void *ptr) {
     (void)ptr;
 }
 
 void sfn_type_register(void *desc) {
     (void)desc;
-}
-
-int sfn_arena_enabled(void) {
-    return 0;
-}
-
-void *sfn_arena_global(void) {
-    return NULL;
 }
 
 void *sfn_alloc_struct(int64_t size) {

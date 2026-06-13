@@ -137,11 +137,13 @@ extern int64_t owned_buf_byte_at(void *self, int64_t index);
 /* Runtime stubs the emitted IR references (same set as
  * test_owned_buf_roundtrip.sh). sfn_alloc_struct backs the boxed-struct
  * returns; plain malloc suffices because every box is fully initialized
- * by a whole-aggregate store before use. */
+ * by a whole-aggregate store before use.
+ *
+ * #1309: sfn_arena_enabled / sfn_arena_global are now defined in arena.ll
+ * (linked below), so stubbing them here would collide; the real defs
+ * reference sfn_alloc_struct, satisfied by the stub. */
 void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }
 void sfn_type_register(void *desc) { (void)desc; }
-int sfn_arena_enabled(void) { return 0; }
-void *sfn_arena_global(void) { return NULL; }
 void *sfn_alloc_struct(int64_t size) { return malloc((size_t)size); }
 
 /* Read back the whole buffer and compare to expect[0..n). */
