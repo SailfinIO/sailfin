@@ -27,31 +27,34 @@ fn _sfn_bin() -> string ![io] {
     return "build/native/sailfin";
 }
 
-// Concurrency note: bare dispatch compiles+runs the file, and `sfn build`
-// stages the user module's `.sfn-asm` at the fixed, basename-keyed
-// `build/native/import-context/<slug>.sfn-asm` — so two concurrent builds
-// of same-basename sources cross-contaminate (see
-// `sailfin_main_entry_test.sfn`). `run`/bare dispatch has no `--work-dir`
-// to isolate that staging, so this test deliberately drives a source with
-// a basename (`hello-world`) no other test builds, and its two compiling
-// cases run sequentially within this file — so the staging slug is never
-// touched concurrently. A build-spawning test that needs an arbitrary
-// fixture must use `sfn build --work-dir <dir>` instead (the entry/panic
-// tests do). The child env is the empty environment, matching
-// `guillermo_test.sfn`.
+// Bare dispatch compiles+runs the file. `process.run_capture` treats an
+// empty array as the *empty* environment, so thread the runner's per-file
+// `SAILFIN_TEST_SCRATCH` through: the compiler routes the `program.ll`
+// build-cache dir under it (#1333), isolating this compile from sibling
+// test files' concurrent builds. Unlike `sfn build`, bare dispatch /
+// `run` has no `--work-dir`, so the scratch passthrough is the only
+// isolation lever — and it suffices because the runner mints a unique
+// scratch per file.
+fn _child_env() -> string[] ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    let mut e: string[] = [];
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
 // `sailfin examples/basics/hello-world.sfn` (a single `.sfn` positional,
 // no subcommand) compiles and runs the file, printing its output and
 // exiting 0. The path is relative to the runner's working directory
 // (the repo root), matching the legacy script's `cd "$REPO_ROOT"`.
 test "bare-file: 'sailfin <file.sfn>' compiles, runs, and exits 0" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "examples/basics/hello-world.sfn"], []);
+    let exit = process.run_capture([_sfn_bin(), "examples/basics/hello-world.sfn"], _child_env());
     let _ = process.capture_take_stdout();
     let _ = process.capture_take_stderr();
     assert exit == 0;
 }
 
 test "bare-file: 'sailfin <file.sfn>' prints the program's output" ![io] {
-    let _exit = process.run_capture([_sfn_bin(), "examples/basics/hello-world.sfn"], []);
+    let _exit = process.run_capture([_sfn_bin(), "examples/basics/hello-world.sfn"], _child_env());
     let out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert find(out, "Hello, Sailfin!", 0) >= 0;

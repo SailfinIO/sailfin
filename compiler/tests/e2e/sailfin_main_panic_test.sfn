@@ -22,12 +22,13 @@
 // Build hygiene matches `sailfin_main_entry_test.sfn`: the fixture is
 // written into a fresh temp dir (via `with_tmp_dir`) before building so
 // `sfn build` does not pull in native_driver.c's colliding `main`, and
-// each nested `sfn build` gets its own `--work-dir` so concurrent builds
-// in the parallel `sfn test` pool do not collide on the fixed,
-// basename-keyed `build/native/import-context/<slug>.sfn-asm` staging
-// (which otherwise cross-contaminates same-basename `probe.sfn` builds —
-// see `sailfin_main_entry_test.sfn` for the full rationale and
-// `.claude/rules/no-bash-e2e.md` for the required pattern).
+// each nested `sfn build` threads the runner's per-file
+// `SAILFIN_TEST_SCRATCH` through (`_child_env`) so the compiler routes the
+// `program.ll` build-cache dir under it per invocation (#1333),
+// preventing concurrent builds in the parallel `sfn test` pool from
+// clobbering each other's `build/sailfin/program.ll`. See
+// `sailfin_main_entry_test.sfn` for the full rationale and
+// `.claude/rules/no-bash-e2e.md` for the required pattern.
 //
 // The symbol check (3) runs `objdump` as a subprocess. When `objdump`
 // is unavailable (e.g. macOS dev boxes) the spawn fails and the check
@@ -44,6 +45,16 @@ fn _sfn_bin() -> string ![io] {
 
 fn _fixture_src() -> string ![io] {
     return fs.readFile("compiler/tests/e2e/fixtures/sailfin_main_panic_probe.sfn");
+}
+
+// See `sailfin_main_entry_test.sfn::_child_env`: thread the runner's
+// per-file `SAILFIN_TEST_SCRATCH` to the nested build so the compiler
+// routes the `program.ll` build-cache dir under it per invocation (#1333).
+fn _child_env() -> string[] ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    let mut e: string[] = [];
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
 }
 
 fn _marker(name: string) -> string ![io] {
@@ -63,8 +74,7 @@ fn _build_and_run(err_marker: string) -> int ![io] {
         let srcpath = dir + "/probe.sfn";
         fs.writeFile(srcpath, _fixture_src());
         let binpath = dir + "/probe";
-        let workdir = dir + "/wd";
-        let build_exit = process.run_capture([_sfn_bin(), "build", "--work-dir", workdir, "-o", binpath, srcpath], []);
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
         let _bo = process.capture_take_stdout();
         let _be = process.capture_take_stderr();
         if build_exit != 0 { return -100; }
@@ -85,8 +95,7 @@ fn _build_and_dump_syms(sym_marker: string) -> int ![io] {
         let srcpath = dir + "/probe.sfn";
         fs.writeFile(srcpath, _fixture_src());
         let binpath = dir + "/probe";
-        let workdir = dir + "/wd";
-        let build_exit = process.run_capture([_sfn_bin(), "build", "--work-dir", workdir, "-o", binpath, srcpath], []);
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
         let _bo = process.capture_take_stdout();
         let _be = process.capture_take_stderr();
         if build_exit != 0 { return -100; }

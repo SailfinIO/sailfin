@@ -69,44 +69,48 @@ The supported building blocks (all already shipped):
   `setenv`/`chdir` is unsound under the future parallel runner — see
   `fixtures.sfn`); always scope env to the child you spawn.
 - **Build a binary to run it:** when a test must compile a fixture to an
-  executable (not just frontend-check it), give each nested `sfn build` a
-  per-build `--work-dir` inside the test's `with_tmp_dir` — **mandatory**
-  under the parallel pool. See the dedicated section below for the why.
+  executable (not just frontend-check it), thread `SAILFIN_TEST_SCRATCH`
+  through to the spawned compiler so its staging stays per-invocation —
+  **mandatory** under the parallel pool. See the dedicated section below
+  for the why.
 
-## Build-and-run tests must isolate the build (`--work-dir`)
+## Build-and-run tests must isolate the build
 
 A test that spawns a full `sfn build` (compile a fixture to a binary and
 execute it — e.g. `sailfin_main_entry_test.sfn`,
-`sailfin_main_panic_test.sfn`) runs inside the parallel `int-e2e-caps`
-pool (`sailfin test --jobs N`), so **multiple `sfn build` invocations run
-concurrently**. `sfn build` stages the user module's `.sfn-asm` at the
-fixed, basename-keyed path `build/native/import-context/<slug>.sfn-asm`
-(`capsule_resolver.sfn::_cr_import_context_root`). Two builds whose source
-files share a basename — and every test that copies its fixture to
-`<tmp>/probe.sfn` does — then **overwrite each other's staged IR**,
-producing a cross-contaminated binary (classic symptom: one fixture's
-binary emitting another's output). It is non-deterministic and shows up
-only under the pool, never in a single-file run.
+`sailfin_main_panic_test.sfn`) or uses bare dispatch / `sfn run` to
+compile+run a file (`cli_bare_file_dispatch_test.sfn`) runs inside the
+parallel `int-e2e-caps` pool (`sailfin test --jobs N`), so **multiple
+compiles run concurrently**. A compile writes the top-level module's IR
+to `<cache-dir>/program.ll`, where `<cache-dir>` defaults to the fixed
+`build/sailfin` (`cli_main.sfn::_resolve_sailfin_cache_dir_for_work`).
+Two builds of different sources then **overwrite each other's
+`build/sailfin/program.ll`**, producing a cross-contaminated binary
+(classic symptom: one fixture's binary emitting another's output). It is
+non-deterministic and shows up only under the pool.
 
-The fix is mandatory and simple: give every nested build its **own
-`--work-dir`** under the test's `with_tmp_dir` scratch, which relocates
-the staging per build:
+The fix is simple: the compiler routes that cache dir under
+`SAILFIN_TEST_SCRATCH` when set (#1333), and the runner mints a unique
+scratch per test file — so just **thread `SAILFIN_TEST_SCRATCH` through**
+to the spawned compiler. `run_capture`'s empty `env` array is the *empty*
+environment (not "inherit"), so pass it explicitly:
 
 ```sfn
-let workdir = dir + "/wd";
+fn _child_env() -> string[] ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    let mut e: string[] = [];
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+// ...
 let exit = process.run_capture(
-    [_sfn_bin(), "build", "--work-dir", workdir, "-o", binpath, srcpath], []);
+    [_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
 ```
 
-`SAILFIN_TEST_SCRATCH` is **not** sufficient — it isolates the `.ll`
-scratch (`_cr_scratch_root`) but not the import-context staging. `run` /
-bare dispatch has no `--work-dir`, so a bare-dispatch test
-(`cli_bare_file_dispatch_test.sfn`) must instead drive a source whose
-basename no other test builds and keep its compiling cases sequential
-within the one file. The underlying default-path collision (concurrent
-same-basename builds without `--work-dir` cross-contaminate) is a
-compiler-correctness bug tracked separately; `--work-dir` is the supported
-isolation mechanism regardless.
+This works for `sfn build`, `sfn run`, and bare dispatch alike (it is the
+only lever for the latter two, which have no `--work-dir`). For a caller
+*outside* the test runner (no `SAILFIN_TEST_SCRATCH`), `sfn build
+--work-dir <dir>` is the equivalent explicit per-invocation isolation.
 
 ## When bash is still allowed
 
