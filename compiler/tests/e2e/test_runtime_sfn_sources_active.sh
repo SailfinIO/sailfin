@@ -20,12 +20,14 @@
 # manifest. With build.sh retired, the manifest is the sole
 # source of truth and the allowlist drift-check below is gone.
 #
-# The test asserts both the new (Sailfin) and the old (C)
-# symbol families are present. The C arena assertion guards
-# the M2 "both arenas link side-by-side" invariant — a future
-# patch that drops the C arena before M3 trips this assertion
-# (which is intentional: the C arena retires on a tracked PR,
-# not silently).
+# The test asserts the Sailfin `sfn_arena_sfn_*` infix family, the
+# bare arena-core exports that #1309 moved into Sailfin
+# (`sfn_arena_create`/`alloc`/`global`/`enabled`), and the remaining C
+# arena symbols (`reset`/`destroy`/`realloc`/`print_stats`/`mark`/
+# `rewind`) are all present. The remaining-C assertion guards the
+# "C arena still links for the not-yet-ported entry points" invariant —
+# a patch that drops them before #822 trips it (intentional: the C arena
+# retires on a tracked PR, not silently).
 
 set -euo pipefail
 
@@ -94,40 +96,63 @@ test_compiler_binary_exports_sfn_arena_sfn() {
     return "$missing"
 }
 
-# ---- Test: the compiler binary still exports the C arena symbols ----
+# ---- Test: the compiler binary still exports the remaining C arena symbols ----
 test_compiler_binary_keeps_c_arena_exports() {
-    # Coexistence invariant: M2.1 ships the Sailfin arena
-    # alongside the C arena, not as a replacement. The C arena
-    # remains the production allocator until M3 retires
-    # `runtime/native/src/sailfin_arena.c`. A patch that
-    # accidentally drops the C arena would silently route
-    # production through unfinished Sailfin stubs — this
-    # assertion catches that. Same defined-text-symbol regex as
-    # the Sailfin-export assertion above (` T ` / ` t `, with
-    # the optional macOS `_` prefix) so an undefined reference
-    # cannot pass for an export and Mach-O symbol mangling does
-    # not produce false negatives.
+    # Coexistence invariant. #1309 moved the arena *core* —
+    # `sfn_arena_create` / `sfn_arena_alloc` (+ the global handle /
+    # arena-mode probe) — into the Sailfin module, but the rest of the C
+    # arena (`reset` / `destroy` / `realloc`, plus `print_stats` / `mark`
+    # / `rewind`) stays the production implementation, operating on the
+    # same shared global handle, until #822 retires
+    # `runtime/native/src/sailfin_arena.c`. This asserts those still-C
+    # symbols remain exported: a patch that accidentally drops the
+    # remaining C arena before #822 — silently routing production through
+    # absent helpers — trips here. (create/alloc are checked as
+    # Sailfin-owned below; they must NOT be re-added to this C list.)
+    # Same defined-text-symbol regex as the Sailfin-export assertion
+    # above (` T ` / ` t `, optional macOS `_` prefix) so an undefined
+    # reference cannot pass for an export and Mach-O mangling does not
+    # produce false negatives.
     local nm_log
     nm_log="$(nm "$BINARY" 2>/dev/null || true)"
     local missing=0
-    for sym in sfn_arena_create sfn_arena_alloc sfn_arena_reset sfn_arena_destroy sfn_arena_realloc; do
+    for sym in sfn_arena_reset sfn_arena_destroy sfn_arena_realloc sfn_arena_print_stats sfn_arena_mark sfn_arena_rewind; do
         if ! grep -qE "[[:space:]][Tt][[:space:]]_?${sym}\$" <<< "$nm_log"; then
-            echo "[test]   compiler binary missing C arena export: $sym (looked for ' T|t [_]${sym}' in nm output)"
+            echo "[test]   compiler binary missing still-C arena export: $sym (looked for ' T|t [_]${sym}' in nm output)"
             missing=$((missing + 1))
         fi
     done
     return "$missing"
 }
 
-# ---- Test: nm | grep sfn_arena matches at least the five spec names ----
+# ---- Test: the bare arena-core exports are Sailfin-owned (#1309) ----
+test_compiler_binary_exports_bare_arena_core() {
+    # #1309 headline: the bare `sfn_arena_create` / `sfn_arena_alloc` /
+    # `sfn_arena_global` / `sfn_arena_enabled` are now DEFINED by the
+    # Sailfin arena module (the C namesakes were removed), so the linker
+    # binds every caller — `sailfin_runtime.c`'s bare call sites and the
+    # `mem.sfn` externs — to the Sailfin definitions. They must be
+    # present as defined text symbols; a regression that fails to emit
+    # them (or re-adds the C defs as duplicates) breaks the link this
+    # asserts. Same defined-text-symbol regex as the other export checks.
+    local nm_log
+    nm_log="$(nm "$BINARY" 2>/dev/null || true)"
+    local missing=0
+    for sym in sfn_arena_create sfn_arena_alloc sfn_arena_global sfn_arena_enabled; do
+        if ! grep -qE "[[:space:]][Tt][[:space:]]_?${sym}\$" <<< "$nm_log"; then
+            echo "[test]   compiler binary missing Sailfin arena-core export: $sym"
+            missing=$((missing + 1))
+        fi
+    done
+    return "$missing"
+}
+
+# ---- Test: nm | grep sfn_arena matches at least the spec name ----
 test_nm_grep_sfn_arena_spec_names() {
-    # The literal acceptance check from issue #394: every spec
-    # name in the architect's "exposes" list (`sfn_arena_create
-    # / alloc / reset / destroy / realloc`) is present in the
-    # compiler binary. Today both the C arena and the Sailfin
-    # module's distinct-but-prefixed exports satisfy this; the
-    # check stays valid through M3 because the C arena is the
-    # one keeping these specific names.
+    # The literal acceptance check from issue #394: the spec name
+    # `sfn_arena_alloc` is present in the compiler binary. Post-#1309 it
+    # is the Sailfin bare export that satisfies this (the C namesake was
+    # removed); the check stays valid through #822.
     local nm_log
     nm_log="$(nm "$BINARY" 2>/dev/null || true)"
     if ! grep -q "sfn_arena_alloc" <<< "$nm_log"; then
@@ -139,7 +164,8 @@ test_nm_grep_sfn_arena_spec_names() {
 
 run_test "runtime/native/capsule.toml sfn-sources lists the arena module" test_manifest_lists_arena
 run_test "compiler binary exports five sfn_arena_sfn_* Sailfin symbols" test_compiler_binary_exports_sfn_arena_sfn
-run_test "compiler binary still exports five sfn_arena_* C arena symbols" test_compiler_binary_keeps_c_arena_exports
+run_test "compiler binary exports bare arena-core (create/alloc/global/enabled) from Sailfin" test_compiler_binary_exports_bare_arena_core
+run_test "compiler binary still exports remaining C arena symbols (reset/destroy/realloc/...)" test_compiler_binary_keeps_c_arena_exports
 run_test "nm | grep sfn_arena_alloc matches at least one symbol (#394 spec)" test_nm_grep_sfn_arena_spec_names
 
 echo "[summary] $PASS passed, $FAIL failed"

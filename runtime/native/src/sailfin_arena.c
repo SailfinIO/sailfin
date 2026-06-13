@@ -1,45 +1,34 @@
 /*
- * sailfin_arena.c — M0.5 bump allocator for the Sailfin runtime.
+ * sailfin_arena.c — bump allocator for the Sailfin runtime (transition).
  *
- * Temporary C implementation (~200 lines). Will be replaced by a
- * Sailfin-native arena at M2/M3. See docs/runtime_architecture.md §4.4.
+ * As of #1309 the arena *core* — the process-global handle plus the hot
+ * bump path (`sfn_arena_create`, `sfn_arena_alloc`, `sfn_arena_global`,
+ * `sfn_arena_enabled`) — is owned by the Sailfin module
+ * `runtime/sfn/memory/arena.sfn`; those symbols are removed here so the
+ * linker binds every caller (this file's siblings, `sailfin_runtime.c`,
+ * and the `mem.sfn` externs) to the Sailfin definitions. What remains —
+ * `sfn_arena_realloc`/`reset`/`destroy`/`print_stats`/`mark`/`rewind` —
+ * operates on the *same* shared global handle, which is byte-compatible
+ * across both runtimes (the Sailfin `Arena` mirrors `SfnArena`'s 40-byte
+ * layout). The rest of this file retires in #822. See
+ * docs/runtime_architecture.md §4.4.
  */
 
 #include "sailfin_arena.h"
 
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * `sfn_arena_alloc` is now defined in `runtime/sfn/memory/arena.sfn`
+ * (#1309); `sfn_arena_realloc` below calls it through the prototype in
+ * `sailfin_arena.h`, resolved at link time against the Sailfin object.
+ */
+
 /* ------------------------------------------------------------------ */
 /* Internal helpers                                                    */
 /* ------------------------------------------------------------------ */
-
-static inline size_t _align_up(size_t value, size_t align)
-{
-    /* align must be a non-zero power of two (all internal callers pass 8). */
-    return (value + align - 1) & ~(align - 1);
-}
-
-static SfnArenaPage *_page_create(size_t capacity)
-{
-    SfnArenaPage *page = (SfnArenaPage *)malloc(sizeof(SfnArenaPage));
-    if (!page)
-        return NULL;
-
-    page->data = (uint8_t *)malloc(capacity);
-    if (!page->data)
-    {
-        free(page);
-        return NULL;
-    }
-
-    page->capacity = capacity;
-    page->used = 0;
-    page->next = NULL;
-    return page;
-}
 
 static void _page_destroy(SfnArenaPage *page)
 {
@@ -53,29 +42,7 @@ static void _page_destroy(SfnArenaPage *page)
 /* Lifecycle                                                           */
 /* ------------------------------------------------------------------ */
 
-SfnArena *sfn_arena_create(size_t default_page_size)
-{
-    if (default_page_size == 0)
-        default_page_size = 1024 * 1024; /* 1 MiB default for compiler */
-
-    SfnArena *arena = (SfnArena *)malloc(sizeof(SfnArena));
-    if (!arena)
-        return NULL;
-
-    SfnArenaPage *first = _page_create(default_page_size);
-    if (!first)
-    {
-        free(arena);
-        return NULL;
-    }
-
-    arena->current = first;
-    arena->first = first;
-    arena->default_page_size = default_page_size;
-    arena->total_allocated = 0;
-    arena->total_pages = 1;
-    return arena;
-}
+/* sfn_arena_create: now defined in runtime/sfn/memory/arena.sfn (#1309). */
 
 void sfn_arena_reset(SfnArena *arena)
 {
@@ -141,69 +108,7 @@ void sfn_arena_destroy(SfnArena *arena)
 /* Allocation                                                          */
 /* ------------------------------------------------------------------ */
 
-void *sfn_arena_alloc(SfnArena *arena, size_t size, size_t align)
-{
-    if (!arena || size == 0)
-        return NULL;
-    if (align == 0)
-        align = 8;
-
-    SfnArenaPage *page = arena->current;
-    size_t offset = _align_up(page->used, align);
-
-    if (offset <= page->capacity && size <= page->capacity - offset)
-    {
-        page->used = offset + size;
-        arena->total_allocated += size;
-        return page->data + offset;
-    }
-
-    /* Current page too small — try to reuse downstream pages first.
-     *
-     * `sfn_arena_rewind` (Phase 5a) leaves zeroed pages attached
-     * after the rewind target so subsequent allocations can reuse
-     * the existing capacity instead of growing the page list. The
-     * old behavior allocated a fresh page on every overflow,
-     * leaking the rewound capacity behind the new page in the
-     * linked list. Walking forward here makes mark/rewind a true
-     * stack-discipline reuse. The walk is bounded by pages that
-     * survived the most-recent rewind; in steady state it's
-     * usually one hop. */
-    SfnArenaPage *candidate = page->next;
-    while (candidate)
-    {
-        size_t cand_offset = _align_up(candidate->used, align);
-        if (cand_offset <= candidate->capacity && size <= candidate->capacity - cand_offset)
-        {
-            candidate->used = cand_offset + size;
-            arena->current = candidate;
-            arena->total_allocated += size;
-            return candidate->data + cand_offset;
-        }
-        candidate = candidate->next;
-    }
-
-    /* No reusable downstream page — allocate a new one. */
-    size_t needed = size + align; /* worst-case alignment padding */
-    size_t page_size = arena->default_page_size;
-    if (needed > page_size)
-        page_size = needed;
-
-    SfnArenaPage *new_page = _page_create(page_size);
-    if (!new_page)
-        return NULL;
-
-    /* Insert new page after current and advance. */
-    new_page->next = page->next;
-    page->next = new_page;
-    arena->current = new_page;
-    arena->total_pages++;
-
-    offset = _align_up(new_page->used, align);
-    new_page->used = offset + size;
-    arena->total_allocated += size;
-    return new_page->data + offset;
-}
+/* sfn_arena_alloc: now defined in runtime/sfn/memory/arena.sfn (#1309). */
 
 void *sfn_arena_realloc(SfnArena *arena, void *ptr, size_t old_size,
                         size_t new_size, size_t align)
@@ -245,84 +150,18 @@ void *sfn_arena_realloc(SfnArena *arena, void *ptr, size_t old_size,
 }
 
 /* ------------------------------------------------------------------ */
-/* Global arena (lazy singleton)                                       */
+/* Global arena + arena-mode probe                                     */
 /* ------------------------------------------------------------------ */
-
-static SfnArena *_global_arena = NULL;
-static int _arena_enabled = -1; /* -1 = unchecked */
-static pthread_once_t _arena_enabled_once = PTHREAD_ONCE_INIT;
-static pthread_once_t _arena_global_once = PTHREAD_ONCE_INIT;
-
-static void _init_arena_enabled(void)
-{
-    /*
-     * Arena is on by default. End-user `sfn check`, `sfn test`, and
-     * any future `sfn vet`/`sfn fix`/`sfn lsp` invocation needs the
-     * arena (Phase 5a's mark/rewind primitive only reclaims memory
-     * when the arena is active) — without it the in-process multi-
-     * module loop hits the unfreed-allocations wall documented in
-     * `docs/build-performance.md` Root Cause 5 and SIGSEGVs at
-     * scale. `make compile` historically exported
-     * `SAILFIN_USE_ARENA=1` via the prior `scripts/build.sh` (since
-     * retired in Stage E PR7 / #383); this flip extends the same
-     * default to installed binaries so end users don't have to set
-     * the env var themselves.
-     *
-     * Opt-out: `SAILFIN_USE_ARENA=0` (or `""` or `"false"`) disables
-     * the arena and the runtime falls back to the malloc/owned-string-
-     * hash path. Useful for the `make test-arena` IR-equivalence harness
-     * and for diagnosing arena-vs-malloc divergences. The off-set
-     * matches the Sailfin-side `_env_flag` contract in
-     * `compiler/src/cli_commands_utils.sfn` so a single mental model
-     * applies across every `SAILFIN_*` toggle.
-     *
-     * Empty env: `SAILFIN_USE_ARENA=` (set but empty) is treated
-     * as opt-out, mirroring the `=0` case. This is a deliberate
-     * divergence from `unset` (which now means "take the default",
-     * i.e. arena ON): a script that explicitly clears the variable
-     * with `SAILFIN_USE_ARENA=` is signalling intent to disable,
-     * not "I have no opinion". `unset SAILFIN_USE_ARENA` is the
-     * way to ask for the default.
-     */
-    const char *env = getenv("SAILFIN_USE_ARENA");
-    if (env == NULL)
-    {
-        /* Unset: take the default. */
-        _arena_enabled = 1;
-        return;
-    }
-    if (env[0] == '\0' || strcmp(env, "0") == 0 || strcmp(env, "false") == 0)
-    {
-        /* Explicit opt-out: empty string, "0", or "false". */
-        _arena_enabled = 0;
-        return;
-    }
-    /* Any other value is opt-in (including the historical "1"). */
-    _arena_enabled = 1;
-}
-
-bool sfn_arena_enabled(void)
-{
-    pthread_once(&_arena_enabled_once, _init_arena_enabled);
-    return _arena_enabled == 1;
-}
-
-static void _init_global_arena(void)
-{
-    /* 4 MiB pages for the compiler — modules can be large. */
-    _global_arena = sfn_arena_create(4 * 1024 * 1024);
-    if (!_global_arena)
-    {
-        fprintf(stderr, "[sailfin-arena] fatal: failed to create global arena\n");
-        abort();
-    }
-}
-
-SfnArena *sfn_arena_global(void)
-{
-    pthread_once(&_arena_global_once, _init_global_arena);
-    return _global_arena;
-}
+/*
+ * `sfn_arena_enabled` (SAILFIN_USE_ARENA probe) and `sfn_arena_global`
+ * (lazy process-global handle), along with their backing statics and
+ * pthread_once init helpers, are now defined in
+ * `runtime/sfn/memory/arena.sfn` (#1309). The Sailfin
+ * `sfn_arena_enabled` preserves the exact env semantics documented
+ * there: unset → on (default); empty / "0" / "false" → off; anything
+ * else → on. `sfn_arena_global` creates a 4 MiB-page handle on first
+ * call and aborts with the same fd-2 diagnostic on OOM.
+ */
 
 /* ------------------------------------------------------------------ */
 /* Stats                                                               */

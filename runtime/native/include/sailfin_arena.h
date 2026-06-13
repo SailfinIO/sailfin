@@ -1,15 +1,21 @@
 #pragma once
 
 /*
- * sailfin_arena.h — M0.5 bump allocator for the Sailfin runtime.
+ * sailfin_arena.h — bump allocator for the Sailfin runtime (transition).
  *
- * Temporary C implementation that will be replaced by a Sailfin-native
- * arena at M2/M3. See docs/runtime_architecture.md §4.4.
+ * As of #1309 the arena *core* — the process-global handle and the hot
+ * bump path (`sfn_arena_create`, `sfn_arena_alloc`, `sfn_arena_global`,
+ * `sfn_arena_enabled`) — lives in `runtime/sfn/memory/arena.sfn`. The
+ * declarations for those four stay below so C callers link against the
+ * Sailfin definitions; the C definitions here are
+ * `sfn_arena_realloc`/`reset`/`destroy`/`print_stats`/`mark`/`rewind`,
+ * which operate on the same shared handle and retire in #822. See
+ * docs/runtime_architecture.md §4.4.
  *
- * When SAILFIN_USE_ARENA=1 is set in the environment, the runtime routes
- * all string and array allocations through a process-global arena. Memory
- * is freed in bulk at process exit (or per-module in a future long-lived
- * compiler process).
+ * When the arena is enabled (SAILFIN_USE_ARENA — unset/other → on;
+ * empty/"0"/"false" → off), the runtime routes all string and array
+ * allocations through a process-global arena. Memory is freed in bulk at
+ * process exit (or per-module in a long-lived compiler process).
  */
 
 #include <stddef.h>
@@ -42,7 +48,13 @@ extern "C"
 
     /* ---------- Lifecycle ---------- */
 
-    /* Create a new arena with the given default page size. */
+    /*
+     * Create a new arena with the given default page size.
+     *
+     * #1309: defined in runtime/sfn/memory/arena.sfn — this prototype
+     * stays so C callers (sailfin_runtime.c) link against the Sailfin
+     * definition. sailfin_arena.c no longer defines it.
+     */
     SfnArena *sfn_arena_create(size_t default_page_size);
 
     /* Reset all pages to used=0. Does NOT free backing pages. */
@@ -86,6 +98,11 @@ extern "C"
      * If the current page cannot fit, a new page is allocated
      * (max of default_page_size and size+align).
      * Returns NULL only on malloc failure.
+     *
+     * #1309: defined in runtime/sfn/memory/arena.sfn (the bare export
+     * forwards to `sfn_arena_sfn_alloc`); this prototype stays for C
+     * callers and for sfn_arena_realloc below. sailfin_arena.c no
+     * longer defines it.
      */
     void *sfn_arena_alloc(SfnArena *arena, size_t size, size_t align);
 
@@ -103,8 +120,15 @@ extern "C"
                             size_t new_size, size_t align);
 
     /* ---------- Global arena ---------- */
+    /*
+     * #1309: sfn_arena_enabled and sfn_arena_global are defined in
+     * runtime/sfn/memory/arena.sfn. These prototypes stay so C callers
+     * (sailfin_runtime.c) link against the Sailfin definitions;
+     * sailfin_arena.c no longer defines them or the lazy-singleton
+     * statics.
+     */
 
-    /* Returns true if arena mode is active (SAILFIN_USE_ARENA=1). */
+    /* Returns true if arena mode is active (SAILFIN_USE_ARENA semantics). */
     bool sfn_arena_enabled(void);
 
     /* Get the process-global arena (lazily created on first call). */

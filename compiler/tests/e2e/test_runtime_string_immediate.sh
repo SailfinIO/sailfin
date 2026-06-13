@@ -64,6 +64,7 @@ cat > "$HARNESS" <<'EOF'
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Canonical sfn_str_* trampoline ABI (runtime/native/src/sailfin_runtime.c). */
@@ -78,6 +79,26 @@ extern int64_t sfn_str_byte_at(const char *s, int64_t idx);
 extern int64_t sfn_str_find_byte(const char *s, int64_t byte_value, int64_t start_index);
 extern double sfn_str_codepoint(const char *s);
 extern double sfn_str_to_number(const char *s);
+
+/* #1309: the arena core (`sfn_arena_enabled` / `sfn_arena_global` /
+ * `sfn_arena_alloc`) moved from sailfin_arena.c into the Sailfin module
+ * runtime/sfn/memory/arena.sfn, so the C-only sources this fixture links
+ * (sailfin_runtime.c + sailfin_arena.c) no longer resolve them. This
+ * fixture targets the immediate-codepoint guards in the `sfn_str_*`
+ * trampolines, which are independent of the allocation strategy, so we
+ * provide minimal C stubs rather than pulling the Sailfin arena into a
+ * deliberately C-only test: `enabled`→false steers the runtime to its
+ * malloc/calloc fallback, and `alloc` is malloc-backed for any path that
+ * still reaches it. (The still-C realloc/reset/destroy/print_stats in
+ * sailfin_arena.c are guarded by `enabled()` and stay dormant here.) */
+bool sfn_arena_enabled(void) { return false; }
+void *sfn_arena_global(void) { static char dummy[64]; return dummy; }
+void *sfn_arena_alloc(void *arena, size_t size, size_t align)
+{
+    (void)arena;
+    (void)align;
+    return malloc(size);
+}
 
 static int failures = 0;
 

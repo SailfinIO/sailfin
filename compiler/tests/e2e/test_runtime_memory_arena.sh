@@ -152,21 +152,77 @@ test_no_bare_sfn_arena_define() {
         echo "[test]   $ll missing — test_emit_define_shape must run first"
         return 1
     fi
-    # Coexistence regression: the Sailfin module must NOT emit a
-    # bare `define ... @sfn_arena_create(` etc. — that name belongs
-    # to the C arena (`runtime/native/src/sailfin_arena.c`) and a
-    # collision would fail `make compile` at link time. The
-    # `sfn_arena_sfn_*` infix is the marker for Sailfin-emitted
-    # symbols. When M3 retires the C arena, this assertion goes
-    # away (the architect plan in #389 M2.2 calls this out).
+    # Coexistence regression (post-#1309). The arena *core* —
+    # `sfn_arena_create` / `sfn_arena_alloc` / `sfn_arena_global` /
+    # `sfn_arena_enabled` — is now Sailfin-owned (those C definitions
+    # were removed from `sailfin_arena.c`), so arena.sfn MUST emit bare
+    # `define`s for them (asserted positively below). The remaining
+    # still-C entry points — `sfn_arena_reset` / `sfn_arena_destroy` /
+    # `sfn_arena_realloc` (and `print_stats` / `mark` / `rewind`) —
+    # keep their C definitions, so arena.sfn must NOT emit bare
+    # `define`s for those names or `make compile` fails at link with a
+    # duplicate symbol. #822 retires the rest of the C arena and this
+    # split collapses.
     local found=0
-    for sym in sfn_arena_create sfn_arena_alloc sfn_arena_reset sfn_arena_destroy sfn_arena_realloc; do
+    for sym in sfn_arena_reset sfn_arena_destroy sfn_arena_realloc; do
         if grep -qE "^define .* @${sym}\(" "$ll"; then
             echo "[test]   collision risk: arena.sfn emits 'define ... @${sym}(', conflicts with C arena"
             found=$((found + 1))
         fi
     done
     return "$found"
+}
+
+test_bare_core_defines() {
+    # #1309: the four bare arena-core exports must be DEFINED by
+    # arena.sfn now that their C namesakes are gone — this is the link
+    # ownership the whole refactor turns on. Anchored at line start so
+    # a `call` site does not satisfy the assertion.
+    local ll="$SCRATCH/arena.ll"
+    if [ ! -f "$ll" ]; then
+        echo "[test]   $ll missing — test_emit_define_shape must run first"
+        return 1
+    fi
+    local missing=0
+    if ! grep -qE "^define i8\* @sfn_arena_create\(i64 " "$ll"; then
+        echo "[test]   missing 'define i8* @sfn_arena_create(i64 ...)'"
+        missing=$((missing + 1))
+    fi
+    if ! grep -qE "^define i8\* @sfn_arena_alloc\(i8\* " "$ll"; then
+        echo "[test]   missing 'define i8* @sfn_arena_alloc(i8* ...)'"
+        missing=$((missing + 1))
+    fi
+    if ! grep -qE "^define i8\* @sfn_arena_global\(" "$ll"; then
+        echo "[test]   missing 'define i8* @sfn_arena_global()'"
+        missing=$((missing + 1))
+    fi
+    if ! grep -qE "^define i1 @sfn_arena_enabled\(" "$ll"; then
+        echo "[test]   missing 'define i1 @sfn_arena_enabled()'"
+        missing=$((missing + 1))
+    fi
+    return "$missing"
+}
+
+test_arena_struct_is_40_bytes() {
+    # #1309 deciding constraint: the Sailfin `Arena` must be
+    # byte-identical to the C `SfnArena` (40 bytes / five i64 slots,
+    # `total_allocated@24` / `total_pages@32`) so the still-C
+    # `sfn_arena_realloc` / `print_stats` writing those offsets on the
+    # shared global handle stay in bounds. A regression that drops the
+    # two transition counters (24-byte handle) is a #1205-class heap
+    # corruption — caught here as an IR-shape mismatch before it can
+    # corrupt the heap.
+    local ll="$SCRATCH/arena.ll"
+    if [ ! -f "$ll" ]; then
+        echo "[test]   $ll missing — test_emit_define_shape must run first"
+        return 1
+    fi
+    if ! grep -qE "^%Arena = type \{ i64, i64, i64, i64, i64 \}" "$ll"; then
+        echo "[test]   Arena is not the 40-byte 5×i64 layout the C SfnArena requires:"
+        grep -E "^%Arena = type" "$ll" || echo "   (no %Arena type definition emitted)"
+        return 1
+    fi
+    return 0
 }
 
 test_lifecycle_roundtrip() {
@@ -244,20 +300,23 @@ void sfn_type_register(void *desc) {
     (void)desc;
 }
 
-/* #927: arena.sfn's mark/rewind pair reads the process-global arena
- * via the C `sfn_arena_enabled` / `sfn_arena_global`, so the emitted
- * arena.ll now `declare`s both. This lifecycle harness exercises only
- * the five core allocator entry points (mark/rewind have their own
- * roundtrip in test_runtime_memory_arena_mark.sh against the real C
- * arena), so a disabled-arena stub for `sfn_arena_enabled` and a NULL
- * `sfn_arena_global` keep the link self-contained — neither is reached
- * on the allocator path under test. */
-int sfn_arena_enabled(void) {
-    return 0;
-}
+/* #1309: arena.sfn now DEFINES `sfn_arena_enabled` and
+ * `sfn_arena_global` (they replaced the removed C namesakes), so the
+ * emitted arena.ll carries their bodies — providing stubs here would be
+ * a duplicate-symbol link error. This lifecycle harness exercises only
+ * the five `sfn_arena_sfn_*` infix entry points (which never reach the
+ * global handle or the arena-mode probe), so the real Sailfin
+ * definitions sit unused in the link; they pull in libc
+ * getenv/strcmp/write/abort, all resolved by the system C library. */
 
-void *sfn_arena_global(void) {
-    return NULL;
+/* #1309: those two functions build their probe literals (the env-var
+ * name; the OOM diagnostic) as SfnStrings via `sfn_alloc_struct`, so
+ * arena.ll now references it even though this harness never calls the
+ * functions. A calloc-backed stub satisfies the link (the
+ * interposed-`free` counter is unaffected — the infix entry points the
+ * harness exercises never call `sfn_alloc_struct`). */
+void *sfn_alloc_struct(long size_bytes) {
+    return calloc(1, (size_t)size_bytes);
 }
 
 int main(void) {
@@ -462,12 +521,257 @@ CHARNESS
     return 0
 }
 
+test_asan_no_corruption() {
+    # #1309 deciding constraint, end-to-end. Links the Sailfin arena
+    # (arena.ll: bare `sfn_arena_create` / `sfn_arena_alloc` that own
+    # the 40-byte handle) against the still-C `sailfin_arena.c`
+    # (`sfn_arena_realloc` / `sfn_arena_print_stats`) and exercises the
+    # cross-runtime path on a SHARED handle under AddressSanitizer. If
+    # the Sailfin `Arena` were the old 24-byte layout, the C side's
+    # instrumented reads/writes of `total_allocated@24` /
+    # `total_pages@32` would land in the malloc redzone and ASAN would
+    # report a heap-buffer-overflow. With the 40-byte match the run is
+    # clean. The IR-shape gate (test_arena_struct_is_40_bytes) catches
+    # the same regression statically; this is the dynamic proof.
+    local ll="$SCRATCH/arena.ll"
+    if [ ! -f "$ll" ]; then
+        echo "[test]   $ll missing — test_emit_define_shape must run first"
+        return 1
+    fi
+
+    local clang_bin
+    clang_bin="${CLANG:-clang}"
+    if ! command -v "$clang_bin" >/dev/null 2>&1; then
+        echo "[test]   clang not available — skipping ASAN no-corruption gate"
+        return 0
+    fi
+
+    # ASAN reserves ~16 TB of virtual address space for its shadow at
+    # startup; any finite `ulimit -v` (or the compiler self-cap) aborts
+    # that reservation before main(). Skip — not fail — when capped; the
+    # static IR-shape gate still pins the layout. See
+    # `.claude/rules/compiler-safety.md`.
+    local vmem_cap
+    vmem_cap="$(ulimit -v 2>/dev/null || echo unlimited)"
+    if [ "$vmem_cap" != "unlimited" ]; then
+        echo "[test]   virtual-memory cap active (ulimit -v ${vmem_cap}) — ASAN shadow reservation cannot run; static 40-byte gate still passed"
+        return 0
+    fi
+
+    # Probe that the ASAN runtime (compiler-rt archives) is actually
+    # installed — many minimal toolchains ship clang without it. A
+    # missing sanitizer runtime is a SKIP, not a failure (the static
+    # 40-byte IR-shape gate already pins the layout); only a genuine
+    # `ERROR: AddressSanitizer` report below may fail the test. See
+    # `.claude/rules/compiler-safety.md`.
+    local probe="$SCRATCH/asan_probe.c"
+    echo 'int main(void){return 0;}' > "$probe"
+    if ! "$clang_bin" -fsanitize=address "$probe" -o "$SCRATCH/asan_probe" 2>"$SCRATCH/asan_probe.log"; then
+        echo "[test]   AddressSanitizer runtime unavailable (compiler-rt archives missing) — skipping; static 40-byte gate still passed"
+        return 0
+    fi
+
+    local harness="$SCRATCH/asan_harness.c"
+    cat > "$harness" <<'CHARNESS'
+/* Cross-runtime no-corruption harness for #1309. The Sailfin arena
+ * owns create/alloc (40-byte handle); the C arena owns realloc/
+ * print_stats. Both touch the SAME handle. Under ASAN, a layout
+ * mismatch surfaces as a heap-buffer-overflow on the C side's access
+ * to total_allocated@24 / total_pages@32. */
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Sailfin-defined (arena.ll). */
+extern void *sfn_arena_create(size_t default_page_size);
+extern void *sfn_arena_alloc(void *arena, size_t size, size_t align);
+/* C-defined (sailfin_arena.c) — operate on the shared handle. */
+extern void *sfn_arena_realloc(void *arena, void *ptr, size_t old_size,
+                               size_t new_size, size_t align);
+extern void sfn_arena_print_stats(void *arena);
+
+/* Stubs the emitted arena.ll references (see lifecycle harness). The
+ * Sailfin arena-mode probe / global builds SfnString literals via
+ * sfn_alloc_struct; a calloc-backed stub satisfies the link. */
+void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }
+void sfn_type_register(void *desc) { (void)desc; }
+void *sfn_alloc_struct(long size_bytes) { return calloc(1, (size_t)size_bytes); }
+
+int main(void) {
+    /* Sailfin create → 40-byte handle, total_allocated@24=0,
+     * total_pages@32=1. */
+    void *arena = sfn_arena_create(4096);
+    if (!arena) {
+        fprintf(stderr, "create returned NULL\n");
+        return 1;
+    }
+
+    /* Sailfin alloc bumps total_allocated@24 on the shared handle. */
+    uint8_t *p = (uint8_t *)sfn_arena_alloc(arena, 128, 8);
+    if (!p) {
+        fprintf(stderr, "alloc(128) returned NULL\n");
+        return 2;
+    }
+    memset(p, 0xAB, 128);
+
+    /* C realloc reads ptr/used and writes total_allocated@24 (grow-in-
+     * place: p is at the tip). C-instrumented access to offset 24 must
+     * be in-bounds → no ASAN report. */
+    uint8_t *p2 = (uint8_t *)sfn_arena_realloc(arena, p, 128, 256, 8);
+    if (!p2) {
+        fprintf(stderr, "realloc returned NULL\n");
+        return 3;
+    }
+    for (size_t i = 0; i < 128; i++) {
+        if (p2[i] != 0xAB) {
+            fprintf(stderr, "realloc lost bytes at %zu\n", i);
+            return 4;
+        }
+    }
+
+    /* C realloc copy-on-overflow path calls Sailfin sfn_arena_alloc
+     * (allocates a fresh page → writes total_pages@32 + total_allocated
+     * @24). Force it by allocating past the tip first. */
+    uint8_t *q = (uint8_t *)sfn_arena_alloc(arena, 64, 8);
+    if (!q) { return 5; }
+    uint8_t *p3 = (uint8_t *)sfn_arena_realloc(arena, p2, 256, 8192, 8);
+    if (!p3) { return 6; }
+
+    /* C print_stats reads total_allocated@24 and walks the page chain —
+     * the canonical cross-runtime read of the transition counters. */
+    sfn_arena_print_stats(arena);
+
+    return 0;
+}
+CHARNESS
+
+    local arena_c="$REPO_ROOT/runtime/native/src/sailfin_arena.c"
+    local inc="$REPO_ROOT/runtime/native/include"
+    local arena_obj="$SCRATCH/arena_ll.o"
+    local bin="$SCRATCH/asan_roundtrip"
+    local log="$SCRATCH/asan.log"
+    # Compile the Sailfin IR to a plain object first (no ASAN pass over
+    # machine-generated IR — the deciding access is the C side's read of
+    # the transition counters). ASAN interposes malloc globally, so the
+    # Sailfin-allocated 40-byte handle still gets redzones the
+    # instrumented C reads are checked against. -Wno-override-module:
+    # the .ll triple may not match the host.
+    if ! "$clang_bin" -Wno-override-module -c "$ll" -o "$arena_obj" 2>"$log"; then
+        echo "[test]   clang failed to compile arena.ll:"
+        cat "$log"
+        return 1
+    fi
+    # ASAN-instrument the C harness + the still-C arena; link the plain
+    # Sailfin object. SAILFIN_MEM_LIMIT=unlimited so the linked binary's
+    # own self-cap does not abort the shadow reservation.
+    if ! "$clang_bin" -fsanitize=address -Wno-override-module \
+        -I"$inc" "$harness" "$arena_c" "$arena_obj" -o "$bin" -lm 2>"$log"; then
+        echo "[test]   clang failed to build ASAN harness:"
+        cat "$log"
+        return 1
+    fi
+    if ! SAILFIN_MEM_LIMIT=unlimited ASAN_OPTIONS=detect_leaks=0 "$bin" >"$log" 2>&1; then
+        echo "[test]   ASAN no-corruption harness failed:"
+        cat "$log"
+        return 1
+    fi
+    if grep -q "ERROR: AddressSanitizer" "$log"; then
+        echo "[test]   AddressSanitizer reported a violation on the shared handle:"
+        cat "$log"
+        return 1
+    fi
+    return 0
+}
+
+test_arena_enabled_env_semantics() {
+    # #1309 regression coverage for the two subtlest fixes in the port:
+    #   (1) the re-entrancy guard — `sfn_arena_enabled` builds its
+    #       `SAILFIN_USE_ARENA` probe literals via `sfn_alloc_struct`,
+    #       which (like `mem.sfn`) calls back into `sfn_arena_enabled`;
+    #       without the provisional-state guard the very first call
+    #       recurses to a stack overflow. The harness's `sfn_alloc_struct`
+    #       below deliberately re-enters `sfn_arena_enabled` to reproduce
+    #       that path — a regression that drops the guard CRASHES here.
+    #   (2) the getenv-not-elided fix — the inline `getenv("…" as * u8)`
+    #       form miscompiles (call elided, result lowered to null), making
+    #       every env value read as "unset" (→ enabled). Asserting the
+    #       off-values flip to disabled pins the `string`-local form.
+    local ll="$SCRATCH/arena.ll"
+    if [ ! -f "$ll" ]; then
+        echo "[test]   $ll missing — test_emit_define_shape must run first"
+        return 1
+    fi
+    local clang_bin
+    clang_bin="${CLANG:-clang}"
+    if ! command -v "$clang_bin" >/dev/null 2>&1; then
+        echo "[test]   clang not available — skipping env-semantics gate"
+        return 0
+    fi
+
+    local harness="$SCRATCH/env_harness.c"
+    cat > "$harness" <<'CHARNESS'
+#include <stddef.h>
+#include <stdlib.h>
+#include <stdio.h>
+/* i1 return → declare _Bool so the upper bits of the return register
+ * are not read as garbage (an `int` decl makes every value read as
+ * nonzero/true). */
+extern _Bool sfn_arena_enabled(void);
+void sailfin_runtime_mark_persistent(void *p) { (void)p; }
+void sfn_type_register(void *d) { (void)d; }
+/* Mirror mem.sfn's sfn_alloc_struct: it consults sfn_arena_enabled to
+ * route arena-vs-calloc — exactly the re-entrancy the probe's
+ * provisional-state guard must survive. calloc keeps the harness
+ * self-contained; the point is to re-enter sfn_arena_enabled during its
+ * own first-call probe. Without the guard this recurses forever. */
+void *sfn_alloc_struct(long n) { (void)sfn_arena_enabled(); return calloc(1, (size_t)n); }
+int main(void) { printf("%d\n", sfn_arena_enabled() ? 1 : 0); return 0; }
+CHARNESS
+
+    local bin="$SCRATCH/env_probe"
+    if ! "$clang_bin" -Wno-override-module "$harness" "$ll" -o "$bin" -lm 2>"$SCRATCH/env.log"; then
+        echo "[test]   clang failed to build env-semantics harness:"
+        cat "$SCRATCH/env.log"
+        return 1
+    fi
+
+    # Each row: "<label>|<env-spec>|<expected>". An empty env-spec means
+    # unset; "VAR=" means set-but-empty. A crash (no output / nonzero rc)
+    # is the recursion-guard regression signal.
+    local fails=0
+    _probe() { # $1=expected  $2.. = env assignment(s) (may be empty)
+        local expected="$1"; shift
+        local got
+        got="$(env -u SAILFIN_USE_ARENA "$@" "$bin" 2>/dev/null)" || {
+            echo "[test]   sfn_arena_enabled crashed (rc=$?) with [$*] — re-entrancy guard regression?"
+            fails=$((fails + 1)); return
+        }
+        if [ "$got" != "$expected" ]; then
+            echo "[test]   SAILFIN_USE_ARENA [$*]: got '$got', expected '$expected'"
+            fails=$((fails + 1))
+        fi
+    }
+    _probe 1                              # unset → on (default)
+    _probe 1 SAILFIN_USE_ARENA=1          # explicit on
+    _probe 1 SAILFIN_USE_ARENA=yes        # any other value → on
+    _probe 0 SAILFIN_USE_ARENA=           # empty → off
+    _probe 0 SAILFIN_USE_ARENA=0          # "0" → off
+    _probe 0 SAILFIN_USE_ARENA=false      # "false" → off
+    return "$fails"
+}
+
 run_test "sfn check runtime/sfn/memory/arena.sfn passes" test_check_clean
 run_test "sfn fmt --check runtime/sfn/memory/arena.sfn is canonical" test_fmt_clean
 run_test "sfn emit llvm produces define for every sfn_arena_sfn_* export" test_emit_define_shape
 run_test "sfn emit llvm declares libc malloc/free/memcpy trampolines" test_emit_libc_declares
-run_test "sfn emit llvm does not collide with C arena's sfn_arena_* exports" test_no_bare_sfn_arena_define
+run_test "sfn emit llvm defines bare arena-core exports (create/alloc/global/enabled)" test_bare_core_defines
+run_test "sfn emit llvm keeps Arena byte-identical to C SfnArena (40 bytes)" test_arena_struct_is_40_bytes
+run_test "sfn emit llvm does not collide with still-C sfn_arena_* exports" test_no_bare_sfn_arena_define
 run_test "create → alloc → realloc → reset → destroy exercises every entry point" test_lifecycle_roundtrip
+run_test "SAILFIN_USE_ARENA env semantics + probe recursion guard" test_arena_enabled_env_semantics
+run_test "ASAN: C realloc/print_stats on a Sailfin-created handle is corruption-free" test_asan_no_corruption
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

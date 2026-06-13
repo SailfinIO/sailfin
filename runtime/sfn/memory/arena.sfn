@@ -16,8 +16,10 @@
 //   sfn_arena_sfn_destroy(arena)             → free pages + arena
 //   sfn_arena_sfn_realloc(arena, ptr, old, new, align) → grow-if-at-tip
 //
-// Layout. `Arena` is a 24-byte (three i64 slot) handle that owns a
-// chain of `ArenaPage` records. Each `ArenaPage` is a 32-byte (four
+// Layout. `Arena` is a 40-byte (five i64 slot) handle that owns a
+// chain of `ArenaPage` records — byte-identical to the C `SfnArena`
+// (#1309; see the `struct Arena` comment for why the dual-runtime
+// transition requires the match). Each `ArenaPage` is a 32-byte (four
 // i64 slot) header followed by a separately-malloc'd byte buffer.
 // Pointer-typed fields ride as `i64` slots — same workaround as
 // `runtime/sfn/memory/rc.sfn` and `runtime/sfn/exception.sfn` because
@@ -45,14 +47,20 @@
 // matching the C arena's contract documented in
 // `runtime_architecture.md` §2.1.1.
 //
-// Coexistence with the C arena. Sailfin exports use the `sfn_arena_sfn_*`
-// infix; the C arena exports the bare `sfn_arena_*` names. Both
-// families ship in every compiler binary today — the production
-// runtime keeps calling the C entry points. M3 retires the C arena
-// (flip the C namesakes to `static`, rename the Sailfin exports to
-// the bare form, and route every caller through the Sailfin module
-// in a single rollback-safe PR). Until then the dual-arena layout is
-// the proof-of-life for the M2 runtime/sfn link path.
+// Coexistence with the C arena. As of #1309 the arena *core* — the
+// process-global handle plus the hot bump path — is Sailfin-owned: the
+// bare `sfn_arena_create` / `sfn_arena_alloc` / `sfn_arena_global` /
+// `sfn_arena_enabled` exports below replace the C namesakes (now
+// removed from `sailfin_arena.c`), so the linker binds every caller
+// (the 29 bare `sailfin_runtime.c` call sites and the `mem.sfn`
+// externs) here. The `sfn_arena_sfn_*` infix family is retained for
+// `ownedbuf.sfn`'s externs and is the implementation the bare
+// `create`/`alloc` forward to. The still-C
+// `sfn_arena_realloc`/`reset`/`destroy`/`print_stats`/`mark`/`rewind`
+// operate on the **same shared 40-byte global handle** — which is why
+// `Arena` mirrors the C `SfnArena` layout byte-for-byte. #822 deletes
+// the remaining C arena and shrinks the two transition-only counters
+// back out (40→24).
 //
 // Effects: none. Memory primitives sit below the I/O layer (same
 // discipline as `runtime/sfn/memory/rc.sfn` and the other
@@ -100,6 +108,18 @@ extern fn free(ptr: * u8) -> void;
 
 extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
 
+// libc helpers backing the process-global handle + arena-mode probe
+// ported from `sailfin_arena.c` in #1309. `getenv`/`strcmp` reproduce
+// `_init_arena_enabled`'s `SAILFIN_USE_ARENA` decision; `abort`
+// reproduces `_init_global_arena`'s fatal-on-OOM termination. Inlined
+// for the same cross-module extern-resolution reason as `malloc`/`free`
+// above.
+extern fn getenv(name: * u8) -> * u8;
+
+extern fn strcmp(a: * u8, b: * u8) -> i32;
+
+extern fn abort() -> void;
+
 // `ArenaPage` is the per-page bookkeeping header (32 bytes, four
 // i64 slots). `data_addr` points at the page's backing byte buffer
 // (malloc'd separately from this header). `capacity` is the buffer
@@ -114,14 +134,33 @@ struct ArenaPage {
     next_addr: i64;
 }
 
-// `Arena` is the public handle (24 bytes, three i64 slots).
+// `Arena` is the public handle (40 bytes, five i64 slots).
 // `current_addr` is the page that satisfies the next bump; `first_addr`
 // is the chain head (for reset and destroy walks); `default_page_size`
-// is the size of fresh pages spawned when the chain overflows.
+// is the size of fresh pages spawned when the chain overflows;
+// `total_allocated` is the running byte count handed out by `alloc`;
+// `total_pages` is the number of pages in the chain.
+//
+// The two trailing counters (`total_allocated`, `total_pages`) mirror
+// the C `SfnArena` layout exactly (`sailfin_arena.h:34-41`:
+// `current@0, first@8, default_page_size@16, total_allocated@24,
+// total_pages@32`). The handle is dereferenced by **both** runtimes
+// during the M2→M3 transition (#1309): the Sailfin `create`/`alloc`
+// now own the process-global handle while the still-C
+// `sfn_arena_realloc`/`reset`/`destroy`/`print_stats`/`mark`/`rewind`
+// keep operating on it. A 24-byte Sailfin handle would let those C
+// helpers write `total_allocated`/`total_pages` past the allocation —
+// a #1205-class heap corruption — so the layout is byte-identical here
+// and the counters are maintained the way `sailfin_arena.c:157,200,
+// 75-76` do. The two extra fields shrink back out in #822 when the C
+// arena is deleted. The 40-byte layout is also the one the mark/rewind
+// port (below) already assumes.
 struct Arena {
     current_addr: i64;
     first_addr: i64;
     default_page_size: i64;
+    total_allocated: i64;
+    total_pages: i64;
 }
 
 // `_sfn_arena_align_up(value, align)` rounds `value` up to the next
@@ -181,7 +220,7 @@ fn sfn_arena_sfn_create(default_page_size: usize) -> * u8 {
     let mut page_size: i64 = default_page_size as i64;
     if page_size == 0 { page_size = 1048576; }
 
-    let arena_ptr: * u8 = malloc(24 as usize);
+    let arena_ptr: * u8 = malloc(40 as usize);
     if arena_ptr as i64 == 0 { return arena_ptr; }
 
     let first_ptr: * u8 = _sfn_arena_page_create(page_size);
@@ -194,6 +233,10 @@ fn sfn_arena_sfn_create(default_page_size: usize) -> * u8 {
     arena.current_addr = first_ptr as i64;
     arena.first_addr = first_ptr as i64;
     arena.default_page_size = page_size;
+    // Init the C-mirrored counters (sailfin_arena.c:75-76): one seed
+    // page, zero bytes handed out yet.
+    arena.total_allocated = 0;
+    arena.total_pages = 1;
     return arena_ptr;
 }
 
@@ -223,6 +266,7 @@ fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
         let space: i64 = cap - offset;
         if size_i <= space {
             page.used = offset + size_i;
+            a.total_allocated = a.total_allocated + size_i;
             let result_addr: i64 = page.data_addr + offset;
             return result_addr as * u8;
         }
@@ -245,6 +289,7 @@ fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
             if size_i <= cand_space {
                 candidate.used = cand_offset + size_i;
                 a.current_addr = candidate_addr;
+                a.total_allocated = a.total_allocated + size_i;
                 let cand_result_addr: i64 = candidate.data_addr + cand_offset;
                 return cand_result_addr as * u8;
             }
@@ -268,11 +313,149 @@ fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
     new_page.next_addr = page.next_addr;
     page.next_addr = new_page_ptr as i64;
     a.current_addr = new_page_ptr as i64;
+    a.total_pages = a.total_pages + 1;
 
     let new_offset: i64 = _sfn_arena_align_up(new_page.used, align_i);
     new_page.used = new_offset + size_i;
+    a.total_allocated = a.total_allocated + size_i;
     let new_result_addr: i64 = new_page.data_addr + new_offset;
     return new_result_addr as * u8;
+}
+
+// ====================================================================
+// Bare-named arena core (#1309, C1 of epic #1308).
+//
+// The C `sfn_arena_create` / `sfn_arena_alloc` / `sfn_arena_global` /
+// `sfn_arena_enabled` are removed from `sailfin_arena.c`; these bare
+// Sailfin exports take over those symbol names so the linker binds
+// every caller — `sailfin_runtime.c`'s 29 bare call sites and the
+// `mem.sfn` externs — to the Sailfin definitions. The still-C
+// `sfn_arena_realloc`/`reset`/`destroy`/`print_stats`/`mark`/`rewind`
+// keep operating on the **same shared 40-byte global handle** these
+// produce, so the layout-match above is the deciding correctness
+// constraint. The 24→40 shrink and the rest of the C arena retire in
+// #822.
+//
+// `create` and `alloc` are thin forwarders to the `sfn_arena_sfn_*`
+// infix bodies above (which own the bump discipline and the
+// C-mirrored counter upkeep) so there is a single implementation of
+// each. The infix family stays exported for `ownedbuf.sfn`'s externs.
+// `sfn_arena_create(default_page_size)` — bare-named entry point.
+// Forwards to `sfn_arena_sfn_create`, which allocates the 40-byte
+// handle and inits `total_allocated`/`total_pages`. Faithful to the C
+// `sfn_arena_create` (`sailfin_arena.c:56`).
+fn sfn_arena_create(default_page_size: usize) -> * u8 {
+    return sfn_arena_sfn_create(default_page_size);
+}
+
+// `sfn_arena_alloc(arena, size, align)` — bare-named entry point, the
+// hot-path bump allocator `mem.sfn`'s `sfn_alloc_struct` and 29
+// `sailfin_runtime.c` call sites route through. Forwards to
+// `sfn_arena_sfn_alloc`, which maintains `total_allocated`/`total_pages`
+// exactly as the C `sfn_arena_alloc` did (`sailfin_arena.c:144`).
+fn sfn_arena_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
+    return sfn_arena_sfn_alloc(arena, size, align);
+}
+
+// Process-global arena handle (`_global_arena`) + arena-mode flag
+// (`_arena_enabled`), lazily initialised. `-1` = unchecked, `0` =
+// disabled, `1` = enabled; the address `0` for the global handle
+// doubles as "not yet created".
+//
+// **Thread-safety (known regression vs the C arena — deliberate).** The
+// C original guarded both lazy globals with `pthread_once`
+// (`sailfin_arena.c:253-254,306,323`). This port replaces that with an
+// unsynchronised check-and-set, matching every other lazy global in the
+// `runtime/sfn` layer (`mem.sfn:sfn_mem_get_field_buf_addr`,
+// `type_meta.sfn`'s registry, `future.sfn`'s scheduler globals) and the
+// single-threaded assumption `sfn_alloc_struct` already bakes in. That
+// holds for the compiler toolchain itself (compilation is
+// single-threaded) but NOT for emitted user binaries that spawn
+// `routine`/future threads: two threads racing the first allocation can
+// double-create the global arena or observe the provisional `0` mid-
+// probe. This is acceptable pre-1.0 — the structured-concurrency runtime
+// is not yet shipped (see CLAUDE.md "Deferred / Not Yet Shipped") — and
+// is the same exposure the rest of the `runtime/sfn` alloc path carries.
+// Re-introducing a `pthread_once`-equivalent is a concurrency-runtime
+// concern, tracked there, not part of this M2→M3 arena port.
+let mut _sfn_arena_enabled_state: i64 = -1;
+
+let mut _sfn_arena_global_addr: i64 = 0;
+
+// `sfn_arena_enabled()` — `SAILFIN_USE_ARENA` probe, faithful port of
+// `_init_arena_enabled` + `sfn_arena_enabled` (`sailfin_arena.c:256,
+// 304`). Unset → on (the default). Empty / `0` / `false` → off.
+// Anything else → on. Cached after the first probe. The empty-string
+// case uses `strcmp(env, "")` rather than a single-byte load — the
+// seed compiler's `* u8` byte-load gap (see the file header) makes the
+// `env[0] == '\0'` form unavailable here.
+fn sfn_arena_enabled() -> bool {
+    if _sfn_arena_enabled_state < 0 {
+        // Re-entrancy guard (the load-bearing subtlety of this port).
+        // A `string` / `* u8` literal lowers to an `sfn_alloc_struct`
+        // call that copies the bytes into freshly-allocated memory
+        // (verified in the emitted IR: `call i8* @sfn_alloc_struct(i64
+        // 18)` for "SAILFIN_USE_ARENA\0"). `sfn_alloc_struct` calls
+        // back here to choose arena-vs-calloc, so the env-probe
+        // literals below would recurse infinitely from the very first
+        // call (the startup `_sfn_default_arena_init` constructor).
+        // Publishing a provisional non-negative state BEFORE any
+        // allocation breaks the cycle: the re-entrant call sees
+        // `state >= 0` and returns immediately. Provisional `0`
+        // (disabled) routes the probe's own SfnString allocations
+        // through the libc `calloc` fallback rather than forcing the
+        // global arena into existence mid-probe.
+        _sfn_arena_enabled_state = 0;
+        // Bind each literal to a `string` local before the `as * u8`
+        // cast — the proven env-read pattern from `rlimit.sfn` /
+        // `http.sfn`. The inline form `getenv("…" as * u8)` miscompiles
+        // under the seed: the call is elided and its result lowered to a
+        // null store, so every env value reads as "unset". The `string`
+        // local materialises the `SfnString` (allocated via
+        // `sfn_alloc_struct` — safe now, the provisional state above
+        // routes it through the libc fallback) and the cast extracts its
+        // data pointer correctly.
+        let name: string = "SAILFIN_USE_ARENA";
+        let env: * u8 = getenv(name as * u8);
+        if env as i64 == 0 {
+            // Unset: take the default (arena on).
+            _sfn_arena_enabled_state = 1;
+        } else {
+            let empty: string = "";
+            let zero: string = "0";
+            let f: string = "false";
+            if strcmp(env, empty as * u8) == 0 { _sfn_arena_enabled_state = 0; } else if strcmp(env, zero as * u8) == 0 {
+                _sfn_arena_enabled_state = 0;
+            } else if strcmp(env, f as * u8) == 0 {
+                _sfn_arena_enabled_state = 0;
+            } else { _sfn_arena_enabled_state = 1; }
+        }
+    }
+    return _sfn_arena_enabled_state == 1;
+}
+
+// `sfn_arena_global()` — lazy process-global arena (4 MiB pages for the
+// compiler), faithful port of `_init_global_arena` + `sfn_arena_global`
+// (`sailfin_arena.c:310,321`). Creates the handle on first call;
+// `abort()`s if creation fails (the lowered call sites GEP+store into
+// the returned base with no null-check, so a silent NULL would surface
+// as a bare SIGSEGV — `abort` turns OOM into a clean SIGABRT).
+//
+// The C original printed "[sailfin-arena] fatal: …" before aborting,
+// but a message here is unshippable: emitting one builds an `SfnString`
+// via `sfn_alloc_struct`, which (arena enabled) re-enters
+// `sfn_arena_global` with `_sfn_arena_global_addr` still 0 and recurses
+// until the stack overflows — turning a clean OOM abort into a crash.
+// The bare `abort()` (SIGABRT) is the faithful, recursion-free signal.
+fn sfn_arena_global() -> * u8 {
+    if _sfn_arena_global_addr == 0 {
+        let created: * u8 = sfn_arena_sfn_create(4194304 as usize);
+        if created as i64 == 0 {
+            unsafe { abort(); }
+        }
+        _sfn_arena_global_addr = created as i64;
+    }
+    return _sfn_arena_global_addr as * u8;
 }
 
 // `sfn_arena_sfn_reset(arena)` zeroes the `used` cursor on every
@@ -292,6 +475,10 @@ fn sfn_arena_sfn_reset(arena: * u8) -> void {
         walker = p.next_addr;
     }
     a.current_addr = first_addr;
+    // Match the C arena's reset (sailfin_arena.c:87): the byte counter
+    // resets with the pages; the page chain (and `total_pages`) stays
+    // intact for reuse.
+    a.total_allocated = 0;
 }
 
 // `sfn_arena_sfn_destroy(arena)` frees every page in the chain and
@@ -354,6 +541,7 @@ fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usiz
         if ptr_addr + old_size_i == tip_addr {
             if used + extra <= page.capacity {
                 page.used = used + extra;
+                a.total_allocated = a.total_allocated + extra;
                 return ptr;
             }
         }
@@ -416,12 +604,10 @@ fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usiz
 // matching `runtime/native/include/sailfin_arena.h`. `_runtime_enter`
 // (a `static inline` call-sequence counter in the C runtime) has no
 // bearing on mark/rewind semantics and is intentionally not ported.
-// arena-mode probe + process-global arena handle, both exported from
-// `runtime/native/src/sailfin_arena.c`.
-extern fn sfn_arena_enabled() -> bool;
-
-extern fn sfn_arena_global() -> * u8;
-
+// arena-mode probe + process-global arena handle. As of #1309 both are
+// **defined above** in this module (the bare `sfn_arena_enabled` /
+// `sfn_arena_global` Sailfin exports that replaced the C namesakes), so
+// mark/rewind call them directly — no extern needed.
 // `sfn_arena_sfn_mark()` snapshots the global arena's current page +
 // used offset, encoded as `(page_index << 32) | used` cast to a
 // `number`. Returns `0.0` when the arena is disabled or has no current
