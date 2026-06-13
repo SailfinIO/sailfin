@@ -1,0 +1,58 @@
+// End-to-end test for the bare-file CLI dispatch added in M5.4 (#472).
+//
+// Native replacement for the former `test_cli_bare_file_dispatch.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Pins
+// `sailfin <file.sfn>` (no subcommand) → routes through the Sailfin
+// CLI's catch-all positional handler, which compiles and runs the file
+// as if `sailfin run <file.sfn>` had been invoked. The legacy C-driver
+// fallback (`--emit MODE file.sfn` calling `compile_to_*` directly from
+// `native_driver.c`) is gone; without a regression test, future CLI
+// refactors could silently break this user-visible form.
+//
+// Drives the compiler-under-test as a subprocess with the runtime
+// `process.*` builtins and asserts on captured output — the canonical
+// e2e pattern (see `.claude/rules/no-bash-e2e.md` and
+// `guillermo_test.sfn`). The `sfn/test` `expect_*` matchers are
+// `![pure]` and cannot be called from an `![io]` test, so output is
+// asserted with `sfn/strings::find`.
+import { find } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn) so CI can point
+// the test at any compiler without editing it.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `sailfin examples/basics/hello-world.sfn` (a single `.sfn` positional,
+// no subcommand) compiles and runs the file, printing its output and
+// exiting 0. The path is relative to the runner's working directory
+// (the repo root), matching the legacy script's `cd "$REPO_ROOT"`.
+test "bare-file: 'sailfin <file.sfn>' compiles, runs, and exits 0" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "examples/basics/hello-world.sfn"], []);
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+test "bare-file: 'sailfin <file.sfn>' prints the program's output" ![io] {
+    let _exit = process.run_capture([_sfn_bin(), "examples/basics/hello-world.sfn"], []);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert find(out, "Hello, Sailfin!", 0) >= 0;
+}
+
+// Sanity check: bare-file dispatch only triggers on the `.sfn` extension.
+// An unrelated single positional must still hit the "unknown command"
+// branch and exit non-zero — NOT silently invoke `run` on a non-Sailfin
+// path.
+test "bare-file: non-.sfn positional falls through to 'unknown command'" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "not-a-known-subcommand"], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert find(out + err, "unknown command", 0) >= 0;
+}
