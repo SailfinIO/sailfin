@@ -418,15 +418,15 @@ survives until process exit. This is why per-module compiler RAM reaches
 | `sailfin_runtime_process_run` | ✅ | `posix_spawnp` with argv from `SailfinPtrArray` |
 | `sailfin_runtime_process_spawn_with_env` | ✅ | **#1102:** descriptor `native_signature` now routes to `@sfn_process_spawn_with_env` in `runtime/sfn/process.sfn` (three-pipe `posix_spawnp` producing the `SailfinProcessHandle` the `handle_*` family consumes; `0` on failure). The C body stays exported for seed-built IR; retired separately under #822 (M4). |
 | `sailfin_adapter_fs_read_file` | ✅ | fopen/fread/strdup. **M3.1a (#814):** descriptor `native_signature` now routes to `@sfn_fs_read_file` in `runtime/sfn/adapters/filesystem.sfn` (chunked `fread` + `realloc`); the C body stays exported for seed-built IR. |
-| `sailfin_adapter_fs_write_file` / `_append_file` | ✅ | **M3.1a (#814):** both descriptor rows' `native_signature` now route to `@sfn_fs_write_file` / `@sfn_fs_append_file` in `runtime/sfn/adapters/filesystem.sfn`; the C bodies stay exported for seed-built IR. |
-| `sailfin_adapter_fs_write_lines` | ✅ | `_v2` aliases pending Sailfin port (M3.1b). |
-| `sailfin_adapter_fs_list_directory` | ✅ | Returns `SailfinPtrArray` |
+| `sailfin_adapter_fs_write_file` / `_append_file` | ✅ | **#1311 (epic #1308 C7):** `@sfn_fs_write_file` / `@sfn_fs_append_file` are now **real Sailfin bodies** (`fopen` + `fwrite` + `fclose`) in `runtime/sfn/adapters/filesystem.sfn` — no C call. Linux x86_64 self-host scope (dropped the C immediate-codepoint + macOS mapped-pointer guard). C bodies stay exported for seed-built IR; retired under #822. |
+| `sailfin_adapter_fs_write_lines` | ✅ | **#1311:** `@sfn_fs_write_lines` is a **real Sailfin body** — reads the `SfnArray` `data`/`len` via an overlay + `sailfin_intrinsic_pointer_read_i64`, writes newline-terminated lines. No C call. |
+| `sailfin_adapter_fs_list_directory` | ✅ | Returns `SailfinPtrArray`. `_v2` still a C trampoline behind `@sfn_fs_list_dir` (dirent-offset story; #1311 `Out:` → epic #1308 C8). |
 | `sailfin_adapter_fs_delete_file` / `_create_directory` | ✅ | |
 | `sailfin_intrinsic_fs_exists` | ✅ | stat-based |
-| `sailfin_adapter_fs_set_perms` / `_get_perms` | ✅ | `chmod(2)` + `stat(2) & 07777`; POSIX-only (#366) |
-| `sailfin_adapter_fs_mkdtemp` | ✅ | `mkdtemp(3)` direct; POSIX-only (#366) |
-| `sailfin_adapter_fs_is_executable` | ✅ | `access(X_OK)`; POSIX-only (#366) |
-| `sailfin_adapter_fs_symlink` | ✅ | `symlink(2)`; dangling targets allowed; POSIX-only (#366) |
+| `sailfin_adapter_fs_set_perms` / `_get_perms` | ✅ | **#1311:** real Sailfin bodies — `chmod(2)` + `stat(2)` reading `st_mode` at the Linux x86_64 offset 24 via `sailfin_intrinsic_pointer_read_i32`, masked `& 07777`. No C call. POSIX-only (#366). |
+| `sailfin_adapter_fs_mkdtemp` | ✅ | **#1311:** real Sailfin body — `$TMPDIR`/`/tmp` anchoring + template assembly + `mkdtemp(3)`. No C call. POSIX-only (#366). |
+| `sailfin_adapter_fs_is_executable` | ✅ | **#1311:** real Sailfin body — `access(X_OK)`. No C call. POSIX-only (#366). |
+| `sailfin_adapter_fs_symlink` | ✅ | **#1311:** real Sailfin body — `symlink(2)`; dangling targets allowed. No C call. POSIX-only (#366). |
 
 ### HTTP / network
 
