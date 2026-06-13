@@ -28,7 +28,7 @@ Implement the feature **one pipeline stage at a time**, following the architect'
 4. **Effect Checker** (`compiler/src/effect_checker.sfn`) — if this involves effects
 5. **Native Emitter** (`compiler/src/emit_native.sfn`) — `.sfn-asm` emission
 6. **LLVM Lowering** (`compiler/src/llvm/`) — LLVM IR generation
-7. **Tests** — unit tests in `compiler/tests/unit/`, integration tests in `compiler/tests/integration/`
+7. **Tests** — unit tests in `compiler/tests/unit/`, integration tests in `compiler/tests/integration/`. End-to-end tests go in `compiler/tests/e2e/` as `*_test.sfn` using `sfn/test` — **never** new bash scripts (a warn-first CI lint flags them; see `.claude/rules/no-bash-e2e.md` for the native e2e recipe, e.g. `guillermo_test.sfn`)
 
 After each stage, run targeted tests to verify:
 ```bash
