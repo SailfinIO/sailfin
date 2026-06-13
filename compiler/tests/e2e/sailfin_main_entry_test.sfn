@@ -94,12 +94,25 @@ fn _build_and_run(out_marker: string, extra: string) -> int ![io] {
         let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
         let _bo = process.capture_take_stdout();
         let _be = process.capture_take_stderr();
+        print.err("DBG1333 build_exit=" + number_to_string(build_exit)
+            + " scratch=["
+            + env.get("SAILFIN_TEST_SCRATCH")
+            + "] bo=["
+            + _bo
+            + "] be=["
+            + _be
+            + "]");
         if build_exit != 0 { return -100; }
         let mut run_argv: string[] = [binpath];
         if extra.length > 0 { run_argv.push(extra); }
         let run_exit = process.run_capture(run_argv, []);
         let out = process.capture_take_stdout();
         let _re = process.capture_take_stderr();
+        print.err("DBG1333 run_exit=" + number_to_string(run_exit) + " out=["
+            + out
+            + "] rerr=["
+            + _re
+            + "]");
         fs.writeFile(out_marker, out);
         return run_exit;
     });
