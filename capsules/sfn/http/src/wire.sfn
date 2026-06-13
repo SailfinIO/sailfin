@@ -81,6 +81,21 @@ fn _has_crlf(s: string) -> boolean {
     return find_char(s, "\r", 0) >= 0 || find_char(s, "\n", 0) >= 0;
 }
 
+// True if `h` is a framing header the serializer owns. `serialize_response`
+// always emits its own `Content-Length` and `Connection: close`, so a
+// user-supplied copy would produce duplicate/conflicting framing headers —
+// a response-smuggling footgun (proxies disagree on first-vs-last). These
+// (and `Transfer-Encoding`, which conflicts with explicit `Content-Length`
+// framing) are dropped from `rsp.headers`.
+fn _is_reserved_header(h: string) -> boolean {
+    let colon = find_char(h, ":", 0);
+    let mut name = h;
+    if colon >= 0 { name = substring(h, 0, colon); }
+    let lower = _ascii_lower(_trim(name));
+    return strings_equal(lower, "content-length") || strings_equal(lower, "connection")
+        || strings_equal(lower, "transfer-encoding");
+}
+
 // ASCII-lowercase (A–Z only) for case-insensitive header-name matching.
 fn _ascii_lower(value: string) -> string {
     let mut out = "";
@@ -191,9 +206,11 @@ fn parse_request(raw: string) -> Request {
 // ── response serialization ────────────────────────────────────────
 // Serialize a `Response` into a full HTTP/1.1 response. The status line
 // uses `reason_phrase(rsp.status)`; user headers are emitted verbatim
-// EXCEPT any containing a CR or LF, which are dropped (header-injection
-// guard). `Content-Length` (from the body's length) and `Connection:
-// close` are always appended. v0 is text bodies only.
+// EXCEPT any containing a CR or LF (header-injection guard) or naming a
+// framing header the serializer owns — `Content-Length`, `Connection`,
+// `Transfer-Encoding` (response-smuggling guard, see `_is_reserved_header`).
+// `Content-Length` (from the body's length) and `Connection: close` are
+// always appended. v0 is text bodies only.
 fn serialize_response(rsp: Response) -> string {
     let mut out = "HTTP/1.1 " + _int_to_string(rsp.status) + " " + reason_phrase(rsp.status)
         + "\r\n";
@@ -201,7 +218,7 @@ fn serialize_response(rsp: Response) -> string {
     loop {
         if i >= rsp.headers.length { break; }
         let h = rsp.headers[i];
-        if !_has_crlf(h) { out = out + h + "\r\n"; }
+        if !_has_crlf(h) && !_is_reserved_header(h) { out = out + h + "\r\n"; }
         i = i + 1;
     }
     out = out + "Content-Length: " + _int_to_string(rsp.body.length) + "\r\n";

@@ -66,6 +66,20 @@ test "serialize_response: drops headers carrying CR or LF (injection guard)" {
     assert strings_equal(out, expected);
 }
 
+test "serialize_response: drops user-supplied framing headers (smuggling guard)" {
+    // User-supplied Content-Length / Connection / Transfer-Encoding must not
+    // reach the wire — the serializer owns framing. The case-insensitive,
+    // OWS-padded copies below are all dropped; X-Keep survives.
+    let rsp = Response {
+        status: 200,
+        headers: ["content-length: 999", "Connection: keep-alive", "Transfer-Encoding: chunked", "X-Keep: yes"],
+        body: "abc"
+    };
+    let out = serialize_response(rsp);
+    let expected = "HTTP/1.1 200 OK\r\nX-Keep: yes\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc";
+    assert strings_equal(out, expected);
+}
+
 test "reason_phrase: known codes mapped, unknown falls back to Status" {
     assert strings_equal(reason_phrase(200), "OK");
     assert strings_equal(reason_phrase(500), "Internal Server Error");
