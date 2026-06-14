@@ -322,6 +322,11 @@ When uncertain about feature status or semantics:
 3. **[sailfin.dev/roadmap](https://sailfin.dev/roadmap)** — active workstreams (`site/src/pages/roadmap.astro`)
 4. **`docs/runtime_audit.md`** — C→Sailfin runtime migration tracker
 5. **`docs/build-performance.md`** — build perf analysis + optimization plan
+6. **`docs/strategy/decision-brief.md`** — strategic overlay binding the internal
+   vision (the capstone `docs/proposals/capability-sealed-runtime.md`) to the
+   market: what's *proven now* (compile-time effects) vs. the *long-horizon seal*,
+   the now/later positioning split, and the seal-sufficient-vs-perf-parity fork.
+   Proposal docs win on architecture; the brief wins on positioning.
 
 Examples are compiler-only unless marked with future-syntax comments.
 

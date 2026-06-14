@@ -166,7 +166,14 @@ This is further out than `llvm-independence.md` — it *depends* on it. The chai
 in order:
 
 1. **Finish C→Sailfin runtime** (Axis 1; M3 #390, M4 #965) — *in flight.*
-2. **Own the backend** (Track 8; `llvm-independence.md`) — vision; Stage 0 is small.
+2. **Own the backend — the *seal-sufficient* one** (Track 8; `llvm-independence.md`)
+   — vision; Stage 0 is small. Note the timeline correction in
+   `llvm-independence.md` §5: the seal needs a *correct, metadata-carrying,
+   syscall-gating* backend, **not** the perf-parity optimizer that is the genuine
+   long tail. The seal-sufficient target is agent-amenable and de-riskable by
+   differential testing against the existing LLVM backend, so this dependency is
+   plausibly quarters-scale, not the decade-scale arc the pre-LLM literature
+   assumed.
 3. **Own the syscall layer** (Axis 3; `llvm-independence.md` §8 Stage 4) — deepest piece.
 4. **Land the runtime object-capability model** (#934) — currently `priority:low`, post-1.0.
 5. **Carry capabilities through the scheduler** (extends #965) — the per-task context.
@@ -174,7 +181,9 @@ in order:
 
 Every step is already on the board or in this proposal set. The roadmap is
 *already pointed here* — this doc names the destination so the steps read as a
-journey rather than a pile.
+journey rather than a pile. The agentic era compresses the long pole (step 2):
+the perf tail is off this critical path; only correctness + metadata + the gate
+are.
 
 ---
 

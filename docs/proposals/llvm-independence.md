@@ -16,8 +16,13 @@ analysis + Track registry, #339), `docs/runtime_audit.md` /
 > dependent on LLVM/clang, the way Go owns its backend. It is a **long-term
 > health and performance** bet, deliberately separate from the in-flight
 > runtime rewrite (which eliminates C *source* but keeps LLVM and libc). It is
-> filed as a vision, not a plan: the actionable kernel (Stage 0) is small; the
-> rest is a decade-scale arc.
+> filed as a vision, not a plan: the actionable kernel (Stage 0) is small. The
+> rest is *not* the single decade-scale arc the pre-LLM tooling literature
+> assumed — see §5, which splits a **seal-sufficient backend** (correct +
+> metadata-carrying + syscall-gating, plausibly compressible to quarters with
+> agent-assisted work and a differential-testing oracle) from a **perf-parity
+> backend** (matching LLVM's optimizer — the genuine long tail, off the critical
+> path for the capability seal).
 
 ---
 
@@ -138,9 +143,19 @@ target. But the durable reasons tie to Sailfin's three differentiators:
 2. **Multi-arch, multi-format slog.** x86-64 + aarch64 each need instruction
    selection, register allocation, and ABI (SysV / AAPCS / Win64), plus
    ELF/Mach-O/COFF encoders, DWARF debug info, and unwind tables (`.eh_frame`).
-3. **We will be slower than `-O2` for years.** Every team that has done this
-   (Go, Zig's self-hosted backend, Cranelift) treated it as a decade-scale arc.
-   Matching LLVM throughput is not the near-term goal and should not be promised.
+3. **Perf parity with `-O2` is a long tail — but it is not the gate.** Matching
+   LLVM's optimizer throughput is genuinely hard and should not be promised as
+   near-term. The pre-LLM tooling literature (Go, Zig's self-hosted backend,
+   Cranelift) treated the *whole* effort as a decade-scale arc; that framing
+   conflates two distinct targets. A **seal-sufficient backend** — correct,
+   carrying capability metadata through lowering, gating syscalls, but *not*
+   perf-competitive — is the target on the critical path for the capability seal
+   (`capability-sealed-runtime.md`), and it is agent-amenable and de-riskable by
+   differential testing against the existing LLVM backend (a cheap correctness
+   oracle), which makes it plausibly a quarters-scale effort, not a decade. The
+   **perf-parity backend** is the long tail, the part agentic work helps least
+   with, and it is off the seal's critical path — required only for
+   general-purpose-language competitiveness.
 4. **Lost for free:** LLVM's sanitizers, LTO, PGO, and the entire optimization
    pipeline. The two-backend design (§6) is what keeps these available.
 
