@@ -82,11 +82,11 @@ AArch64 aggregate-return legalizer miscompile), so a runtime body that must
 satisfy a by-value `{i8*, i64}` call site cannot just `return` a normal
 struct.
 
-The mechanism (M1.A.2, first landed by #1312): a reserved return/parameter
-type **spelling `SfnString`** that `map_return_type` / `map_type_annotation`
-intercept and map to the literal `{i8*, i64}`, routing the *definition* onto
-the by-value aggregate ABI without changing any other struct. It is narrow
-and opt-in by design:
+The mechanism (the M1.A.2 capability; its first consumer is the #1312 env
+flip): a reserved return/parameter type **spelling `SfnString`** that
+`map_return_type` / `map_type_annotation` intercept and map to the literal
+`{i8*, i64}`, routing the *definition* onto the by-value aggregate ABI without
+changing any other struct. It is narrow and opt-in by design:
 
 - **Return:** spell the return type `SfnString` (→ `define {i8*, i64} @f`).
   The body returns a bare `* u8`; the return-path coercion

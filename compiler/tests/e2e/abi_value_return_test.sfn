@@ -77,6 +77,15 @@ test "abi: SfnString return spelling lowers to a by-value {i8*, i64}" ![io] {
     assert find(ir, "ret {i8*, i64}", 0) >= 0;
 }
 
+test "abi: move-wrapped SfnString return still lowers to by-value {i8*, i64}" ![io] {
+    // The spelling is matched on the move-unwrapped form (`unwrap_move_wrapper`
+    // strips `Affine<…>` / `Linear<…>`), so a consume-and-return
+    // `-> Affine<SfnString>` takes the by-value path too — not the boxed `%T*`
+    // ABI it would fall into if matched before the unwrap.
+    let ir = _emit_ir("movecase", "fn mv(name_data: * u8, name_len: i64) -> Affine<SfnString> ![io] { return name_data; }");
+    assert find(ir, "define {i8*, i64} @mv", 0) >= 0;
+}
+
 test "abi: string return spelling still lowers to i8* (no regression)" ![io] {
     let ir = _emit_ir("strctrl", "fn s(x: * u8) -> string ![io] { return x; }");
     // `string` is unchanged — single pointer return.

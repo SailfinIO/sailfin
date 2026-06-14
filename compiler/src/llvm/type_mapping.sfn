@@ -593,6 +593,7 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
     if starts_with(trimmed, "__closure__@") { return "{i8*, i8*}"; }
     if starts_with(trimmed, "fn(") { return "{i8*, i8*}"; }
     if starts_with(trimmed, "fn (") { return "{i8*, i8*}"; }
+    let normalized = unwrap_move_wrapper(trimmed);
     // Runtime-internal by-value `SfnString` aggregate ABI (M1.A.2). The bare
     // `{i8*, i64}` (data, len) two-eightbyte INTEGER-class struct is the
     // canonical SfnString layout (see `abi_hash.sfn`), returned/passed in
@@ -601,11 +602,12 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
     // parameter type `SfnString` in a runtime `.sfn` body routes the
     // *definition* onto that same by-value aggregate ABI instead of the boxed
     // `%T*` struct ABI below, so a Sailfin body can satisfy the call site
-    // without a C trampoline. Intercepted here, before the boxed-struct path,
-    // so it never becomes `%SfnString*`. Not a user-facing type — a runtime
-    // ABI spelling only.
-    if trimmed == "SfnString" { return "{i8*, i64}"; }
-    let normalized = unwrap_move_wrapper(trimmed);
+    // without a C trampoline. Checked on the move-unwrapped `normalized`
+    // spelling (so `move SfnString` and move-wrapped params/locals via
+    // `map_parameter_type` / `map_local_type` are caught too), before the
+    // boxed-struct path, so it never becomes `%SfnString*`. Not a user-facing
+    // type — a runtime ABI spelling only.
+    if normalized == "SfnString" { return "{i8*, i64}"; }
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
     if starts_with(normalized, "*") {
