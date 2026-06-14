@@ -424,10 +424,139 @@ PYEOF
     return 0
 }
 
+# Lay out a consumer capsule whose entry uses the typed `fetch` client to
+# GET /secret from the capsule server and print the parsed status, headers,
+# and body. $1 = server port. Proves the Wave 4 client↔server loopback:
+# fetch() returns a Response with the real status code (403) and headers
+# (X-Reason: nope), not just the body string.
+CLIENT="$SCRATCH/client-app"
+write_fetch_client() {
+    local port="$1"
+    mkdir -p "$CLIENT/src"
+    cat > "$CLIENT/capsule.toml" <<TOML
+[capsule]
+name = "sfn/http-e2e-client"
+version = "0.0.1"
+description = "sfn/http fetch client e2e consumer"
+
+[dependencies]
+"sfn/http" = "*"
+
+[capabilities]
+required = ["io", "net"]
+
+[build]
+entry = "src/main.sfn"
+kind = "library"
+TOML
+    cat > "$CLIENT/src/main.sfn" <<SFN
+import { fetch, Response } from "sfn/http";
+
+fn main() -> int ![net, io] {
+    let no_headers: string[] = [];
+    let resp = fetch("GET", "http://127.0.0.1:${port}/secret", no_headers, "");
+    if resp.status == 403 {
+        print.info("FETCH_STATUS=403");
+    } else {
+        print.info("FETCH_STATUS=other");
+    }
+    let mut i = 0;
+    loop {
+        if i >= resp.headers.length { break; }
+        print.info("FETCH_HEADER=" + resp.headers[i]);
+        i = i + 1;
+    }
+    print.info("FETCH_BODY=" + resp.body);
+    return 0;
+}
+SFN
+}
+
+# ---- Behavioral: the typed fetch client round-trips status + headers ----
+test_loopback_fetch_client() {
+    if [ -n "$SERVER_PID" ]; then
+        kill "$SERVER_PID" 2>/dev/null || true
+        wait "$SERVER_PID" 2>/dev/null || true
+        SERVER_PID=""
+    fi
+
+    local port
+    port="$(python3 - <<'PYEOF'
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PYEOF
+)"
+    if [ -z "$port" ]; then
+        echo "[test]   could not allocate a free port"
+        return 1
+    fi
+
+    write_app "$port"
+    local srvlog="$SCRATCH/server_fetch.out"
+    "$BINARY" run "$APP/src/main.sfn" > "$srvlog" 2>&1 &
+    SERVER_PID=$!
+
+    # Wait for the server to accept connections before compiling+running
+    # the Sailfin client (the client's fetch() makes a single attempt).
+    if ! python3 - "$port" <<'PYEOF'
+import socket, sys, time
+port = int(sys.argv[1])
+deadline = time.time() + 25
+while time.time() < deadline:
+    try:
+        socket.create_connection(("127.0.0.1", port), timeout=2).close()
+        sys.exit(0)
+    except OSError:
+        time.sleep(0.3)
+sys.exit(1)
+PYEOF
+    then
+        echo "[test]   server never came up on port $port"
+        cat "$srvlog"
+        return 1
+    fi
+
+    write_fetch_client "$port"
+    local out="$SCRATCH/client_fetch.out"
+    if ! "$BINARY" run "$CLIENT/src/main.sfn" > "$out" 2>&1; then
+        echo "[test]   fetch client failed to compile/run:"
+        cat "$out"
+        echo "[test]   --- server log ---"
+        cat "$srvlog"
+        return 1
+    fi
+
+    local bad=0
+    if ! grep -q "FETCH_STATUS=403" "$out"; then
+        echo "[test]   expected fetch to parse status 403, got:"
+        cat "$out"
+        bad=$((bad + 1))
+    fi
+    if ! grep -q "FETCH_HEADER=X-Reason: nope" "$out"; then
+        echo "[test]   expected fetch to surface header 'X-Reason: nope', got:"
+        cat "$out"
+        bad=$((bad + 1))
+    fi
+    if ! grep -q "FETCH_BODY=denied" "$out"; then
+        echo "[test]   expected fetch body 'denied', got:"
+        cat "$out"
+        bad=$((bad + 1))
+    fi
+    if [ "$bad" -ne 0 ]; then
+        echo "[test]   --- server log ---"
+        cat "$srvlog"
+    fi
+    return "$bad"
+}
+
 run_test "imported serve lowers to the capsule fn, not the builtin @sfn_serve" test_gate_not_hijacked
 run_test "typed serve delivers custom status + headers on the wire" test_loopback_status_and_headers
 run_test "POST Content-Length body is drained and reaches req.body" test_loopback_post_body
 run_test "over-cap Content-Length is rejected with a 500" test_loopback_oversize_rejected
+run_test "typed fetch client round-trips status + headers from the server" test_loopback_fetch_client
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

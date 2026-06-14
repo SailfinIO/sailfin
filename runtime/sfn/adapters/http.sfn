@@ -559,6 +559,151 @@ fn sfn_http_post2(url: * u8, body: * u8) -> * u8 ![net] {
     return sfn_http_post(url, body, null);
 }
 
+// `sfn_http_request_raw(method, url, headers, body)` — perform an
+// arbitrary HTTP/1.1 request and return the FULL raw response (status
+// line + headers + body) as a caller-owned NUL-terminated buffer, or
+// null on a socket/connect failure. This is the additive primitive
+// behind the typed `fetch` client (sfn/http, Wave 4 / #1325): unlike
+// `sfn_http_get` / `sfn_http_post` it neither strips the headers nor
+// filters on the status code, so the capsule's response parser can
+// surface the real status + headers. Same v0 limits as the rest of
+// this adapter: no TLS, localhost / dotted-quad host only, no chunked
+// decoding, no redirect following.
+//
+// `headers` is a pre-serialized header block — zero or more
+// "Name: value\r\n" lines, possibly empty — emitted verbatim after the
+// `Host` line (the capsule joins its `string[]`). The framing headers
+// `Host`, `Content-Length` (only when a body is present), and
+// `Connection: close` are owned here, matching the GET/POST paths.
+fn sfn_http_request_raw(method: * u8, url: * u8, headers: * u8, body: * u8) -> * u8 ![net] {
+    if url as i64 == 0 { return null; }
+    if method as i64 == 0 { return null; }
+
+    // Reject TLS — no HTTPS in v0.
+    let https: string = "https://";
+    if (strstr(url, https as * u8) as i64) == (url as i64) { return null; }
+
+    // Locate the authority: skip past "scheme://" if present.
+    let sep: string = "://";
+    let mut host_start: * u8 = url;
+    let scheme: * u8 = strstr(url, sep as * u8);
+    if scheme as i64 != 0 { host_start = _ptr_off(scheme, 3); }
+
+    // Path begins at the first '/' after the authority; default "/".
+    let slash: * u8 = strchr(host_start, 47);
+    let mut authority_len: i64 = 0;
+    if slash as i64 != 0 {
+        authority_len = (slash as i64) - (host_start as i64);
+    } else { authority_len = strlen(host_start) as i64; }
+    let authority: * u8 = _strdup_n(host_start, authority_len);
+    if authority as i64 == 0 { return null; }
+
+    // Split host:port (terminate host in place at the colon).
+    let mut port: i64 = 80;
+    let colon: * u8 = strchr(authority, 58);
+    if colon as i64 != 0 {
+        port = atoi(_ptr_off(colon, 1)) as i64;
+        memset(colon, 0, 1 as usize);
+    }
+
+    let root: string = "/";
+    let mut path: * u8 = root as * u8;
+    if slash as i64 != 0 { path = slash; }
+
+    let fd: i32 = _connect_tcp(authority, port);
+    if fd < 0 {
+        free(authority);
+        return null;
+    }
+
+    // ── Build the request head ──
+    // "<METHOD> <path> HTTP/1.1\r\nHost: <authority>\r\n" + <headers>
+    //   [+ "Content-Length: <n>\r\n"] + "Connection: close\r\n\r\n"
+    let sp: string = " ";
+    let proto: string = " HTTP/1.1\r\nHost: ";
+    let crlf: string = "\r\n";
+    let clen_label: string = "Content-Length: ";
+    let conn_close: string = "Connection: close\r\n\r\n";
+
+    let method_len: i64 = strlen(method) as i64;
+    let path_len: i64 = strlen(path) as i64;
+    let host_len: i64 = strlen(authority) as i64;
+    let mut headers_len: i64 = 0;
+    if headers as i64 != 0 { headers_len = strlen(headers) as i64; }
+    let mut body_len: i64 = 0;
+    if body as i64 != 0 { body_len = strlen(body) as i64; }
+
+    // Optional Content-Length line — only when a body is present (a
+    // bare GET emits no Content-Length, matching `_http_send`).
+    let mut clen: * u8 = null;
+    let mut clen_len: i64 = 0;
+    if body_len > 0 {
+        clen = _uint_to_str(body_len);
+        if clen as i64 == 0 {
+            free(authority);
+            close(fd);
+            return null;
+        }
+        clen_len = strlen(clen) as i64;
+    }
+
+    let mut total: i64 = method_len + (strlen(sp as * u8) as i64) + path_len + (strlen(proto as * u8) as i64)
+        + host_len
+        + (strlen(crlf as * u8) as i64)
+        + headers_len
+        + (strlen(conn_close as * u8) as i64);
+    if body_len > 0 {
+        total = total + (strlen(clen_label as * u8) as i64) + clen_len + (strlen(crlf as * u8) as i64);
+    }
+    let head: * u8 = malloc((total + 1) as usize);
+    if head as i64 == 0 {
+        if clen as i64 != 0 { free(clen); }
+        free(authority);
+        close(fd);
+        return null;
+    }
+    let mut off: i64 = 0;
+    off = _append(head, off, method);
+    off = _append(head, off, sp as * u8);
+    off = _append(head, off, path);
+    off = _append(head, off, proto as * u8);
+    off = _append(head, off, authority);
+    off = _append(head, off, crlf as * u8);
+    if headers_len > 0 { off = _append(head, off, headers); }
+    if body_len > 0 {
+        off = _append(head, off, clen_label as * u8);
+        off = _append(head, off, clen);
+        off = _append(head, off, crlf as * u8);
+    }
+    off = _append(head, off, conn_close as * u8);
+    memset(_ptr_off(head, off), 0, 1 as usize);
+    if clen as i64 != 0 { free(clen); }
+
+    let head_ok: bool = _send_all(fd, head, off);
+    free(head);
+    if !head_ok {
+        free(authority);
+        close(fd);
+        return null;
+    }
+    if body_len > 0 {
+        if !_send_all(fd, body, body_len) {
+            free(authority);
+            close(fd);
+            return null;
+        }
+    }
+
+    free(authority);
+    let mut total_len: i64 = 0;
+    let resp: * u8 = _recv_all(fd, & total_len);
+    close(fd);
+    // Return the full raw response verbatim — the capsule parses the
+    // status code and headers out of it. `_recv_all` NUL-terminates the
+    // buffer; null (socket/recv error) propagates to the caller.
+    return resp;
+}
+
 // `sfn_http_download(url, output_path)` — GET `url` and write the
 // body to `output_path` in binary mode. Returns the literal `"ok"`
 // on success, null on failure (matching the curl

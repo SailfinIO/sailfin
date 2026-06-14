@@ -112,6 +112,23 @@ fn _ascii_lower(value: string) -> string {
     return out;
 }
 
+// Parse a leading non-negative decimal integer from `s`, stopping at
+// the first non-digit (the `atoi` shape, used for the response status
+// code). Returns 0 for an empty or non-numeric prefix.
+fn _parse_int(s: string) -> int {
+    let mut value = 0;
+    let mut i = 0;
+    let n = s.length;
+    loop {
+        if i >= n { break; }
+        let code = char_code(grapheme_at(s, i));
+        if code < 48 || code > 57 { break; }
+        value = value * 10 + (code - 48);
+        i = i + 1;
+    }
+    return value;
+}
+
 // ── reason phrases ────────────────────────────────────────────────
 // Reason phrase for the common status codes; unknown codes get the
 // generic `"Status"` (a valid HTTP/1.1 reason phrase).
@@ -203,6 +220,63 @@ fn parse_request(raw: string) -> Request {
         headers: headers,
         body: body
     };
+}
+
+// ── response parsing (client side) ────────────────────────────────
+// Parse raw HTTP/1.1 response bytes into a `Response` — the client-side
+// twin of `parse_request`. The status line ("HTTP/1.1 NNN reason")
+// yields `status` (the numeric code; the reason phrase is discarded);
+// `headers` are the raw "Name: value" lines up to the blank-line
+// terminator; `body` is whatever follows it. Same v0 tolerances
+// (bare-LF endings, missing final blank line) and limits (no chunked
+// decoding) as the request parser. An empty input (e.g. a null buffer
+// from a connect failure, whose `.length` is 0) yields a `status: 0`
+// `Response` — the typed `fetch` failure signal.
+fn parse_response(raw: string) -> Response {
+    let total = raw.length;
+    if total == 0 {
+        return Response { status: 0, headers: [], body: "" };
+    }
+
+    // Status line: up to the first '\n'.
+    let line_nl = find_char(raw, "\n", 0);
+    let mut line_end = total;
+    if line_nl >= 0 { line_end = line_nl; }
+    let status_line = _strip_cr(substring(raw, 0, line_end));
+
+    // Status code is the token after the first space.
+    let mut status = 0;
+    let sp1 = find_char(status_line, " ", 0);
+    if sp1 >= 0 {
+        let sp2 = find_char(status_line, " ", sp1 + 1);
+        let mut code_end = status_line.length;
+        if sp2 >= 0 { code_end = sp2; }
+        status = _parse_int(substring(status_line, sp1 + 1, code_end));
+    }
+
+    // Header lines until the blank line; the remainder is the body.
+    let mut headers: string[] = [];
+    let mut body = "";
+    let mut cursor = total;
+    if line_nl >= 0 { cursor = line_nl + 1; }
+    loop {
+        if cursor >= total { break; }
+        let nl = find_char(raw, "\n", cursor);
+        let mut end = total;
+        if nl >= 0 { end = nl; }
+        let line = _strip_cr(substring(raw, cursor, end));
+        let mut next = total;
+        if nl >= 0 { next = nl + 1; }
+        if line.length == 0 {
+            body = substring(raw, next, total);
+            break;
+        }
+        headers.push(line);
+        if nl < 0 { break; }
+        cursor = next;
+    }
+
+    return Response { status: status, headers: headers, body: body };
 }
 
 // ── response serialization ────────────────────────────────────────
