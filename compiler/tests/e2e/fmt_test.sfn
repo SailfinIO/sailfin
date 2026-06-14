@@ -1,0 +1,163 @@
+// End-to-end tests for `sfn fmt`.
+//
+// Native replacement for the former `test_fmt.sh` (test-infra Phase 3,
+// epic #842). Exercises the formatter end-to-end: writes fixtures to a
+// scratch file, runs `sfn fmt <file>`, and asserts the emitted output
+// exactly matches the canonical form; plus idempotency on real compiler
+// sources and the `--check` / `--write` exit-code contract.
+//
+// `sfn fmt` is a pure frontend pass (no `clang`/link step), so the
+// spawned compiler needs no `PATH` — `run_capture` with an empty env is
+// sufficient. Output is compared with `trim_right` to normalize the
+// single trailing newline `fmt` appends (the bash original relied on
+// `$()` stripping it). The `sfn/test` `expect_*` matchers are `![pure]`
+// and cannot be called from an `![io]` test, so equality is asserted
+// directly. See `.claude/rules/no-bash-e2e.md` and `guillermo_test.sfn`.
+import { trim_right } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Per-test scratch dir: the runner's per-file `SAILFIN_TEST_SCRATCH` when
+// set (keeps fixtures off the repo tree and unique under the parallel
+// pool), else `/tmp`.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Write `input` to a uniquely-named scratch `.sfn` file and return its path.
+fn _write_fixture(name: string, input: string) -> string ![io] {
+    let path = _scratch_dir() + "/fmt-" + name + ".sfn";
+    fs.writeFile(path, input);
+    return path;
+}
+
+// Run `sfn fmt <file>` on `input` and return the trailing-newline-
+// normalized formatted output.
+fn _fmt(name: string, input: string) -> string ![io] {
+    let path = _write_fixture(name, input);
+    let _exit = process.run_capture([_sfn_bin(), "fmt", path], []);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if fs.exists(path) { fs.deleteFile(path); }
+    return trim_right(out);
+}
+
+test "fmt: empty file" ![io] { assert _fmt("empty", "") == ""; }
+
+test "fmt: comment-only file" ![io] {
+    let src = "// This is a comment\n// Another comment";
+    assert _fmt("comment_only", src) == "// This is a comment\n// Another comment";
+}
+
+test "fmt: simple function spacing" ![io] {
+    let src = "fn hello() -> string { return \"world\"; }";
+    assert _fmt("simple_fn", src) == "fn hello() -> string { return \"world\"; }";
+}
+
+test "fmt: new method name spacing" ![io] {
+    let src = "struct R {\n    fn new(w: int) -> R { return R {}; }\n}\nlet r = R.new(1);";
+    let want = "struct R {\n    fn new(w: int) -> R {\n        return R { };\n    }\n}\nlet r = R.new(1);";
+    assert _fmt("new_method_name", src) == want;
+}
+
+test "fmt: unary negation" ![io] {
+    let src = "fn neg(x: number) -> number { return -x; }";
+    assert _fmt("unary_neg", src) == "fn neg(x: number) -> number { return -x; }";
+}
+
+test "fmt: unary not" ![io] {
+    let src = "fn check(a: string, b: string) -> boolean { return !strings_equal(a, b); }";
+    let want = "fn check(a: string, b: string) -> boolean { return !strings_equal(a, b); }";
+    assert _fmt("unary_not", src) == want;
+}
+
+test "fmt: optional type suffix" ![io] {
+    let src = "fn find(x: string) -> string? { return x; }";
+    assert _fmt("optional_type", src) == "fn find(x: string) -> string? {\n    return x;\n}";
+}
+
+test "fmt: effect annotations" ![io] {
+    let src = "fn fetch(url: string) -> string ![io, net] { return \"\"; }";
+    assert _fmt("effects", src) == "fn fetch(url: string) -> string ![io, net] { return \"\"; }";
+}
+
+test "fmt: struct decl not inlined" ![io] {
+    let src = "struct Point {\n    x: number;\n    y: number;\n}";
+    assert _fmt("struct_decl", src) == "struct Point {\n    x: number;\n    y: number;\n}";
+}
+
+test "fmt: import stays inline" ![io] {
+    let src = "import { foo, bar } from \"./mod\";";
+    assert _fmt("import_inline", src) == "import { foo, bar } from \"./mod\";";
+}
+
+test "fmt: let binding spacing" ![io] {
+    assert _fmt("let_binding", "let x: number = 42;") == "let x: number = 42;";
+}
+
+test "fmt: if/else stays inline inside expanded fn" ![io] {
+    let src = "fn f(x: boolean) -> number { if x { return 1; } else { return 0; } }";
+    assert _fmt("if_else_inline", src) == "fn f(x: boolean) -> number {\n    if x { return 1; } else { return 0; }\n}";
+}
+
+// Idempotency: format twice and confirm the second pass is a no-op. Run
+// against real compiler sources so subtle drift surfaces here.
+fn _idempotent(name: string, src: string) -> boolean ![io] {
+    let first = _fmt(name + "_1", src);
+    let second = _fmt(name + "_2", first);
+    return first == second;
+}
+
+test "fmt: idempotency on string_utils.sfn" ![io] {
+    assert _idempotent("idem_string_utils", fs.readFile("compiler/src/string_utils.sfn"));
+}
+
+test "fmt: idempotency on ast.sfn" ![io] {
+    assert _idempotent("idem_ast", fs.readFile("compiler/src/ast.sfn"));
+}
+
+test "fmt: idempotency on effect_checker.sfn" ![io] {
+    assert _idempotent("idem_effect_checker", fs.readFile("compiler/src/effect_checker.sfn"));
+}
+
+test "fmt: --check detects unformatted file" ![io] {
+    let path = _write_fixture("check_diff", "fn   foo( )  ->   string  {  return \"bar\" ;  }");
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", path], []);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if fs.exists(path) { fs.deleteFile(path); }
+    assert exit != 0;
+}
+
+test "fmt: --check passes on formatted file" ![io] {
+    let path = _write_fixture("check_pass", "fn foo() -> string { return \"bar\"; }");
+    let w = process.run_capture([_sfn_bin(), "fmt", "--write", path], []);
+    let _wo = process.capture_take_stdout();
+    let _we = process.capture_take_stderr();
+    assert w == 0;
+    let c = process.run_capture([_sfn_bin(), "fmt", "--check", path], []);
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    if fs.exists(path) { fs.deleteFile(path); }
+    assert c == 0;
+}
+
+test "fmt: --write modifies file in place" ![io] {
+    let path = _write_fixture("write_mode", "fn   foo( )  ->   string  {  return \"bar\" ;  }");
+    let w = process.run_capture([_sfn_bin(), "fmt", "--write", path], []);
+    let _wo = process.capture_take_stdout();
+    let _we = process.capture_take_stderr();
+    assert w == 0;
+    let c = process.run_capture([_sfn_bin(), "fmt", "--check", path], []);
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    if fs.exists(path) { fs.deleteFile(path); }
+    assert c == 0;
+}
