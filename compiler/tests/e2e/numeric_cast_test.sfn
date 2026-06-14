@@ -1,0 +1,192 @@
+// End-to-end test for the numeric `as` cast LLVM lowering matrix
+// (Slice D, docs/runtime_architecture.md §3.7).
+//
+// Native replacement for the former `test_numeric_cast.sh` (test-infra
+// Phase 3, epic #842; ratchet #1327). PR #289 shipped the parser + AST +
+// native-IR rendering for `as` casts but deferred the LLVM lowering
+// matrix; Slice D adds the matrix on top of the existing
+// pointer↔pointer / int↔pointer branches:
+//
+//   i1  → int (wider)    → zext
+//   i*  → int (wider)    → sext
+//   i*  → int (narrower) → trunc
+//   i1  → double/float   → uitofp
+//   i*  → double/float   → sitofp
+//   double/float → i*    → fptosi
+//   float → double       → fpext
+//   double → float       → fptrunc
+//   any  → i1 via `as`   → diagnostic ("use `x != 0`")
+//
+// Each sub-test compiles a tiny fixture to LLVM IR via `sfn emit llvm`,
+// extracts the relevant function body, and asserts the expected cast
+// instruction is present (and, where it matters, that the wrong one is
+// absent).
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like these. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains, split, starts_with } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn emit`. `process.run_capture` treats
+// an empty array as the *empty* environment (not "inherit"), so the relevant
+// variables must be threaded explicitly:
+//   - `PATH` (+ `HOME`/`TMPDIR`): keeps any subprocess the compiler shells out
+//     to resolvable.
+//   - `SAILFIN_TEST_SCRATCH`: the runner's per-file scratch, which the
+//     compiler routes its build-cache dir under (#1333) so a parallel run
+//     (`--jobs N>1`) does not collide on the fixed `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Extract the body of the function whose `define` line starts with
+// `header_prefix` (the `sed -n "/define .../,/^}/p"` shape). LLVM `define`
+// lines start at column 0, so a prefix match is exact; collection stops at
+// the closing `}` at column 0.
+fn _fn_body(ir: string, header_prefix: string) -> string {
+    let lines = split(ir, "\n");
+    let mut out = "";
+    let mut inside = false;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if !inside {
+            if starts_with(line, header_prefix) {
+                inside = true;
+                out = out + line + "\n";
+            }
+        } else {
+            out = out + line + "\n";
+            if starts_with(line, "}") { break; }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Write `source` to a scratch `.sfn` keyed by `tag`, lower it to LLVM IR via
+// `sfn emit llvm`, then return the body of the function selected by
+// `header_prefix`. Returns "" on emit failure so callers assert on the
+// emptiness.
+fn _emit_body(source: string, header_prefix: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-cast-" + tag + ".sfn";
+    let ll = dir + "/sfn-cast-" + tag + ".ll";
+    fs.writeFile(src, source);
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    fs.deleteFile(src);
+    return _fn_body(ir, header_prefix);
+}
+
+// ---- int → float lowers as sitofp ----
+test "numeric-cast: int → float lowers as sitofp i64 to double" ![io] {
+    let body = _emit_body("fn convert(x: int) -> float { return x as float; }", "define double @convert", "int_to_float");
+    assert body.length > 0;
+    assert contains(body, "sitofp i64 %x to double");
+}
+
+// ---- float → int lowers as fptosi ----
+test "numeric-cast: float → int lowers as fptosi double to i64" ![io] {
+    let body = _emit_body("fn back(x: float) -> int { return x as int; }", "define i64 @back", "float_to_int");
+    assert body.length > 0;
+    assert contains(body, "fptosi double %x to i64");
+}
+
+// ---- i32 → i64 lowers as sext ----
+test "numeric-cast: i32 → i64 widening lowers as sext" ![io] {
+    let body = _emit_body("fn widen(x: i32) -> i64 { return x as i64; }", "define i64 @widen", "i32_to_i64");
+    assert body.length > 0;
+    assert contains(body, "sext i32 %x to i64");
+}
+
+// ---- i8 → i64 lowers as sext ----
+test "numeric-cast: i8 → i64 widening lowers as sext" ![io] {
+    let body = _emit_body("fn widen(x: i8) -> i64 { return x as i64; }", "define i64 @widen", "i8_to_i64");
+    assert body.length > 0;
+    assert contains(body, "sext i8 %x to i64");
+}
+
+// ---- i64 → i32 lowers as trunc ----
+test "numeric-cast: i64 → i32 narrowing lowers as trunc" ![io] {
+    let body = _emit_body("fn narrow(x: i64) -> i32 { return x as i32; }", "define i32 @narrow", "i64_to_i32");
+    assert body.length > 0;
+    assert contains(body, "trunc i64 %x to i32");
+}
+
+// ---- bool (i1) → i64 lowers as zext (not sext) ----
+// Source-side `bool` maps to LLVM `i1`. Widening to i64 must use `zext`
+// (not sext) so `true` becomes 1 (not -1).
+test "numeric-cast: bool (i1) → i64 widening lowers as zext (not sext)" ![io] {
+    let body = _emit_body("fn widen(x: bool) -> i64 { return x as i64; }", "define i64 @widen", "i1_to_i64");
+    assert body.length > 0;
+    assert contains(body, "zext i1 %x to i64");
+    assert ! contains(body, "sext i1 ");
+}
+
+// ---- bool → double uses uitofp (not sitofp; true → 1.0) ----
+// `sitofp i1 1` produces -1.0 because LLVM treats `i1` as signed where
+// `true` = -1. For `bool as float` the user expects `true` → 1.0, so the
+// lowering must use `uitofp` for the i1 source.
+test "numeric-cast: bool → double uses uitofp (not sitofp; true → 1.0)" ![io] {
+    let body = _emit_body("fn promote(x: bool) -> float { return x as float; }", "define double @promote", "i1_to_double");
+    assert body.length > 0;
+    assert contains(body, "uitofp i1 %x to double");
+    assert ! contains(body, "sitofp i1 ");
+}
+
+// ---- f32 (LLVM float) → double lowers as fpext ----
+test "numeric-cast: f32 → double widening lowers as fpext" ![io] {
+    let body = _emit_body("fn widen(x: f32) -> float { return x as float; }", "define double @widen", "f32_to_double");
+    assert body.length > 0;
+    assert contains(body, "fpext float %x to double");
+}
+
+// ---- double → f32 (LLVM float) lowers as fptrunc ----
+test "numeric-cast: double → f32 narrowing lowers as fptrunc" ![io] {
+    let body = _emit_body("fn narrow(x: float) -> f32 { return x as f32; }", "define float @narrow", "double_to_f32");
+    assert body.length > 0;
+    assert contains(body, "fptrunc double %x to float");
+}
+
+// ---- pointer → bool is rejected (not ptrtoint) ----
+// Without the early `as bool` check, `ptr as bool` would lower to
+// `ptrtoint ptr to i1`, a low-bit reinterpretation rather than the
+// documented "is non-null" comparison. The rejection runs before the
+// pointer→int branch, the cast bails with a null operand, and `lower_return`
+// falls back to the default literal `false` for i1.
+test "numeric-cast: ptr → bool is rejected (not ptrtoint)" ![io] {
+    let body = _emit_body("fn isset(x: *u8) -> bool { return x as bool; }", "define i1 @isset", "ptr_to_bool");
+    assert body.length > 0;
+    assert ! contains(body, "ptrtoint i8* %x to i1");
+    assert contains(body, "ret i1 false");
+}

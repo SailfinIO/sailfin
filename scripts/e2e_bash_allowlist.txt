@@ -76,8 +76,6 @@ test_make_result_contract.sh
 test_mem_limit_selfcap.sh
 test_monotonic_millis_advances.sh
 test_no_duplicate_declares.sh
-test_numeric_bitwise.sh
-test_numeric_cast.sh
 test_numeric_int_default.sh
 test_numeric_int_float.sh
 test_owned_buf_grow_determinism.sh
