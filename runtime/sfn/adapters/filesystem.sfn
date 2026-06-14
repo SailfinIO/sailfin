@@ -43,8 +43,8 @@
 //     `SfnArray` (`{ i8**, i64, i64 }*`) the C adapter already
 //     builds with sorting + `.`/`..` filtering. Replicating both
 //     in Sailfin is a follow-up inline wave; the symbol flip lands
-//     against the canonical `sfn_fs_list_dir` name now (same shape
-//     as the M3.1a write/append trampolines).
+//     against the canonical `sfn_fs_list_dir` name now (#1311 `Out:`,
+//     tracked as epic #1308 C8).
 //   - **`sfn_fs_read_bytes`**: trampolines to the C
 //     `sailfin_runtime_read_file_bytes` (the read_bytes row's
 //     existing `symbol`). That body reports the true binary length
@@ -82,28 +82,46 @@
 //     stat block). Returns a NUL-terminated buffer the caller
 //     owns; null on OOM or open failure.
 //
-//   - **`sfn_fs_write_file` / `sfn_fs_append_file`**: trampolined
-//     to the legacy C adapters `sailfin_adapter_fs_write_file` /
-//     `sailfin_adapter_fs_append_file`. The C bodies detect
-//     immediate-codepoint tagged-pointer strings (low ASCII
-//     embedded in the pointer value, or single codepoint in the
-//     high 32 bits, gated by a macOS mapped-pointer guard that
-//     reads `mach_vm_region` to avoid false-positives on real
-//     pointers with low 32 bits zero) and emit the UTF-8
-//     encoding directly when the input is immediate, falling
-//     back to `fopen` + `fwrite` otherwise. Replicating that
-//     detection in Sailfin needs the macOS mapped-region probe
-//     and a UTF-8 encoder; both are post-M3.1a work. Until then
-//     the Sailfin module owns the `sfn_fs_write_file` /
-//     `sfn_fs_append_file` symbol names (matching the io.sfn
-//     pattern for `sfn_print_sfn` → `sailfin_runtime_print_raw`)
-//     so the descriptor flip in `runtime_helpers.sfn` lands
-//     against the canonical names; a follow-up wave inlines the
-//     bodies. This trampoline shape is safe by construction —
-//     the C adapter has carried the production fs.writeFile /
-//     fs.appendFile contract since pre-M2, including the
-//     immediate-codepoint hazard surfaced in the M3.1a Copilot
-//     review.
+//   Five of the eight adapters land as real Sailfin bodies; three
+//   stay C trampolines because they touch a platform-divergent symbol
+//   or struct that needs a `cfg(target_os)` story (#468) Sailfin has
+//   not shipped. The single `filesystem.ll` is compiled for Linux,
+//   macOS arm64, *and* the Windows cross target, so an adapter is only
+//   portable-as-pure-Sailfin when its libc symbol links and behaves on
+//   all three.
+//
+//   - **`sfn_fs_write_file` / `sfn_fs_append_file` /
+//     `sfn_fs_write_lines`** (#1311, epic #1308 C7): pure Sailfin —
+//     `fopen("wb"/"ab")` + `fwrite` + `fclose` (portable C stdio).
+//     `write_lines` reads the `SfnArray` `data`/`len` fields through
+//     the `SfnArrayView` overlay. For a real buffer `strlen` recovers
+//     the byte length; a pre-M1.A.2 immediate-codepoint tagged pointer
+//     in the *content* would crash `strlen`/`fwrite`, so those cases
+//     delegate the whole write to the decoding C adapter (the same
+//     `_fs_is_immediate` fallback shape `runtime/sfn/io.sfn`'s print
+//     family uses). Path arguments are never guarded — they follow the
+//     shipped `sfn_fs_read_file` / `_delete` / `_mkdir` convention.
+//
+//   - **`sfn_fs_set_perms` / `sfn_fs_is_executable`** (#1311): pure
+//     Sailfin over the portable libc `chmod` / `access` externs —
+//     both link and behave identically on Linux / macOS / Windows.
+//
+//   - **`sfn_fs_get_perms`**: stays a C trampoline. Recovering
+//     `st_mode` needs the native `struct stat`, whose `st_mode` byte
+//     offset diverges per platform (24 on Linux x86_64, 4 on macOS
+//     arm64), so a fixed-offset Sailfin read returns garbage off-Linux
+//     and fails the macOS fs tests.
+//
+//   - **`sfn_fs_mkdtemp` / `sfn_fs_symlink`**: stay C trampolines —
+//     `mkdtemp(3)` / `symlink(2)` have no MinGW symbol, so a direct
+//     libc call breaks the Windows cross-compile link of the shared
+//     `filesystem.ll`. The C bodies' `#if defined(_WIN32)` stubs are
+//     the only Windows-safe source.
+//
+//   Porting `get_perms` / `mkdtemp` / `symlink` to pure Sailfin is the
+//   documented #1311 follow-up (gated on the #468 `cfg`/stub story).
+//   `list_dir` / `read_bytes` likewise remain C trampolines (#1311
+//   `Out:` — dirent-offset / `fseek`+`ftell` story, epic #1308 C8).
 //
 // Why inline the externs rather than `import { fopen, ... }
 // from "../platform/libc"`? Same rationale as every other
@@ -135,17 +153,38 @@ extern fn fclose(f: * File) -> i32;
 
 extern fn fread(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
 
-// Legacy C adapters from `runtime/native/src/sailfin_runtime.c`
-// that own the production fs.writeFile / fs.appendFile contract,
-// including the immediate-codepoint tagged-pointer detection +
-// macOS mapped-pointer guard the Sailfin port has not yet
-// replicated. The new `sfn_fs_write_file` / `sfn_fs_append_file`
-// exports trampoline through these until a follow-up wave inlines
-// the bodies (see file header). The C symbols stay exported until
-// M3.9 retires `sailfin_runtime.c`.
-extern fn sailfin_adapter_fs_write_file(path: * u8, contents: * u8) -> void;
+extern fn fwrite(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
 
-extern fn sailfin_adapter_fs_append_file(path: * u8, contents: * u8) -> void;
+// Extended POSIX filesystem primitives (#1311, epic #1308 C7). Two
+// portable libc symbols are bound directly (no C trampoline):
+// `chmod` backs `set_perms` and `access` backs `is_executable`
+// (`fwrite`, above, backs write_file / append_file / write_lines).
+// Both have a MinGW symbol and identical behaviour across Linux /
+// macOS / Windows, so the single `filesystem.ll` links and behaves
+// on every target. Declared in `runtime/sfn/platform/libc.sfn`
+// (inlined here per the #306 cross-module-extern workaround in the
+// file header).
+extern fn chmod(path: * u8, mode: i32) -> i32;
+
+extern fn access(path: * u8, mode: i32) -> i32;
+
+// Platform-divergent adapters that stay C trampolines (the C bodies
+// carry the per-platform layout + `#if defined(_WIN32)` stubs and
+// retire with #822):
+//   - `mkdtemp(3)` / `symlink(2)` have **no MinGW symbol**, so a
+//     direct libc call breaks the Windows `sailfin.exe` link
+//     (`undefined reference to mkdtemp/symlink`).
+//   - `struct stat`'s `st_mode` offset differs per platform (24 on
+//     Linux x86_64, 4 on macOS arm64), so a fixed-offset Sailfin
+//     read for `get_perms` returns garbage off-Linux (the macOS fs
+//     tests fail). The C body reads the native `struct stat`.
+// Porting all three to pure Sailfin is the documented #1311
+// follow-up, gated on a per-platform `cfg`/stub story (#468).
+extern fn sailfin_adapter_fs_mkdtemp(prefix: * u8) -> * u8;
+
+extern fn sailfin_adapter_fs_symlink(target: * u8, link: * u8) -> bool;
+
+extern fn sailfin_adapter_fs_get_perms(path: * u8) -> i64;
 
 // M3.1b additions. `memcpy` / `strlen` / `strchr` back the
 // recursive `sfn_fs_mkdir` component walk; `unlink` / `mkdir` are
@@ -166,43 +205,12 @@ extern fn mkdir(path: * u8, mode: i32) -> i32;
 
 extern fn rmdir(path: * u8) -> i32;
 
-// M3.1c (#926): legacy C adapters the seven extended-fs flips
-// trampoline through. Each carries the production POSIX behaviour
-// *and* a `#if defined(_WIN32)` stub in `runtime/native/src/
-// sailfin_runtime.c`, so trampolining keeps the `sfn_fs_*` exports
-// cross-platform-linkable — the Windows cross-compile (which links
-// the same `filesystem.ll` it builds for Linux) has no MinGW symbol
-// for `symlink` / `mkdtemp` / raw `stat`, and the C stubs are the
-// only Windows-safe source. This mirrors the M3.1b `list_dir` /
-// `read_bytes` split: portable bodies stay pure Sailfin (delete /
-// mkdir, above), platform-specific ones trampoline behind the
-// canonical name. A follow-up wave inlines the bodies once a
-// per-platform externs story (`runtime/sfn/platform/sizes_*.sfn`)
-// lands. All stay exported until M3.9 retires `sailfin_runtime.c`.
-//
-//   - `sailfin_intrinsic_fs_exists` — `stat(2)`-based existence probe.
-//   - `sailfin_adapter_fs_set_perms` — `chmod(2)`, masks to `07777`.
-//   - `sailfin_adapter_fs_is_executable` — `access(X_OK)`.
-//   - `sailfin_adapter_fs_symlink` — `symlink(2)`.
-//   - `sailfin_adapter_fs_get_perms` — reads `st_mode` at a
-//     platform-specific `struct stat` offset.
-//   - `sailfin_adapter_fs_mkdtemp` — `$TMPDIR` anchoring + `mkdtemp(3)`.
-//   - `sailfin_adapter_fs_write_lines_v2` — unpacks the `SfnArray`
-//     (`{ i8**, i64, i64 }*`, spelled `* u8`) into the legacy
-//     `SailfinPtrArray` shim.
+// `sailfin_intrinsic_fs_exists` — `stat(2)`-based existence probe,
+// kept as a C-backed intrinsic (out of #1311 scope; it carries a
+// `#if defined(_WIN32)` stub and retires with #822 when
+// `sailfin_runtime.c` is deleted). `sfn_fs_mkdir` / `sfn_fs_exists`
+// below route through it.
 extern fn sailfin_intrinsic_fs_exists(path: * u8) -> bool;
-
-extern fn sailfin_adapter_fs_set_perms(path: * u8, mode: i64) -> bool;
-
-extern fn sailfin_adapter_fs_is_executable(path: * u8) -> bool;
-
-extern fn sailfin_adapter_fs_symlink(target: * u8, link: * u8) -> bool;
-
-extern fn sailfin_adapter_fs_get_perms(path: * u8) -> i64;
-
-extern fn sailfin_adapter_fs_mkdtemp(prefix: * u8) -> * u8;
-
-extern fn sailfin_adapter_fs_write_lines_v2(path: * u8, lines: * u8) -> void;
 
 // Legacy C adapters the M3.1b list/read_bytes flips trampoline
 // through (see the file header). `sailfin_adapter_fs_list_directory_v2`
@@ -216,6 +224,53 @@ extern fn sailfin_adapter_fs_write_lines_v2(path: * u8, lines: * u8) -> void;
 extern fn sailfin_adapter_fs_list_directory_v2(path: * u8) -> * u8;
 
 extern fn sailfin_runtime_read_file_bytes(path: * u8, out_length: * u8) -> * u8;
+
+// Immediate-codepoint fallback (the same shape `runtime/sfn/io.sfn`'s
+// print family uses). Pre-M1.A.2 a single grapheme can arrive as a
+// `string` with no backing buffer — the codepoint tagged into the
+// pointer value itself (#714/#716). The pure `fopen`/`fwrite` bodies
+// below `strlen`/deref the content pointer, which would crash on such
+// a tagged value, so when `_fs_is_immediate(content)` trips they
+// delegate the whole write to these legacy C adapters, which decode
+// the codepoint to UTF-8 before writing. Path arguments are never
+// guarded (they follow the shipped `sfn_fs_read_file` / `_delete` /
+// `_mkdir` convention — paths are always real buffers, and even the C
+// adapter never decoded the path). These fall away with the encoding
+// itself (#822 / M1.A.2).
+extern fn sailfin_adapter_fs_write_file(path: * u8, contents: * u8) -> void;
+
+extern fn sailfin_adapter_fs_append_file(path: * u8, contents: * u8) -> void;
+
+extern fn sailfin_adapter_fs_write_lines_v2(path: * u8, lines: * u8) -> void;
+
+// `_fs_is_immediate(data)` — is `data` a legacy immediate-codepoint
+// tagged pointer rather than a real string buffer? Inlined copy of
+// `runtime/sfn/io.sfn::_sfn_is_immediate` (the runtime `sfn-source`
+// emit path does not resolve imported *defined* functions — see the
+// note in `clock.sfn`, epic #763). Pointer math only — no syscall.
+// A near-null ASCII byte (`1..=0x7f`, plus NULL `0`) or a codepoint
+// shifted into the upper 32 bits (`cp << 32`, low 32 bits zero,
+// value non-zero) classifies as immediate; a real pointer is `> 0x7f`
+// with a non-zero low word, so it never matches.
+fn _fs_is_immediate(data: * u8) -> bool {
+    let raw: i64 = data as i64;
+    if raw >= 0 && raw <= 127 { return true; }
+    if raw != 0 && (raw & 4294967295) == 0 { return true; }
+    return false;
+}
+
+// Overlay for the unified `SfnArray` layout (`{ data: T*, len: i64,
+// cap: i64 }`, `runtime/sfn/array.sfn`) so `sfn_fs_write_lines` can
+// read the `data`/`len` fields of the `{ i8**, i64, i64 }*` it is
+// handed without a C trampoline. `data` overlays the `i8**` element
+// pointer as an `i64` address (same overlay trick `process.sfn`'s
+// `GrowBuf` uses for the environ/handle headers); the per-slot
+// `char*` entries are then read via `sailfin_intrinsic_pointer_read_i64`.
+struct SfnArrayView {
+    data: i64;
+    len: i64;
+    cap: i64;
+}
 
 // `sfn_fs_read_file(path)` — slurp the entire contents of `path`
 // into a freshly libc-`malloc`'d NUL-terminated buffer the
@@ -297,25 +352,59 @@ fn sfn_fs_read_file(path: * u8) -> * u8 ![io] {
     return buf;
 }
 
-// `sfn_fs_write_file(path, contents)` — write the full payload
-// of `contents` to `path` in binary mode, truncating any prior
-// contents. Trampolines to the legacy C adapter so the
-// immediate-codepoint tagged-pointer detection (+ macOS mapped-
-// pointer guard) survives the symbol flip. The C body's null
-// guards and `fopen` failure handling already match the
-// architect-spec defensive contract; the Sailfin layer adds no
-// behavior of its own. See the file header for the inlining
-// roadmap.
+// `sfn_fs_write_file(path, contents)` — write the full payload of
+// `contents` to `path` in binary mode (`"wb"`), truncating any
+// prior contents. Pure Sailfin for the common case: `fopen` +
+// `fwrite` + `fclose`, mirroring the C `sailfin_adapter_fs_write_file`
+// null-guard + `fopen`-failure contract. When `contents` is a
+// pre-M1.A.2 immediate-codepoint tagged pointer (single grapheme, no
+// backing buffer), `strlen`/`fwrite` would dereference an invalid
+// address, so the whole write delegates to the C adapter, which
+// decodes the codepoint to UTF-8 (same fallback shape as `io.sfn`'s
+// print family). For a real buffer `strlen` recovers the byte length.
 fn sfn_fs_write_file(path: * u8, contents: * u8) -> void ![io] {
-    sailfin_adapter_fs_write_file(path, contents);
+    if path as i64 == 0 { return; }
+    if contents as i64 == 0 { return; }
+
+    if _fs_is_immediate(contents) {
+        sailfin_adapter_fs_write_file(path, contents);
+        return;
+    }
+
+    let mode_str: string = "wb";
+    let f: * File = fopen(path, mode_str as * u8);
+    if f as i64 == 0 { return; }
+
+    let len: i64 = strlen(contents) as i64;
+    if len > 0 {
+        fwrite(contents, 1 as usize, len as usize, f);
+    }
+    fclose(f);
 }
 
-// `sfn_fs_append_file(path, contents)` — append the full payload
-// of `contents` to `path` in binary append mode, creating the
-// file if absent. Same trampoline + safety contract as
+// `sfn_fs_append_file(path, contents)` — append the full payload of
+// `contents` to `path` in binary append mode (`"ab"`), creating the
+// file if absent. Same pure-Sailfin `fopen` + `fwrite` + `fclose`
+// shape, immediate-codepoint C fallback, and safety contract as
 // `sfn_fs_write_file` above.
 fn sfn_fs_append_file(path: * u8, contents: * u8) -> void ![io] {
-    sailfin_adapter_fs_append_file(path, contents);
+    if path as i64 == 0 { return; }
+    if contents as i64 == 0 { return; }
+
+    if _fs_is_immediate(contents) {
+        sailfin_adapter_fs_append_file(path, contents);
+        return;
+    }
+
+    let mode_str: string = "ab";
+    let f: * File = fopen(path, mode_str as * u8);
+    if f as i64 == 0 { return; }
+
+    let len: i64 = strlen(contents) as i64;
+    if len > 0 {
+        fwrite(contents, 1 as usize, len as usize, f);
+    }
+    fclose(f);
 }
 
 // `sfn_fs_delete(path)` — remove the file named by `path`. Pure
@@ -446,69 +535,156 @@ fn sfn_fs_read_bytes(path: * u8, out_length: * u8) -> * u8 ![io] {
     return sailfin_runtime_read_file_bytes(path, out_length);
 }
 
-// `sfn_fs_set_perms(path, mode)` — `chmod(2)` equivalent (masks
-// `mode` to the POSIX permission bits `07777`). Trampolines to the
-// legacy C `sailfin_adapter_fs_set_perms`, which carries the mask +
-// null-guard + `#if _WIN32` stub. Trampolined (rather than a pure
-// `chmod` call) so the single `filesystem.ll` links on both the
-// Linux native and Windows cross targets. POSIX-only (#366).
+// `sfn_fs_set_perms(path, mode)` — `chmod(2)` equivalent. Masks
+// `mode` to the POSIX permission bits (`07777` == 4095) before the
+// syscall to keep the surface narrow, mirroring the C
+// `sailfin_adapter_fs_set_perms` mask + null-guard contract.
+// Returns true on success, false on a null path or any `chmod`
+// error. `chmod` is portable libc (links + behaves on Linux / macOS /
+// Windows), so this stays pure Sailfin. POSIX-only (#366); #1311.
 fn sfn_fs_set_perms(path: * u8, mode: i64) -> bool ![io] {
-    return sailfin_adapter_fs_set_perms(path, mode);
+    if path as i64 == 0 { return false; }
+    let masked: i64 = mode & 4095;
+    return chmod(path, masked as i32) == 0;
 }
 
 // `sfn_fs_get_perms(path)` — return the lower 12 bits of `st_mode`
 // (perm + sticky/setuid/setgid), or -1 on any error. Trampolines to
 // the legacy C `sailfin_adapter_fs_get_perms`: recovering `st_mode`
-// needs a platform-specific `struct stat` field offset (the same
-// layout caveat that keeps `sfn_fs_list_dir` on its C body), so the
-// flip lands against the canonical name now and a follow-up wave
-// inlines the offset accessor once a per-platform sizes module
-// ships. POSIX-only (#366).
+// needs the native `struct stat` layout, whose `st_mode` byte offset
+// diverges per platform (24 on Linux x86_64, 4 on macOS arm64), so a
+// fixed-offset Sailfin read returns garbage off-Linux. The C body
+// reads the real `struct stat`, keeping `get_perms` correct on every
+// target (the macOS fs tests exercise this). Pure-Sailfin port is the
+// documented #1311 follow-up, gated on a per-platform sizes/offset
+// story (#468). POSIX-only (#366).
 fn sfn_fs_get_perms(path: * u8) -> i64 ![io] {
     return sailfin_adapter_fs_get_perms(path);
 }
 
 // `sfn_fs_mkdtemp(prefix)` — create a unique directory (mode `0700`)
-// and return its malloc'd absolute path, or an empty malloc'd
-// string on error. Trampolines to the legacy C
-// `sailfin_adapter_fs_mkdtemp`, which carries the `$TMPDIR`
-// anchoring and `mkdtemp(3)` template construction; replicating the
-// `getenv`/template-buffer assembly in Sailfin is a follow-up wave,
-// so the symbol flip lands against the canonical name now. POSIX-
-// only (#366).
+// and return its malloc'd absolute path, or an empty malloc'd string
+// on error. Trampolines to the legacy C `sailfin_adapter_fs_mkdtemp`,
+// which carries the `$TMPDIR` anchoring + `mkdtemp(3)` template
+// construction *and* the `#if defined(_WIN32)` stub. `mkdtemp(3)` has
+// no MinGW symbol, so a pure-Sailfin body calling raw `mkdtemp` would
+// break the Windows cross-compile link (the single `filesystem.ll` is
+// built for both targets); the trampoline is the only Windows-safe
+// shape until a per-platform `cfg`/stub story (#468) lands. Porting
+// this body to pure Sailfin is the documented #1311 follow-up.
+// POSIX-only (#366).
 fn sfn_fs_mkdtemp(prefix: * u8) -> * u8 ![io] {
     return sailfin_adapter_fs_mkdtemp(prefix);
 }
 
 // `sfn_fs_is_executable(path)` — true iff the current process has
-// execute access to `path` (`access(path, X_OK)`). Trampolines to
-// the legacy C `sailfin_adapter_fs_is_executable`, which carries the
-// null-guard + `#if _WIN32` stub. Missing files and permission
-// errors both collapse to `false`. Trampolined for the same
-// single-`filesystem.ll` cross-platform-link reason as
-// `sfn_fs_set_perms`. POSIX-only (#366).
+// execute access to `path` (`access(path, X_OK)`; `X_OK == 1`).
+// Pure Sailfin, mirroring the C `sailfin_adapter_fs_is_executable`
+// null-guard contract: missing files and permission errors both
+// collapse to `false`. `access` is portable libc (Linux / macOS /
+// Windows), so this stays pure Sailfin. POSIX-only (#366); #1311.
 fn sfn_fs_is_executable(path: * u8) -> bool ![io] {
-    return sailfin_adapter_fs_is_executable(path);
+    if path as i64 == 0 { return false; }
+    return access(path, 1) == 0;
 }
 
 // `sfn_fs_symlink(target, link)` — create `link` pointing at
 // `target` (`symlink(2)`; per POSIX the target need not exist, so
 // dangling symlinks are allowed). Trampolines to the legacy C
-// `sailfin_adapter_fs_symlink`: `symlink` has no MinGW symbol at all
-// (the C body stubs it under `#if _WIN32`), so a pure call would
-// break the Windows cross-compile link. POSIX-only (#366).
+// `sailfin_adapter_fs_symlink`: `symlink(2)` has no MinGW symbol at
+// all (the C body stubs it under `#if defined(_WIN32)`), so a pure
+// call would break the Windows cross-compile link of the shared
+// `filesystem.ll`. Same Windows-safe-trampoline rationale as
+// `sfn_fs_mkdtemp`; pure-Sailfin port is the documented #1311
+// follow-up (gated on the #468 `cfg`/stub story). POSIX-only (#366).
 fn sfn_fs_symlink(target: * u8, link: * u8) -> bool ![io] {
     return sailfin_adapter_fs_symlink(target, link);
 }
 
 // `sfn_fs_write_lines(path, lines)` — write each entry of the
 // `SfnArray` (`{ i8**, i64, i64 }*`, spelled `* u8`) to `path` as a
-// newline-terminated line. Trampolines to the legacy C
-// `sailfin_adapter_fs_write_lines_v2`, which unpacks the SfnArray
-// into the legacy `SailfinPtrArray` shim and owns the line-join +
-// `fopen`/`fwrite` contract; replicating the array walk + encoder in
-// Sailfin is a follow-up wave (no `fs.writeLines` call site exists
-// yet, so the flip is pure forward surface). POSIX-only (#366).
+// newline-terminated line, truncating any prior contents (`"wb"`).
+// Pure Sailfin for the common case, mirroring the C
+// `sailfin_adapter_fs_write_lines_v2` → `_write_lines` contract: a
+// null entry pointer writes a bare newline. The `SfnArray` fields are
+// read through the `SfnArrayView` overlay (`data` address + `len`),
+// and each per-slot `char*` is loaded via
+// `sailfin_intrinsic_pointer_read_i64`; for a real buffer `strlen`
+// recovers its length. Two cases delegate the whole write to the C
+// adapter (which carries the refuse-and-truncate guard + immediate-
+// codepoint decode): an absurd `len > 10000000` from a corrupted-ABI
+// handle, and any entry that is a pre-M1.A.2 immediate-codepoint
+// tagged pointer (which `strlen`/`fwrite` would crash on). The
+// immediate pre-scan runs only after the count is bounded, so the
+// corrupted-handle case never iterates an absurd count.
 fn sfn_fs_write_lines(path: * u8, lines: * u8) -> void ![io] {
-    sailfin_adapter_fs_write_lines_v2(path, lines);
+    if path as i64 == 0 { return; }
+    if lines as i64 == 0 { return; }
+
+    let arr: * SfnArrayView = lines as * SfnArrayView;
+    let mut n: i64 = arr.len;
+    if n < 0 { n = 0; }
+
+    // Corrupted-ABI absurd count: defer to the C body (opens, refuses,
+    // leaves the file truncated-empty) rather than scanning it.
+    if n > 10000000 {
+        sailfin_adapter_fs_write_lines_v2(path, lines);
+        return;
+    }
+
+    let data_addr: i64 = arr.data;
+
+    // Immediate-codepoint pre-scan: if any entry is a tagged pointer,
+    // delegate the whole write to the decoding C adapter.
+    if data_addr != 0 {
+        let scan_slots: * i64 = data_addr as * i64;
+        let mut k: i64 = 0;
+        loop {
+            if k >= n { break; }
+            let e: i64 = sailfin_intrinsic_pointer_read_i64(scan_slots + k);
+            if e != 0 && _fs_is_immediate(e as * u8) {
+                sailfin_adapter_fs_write_lines_v2(path, lines);
+                return;
+            }
+            k = k + 1;
+        }
+    }
+
+    // Pure path: open (truncate) + write each line.
+    let mode_str: string = "wb";
+    let f: * File = fopen(path, mode_str as * u8);
+    if f as i64 == 0 { return; }
+
+    // Missing data pointer with a positive count is a corrupted handle:
+    // mirror the C body (file already truncated, then bail).
+    if data_addr == 0 {
+        if n > 0 {
+            fclose(f);
+            return;
+        }
+    }
+
+    let slots: * i64 = data_addr as * i64;
+    let newline: string = "\n";
+    let nl_ptr: * u8 = newline as * u8;
+
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        let slot_ptr: * i64 = slots + i;
+        let entry_addr: i64 = sailfin_intrinsic_pointer_read_i64(slot_ptr);
+        if entry_addr == 0 {
+            fwrite(nl_ptr, 1 as usize, 1 as usize, f);
+        } else {
+            let line: * u8 = entry_addr as * u8;
+            let llen: i64 = strlen(line) as i64;
+            if llen > 0 {
+                fwrite(line, 1 as usize, llen as usize, f);
+            }
+            fwrite(nl_ptr, 1 as usize, 1 as usize, f);
+        }
+        i = i + 1;
+    }
+
+    fclose(f);
 }
