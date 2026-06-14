@@ -2523,7 +2523,12 @@ double sfn_str_to_number(const char *s)
     return sailfin_runtime_string_to_number((char *)s);
 }
 
-char *sfn_number_to_str(double v)
+/* #1314 (C3 of epic #1308): the canonical `sfn_number_to_str` emission
+ * target is now a real hand-rolled Sailfin body in `runtime/sfn/string.sfn`.
+ * This C definition is `static` so the linker binds every emission to the
+ * Sailfin body while avoiding a duplicate-symbol collision; it is retained
+ * (unused) only until #822 deletes this file. */
+static char *sfn_number_to_str(double v)
 {
     return sailfin_runtime_number_to_string(v);
 }
@@ -2537,7 +2542,12 @@ char *sfn_number_to_str(double v)
  * trampoline keeps the legacy `* u8` return ABI so the descriptor
  * flip doesn't need to thread `@sfn_default_arena` through the call
  * site. */
-char *sfn_int_to_str(int64_t v)
+/* #1314 (C3 of epic #1308): the canonical `sfn_int_to_str` emission target
+ * is now a real hand-rolled Sailfin body in `runtime/sfn/string.sfn`. This C
+ * definition is `static` so the linker binds every emission to the Sailfin
+ * body while avoiding a duplicate-symbol collision; retained (unused) only
+ * until #822 deletes this file. */
+static char *sfn_int_to_str(int64_t v)
 {
     // #892: this is the format_temp_name backend ("%t" + number_to_string(n)),
     // called between every concat during IR line emission. Without the seq

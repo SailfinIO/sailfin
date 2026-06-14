@@ -99,24 +99,29 @@ test_emit_define_shape() {
         sfn_str_sfn_find_byte \
         sfn_str_sfn_codepoint \
         sfn_str_sfn_from_codepoint \
-        sfn_str_sfn_to_number \
-        sfn_number_to_str_sfn \
-        sfn_int_to_str_sfn; do
+        sfn_str_sfn_to_number; do
         if ! grep -qE "^define .* @${sym}\(" "$ll"; then
             echo "[test]   missing 'define ... @${sym}(' in string.ll"
             missing=$((missing + 1))
         fi
     done
+    # #1314: the numeric formatters no longer have a proof-of-life `_sfn`
+    # infix — their real bodies live at the bare `sfn_number_to_str` /
+    # `sfn_int_to_str` emission-target names (asserted by the wave-2
+    # export test below), so `sfn_number_to_str_sfn` / `sfn_int_to_str_sfn`
+    # are intentionally absent here.
     return "$missing"
 }
 
-# ---- Test: emitted IR does NOT collide with C trampolines ----
+# ---- Test: emitted IR does NOT collide with the still-C trampolines ----
 #
-# Coexistence regression: a regression that flips a Sailfin export
-# to a bare wave-2 name would collide with the C trampoline at link
-# time and break `make compile`. Pin the `_sfn_` infix (or `_sfn`
-# suffix for the leading-`sfn` numeric helpers) as the marker until
-# the C trampolines retire.
+# Coexistence regression: a regression that flips a still-façade Sailfin
+# export to a bare wave-2 name would collide with the C trampoline at
+# link time and break `make compile`. Pin the `_sfn_` infix as the marker
+# until each C trampoline retires. NOTE: `sfn_number_to_str` /
+# `sfn_int_to_str` are deliberately ABSENT from this list as of #1314 —
+# their bare bodies are now real Sailfin (string.sfn) and the C namesakes
+# are `static`, so a bare `define` for them is expected, not a collision.
 test_no_bare_sfn_str_define() {
     local ll="$SCRATCH/string.ll"
     if [ ! -f "$ll" ]; then
@@ -131,9 +136,7 @@ test_no_bare_sfn_str_define() {
         sfn_str_find_byte \
         sfn_str_codepoint \
         sfn_str_from_codepoint \
-        sfn_str_to_number \
-        sfn_number_to_str \
-        sfn_int_to_str; do
+        sfn_str_to_number; do
         if grep -qE "^define .* @${sym}\(" "$ll"; then
             echo "[test]   collision risk: string.sfn emits 'define ... @${sym}(', conflicts with C trampoline"
             found=$((found + 1))
@@ -225,9 +228,10 @@ test_compiler_binary_exports_wave2() {
         sfn_str_sfn_find_byte \
         sfn_str_sfn_codepoint \
         sfn_str_sfn_from_codepoint \
-        sfn_str_sfn_to_number \
-        sfn_number_to_str_sfn \
-        sfn_int_to_str_sfn; do
+        sfn_str_sfn_to_number; do
+        # #1314: `sfn_number_to_str_sfn` / `sfn_int_to_str_sfn` retired —
+        # the real bodies are the bare `sfn_number_to_str` / `sfn_int_to_str`
+        # above (Sailfin-defined; the C namesakes are now `static`).
         # Require a defined text symbol (` T ` / ` t `). The optional
         # `_` prefix accommodates macOS Mach-O while staying tight
         # against substring collisions. A here-string avoids the
