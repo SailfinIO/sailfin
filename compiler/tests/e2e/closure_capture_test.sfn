@@ -1,0 +1,109 @@
+// End-to-end test for closure call-site dispatch (#689) and
+// multi-capture env layout (#1106).
+//
+// Native replacement for the former `test_closure_capture.sh`
+// (test-infra Phase 3, epic #842). Compiles and runs six representative
+// closure fixtures and asserts each prints its exact expected value:
+//
+//   1. canonical non-capturing two-arg lambda           → 7
+//   2. single-int capture                               → 12
+//   3. higher-order dispatch via `fn(int) -> int` param → 10
+//   4. two-int capture                                  → 31
+//   5. three-int capture                                → 16
+//   6. mixed string+int two-capture                     → xv42
+//
+// Each fixture lives in its own capsule directory (with a minimal
+// `capsule.toml`) so `discover_project_root` doesn't walk up into
+// `compiler/capsule.toml` and inherit `sfn/runtime-native` — that would
+// drag `native_driver.c`'s own `int main` into the link and clobber the
+// fixture's `fn main()`. (See each fixture's capsule.toml.)
+//
+// Drives the compiler-under-test as a subprocess with the runtime
+// `process.*` builtins and asserts on captured stdout — the canonical
+// e2e pattern (see `.claude/rules/no-bash-e2e.md` and `guillermo_test.sfn`).
+// Output is compared with `trim_right` to normalize the trailing newline;
+// the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test.
+import { trim_right } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn) so CI can point
+// the test at any compiler without editing it.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `sfn run` compiles+links+executes the fixture, so the spawned compiler
+// needs a real environment. `process.run_capture` treats an empty array
+// as the *empty* environment (not "inherit"), so thread `PATH`
+// (+ `HOME`/`TMPDIR`) — without `PATH` the nested compile's linker is not
+// found and the build fails — plus the runner's per-file
+// `SAILFIN_TEST_SCRATCH`, under which the compiler routes the `program.ll`
+// build-cache dir (#1333) so a parallel run does not collide on the fixed
+// `build/sailfin`. (`sfn run` has no `--work-dir`, so scratch is the only
+// isolation lever — see `.claude/rules/no-bash-e2e.md`.)
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+struct RunOut {
+    exit: int;
+    out: string;
+}
+
+// Compile+run a fixture and return its exit code plus the trailing-
+// newline-normalized stdout.
+fn _run_fixture(path: string) -> RunOut ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return RunOut { exit: exit, out: trim_right(out) };
+}
+
+test "closure: canonical non-capturing two-arg lambda prints 7" ![io] {
+    let r = _run_fixture("examples/advanced/lambda-closure.sfn");
+    assert r.exit == 0;
+    assert r.out == "7";
+}
+
+test "closure: single-int-capture lambda prints 12" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/closure_single_capture/main.sfn");
+    assert r.exit == 0;
+    assert r.out == "12";
+}
+
+test "closure: higher-order dispatch via fn(int) -> int parameter prints 10" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/closure_higher_order/main.sfn");
+    assert r.exit == 0;
+    assert r.out == "10";
+}
+
+test "closure: two-int-capture lambda prints 31" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/closure_two_int_capture/main.sfn");
+    assert r.exit == 0;
+    assert r.out == "31";
+}
+
+test "closure: three-int-capture lambda prints 16" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/closure_three_int_capture/main.sfn");
+    assert r.exit == 0;
+    assert r.out == "16";
+}
+
+test "closure: mixed string+int two-capture lambda prints xv42" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/closure_mixed_capture/main.sfn");
+    assert r.exit == 0;
+    assert r.out == "xv42";
+}
