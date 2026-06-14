@@ -25,6 +25,7 @@ import { gather_instruction, parse_instruction } from "./native_ir_parser_instru
 import { parse_decimal_number } from "./native_ir_utils_layout";
 import {
     line_looks_like_parameter_entry,
+    parse_binding_components,
     parse_decorator_name,
     parse_function_name,
     parse_import_entry,
@@ -170,6 +171,17 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
                     diagnostics.push("unable to parse decorator directive: "
                         + line);
                 } else { pending_decorators.push(decorator_name); }
+            }
+            index += 1;
+            continue;
+        }
+        if starts_with(line, ".extern-var ") {
+            if pending_decorators.length > 0 { pending_decorators = []; }
+            if include_top_level_bindings {
+                let parsed = parse_binding_components(trim_text(strip_prefix(line, ".extern-var ")));
+                bindings.push(NativeBinding {
+                    name: parsed.name, mutable: false, is_thread_local: false, is_extern: true, type_annotation: parsed.type_annotation, value: null
+                });
             }
             index += 1;
             continue;
@@ -440,6 +452,7 @@ fn binding_from_instruction(instruction: NativeInstruction) -> NativeBinding {
         name: instruction.name,
         mutable: instruction.mutable,
         is_thread_local: instruction.is_thread_local,
+        is_extern: false,
         type_annotation: instruction.type_annotation,
         value: instruction.value
     };

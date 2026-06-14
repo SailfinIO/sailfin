@@ -985,6 +985,50 @@ fn parse_extern_function(initial_parser: Parser, starts_with_unsafe: boolean, de
     return StatementParseResult { parser: parser, statement: statement };
 }
 
+// Parse `extern var NAME: TYPE;` (optionally `unsafe extern var ...`).
+// Declares a reference to a C-ABI global symbol (e.g. libc `environ`).
+// The type annotation is validated against the same accept-list as
+// `extern fn` signatures (E0801–E0805) in `check_extern_var`.
+fn parse_extern_var(initial_parser: Parser, starts_with_unsafe: boolean, decorators: Decorator[]) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
+    parser = skip_trivia(parser);
+    if starts_with_unsafe { parser = consume_keyword(parser, "unsafe"); }
+
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "extern");
+
+    parser = skip_trivia(parser);
+    parser = consume_keyword(parser, "var");
+
+    parser = skip_trivia(parser);
+    let name_token = parser_peek_raw(parser);
+    let name = identifier_text(name_token);
+    let name_span = source_span_from_tokens([name_token]);
+    parser = parser_advance_raw(parser);
+
+    parser = skip_trivia(parser);
+    let sep_result = consume_annotation_separator(parser);
+    if sep_result.found { parser = sep_result.parser; } else {
+        let arrow_result = consume_return_type_separator(parser);
+        if arrow_result.found { parser = arrow_result.parser; }
+    }
+
+    let capture = collect_until(skip_trivia(parser), [";"]);
+    parser = capture.parser;
+    let type_text = trim_text(tokens_to_text(capture.tokens));
+
+    parser = skip_trivia(parser);
+    parser = consume_symbol(parser, ";");
+
+    let statement = Statement.ExternVarDeclaration {
+        name: name,
+        type_annotation: TypeAnnotation { text: type_text },
+        name_span: name_span,
+        decorators: decorators
+    };
+    return StatementParseResult { parser: parser, statement: statement };
+}
+
 // ============================================================================
 // Struct Declaration
 // ============================================================================
