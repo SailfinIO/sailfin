@@ -1,4 +1,4 @@
-// Fixture for compiler/tests/e2e/test_atomic_add_sub_compile.sh.
+// Fixture for compiler/tests/e2e/atomic_add_sub_compile_test.sfn.
 // Exercises `atomic_add` and `atomic_sub` so the emitted LLVM IR
 // contains exactly one `atomicrmw add` and one `atomicrmw sub`
 // instruction — matches the verification regex in issue #332. Each

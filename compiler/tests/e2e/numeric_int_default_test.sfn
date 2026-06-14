@@ -1,0 +1,159 @@
+// End-to-end test for Slice E.1 (issue #488): default unsuffixed integer
+// literals to `int` (i64) in LLVM lowering, while keeping `number` and
+// `float` as aliases for `double`.
+//
+// Native replacement for the former `test_numeric_int_default.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). This test pins four
+// IR-level contracts:
+//   1. Bare integer-literal arithmetic (`let a = 1; a + 2`) emits
+//      `add i64` — no widening to `double`.
+//   2. Decimal-literal arithmetic (`let a = 3.14; a + 0.5`) emits
+//      `fadd double` — the float path is untouched.
+//   3. `let x: float = 1; x + 2` keeps `fadd double` — the explicit-`float`
+//      annotation pulls integer literals onto the `double` side via the
+//      literal-coercion path in `lower_binary_operation`.
+//   4. `let x: number = 42` keeps the deprecated `number` alias lowering as
+//      `double` (`store double 42.0`), not `store i64 42`.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like these. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains, split, starts_with } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn emit`. `process.run_capture` treats
+// an empty array as the *empty* environment (not "inherit"), so the relevant
+// variables must be threaded explicitly:
+//   - `PATH` (+ `HOME`/`TMPDIR`): keeps any subprocess the compiler shells out
+//     to resolvable.
+//   - `SAILFIN_TEST_SCRATCH`: the runner's per-file scratch, which the
+//     compiler routes its build-cache dir under (#1333) so a parallel run
+//     (`--jobs N>1`) does not collide on the fixed `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Extract the body of the synthesised `@sailfin_user_main__...` function from
+// emitted IR. The emitted module always carries a trailing `add____<module>`
+// helper (a binary-operator function lowered as `fadd double`) regardless of
+// whether `main`'s body uses doubles, so a whole-file grep can't distinguish
+// "main uses fadd" from "the helper uses fadd". This isolates main's body —
+// the `sed -n "/define .../,/^}/p"` shape. LLVM `define` lines start at
+// column 0, so the prefix match is exact; collection stops at the column-0
+// closing `}`.
+fn _main_body(ir: string) -> string {
+    let lines = split(ir, "\n");
+    let mut out = "";
+    let mut inside = false;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if !inside {
+            if starts_with(line, "define") && contains(line, "@sailfin_user_main__") {
+                inside = true;
+                out = out + line + "\n";
+            }
+        } else {
+            out = out + line + "\n";
+            if starts_with(line, "}") { break; }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Write `source` to a scratch `.sfn` keyed by `tag`, lower it to LLVM IR via
+// `sfn emit llvm`, and return the whole IR text. Returns "" on emit failure
+// so callers assert on the emptiness.
+fn _emit_llvm(source: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-numeric-int-default-" + tag + ".sfn";
+    let ll = dir + "/sfn-numeric-int-default-" + tag + ".ll";
+    fs.writeFile(src, source);
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    fs.deleteFile(src);
+    return ir;
+}
+
+// ---- (1) bare integer addition emits `add i64` (not `fadd double`) ----
+test "numeric-int-default: bare integer addition emits 'add i64'" ![io] {
+    let ir = _emit_llvm("fn main() ![io] {\n" + "    let a = 1;\n"
+        + "    let b = a + 2;\n"
+        + "    print.info(b);\n"
+        + "}\n", "bare");
+    assert ir.length > 0;
+    let body = _main_body(ir);
+    assert body.length > 0;
+    assert contains(body, "add i64");
+    // Pre-fix regression: bare integer literals defaulted to `double`,
+    // widening the arithmetic. The print conversion still emits `sitofp`,
+    // but the addition itself must not be `fadd double`.
+    assert ! contains(body, "fadd double");
+}
+
+// ---- (2) decimal addition keeps `fadd double` ----
+test "numeric-int-default: decimal addition emits 'fadd double'" ![io] {
+    let ir = _emit_llvm("fn main() ![io] {\n" + "    let a = 3.14;\n"
+        + "    let b = a + 0.5;\n"
+        + "    print.info(b);\n"
+        + "}\n", "decimal");
+    assert ir.length > 0;
+    let body = _main_body(ir);
+    assert body.length > 0;
+    assert contains(body, "fadd double");
+}
+
+// ---- (3) explicit `: float` annotation keeps `fadd double` ----
+test "numeric-int-default: ': float' annotation keeps 'fadd double'" ![io] {
+    let ir = _emit_llvm("fn main() ![io] {\n" + "    let x: float = 1;\n"
+        + "    let y = x + 2;\n"
+        + "    print.info(y);\n"
+        + "}\n", "explicit_float");
+    assert ir.length > 0;
+    let body = _main_body(ir);
+    assert body.length > 0;
+    assert contains(body, "fadd double");
+}
+
+// ---- (4) deprecated `: number` alias still lowers integer literals as double ----
+test "numeric-int-default: ': number' alias lowers integer literals as double" ![io] {
+    let ir = _emit_llvm("fn main() ![io] {\n" + "    let x: number = 42;\n"
+        + "    print.info(x);\n"
+        + "}\n", "number_alias");
+    assert ir.length > 0;
+    let body = _main_body(ir);
+    assert body.length > 0;
+    // The `: number` annotation pulls the integer literal onto the float
+    // path: `store double 42.0`, never `store i64 42`.
+    assert contains(body, "store double 42");
+    assert ! contains(body, "store i64 42,");
+}

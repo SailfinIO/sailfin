@@ -19,7 +19,6 @@
 test_arena_default_on.sh
 test_array_aggregate_shape.sh
 test_async_coerce_refusal.sh
-test_atomic_add_sub_compile.sh
 test_atomic_cas_compile.sh
 test_binary_capsule_walker.sh
 test_build_diagnostics_format.sh
@@ -76,7 +75,6 @@ test_make_result_contract.sh
 test_mem_limit_selfcap.sh
 test_monotonic_millis_advances.sh
 test_no_duplicate_declares.sh
-test_numeric_int_default.sh
 test_numeric_int_float.sh
 test_owned_buf_grow_determinism.sh
 test_owned_buf_roundtrip.sh
