@@ -1,0 +1,112 @@
+// End-to-end test for the function-body scope-exit drop seam (M1.5.2,
+// issue #326).
+//
+// Native replacement for the former `test_drop_emission_function_body.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). The compiler must:
+//
+//   1. Always emit `declare void @sfn_rc_release(i8*)` in the module
+//      preamble so the runtime ABI is visible to downstream linkers
+//      regardless of whether any local has `allocation_kind == "rc"`.
+//   2. Emit zero `call void @sfn_rc_release(...)` lines for the
+//      all-primitive fixture: the functions have only primitive arena
+//      locals, so neither the function-body seam nor the M1.5.3 mid-exit
+//      hooks have anything to drop. (M1.5.5 escape promotion only flips
+//      heap-typed locals that escape via `return`; nothing here matches.)
+//   3. Emit exactly one such declare for `hello-world.sfn` (the smoke
+//      check from the issue).
+//
+// The unit test (compiler/tests/unit/emit_scope_drops_test.sfn) is the
+// load-bearing piece for the helper's per-binding decision logic; this
+// test pins the runtime ABI integration end-to-end through the driver.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like these. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { count, split, starts_with } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn emit`. `process.run_capture` treats
+// an empty array as the *empty* environment (not "inherit"), so the relevant
+// variables must be threaded explicitly:
+//   - `PATH` (+ `HOME`/`TMPDIR`): keeps any subprocess the compiler shells out
+//     to (e.g. `mkdir`) resolvable.
+//   - `SAILFIN_TEST_SCRATCH`: the runner's per-file scratch, which the
+//     compiler routes its build-cache dir under (#1333) so a parallel run
+//     (`--jobs N>1`) does not collide on the fixed `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Lower `fixture` to a standalone `.ll` via `sfn emit llvm` and return the
+// IR text. Writes the `.ll` to a unique scratch path keyed by `tag` so
+// parallel sub-tests do not collide; returns "" on emit failure so the
+// caller can assert on the emptiness.
+fn _emit_llvm(fixture: string, tag: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let ll = dir + "/sfn-drop-emission-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", fixture], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+// Count column-0 lines beginning with `prefix` (the `grep -c '^...'` shape).
+// Function-body lines are indented and never match, so this isolates
+// module-scope declarations.
+fn _count_lines_starting(ir: string, prefix: string) -> int {
+    let lines = split(ir, "\n");
+    let mut n = 0;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if starts_with(lines[i], prefix) { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+fn _fixture() -> string {
+    return "compiler/tests/e2e/fixtures/drop_emission_function_body.sfn";
+}
+
+// ---- (1) declare line is present in compiled IR ----
+test "drop-emission: emits declare void @sfn_rc_release(i8*) for the fixture" ![io] {
+    let ir = _emit_llvm(_fixture(), "declare");
+    assert ir.length > 0;
+    assert _count_lines_starting(ir, "declare void @sfn_rc_release(i8*)") >= 1;
+}
+
+// ---- (2) zero call sites for the all-primitive fixture ----
+test "drop-emission: zero 'call void @sfn_rc_release' for primitive-locals fixture" ![io] {
+    let ir = _emit_llvm(_fixture(), "calls");
+    assert ir.length > 0;
+    assert count(ir, "call void @sfn_rc_release") == 0;
+}
+
+// ---- (3) hello-world also gets exactly one declare (smoke check) ----
+test "drop-emission: hello-world.sfn exposes exactly one runtime ABI declare" ![io] {
+    let ir = _emit_llvm("examples/basics/hello-world.sfn", "hello");
+    assert ir.length > 0;
+    assert _count_lines_starting(ir, "declare void @sfn_rc_release(i8*)") == 1;
+}

@@ -49,7 +49,6 @@ test_cross_module_int_signature.sh
 test_cross_module_signature_resolution.sh
 test_cross_windows_runtime_modules.sh
 test_drop_emission_escape_promotion.sh
-test_drop_emission_function_body.sh
 test_drop_emission_mid_exit.sh
 test_drop_emission_try_catch.sh
 test_effect_gate_build_path.sh
@@ -87,7 +86,6 @@ test_plain_fn_ptr_call.sh
 test_pointer_read_intrinsic.sh
 test_publish.sh
 test_reexport.sh
-test_result_prelude_discriminant.sh
 test_routine_nursery.sh
 test_run_cache_flags.sh
 test_runner_jobs_parallel.sh
