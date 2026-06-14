@@ -511,6 +511,10 @@ fn map_type_annotation(annotation: string) -> string {
     if normalized == "u8" { _if314d = true; }
     if _if314d { return "i8"; }
     if normalized == "string" { return "i8*"; }
+    // Runtime-internal by-value `SfnString` aggregate spelling (M1.A.2) — see
+    // the matching guard in `map_return_type`. Keeps incidental field/local
+    // uses of `SfnString` consistent with the `{i8*, i64}` return/param ABI.
+    if normalized == "SfnString" { return "{i8*, i64}"; }
     if normalized == "void" { return "void"; }
     if normalized.length > 2 {
         let suffix = substring(normalized, normalized.length - 2, normalized.length);
@@ -590,6 +594,20 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
     if starts_with(trimmed, "fn(") { return "{i8*, i8*}"; }
     if starts_with(trimmed, "fn (") { return "{i8*, i8*}"; }
     let normalized = unwrap_move_wrapper(trimmed);
+    // Runtime-internal by-value `SfnString` aggregate ABI (M1.A.2). The bare
+    // `{i8*, i64}` (data, len) two-eightbyte INTEGER-class struct is the
+    // canonical SfnString layout (see `abi_hash.sfn`), returned/passed in
+    // registers — the ABI the runtime-helper call sites already emit for
+    // `env.get` / `env.home` etc. (`runtime_helpers.sfn`). Naming the return /
+    // parameter type `SfnString` in a runtime `.sfn` body routes the
+    // *definition* onto that same by-value aggregate ABI instead of the boxed
+    // `%T*` struct ABI below, so a Sailfin body can satisfy the call site
+    // without a C trampoline. Checked on the move-unwrapped `normalized`
+    // spelling (so `move SfnString` and move-wrapped params/locals via
+    // `map_parameter_type` / `map_local_type` are caught too), before the
+    // boxed-struct path, so it never becomes `%SfnString*`. Not a user-facing
+    // type — a runtime ABI spelling only.
+    if normalized == "SfnString" { return "{i8*, i64}"; }
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
     if starts_with(normalized, "*") {
