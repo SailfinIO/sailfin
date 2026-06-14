@@ -31,6 +31,7 @@ import {
     append_symbol,
     check_enum_variants,
     check_extern_signature,
+    check_extern_var,
     check_fn_reference_raw,
     check_function_signature,
     check_interface_members,
@@ -304,6 +305,9 @@ fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> S
     if statement.variant == "ExternFunctionDeclaration" {
         return register_symbol(statement.signature.name, "extern function", statement.signature.name_span, existing, signature_is_generic(statement.signature), signature_is_c_abi(statement.signature));
     }
+    if statement.variant == "ExternVarDeclaration" {
+        return register_symbol(statement.name, "extern variable", statement.name_span, existing);
+    }
     if statement.variant == "StructDeclaration" {
         return register_symbol(statement.name, "struct", statement.name_span, existing);
     }
@@ -413,6 +417,21 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         loop {
             if _ci >= _sig_diags.length { break; }
             diagnostics.push(_sig_diags[_ci]);
+            _ci += 1;
+        }
+        return ScopeResult {
+            bindings: registration.bindings,
+            diagnostics: diagnostics
+        };
+    }
+    if statement.variant == "ExternVarDeclaration" {
+        let registration = register_local_symbol(bindings, statement.name, "extern variable", statement.name_span, scope_start);
+        let mut diagnostics = registration.diagnostics;
+        let _var_diags = check_extern_var(statement.name, statement.type_annotation);
+        let mut _ci: int = 0;
+        loop {
+            if _ci >= _var_diags.length { break; }
+            diagnostics.push(_var_diags[_ci]);
             _ci += 1;
         }
         return ScopeResult {

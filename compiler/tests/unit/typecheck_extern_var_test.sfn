@@ -1,0 +1,63 @@
+// Unit tests for `extern var NAME: TYPE;` typechecker registration (#1313).
+//
+// `extern var` binds a libc global; its type is validated against the same
+// C-ABI accept-list as `extern fn` signatures (`check_extern_var` reuses
+// `classify_extern_parameter_type`, so the same E0801–E0805 codes apply).
+// `* * u8` (for libc `environ`) is on the accept-list; non-C-ABI types and
+// `void` (a variable has storage; `void` has none) are rejected.
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "extern var: accepts `extern var environ: * * u8;`" ![io] {
+    let program = parse_program("extern var environ: * * u8;");
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "extern var: accepts a scalar `extern var errno: i32;`" ![io] {
+    let program = parse_program("extern var errno: i32;");
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "extern var: rejects string type (E0801)" ![io] {
+    let program = parse_program("extern var bad: string;");
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0801");
+}
+
+test "extern var: rejects array type (E0802)" ![io] {
+    let program = parse_program("extern var bad: i32[];");
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0802");
+}
+
+test "extern var: rejects legacy `number` (E0805)" ![io] {
+    let program = parse_program("extern var bad: number;");
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0805");
+}
+
+test "extern var: rejects bare `void` (E0805)" ![io] {
+    let program = parse_program("extern var bad: void;");
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0805");
+}
+
+test "extern var: a reference to the global resolves in scope (no undefined-symbol)" ![io] {
+    let source = "extern var environ: * * u8;\nfn read_environ() -> * * u8 { return environ; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}

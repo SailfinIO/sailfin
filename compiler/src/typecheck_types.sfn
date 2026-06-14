@@ -878,6 +878,30 @@ fn check_extern_signature(signature: FunctionSignature) -> Diagnostic[] {
     return diagnostics;
 }
 
+// Validate an `extern var NAME: TYPE;` declaration's type against the
+// same C-ABI accept-list as extern fn signatures (E0801–E0805). An
+// extern var binds a libc global symbol (e.g. `environ`), so its type
+// must be a concrete C-ABI type with storage — `void` is rejected the
+// same way it is in parameter position (a variable has storage; `void`
+// has none). `* * u8` (for `environ`) is on the accept-list.
+fn check_extern_var(name: string, type_annotation: TypeAnnotation?) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    if type_annotation == null {
+        diagnostics.push(make_extern_var_missing_type_diagnostic(name));
+        return diagnostics;
+    }
+    let type_text = trim_text(type_annotation.text);
+    if type_text.length == 0 {
+        diagnostics.push(make_extern_var_missing_type_diagnostic(name));
+        return diagnostics;
+    }
+    let kind = classify_extern_parameter_type(type_text);
+    if !strings_equal(kind, "ok") {
+        diagnostics.push(make_extern_var_type_diagnostic(name, type_text, kind));
+    }
+    return diagnostics;
+}
+
 // Classify an extern type-annotation string used for a function
 // *parameter*. Returns one of:
 //   "ok"          — accepted by the v0 C-ABI rule set.
@@ -1419,6 +1443,35 @@ fn make_extern_parameter_type_diagnostic(fn_name: string, parameter_name: string
         message: "extern fn `" + fn_name + "` parameter `" + parameter_name
             + "` type `"
             + type_text
+            + "` is not C-ABI-compatible. "
+            + hint,
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+fn make_extern_var_missing_type_diagnostic(name: string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0805",
+        severity: "error",
+        message: "extern var `" + name + "` is missing a type annotation."
+            + " Extern globals have no initializer for inference; the"
+            + " declaration must commit to a concrete C-ABI type"
+            + " (e.g. `* * u8` for libc `environ`).",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+fn make_extern_var_type_diagnostic(name: string, type_text: string, kind: string) -> Diagnostic {
+    let code = extern_diagnostic_code_for(kind);
+    let hint = extern_type_hint_for(kind, type_text);
+    return Diagnostic {
+        code: code,
+        severity: "error",
+        message: "extern var `" + name + "` type `" + type_text
             + "` is not C-ABI-compatible. "
             + hint,
         file_path: "",

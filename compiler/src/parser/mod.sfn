@@ -18,6 +18,7 @@ import {
     parse_enum,
     parse_export,
     parse_extern_function,
+    parse_extern_var,
     parse_function,
     parse_import,
     parse_interface,
@@ -161,11 +162,19 @@ fn parse_statement(initial_parser: Parser) -> StatementParseResult {
         }
     }
     if identifier_matches(token, "extern") {
+        let after_extern = skip_trivia(parser_advance_raw(parser));
+        if identifier_matches(parser_peek_raw(after_extern), "var") {
+            return parse_extern_var(parser, false, decorators);
+        }
         return parse_extern_function(parser, false, decorators);
     }
     if identifier_matches(token, "unsafe") {
         let lookahead = skip_trivia(parser_advance_raw(parser));
         if identifier_matches(parser_peek_raw(lookahead), "extern") {
+            let after_extern = skip_trivia(parser_advance_raw(lookahead));
+            if identifier_matches(parser_peek_raw(after_extern), "var") {
+                return parse_extern_var(parser, true, decorators);
+            }
             return parse_extern_function(parser, true, decorators);
         }
         if identifier_matches(parser_peek_raw(lookahead), "fn") {
@@ -451,6 +460,7 @@ export {
     // Function declaration
     parse_function,
     parse_extern_function,
+    parse_extern_var,
 
     // Struct declaration
     parse_struct,

@@ -75,6 +75,11 @@ fn prelude_global_names_from_source(source: string) -> string[] {
             names.push(unsafe_extern_name);
             continue;
         }
+        let extern_var_name = _ps_name_after_prefix(line, "extern var ");
+        if extern_var_name.length > 0 {
+            names.push(extern_var_name);
+            continue;
+        }
         if substring(line, 0, 4) == "let " {
             let mut start = 4;
             // `let mut <name>` — skip the qualifier so the bound name is

@@ -248,6 +248,12 @@ fn emit_statement_declarations(state: NativeState, statement: Statement) -> Stat
             handled: true
         };
     }
+    if statement.variant == "ExternVarDeclaration" {
+        return StatementDispatchResult {
+            state: emit_extern_var(state, statement.name, statement.type_annotation, statement.decorators),
+            handled: true
+        };
+    }
     if statement.variant == "StructDeclaration" {
         return StatementDispatchResult {
             state: emit_struct(state, statement),
@@ -377,6 +383,17 @@ fn emit_extern_function(state: NativeState, signature: FunctionSignature, unsafe
     current = emit_signature_metadata(current, signature);
     current = emit_parameter_metadata(current, signature.parameters);
     return state_emit_line(current, ".endfn");
+}
+
+// Emit a top-level `extern var NAME: TYPE;` as a `.extern-var NAME : TYPE`
+// directive. The native-IR parser collects it as an extern module binding
+// (`NativeBinding { is_extern: true }`), which lowers to an
+// `@NAME = external global <ty>` declaration whose references auto-load.
+fn emit_extern_var(state: NativeState, name: string, type_annotation: TypeAnnotation, decorators: Decorator[]) -> NativeState {
+    let mut current = emit_decorators(state, decorators);
+    let mut line: string = ".extern-var " + name;
+    line = append_optional_type_annotation(line, type_annotation);
+    return state_emit_line(current, line);
 }
 
 fn emit_throw(state: NativeState, statement: Statement) -> NativeState {

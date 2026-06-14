@@ -274,6 +274,12 @@ enum Statement {
         unsafe: boolean;
         decorators: Decorator[];
     },
+    ExternVarDeclaration {
+        name: string;
+        type_annotation: TypeAnnotation;
+        name_span: SourceSpan?;
+        decorators: Decorator[];
+    },
     StructDeclaration {
         name: string;
         name_span: SourceSpan?;

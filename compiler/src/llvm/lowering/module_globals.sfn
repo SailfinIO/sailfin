@@ -93,6 +93,35 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
     }
     if llvm_type.length == 0 { llvm_type = "double"; }
 
+    // `extern var NAME: TYPE;` (#1313): bind a C-ABI global symbol
+    // (e.g. libc `environ`). Emit `@NAME = external global <ty>` with the
+    // verbatim symbol name (no `@global.` prefix, no `internal` linkage,
+    // no initializer) and register a `LocalBinding` pointing at it so a
+    // reference auto-loads through the same `find_local_binding` ->
+    // `load_local_operand` path as any module global.
+    if binding.is_extern {
+        let extern_symbol = "@" + sanitize_symbol(name);
+        let mut extern_preamble: string[] = [];
+        extern_preamble.push(extern_symbol + " = external global " + llvm_type);
+        let extern_local = LocalBinding {
+            name: name,
+            pointer: extern_symbol,
+            llvm_type: llvm_type,
+            type_annotation: effective_type_annotation,
+            ownership: null,
+            consumed: false,
+            scope_id: scope_id,
+            scope_depth: 0,
+            allocation_kind: "arena",
+            init_sentinel: ""
+        };
+        return BindingLoweringResult {
+            preamble_lines: extern_preamble,
+            locals: [extern_local],
+            needs_init: false
+        };
+    }
+
     let mut preamble_lines: string[] = [];
     let mut needs_init: boolean = false;
 

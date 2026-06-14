@@ -1,0 +1,46 @@
+// Unit tests for `extern var NAME: TYPE;` parsing (#1313).
+//
+// `extern var` declares a reference to a C-ABI global symbol (e.g. libc
+// `environ`). The parser dispatches on `extern` + lookahead `var` to
+// `parse_extern_var`, producing a `Statement.ExternVarDeclaration`. These
+// tests pin the dispatch (including the `unsafe extern var` form), the
+// node shape, and that the sibling `extern fn` path is untouched.
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+test "parser: parses `extern var environ: * * u8;`" ![io] {
+    let program = parse_program("extern var environ: * * u8;");
+    assert program.statements.length == 1;
+    let stmt = program.statements[0];
+    assert stmt.variant == "ExternVarDeclaration";
+    assert stmt.name == "environ";
+    assert _contains(stmt.type_annotation.text, "u8");
+    assert _contains(stmt.type_annotation.text, "*");
+}
+
+test "parser: parses `unsafe extern var environ: * * u8;`" ![io] {
+    let program = parse_program("unsafe extern var environ: * * u8;");
+    assert program.statements.length == 1;
+    let stmt = program.statements[0];
+    assert stmt.variant == "ExternVarDeclaration";
+    assert stmt.name == "environ";
+}
+
+test "parser: a scalar extern var parses with a non-empty type" ![io] {
+    let program = parse_program("extern var errno: i32;");
+    assert program.statements.length == 1;
+    let stmt = program.statements[0];
+    assert stmt.variant == "ExternVarDeclaration";
+    assert stmt.name == "errno";
+    assert _contains(stmt.type_annotation.text, "i32");
+}
+
+test "parser: `extern fn` still dispatches to a function declaration" ![io] {
+    let program = parse_program("extern fn malloc(size: usize) -> * u8;");
+    assert program.statements.length == 1;
+    assert program.statements[0].variant == "ExternFunctionDeclaration";
+}
