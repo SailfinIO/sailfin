@@ -45,9 +45,10 @@ test "lowering: runtime/sfn/io.sfn lowers the imported libc write call" ![io] {
 // assertions that lived in the retired `test_runtime_io_extended.sh`
 // (migrated to native sfn/test per epic #842). Lowers the REAL io.sfn
 // in-process and pins the new ownership: io.sfn now defines the bare
-// `sfn_print*` symbols directly (native `write(2)` bodies), keeps the
-// surviving `_sfn_` infix exports, and must NOT define the still-C-owned
-// `sfn_getenv` / `sfn_home_dir` canonical names (their flip is C7).
+// `sfn_print*` symbols directly (native `write(2)` bodies) and keeps the
+// surviving Sailfin exports. (The bare `sfn_getenv` / `sfn_home_dir`
+// canonical names are now ALSO Sailfin-defined — C7/R7, #1312 — asserted
+// in the dedicated env test below.)
 test "lowering: io.sfn defines the bare native sfn_print* family" ![io] {
     let source = fs.readFile("runtime/sfn/io.sfn");
     let program = parse_program(source);
@@ -62,25 +63,29 @@ test "lowering: io.sfn defines the bare native sfn_print* family" ![io] {
     assert _contains(ir, "define void @sfn_print_error(");
     // Surviving Sailfin exports (prelude import + baselines).
     assert _contains(ir, "define void @sfn_print_sfn(");
-    assert _contains(ir, "@sfn_getenv_sfn(");
-    assert _contains(ir, "@sfn_home_dir_sfn(");
     assert _contains(ir, "@sfn_write_fd(");
 }
 
-test "lowering: io.sfn still forwards env reads to the C entrypoints (C7 not flipped)" ![io] {
+test "lowering: io.sfn defines the bare native env readers (C7/R7 flipped)" ![io] {
     let source = fs.readFile("runtime/sfn/io.sfn");
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "runtime/sfn/io");
     let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/io");
 
-    // getenv / home_dir are NOT flipped to native yet (C7 of #1308):
-    // io.sfn's `sfn_getenv_sfn` / `sfn_home_dir_sfn` forward to the C
-    // `sailfin_runtime_*` trampolines, so the bare canonical names stay
-    // C-owned and io.sfn defines no colliding native body. (The bare
-    // `@sfn_getenv` / `@sfn_home_dir` appear only as registry-preamble
-    // `declare`s, so an absence check on them would be a false negative.)
-    assert _contains(ir, "@sailfin_runtime_getenv");
-    assert _contains(ir, "@sailfin_runtime_home_dir");
+    // C7/R7 of #1308 (issue #1312): `env.get` / `env.home` are now real
+    // Sailfin bodies. io.sfn defines the bare canonical `sfn_getenv` /
+    // `sfn_home_dir` with the `{i8*, i64}` SfnString aggregate return ABI
+    // (the M1.A.2 `SfnString` return spelling) — the symbols user emission
+    // calls against. The two-eightbyte name aggregate arrives as a
+    // `(data, len)` scalar pair, so the param list is `(i8*, i64, i8*)`.
+    assert _contains(ir, "define {i8*, i64} @sfn_getenv(");
+    assert _contains(ir, "define {i8*, i64} @sfn_home_dir(");
+    // The retired proof-of-life forwarders and their C trampoline externs
+    // are gone (their `sailfin_runtime_*` C bodies retire with #822).
+    assert ! _contains(ir, "@sfn_getenv_sfn(");
+    assert ! _contains(ir, "@sfn_home_dir_sfn(");
+    assert ! _contains(ir, "@sailfin_runtime_getenv");
+    assert ! _contains(ir, "@sailfin_runtime_home_dir");
 }
 
 test "lowering: io.sfn immediate-codepoint guard routes to the C decoders" ![io] {

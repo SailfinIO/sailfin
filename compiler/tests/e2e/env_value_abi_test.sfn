@@ -1,0 +1,106 @@
+// End-to-end test for the C7/R7 env flip (#1308, issue #1312): `env.get` /
+// `env.home` are now real Sailfin bodies in `runtime/sfn/io.sfn` returning the
+// `{i8*, i64}` SfnString aggregate by value (the M1.A.2 `SfnString` return
+// spelling). This is the load-bearing correctness proof: it builds a fixture
+// that reads an env var and prints it, runs it with the var set, and asserts
+// the value round-trips. A truncated aggregate return (the data pointer or the
+// length landing in the wrong SysV register) would surface here as a garbage /
+// wrong-length print — the exact failure the boxed-struct ABI was created to
+// avoid, which this narrow two-eightbyte INTEGER-class return is immune to.
+//
+// Native (no-bash) replacement-class test per epic #842 /
+// `.claude/rules/no-bash-e2e.md`. Build-and-run isolation mirrors
+// `sailfin_main_entry_test.sfn`: the fixture is written into a fresh
+// `with_tmp_dir` (so `sfn build` does not auto-discover
+// `runtime/native/capsule.toml`'s `main`), and the nested build's env is
+// threaded explicitly — `PATH` (clang + linker), `HOME`/`TMPDIR`, and
+// `SAILFIN_TEST_SCRATCH` (routes the `program.ll` build-cache dir per-
+// invocation under the parallel pool, #1333). The fixture's own env (the var
+// under test) is passed to the *run*, not the build.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-env-abi-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Build `src` in a temp dir, run it with `run_env`, stash captured stdout to
+// `out_marker`, and return the run's exit code (or `-100` on build failure).
+fn _build_and_run(src: string, run_env: string[], out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, src);
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], run_env);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+// `env.get(name)` of a SET variable round-trips its full value through the
+// `{i8*, i64}` aggregate return — the core ABI proof.
+test "env-abi: env.get returns the full value of a set variable" ![io] {
+    let marker = _marker("get");
+    let src = "fn main() -> void ![io] { let v: string = env.get(\"SFN_ENV_ABI_TEST\"); print.info(v); }";
+    let exit = _build_and_run(src, ["SFN_ENV_ABI_TEST=roundtrip-sentinel-value"], marker);
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // Full value present (not truncated by a bad length register).
+    assert find(out, "roundtrip-sentinel-value", 0) >= 0;
+}
+
+// `env.get(name)` of an UNSET variable is the empty string (len 0) — the miss
+// path returns the `{emptyptr, 0}` aggregate, not garbage.
+test "env-abi: env.get of an unset variable is empty" ![io] {
+    let marker = _marker("miss");
+    let src = "fn main() -> void ![io] { let v: string = env.get(\"SFN_ENV_ABI_DEFINITELY_UNSET\"); print.info(\"[\" + v + \"]\"); }";
+    let exit = _build_and_run(src, [], marker);
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // The bracketed empty value prints as `[info] []` — nothing between.
+    assert find(out, "[]", 0) >= 0;
+}
+
+// `env.home()` returns `$HOME` when set — exercises the second flipped symbol
+// (the `["ptr"]`-only descriptor) through the same aggregate return ABI.
+test "env-abi: env.home returns HOME" ![io] {
+    let marker = _marker("home");
+    let src = "fn main() -> void ![io] { let h: string = env.home(); print.info(h); }";
+    let exit = _build_and_run(src, ["HOME=/sfn/env/abi/home"], marker);
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(out, "/sfn/env/abi/home", 0) >= 0;
+}

@@ -434,16 +434,13 @@ extern "C"
     // Environment & path helpers.
     char *sailfin_runtime_getenv(const char *name);
     char *sailfin_runtime_home_dir(void);
-    /* M2.8b (#726): SfnString aggregate ABI for `env.get` / `env.home`.
-     * The compiler's runtime_helpers.sfn descriptors carry
-     * `parameter_types: ["{i8*, i64}", "ptr"]` / `["ptr"]` and
-     * `return_type: "{i8*, i64}"`; the call-site dispatch in
-     * `core_call_lowering.sfn` splices `ptr @sfn_default_arena` as
-     * the trailing arg (mirrors `sfn_str_concat` from #714). Bodies
-     * NUL-marshal the name through the arena, call `getenv`, and
-     * wrap the libc result via `sfn_str_from_cstr` + `sfn_str_len`. */
-    SfnString sfn_getenv(SfnString name, SfnArena **arena_slot);
-    SfnString sfn_home_dir(SfnArena **arena_slot);
+    /* M2.8b (#726): the `{i8*, i64}` SfnString aggregate-ABI env readers
+     * `sfn_getenv` / `sfn_home_dir` (`env.get` / `env.home`) moved to
+     * `runtime/sfn/io.sfn` (C7/R7 of #1308, issue #1312). The C bodies and
+     * these prototypes are removed together; emitted `call {i8*, i64}
+     * @sfn_getenv(...)` now binds to the Sailfin definition. The legacy
+     * single-pointer trampolines above stay (seed-built `i8*` ABI; retire
+     * with #822). */
     char *sailfin_runtime_read_file_bytes(const char *path, int64_t *out_length);
 
     // Misc stubs.

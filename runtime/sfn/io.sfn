@@ -45,9 +45,23 @@
 //      (`sfn_log_execution`, `sfn_print_sfn`) likewise stay on the C
 //      entrypoints (their `* u8` arg has no length to drive `write`).
 //
-//   2. The `sfn_getenv_sfn` / `sfn_home_dir_sfn` proof-of-life family.
-//      These still forward to the `sailfin_runtime_{getenv,home_dir}` C
-//      entrypoints — their flip is C7 of #1308, not this issue.
+//   2. The bare `sfn_getenv` / `sfn_home_dir` env readers — the canonical
+//      symbols the compiler emits `call`s against for `env.get` / `env.home`
+//      (registered in `runtime_helpers.sfn` with the `{i8*, i64}` SfnString
+//      aggregate ABI). As of C7/R7 of the C→Sailfin runtime-retirement epic
+//      (#1308, issue #1312) these are **real native bodies** over libc
+//      `getenv` — no longer C trampolines. The prior C definitions
+//      (`SfnString sfn_getenv(SfnString, SfnArena**)` / `sfn_home_dir`) are
+//      deleted in the same change (no internal C caller remained); this
+//      module's TU is now the sole definition site. They return the
+//      `{i8*, i64}` aggregate by value: the
+//      `SfnString` return spelling routes the definition onto that ABI
+//      (M1.A.2), and the by-value name aggregate arrives as a `(data, len)`
+//      two-scalar pair — the same register classification the print family
+//      uses. The retired proof-of-life `sfn_getenv_sfn` / `sfn_home_dir_sfn`
+//      forwarders (and their `sailfin_runtime_{getenv,home_dir}` externs) are
+//      removed; the C `sailfin_runtime_{getenv,home_dir}` trampolines retire
+//      with #822.
 //
 // Linkage: this file is listed in `runtime/native/capsule.toml`'s
 // `sfn-sources` array; `_compile_runtime_sfn_sources` in
@@ -83,9 +97,20 @@ extern fn sailfin_runtime_print_warn(msg: * u8) -> void;
 
 extern fn sailfin_runtime_print_error(msg: * u8) -> void;
 
-extern fn sailfin_runtime_getenv(name: * u8) -> * u8;
+// libc `getenv` — the env-read primitive the native `sfn_getenv` /
+// `sfn_home_dir` bodies below call. Inlined (not imported) for the same
+// reason as `write` above: the isolated runtime-sfn emit only pre-stages the
+// platform symbols the seed snapshots, so any other libc surface must be
+// declared locally (the `arena.sfn` / `string.sfn` discipline).
+extern fn getenv(name: * u8) -> * u8;
 
-extern fn sailfin_runtime_home_dir() -> * u8;
+// `sfn_str_from_codepoint(cp)` — UTF-8 encodes a single codepoint into a
+// fresh NUL-terminated buffer. Used only on the pathological immediate-
+// codepoint `name` path (pre-M1.A.2 tagged pseudo-pointers). A C runtime
+// symbol on its own retirement track (R1 string family); the guard that
+// calls it — and this extern — retire with the immediate encoding
+// (#822 / #1136).
+extern fn sfn_str_from_codepoint(cp: i64) -> * u8;
 
 // stdout / stderr file descriptors — the `write(2)` targets for the
 // print family. Matches the C `_print_line` stream routing: raw/info to
@@ -208,18 +233,90 @@ fn sfn_print_error(data: * u8, len: i64) -> void ![io] {
 // (#822 / #1136).
 fn sfn_print_sfn(msg: * u8) -> void ![io] { sailfin_runtime_print_raw(msg); }
 
-// `sfn_getenv_sfn(name)` — environment-variable read. Still forwards to
-// the C `sailfin_runtime_getenv` (the aggregate-return + arena-threaded
-// flip is C7 of #1308). The user-emission hot path bypasses this
-// wrapper and lands on `@sfn_getenv` against the real aggregate ABI.
-fn sfn_getenv_sfn(name: * u8) -> * u8 ![io] {
-    return sailfin_runtime_getenv(name);
+// `_sfn_decode_immediate_name(data)` — decode a legacy immediate-codepoint
+// tagged pseudo-pointer (pre-M1.A.2) into a real NUL-terminated buffer.
+// Mirrors the C `sfn_getenv`'s `_is_immediate_codepoint_string` +
+// `_utf8_encode` guard: a single grapheme can arrive as `cp << 32` (low word
+// zero) or a near-null ASCII byte (`1..=0x7f`) rather than a real string
+// pointer; dereferencing it directly would segfault. The codepoint is the
+// raw value for the ASCII case and `raw >> 32` for the shifted case (the two
+// shapes `_sfn_is_immediate` accepts), and `sfn_str_from_codepoint` does the
+// UTF-8 encode. Pathological for env *names* (which are real strings in every
+// realistic path); the guard exists only so the native body matches the C
+// body's defensiveness. Retires with the immediate encoding (#822 / #1136).
+fn _sfn_decode_immediate_name(data: * u8) -> * u8 {
+    let raw: i64 = data as i64;
+    let mut cp: i64 = raw;
+    if raw > 127 { cp = raw >> 32; }
+    return sfn_str_from_codepoint(cp);
 }
 
-// `sfn_home_dir_sfn()` — `getenv("HOME")` (or `USERPROFILE` on Windows;
-// the C trampoline handles the platform fork). Same C7 deferral as
-// `sfn_getenv_sfn`.
-fn sfn_home_dir_sfn() -> * u8 ![io] { return sailfin_runtime_home_dir(); }
+// `sfn_getenv(name, arena)` — C7/R7 of the C→Sailfin runtime retirement
+// (#1308, issue #1312). The bare canonical symbol user emission targets for
+// `env.get` (`runtime_helpers.sfn`: `symbol: sfn_getenv`,
+// `return_type: "{i8*, i64}"`, `parameter_types: ["{i8*, i64}", "ptr"]`).
+// Replaces the C `SfnString sfn_getenv(SfnString, SfnArena**)` body, which is
+// deleted in the same change so the linker binds this definition.
+//
+// ABI: the `{i8*, i64}` name aggregate is passed by value, which the System V
+// / AAPCS classification of a two-eightbyte INTEGER struct splits into two
+// integer registers — identical to a `(data: * u8, len: i64)` pair (the same
+// coercion the print family relies on). So the parameters are two scalars +
+// the arena `ptr`, lowering to `define {i8*, i64} @sfn_getenv(i8*, i64, i8*)`
+// (the `SfnString` return spelling routes the definition onto the by-value
+// aggregate ABI — M1.A.2). The body returns a bare `* u8`; the return-path
+// coercion wraps it into the `{i8*, i64}` aggregate, recovering the length via
+// `sfn_str_len` — byte-identical to the C body's `sfn_str_from_cstr` +
+// `sfn_str_len` result wrapping.
+//
+// `arena` is unused: today's `SfnString.data` is always NUL-terminated
+// (literal lowering writes the trailing NUL; arena-routed concat preserves
+// it), so `name_data` is a valid C string and no arena-marshalled copy is
+// needed. The C body marshalled defensively against a future non-terminated
+// slice shape; when such a shape lands, re-introduce the arena copy here
+// (same condition under which the immediate guard above retires). The slot is
+// kept in the signature to match the emitted call ABI.
+fn sfn_getenv(name_data: * u8, name_len: i64, arena: * u8) -> SfnString ![io] {
+    if name_data as i64 == 0 {
+        let empty: string = "";
+        return empty;
+    }
+    if name_len <= 0 {
+        let empty_len: string = "";
+        return empty_len;
+    }
+    let mut cname: * u8 = name_data;
+    if _sfn_is_immediate(name_data) {
+        cname = _sfn_decode_immediate_name(name_data);
+    }
+    let val: * u8 = getenv(cname);
+    if val as i64 == 0 {
+        let empty_miss: string = "";
+        return empty_miss;
+    }
+    return val;
+}
+
+// `sfn_home_dir(arena)` — C7/R7 companion (`env.home`,
+// `runtime_helpers.sfn`: `symbol: sfn_home_dir`, `parameter_types: ["ptr"]`).
+// Replaces the deleted C `SfnString sfn_home_dir(SfnArena**)`. The C
+// body forked on `_WIN32` (`USERPROFILE`) vs POSIX (`HOME`); Sailfin has no
+// `cfg(target_os)` yet (#468), so this tries `HOME` first then falls back to
+// `USERPROFILE` — platform-agnostic and correct on both (Linux/macOS set
+// `HOME`; Windows sets `USERPROFILE`). Literals are bound to `string` locals
+// before the `* u8` cast — the proven env-read pattern (`arena.sfn` /
+// `rlimit.sfn`): the inline `getenv("…" as * u8)` form miscompiles under the
+// seed (the call is elided to a null store). Return ABI as `sfn_getenv`.
+fn sfn_home_dir(arena: * u8) -> SfnString ![io] {
+    let home: string = "HOME";
+    let val: * u8 = getenv(home as * u8);
+    if val as i64 != 0 { return val; }
+    let userprofile: string = "USERPROFILE";
+    let val2: * u8 = getenv(userprofile as * u8);
+    if val2 as i64 != 0 { return val2; }
+    let empty: string = "";
+    return empty;
+}
 
 // #925 (sub-issue of #390): `sfn_log_execution(value)` — the body the
 // `@logExecution` decorator lowers to (via
