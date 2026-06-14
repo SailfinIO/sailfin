@@ -122,8 +122,6 @@ extern fn sailfin_runtime_char_code(s: * u8) -> f64;
 
 extern fn sailfin_runtime_string_to_number(s: * u8) -> f64;
 
-extern fn sailfin_runtime_number_to_string(value: f64) -> * u8;
-
 // The wave-2 C trampolines that ship the architect-spec ABI for
 // helpers without a legacy `sailfin_runtime_*` direct mapping
 // (byte_at / find_byte are int64-typed end-to-end in the spec but
@@ -143,8 +141,6 @@ extern fn sfn_str_from_codepoint(cp: i64) -> * u8;
 // string for 0 (unrepresentable under the NUL-terminated model — see
 // the C body) and out-of-range values.
 extern fn sfn_str_from_byte(byte_value: i64) -> * u8;
-
-extern fn sfn_int_to_str(value: i64) -> * u8;
 
 // #1217 (Phase R1): the process-global arena `concat` builds into, and
 // the arena-mode probe that gates it. `sfn_arena_global()` ALWAYS
@@ -298,8 +294,9 @@ fn sfn_str_sfn_append(buf: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> Owned
 //   sfn_str_sfn_codepoint(SfnString) -> i64
 //   sfn_str_sfn_from_codepoint(i64, *Arena) -> SfnString
 //   sfn_str_sfn_to_number(SfnString) -> f64
-//   sfn_number_to_str_sfn(f64, *Arena) -> SfnString
-//   sfn_int_to_str_sfn(i64, *Arena) -> SfnString
+//   (number/int formatting flipped to the bare `sfn_number_to_str` /
+//    `sfn_int_to_str` real bodies in #1314 — see the family comment
+//    further down; the `_sfn` infix forms are retired.)
 //
 // `sfn_str_sfn_grapheme_count(s)` — UTF-8 grapheme count of `s`.
 // Architect spec is an O(n) UTF-8 walk over `s.data[0..s.len]`
@@ -396,26 +393,394 @@ fn sfn_str_sfn_from_byte(byte_value: i64) -> * u8 {
 // length is not exposed at this surface.
 fn sfn_str_sfn_to_number(s: * u8) -> f64 { return strtod(s, null); }
 
-// `sfn_number_to_str_sfn(value)` — render `value` as a decimal
-// string. Architect spec hand-rolls the conversion into an arena
-// buffer (~100 LOC per Rust `std::fmt` precedent) to avoid
-// dragging variadic `snprintf` into the v0 runtime surface;
-// today's body trampolines through the legacy C entrypoint which
-// already uses a fixed `%.15g` format. The hand-rolled body
-// moves into Sailfin once the arena threading lands.
-fn sfn_number_to_str_sfn(value: f64) -> * u8 {
-    return sailfin_runtime_number_to_string(value);
+// ====================================================================
+// Number / int formatting — real hand-rolled Sailfin bodies (#1314, C3
+// of epic #1308). The bare `sfn_int_to_str` / `sfn_number_to_str`
+// (emission targets, formerly C trampolines in `sailfin_runtime.c`,
+// now `static`) are defined here in Sailfin; the linker binds every
+// fresh emission to these bodies. The bare names ARE the real bodies —
+// the proof-of-life `sfn_number_to_str_sfn` / `sfn_int_to_str_sfn` infix
+// wrappers are retired (the migration they marked is complete), and the
+// `f64` call-resolution gap (see `sfn_number_to_str` below) makes an
+// `f64`-forwarding infix unrepresentable under the seed anyway.
+//
+// Byte assembly. Like `ownedbuf.sfn`, the seed compiler does not lower
+// a direct single-byte store through a `* u8` slot, so digits are
+// written via read-modify-write of the enclosing 8-aligned i64 word
+// (`atomic_load` + clear-the-byte + `atomic_store`). The result is
+// allocated through the process-global arena when arena mode is on
+// (gated on `sfn_arena_enabled()`, the discipline `concat` follows),
+// else libc storage; a 64-byte buffer covers every worst case (sci
+// "-1.23456789012346e-308" = 22 bytes + NUL; fixed "-0.000<15 digits>"
+// ≈ 22 bytes + NUL). The buffer is NUL-terminated so the `* u8`
+// C-string consumers (`sailfin_runtime_string_length`, etc.) recover
+// the length by scan.
+//
+// Float formatting reproduces libc `%.15g`: P=15 significant digits;
+// fixed (`%f`) style when the decimal exponent X satisfies
+// -4 <= X < 15, else scientific (`d.ddde±NN`, exponent >= 2 digits with
+// sign); trailing zeros and a bare trailing point stripped. Integer-
+// valued doubles below 1e15 take an exact i64 fast path (no rounding) —
+// this covers the self-host hot path (`%t` temp-name emission) bit-for-
+// bit. The general path scales `m * 10^(14 - X)` and rounds; for the
+// fixed range that is a single exact power-of-ten multiply (10^k,
+// k <= 22, is exact in f64), so rounding is correct there. Correctness
+// ceiling (documented, out of the suite): values landing exactly on a
+// half-ulp tie at the 15th significant digit round half-up rather than
+// libc's half-to-even; extreme subnormals (|X| > ~300) and -0.0 (prints
+// "0") may diverge. A bignum dtoa (Ryu/Dragon) is post-1.0 if exactness
+// for those is ever required.
+// `_num_put_byte(addr, value)` writes the low byte of `value` at byte
+// address `addr` via read-modify-write of the enclosing i64 word.
+// `word - (word & mask)` clears the target byte without a bitwise NOT
+// (the seed-unverified `~`, avoided per the arena module); the new byte
+// ORs in (the cleared bits make `+` equivalent to `|`). The enclosing
+// word is always in-bounds: every backing allocation is 8-aligned with
+// a capacity that is a multiple of 8 (`owned_buf_new` discipline).
+fn _num_put_byte(addr: i64, value: i64) -> void {
+    let word_addr: i64 = (addr / 8) * 8;
+    let shift: i64 = (addr - word_addr) * 8;
+    let slot: * i64 = word_addr as * i64;
+    let word: i64 = atomic_load(slot);
+    let mask: i64 = 255 << shift;
+    let current: i64 = word & mask;
+    let placed: i64 = (value & 255) << shift;
+    atomic_store(slot, (word - current) + placed);
 }
 
-// `sfn_int_to_str_sfn(value)` — decimal integer formatting.
-// Architect spec is hand-rolled per §2.2.2 (no variadic snprintf
-// in v0); today's body forwards to the C wave-2 trampoline
-// `sfn_int_to_str`, which implements the architect-spec digit
-// emission against a 21-byte stack buffer (worst-case INT64_MIN
-// is 20 digits + sign + NUL) and copies into a fresh NUL-
-// terminated heap buffer. The Sailfin body retires the C
-// trampoline once arena threading lands at the call surface.
-fn sfn_int_to_str_sfn(value: i64) -> * u8 { return sfn_int_to_str(value); }
+// `_num_emit_char(base, pos, ch)` writes one byte and returns the next
+// position.
+fn _num_emit_char(base: i64, pos: i64, ch: i64) -> i64 {
+    _num_put_byte(base + pos, ch);
+    return pos + 1;
+}
+
+// `_num_finish(base, pos)` NUL-terminates and returns the buffer base
+// as a `* u8` C-string.
+fn _num_finish(base: i64, pos: i64) -> * u8 {
+    _num_put_byte(base + pos, 0);
+    return base as * u8;
+}
+
+// `_num_pow10_i64(k)` — 10^k as i64 for k in [0, 18] (fits i64).
+fn _num_pow10_i64(k: i64) -> i64 {
+    let mut r: i64 = 1;
+    let mut i: i64 = 0;
+    loop {
+        if i >= k { break; }
+        r = r * 10;
+        i = i + 1;
+    }
+    return r;
+}
+
+// `_num_count_digits(value)` — decimal digit count of a non-negative
+// i64 (0 has one digit).
+fn _num_count_digits(value: i64) -> i64 {
+    if value == 0 { return 1; }
+    let mut n: i64 = 0;
+    let mut v: i64 = value;
+    loop {
+        if v == 0 { break; }
+        v = v / 10;
+        n = n + 1;
+    }
+    return n;
+}
+
+// `_num_emit_uint(base, pos, value, min_digits)` writes `value` (>= 0)
+// most-significant digit first, zero-padded to at least `min_digits`.
+// Returns the next position.
+fn _num_emit_uint(base: i64, pos: i64, value: i64, min_digits: i64) -> i64 {
+    let mut width: i64 = _num_count_digits(value);
+    if min_digits > width { width = min_digits; }
+    let mut divisor: i64 = _num_pow10_i64(width - 1);
+    let mut p: i64 = pos;
+    let mut i: i64 = 0;
+    loop {
+        if i >= width { break; }
+        let digit: i64 = (value / divisor) % 10;
+        p = _num_emit_char(base, p, 48 + digit);
+        divisor = divisor / 10;
+        i = i + 1;
+    }
+    return p;
+}
+
+// `sfn_number_to_str(value)` — the bare emission target (#1314), render
+// `value` as a `%.15g`-style decimal string into arena/libc storage. See
+// the family comment above for the algorithm and its correctness ceiling.
+//
+// The whole float pipeline (exponent walk + 15-digit scaling) is inlined
+// here rather than split into helpers: an UNregistered internal Sailfin
+// function taking/returning `f64` mis-resolves under the seed — its call
+// site defaults the `f64` to `i8*` and coerces the argument through
+// `sfn_number_to_str` (visible in the seed's emission of the
+// `sfn_str_sfn_slice` proof-of-life wrapper). `sfn_number_to_str` itself
+// resolves correctly because it carries a runtime-helper descriptor
+// (`number.to_string` → `["double"]`); the i64-only helpers it calls
+// (`_num_emit_*`, `_num_pow10_i64`) resolve fine. Keeping every `f64`
+// inside this one descriptor-backed body sidesteps the gap.
+fn sfn_number_to_str(value: f64) -> * u8 {
+    let mut arena_addr: i64 = 0;
+    if sfn_arena_enabled() { arena_addr = sfn_arena_global() as i64; }
+    let buf: OwnedBuf = owned_buf_new(arena_addr, 64);
+    let base: i64 = buf.ptr_addr;
+    if base == 0 { return null; }
+    let mut pos: i64 = 0;
+
+    // NaN (libc prints "nan").
+    if value != value {
+        pos = _num_emit_char(base, pos, 110);
+        pos = _num_emit_char(base, pos, 97);
+        pos = _num_emit_char(base, pos, 110);
+        return _num_finish(base, pos);
+    }
+
+    let mut neg: bool = false;
+    let mut m: f64 = value;
+    if value < 0.0 {
+        neg = true;
+        m = 0.0 - value;
+    }
+
+    // Infinity (libc prints "inf" / "-inf"). NaN is already handled, so
+    // `m - m` is 0 for every finite m and NaN (!= 0) only for +inf.
+    if (m - m) != 0.0 {
+        if neg { pos = _num_emit_char(base, pos, 45); }
+        pos = _num_emit_char(base, pos, 105);
+        pos = _num_emit_char(base, pos, 110);
+        pos = _num_emit_char(base, pos, 102);
+        return _num_finish(base, pos);
+    }
+
+    // Zero (covers -0.0 -> "0", a documented divergence from libc's "-0").
+    if m == 0.0 {
+        pos = _num_emit_char(base, pos, 48);
+        return _num_finish(base, pos);
+    }
+
+    // Exact integer fast path: integer-valued magnitudes below 1e15
+    // format as plain integers (no rounding) — the self-host hot path.
+    if m < 1000000000000000.0 {
+        let ip: i64 = m as i64;
+        if (ip as f64) == m {
+            if neg { pos = _num_emit_char(base, pos, 45); }
+            pos = _num_emit_uint(base, pos, ip, 1);
+            return _num_finish(base, pos);
+        }
+    }
+
+    // ---- General 15-significant-digit path ----
+    // Exponent estimate X = floor(log10(m)) via a power-of-ten walk. Any
+    // one-ulp boundary error is corrected by the normalization loop below.
+    // Powers overflow to +inf past ~1e308, terminating each walk.
+    let mut x_exp: i64 = 0;
+    if m >= 1.0 {
+        loop {
+            // p = 10^(x_exp + 1), recomputed inline.
+            let target: i64 = x_exp + 1;
+            let mut p: f64 = 1.0;
+            let mut j: i64 = 0;
+            loop {
+                if j >= target { break; }
+                p = p * 10.0;
+                j = j + 1;
+            }
+            if m >= p { x_exp = x_exp + 1; } else { break; }
+        }
+    } else {
+        loop {
+            // p = 10^(-x_exp); `m * p >= 1.0` iff `m >= 10^x_exp`.
+            let nx: i64 = 0 - x_exp;
+            let mut p: f64 = 1.0;
+            let mut j: i64 = 0;
+            loop {
+                if j >= nx { break; }
+                p = p * 10.0;
+                j = j + 1;
+            }
+            if m * p >= 1.0 { break; }
+            x_exp = x_exp - 1;
+        }
+    }
+
+    // 10^18 chunk constant (exact in f64; reused by the scaling below).
+    let mut chunk: f64 = 1.0;
+    let mut ci: i64 = 0;
+    loop {
+        if ci >= 18 { break; }
+        chunk = chunk * 10.0;
+        ci = ci + 1;
+    }
+
+    // Scale to a 15-digit significant integer D = round(m * 10^(14 - X)),
+    // normalizing X so D lands in [1e14, 1e15). The scale factor is one
+    // exact 10^kk multiply when |14 - X| <= 18 (the whole fixed-form
+    // range, so rounding is correct there), chunked by the exact 10^18
+    // otherwise. Round-half-up is the documented tie ceiling. `guard`
+    // bounds the normalization (1-2 corrections suffice) so extreme
+    // subnormals cannot loop forever.
+    let mut d15: i64 = 0;
+    let mut guard: i64 = 0;
+    loop {
+        let k: i64 = 14 - x_exp;
+        let mut r: f64 = m;
+        if k >= 0 {
+            let mut kk: i64 = k;
+            loop {
+                if kk < 18 { break; }
+                r = r * chunk;
+                kk = kk - 18;
+            }
+            let mut p: f64 = 1.0;
+            let mut j: i64 = 0;
+            loop {
+                if j >= kk { break; }
+                p = p * 10.0;
+                j = j + 1;
+            }
+            r = r * p;
+        } else {
+            let mut kk: i64 = 0 - k;
+            loop {
+                if kk < 18 { break; }
+                r = r / chunk;
+                kk = kk - 18;
+            }
+            let mut p: f64 = 1.0;
+            let mut j: i64 = 0;
+            loop {
+                if j >= kk { break; }
+                p = p * 10.0;
+                j = j + 1;
+            }
+            r = r / p;
+        }
+        d15 = (r + 0.5) as i64;
+
+        if guard >= 5 { break; }
+        guard = guard + 1;
+        if d15 < 100000000000000 { x_exp = x_exp - 1; } else if d15 >= 1000000000000000 {
+            x_exp = x_exp + 1;
+        } else { break; }
+    }
+
+    // Strip trailing zeros from the 15-digit significant integer.
+    let mut s: i64 = 15;
+    loop {
+        if d15 % 10 != 0 { break; }
+        d15 = d15 / 10;
+        s = s - 1;
+    }
+
+    if neg { pos = _num_emit_char(base, pos, 45); }
+
+    if x_exp >= -4 {
+        if x_exp < 15 {
+            // Fixed (`%f`) form.
+            if x_exp >= 0 {
+                let intlen: i64 = x_exp + 1;
+                if s <= intlen {
+                    pos = _num_emit_uint(base, pos, d15, s);
+                    let mut zpad: i64 = intlen - s;
+                    loop {
+                        if zpad <= 0 { break; }
+                        pos = _num_emit_char(base, pos, 48);
+                        zpad = zpad - 1;
+                    }
+                } else {
+                    let fracdigits: i64 = s - intlen;
+                    let pdiv: i64 = _num_pow10_i64(fracdigits);
+                    let high: i64 = d15 / pdiv;
+                    let low: i64 = d15 % pdiv;
+                    pos = _num_emit_uint(base, pos, high, intlen);
+                    pos = _num_emit_char(base, pos, 46);
+                    pos = _num_emit_uint(base, pos, low, fracdigits);
+                }
+            } else {
+                pos = _num_emit_char(base, pos, 48);
+                pos = _num_emit_char(base, pos, 46);
+                let mut lz: i64 = (0 - x_exp) - 1;
+                loop {
+                    if lz <= 0 { break; }
+                    pos = _num_emit_char(base, pos, 48);
+                    lz = lz - 1;
+                }
+                pos = _num_emit_uint(base, pos, d15, s);
+            }
+            return _num_finish(base, pos);
+        }
+    }
+
+    // Scientific (`d.ddde±NN`) form.
+    let lead_div: i64 = _num_pow10_i64(s - 1);
+    let lead: i64 = d15 / lead_div;
+    let rest: i64 = d15 % lead_div;
+    pos = _num_emit_uint(base, pos, lead, 1);
+    if s > 1 {
+        pos = _num_emit_char(base, pos, 46);
+        pos = _num_emit_uint(base, pos, rest, s - 1);
+    }
+    pos = _num_emit_char(base, pos, 101);
+    if x_exp >= 0 { pos = _num_emit_char(base, pos, 43); } else {
+        pos = _num_emit_char(base, pos, 45);
+    }
+    let mut absx: i64 = x_exp;
+    if absx < 0 { absx = 0 - absx; }
+    pos = _num_emit_uint(base, pos, absx, 2);
+    return _num_finish(base, pos);
+}
+
+// `sfn_int_to_str(value)` — the bare emission target (#1314), decimal i64
+// formatting into arena/libc storage. Digit extraction runs in the
+// negative domain so INT64_MIN (whose positive has no i64 representation)
+// formats without overflow: `value % 10` / `value / 10` truncate toward
+// zero, yielding negative remainders that are negated per digit. All
+// parameters/locals are i64, so the seed resolves the call surface
+// correctly (the `f64` mis-resolution that forced `sfn_number_to_str` to
+// inline its helpers does not apply here).
+fn sfn_int_to_str(value: i64) -> * u8 {
+    let mut arena_addr: i64 = 0;
+    if sfn_arena_enabled() { arena_addr = sfn_arena_global() as i64; }
+    let buf: OwnedBuf = owned_buf_new(arena_addr, 32);
+    let base: i64 = buf.ptr_addr;
+    if base == 0 { return null; }
+    let mut pos: i64 = 0;
+
+    if value == 0 {
+        pos = _num_emit_char(base, pos, 48);
+        return _num_finish(base, pos);
+    }
+
+    let mut neg: bool = false;
+    if value < 0 { neg = true; }
+
+    // Count digits (loop toward zero works for either sign).
+    let mut nd: i64 = 0;
+    let mut t: i64 = value;
+    loop {
+        if t == 0 { break; }
+        t = t / 10;
+        nd = nd + 1;
+    }
+
+    if neg { pos = _num_emit_char(base, pos, 45); }
+
+    // Write digits least-significant first into the reserved span.
+    let mut wp: i64 = pos + nd - 1;
+    let mut x: i64 = value;
+    loop {
+        if x == 0 { break; }
+        let mut d: i64 = x % 10;
+        if d < 0 { d = 0 - d; }
+        _num_put_byte(base + wp, 48 + d);
+        wp = wp - 1;
+        x = x / 10;
+    }
+    pos = pos + nd;
+    return _num_finish(base, pos);
+}
 
 // #925 (sub-issue of #390): Cat-C char-predicate ports. The legacy C
 // bodies (`sailfin_runtime_is_alpha_char` / `_is_decimal_digit` /
