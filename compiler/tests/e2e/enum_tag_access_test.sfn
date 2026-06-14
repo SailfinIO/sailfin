@@ -1,0 +1,161 @@
+// End-to-end test for enum tag readback in pure Sailfin (issue #704).
+//
+// Native replacement for the former `test_enum_tag_access.sh` (test-infra
+// Phase 3, epic #842; ratchet #1327). Pins two distinct miscompilations in
+// the LLVM lowering that the #623 audit surfaced and #704 fixed:
+//
+//   A. `.tag` field access — `lower_enum_member_access` extracted the tag
+//      (i32) but never returned the operand, so the receiving `return` dropped
+//      it and emitted `ret <default>`. Every caller saw tag 0 regardless of
+//      the actual variant.
+//   B. `match` over a by-value enum subject — the tag check emitted
+//      `getelementptr ..., %EnumT %v, ...`, which LLVM rejects because the GEP
+//      base must be a pointer.
+//
+// The test asserts three signals against the same fixture:
+//   1. The compiled IR for the `.tag` paths widens the tag to the i64 return
+//      type (`sext i32 ... to i64`) and actually returns it.
+//   2. The IR carries no GEP against a by-value aggregate (failure B).
+//   3. `sfn run` against the fixture prints the expected tag sequence
+//      (0/1/2 for all three readback paths). Catches future regressions where
+//      the IR happens to look fine but the runtime answer is wrong.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like these. Assert on the captured
+// `.ll` / stdout text with `sfn/strings` predicates instead. (#842.)
+import { contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn emit` / `sfn run`.
+// `process.run_capture` treats an empty array as the *empty* environment (not
+// "inherit"), so the relevant variables must be threaded explicitly:
+//   - `PATH` (+ `HOME`/`TMPDIR`): the nested `sfn run` build shells out to
+//     `clang` and its linker (`mold`/`lld`/`ld`); with no `PATH` the linker is
+//     not found and the build fails.
+//   - `SAILFIN_TEST_SCRATCH`: the runner's per-file scratch, which the
+//     compiler routes its build-cache dir under (#1333) so a parallel run
+//     (`--jobs N>1`) does not collide on the fixed `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _fixture() -> string {
+    return "compiler/tests/e2e/fixtures/enum_tag_access/main.sfn";
+}
+
+// Count lines that contain both `a` and `b` (the `grep -cE "a.*b"` shape).
+fn _count_lines_with(text: string, a: string, b: string) -> int {
+    let lines = split(text, "\n");
+    let mut n = 0;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], a) && contains(lines[i], b) { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+// Faithful stand-in for `grep -A 3 'extractvalue %Shape ... 0' | grep 'sext i32
+// ... to i64'`: a line that extracts the %Shape tag (field 0) must be followed
+// within the next 3 lines by a `sext i32 ... to i64` widening.
+fn _extractvalue_tag_followed_by_sext(text: string) -> bool {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if contains(line, "extractvalue %Shape") && contains(line, ", 0") {
+            let mut j = i + 1;
+            let stop = i + 4;
+            loop {
+                if j >= lines.length { break; }
+                if j >= stop { break; }
+                if contains(lines[j], "sext i32") && contains(lines[j], "to i64") {
+                    return true;
+                }
+                j += 1;
+            }
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// Lower the fixture to a standalone `.ll` via `sfn emit llvm` and return the IR
+// text; returns "" on emit failure so the caller can assert on the emptiness.
+fn _emit_llvm(tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-enum-tag-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _fixture()], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+// ---- Failure A: `.tag` is read, widened to the i64 return type, returned ----
+test "enum-tag: .tag access widens i32 tag to i64 and returns it" ![io] {
+    let ir = _emit_llvm("basic");
+    assert ir.length > 0;
+    // Both `.tag` accessor functions must be defined with an i64 return.
+    assert contains(ir, "define i64 @shape_tag_direct");
+    assert contains(ir, "define i64 @shapes_tag_indexed");
+    // At least two `sext i32 %t... to i64` widenings (one per .tag path).
+    // Pre-fix the extractvalue was emitted but dropped, ending in `ret i64 0`.
+    assert _count_lines_with(ir, "sext i32 %t", "to i64") >= 2;
+    // Pin the specific regression shape: an `extractvalue %Shape ..., 0`
+    // immediately followed by a `sext i32 ... to i64`.
+    assert _extractvalue_tag_followed_by_sext(ir);
+}
+
+// ---- Failure B: by-value match emits well-formed IR (no GEP-against-value) --
+// Pre-fix the match arm emitted `getelementptr inbounds %Shape, %Shape %tM,
+// ...` — a GEP whose base operand is a by-value aggregate, not a pointer, which
+// LLVM rejects. The well-formed shape carries a pointer base (`%Shape* %tM`),
+// so the regression signature is specifically `%Shape, %Shape %` (a `%`-operand
+// directly after the struct type, with no `*`). Reject any such occurrence so
+// the regression cannot return.
+test "enum-tag: by-value match emits no getelementptr against a by-value aggregate" ![io] {
+    let ir = _emit_llvm("match");
+    assert ir.length > 0;
+    assert ! contains(ir, "getelementptr inbounds %Shape, %Shape %");
+}
+
+// ---- End-to-end: the compiled binary returns the right tag per variant ----
+// Three lines, each enumerating tags 0/1/2 — one per readback path (direct
+// `.tag`, indexed `.tag`, match arm).
+test "enum-tag: compiled binary returns the correct tag for each variant" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", _fixture()], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out, "direct 0 1 2");
+    assert contains(out, "indexed 0 1 2");
+    assert contains(out, "match 0 1 2");
+}

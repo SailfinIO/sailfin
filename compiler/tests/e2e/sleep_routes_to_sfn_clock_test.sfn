@@ -1,0 +1,75 @@
+// Migration sentinel: pin that user-program `sleep(N)` call sites lower to
+// `@sfn_sleep` (the Sailfin-native wrapper in `runtime/sfn/clock.sfn`) and NOT
+// to the C entrypoint `@sailfin_runtime_sleep` directly.
+//
+// Native replacement for the former `test_sleep_routes_to_sfn_clock.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327).
+//
+// This test exists so a future change to the runtime helper registry that
+// accidentally reverts the symbol field for the `sleep` / `runtime_sleep_fn`
+// descriptors fails immediately rather than silently moving the call path back
+// into the C runtime. When the C trampoline is finally retired (PR 2 of the
+// sleep migration, gated on Q7 — opaque-handle sizing), this test stays
+// correct: the user-program call site is still `@sfn_sleep`, only the
+// wrapper's body changes from `sailfin_runtime_sleep(...)` to `nanosleep(...)`.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn emit`. `process.run_capture` treats
+// an empty array as the *empty* environment (not "inherit"), so the relevant
+// variables must be threaded explicitly (PATH for any subprocess the compiler
+// shells out to; SAILFIN_TEST_SCRATCH so a parallel run does not collide on
+// the fixed `build/sailfin` build-cache dir — #1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// ---- user-program sleep(N) routes through @sfn_sleep, not direct C entry ----
+// The emitted IR must call `@sfn_sleep` and must NOT call the C entrypoint
+// `@sailfin_runtime_sleep` directly — a regression of the migration's
+// call-path rewire leaks straight through to the C symbol.
+test "sleep-routing: user-program sleep(N) lowers to @sfn_sleep, not direct C entrypoint" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-sleep-caller.sfn";
+    let ll = dir + "/sfn-sleep-caller.ll";
+    fs.writeFile(src, "fn main() ![io, clock] {\n    sleep(0);\n}\n");
+    if fs.exists(ll) { fs.deleteFile(ll); }
+
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+    assert fs.exists(ll);
+
+    let ir = fs.readFile(ll);
+    assert contains(ir, "call void @sfn_sleep(");
+    assert ! contains(ir, "call void @sailfin_runtime_sleep(");
+
+    fs.deleteFile(ll);
+    fs.deleteFile(src);
+}
