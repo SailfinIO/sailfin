@@ -1,0 +1,105 @@
+// E2E golden-IR regression test for the concurrency frontend lowering — issue
+// #1085, epic #965 (M4). Verifies that `channel`/`spawn`/`parallel`/`serve`
+// lower to the correct runtime-helper call symbols in LLVM IR, with no
+// `[fatal]: not yet lowered` diagnostics.
+//
+// Native replacement for the former `test_concurrency_lowering_ir.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Drives `sfn emit llvm`
+// against inline fixtures and asserts on the captured `.ll` text.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like these. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn emit`. `process.run_capture` treats
+// an empty array as the *empty* environment (not "inherit"), so the relevant
+// variables must be threaded explicitly (PATH for any subprocess the compiler
+// shells out to; SAILFIN_TEST_SCRATCH so a parallel run does not collide on
+// the fixed `build/sailfin` build-cache dir — #1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Lower `source` to a standalone `.ll` via `sfn emit llvm` and return the IR
+// text. Writes the fixture and `.ll` to unique scratch paths keyed by `tag`
+// so sub-tests do not collide; returns "" on emit failure.
+fn _emit_llvm(source: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-concurrency-ir-" + tag + ".sfn";
+    let ll = dir + "/sfn-concurrency-ir-" + tag + ".ll";
+    fs.writeFile(src, source);
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    fs.deleteFile(src);
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+// channel(N) → sfn_channel_create(i64 N, i64 8) (#1266; was 1-arg i32 in #1091)
+test "concurrency-ir: channel(N) lowers to sfn_channel_create (#1091)" ![io] {
+    let ir = _emit_llvm("fn main() ![io] {\n    let ch = channel(4);\n}\n", "channel_create");
+    assert ir.length > 0;
+    assert contains(ir, "sfn_channel_create");
+}
+
+// channel_create call carries the capacity AND the elem_size operand, matching
+// runtime/sfn/concurrency/channel.sfn (§2.6.4): v0 channels are monomorphized
+// to pointer-sized elements, so elem_size is 8.
+test "concurrency-ir: channel_create carries i64 capacity + elem_size (#1266)" ![io] {
+    let ir = _emit_llvm("fn main() ![io] {\n    let ch = channel(4);\n}\n", "channel_create_i64");
+    assert ir.length > 0;
+    assert contains(ir, "sfn_channel_create(i64 4, i64 8)");
+}
+
+// spawn:int <lambda> → sfn_spawn_int (#1090 flip)
+test "concurrency-ir: spawn:int lowers to sfn_spawn_int (#1090)" ![io] {
+    let ir = _emit_llvm("fn main() ![io] {\n    let f = spawn fn() -> int { return 1; };\n}\n", "spawn_int");
+    assert ir.length > 0;
+    assert contains(ir, "sfn_spawn_int");
+}
+
+// parallel [spawn task] → one sfn_spawn_task per task (#1091). The symbol is
+// use-driven (only emitted when the construct lowers), so its presence is a
+// meaningful signal, not an unconditional declaration.
+test "concurrency-ir: parallel [task] lowers to sfn_spawn_task (#1091)" ![io] {
+    let source = "fn worker() -> int { return 1; }\nfn main() ![io] {\n    let p = parallel [spawn worker()];\n}\n";
+    let ir = _emit_llvm(source, "parallel_spawn_task");
+    assert ir.length > 0;
+    assert contains(ir, "sfn_spawn_task");
+}
+
+// serve(handler, port) → sfn_serve (Sailfin-native server, #1092).
+test "concurrency-ir: serve(handler, port) lowers to sfn_serve (#1092)" ![io] {
+    let source = "fn handler() ![net, io] { }\nfn main() ![net, io] {\n    serve(handler, 8080);\n}\n";
+    let ir = _emit_llvm(source, "serve_serve_start");
+    assert ir.length > 0;
+    assert contains(ir, "sfn_serve");
+}

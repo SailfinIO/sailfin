@@ -1,0 +1,176 @@
+// End-to-end test for issue #713 — pointer-typed struct fields survive into
+// the struct's LLVM layout AND round-trip at runtime.
+//
+// Before the fix, `emit_native_layout.sfn` serialized a field's type into a
+// single whitespace-delimited token, but pointer annotations carry an internal
+// space (`* u8`). The native-IR re-parser split that line on whitespace, the
+// pointee became an unrecognized token, the field's parse failed, and the field
+// was dropped from the struct's LLVM type. The downstream symptom was that
+// field assignments to pointer fields emitted no `store`.
+//
+// Native replacement for the former `test_struct_field_pointer_roundtrip.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Pins three contracts on the
+// shared fixture:
+//   1. IR layout: `%Node` keeps the self-referential `* Node` and raw `* u8`
+//      fields alongside the `i64` (pre-fix it collapsed to `{ i64 }`).
+//   2. The assignment to the raw pointer field GEPs to its slot-2 and emits a
+//      real `store i8*`/`store ptr` into that GEP result.
+//   3. Runtime round-trip (`run`): writing then reading the pointer/int fields
+//      executes to exit 0.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import {
+    contains,
+    ends_with,
+    split,
+    trim
+} from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn` invocations. `process.run_capture`
+// treats an empty array as the *empty* environment (not "inherit"), so PATH
+// (the nested `sfn run` build shells out to clang + a linker) and
+// SAILFIN_TEST_SCRATCH (per-invocation build-cache dir, #1333) are threaded
+// explicitly.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _fixture() -> string {
+    return "compiler/tests/e2e/fixtures/struct_field_pointer_roundtrip.sfn";
+}
+
+fn _emit_llvm() -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/struct_field_pointer_roundtrip.ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _fixture()], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+// The first whitespace-delimited token of a line (e.g. the `%reg` in
+// `%reg = getelementptr …`).
+fn _first_token(line: string) -> string {
+    let toks = split(trim(line), " ");
+    if toks.length == 0 { return ""; }
+    return toks[0];
+}
+
+// The last whitespace-delimited token of a line (the store destination
+// register in `store i8* %val, i8* %dst`).
+fn _last_token(line: string) -> string {
+    let toks = split(trim(line), " ");
+    if toks.length == 0 { return ""; }
+    return toks[toks.length - 1];
+}
+
+fn _contains_str(haystack: string[], needle: string) -> bool {
+    let mut i = 0;
+    loop {
+        if i >= haystack.length { break; }
+        if haystack[i] == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// 1 — `%Node` keeps both pointer fields (self-ref `%Node*`/`ptr` + raw
+// `i8*`/`ptr`) alongside the `i64`. Pre-fix this collapsed to `{ i64 }`.
+test "struct-ptr-field: Node layout keeps self-ref and raw pointer fields" ![io] {
+    let ir = _emit_llvm();
+    assert ir.length > 0;
+    let lines = split(ir, "\n");
+    let mut found = false;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if contains(line, "%Node = type {") {
+            // Pre-fix the line was `%Node = type { i64 }` — assert the i64 plus
+            // both pointer slots (typed `%Node*`/`i8*` or opaque `ptr`) survive.
+            let has_self = contains(line, "%Node*") || contains(line, "ptr");
+            let has_raw = contains(line, "i8*") || contains(line, "ptr");
+            if contains(line, "i64") && has_self && has_raw { found = true; }
+            break;
+        }
+        i += 1;
+    }
+    assert found;
+}
+
+// 2 — Assigning the raw `* u8` field GEPs to slot 2 and emits a real
+// `store i8*` (or `store ptr`) into that GEP result. Pre-fix the store was
+// silently dropped.
+test "struct-ptr-field: raw *u8 field assignment emits a store into slot-2 GEP" ![io] {
+    let ir = _emit_llvm();
+    assert ir.length > 0;
+    let lines = split(ir, "\n");
+
+    // Collect the result registers of every `… i32 0, i32 2` GEP into %Node.
+    let mut slot2: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let t = trim(lines[i]);
+        if contains(t, "getelementptr %Node,") && ends_with(t, "i32 0, i32 2") {
+            slot2.push(_first_token(t));
+        }
+        i += 1;
+    }
+    assert slot2.length > 0;
+
+    // Require a `store i8*`/`store ptr` whose destination is one of them.
+    let mut found = false;
+    let mut j = 0;
+    loop {
+        if j >= lines.length { break; }
+        let t = trim(lines[j]);
+        if contains(t, "store i8* ") || contains(t, "store ptr ") {
+            if _contains_str(slot2, _last_token(t)) {
+                found = true;
+                break;
+            }
+        }
+        j += 1;
+    }
+    assert found;
+}
+
+// 3 — Runtime round-trip: write then read the pointer/int fields. Exit 0 means
+// every field survived the store/load; non-zero pinpoints which read-back
+// diverged (1=self-ref *Node, 2=int, 3=raw *u8).
+test "struct-ptr-field: pointer/int field round-trip runs to exit 0" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", _fixture()], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}

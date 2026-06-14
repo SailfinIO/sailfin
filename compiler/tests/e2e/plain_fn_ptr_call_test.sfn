@@ -1,0 +1,155 @@
+// End-to-end test for the plain C-ABI function-pointer indirect call (#1089).
+//
+// A local/parameter typed `* fn (A) -> R` is a bare code pointer. Calling it
+// must lower to an env-LESS indirect call — `bitcast` the stored pointer to the
+// typed function-pointer LLVM type, then `call <ret> <fnptr>(<args>)` with NO
+// hidden environment argument. This is the env-less sibling of the
+// closure-dispatch path (which extractvalues a `{i8*, i8*}` env pair).
+//
+// Native replacement for the former `test_plain_fn_ptr_call.sh` (test-infra
+// Phase 3, epic #842; ratchet #1327).
+//
+// Acceptance:
+//   - `sfn check fixtures/plain_fn_ptr_call.sfn` exits 0.
+//   - `sfn fmt --check fixtures/plain_fn_ptr_call.sfn` exits 0.
+//   - emitted IR for @invoke_self contains a typed-fn-ptr bitcast and an
+//     env-less indirect `call i8* %tmp(i8* ...)`, and does NOT engage the
+//     closure path (no `extractvalue {i8*, i8*}`).
+//   - the program runs and exits 42 (worker(41) == 42, forwarded as the
+//     process exit code) — proving an indirect call actually executed.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn` invocations. `process.run_capture`
+// treats an empty array as the *empty* environment (not "inherit"), so the
+// relevant variables must be threaded explicitly — most importantly PATH (the
+// nested `sfn run` build shells out to clang + a linker) and
+// SAILFIN_TEST_SCRATCH (so a parallel run routes its build-cache dir per
+// invocation rather than colliding on the fixed `build/sailfin` — #1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _fixture_src() -> string {
+    return "compiler/tests/e2e/fixtures/plain_fn_ptr_call.sfn";
+}
+
+// Copy the repo fixture into an isolated scratch dir so project-root discovery
+// does not pick up compiler/capsule.toml when checking/emitting/running it.
+fn _fixture_copy() -> string ![io] {
+    let dir = _scratch_dir();
+    let dst = dir + "/plain_fn_ptr_call.sfn";
+    fs.writeFile(dst, fs.readFile(_fixture_src()));
+    return dst;
+}
+
+// Extract the body of `define … @<fn>(…) { … }` from emitted IR — the
+// faithful stand-in for `awk '/^define .* @fn\(/,/^}/'`.
+fn _extract_fn_body(ir: string, fn_name: string) -> string {
+    let lines = split(ir, "\n");
+    let mut body = "";
+    let mut capturing = false;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if !capturing {
+            if contains(line, "define ") && contains(line, "@" + fn_name)
+                && contains(line, "(") {
+                capturing = true;
+                body = body + line + "\n";
+            }
+        } else {
+            body = body + line + "\n";
+            if line.length > 0 && line[0] == "}" { break; }
+        }
+        i += 1;
+    }
+    return body;
+}
+
+fn _any_line_with(text: string, a: string, b: string) -> bool {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], a) && contains(lines[i], b) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "plain-fn-ptr: sfn check passes on the fixture" ![io] {
+    let src = _fixture_copy();
+    let exit = process.run_capture([_sfn_bin(), "check", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(src);
+    assert exit == 0;
+    assert contains(out + err, "ok");
+}
+
+test "plain-fn-ptr: fixture is canonically formatted" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", _fixture_src()], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+test "plain-fn-ptr: emit llvm produces an env-less indirect call" ![io] {
+    let src = _fixture_copy();
+    let dir = _scratch_dir();
+    let ll = dir + "/plain.ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    fs.deleteFile(src);
+    assert exit == 0;
+    assert fs.exists(ll);
+
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    let body = _extract_fn_body(ir, "invoke_self");
+    assert body.length > 0;
+    // Typed function-pointer bitcast for the call target.
+    assert contains(body, "to i8* (i8*)*");
+    // Env-less indirect call: call through an SSA temp with a single user arg.
+    assert _any_line_with(body, "call i8* %", "(i8* ");
+    // Must NOT engage the closure-pair path.
+    assert ! contains(body, "extractvalue {i8*, i8*}");
+}
+
+test "plain-fn-ptr: linked program runs the indirect call and exits 42" ![io] {
+    let src = _fixture_copy();
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    fs.deleteFile(src);
+    assert exit == 42;
+}
