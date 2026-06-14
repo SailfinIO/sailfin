@@ -1,0 +1,195 @@
+// End-to-end test for the `atomic_cas` builtin (M0-Atomics.3, issue #333).
+//
+// Native replacement for the former `test_atomic_cas_compile.sh` (test-infra
+// Phase 3, epic #842; ratchet #1327). Drives `sfn emit llvm` against the
+// fixture and asserts the emitted IR contains both the `cmpxchg` aggregate
+// instruction and the `extractvalue { i64, i1 } ..., 1` follow-up that unwraps
+// the success bit. Also pins the E0806 rejection on deliberately broken calls
+// (non-`*int` first arg, non-`int` second/third args) so the diagnostic
+// surface stays user-visible — sibling to the load/store + add/sub rejection
+// coverage in `atomic_add_sub_compile_test.sfn`.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like these. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn emit`. `process.run_capture` treats
+// an empty array as the *empty* environment (not "inherit"), so the relevant
+// variables must be threaded explicitly:
+//   - `PATH` (+ `HOME`/`TMPDIR`): keeps any subprocess the compiler shells out
+//     to resolvable.
+//   - `SAILFIN_TEST_SCRATCH`: the runner's per-file scratch, which the
+//     compiler routes its build-cache dir under (#1333) so a parallel run
+//     (`--jobs N>1`) does not collide on the fixed `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Whether any single line of `text` contains *all* of `needles` — the
+// faithful stand-in for a `grep -E "a.*b.*c"` over one line.
+fn _line_contains_all(text: string, needles: string[]) -> bool {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let mut all = true;
+        let mut j = 0;
+        loop {
+            if j >= needles.length { break; }
+            if !contains(line, needles[j]) {
+                all = false;
+                break;
+            }
+            j += 1;
+        }
+        if all { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Count lines that contain both `a` and `b` (the `grep -cE "a.*b"` shape).
+fn _count_lines_with(text: string, a: string, b: string) -> int {
+    let lines = split(text, "\n");
+    let mut n = 0;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], a) && contains(lines[i], b) { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+// Lower the source at `path` to a standalone `.ll` via `sfn emit llvm` and
+// return the IR text. Writes the `.ll` to a unique scratch path keyed by
+// `tag` so parallel sub-tests do not collide; returns "" on emit failure so
+// the caller can assert on the emptiness.
+fn _emit_llvm(path: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-atomic-cas-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+fn _fixture() -> string {
+    return "compiler/tests/e2e/fixtures/atomic_cas_basic.sfn";
+}
+
+// ---- Happy path: atomic_cas emits the cmpxchg + extractvalue pair ----
+// Acceptance Criteria from issue #333:
+//   atomic_cas(ptr, expected, new) ->
+//     %tA = cmpxchg ptr <ptr>, i64 <exp>, i64 <new> seq_cst seq_cst, align 8
+//     %tB = extractvalue { i64, i1 } %tA, 1
+test "atomic-cas: emit cmpxchg + extractvalue with seq_cst seq_cst, align 8" ![io] {
+    let ir = _emit_llvm(_fixture(), "happy");
+    assert ir.length > 0;
+    assert _line_contains_all(ir, ["cmpxchg ptr", "i64", "seq_cst seq_cst"]);
+    assert _line_contains_all(ir, ["cmpxchg ptr", "align 8"]);
+    assert _line_contains_all(ir, ["extractvalue { i64, i1 }", ", 1"]);
+}
+
+// ---- Verification regex from the issue counts >= 2 ----
+// (one `cmpxchg ... seq_cst seq_cst` + one `extractvalue { i64, i1 }` for the
+//  `try_set` callsite; the `try_acquire` callsite pushes the count higher.)
+test "atomic-cas: verification regex matches >= 2 cmpxchg/extractvalue lines" ![io] {
+    let ir = _emit_llvm(_fixture(), "count");
+    assert ir.length > 0;
+    let cmpxchg_hits = _count_lines_with(ir, "cmpxchg ptr", "seq_cst seq_cst");
+    let extract_hits = _count_lines_with(ir, "extractvalue { i64, i1 }", "");
+    assert cmpxchg_hits + extract_hits >= 2;
+}
+
+// ---- E0806: type-error on non-pointer first argument is reported ----
+// E0806 is emitted as a `[fatal]`-tagged lowering diagnostic on stderr from
+// `_lower_atomic_cas`. We assert two signals (mirroring the load/store and
+// add/sub siblings): the E0806 code is present on stderr, and any partial
+// `.ll` does NOT contain `cmpxchg ptr` — i.e. the bogus call was rejected
+// before lowering would have emitted malformed IR. The exit code is
+// intentionally not gated.
+test "atomic-cas: non-pointer first argument reports E0806" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-cas-bad-ptr.sfn";
+    let ll = dir + "/sfn-cas-bad-ptr.ll";
+    fs.writeFile(src, "fn bad() -> boolean {\n    return atomic_cas(42, 0, 1);\n}\n");
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let _exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert contains(err, "E0806");
+    if fs.exists(ll) {
+        let ir = fs.readFile(ll);
+        assert ! contains(ir, "cmpxchg ptr");
+        fs.deleteFile(ll);
+    }
+    fs.deleteFile(src);
+}
+
+// ---- E0806: type-error on non-int second arg (`expected`) ----
+test "atomic-cas: non-int expected (arg 1) reports E0806" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-cas-bad-expected.sfn";
+    let ll = dir + "/sfn-cas-bad-expected.ll";
+    fs.writeFile(src, "fn bad(p: * int) -> boolean {\n    return atomic_cas(p, \"hello\", 1);\n}\n");
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let _exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert contains(err, "E0806");
+    if fs.exists(ll) {
+        let ir = fs.readFile(ll);
+        assert ! contains(ir, "cmpxchg ptr");
+        fs.deleteFile(ll);
+    }
+    fs.deleteFile(src);
+}
+
+// ---- E0806: type-error on non-int third arg (`new`) ----
+test "atomic-cas: non-int new (arg 2) reports E0806" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-cas-bad-new.sfn";
+    let ll = dir + "/sfn-cas-bad-new.ll";
+    fs.writeFile(src, "fn bad(p: * int) -> boolean {\n    return atomic_cas(p, 0, \"hello\");\n}\n");
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let _exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert contains(err, "E0806");
+    if fs.exists(ll) {
+        let ir = fs.readFile(ll);
+        assert ! contains(ir, "cmpxchg ptr");
+        fs.deleteFile(ll);
+    }
+    fs.deleteFile(src);
+}

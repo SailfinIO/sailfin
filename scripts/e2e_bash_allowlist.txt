@@ -18,7 +18,6 @@
 
 test_arena_default_on.sh
 test_array_aggregate_shape.sh
-test_atomic_cas_compile.sh
 test_binary_capsule_walker.sh
 test_build_diagnostics_format.sh
 test_build_json_schema.sh
@@ -49,7 +48,6 @@ test_drop_emission_mid_exit.sh
 test_drop_emission_try_catch.sh
 test_effect_gate_build_path.sh
 test_effect_gate_build_path_entry.sh
-test_enum_tag_access.sh
 test_errno_locator_platform.sh
 test_errno_reader.sh
 test_escape_promotion_boundaries.sh
@@ -112,7 +110,6 @@ test_runtime_string_utf8_numeric.sh
 test_runtime_type_meta.sh
 test_sfn_package.sh
 test_sleep_eintr_resume.sh
-test_sleep_routes_to_sfn_clock.sh
 test_sleep_unit_semantics.sh
 test_string_aggregate_shape.sh
 test_struct_field_pointer_roundtrip.sh
