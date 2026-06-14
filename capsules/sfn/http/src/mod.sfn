@@ -5,11 +5,11 @@
 //
 // Internal layout — this barrel re-exports the public surface. Sources live in:
 //   - types.sfn   Request, Response, ServerConfig
-//   - wire.sfn    parse_request, serialize_response, header, query_param,
-//                 reason_phrase, response, response_with_status,
-//                 json_response, not_found
+//   - wire.sfn    parse_request, parse_response, serialize_response,
+//                 header, query_param, reason_phrase, response,
+//                 response_with_status, json_response, not_found
 //   - server.sfn  serve (typed HTTP server on the M4 runtime)
-//   - mod.sfn     client (get, post)
+//   - mod.sfn     client (get, post, fetch)
 //
 // Build-out tracked by epic #1321; design in docs/proposals/sfn-http-capsule.md.
 // ---- Types ----
@@ -18,6 +18,7 @@ export { Request, Response, ServerConfig } from "./types";
 // ---- Wire layer + response builders ----
 export {
     parse_request,
+    parse_response,
     serialize_response,
     header,
     query_param,
@@ -31,6 +32,23 @@ export {
 // ---- Server ----
 export { serve } from "./server";
 
+// Local bindings for the typed client (re-export above does not create
+// local scope): `fetch` returns a `Response` and parses it via the wire
+// layer's `parse_response`.
+import { Response } from "./types";
+import { parse_response } from "./wire";
+
+// Additive runtime primitive (runtime/sfn/adapters/http.sfn, Wave 4 /
+// #1325): performs an arbitrary HTTP/1.1 request and returns the FULL
+// raw response (status line + headers + body) as a caller-owned
+// NUL-terminated `* u8`, or null on a socket/connect failure. Declared
+// with the raw `* u8` C-ABI the rest of the adapter uses (extern returns
+// must be C-ABI-compatible — E0801); `fetch` null-checks the pointer and
+// then views it as a Sailfin `string` via the canonical `* u8 as string`
+// cast. The extern carries no effect (externs may not); enforcement
+// rides on `fetch`'s own `![net]` annotation.
+extern fn sfn_http_request_raw(method: * u8, url: * u8, headers: * u8, body: * u8) -> * u8;
+
 // ---- Client ----
 fn get(url: string) -> string ![net] {
     // HTTP GET request. Returns the response body as a string.
@@ -40,4 +58,32 @@ fn get(url: string) -> string ![net] {
 fn post(url: string, body: string) -> string ![net] {
     // HTTP POST request. Returns the response body as a string.
     return http.post(url, body);
+}
+
+// `fetch(method, url, headers, body)` — typed HTTP client. Unlike
+// `get`/`post` (which return only the response body string), `fetch`
+// returns a `Response` exposing the status code and response headers.
+// `headers` are raw "Name: value" request-header lines; `body` is sent
+// with a `Content-Length` only when non-empty. A connect/socket failure
+// yields a `Response` with `status: 0`. v0 limits match the rest of the
+// client: no TLS, localhost / dotted-quad host only, no chunked, no
+// redirects (see runtime/sfn/adapters/http.sfn).
+fn fetch(method: string, url: string, headers: string[], body: string) -> Response ![net] {
+    // Serialize the request headers into a single CRLF-terminated block
+    // ("Name: value\r\n" per line) for the raw runtime call; the runtime
+    // owns the Host / Content-Length / Connection framing.
+    let mut headers_blob = "";
+    let mut i = 0;
+    loop {
+        if i >= headers.length { break; }
+        headers_blob = headers_blob + headers[i] + "\r\n";
+        i = i + 1;
+    }
+    let raw_ptr = sfn_http_request_raw(method as * u8, url as * u8, headers_blob as * u8, body as * u8);
+    if raw_ptr as i64 == 0 {
+        // Socket/connect failure — surface a status-0 Response rather
+        // than dereferencing a null buffer as a string.
+        return Response { status: 0, headers: [], body: "" };
+    }
+    return parse_response(raw_ptr as string);
 }

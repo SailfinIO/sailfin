@@ -888,6 +888,17 @@ let req = parse_request("GET /hello?name=world HTTP/1.1\r\nHost: localhost\r\n\r
 
 ---
 
+#### `parse_response(raw: string) -> Response`
+
+Parse a raw HTTP/1.1 response string into a `Response` — the client-side twin of `parse_request`. The status line yields the numeric `status` (the reason phrase is discarded); `headers` are the raw `"Name: value"` lines up to the blank line; `body` is whatever follows. An empty input (e.g. a connect failure) yields a `Response` with `status: 0`. Used internally by `fetch`; exposed for testing and custom client loops.
+
+```sfn
+let rsp = parse_response("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+// rsp.status == 404
+```
+
+---
+
 #### `serialize_response(rsp: Response) -> string`
 
 Serialize a `Response` to a raw HTTP/1.1 response string. Emits the status line (using an internal reason-phrase table), the user-supplied headers, `Content-Length`, and `Connection: close`. Any user header containing CR or LF is silently dropped (injection guard). Headers that name `Content-Length`, `Connection`, or `Transfer-Encoding` are also dropped to prevent response smuggling.
@@ -965,6 +976,23 @@ fn submit(url: string, payload: string) -> string ![net] {
     return post(url, payload);
 }
 ```
+
+---
+
+#### `fetch(method: string, url: string, headers: string[], body: string) -> Response ![net]`
+
+Typed HTTP client (Wave 4, epic #1321). Unlike `get`/`post` (which return only the response body string), `fetch` returns a `Response` exposing the **status code** and **response headers** as well as the body. `headers` are raw `"Name: value"` request-header lines; `body` is sent with a `Content-Length` only when non-empty. A connect/socket failure yields a `Response` with `status: 0`. Built on the additive runtime primitive `sfn_http_request_raw`, which returns the full raw response; the capsule parses it via `parse_response`.
+
+```sfn
+import { fetch } from "sfn/http";
+
+fn check(url: string) -> int ![net] {
+    let resp = fetch("GET", url, [], "");
+    return resp.status; // e.g. 200, 403, 404
+}
+```
+
+The `fetch` client shares the v0 client limits: no TLS (`https://` is rejected), `localhost`/dotted-quad IPv4 hosts only (no DNS), no chunked decoding, no redirect following.
 
 ---
 
