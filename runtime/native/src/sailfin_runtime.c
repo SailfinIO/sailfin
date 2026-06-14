@@ -8285,99 +8285,16 @@ char *sailfin_runtime_home_dir(void)
     return strdup(home);
 }
 
-/* M2.8b (#726): SfnString aggregate ABI for `env.get` / `env.home`.
- * The runtime_helpers.sfn descriptors carry
- * `parameter_types: ["{i8*, i64}", "ptr"]` (env.get) /
- * `parameter_types: ["ptr"]` (env.home) and
- * `return_type: "{i8*, i64}"`. The compiler's call-site dispatch
- * splices `ptr @sfn_default_arena` as the trailing arg (mirrors
- * `sfn_str_concat` from #714); the bodies below NUL-marshal the
- * name through the arena and wrap the libc result via
- * `sfn_str_from_cstr` + `sfn_str_len`. The legacy
- * `sailfin_runtime_getenv` / `sailfin_runtime_home_dir` entrypoints
- * stay exported above so seed-built IR (which still emits the legacy
- * `i8*` ABI) keeps linking through the 2-pass self-host build. */
-SfnString sfn_getenv(SfnString name, SfnArena **arena_slot)
-{
-    SfnString result = {NULL, 0};
-    if (name.data == NULL || name.len <= 0)
-        return result;
-
-    /* Resolve arena — mirrors `sfn_str_concat`'s slot/fallback gate. */
-    SfnArena *arena;
-    if (arena_slot != NULL && *arena_slot != NULL)
-    {
-        arena = *arena_slot;
-    }
-    else
-    {
-        arena = sfn_arena_global();
-        if (arena_slot != NULL && *arena_slot == NULL)
-        {
-            *arena_slot = arena;
-        }
-    }
-
-    /* Decode pre-M1.A.2 tagged immediate-codepoint inputs into a
-     * stack buffer before the memcpy, mirroring `sfn_str_concat`'s
-     * handling: single-codepoint "strings" (e.g. literal `"X"`) are
-     * lowered to `((uint64_t)codepoint << 32)` rather than a real
-     * pointer; dereferencing `name.data` directly would segfault.
-     * `_utf8_encode` writes 1-4 UTF-8 bytes for the codepoint and
-     * the byte length matches what `sfn_str_len` returned at the
-     * call site. */
-    unsigned char name_imm_buf[5] = {0};
-    const char *name_data = name.data;
-    uint32_t name_cp = 0;
-    if (_is_immediate_codepoint_string(name.data, &name_cp))
-    {
-        _utf8_encode(name_cp, name_imm_buf);
-        name_data = (const char *)name_imm_buf;
-    }
-
-    /* NUL-marshal `name` into the arena so getenv() sees a clean C
-     * string regardless of the aggregate's NUL invariant. Today's
-     * SfnString.data is NUL-terminated (literal lowering writes a
-     * trailing 0; arena-routed concat preserves it), but the spec'd
-     * invariant only covers `len` bytes — copying through the arena
-     * keeps the contract independent of the data slot's terminator. */
-    size_t nlen = (size_t)name.len;
-    char *cname = (char *)sfn_arena_alloc(arena, nlen + 1, 1);
-    if (cname == NULL)
-        return result;
-    if (nlen > 0)
-        memcpy(cname, name_data, nlen);
-    cname[nlen] = '\0';
-
-    const char *val = getenv(cname);
-    if (val == NULL)
-        return result;
-
-    /* Wrap the libc-owned pointer via `sfn_str_from_cstr` (identity
-     * bridge in the M2.4a wave). `getenv()` guarantees a
-     * NUL-terminated buffer stable until the next mutating call on
-     * the same key, so the aggregate's data slot keeps the
-     * literal/concat NUL-termination invariant. Length recovered via
-     * `sfn_str_len` (the `native_signature` flip from M2.4a routes
-     * through `sailfin_runtime_string_length` for safe walking). */
-    const char *wrapped = sfn_str_from_cstr(val);
-    result.data = (char *)wrapped;
-    result.len = sfn_str_len(wrapped);
-    return result;
-}
-
-SfnString sfn_home_dir(SfnArena **arena_slot)
-{
-#if defined(_WIN32)
-    static const char k_home_name[] = "USERPROFILE";
-#else
-    static const char k_home_name[] = "HOME";
-#endif
-    SfnString name;
-    name.data = (char *)k_home_name;
-    name.len = (int64_t)(sizeof(k_home_name) - 1);
-    return sfn_getenv(name, arena_slot);
-}
+/* sfn_getenv / sfn_home_dir: the `{i8*, i64}` SfnString aggregate-ABI env
+ * readers (`env.get` / `env.home`) are now defined in `runtime/sfn/io.sfn`
+ * (C7/R7 of #1308, issue #1312). The C bodies are deleted (not static-ified):
+ * there is no remaining internal C caller — the only one was sfn_home_dir
+ * calling sfn_getenv, and both flip together — so the migration-rule
+ * "live-internal-caller" carve-out does not apply, and deleting keeps the
+ * nm/relink gate clean. The header prototypes are dropped in lockstep
+ * (sailfin_runtime.h). The legacy single-pointer `sailfin_runtime_getenv` /
+ * `sailfin_runtime_home_dir` trampolines above stay exported (seed-built IR
+ * on the legacy `i8*` ABI still links through them; they retire with #822). */
 
 char *sailfin_runtime_read_file_bytes(const char *path, int64_t *out_length)
 {

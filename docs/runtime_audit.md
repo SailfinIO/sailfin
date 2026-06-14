@@ -475,7 +475,8 @@ survives until process exit. This is why per-module compiler RAM reaches
 |---|---|---|
 | `sailfin_runtime_sha256_hex` | ✅ (ported) | SHA-256 reimplemented in pure Sailfin in `capsules/sfn/crypto/src/mod.sfn` (M3, #816); the `crypto.sha256` intrinsic now resolves to the capsule symbol. C body in `sailfin_sha256.c` (~150 lines) stays linked for seed compat until M3.9 deletes it. |
 | `sailfin_runtime_base64_encode` | ✅ | Separate file `sailfin_base64.c` |
-| `sailfin_runtime_getenv` / `home_dir` / `read_file_bytes` | ✅ | Used by `sfn/os` and package manager |
+| `sailfin_runtime_getenv` / `home_dir` / `read_file_bytes` | ✅ | Single-pointer (`i8*`) trampolines. `getenv`/`home_dir` are now the legacy path only; the canonical aggregate readers flipped to Sailfin (next row). Stay exported for seed-built `i8*`-ABI IR; retire under #822. |
+| `sfn_getenv` / `sfn_home_dir` (`env.get` / `env.home`) | ✅ | **#1312 (epic #1308 C7/R7):** the `{i8*, i64}` SfnString aggregate-ABI readers are **real Sailfin bodies** in `runtime/sfn/io.sfn` over libc `getenv`; the C bodies are **deleted** (header protos dropped) — no internal C caller remained, so the nm/relink gate is clean. Enabled by the M1.A.2 by-value small-aggregate return (`SfnString` return spelling → `{i8*, i64}`, `type_mapping.sfn`, #1339) — its first consumer. Seed cut to `0.7.0-alpha.34` carries the capability so the seed compiles io.sfn correctly. Immediate-codepoint `name` decoded via `sfn_str_from_codepoint` (retires with #822). |
 
 ## Bootstrap-Era Defensive Scaffolding
 
