@@ -1,0 +1,99 @@
+// Regression test for issue #675: the `[fatal]` ABI primitive mismatch
+// diagnostic must halt test-mode compilation, not just print to stderr.
+//
+// Native replacement for the former `test_async_coerce_refusal.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327).
+//
+// Pre-fix, `write_llvm_ir_for_tests_from_text_with_context` (the
+// entrypoint behind `sfn test`) skipped the `has_fatal_lowering_-
+// diagnostic` gate that `write_llvm_ir` and
+// `compile_native_text_to_llvm_file` honor. Result: a `number → int`
+// coercion across an `await` boundary (e.g. `step1() -> number` followed
+// by `step2(input: int)`) emitted the `[fatal]` diagnostic to stderr,
+// then wrote partial IR that ran the corrupted call site anyway — the
+// final assertion observed garbage.
+//
+// This test pins two behaviours:
+//   1. The narrowing case (`number → int`) refuses to compile, exits
+//      non-zero, and surfaces the canonical #556 fix-it phrasing.
+//   2. The widening case (`int → number`) keeps the asymmetric silent
+//      sitofp behaviour — the new gate must not over-refuse.
+//
+// Drives the compiler-under-test as a subprocess with the runtime
+// `process.*` builtins and asserts on captured output — the canonical
+// e2e pattern (see `.claude/rules/no-bash-e2e.md` and `guillermo_test.sfn`).
+// The `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test, so output is asserted with `sfn/strings::find`.
+import { find } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn) so CI can point
+// the test at any compiler without editing it.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `sfn test <fixture>` compiles AND runs the fixture, so the spawned
+// compiler needs a real environment. `process.run_capture` treats an
+// empty array as the *empty* environment, so thread `PATH` (+ `HOME`/
+// `TMPDIR`) — without `PATH` the nested compile's linker is not found and
+// the build fails — plus the runner's per-file `SAILFIN_TEST_SCRATCH`,
+// under which the compiler routes the `program.ll` build-cache dir
+// (#1333) so a parallel run does not collide on `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Fixtures live next to this test; the path is relative to the runner's
+// working directory (the repo root), matching the legacy script.
+let REFUSE_FIXTURE: string = "compiler/tests/e2e/fixtures/async_coerce_refusal_basic.sfn";
+let WIDEN_FIXTURE: string = "compiler/tests/e2e/fixtures/async_coerce_widen_basic.sfn";
+
+// ---- Narrowing direction (number → int across await): must refuse ----
+//
+// The compile must refuse: exit non-zero, surface the canonical
+// diagnostic + #556 fix-it phrasing + int/float kind detail + the
+// "compile failed for" refusal marker. The fixture's assertion must
+// NEVER run — if "assertion failed" appears, the gate was bypassed, IR
+// was written, and the corrupted call site executed.
+test "async coerce: number→int across await refuses with #556 fix-it" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "test", REFUSE_FIXTURE], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let combined = out + err;
+
+    assert exit != 0;
+    assert find(combined, "ABI primitive mismatch", 0) >= 0;
+    assert find(combined, "add `as float` or `as int` to disambiguate", 0) >= 0;
+    assert find(combined, "compile failed for", 0) >= 0;
+    // The fixture's assertion must never run — proves the gate halted
+    // compilation before IR was written and executed.
+    assert find(combined, "assertion failed", 0) < 0;
+}
+
+// ---- Widening direction (int → number across await): must compile ----
+//
+// The widening direction stays silent (sitofp): it must compile, run,
+// exit 0, report PASS, and NOT surface the ABI mismatch (no over-refusal).
+test "async coerce: int→number across await keeps silent widening" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "test", WIDEN_FIXTURE], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let combined = out + err;
+
+    assert exit == 0;
+    assert find(combined, "ABI primitive mismatch", 0) < 0;
+    assert find(combined, "PASS", 0) >= 0;
+}

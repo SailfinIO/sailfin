@@ -18,7 +18,6 @@
 
 test_arena_default_on.sh
 test_array_aggregate_shape.sh
-test_async_coerce_refusal.sh
 test_atomic_cas_compile.sh
 test_binary_capsule_walker.sh
 test_build_diagnostics_format.sh
@@ -37,7 +36,6 @@ test_check_effect_call_site_caret.sh
 test_check_json_schema.sh
 test_check_phase_ledger.sh
 test_check_resolver_scan_memo.sh
-test_cli_v2_exit_codes.sh
 test_clock_gettime_reader.sh
 test_clock_monotonic_id_sentinel.sh
 test_closure_capture.sh

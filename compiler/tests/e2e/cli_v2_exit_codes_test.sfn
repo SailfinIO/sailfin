@@ -1,0 +1,90 @@
+// End-to-end test for the compiler CLI skeleton `sailfin_cli_main_v2`
+// (CLI modularization epic #351, Issue 2.3 — proposal §5 Phase 2,
+// §7 Issue 2.3, Risk R2).
+//
+// Native replacement for the former `test_cli_v2_exit_codes.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). v2 is the new front
+// door for the compiler CLI: it builds a root `Command` via `sfn/cli`,
+// registers only `version`, parses with the pure, non-exiting `parse()`,
+// prints help/version itself, and falls through to the verbatim legacy
+// dispatch (`sailfin_cli_main_legacy`) for every other subcommand.
+//
+// This pins the Issue 2.3 acceptance contract end-to-end against the
+// real binary — i.e. through the synthesized `@main` →
+// `sailfin_cli_main_with_paths` → `sailfin_cli_main_v2` chain:
+//
+//   1. `sfn version`  routes through v2 → prints `sfn <version>`, exit 0.
+//   2. `sfn --version` / `sfn -V` route through v2's `version_requested`
+//      branch → prints `sfn <version>`, exit 0.
+//   3. A legacy subcommand (unknown) falls through to the legacy dispatch
+//      and the v2 CALLER OBSERVES the returned exit code — i.e.
+//      `run()`/`process.exit()` never fires out from under the
+//      `int`-returning contract (Risk R2). An unknown command returns the
+//      canonical EXIT_USAGE (2) with an "unknown command" diagnostic.
+//
+// Drives the compiler-under-test as a subprocess with the runtime
+// `process.*` builtins and asserts on captured output — the canonical
+// e2e pattern (see `.claude/rules/no-bash-e2e.md` and `guillermo_test.sfn`).
+// The `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test, so output is asserted with `sfn/strings`.
+import { find, starts_with, trim } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn) so CI can point
+// the test at any compiler without editing it.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The version-printing legs do not compile anything (no linker, no
+// build-cache), so they need no child environment. These are pure CLI
+// dispatch paths — the empty environment is correct.
+//
+// Shared assertion for the version-printing legs: exit 0 and a stdout
+// line of the form `sfn <non-empty version>`.
+test "cli-v2: version subcommand routes through v2 exit zero prints version" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "version"], []);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    let line = trim(out);
+    assert starts_with(line, "sfn ");
+    // `sfn ` plus a non-empty version string.
+    assert line.length > 4;
+}
+
+test "cli-v2: version long flag routes through v2 exit zero prints version" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "--version"], []);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    let line = trim(out);
+    assert starts_with(line, "sfn ");
+    assert line.length > 4;
+}
+
+test "cli-v2: version short flag routes through v2 exit zero prints version" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "-V"], []);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    let line = trim(out);
+    assert starts_with(line, "sfn ");
+    assert line.length > 4;
+}
+
+// `not-a-known-subcommand` is not `version`, does not end in `.sfn`, and
+// is unknown to the legacy dispatch — which prints "unknown command" and
+// returns EXIT_USAGE (2). The point of the pin: the legacy exit code is
+// OBSERVED by the v2 caller, proving v2 forwarded to legacy without a
+// `process.exit` terminating the process first.
+test "cli-v2: legacy fallthrough exit code is observed by the v2 caller (no process.exit)" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "not-a-known-subcommand"], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 2;
+    assert find(out + err, "unknown command", 0) >= 0;
+}
