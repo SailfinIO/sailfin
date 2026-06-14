@@ -1,0 +1,86 @@
+// Regression test for the M1.A.2 by-value small-aggregate return capability
+// (prerequisite for the #1308 C7/R7 env flip #1312 and the string family's
+// `{i8*, i64}` canonical bodies).
+//
+// The compiler returns every *user* struct by pointer (`%T*`, the boxed-struct
+// ABI in `type_mapping.sfn`) to dodge an AArch64 aggregate-return legalizer
+// miscompile. A runtime body that must satisfy a by-value `{i8*, i64}` call
+// site therefore cannot just return a struct. The capability: a reserved
+// return/parameter type spelling `SfnString` that the type mappers map to the
+// literal `{i8*, i64}`, routing a Sailfin *definition* onto the existing
+// SfnString aggregate ABI — narrow (only the two-eightbyte INTEGER-class
+// `{i8*, i64}` shape) and opt-in (only the `SfnString` spelling). This pins:
+//   1. a `-> SfnString` function lowers to `define {i8*, i64} @…` returning the
+//      aggregate by value (the body returns a bare `* u8`; the return-path
+//      coercion wraps it), and
+//   2. the negative control — a `-> string` function STILL lowers to
+//      `define i8* @…`, never the aggregate (zero blast radius: `SfnString` is
+//      the only opt-in spelling).
+//
+// Native (no-bash) per `.claude/rules/no-bash-e2e.md`. Drives `sfn emit llvm`
+// over a tiny fixture and asserts on the emitted IR (frontend + lowering only,
+// no link), so it is fast and needs no clang/linker. `emit` writes the module
+// symbol with a `__<module>` suffix, so the assertions match the stable
+// `define <ret> @<name>` prefix, not an exact symbol.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `emit` neither links nor spawns clang, but `run_capture`'s empty array is the
+// *empty* environment; thread HOME/TMPDIR/SAILFIN_TEST_SCRATCH so the toolchain
+// has a writable scratch under the parallel pool. No PATH needed (no linker).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A unique scratch dir for this test (under the runner's per-file scratch when
+// present, else /tmp). `emit` writes IR to `-o` and keeps no `program.ll` build
+// cache, so a per-`tag` path is sufficient isolation under the parallel pool
+// (no `with_tmp_dir` — that fixture's closure must return `int`).
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-abi-value-return";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit LLVM IR for `source` and return it (or "EMIT_FAILED" on a non-zero exit).
+fn _emit_ir(tag: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let srcpath = dir + "/" + tag + ".sfn";
+    let outpath = dir + "/" + tag + ".ll";
+    fs.writeFile(srcpath, source);
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", srcpath], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(outpath);
+}
+
+test "abi: SfnString return spelling lowers to a by-value {i8*, i64}" ![io] {
+    let ir = _emit_ir("agg", "fn agg(name_data: * u8, name_len: i64) -> SfnString ![io] { return name_data; }");
+    // Definition returns the aggregate by value (not `%SfnString*`).
+    assert find(ir, "define {i8*, i64} @agg", 0) >= 0;
+    // And the body's bare `* u8` return is wrapped into the aggregate.
+    assert find(ir, "ret {i8*, i64}", 0) >= 0;
+}
+
+test "abi: string return spelling still lowers to i8* (no regression)" ![io] {
+    let ir = _emit_ir("strctrl", "fn s(x: * u8) -> string ![io] { return x; }");
+    // `string` is unchanged — single pointer return.
+    assert find(ir, "define i8* @s", 0) >= 0;
+    // ...and never the by-value aggregate (proves `SfnString` is opt-in).
+    assert find(ir, "define {i8*, i64} @s", 0) < 0;
+}

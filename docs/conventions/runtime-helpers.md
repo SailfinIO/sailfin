@@ -72,6 +72,39 @@ preamble's `render_runtime_helper_declarations` then emits a single
 `declare` per used target's effective symbol — no aliases, no
 per-target fallbacks.
 
+## Returning the `{i8*, i64}` aggregate from a Sailfin body (`SfnString`)
+
+A handful of helpers carry the `{i8*, i64}` SfnString aggregate return ABI
+(`env.get` / `env.home`; the string family's `{i8*,i64}` canonical bodies
+will follow). The compiler returns every *user* struct by pointer (`%T*`,
+the "boxed-struct ABI" in `type_mapping.sfn` — deliberate, to dodge an
+AArch64 aggregate-return legalizer miscompile), so a runtime body that must
+satisfy a by-value `{i8*, i64}` call site cannot just `return` a normal
+struct.
+
+The mechanism (M1.A.2, first landed by #1312): a reserved return/parameter
+type **spelling `SfnString`** that `map_return_type` / `map_type_annotation`
+intercept and map to the literal `{i8*, i64}`, routing the *definition* onto
+the by-value aggregate ABI without changing any other struct. It is narrow
+and opt-in by design:
+
+- **Return:** spell the return type `SfnString` (→ `define {i8*, i64} @f`).
+  The body returns a bare `* u8`; the return-path coercion
+  (`coerce_pointer_or_struct`) wraps it into `{i8*, i64}`, recovering the
+  length via `sfn_str_len`. A `string`-typed return still maps to `i8*` —
+  `SfnString` is the only spelling that opts in.
+- **Parameter:** a by-value `{i8*, i64}` argument classifies as two INTEGER
+  eightbytes, identical to a `(data: * u8, len: i64)` scalar pair (the print
+  family's trick). Take the two scalars, not an `SfnString` param — the body
+  has no struct fields to read.
+- `SfnString` is a **runtime-internal ABI spelling, not a user-facing
+  type** — keep it out of the language spec; it appears only in
+  `runtime/sfn/*.sfn` bodies whose descriptor carries `{i8*, i64}`.
+- Safe only for ≤16B, all-INTEGER-class aggregates (`{i8*, i64}` is exactly
+  that). Do **not** generalize to other shapes via a layout heuristic — that
+  re-exposes the boxed-ABI's AArch64 hazard. A second by-value shape, if ever
+  needed, is a deliberate new decision.
+
 ## When the registry is the wrong tool
 
 The runtime helper registry is for descriptors that:
