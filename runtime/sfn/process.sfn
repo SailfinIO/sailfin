@@ -57,11 +57,11 @@
 // Envp: the parent's `environ` is passed through, matching the
 // pre-M2.9 C `sailfin_runtime_process_run` exactly so children
 // continue to inherit the spawning process's environment.
-// Sailfin has no `extern var` syntax, so the libc `environ`
-// global cannot be referenced directly — the one-line bridge
-// `sailfin_runtime_get_environ` in
-// `runtime/native/src/sailfin_runtime.c` wraps it in an
-// `extern fn` ABI. Passing literal NULL instead gave the child
+// `environ` is referenced directly via `extern var` (#1313) and
+// loaded by the Sailfin `get_environ` accessor below — the former
+// C bridge `sailfin_runtime_get_environ` in
+// `runtime/native/src/sailfin_runtime.c` is no longer called.
+// Passing literal NULL instead gave the child
 // an empty environment on Linux glibc and broke env-inheritance
 // callers (caught by
 // `compiler/tests/e2e/test_subprocess_emit_clean_env.sh` —
@@ -97,7 +97,15 @@ extern fn waitpid(pid: i32, status: * i32, options: i32) -> i32;
 
 extern fn sfn_str_to_cstr(s: * u8) -> * u8;
 
-extern fn sailfin_runtime_get_environ() -> * * u8;
+// libc `environ` (`char **`) referenced directly via `extern var`
+// (#1313) — the Sailfin-native replacement for the retired C bridge
+// `sailfin_runtime_get_environ`. The reference lowers to a `load` of
+// the `@environ` global; no C call participates.
+extern var environ: * * u8;
+
+// Sailfin port of the former C `sailfin_runtime_get_environ` accessor:
+// hand back the libc `environ` block by loading the extern global.
+fn get_environ() -> * * u8 { return environ; }
 
 // ── Additional POSIX surface for the capture / handle variants ──
 // (#928, M3). These back `sfn_process_run_capture`,
@@ -189,7 +197,7 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
     let pid_ptr: * i32 = & pid;
     let first: string = argv[0];
     let path: * u8 = sfn_str_to_cstr(first as * u8);
-    let envp: * * u8 = sailfin_runtime_get_environ();
+    let envp: * * u8 = get_environ();
     let buf_pp: * * u8 = buf as * * u8;
     let spawn_err: i32 = posix_spawnp(pid_ptr, path, null, null, buf_pp, envp);
     if spawn_err != 0 {
@@ -1034,10 +1042,9 @@ fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] {
 // #1242: enumerate the parent process environment as a flat
 // `"KEY=VALUE"` `SfnArray<string>` (`{ i8**, i64, i64 }*`, spelled
 // `* u8` — same return spelling as `sfn_fs_list_dir`). The libc
-// `environ` block is reached through the same
-// `sailfin_runtime_get_environ` accessor `sfn_process_run` uses
-// (Sailfin has no `extern var`, so the global needs the one-line C
-// bridge). Each entry pointer is loaded via
+// `environ` block is reached through the same Sailfin `get_environ`
+// accessor `sfn_process_run` uses — `environ` is bound directly via
+// `extern var` (#1313), no C bridge. Each entry pointer is loaded via
 // `sailfin_intrinsic_pointer_read_i64` (the seed-supported pointer-
 // slot load — mirrors `runtime/sfn/clock.sfn`'s Timespec reads) and
 // COPIED into a fresh malloc'd buffer before the push:
@@ -1073,7 +1080,7 @@ fn sfn_process_environ() -> * u8 ![io] {
     arr.cap = 0;
     let out: * u8 = arr as * u8;
 
-    let envp: * * u8 = sailfin_runtime_get_environ();
+    let envp: * * u8 = get_environ();
     if envp as i64 == 0 { return out; }
 
     let slots: * i64 = envp as * i64;
