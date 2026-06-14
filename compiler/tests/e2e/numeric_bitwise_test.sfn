@@ -18,7 +18,12 @@
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
 // cannot be called from an `![io]` test like these. Assert on the captured
 // `.ll` text with `sfn/strings` predicates instead. (#842.)
-import { contains, split, starts_with } from "sfn/strings";
+import {
+    contains,
+    replace,
+    split,
+    starts_with
+} from "sfn/strings";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -52,6 +57,19 @@ fn _scratch_dir() -> string ![io] {
     if dir.length == 0 { dir = "/tmp"; }
     fs.createDirectory(dir, true);
     return dir;
+}
+
+// Collapse every run of consecutive spaces down to a single space. Lets a
+// single-space substring check (`" = double "`) match the original
+// `=[[:space:]]+` grep — i.e. the canonical malformed shape `%t0 =  double`
+// (two spaces, empty opcode) as well as any wider run.
+fn _collapse_spaces(text: string) -> string {
+    let mut out = text;
+    loop {
+        if !contains(out, "  ") { break; }
+        out = replace(out, "  ", " ");
+    }
+    return out;
 }
 
 // Whether any single line of `text` contains both `a` and `b` — the
@@ -172,12 +190,16 @@ test "numeric-bitwise: (flags & mask) == mask — AND inside, comparison outside
 // returns a null operand so the function body falls through cleanly. The
 // malformed shape is a `%reg = <type>` line with no opcode between `=` and
 // the type; valid IR always has an opcode (`= alloca double`, `= load i64`).
+// The malformed line carries a DOUBLE space (`=  double`) where the empty
+// opcode was spliced in, so normalize space runs first — otherwise a
+// single-space check would slip right past the very shape it guards.
 test "numeric-bitwise: bitwise on float emits no malformed LLVM IR" ![io] {
     let ir = _emit_llvm("fn bad(x: float, y: float) -> float {\n    return x & y;\n}\n", "bitwise_float");
     // Emission must not crash; a clean fall-through still produces IR.
     assert ir.length > 0;
-    assert ! contains(ir, " = double ");
-    assert ! contains(ir, " = i64 ");
-    assert ! contains(ir, " = i32 ");
-    assert ! contains(ir, " = i8 ");
+    let norm = _collapse_spaces(ir);
+    assert ! contains(norm, " = double ");
+    assert ! contains(norm, " = i64 ");
+    assert ! contains(norm, " = i32 ");
+    assert ! contains(norm, " = i8 ");
 }
