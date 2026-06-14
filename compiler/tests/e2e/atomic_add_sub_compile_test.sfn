@@ -1,0 +1,174 @@
+// End-to-end test for the `atomic_add` / `atomic_sub` builtins
+// (M0-Atomics.2, issue #332).
+//
+// Native replacement for the former `test_atomic_add_sub_compile.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Drives `sfn emit llvm`
+// against the fixture and asserts the emitted IR contains the expected
+// `atomicrmw add` / `atomicrmw sub` shapes with `seq_cst` ordering and
+// `align 8`. Also pins the E0806 rejection on deliberately broken calls so
+// the diagnostic surface stays user-visible — sibling to the load/store
+// rejection coverage in `test_atomic_load_store_compile.sh`.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like these. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn emit`. `process.run_capture` treats
+// an empty array as the *empty* environment (not "inherit"), so the relevant
+// variables must be threaded explicitly:
+//   - `PATH` (+ `HOME`/`TMPDIR`): keeps any subprocess the compiler shells out
+//     to resolvable.
+//   - `SAILFIN_TEST_SCRATCH`: the runner's per-file scratch, which the
+//     compiler routes its build-cache dir under (#1333) so a parallel run
+//     (`--jobs N>1`) does not collide on the fixed `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Whether any single line of `text` contains *all* of `needles` — the
+// faithful stand-in for a `grep -E "a.*b.*c"` over one line.
+fn _line_contains_all(text: string, needles: string[]) -> bool {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let mut all = true;
+        let mut j = 0;
+        loop {
+            if j >= needles.length { break; }
+            if !contains(line, needles[j]) {
+                all = false;
+                break;
+            }
+            j += 1;
+        }
+        if all { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Count lines that contain both `a` and `b` (the `grep -cE "a.*b"` shape).
+fn _count_lines_with(text: string, a: string, b: string) -> int {
+    let lines = split(text, "\n");
+    let mut n = 0;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], a) && contains(lines[i], b) { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+// Lower the source at `path` to a standalone `.ll` via `sfn emit llvm` and
+// return the IR text. Writes the `.ll` to a unique scratch path keyed by
+// `tag` so parallel sub-tests do not collide; returns "" on emit failure so
+// the caller can assert on the emptiness.
+fn _emit_llvm(path: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-atomic-add-sub-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+fn _fixture() -> string {
+    return "compiler/tests/e2e/fixtures/atomic_add_sub_basic.sfn";
+}
+
+// ---- Happy path: both builtins emit the right LLVM atomicrmw ops ----
+// Acceptance Criteria from issue #332:
+//   atomic_add → `atomicrmw add ptr %ptr, i64 %delta seq_cst, align 8`
+//   atomic_sub → `atomicrmw sub ptr %ptr, i64 %delta seq_cst, align 8`
+test "atomic-add-sub: emit atomicrmw add/sub with seq_cst and align 8" ![io] {
+    let ir = _emit_llvm(_fixture(), "happy");
+    assert ir.length > 0;
+    assert _line_contains_all(ir, ["atomicrmw add ptr", "i64", "seq_cst"]);
+    assert _line_contains_all(ir, ["atomicrmw sub ptr", "i64", "seq_cst"]);
+    assert _line_contains_all(ir, ["atomicrmw add ptr", "align 8"]);
+    assert _line_contains_all(ir, ["atomicrmw sub ptr", "align 8"]);
+}
+
+// ---- Verification regex from the issue counts >= 2 ----
+// (`atomicrmw add ... seq_cst` + `atomicrmw sub ... seq_cst`).
+test "atomic-add-sub: verification regex matches >= 2 atomicrmw seq_cst ops" ![io] {
+    let ir = _emit_llvm(_fixture(), "count");
+    assert ir.length > 0;
+    assert _count_lines_with(ir, "atomicrmw", "seq_cst") >= 2;
+}
+
+// ---- E0806: type-error on non-pointer first argument is reported ----
+// E0806 is emitted as a `[fatal]`-tagged lowering diagnostic on stderr from
+// `_lower_atomic_rmw`. We assert two signals (mirroring the load/store
+// sibling): the E0806 code is present on stderr, and any partial `.ll` does
+// NOT contain `atomicrmw add ptr` — i.e. the bogus call was rejected before
+// lowering would have emitted malformed IR. The exit code is intentionally
+// not gated: the `compile_to_llvm_file_with_module` fallback can still
+// produce a partial-but-valid-looking `.ll` even on fatal diagnostics.
+test "atomic-add-sub: non-pointer atomic_add argument reports E0806" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-atomic-bad-add.sfn";
+    let ll = dir + "/sfn-atomic-bad-add.ll";
+    fs.writeFile(src, "fn bad() -> int {\n    return atomic_add(42, 1);\n}\n");
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let _exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert contains(err, "E0806");
+    if fs.exists(ll) {
+        let ir = fs.readFile(ll);
+        assert ! contains(ir, "atomicrmw add ptr");
+        fs.deleteFile(ll);
+    }
+    fs.deleteFile(src);
+}
+
+// ---- E0806: type-error on non-int delta is reported ----
+test "atomic-add-sub: non-int atomic_sub delta reports E0806" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-atomic-bad-sub.sfn";
+    let ll = dir + "/sfn-atomic-bad-sub.ll";
+    fs.writeFile(src, "fn bad(p: * int) -> int {\n    return atomic_sub(p, \"hello\");\n}\n");
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let _exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert contains(err, "E0806");
+    if fs.exists(ll) {
+        let ir = fs.readFile(ll);
+        assert ! contains(ir, "atomicrmw sub ptr");
+        fs.deleteFile(ll);
+    }
+    fs.deleteFile(src);
+}
