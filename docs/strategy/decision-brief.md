@@ -1,4 +1,4 @@
-# Sailfin — Strategic Decision Brief (v2)
+# Sailfin — Strategic Decision Brief
 
 **Date:** 2026-06-14
 **Status:** Strategic overlay — agent context. Binds the internal vision (the
@@ -9,7 +9,7 @@ market positioning):** `docs/proposals/capability-sealed-runtime.md`,
 `docs/proposals/effect-validation.md`, `docs/proposals/model-engines-and-training.md`.
 
 > **What this is.** A strategic overlay for the Sailfin repo, written to be read
-> by a Claude Code agent operating in-tree (and by Michael). It does **not**
+> by a Claude Code agent operating in-tree. It does **not**
 > restate the internal vision — that already lives, better grounded, in the
 > proposal docs below. Its job is to (a) bind the internal vision to the external
 > market, (b) name the cross-cutting gaps, and (c) frame the open strategic fork.
@@ -46,11 +46,11 @@ market positioning):** `docs/proposals/capability-sealed-runtime.md`,
 
 ---
 
-## 3. The thesis (as it actually is — corrected from v1)
+## 3. The thesis
 
 Sailfin owns its stack on purpose, because **you cannot seal a binary you don't own**. The differentiated end-state, per `capability-sealed-runtime.md`: a native binary whose declared capabilities are enforced down to the syscall — proven-safe code runs at full native speed with no gate; code the type system can't see (FFI, plugins, generated/`eval`'d code) hits the owned syscall gate and is refused if it exceeds the grant. Plus the genuinely novel synthesis: **scoped, inherited, revocable capabilities per task** via the structured-concurrency scheduler — effects say *what*, capabilities say *how much*, structured concurrency says *for how long and to whom*. No mainstream language offers this.
 
-> v1 of this brief mis-framed Sailfin as a contract that "sits above and feeds someone else's runtime." That was wrong. Sailfin's reach-into-untrusted-code story is **its own runtime gate catching in-process foreign/generated code**, not emitting policy for an external enforcer. The emit-to-OPA/WASI/OTel idea survives only as a narrow *cross-process interop* option (Section 7), not the core.
+> A clarifying distinction: Sailfin's reach-into-untrusted-code story is **its own runtime gate catching in-process foreign/generated code**, not a contract that "sits above and feeds someone else's runtime" by emitting policy for an external enforcer. The emit-to-OPA/WASI/OTel idea survives only as a narrow *cross-process interop* option (Section 7), not the core.
 
 ---
 
@@ -94,7 +94,7 @@ For untrusted code running in *other* processes/runtimes (true foreign execution
 
 ---
 
-## 8. The fork (sharpened) — and the timeline correction
+## 8. The fork — and the timeline correction
 
 **Timeline (corrected).** Backend ownership is **not** a fixed decade-scale gate. The pre-LLM tooling literature (Go, Zig, Cranelift) treated a self-hosted backend as a decade-scale arc; agent-assisted compiler work plus a cheap correctness oracle (differential testing against the existing LLVM backend) changes that math. Split it:
 - **Seal-sufficient backend** — correct + carries capability metadata + gates syscalls; *not* perf-competitive with LLVM. On the critical path for the trust-substrate thesis. Agent-amenable and **plausibly compressible to quarters**, de-risked by differential testing against the existing LLVM backend (cheap correctness oracle). This is the target that matters.
