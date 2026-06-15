@@ -1,0 +1,90 @@
+// End-to-end regression for aliased function imports (`import { f as g }`).
+//
+// The LLVM expression-lowering signature resolver looked the call site up
+// by the LOCAL alias name (`g`) while imported function signatures are keyed
+// by the EXPORTED name (`f`, possibly mangled `f__<provider>`), so any
+// aliased imported-function call failed lowering with `cannot resolve return
+// type for call to \`<alias>\` — callee signature is not known to the
+// compiler`. The fix clones the provider's signature under the local alias
+// name into the lowering context table (build_import_alias_signatures,
+// lowering_phase_imports.sfn).
+//
+// This builds a two-file fixture (a multi-export provider + a consumer that
+// aliases both exports) with `sfn build` and runs it, exercising the real
+// lower-to-LLVM + link path (the path `sfn run`/`make compile` use) rather
+// than the test runner's inline-compile path. Build hygiene mirrors
+// `sailfin_main_entry_test.sfn`: fixtures live in a fresh temp dir and the
+// nested build threads PATH (clang/linker) + SAILFIN_TEST_SCRATCH (so the
+// `program.ll` cache dir does not collide under the parallel pool).
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-aliased-import-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// A multi-export provider; the consumer imports BOTH exports under aliases,
+// so signature resolution must map each local alias to the provider export.
+fn _provider_src() -> string {
+    return "fn sum_two(a: int, b: int) -> int {\n    return a + b;\n}\nfn greet_one(name: string) -> string {\n    return \"hi \" + name;\n}\nexport { sum_two, greet_one };\n";
+}
+
+fn _consumer_src() -> string {
+    return "import { sum_two as s2, greet_one as g1 } from \"./prov\";\n\nfn main() -> int ![io] {\n    print(g1(\"world\") + \" \" + number_to_string(s2(40, 2)));\n    return 0;\n}\n";
+}
+
+// Build the aliased-import consumer and run it; stash stdout to `out_marker`
+// and return the run exit code, or `-100` if the build itself failed.
+fn _build_and_run(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        fs.writeFile(dir + "/prov.sfn", _provider_src());
+        let srcpath = dir + "/consumer.sfn";
+        fs.writeFile(srcpath, _consumer_src());
+        let binpath = dir + "/consumer";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+test "aliased_import: aliased imports from a multi-export module lower and run" ![io] {
+    let marker = _marker("multi");
+    let exit = _build_and_run(marker);
+    // `-100` is the build-failure sentinel (was the pre-fix outcome: the
+    // aliased calls failed LLVM lowering). Assert the build+run succeeded
+    // before reading the marker.
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    assert find(out, "hi world 42", 0) >= 0;
+}

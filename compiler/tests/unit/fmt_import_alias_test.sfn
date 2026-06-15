@@ -1,0 +1,55 @@
+// Regression coverage for `sfn fmt` aliased import-specifier handling
+// (`compiler/src/tools/fmt.sfn`).
+//
+// History: `_sort_import_specifiers` collected every identifier inside the
+// `{ … }` independently and re-slotted them positionally, so for
+// `import { A as B }` it gathered both `A` and `B`, sorted the flat list,
+// and emitted them as `B as A` — swapping the imported/local sides and
+// corrupting the binding (a multi-specifier line scrambled across the `as`
+// boundary, e.g. `command_def as run`). The fix treats `A as B` as one
+// sortable unit keyed on the imported name `A`, preserving the pairing.
+import { index_of } from "../../src/string_utils";
+import { format_source } from "../../src/tools/fmt";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+// ── The headline bug: `A as B` must not swap to `B as A` ─────────────
+test "fmt import-alias: single aliased specifier keeps imported-as-local" ![io] {
+    // Two consecutive imports trigger the import sorter.
+    let src = "import { make as maker } from \"./a\";\nimport { run as runner } from \"./b\";\n";
+    let out = format_source(src);
+    assert _contains(out, "make as maker");
+    assert _contains(out, "run as runner");
+    // Must NOT swap the two sides of either specifier.
+    assert _contains(out, "maker as make") == false;
+    assert _contains(out, "runner as run") == false;
+}
+
+// ── Multi-specifier aliased line stays paired across the `as` boundary ─
+test "fmt import-alias: multi-specifier aliased line stays paired" ![io] {
+    let src = "import { command_def as cdef, run as runner } from \"./z\";\nimport { x } from \"./a\";\n";
+    let out = format_source(src);
+    assert _contains(out, "command_def as cdef");
+    assert _contains(out, "run as runner");
+    // The classic corruption fused unrelated sides together.
+    assert _contains(out, "command_def as run") == false;
+    assert _contains(out, "cdef as command_def") == false;
+}
+
+// ── Aliased specifiers still sort by imported name within a line ─────
+test "fmt import-alias: specifiers sort by imported name, pairing intact" ![io] {
+    let src = "import { run as runner, command_def as cdef } from \"./z\";\nimport { x } from \"./a\";\n";
+    let out = format_source(src);
+    // command_def sorts before run; both pairings survive the reorder.
+    assert _contains(out, "command_def as cdef, run as runner");
+}
+
+// ── Idempotency: a second pass changes nothing ──────────────────────
+test "fmt import-alias: aliased import sort is idempotent" ![io] {
+    let src = "import { make as maker } from \"./a\";\nimport { run as runner } from \"./b\";\n";
+    let once = format_source(src);
+    let twice = format_source(once);
+    assert once == twice;
+}
