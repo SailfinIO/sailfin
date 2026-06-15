@@ -935,6 +935,21 @@ fn parse_call_arguments(state: ExpressionTokens) -> CallArgumentsParseResult {
         let separator = expression_tokens_peek(current);
         if symbol_matches(separator, ",") {
             current = expression_tokens_advance(current);
+            if expression_tokens_is_at_end(current) {
+                return CallArgumentsParseResult {
+                    state: state,
+                    arguments: [],
+                    success: false
+                };
+            }
+            // Allow a trailing comma: `f(a, b,)` ends the argument list at
+            // the `)` following the separator rather than parsing a bogus
+            // empty argument (which silently miscompiled — see #1357).
+            let after_comma = expression_tokens_peek(current);
+            if symbol_matches(after_comma, ")") {
+                current = expression_tokens_advance(current);
+                break;
+            }
             continue;
         }
         if symbol_matches(separator, ")") {
