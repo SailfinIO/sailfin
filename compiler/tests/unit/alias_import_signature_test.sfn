@@ -1,0 +1,63 @@
+// Regression coverage for aliased function-import signature resolution
+// (`compiler/src/llvm/lowering/lowering_phase_imports.sfn`).
+//
+// Aliased imports (`import { foo as bar }`) bind the call site to the LOCAL
+// alias name while imported function signatures are keyed by the EXPORTED
+// name, so the LLVM signature resolver missed and emitted `cannot resolve
+// return type for call to <alias>`. `build_import_alias_signatures` clones
+// the provider's signature under the local alias so resolution matches; the
+// lowering orchestrator injects those clones into the context table. This
+// exercises the pure helper directly (deterministic, no build subprocess).
+// End-to-end behavior is also covered by `sfn run`/`sfn build`.
+import { build_import_alias_signatures } from "../../src/llvm/lowering/lowering_phase_imports";
+import { NativeFunction, NativeImport, NativeImportSpecifier } from "../../src/native_ir";
+
+fn _fn(name: string, return_type: string) -> NativeFunction {
+    return NativeFunction {
+        name: name,
+        is_async: false,
+        parameters: [],
+        return_type: return_type,
+        effects: [],
+        decorators: [],
+        is_extern: false,
+        instructions: []
+    };
+}
+
+fn _import(name: string, alias: string?) -> NativeImport {
+    return NativeImport {
+        kind: "import",
+        module: "./provider",
+        specifiers: [NativeImportSpecifier { name: name, alias: alias }]
+    };
+}
+
+// ── Aliased specifier clones the provider signature under the local name ──
+test "alias signatures: aliased specifier clones export under local alias" {
+    let aliases = build_import_alias_signatures([_import("make", "make_a")], [_fn("make", "int")]);
+    assert aliases.length == 1;
+    assert aliases[0].name == "make_a";
+    assert aliases[0].return_type == "int";
+}
+
+// ── Plain (non-aliased) specifiers need no clone (export name resolves) ──
+test "alias signatures: plain specifier produces no clone" {
+    let aliases = build_import_alias_signatures([_import("make", null)], [_fn("make", "int")]);
+    assert aliases.length == 0;
+}
+
+// ── An alias of an unknown export is skipped (no spurious entry) ─────────
+test "alias signatures: alias of an unknown export is skipped" {
+    let aliases = build_import_alias_signatures([_import("ghost", "g")], [_fn("make", "int")]);
+    assert aliases.length == 0;
+}
+
+// ── Provider resolved by mangled `name__<provider>` suffix (test-runner /
+//    cross-module case where imported defs carry the module suffix) ──────
+test "alias signatures: resolves provider by mangled suffix" {
+    let aliases = build_import_alias_signatures([_import("make", "make_a")], [_fn("make__provider", "string")]);
+    assert aliases.length == 1;
+    assert aliases[0].name == "make_a";
+    assert aliases[0].return_type == "string";
+}

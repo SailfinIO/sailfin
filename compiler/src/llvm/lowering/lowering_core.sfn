@@ -96,7 +96,7 @@ import {
     write_llvm_lines_chunked
 } from "./lowering_io";
 import { lower_all_functions } from "./lowering_phase_functions";
-import { gather_imported_module_symbols } from "./lowering_phase_imports";
+import { build_import_alias_signatures, gather_imported_module_symbols } from "./lowering_phase_imports";
 import { render_llvm_preamble } from "./lowering_phase_render";
 // Phase modules
 import {
@@ -737,6 +737,14 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     // Site 3 — safe in-place extend: context_functions is a fresh array from
     // site 2, no prior snapshot is aliased.
     context_functions = extend_native_functions_inplace(context_functions, imported_struct_methods);
+    // Aliased function imports (`import { make as m }`): register the
+    // provider's signature under the local alias name so call-site signature
+    // resolution finds it. Resolution-only entries (empty body) added to the
+    // context table — not to `imported_functions`, so no extra `declare` is
+    // emitted; the IR-text mangling pass already rewrites `@m` → the provider
+    // symbol. See build_import_alias_signatures (lowering_phase_imports.sfn).
+    let import_alias_signatures = build_import_alias_signatures(safe_imports, context_functions);
+    context_functions = extend_native_functions_inplace(context_functions, import_alias_signatures);
     if debug_lowering { print.err("emit-llvm: phase=context_functions"); }
 
     // ── Effect analysis ─────────────────────────────────────────────
