@@ -1,0 +1,68 @@
+// Unit tests for trailing commas in call argument lists (issue #1357).
+//
+// Before the fix, `parse_call_arguments` unconditionally looped back to
+// parse another argument after consuming a separator `,`. A trailing
+// comma — `add(2, 3,)` — therefore ran the expression parser against the
+// closing `)`, which silently produced a bogus extra argument instead of
+// a diagnostic. The call then miscompiled (the last real argument was
+// effectively dropped/zeroed), so `add(2, 3,)` returned `0` while
+// `add(2, 3)` returned `5`. The miscompile survived `sfn fmt`, which
+// collapses a multi-line call onto one line but keeps the trailing comma.
+//
+// The fix makes a trailing comma close the argument list: after a
+// separator `,`, a following `)` ends the args. `add(2, 3,)` now parses
+// to a `Call` with exactly the two real arguments — identical to
+// `add(2, 3)`.
+import { Expression } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+
+// Initializer of the first top-level `let` in `source`, asserted to be a
+// `Call` so a structural change fails here with a clear message.
+fn first_call_initializer(source: string) -> Expression ![io] {
+    let program = parse_program(source);
+    let stmt = program.statements[0];
+    assert stmt.variant == "VariableDeclaration";
+    let init = stmt.initializer;
+    assert init != null;
+    assert init.variant == "Call";
+    return init;
+}
+
+// -------------------------------------------------------------------
+// A trailing comma does not add a bogus argument: `add(2, 3,)` parses
+// to a `Call` with exactly two arguments.
+// -------------------------------------------------------------------
+test "call trailing comma: does not add a bogus last argument" ![io] {
+    let expr = first_call_initializer("let x = add(2, 3,);");
+    assert expr.arguments.length == 2;
+    assert expr.arguments[0].variant == "NumberLiteral";
+    assert expr.arguments[1].variant == "NumberLiteral";
+}
+
+// -------------------------------------------------------------------
+// `add(2, 3,)` parses identically to `add(2, 3)` — same argument count
+// and shapes.
+// -------------------------------------------------------------------
+test "call trailing comma: parses identically to no trailing comma" ![io] {
+    let with_comma = first_call_initializer("let x = add(2, 3,);");
+    let without_comma = first_call_initializer("let x = add(2, 3);");
+    assert with_comma.arguments.length == without_comma.arguments.length;
+    assert with_comma.arguments.length == 2;
+}
+
+// -------------------------------------------------------------------
+// A single-argument trailing comma — `f(a,)` — keeps the one argument.
+// -------------------------------------------------------------------
+test "call trailing comma: single argument keeps its one argument" ![io] {
+    let expr = first_call_initializer("let x = f(a,);");
+    assert expr.arguments.length == 1;
+    assert expr.arguments[0].variant == "Identifier";
+}
+
+// -------------------------------------------------------------------
+// No regression: a call without a trailing comma keeps its arguments.
+// -------------------------------------------------------------------
+test "call trailing comma: ordinary call is unaffected" ![io] {
+    let expr = first_call_initializer("let x = add(2, 3);");
+    assert expr.arguments.length == 2;
+}
