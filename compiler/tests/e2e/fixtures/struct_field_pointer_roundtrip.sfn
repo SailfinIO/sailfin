@@ -1,4 +1,4 @@
-// Fixture for compiler/tests/e2e/test_struct_field_pointer_roundtrip.sh.
+// Fixture for compiler/tests/e2e/struct_field_pointer_roundtrip_test.sfn.
 //
 // Issue #713: pointer-typed struct fields (`* u8`, self-referential
 // `* StructTy`) were silently dropped from the struct's LLVM layout, and

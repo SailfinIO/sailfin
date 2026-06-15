@@ -38,7 +38,6 @@ test_check_resolver_scan_memo.sh
 test_clock_gettime_reader.sh
 test_clock_monotonic_id_sentinel.sh
 test_compiler_debug_toggle_env_vars.sh
-test_concurrency_lowering_ir.sh
 test_config.sh
 test_cross_module_int_signature.sh
 test_cross_module_signature_resolution.sh
@@ -72,8 +71,6 @@ test_no_duplicate_declares.sh
 test_numeric_int_float.sh
 test_owned_buf_grow_determinism.sh
 test_owned_buf_roundtrip.sh
-test_plain_fn_ptr_call.sh
-test_pointer_read_intrinsic.sh
 test_publish.sh
 test_reexport.sh
 test_routine_nursery.sh
@@ -112,7 +109,6 @@ test_sfn_package.sh
 test_sleep_eintr_resume.sh
 test_sleep_unit_semantics.sh
 test_string_aggregate_shape.sh
-test_struct_field_pointer_roundtrip.sh
 test_struct_field_separator.sh
 test_subprocess_emit_clean_env.sh
 test_sync_rejects_unimplemented_concurrency.sh
