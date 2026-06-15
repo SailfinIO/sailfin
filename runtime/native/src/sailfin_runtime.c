@@ -738,6 +738,16 @@ static uint64_t _runtime_call_seq = 0; // incremented at entry to every exported
 // Call this at the top of every exported runtime function.
 static inline void _runtime_enter(void) { _runtime_call_seq++; }
 
+// #1315: Sailfin-defined runtime bodies (e.g. the string accessors ported
+// to runtime/sfn/string.sfn) cannot reach the `static` _runtime_enter, but
+// they are exported runtime functions and so MUST bump the call-seq to
+// invalidate the concat in-place-reuse window — the exact #892 contract the
+// C `sfn_str_byte_at` / `_find_byte` trampolines they replaced honoured.
+// This non-static shim is their entry hook (declared `extern` in
+// string.sfn). It retires with the concat-reuse window itself (#1318) or
+// when sailfin_runtime.c is deleted (#822).
+void sfn_runtime_enter(void) { _runtime_enter(); }
+
 // Used by array_push / concat / string_drop to invalidate the concat-reuse
 // window. #892: this was gutted to a no-op under the assumption that EVERY
 // exported runtime fn calls _runtime_enter() (which bumps the seq and thereby

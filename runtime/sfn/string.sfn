@@ -122,6 +122,14 @@ extern fn sailfin_runtime_string_to_number(s: * u8) -> f64;
 
 extern fn sfn_str_from_codepoint(cp: i64) -> * u8;
 
+// #1315: the concat in-place-reuse window invalidator (#892). Every
+// exported runtime function must bump the call-seq so a string `+` after
+// an intervening runtime call does not wrongly reuse a stale buffer (the
+// C `sfn_str_byte_at` / `_find_byte` trampolines this module replaces
+// called the `static` `_runtime_enter` for exactly this). The accessor
+// bodies below call it first. Retires with the reuse window (#1318) / #822.
+extern fn sfn_runtime_enter() -> void;
+
 // #874: raw single-byte string constructor. Unlike `from_codepoint`
 // (UTF-8 encode), this writes the byte value verbatim — the write
 // counterpart to the already-working byte read (`char_code(s[i])`).
@@ -365,6 +373,7 @@ fn sfn_str_sfn_append(buf: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> Owned
 // first-pass binary.
 // `sfn_str_byte_at(s, idx)` — raw byte at `idx`, -1 on OOB / null.
 fn sfn_str_byte_at(s: * u8, idx: i64) -> i64 {
+    sfn_runtime_enter();
     let base: i64 = s as i64;
     if base == 0 { return -1; }
     if idx < 0 { return -1; }
@@ -381,6 +390,7 @@ fn sfn_str_byte_at(s: * u8, idx: i64) -> i64 {
 // `sfn_str_find_byte(s, byte_value, start_index)` — first occurrence of
 // the low byte of `byte_value` at or after `start_index`, -1 if absent.
 fn sfn_str_find_byte(s: * u8, byte_value: i64, start_index: i64) -> i64 {
+    sfn_runtime_enter();
     let base: i64 = s as i64;
     if base == 0 { return -1; }
     let target: i64 = byte_value & 255;
@@ -408,6 +418,7 @@ fn sfn_str_find_byte(s: * u8, byte_value: i64, start_index: i64) -> i64 {
 // preserved here byte-for-byte so lexer results don't shift. -1 for
 // null / empty. Returns `f64` to match the descriptor's `double` C-ABI.
 fn sfn_str_codepoint(s: * u8) -> f64 {
+    sfn_runtime_enter();
     let base: i64 = s as i64;
     if base == 0 { return -1.0; }
     if _str_is_immediate(base) {
@@ -423,6 +434,7 @@ fn sfn_str_codepoint(s: * u8) -> f64 {
 // single grapheme. Returns `f64` to match the descriptor's `double`
 // C-ABI.
 fn sfn_str_grapheme_count(s: * u8) -> f64 {
+    sfn_runtime_enter();
     let base: i64 = s as i64;
     if base == 0 { return 0.0; }
     if _str_is_immediate(base) { return 1.0; }
@@ -440,6 +452,7 @@ fn sfn_str_grapheme_count(s: * u8) -> f64 {
 // this family. `idx` is `f64` to match the descriptor ABI
 // (`["i8*", "double"]`).
 fn sfn_str_grapheme_at(s: * u8, idx: f64) -> * u8 {
+    sfn_runtime_enter();
     let base: i64 = s as i64;
     if base == 0 { return _str_empty(); }
     let i: i64 = idx as i64;
