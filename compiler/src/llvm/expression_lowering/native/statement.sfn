@@ -60,6 +60,7 @@ import {
     find_local_binding,
     infer_borrow_base_scope,
     make_lifetime_region_metadata,
+    mark_last_local_consumed,
     promote_escaping_locals_for_boundaries,
     promote_local_to_rc
 } from "./core_scopes";
@@ -262,7 +263,10 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
 
             if consumption != null {
                 if consumption.kind == "local" {
-                    current_locals = mark_local_consumed(current_locals, consumption.name);
+                    // Issue #1267: innermost-only consumption so a shadowed
+                    // outer local keeps its scope-exit drop when only the
+                    // inner same-named binding was moved by the RHS.
+                    current_locals = mark_last_local_consumed(current_locals, consumption.name);
                 } else if consumption.kind == "parameter" {
                     current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
                 }
@@ -361,7 +365,10 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
     current_temp = recover_temp_from_lines(current_lines, current_temp);
     if consumption != null {
         if consumption.kind == "local" {
-            current_locals = mark_local_consumed(current_locals, consumption.name);
+            // Issue #1267: innermost-only consumption (matches the escape
+            // boundary applied just below, which already resolves the last
+            // binding); a shadowed outer local keeps its scope-exit drop.
+            current_locals = mark_last_local_consumed(current_locals, consumption.name);
         } else if consumption.kind == "parameter" {
             current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
         }
@@ -694,7 +701,11 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     // be a use-after-free once `sfn_rc_release` becomes non-no-op.
     if consumption != null {
         if consumption.kind == "local" {
-            current_locals = mark_local_consumed(current_locals, consumption.name);
+            // Issue #1267: innermost-only consumption. Marking every
+            // same-named binding consumed would suppress the scope-exit
+            // drop of an outer local shadowed by the returned one (a leak);
+            // only the binding `find_local_binding` resolves was moved.
+            current_locals = mark_last_local_consumed(current_locals, consumption.name);
         } else if consumption.kind == "parameter" {
             current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
         }
@@ -719,7 +730,11 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
         if returned_local != null {
             if is_heap_type(returned_local.llvm_type) {
                 current_locals = promote_local_to_rc(current_locals, trimmed_return_expr);
-                current_locals = mark_local_consumed(current_locals, trimmed_return_expr);
+                // Issue #1267: consume the same innermost binding
+                // `promote_local_to_rc` just flipped. `mark_local_consumed`
+                // flipped every match, so a shadowed outer local lost its
+                // drop even though only the inner one was returned.
+                current_locals = mark_last_local_consumed(current_locals, trimmed_return_expr);
             }
         }
     }
