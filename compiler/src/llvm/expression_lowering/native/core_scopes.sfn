@@ -274,12 +274,15 @@ fn promote_local_to_rc(locals: LocalBinding[], name: string) -> LocalBinding[] {
 // Linear) remains post-1.0 and is out of scope here.
 // Mark ONLY the innermost (last) binding matching `name` as consumed,
 // mirroring the binding `find_local_binding` resolves and the one
-// `promote_local_to_rc` rewrites. `bindings_mark_local_consumed` (the
-// helper the return path uses) flips every same-named binding, which
-// would wrongly suppress the drop of an outer-scope local shadowed by
-// the escaping one — the outer value never crossed the boundary and its
-// owner-drop must still fire.
-fn _mark_last_local_consumed(locals: LocalBinding[], name: string) -> LocalBinding[] {
+// `promote_local_to_rc` rewrites. `bindings_mark_local_consumed` flips
+// every same-named binding, which would wrongly suppress the drop of an
+// outer-scope local shadowed by the consumed/escaping one — the outer
+// value never crossed the boundary and its owner-drop must still fire.
+// Exported (issue #1267) so the return-boundary consumption in
+// `lower_return_instruction` and the assignment/let/bare-expression
+// consumption paths can mirror the same innermost-only resolution the
+// escape boundary already uses via `promote_escaping_local`.
+fn mark_last_local_consumed(locals: LocalBinding[], name: string) -> LocalBinding[] {
     let mut target_index: int = -1;
     let mut scan: int = locals.length;
     loop {
@@ -332,7 +335,7 @@ fn promote_escaping_local(locals: LocalBinding[], name: string) -> LocalBinding[
         if binding.ownership.variant == "Borrow" { return locals; }
     }
     let promoted = promote_local_to_rc(locals, name);
-    return _mark_last_local_consumed(promoted, name);
+    return mark_last_local_consumed(promoted, name);
 }
 
 // Collect every identifier token in `text`, skipping string-literal

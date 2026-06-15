@@ -19,7 +19,12 @@
 // Plus a few "predicate hygiene" cases for `is_heap_type` so future
 // changes to the predicate don't silently expand or shrink the heap-type
 // surface (over-match → use-after-free, under-match → leak).
-import { append_local_binding, find_local_binding, promote_local_to_rc } from "../../src/llvm/expression_lowering/native/core_scopes";
+import {
+    append_local_binding,
+    find_local_binding,
+    mark_last_local_consumed,
+    promote_local_to_rc
+} from "../../src/llvm/expression_lowering/native/core_scopes";
 import { is_heap_type } from "../../src/llvm/expression_lowering/native/core_type_mapping";
 import { LocalBinding, OwnershipInfo } from "../../src/llvm/types";
 
@@ -241,4 +246,68 @@ test "promote_local_to_rc: shadowed name only promotes the last match (mirrors f
     assert resolved != null;
     assert resolved.pointer == "%l_inner";
     assert resolved.allocation_kind == "rc";
+}
+
+// -----------------------------------------------------------------------------
+// mark_last_local_consumed — innermost-only consumption (issue #1267).
+//
+// `lower_return_instruction` marks the returned local consumed so
+// `emit_scope_drops` skips it. Before #1267 it used the all-matches
+// `bindings_mark_local_consumed`, which flipped EVERY same-named binding —
+// so returning an inner-scope shadow also suppressed the outer binding's
+// scope-exit drop even though the outer value never escaped (a leak). The
+// consumption must mirror `promote_local_to_rc` / `find_local_binding`:
+// resolve and flip only the innermost (last) match.
+// -----------------------------------------------------------------------------
+test "mark_last_local_consumed: shadowed name only consumes the last match" {
+    let outer = _make_binding_with_pointer("s", "i8*", "arena", "%l_outer");
+    let inner = _make_binding_with_pointer("s", "i8*", "arena", "%l_inner");
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, outer);
+    locals = append_local_binding(locals, inner);
+    let consumed = mark_last_local_consumed(locals, "s");
+    assert consumed.length == 2;
+    // Outer (older) binding keeps its scope-exit drop — it never escaped.
+    assert consumed[0].pointer == "%l_outer";
+    assert ! consumed[0].consumed;
+    // Inner (most-recent) binding is the one find_local_binding resolves,
+    // so it is the one marked consumed.
+    assert consumed[1].pointer == "%l_inner";
+    assert consumed[1].consumed;
+}
+
+test "mark_last_local_consumed: missing name leaves the array unchanged" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding_with_pointer("a", "i8*", "arena", "%l_a"));
+    locals = append_local_binding(locals, _make_binding_with_pointer("b", "i8*", "arena", "%l_b"));
+    let consumed = mark_last_local_consumed(locals, "missing");
+    assert consumed.length == 2;
+    assert ! consumed[0].consumed;
+    assert ! consumed[1].consumed;
+}
+
+test "return boundary: returning the inner shadow leaves the outer binding's drop intact (both axes)" {
+    // Composes the two helpers `lower_return_instruction` applies to a
+    // heap-typed bare-identifier return (`promote_local_to_rc` then
+    // `mark_last_local_consumed`) and pins that ONLY the innermost binding
+    // flips on BOTH axes. The outer same-named local — which was never
+    // returned — must keep `arena` AND stay unconsumed so its owner drop
+    // still fires at scope exit. This is the return-boundary analogue of the
+    // escape-boundary shadowing pin in escape_promotion_boundaries_test.sfn.
+    let outer = _make_binding_with_pointer("s", "i8*", "arena", "%l_outer");
+    let inner = _make_binding_with_pointer("s", "i8*", "arena", "%l_inner");
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, outer);
+    locals = append_local_binding(locals, inner);
+    let promoted = promote_local_to_rc(locals, "s");
+    let result = mark_last_local_consumed(promoted, "s");
+    assert result.length == 2;
+    // Outer (older) binding: untouched on both axes.
+    assert result[0].pointer == "%l_outer";
+    assert result[0].allocation_kind == "arena";
+    assert ! result[0].consumed;
+    // Inner (most-recent) binding: promoted AND consumed.
+    assert result[1].pointer == "%l_inner";
+    assert result[1].allocation_kind == "rc";
+    assert result[1].consumed;
 }
