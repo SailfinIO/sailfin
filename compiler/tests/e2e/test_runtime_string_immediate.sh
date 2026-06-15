@@ -20,6 +20,17 @@
 # surface, whereas the harness constructs the exact pseudo-pointers the
 # guards must survive.
 #
+# #1315 (C4/R1 of epic #1308): the accessor family — `sfn_str_grapheme_count`
+# / `_grapheme_at` / `_byte_at` / `_find_byte` / `_codepoint` — moved to
+# real Sailfin bodies in `runtime/sfn/string.sfn`, and the C namesakes are
+# now `static` (unlinkable from this C-only harness). Their immediate-
+# codepoint survival is carried forward by the Sailfin `_str_is_immediate`
+# guard (pointer-math only, never dereferences a tagged value) plus the
+# functional coverage in `compiler/tests/unit/string_accessor_test.sfn`, so
+# they are removed from this harness. The still-C trampolines (`len` / `eq`
+# / `slice` / `to_cstr` / `from_cstr` / `to_number`) remain tested here
+# until they migrate too.
+#
 # The first positional arg (the compiler binary) is accepted for
 # parity with the rest of the e2e suite but is unused — this fixture
 # exercises the C runtime directly.
@@ -73,12 +84,10 @@ extern bool sfn_str_eq(const char *a, const char *b);
 extern char *sfn_str_slice(const char *text, double start, double end);
 extern const char *sfn_str_to_cstr(const char *s);
 extern const char *sfn_str_from_cstr(const char *s);
-extern double sfn_str_grapheme_count(const char *s);
-extern char *sfn_str_grapheme_at(const char *s, double idx);
-extern int64_t sfn_str_byte_at(const char *s, int64_t idx);
-extern int64_t sfn_str_find_byte(const char *s, int64_t byte_value, int64_t start_index);
-extern double sfn_str_codepoint(const char *s);
 extern double sfn_str_to_number(const char *s);
+/* #1315: sfn_str_grapheme_count/_grapheme_at/_byte_at/_find_byte/_codepoint
+ * are now `static` Sailfin-backed bodies — not linkable here. See the file
+ * header for where their immediate-codepoint coverage moved. */
 
 /* #1309: the arena core (`sfn_arena_enabled` / `sfn_arena_global` /
  * `sfn_arena_alloc`) moved from sailfin_arena.c into the Sailfin module
@@ -158,21 +167,9 @@ int main(void)
     check("to_cstr(real) is identity", sfn_str_to_cstr(real) == real);
     check("from_cstr(real) is identity", sfn_str_from_cstr(real) == real);
 
-    /* grapheme_count / grapheme_at */
-    check("grapheme_count(immediate 'h') == 1", sfn_str_grapheme_count(h_up) == 1.0);
-    char *g = sfn_str_grapheme_at(h_up, 0.0);
-    check("grapheme_at(immediate 'h', 0) returns non-null", g != NULL);
-
-    /* byte_at: first byte of 'h' is 0x68 */
-    check("byte_at(immediate 'h', 0) == 0x68", sfn_str_byte_at(h_up, 0) == 0x68);
-    check("byte_at(immediate 'h', 1) == -1", sfn_str_byte_at(h_up, 1) == -1);
-
-    /* find_byte */
-    check("find_byte(immediate 'h', 0x68, 0) == 0", sfn_str_find_byte(h_up, 0x68, 0) == 0);
-    check("find_byte(immediate 'h', 'x', 0) == -1", sfn_str_find_byte(h_up, 'x', 0) == -1);
-
-    /* codepoint */
-    check("codepoint(immediate 'h') == 0x68", sfn_str_codepoint(h_up) == (double)0x68);
+    /* #1315: grapheme_count / grapheme_at / byte_at / find_byte / codepoint
+     * checks retired — those accessors are now `static` Sailfin-backed
+     * bodies (see file header). */
 
     /* to_number: '5' immediate parses to 5.0; non-digit to 0.0 */
     check("to_number(immediate '5') == 5.0", sfn_str_to_number(digit) == 5.0);

@@ -93,11 +93,6 @@ test_emit_define_shape() {
     fi
     local missing=0
     for sym in \
-        sfn_str_sfn_grapheme_count \
-        sfn_str_sfn_grapheme_at \
-        sfn_str_sfn_byte_at \
-        sfn_str_sfn_find_byte \
-        sfn_str_sfn_codepoint \
         sfn_str_sfn_from_codepoint \
         sfn_str_sfn_to_number; do
         if ! grep -qE "^define .* @${sym}\(" "$ll"; then
@@ -110,6 +105,14 @@ test_emit_define_shape() {
     # `sfn_int_to_str` emission-target names (asserted by the wave-2
     # export test below), so `sfn_number_to_str_sfn` / `sfn_int_to_str_sfn`
     # are intentionally absent here.
+    #
+    # #1315: likewise the accessor family (`grapheme_count` / `grapheme_at`
+    # / `byte_at` / `find_byte` / `codepoint`) retired its `sfn_str_sfn_*`
+    # infix — the real bodies are now the bare `sfn_str_*` emission targets
+    # (asserted to be defined, not a collision, in the test below), so the
+    # `sfn_str_sfn_{grapheme_count,grapheme_at,byte_at,find_byte,codepoint}`
+    # infixes are intentionally absent here. Only `from_codepoint` /
+    # `to_number` keep their C-façade `_sfn_` infix.
     return "$missing"
 }
 
@@ -119,9 +122,12 @@ test_emit_define_shape() {
 # export to a bare wave-2 name would collide with the C trampoline at
 # link time and break `make compile`. Pin the `_sfn_` infix as the marker
 # until each C trampoline retires. NOTE: `sfn_number_to_str` /
-# `sfn_int_to_str` are deliberately ABSENT from this list as of #1314 —
-# their bare bodies are now real Sailfin (string.sfn) and the C namesakes
-# are `static`, so a bare `define` for them is expected, not a collision.
+# `sfn_int_to_str` are deliberately ABSENT from this list as of #1314, and
+# the accessor family (`sfn_str_grapheme_count` / `grapheme_at` /
+# `byte_at` / `find_byte` / `codepoint`) as of #1315 — their bare bodies
+# are now real Sailfin (string.sfn) and the C namesakes are `static`, so a
+# bare `define` for them is expected, not a collision. Only the still-C
+# façades (`from_codepoint` / `to_number`) remain pinned here.
 test_no_bare_sfn_str_define() {
     local ll="$SCRATCH/string.ll"
     if [ ! -f "$ll" ]; then
@@ -130,11 +136,6 @@ test_no_bare_sfn_str_define() {
     fi
     local found=0
     for sym in \
-        sfn_str_grapheme_count \
-        sfn_str_grapheme_at \
-        sfn_str_byte_at \
-        sfn_str_find_byte \
-        sfn_str_codepoint \
         sfn_str_from_codepoint \
         sfn_str_to_number; do
         if grep -qE "^define .* @${sym}\(" "$ll"; then
@@ -222,16 +223,15 @@ test_compiler_binary_exports_wave2() {
         sfn_str_to_number \
         sfn_number_to_str \
         sfn_int_to_str \
-        sfn_str_sfn_grapheme_count \
-        sfn_str_sfn_grapheme_at \
-        sfn_str_sfn_byte_at \
-        sfn_str_sfn_find_byte \
-        sfn_str_sfn_codepoint \
         sfn_str_sfn_from_codepoint \
         sfn_str_sfn_to_number; do
         # #1314: `sfn_number_to_str_sfn` / `sfn_int_to_str_sfn` retired —
         # the real bodies are the bare `sfn_number_to_str` / `sfn_int_to_str`
         # above (Sailfin-defined; the C namesakes are now `static`).
+        # #1315: the accessor `sfn_str_sfn_{grapheme_count,grapheme_at,
+        # byte_at,find_byte,codepoint}` infixes retired too — their real
+        # bodies are the bare `sfn_str_{grapheme_count,grapheme_at,byte_at,
+        # find_byte,codepoint}` above (Sailfin-defined; C namesakes `static`).
         # Require a defined text symbol (` T ` / ` t `). The optional
         # `_` prefix accommodates macOS Mach-O while staying tight
         # against substring collisions. A here-string avoids the
