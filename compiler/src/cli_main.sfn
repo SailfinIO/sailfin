@@ -61,7 +61,6 @@ import {
     handle_add_command,
     handle_config_command,
     handle_fmt_command,
-    handle_init_command,
     handle_lock_command,
     handle_login_command,
     handle_package_command,
@@ -1961,7 +1960,6 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     if strings_equal(cmd, "-h") { _let10 = true; }
     if strings_equal(cmd, "--help") { _let10 = true; }
     let is_help = _let10;
-    let is_init = strings_equal(cmd, "init");
     let is_publish = strings_equal(cmd, "publish");
     let is_package = strings_equal(cmd, "package");
     let is_add = strings_equal(cmd, "add");
@@ -2744,8 +2742,8 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     }
 
     // ---- Package management commands ----
-    if is_init { return handle_init_command(args); }
-
+    // `sfn init` migrated to `sfn/cli` (epic #351, Issue 3.1) — handled
+    // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
     if is_publish { return handle_publish_command(args); }
 
     if is_package { return handle_package_command(args); }

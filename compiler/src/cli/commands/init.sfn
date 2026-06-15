@@ -1,0 +1,74 @@
+// compiler/src/cli/commands/init.sfn
+//
+// `init` subcommand (CLI modularization epic #351, Issue 3.1 — proposal
+// §5 Phase 3 item 1, §7). Migrates `sfn init` off the legacy
+// `cli_commands` handler onto the per-command `command_def()`/`run()`
+// pattern established by Issue 2.4 (`version`) and exercised by Issue 3.3
+// (`guillermo`).
+//
+// `init` takes no flags and no positionals, so `command_def()` is a bare
+// `command(...)`. The bare invocation scaffolds a new capsule (writes
+// `capsule.toml` + `src/main.sfn`); `run` reproduces the legacy handler's
+// behavior byte-for-byte and returns the same exit codes:
+//   - 0 — scaffolded a fresh capsule.
+//   - 1 — `capsule.toml` already exists here.
+// The usage error (2) for extra tokens is enforced by the v2 dispatch in
+// `cli/main.sfn`: `init` declares no args, so the parser surfaces any
+// trailing token as a non-ok parse and the dispatch returns 2 there — the
+// parser owns argument validation, matching the legacy `args.length != 1`
+// guard.
+//
+// Exit codes are integer literals, not the `sfn/cli` `EXIT_*` constants:
+// those are module-level `let` constants and have no cross-capsule import
+// value path today (they lower to a zero `internal global` in the
+// importing module — see the `_sfn_cli_link_gate` note in `cli_main.sfn`'s
+// `fn main`). `version`/`guillermo` only ever return `EXIT_OK`, so the
+// zero coincidentally matched; `init` is the first command needing 1/2, so
+// it must use literals to return them correctly.
+import { Command, Matches, command } from "sfn/cli";
+
+import { _get_env_cmd } from "../../cli_commands_utils";
+import { substring } from "../../string_utils";
+import { toml_generate } from "../../toml_parser";
+import { CliContext } from "../context";
+
+// The `sfn/cli` definition for `init`, registered on the v2 root via
+// `with_subcommand`. No args or flags — `init` is a bare subcommand.
+fn command_def() -> Command {
+    return command("init", "Scaffold a new capsule in the current directory");
+}
+
+// Scaffold a new capsule: write `capsule.toml` (name derived from the
+// current directory's basename) and a `src/main.sfn` stub. `matches` and
+// `ctx` are part of the per-command contract but unused here (init takes
+// no input). Byte-identical to the legacy `init` handler body.
+fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    if fs.exists("capsule.toml") {
+        print("capsule.toml already exists in this directory");
+        return 1;
+    }
+    let cwd = _get_env_cmd("PWD");
+    let mut pkg_name: string = "my-capsule";
+    if cwd.length > 0 {
+        let mut last_slash: int = -1;
+        let mut si: int = 0;
+        loop {
+            if si >= cwd.length { break; }
+            if substring(cwd, si, si + 1) == "/" { last_slash = si; }
+            si += 1;
+        }
+        if last_slash >= 0 {
+            if last_slash < cwd.length - 1 {
+                pkg_name = substring(cwd, last_slash + 1, cwd.length);
+            }
+        }
+    }
+    let toml_text = toml_generate(pkg_name, "0.1.0", "", "src/main.sfn");
+    fs.writeFile("capsule.toml", toml_text);
+    if !fs.exists("src") { fs.createDirectory("src", true); }
+    if !fs.exists("src/main.sfn") {
+        fs.writeFile("src/main.sfn", "fn main() ![io] {\n    print(\"Hello, Sailfin!\");\n}\n");
+    }
+    print("initialized capsule: " + pkg_name);
+    return 0;
+}
