@@ -1,0 +1,88 @@
+// compiler/src/cli/commands/guillermo.sfn
+//
+// `guillermo` subcommand (CLI modularization epic #351, Issue 3.3 —
+// proposal §5 Phase 3 item 3, §7). The first/simplest Phase 3 migration:
+// no flags, no positionals, so it solidifies the per-command
+// `command_def()`/`run()` pattern (established by Issue 2.4's `version`
+// command) before the heavier subcommands follow.
+//
+// `run` ignores `matches` and `ctx` (the command takes no input) and
+// prints the ASCII-art mascot greeting byte-identically to the legacy
+// handler it replaces, returning EXIT_OK.
+import {
+    Command,
+    EXIT_OK,
+    Matches,
+    command
+} from "sfn/cli";
+
+import { CliContext } from "../context";
+
+// The `sfn/cli` definition for `guillermo`, registered on the v2 root via
+// `with_subcommand`. No args or flags — `guillermo` is a bare subcommand.
+fn command_def() -> Command {
+    return command("guillermo", "Say hi to Guillermo, the Sailfin mascot");
+}
+
+// Print the ASCII-art mascot greeting. `matches` and `ctx` are part of
+// the per-command contract but unused here (guillermo takes no input).
+fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    print("                                                                               ++++++++++++         ");
+    print("                                                                       ++++++++++++++##*++++++++    ");
+    print("                                                                   ++++++++++++#%%%%%%%%%++++++++++ ");
+    print("                                                                 ++++++++*#%%%%%%%%%%%%%%+++++++++++");
+    print("                                                              #++++++++#%%%%%%%#*++++++++++++++++++*");
+    print("                                                            +++++++++#####*+++++++++++++++++++++++% ");
+    print("                                                         ++++++++++#####+++++++++++++++++++++++##   ");
+    print("                                                    +++++++++++++####%%#++++++*++++++++++++*##      ");
+    print("                                                +++++++++++++++*#####%%%%***+++++++++++#***         ");
+    print("                                            ++++++++++++++++++#*##**#%%%%%%#+++++*##****            ");
+    print("                                        ++++++++++++++++++++**********%%%%%%%%#*****#%              ");
+    print("                                     ++++++++++++++++++++#%%%#*******************%%                 ");
+    print("                                 +++++++++++++++++++++#%%%%%%%%%%##*******##%%%%%                   ");
+    print("                              ++++++++++++++++++++++%%%%#**#%%%%%%%%%%%%%%%%%%%                     ");
+    print("                           +++++++++++++++++++++++#%%%++++++++%%%%%%%%%%%%%%%                       ");
+    print("                        %%#*++++++++++++*********%%%++++++++++%%%%%%%%%%%%%                         ");
+    print("                      %%%%%%%%#****************%%%*+++++++++++%%%%%%%%%%%                           ");
+    print("                   *****%%%%%%%%%*************%%%+++++++++++#%%%%%%%%%%%                            ");
+    print("                 +++++****#%%%%%%%%*********#%%*++++++++++#%%%%%%%%%%%%%                            ");
+    print("               *++++++++****#%%%%%%%*******%%%*+++++++++*%%%%%%%%%%%%%%%                            ");
+    print("             %%%%%%%%%#+++****%%%%%%#*****%%%%+++++++++%%%%%%%%%%%%%%%%%                            ");
+    print("           %%%%###%%%%%%%%%#***%%%%%%***%%%%%%+++++++%%%%%%%%%  %%%%%%%#                            ");
+    print("          %%++++++++#%%%%%%%%%%%%%%%%%%%%%%%%%+++++++*%%%%%     %%%%%%####                          ");
+    print("        %%#+++++++++++#%%%%%%%%%%%%%%%%%%%%%%%*+++++++#%          %%########                        ");
+    print("       %%%+++++++++++++++#%%#%%%%%%%%%%%%%%%%%%*++++++++           ########*********                ");
+    print("      %%%%+++++++++++++++++++++++%%%%%%%%%%%%%%%+++++++++            ####*********++                ");
+    print("     %%%%%*+++++++++++++++++++++++#%%%%%%%%      +++++++++             #*********+                  ");
+    print("    %%%%%%%%*++++++++++++++++++++++%              ****+++++++++++       *******++++++               ");
+    print("   %%%%%%%%%%%%%%#*++++++++++++++++                ********++++++        *** ++++  +++              ");
+    print("   %%%%%%%%%%%%%%%%   +++++++++++                   **********           ***  ++++                  ");
+    print("  %%%%%%%%%%%%%%%    +++++++++++                     ************                                   ");
+    print(" %%%%%%%%%%%%%%    ***++++++++                        ** ****  ****                                 ");
+    print(" %%%%%%%%%%%%%   *******++++                          ***  ***                                      ");
+    print(" %%%%%%%%%%%%   ***********                            *    ***                                     ");
+    print("%%%%%%%%%%%     **********                                                                          ");
+    print("%%%%%%%%%%%      *************                                                                      ");
+    print("%%%%%%%%%%        ***************                                                                   ");
+    print("%%%%%%%%%%         **** ****                                                                        ");
+    print("%%%%%%%%%            ***  ****                                                                      ");
+    print("%%%%%%%%%             **    ***                                                                     ");
+    print("%%%%%%%%%                                                                                           ");
+    print(" %%%%%%%%%                                                            ***                           ");
+    print(" %%%%%%%%%                                                           ***                            ");
+    print("  %%%%%%%%%                                                         ****                            ");
+    print("   %%%%%%%%%                                                       ***                              ");
+    print("   %%%%%%%%%%                                                     ***                               ");
+    print("     %%%%%%%%%                                                  ****                                ");
+    print("      %%%%%%%%%%                                              ##***                                 ");
+    print("       %%%%%%%%%%%                                          #####                                   ");
+    print("         %%%%%%%%%%%                                      #####                                     ");
+    print("           %%%%%%%%%%%%                                ######                                       ");
+    print("              %%%%%%%%%%%%%                        ########                                         ");
+    print("                 %%%%%%%%%%%%%%%%%           ###########                                            ");
+    print("                     %%%%%%%%%%%%%%%%%%%%%%%%%%#####                                                ");
+    print("                           %%%%%%%%%%%%%%%%%%%                                                      ");
+    print("");
+    print("  What's good yo! I'm Guillermo, straight outta the codebase kickin' it 🦎");
+    return EXIT_OK;
+}
