@@ -75,8 +75,14 @@ per-target fallbacks.
 ## Returning the `{i8*, i64}` aggregate from a Sailfin body (`SfnString`)
 
 A handful of helpers carry the `{i8*, i64}` SfnString aggregate return ABI
-(`env.get` / `env.home`; the string family's `{i8*,i64}` canonical bodies
-will follow). The compiler returns every *user* struct by pointer (`%T*`,
+(`env.get` / `env.home`). The string accessor family (`sfn_str_byte_at`,
+`sfn_str_find_byte`, `sfn_str_codepoint`, `sfn_str_grapheme_at`,
+`sfn_str_grapheme_count`) followed the bare-name pattern established by #1314
+(C3 of epic #1308): real Sailfin bodies now define the bare `sfn_str_*`
+symbols in `runtime/sfn/string.sfn`; the `sfn_str_sfn_*` `_sfn_` infix
+wrappers for these five are retired (#1315, C4 of epic #1308). These accessors
+return `f64` (not `SfnString`) and so do not use the aggregate-return ABI,
+but they follow the same link-ownership-flip mechanic. The compiler returns every *user* struct by pointer (`%T*`,
 the "boxed-struct ABI" in `type_mapping.sfn` — deliberate, to dodge an
 AArch64 aggregate-return legalizer miscompile), so a runtime body that must
 satisfy a by-value `{i8*, i64}` call site cannot just `return` a normal

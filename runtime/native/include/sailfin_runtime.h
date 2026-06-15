@@ -133,6 +133,15 @@ extern "C"
     void sfn_str_append(SfnString *dst, SfnString suffix, SfnArena **arena_slot);
     SfnString sfn_str_concat_arena(SfnString a, SfnString b, SfnArena **arena_slot);
     void sfn_str_append_arena(SfnString *dst, SfnString suffix, SfnArena **arena_slot);
+    // #1315 (C4 of epic #1308): exported bridge primitives the Sailfin
+    // string-accessor bodies in `runtime/sfn/string.sfn` call (immediate
+    // decode, single-byte read, platform-gated grapheme production). These
+    // retire with the immediate-encoding deletion (#1283 / #822); do not
+    // grow this surface. See the bridge block in `sailfin_runtime.c`.
+    const char *sfn_str_decode_owned(const char *s);
+    int64_t sfn_str_immediate_codepoint(const char *s);
+    int64_t sfn_str_read_byte(const char *s, int64_t idx);
+    char *sfn_str_grapheme_byte(const char *real, int64_t idx);
     extern SfnArena *sfn_default_arena;
     // Drop/free a runtime-owned string (no-op for non-owned/persistent values).
     void sailfin_runtime_string_drop(char *text);

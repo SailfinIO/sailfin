@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-06-13. Seed pinned to `0.7.0-alpha.31` (`.seed-version`);
+Updated: 2026-06-15. Seed pinned to `0.7.0-alpha.31` (`.seed-version`);
 the compiler version source of truth is `compiler/capsule.toml`.
 
 This document is the **current-state source of truth**: what ships today,
@@ -224,6 +224,7 @@ linked issues.
 | Pointer-typed struct fields | **Shipped** (#713) | Layout + stores emit; retires the `i64`-slot workarounds after the next seed cut (`seed-blocker`) |
 | Extern return-type defaulting hardened | **Shipped** (#306 Phase A) | Unresolvable callee signatures fail loud instead of emitting malformed IR; Phases B/C deferred |
 | Self-applied memory budget (`platform/rlimit.sfn`) | **Shipped** (2026-06-12) | `fn main` (cli_main.sfn) self-applies an 8 GiB `RLIMIT_AS` on Linux at startup, replacing the caller-side `ulimit -v 8388608` ritual + PreToolUse hook. `SAILFIN_MEM_LIMIT=<bytes>` overrides, `unlimited` disables (ASAN escape hatch), inherited external caps always win, `SAILFIN_TRACE_MEM_LIMIT=1` traces. Toolchain-only — compiled user programs are not capped. No-op on macOS/Windows (Linux `/proc` probe gate). Pinned by `compiler/tests/e2e/test_mem_limit_selfcap.sh`. Carried by the pinned seed since 0.7.0-alpha.33, so every toolchain invocation — including the seed during `make compile` — self-caps; CI's step-level `ulimit -v` defense lines were dropped in the same cleanup |
+| String accessor family (`string.sfn`) | **Shipped** (#1315, C4 of epic #1308, 2026-06-15) | `sfn_str_byte_at`, `sfn_str_find_byte`, `sfn_str_codepoint`, `sfn_str_grapheme_at`, `sfn_str_grapheme_count` are now real Sailfin bodies (bare emission targets) in `runtime/sfn/string.sfn`; the C namesakes in `sailfin_runtime.c` are `static`. The `_sfn_` infix wrappers for these five are retired. Four narrow C bridge primitives remain (`sfn_str_decode_owned`, `sfn_str_immediate_codepoint`, `sfn_str_read_byte`, `sfn_str_grapheme_byte`) while the immediate-codepoint encoding (`(cp<<32)`) is live; they retire with #822/#1283. `codepoint`/`grapheme_count` return `f64` to preserve the registry `double` ABI — no `runtime_helpers.sfn` change, no seed cut. Behaviour byte-identical to prior C trampolines. Pinned by `capsules/sfn/strings/tests/strings_test.sfn`. |
 
 ## Installer (Current)
 
