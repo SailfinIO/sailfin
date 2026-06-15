@@ -79,8 +79,12 @@ extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
 // allocation work and these wrappers exist only to give this
 // module a legal Sailfin call surface for its proof-of-life
 // emission.
-extern fn sailfin_runtime_string_length(s: * u8) -> i64;
-
+//
+// #1315 (C4/R1 of epic #1308): the `sailfin_runtime_string_length`
+// façade extern is retired — `sfn_str_sfn_len` now recovers the
+// NUL-terminated byte length via the local `_str_cstr_len` walk. The C
+// `sailfin_runtime_string_length` body stays exported (9 internal C
+// callers) but this module no longer links through it.
 extern fn strings_equal(a: * u8, b: * u8) -> bool;
 
 extern fn substring_unchecked(text: * u8, start: f64, end: f64) -> * u8;
@@ -108,29 +112,13 @@ extern fn sailfin_runtime_string_append(buf: * u8, suffix: * u8) -> * u8;
 // IR continues to link through them) but every fresh user emission
 // targets the bare `sfn_str_*` / `sfn_number_to_str` names instead.
 //
-// Return types match the C ABI exactly. `sailfin_runtime_grapheme_count`
-// and `sailfin_runtime_char_code` return `double` in C (System V x86_64
-// returns floats in `%xmm0` vs integers in `%rax` — declaring them
-// `-> i64` here would emit `call i64 ... %xmm0`, reading garbage from
-// the wrong register class). The Sailfin proof-of-life trampolines
-// below cast `f64 -> i64` at the language layer.
-extern fn sailfin_runtime_grapheme_count(s: * u8) -> f64;
-
-extern fn sailfin_runtime_grapheme_at(s: * u8, idx: f64) -> * u8;
-
-extern fn sailfin_runtime_char_code(s: * u8) -> f64;
-
+// #1315 (C4/R1 of epic #1308): the accessor-family façade externs
+// (`sailfin_runtime_grapheme_count`/`_grapheme_at`/`_char_code`) are
+// retired — the bare `sfn_str_grapheme_count`/`_grapheme_at`/`_codepoint`
+// emission targets now have real Sailfin bodies further down. The C
+// `sailfin_runtime_*` bodies stay exported for seed-built IR; this module
+// no longer links through them.
 extern fn sailfin_runtime_string_to_number(s: * u8) -> f64;
-
-// The wave-2 C trampolines that ship the architect-spec ABI for
-// helpers without a legacy `sailfin_runtime_*` direct mapping
-// (byte_at / find_byte are int64-typed end-to-end in the spec but
-// the legacy entries returned `double`; from_codepoint and
-// int_to_str are net-new). Defined in `sailfin_runtime.c` alongside
-// the wave-1 trampolines.
-extern fn sfn_str_byte_at(s: * u8, idx: i64) -> i64;
-
-extern fn sfn_str_find_byte(s: * u8, byte_value: i64, start_index: i64) -> i64;
 
 extern fn sfn_str_from_codepoint(cp: i64) -> * u8;
 
@@ -156,17 +144,99 @@ extern fn sfn_arena_global() -> * u8;
 
 extern fn sfn_arena_enabled() -> bool;
 
+// ====================================================================
+// Shared byte-walk helpers for the accessor family (#1315, C4/R1 of
+// epic #1308). Defined ahead of their first consumer (`sfn_str_sfn_len`
+// below) so resolution never depends on a forward reference.
+// `_str_load_byte(addr)` reads the byte at `addr` via the enclosing
+// 8-aligned i64 word (`atomic_load` + shift/mask) — the `ownedbuf.sfn`
+// idiom, because the seed does not lower a single-byte `* u8` load. An
+// 8-aligned 8-byte word never straddles a 4096-byte page (4096 is a
+// multiple of 8), so whenever `addr` is itself a mapped byte the whole
+// enclosing word lies in the same mapped page: page-safe for every byte
+// the NUL-terminated walks below visit. Little-endian extraction.
+fn _str_load_byte(addr: i64) -> i64 {
+    let word_addr: i64 = (addr / 8) * 8;
+    let shift: i64 = (addr - word_addr) * 8;
+    let slot: * i64 = word_addr as * i64;
+    let word: i64 = atomic_load(slot);
+    let shifted: i64 = word >> shift;
+    return shifted & 255;
+}
+
+// `_str_is_immediate(addr)` — is `addr` an immediate-codepoint
+// pseudo-pointer rather than a real buffer address? Mirrors the C
+// `_is_immediate_codepoint_string`: two tagged shapes carry a codepoint
+// in the pointer bits — a near-null ASCII byte (`1..=127`) or a codepoint
+// shifted into the upper 32 bits (`cp << 32`, low word zero, value
+// non-zero). A real string pointer is `> 127` with a non-zero low word,
+// so it never matches. Pointer math only — never dereferences `addr`.
+// The new `sfn_str_grapheme_at` below no longer PRODUCES immediates
+// (it materializes real buffers), so this guard defends only against
+// immediates produced elsewhere (legacy `sailfin_runtime_grapheme_at`
+// reachable through seed-built IR until the next seed). Retires with the
+// SfnString aggregate flip (#1283).
+fn _str_is_immediate(addr: i64) -> bool {
+    if addr >= 1 {
+        if addr <= 127 { return true; }
+    }
+    if addr != 0 {
+        if (addr & 4294967295) == 0 { return true; }
+    }
+    return false;
+}
+
+// `_str_immediate_codepoint(addr)` — the codepoint carried by an
+// immediate pseudo-pointer: the raw value for the near-null ASCII shape,
+// `addr >> 32` for the shifted shape.
+fn _str_immediate_codepoint(addr: i64) -> i64 {
+    let mut cp: i64 = addr;
+    if addr > 127 { cp = addr >> 32; }
+    return cp;
+}
+
+// `_str_cstr_len(base)` — NUL-terminated byte length of the buffer at
+// `base` via the word-load scan. Returns 0 for a null pointer. `base`
+// must be a real (mapped) address — callers route immediate
+// pseudo-pointers away first.
+fn _str_cstr_len(base: i64) -> i64 {
+    if base == 0 { return 0; }
+    let mut n: i64 = 0;
+    loop {
+        let b: i64 = _str_load_byte(base + n);
+        if b == 0 { break; }
+        n = n + 1;
+    }
+    return n;
+}
+
+// `_str_empty()` — a fresh real NUL-terminated empty `* u8` (never an
+// immediate), for the out-of-range / null return paths of `grapheme_at`.
+// Allocated through the process-global arena when arena mode is on (the
+// `grapheme_at` discipline), else libc; identical machinery to the
+// 1-byte buffer `grapheme_at` builds, so it is seed-safe.
+fn _str_empty() -> * u8 {
+    let mut arena_addr: i64 = 0;
+    if sfn_arena_enabled() { arena_addr = sfn_arena_global() as i64; }
+    let buf: OwnedBuf = owned_buf_new(arena_addr, 1);
+    let base: i64 = buf.ptr_addr;
+    if base == 0 { return null; }
+    // Zero the whole 8-aligned owned word (cap is a multiple of 8) so
+    // `base[0]` is NUL — a valid empty NUL-terminated string. Direct
+    // `atomic_store` avoids a forward reference to `_num_put_byte`.
+    let slot: * i64 = base as * i64;
+    atomic_store(slot, 0);
+    return base as * u8;
+}
+
 // `sfn_str_sfn_len(s)` — Sailfin-side length recovery for the
 // SfnString aggregate. Architect spec
 // (`runtime_architecture.md` §2.2): direct field access on the
-// aggregate's `len` slot, no runtime call. Today's bodies still
-// trampoline through the C scanner because the aggregate-typed
-// parameter flip (M1.A.2) hasn't landed yet; the legacy `i8*`
-// fallback path on the compiler side keeps consuming
-// NUL-terminated buffers.
-fn sfn_str_sfn_len(s: * u8) -> i64 {
-    return sailfin_runtime_string_length(s);
-}
+// aggregate's `len` slot, no runtime call. Today's body recovers the
+// length from the NUL-terminated `* u8` buffer via the local
+// `_str_cstr_len` walk (#1315 retired the `sailfin_runtime_string_length`
+// façade extern).
+fn sfn_str_sfn_len(s: * u8) -> i64 { return _str_cstr_len(s as i64); }
 
 // `sfn_str_sfn_eq(a, b)` — byte-for-byte equality for two
 // SfnStrings. Architect spec: `len` compare followed by
@@ -270,93 +340,135 @@ fn sfn_str_sfn_append(buf: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> Owned
     return owned_buf_append(buf, suffix_addr, suffix_len);
 }
 
-// M2.5 (#403) wave-2 trampolines — UTF-8 + numeric formatting.
+// ====================================================================
+// String accessor family — real Sailfin bodies (#1315, C4/R1 of epic
+// #1308). The bare `sfn_str_byte_at` / `_find_byte` / `_codepoint` /
+// `_grapheme_at` / `_grapheme_count` ARE the emission targets the
+// compiler `call`s against; the matching C defs in `sailfin_runtime.c`
+// are now `static`, so the linker binds every fresh emission here. The
+// `_sfn_` infix wrappers these bodies replace are retired (the migration
+// they marked is complete) — mirrors the #1314 number/int flip below.
 //
-// These proof-of-life Sailfin definitions follow the wave-1a
-// `sfn_str_sfn_*` infix discipline: the canonical user-facing
-// symbols — the ones the new compiler emits `call`s against —
-// are `sfn_str_grapheme_count / grapheme_at / byte_at /
-// find_byte / codepoint / from_codepoint / to_number` and
-// `sfn_number_to_str / sfn_int_to_str`, provided by the C
-// trampolines in `runtime/native/src/sailfin_runtime.c`. The
-// Sailfin exports below use the `_sfn_` infix so the two
-// namespaces coexist without a link-time collision; once the
-// aggregate-typed parameter flip (M1.A.2) lets bodies consume
-// `SfnString` and `*Arena` directly, the C trampolines retire
-// and these Sailfin functions rename to the bare canonical
-// form in a single rollback-safe PR.
+// Bootstrap semantics match the retired C bodies byte-for-byte: one
+// UTF-8 byte == one grapheme, `codepoint` returns the first byte. Full
+// grapheme-cluster segmentation / multibyte decode is post-1.0 (the
+// SfnString aggregate flip, #1283).
 //
-// Architect spec mappings (`docs/runtime_architecture.md` §2.2.2):
-//   sfn_str_sfn_grapheme_count(SfnString) -> i64
-//   sfn_str_sfn_grapheme_at(SfnString, i64, *Arena) -> SfnString
-//   sfn_str_sfn_byte_at(SfnString, i64) -> i64
-//   sfn_str_sfn_find_byte(SfnString, i64, i64) -> i64
-//   sfn_str_sfn_codepoint(SfnString) -> i64
-//   sfn_str_sfn_from_codepoint(i64, *Arena) -> SfnString
-//   sfn_str_sfn_to_number(SfnString) -> f64
-//   (number/int formatting flipped to the bare `sfn_number_to_str` /
-//    `sfn_int_to_str` real bodies in #1314 — see the family comment
-//    further down; the `_sfn` infix forms are retired.)
-//
-// `sfn_str_sfn_grapheme_count(s)` — UTF-8 grapheme count of `s`.
-// Architect spec is an O(n) UTF-8 walk over `s.data[0..s.len]`
-// counting grapheme clusters; today's body delegates to the C
-// runtime walker which counts bytes (the "treat each UTF-8 byte
-// as a grapheme" simplification the C body documents). The
-// proof-of-life shape pins the migration symbol; the real walker
-// lands when the body moves into Sailfin against the SfnString
-// aggregate. The legacy C entrypoint returns `f64` (see extern
-// declaration above) so the body casts down at the Sailfin layer
-// to preserve the architect-spec `i64` return.
-fn sfn_str_sfn_grapheme_count(s: * u8) -> i64 {
-    return sailfin_runtime_grapheme_count(s) as i64;
+// ABI: `codepoint` and `grapheme_count` return `f64` (the descriptors
+// carry `c_abi_return_type: "double"`, so the seed emits `call double`
+// against these symbols — a register-class match is mandatory). The
+// bodies compute in i64 and cast at return; the call-site `round +
+// fptosi` coercion (`emit_runtime_call`, #638) recovers the exact
+// integer. The descriptors stay UNCHANGED this PR — flipping
+// `c_abi_return_type` to `null` is a future-seed change, since the
+// current seed's `call double` would mismatch an i64 body inside the
+// first-pass binary.
+// `sfn_str_byte_at(s, idx)` — raw byte at `idx`, -1 on OOB / null.
+fn sfn_str_byte_at(s: * u8, idx: i64) -> i64 {
+    let base: i64 = s as i64;
+    if base == 0 { return -1; }
+    if idx < 0 { return -1; }
+    if _str_is_immediate(base) {
+        // A 1-byte immediate has exactly one byte at index 0.
+        if idx == 0 { return _str_immediate_codepoint(base) & 255; }
+        return -1;
+    }
+    let len: i64 = _str_cstr_len(base);
+    if idx >= len { return -1; }
+    return _str_load_byte(base + idx);
 }
 
-// `sfn_str_sfn_grapheme_at(s, idx)` — N-th grapheme of `s`.
-// Architect spec returns a fresh SfnString containing one
-// grapheme cluster; today's body trampolines through the C
-// runtime which still uses the immediate-codepoint tagged-
-// pointer encoding for ASCII bytes (1-byte clusters round-trip
-// through a tagged `i8*`). The `f64` index shape matches the
-// registry signature so call-site arguments don't need a
-// coercion shim during the flip.
-fn sfn_str_sfn_grapheme_at(s: * u8, idx: f64) -> * u8 {
-    return sailfin_runtime_grapheme_at(s, idx);
+// `sfn_str_find_byte(s, byte_value, start_index)` — first occurrence of
+// the low byte of `byte_value` at or after `start_index`, -1 if absent.
+fn sfn_str_find_byte(s: * u8, byte_value: i64, start_index: i64) -> i64 {
+    let base: i64 = s as i64;
+    if base == 0 { return -1; }
+    let target: i64 = byte_value & 255;
+    if _str_is_immediate(base) {
+        let mut imm_start: i64 = start_index;
+        if imm_start < 0 { imm_start = 0; }
+        if imm_start > 0 { return -1; }
+        if (_str_immediate_codepoint(base) & 255) == target { return 0; }
+        return -1;
+    }
+    let len: i64 = _str_cstr_len(base);
+    let mut i: i64 = start_index;
+    if i < 0 { i = 0; }
+    loop {
+        if i >= len { break; }
+        if _str_load_byte(base + i) == target { return i; }
+        i = i + 1;
+    }
+    return -1;
 }
 
-// `sfn_str_sfn_byte_at(s, idx)` — raw byte at offset `idx`.
-// Architect spec returns the byte as `i64` via direct `s.data[idx]`
-// indexing once the SfnString aggregate flip lands. Today's
-// proof-of-life body forwards to the C wave-2 trampoline
-// `sfn_str_byte_at` (defined alongside `sfn_str_grapheme_count`
-// in `sailfin_runtime.c`), which carries the bounds check + byte
-// load against a `* u8`. The C trampoline ships the architect ABI
-// (int64 return, int64 index); no compiler emission site targets
-// the legacy `sailfin_runtime_byte_at` symbol — that one was an
-// orphan from a prior design.
-fn sfn_str_sfn_byte_at(s: * u8, idx: i64) -> i64 {
-    return sfn_str_byte_at(s, idx);
+// `sfn_str_codepoint(s)` — first byte of `s` as a codepoint. Bootstrap:
+// the C `char_code` returns the first BYTE of a real buffer (not a
+// decoded multibyte codepoint) and the full codepoint for an immediate;
+// preserved here byte-for-byte so lexer results don't shift. -1 for
+// null / empty. Returns `f64` to match the descriptor's `double` C-ABI.
+fn sfn_str_codepoint(s: * u8) -> f64 {
+    let base: i64 = s as i64;
+    if base == 0 { return -1.0; }
+    if _str_is_immediate(base) {
+        return _str_immediate_codepoint(base) as f64;
+    }
+    let first: i64 = _str_load_byte(base);
+    if first == 0 { return -1.0; }
+    return first as f64;
 }
 
-// `sfn_str_sfn_find_byte(s, byte, start)` — first occurrence of
-// `byte` in `s` starting at `start`, or -1 if not found.
-// Architect spec is `memchr`-backed; today's body delegates to
-// the C wave-2 trampoline which carries the `_safe_strlen_asan`
-// length probe + `memchr` walk.
-fn sfn_str_sfn_find_byte(s: * u8, byte_value: i64, start_index: i64) -> i64 {
-    return sfn_str_find_byte(s, byte_value, start_index);
+// `sfn_str_grapheme_count(s)` — bootstrap one-byte-per-grapheme count
+// (== NUL-terminated byte length). Immediate pseudo-pointers count as a
+// single grapheme. Returns `f64` to match the descriptor's `double`
+// C-ABI.
+fn sfn_str_grapheme_count(s: * u8) -> f64 {
+    let base: i64 = s as i64;
+    if base == 0 { return 0.0; }
+    if _str_is_immediate(base) { return 1.0; }
+    return _str_cstr_len(base) as f64;
 }
 
-// `sfn_str_sfn_codepoint(s)` — first codepoint of `s` as `i64`.
-// Architect spec decodes the leading 1-4 UTF-8 bytes; today's
-// body delegates to the legacy C reader which returns the first
-// byte for multi-byte sequences (matches the documented bootstrap
-// simplification). Full UTF-8 decode moves into Sailfin alongside
-// the SfnString aggregate flip. The legacy C entrypoint returns
-// `f64` (see extern declaration above) so the body casts down at
-// the Sailfin layer to preserve the architect-spec `i64` return.
-fn sfn_str_sfn_codepoint(s: * u8) -> i64 {
-    return sailfin_runtime_char_code(s) as i64;
+// `sfn_str_grapheme_at(s, idx)` — the N-th grapheme (bootstrap: the N-th
+// byte) as a fresh NUL-terminated 1-byte `* u8`, allocated through the
+// process-global arena when arena mode is on (gated on
+// `sfn_arena_enabled()`, the `concat` discipline), else libc.
+// Out-of-range / null yields the empty string. CRITICAL (#1315): this
+// body NEVER returns an immediate pseudo-pointer — it always
+// materializes a real buffer (the macOS C path's behaviour, now
+// universal), which retires the Linux immediate-codepoint producer for
+// this family. `idx` is `f64` to match the descriptor ABI
+// (`["i8*", "double"]`).
+fn sfn_str_grapheme_at(s: * u8, idx: f64) -> * u8 {
+    let base: i64 = s as i64;
+    if base == 0 { return _str_empty(); }
+    let i: i64 = idx as i64;
+    if (i as f64) != idx { return _str_empty(); }
+    if i < 0 { return _str_empty(); }
+
+    let mut byte: i64 = 0;
+    if _str_is_immediate(base) {
+        if i != 0 { return _str_empty(); }
+        byte = _str_immediate_codepoint(base) & 255;
+    } else {
+        let len: i64 = _str_cstr_len(base);
+        if i >= len { return _str_empty(); }
+        byte = _str_load_byte(base + i);
+    }
+
+    // Materialize a real 1-byte NUL-terminated buffer (cap rounds to 8).
+    // A single `atomic_store` of the byte value writes `base[0] = byte`
+    // (low byte, little-endian) and zeros `base[1..8]`, so `base[1]` is
+    // the NUL terminator. The buffer is freshly allocated and uniquely
+    // owned, so the word store is sound.
+    let mut arena_addr: i64 = 0;
+    if sfn_arena_enabled() { arena_addr = sfn_arena_global() as i64; }
+    let buf: OwnedBuf = owned_buf_new(arena_addr, 2);
+    let bbase: i64 = buf.ptr_addr;
+    if bbase == 0 { return _str_empty(); }
+    let slot: * i64 = bbase as * i64;
+    atomic_store(slot, byte);
+    return bbase as * u8;
 }
 
 // `sfn_str_sfn_from_codepoint(cp)` — 1-4 byte UTF-8 encode of

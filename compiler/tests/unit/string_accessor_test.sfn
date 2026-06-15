@@ -1,0 +1,95 @@
+// compiler/tests/unit/string_accessor_test.sfn
+//
+// Regression coverage for the hand-rolled Sailfin string accessor bodies
+// (#1315, C4/R1 of epic #1308). The bare `sfn_str_codepoint` /
+// `sfn_str_grapheme_at` / `sfn_str_grapheme_count` emission targets now
+// have real Sailfin bodies in `runtime/sfn/string.sfn` (the C trampolines
+// are `static`). These cases pin the bootstrap semantics the migration
+// must preserve byte-for-byte:
+//   * `char_code(s)`  → grapheme_at(s, 0) → codepoint (first byte)
+//   * `char_at(s, i)` / string `==` → grapheme_at (now a real buffer,
+//      never an immediate pseudo-pointer) → codepoint
+//   * `s.length`      → grapheme_count (one byte == one grapheme)
+//   * `find_char`     → grapheme_at + strings_equal
+// The grapheme_at→codepoint chain is the exact path the lexer hammers on
+// every operator/punctuation comparison, so these exercise the
+// immediate-codepoint hazard end-to-end (a regression there faults
+// `make compile`).
+// ---- codepoint (char_code → grapheme_at + codepoint) ----
+test "string_accessor: char_code of ASCII letters" {
+    assert char_code("A") == 65;
+    assert char_code("Z") == 90;
+    assert char_code("a") == 97;
+    assert char_code("z") == 122;
+}
+
+test "string_accessor: char_code of digits and punctuation" {
+    assert char_code("0") == 48;
+    assert char_code("9") == 57;
+    assert char_code(" ") == 32;
+    assert char_code("/") == 47;
+    assert char_code("\n") == 10;
+}
+
+test "string_accessor: char_code of empty string is -1" {
+    assert char_code("") == -1;
+}
+
+test "string_accessor: char_code reads the first byte of a multi-char string" {
+    assert char_code("hello") == 104;
+}
+
+// ---- grapheme_at (real-buffer materialization) ----
+test "string_accessor: grapheme_at returns the N-th byte as a 1-char string" {
+    assert strings_equal(grapheme_at("hello", 0), "h");
+    assert strings_equal(grapheme_at("hello", 1), "e");
+    assert strings_equal(grapheme_at("hello", 4), "o");
+}
+
+test "string_accessor: grapheme_at out of range yields empty" {
+    assert strings_equal(grapheme_at("x", 5), "");
+    assert strings_equal(grapheme_at("", 0), "");
+    assert strings_equal(grapheme_at("ab", 9), "");
+}
+
+// ---- grapheme_count (.length) ----
+test "string_accessor: length counts one byte per grapheme" {
+    assert "hello".length == 5;
+    assert "".length == 0;
+    assert "a".length == 1;
+    assert "abcdefghij".length == 10;
+}
+
+// ---- strings_equal: the grapheme_at -> codepoint chain end-to-end ----
+test "string_accessor: strings_equal round-trips through the accessor chain" {
+    assert strings_equal("abc", "abc");
+    assert strings_equal("", "");
+    assert strings_equal("x", "x");
+}
+
+test "string_accessor: strings_equal rejects differing strings" {
+    assert ! strings_equal("abc", "abd");
+    assert ! strings_equal("abc", "ab");
+    assert ! strings_equal("a", "");
+}
+
+// ---- find_char (grapheme_at + strings_equal) ----
+// NOTE: `find_char`'s `start: int = 0` default arg is not filled inside
+// `test` blocks (a pre-existing harness quirk, reproducible on the seed
+// and unrelated to #1315 — `fn main` fills it correctly), so these pass
+// `start` explicitly to exercise the accessor chain without tripping it.
+test "string_accessor: find_char locates a byte" {
+    assert find_char("hello", "h", 0) == 0;
+    assert find_char("hello", "l", 0) == 2;
+    assert find_char("hello", "o", 0) == 4;
+}
+
+test "string_accessor: find_char honours a non-zero start" {
+    assert find_char("hello", "l", 3) == 3;
+    assert find_char("hello", "h", 1) == -1;
+}
+
+test "string_accessor: find_char returns -1 when absent" {
+    assert find_char("hello", "z", 0) == -1;
+    assert find_char("", "a", 0) == -1;
+}
