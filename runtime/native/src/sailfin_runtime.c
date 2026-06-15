@@ -2314,10 +2314,88 @@ char *sailfin_runtime_number_to_string(double value);
  * the coercion machinery; the eventual Sailfin body retires the
  * double-return convention alongside the wider `int`/`float`
  * landing. */
-/* #716 audit: safe by delegation — `sailfin_runtime_grapheme_count`
- * (line ~5872) guards immediate codepoints (counts them as a single
- * grapheme) before any dereference. */
-double sfn_str_grapheme_count(const char *s)
+/* ---- #1315 (C4 of epic #1308): exported bridge primitives for the
+ * Sailfin string-accessor bodies in `runtime/sfn/string.sfn` ----
+ *
+ * The bare emission targets `sfn_str_{byte_at,find_byte,codepoint,
+ * grapheme_at,grapheme_count}` are now real Sailfin bodies; the C
+ * definitions below are `static` (a link-ownership flip). Those Sailfin
+ * bodies cannot, under today's seed, (a) single-byte-load through a
+ * `* u8` slot, (b) decode the immediate-codepoint pseudo-pointer
+ * encoding, or (c) reproduce the platform-gated grapheme production.
+ * These four narrow primitives carry exactly those operations, and all
+ * retire wholesale with the SfnString aggregate flip / immediate-encoding
+ * deletion (#1283 / #822). Do NOT grow this surface. */
+
+/* Materialize an immediate-codepoint pseudo-pointer into a real,
+ * deref-safe, NUL-terminated buffer; pass genuine pointers through
+ * untouched. Owning variant (the result outlives the call). Also bumps
+ * `_runtime_call_seq` (#892): `sfn_str_byte_at`/`sfn_str_find_byte` are
+ * called mid-IR-emission and must invalidate the concat-reuse window;
+ * routing the bump here covers both (and is conservatively safe for the
+ * other read callers, which did not bump before). */
+const char *sfn_str_decode_owned(const char *s)
+{
+    _runtime_enter();
+    return _sfn_str_decode_immediate_owned(s);
+}
+
+/* If `s` is an immediate-codepoint pseudo-pointer, return its codepoint;
+ * else -1. Lets the Sailfin `codepoint` body preserve the legacy
+ * `sailfin_runtime_char_code` immediate fast-path without dereferencing
+ * a tagged address. */
+int64_t sfn_str_immediate_codepoint(const char *s)
+{
+    uint32_t cp = 0;
+    if (_is_immediate_codepoint_string(s, &cp))
+    {
+        return (int64_t)cp;
+    }
+    return -1;
+}
+
+/* Single in-bounds byte read. `s` must be deref-safe (post-decode) and
+ * `0 <= idx < len`. Stays in C because the seed cannot lower a
+ * single-byte `* u8` load in Sailfin, and a Sailfin word-load would
+ * over-read an unpadded buffer's tail (an ASAN heap/global-buffer-
+ * overflow). */
+int64_t sfn_str_read_byte(const char *s, int64_t idx)
+{
+    return (int64_t)(unsigned char)s[idx];
+}
+
+/* Bootstrap grapheme production lifted verbatim from
+ * `sailfin_runtime_grapheme_at` (line ~6130): for an ASCII byte return
+ * the immediate-codepoint pseudo-pointer (Linux only — the macOS gate
+ * cannot live in Sailfin), else a real 1-byte arena/heap buffer. `real`
+ * must be deref-safe and `idx` in bounds (caller-checked). */
+char *sfn_str_grapheme_byte(const char *real, int64_t idx)
+{
+    unsigned char byte = (unsigned char)real[idx];
+#if !defined(__APPLE__)
+    if (byte <= 0x7fu)
+    {
+        uintptr_t packed = ((uintptr_t)byte) << 32;
+        return (char *)packed;
+    }
+#endif
+    char *out = (char *)_rt_malloc(2);
+    if (!out)
+    {
+        return NULL;
+    }
+    out[0] = (char)byte;
+    out[1] = '\0';
+    _track_owned_string(out);
+    return out;
+}
+
+/* #1315: canonical emission target is now a real Sailfin body in
+ * `runtime/sfn/string.sfn`. This C definition is `static` so the linker
+ * binds every emission to the Sailfin body while avoiding a
+ * duplicate-symbol collision; retained (unused) only until #822 deletes
+ * this file. */
+static double sfn_str_grapheme_count(const char *s)
 {
     return sailfin_runtime_grapheme_count((char *)s);
 }
@@ -2325,7 +2403,8 @@ double sfn_str_grapheme_count(const char *s)
 /* #716 audit: safe by delegation — `sailfin_runtime_grapheme_at`
  * (line ~5877) returns the immediate pseudo-pointer itself at index 0
  * and never dereferences it. */
-char *sfn_str_grapheme_at(const char *s, double idx)
+/* #1315: `static` link-ownership flip — see the bridge block above. */
+static char *sfn_str_grapheme_at(const char *s, double idx)
 {
     return sailfin_runtime_grapheme_at((char *)s, idx);
 }
@@ -2336,7 +2415,8 @@ char *sfn_str_grapheme_at(const char *s, double idx)
  * from a prior design. This trampoline ships the architect-spec ABI
  * (int64 return, int64 index) so the first caller routes through the
  * canonical shape from the outset. */
-int64_t sfn_str_byte_at(const char *s, int64_t idx)
+/* #1315: `static` link-ownership flip — see the bridge block above. */
+static int64_t sfn_str_byte_at(const char *s, int64_t idx)
 {
     _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
     if (!s || idx < 0)
@@ -2372,7 +2452,8 @@ int64_t sfn_str_byte_at(const char *s, int64_t idx)
  * targets `sailfin_runtime_find_byte_index` today — same orphan story
  * as `_byte_at`. The trampoline takes int64s end-to-end so callers
  * never round-trip through `double`. */
-int64_t sfn_str_find_byte(const char *s, int64_t byte_value, int64_t start_index)
+/* #1315: `static` link-ownership flip — see the bridge block above. */
+static int64_t sfn_str_find_byte(const char *s, int64_t byte_value, int64_t start_index)
 {
     _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
     if (!s)
@@ -2409,7 +2490,8 @@ int64_t sfn_str_find_byte(const char *s, int64_t byte_value, int64_t start_index
  * #716 audit: safe by delegation — `sailfin_runtime_char_code`
  * (line ~7085) carries the immediate-codepoint fast path and returns
  * the tagged value's codepoint without dereferencing it. */
-double sfn_str_codepoint(const char *s)
+/* #1315: `static` link-ownership flip — see the bridge block above. */
+static double sfn_str_codepoint(const char *s)
 {
     return sailfin_runtime_char_code((char *)s);
 }
