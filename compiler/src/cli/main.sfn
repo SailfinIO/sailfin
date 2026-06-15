@@ -37,7 +37,8 @@ import {
 
 import { sailfin_cli_main_legacy } from "../cli_main";
 import { number_to_string } from "../num_format";
-import { command_def, run } from "./commands/version";
+import { command_def as guillermo_command_def, run as guillermo_run } from "./commands/guillermo";
+import { command_def as version_command_def, run as version_run } from "./commands/version";
 import { CliContext, driver_prefix_length, parse_driver_prefix } from "./context";
 
 // Cold-path `SAILFIN_TRACE_ARGV` trace, byte-identical to the block at
@@ -79,7 +80,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // resolving it eagerly here would add a filesystem read to every
     // `build` / `run` invocation. `parse()` skips argv[0] (the program
     // name), so a synthetic "sfn" head is prepended before parsing.
-    let root: Command = with_subcommand(command("sfn", "Sailfin compiler"), command_def());
+    let root: Command = with_subcommand(with_subcommand(command("sfn", "Sailfin compiler"), version_command_def()), guillermo_command_def());
 
     let mut parse_argv: string[] = ["sfn"];
     let mut j: int = 0;
@@ -90,6 +91,17 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     }
 
     let result: ParseResult = parse(root, parse_argv);
+
+    // `sfn guillermo` — the registered subcommand matched. Dispatch to
+    // the guillermo command's `run` (it takes no input, so `matches` and
+    // `ctx` are unused), reproducing the cold-path argv trace v2 owns.
+    if result.ok {
+        if strings_equal(subcommand(result.matches), "guillermo") {
+            if ctx.trace_argv { _v2_trace_argv(argv); }
+            return guillermo_run(result.matches, ctx);
+        }
+    }
+
     let mut handled_version: boolean = false;
     if result.ok {
         // `sfn version` — the registered subcommand matched.
@@ -111,7 +123,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         // `-V` flag path `result.ok` is false, but `result.matches` still
         // reflects the accumulated parse state; `version.run` ignores it,
         // so passing it on both paths keeps the dispatch uniform.
-        return run(result.matches, ctx);
+        return version_run(result.matches, ctx);
     }
 
     // Every other subcommand (and help, parse errors, the bare
