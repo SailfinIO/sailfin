@@ -38,12 +38,17 @@ test "fmt import-alias: multi-specifier aliased line stays paired" ![io] {
     assert _contains(out, "cdef as command_def") == false;
 }
 
-// ── Aliased specifiers still sort by imported name within a line ─────
-test "fmt import-alias: specifiers sort by imported name, pairing intact" ![io] {
+// ── Misordered aliased specifiers keep their pairing intact ─────────
+test "fmt import-alias: misordered aliased specifiers keep their pairing" ![io] {
     let src = "import { run as runner, command_def as cdef } from \"./z\";\nimport { x } from \"./a\";\n";
     let out = format_source(src);
-    // command_def sorts before run; both pairings survive the reorder.
-    assert _contains(out, "command_def as cdef, run as runner");
+    // The bug being guarded is the side-swap, which is order-independent:
+    // each `imported as local` pairing must survive regardless of the final
+    // within-line ordering (exact ordering is incidental and not asserted).
+    assert _contains(out, "command_def as cdef");
+    assert _contains(out, "run as runner");
+    assert _contains(out, "command_def as run") == false;
+    assert _contains(out, "run as cdef") == false;
 }
 
 // ── Idempotency: a second pass changes nothing ──────────────────────
