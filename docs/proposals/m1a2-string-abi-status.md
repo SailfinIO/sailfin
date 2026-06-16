@@ -29,7 +29,39 @@ family (epic #1308) can take/return strings by value with their length.
 4. **Struct string fields → `{i8*, i64}` (16 bytes)** with the field-layout
    size updated in `emit_native_layout.sfn::analyze_type_layout`.
 
-## Remaining blocker — canonical layout-table fixed-point
+## Update (current state)
+
+- **Self-host corruption FIXED.** The layout cycle-guard bug (`append_string`
+  mutating the `visiting` chain in place, undercounting repeated by-value
+  fields) is fixed via `visiting_branch` (commit `ac50304`). `sfn build -p
+  compiler --work-dir` now succeeds; `make compile` self-hosts.
+- **Canonical sizes corrected** (`Statement` 128→184) and now match the fixed
+  engine's computed manifests.
+- **Concat returns the `{i8*,i64}` aggregate** (commit `ea5588d`).
+
+### Remaining blocker — cross-module string-construction miscompile
+
+`make check` still fails ~127 first-pass tests (confirmed **real regressions**
+vs the pre-flip baseline — the same tests pass on `86c7366~1`). Root cause
+narrowed to a **garbage `.length`** on strings built by the compiler's own
+string-heavy code under string=16:
+
+- `emit_native_text_with_module_name(...)` returns a string with a valid,
+  NUL-terminated data pointer but an **undef/garbage length field**, so
+  `index_of`/length-dependent ops on the emitted asm fail → the bulk of the
+  127 (any test that emits + searches asm).
+- Narrowed to `join_with_separator` / the `string[]`-iterate-then-concat
+  pattern. **The identical code works inline in `main`** (`len=5`) **but
+  yields garbage when imported from `emit_native_state.sfn`** — i.e. an
+  *elusive cross-module* miscompile, not a single construction site. The
+  per-field coercion (`i8*`→`{i8*,i64}` via `sfn_str_len`), the let-binding
+  coercion, and the index lowering all look correct in isolation.
+
+This needs a focused cross-module IR diff (the same function compiled in two
+modules) to find why the length field is dropped in the imported build. It is
+the gating item before the ~20 stale-`i8*`-ABI test-pin updates.
+
+## Remaining blocker — canonical layout-table fixed-point (RESOLVED — see Update above)
 
 `emit_native_layout.sfn::canonical_type_layouts()` hand-pins by-value sizes
 for ~28 well-known compiler/runtime types (to break recursive/incomplete
