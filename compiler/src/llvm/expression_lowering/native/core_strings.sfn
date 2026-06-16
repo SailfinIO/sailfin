@@ -172,17 +172,18 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
         diagnostics.push(concat_result.diagnostics[_concat_di]);
         _concat_di += 1;
     }
+    // M1.A.2: return the full `{i8*, i64}` aggregate `sfn_str_concat` produces
+    // (data + length) rather than extracting just the data pointer. The length
+    // field is authoritative; discarding it and re-wrapping downstream left the
+    // length undef on paths that reinterpreted the `i8*` as the aggregate (the
+    // `emit_native` builder output had a garbage `.length`, breaking
+    // `index_of`/length-dependent ops in compiled programs). Now that scalar
+    // `string` is the aggregate, this is also the natural result shape.
     let agg_name = format_temp_name(right_aligned.temp_index);
-    let mut out_lines = concat_result.lines;
-    let data_name = format_temp_name(right_aligned.temp_index + 1);
-    let extract_line = "  " + data_name + " = extractvalue {i8*, i64} "
-        + agg_name
-        + ", 0";
-    out_lines = append_string(out_lines, extract_line);
-    let operand = LLVMOperand { llvm_type: "i8*", value: data_name };
+    let operand = LLVMOperand { llvm_type: "{i8*, i64}", value: agg_name };
     return ExpressionResult {
-        lines: out_lines,
-        temp_index: right_aligned.temp_index + 2,
+        lines: concat_result.lines,
+        temp_index: right_aligned.temp_index + 1,
         operand: operand,
         diagnostics: diagnostics,
         string_constants: empty_string_constant_set()
