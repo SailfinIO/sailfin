@@ -620,6 +620,7 @@ fn _resolve_capture_operands(captures: Capture[], bindings: ParameterBinding[], 
         if index >= captures.length { break; }
         let capture = captures[index];
         let mut value_text: string = "";
+        let mut value_type: string = "";
         let local = find_local_binding(locals, capture.name);
         if local != null {
             // Heuristic: bindings whose `pointer` starts with `%l`
@@ -634,19 +635,26 @@ fn _resolve_capture_operands(captures: Capture[], bindings: ParameterBinding[], 
                 current_lines = load_result.lines;
                 current_temp = load_result.temp_index;
                 value_text = load_result.operand.value;
+                value_type = load_result.operand.llvm_type;
                 let mut _ldi: int = 0;
                 loop {
                     if _ldi >= load_result.diagnostics.length { break; }
                     diagnostics.push(load_result.diagnostics[_ldi]);
                     _ldi += 1;
                 }
-            } else { value_text = local.pointer; }
+            } else {
+                value_text = local.pointer;
+                value_type = local.llvm_type;
+            }
         } else {
             let param = find_parameter_binding(bindings, capture.name);
-            if param != null { value_text = param.llvm_name; }
+            if param != null {
+                value_text = param.llvm_name;
+                value_type = param.llvm_type;
+            }
         }
         operands.push(ClosureCaptureOperand {
-            name: capture.name, llvm_value: value_text
+            name: capture.name, llvm_value: value_text, llvm_type: value_type
         });
         index += 1;
     }

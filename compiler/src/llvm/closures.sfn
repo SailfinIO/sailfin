@@ -255,6 +255,14 @@ struct ClosureEnvLayout {
 struct ClosureCaptureOperand {
     name: string;
     llvm_value: string;
+    // M1.A.2: the LLVM type of the captured value at the capture site. A
+    // string capture arrives as the scalar `{i8*, i64}` aggregate, but its
+    // env field is the pointer-sized `i8*` container shape, so the env-store
+    // walk must shed the length word (`extractvalue ..., 0`) before storing.
+    // Empty string means "type unknown" — the store falls back to the field
+    // type unchanged (the legacy behaviour for scalars whose value already
+    // matches the field type).
+    llvm_type: string;
 }
 
 // Result of `emit_closure_env_alloc`. `env_raw_var` is the i8*
@@ -377,6 +385,21 @@ fn _find_operand(operands: ClosureCaptureOperand[], name: string) -> string {
     return "";
 }
 
+// Look up a capture operand's LLVM type by name (M1.A.2). Returns the empty
+// string when the capture is absent or its type was not recorded — callers
+// then leave the value's store type as the field type.
+fn _find_operand_type(operands: ClosureCaptureOperand[], name: string) -> string {
+    let mut index: int = 0;
+    loop {
+        if index >= operands.length { break; }
+        if operands[index].name == name {
+            return operands[index].llvm_type;
+        }
+        index += 1;
+    }
+    return "";
+}
+
 // Default operand text when no caller-supplied value is present
 // for a field. Mirrors LLVM's `zeroinitializer` for primitives
 // and `null` for pointers — both forms are valid in a `store`.
@@ -449,7 +472,23 @@ fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOper
         if field_index >= layout.fields.length { break; }
         let field = layout.fields[field_index];
         let mut value = _find_operand(operands, field.name);
+        let operand_type = _find_operand_type(operands, field.name);
         if value.length == 0 { value = _field_zero_value(field.llvm_type); }
+        // M1.A.2: a `string` capture is the scalar `{i8*, i64}` aggregate at
+        // the capture site, but its env field is the `i8*` container shape
+        // (see `closure_field_llvm_type`). Shed the length word so the store
+        // type matches the field — otherwise we emit
+        // `store i8* %v, i8** ...` with `%v : {i8*, i64}` (invalid IR).
+        if field.llvm_type == "i8*" {
+            if operand_type == "{i8*, i64}" {
+                let extracted = format_temp_name(current_temp);
+                current_temp += 1;
+                lines.push("  " + extracted + " = extractvalue {i8*, i64} "
+                    + value
+                    + ", 0");
+                value = extracted;
+            }
+        }
         let field_ptr = format_temp_name(current_temp);
         current_temp += 1;
         lines.push("  " + field_ptr + " = getelementptr inbounds " + type_name
