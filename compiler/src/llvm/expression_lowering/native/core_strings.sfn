@@ -202,6 +202,22 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
         };
     }
 
+    // M1.A.2: a `{i8*, i64}` operand is already the scalar SfnString
+    // aggregate — the natural string shape after the flip. It needs no
+    // conversion (string interpolation, `print({{x}})`, etc. lower the
+    // interpolated expression to the aggregate). Without this arm it fell
+    // through to the "unable to convert" default, returning a null operand
+    // that silently dropped the whole interpolated statement.
+    if operand.llvm_type == "{i8*, i64}" {
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: operand,
+            diagnostics: [],
+            string_constants: empty_constants
+        };
+    }
+
     if operand.llvm_type == "double" {
         // M1.7.2b (#497): route number→string through descriptor dispatch.
         let nts_operands: LLVMOperand[] = [operand];
