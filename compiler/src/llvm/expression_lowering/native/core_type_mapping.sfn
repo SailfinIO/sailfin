@@ -81,6 +81,13 @@ fn map_optional_type(context: TypeContext, annotation: string) -> string {
     // Extract the inner type (everything before the ?)
     let inner_annotation = trim_text(substring(trimmed, 0, trimmed.length - 1));
     if inner_annotation.length == 0 { return ""; }
+    // M1.A.2: optional `string?` stays a nullable `i8*` (see the matching
+    // clamp in `type_mapping.sfn::map_optional_type`). Scalar `string` flips to
+    // the `{i8*, i64}` aggregate; the optional-in-container form keeps the
+    // legacy pointer shape so string `+`/comparison and null checks recognise
+    // it without a `{i8*, i64}*` boxed form.
+    if inner_annotation == "string" { return "i8*"; }
+    if inner_annotation == "SfnString" { return "i8*"; }
     // For optional types, try the context-aware mapping first for structs/enums
     let struct_type = map_struct_type_annotation_ctx(context, inner_annotation);
     if struct_type.length > 0 {
@@ -342,6 +349,14 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
     if starts_with(trimmed, "fn (") { return "{i8*, i8*}"; }
     let normalized = unwrap_move_wrapper(trimmed);
 
+    // M1.A.2: scalar `string` lowers to the by-value `{i8*, i64}` SfnString
+    // aggregate, matching `compiler/src/llvm/type_mapping.sfn`. `string[]`
+    // (normalized != "string") keeps `i8*` element slots via the array path.
+    let mut _is_str_ret: boolean = false;
+    if normalized == "string" { _is_str_ret = true; }
+    if normalized == "SfnString" { _is_str_ret = true; }
+    if _is_str_ret { return "{i8*, i64}"; }
+
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
     if starts_with(normalized, "*") {
         let mut remainder = trim_text(substring(normalized, 1, normalized.length));
@@ -501,6 +516,15 @@ fn map_parameter_type(context: TypeContext, parameter_type: string) -> string {
     if starts_with(trimmed, "fn(") { return "{i8*, i8*}"; }
     if starts_with(trimmed, "fn (") { return "{i8*, i8*}"; }
     let normalized = unwrap_move_wrapper(trimmed);
+
+    // M1.A.2: scalar `string` parameters cross the call boundary as the
+    // by-value `{i8*, i64}` SfnString aggregate (data, len), matching the
+    // function definition's signature in `type_mapping.sfn`. `string[]` keeps
+    // `i8*` element slots via the array path below.
+    let mut _is_str_param: boolean = false;
+    if normalized == "string" { _is_str_param = true; }
+    if normalized == "SfnString" { _is_str_param = true; }
+    if _is_str_param { return "{i8*, i64}"; }
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
     if starts_with(normalized, "*") {

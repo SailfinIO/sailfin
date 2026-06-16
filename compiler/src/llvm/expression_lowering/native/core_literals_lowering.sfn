@@ -77,6 +77,17 @@ fn _format_literal_span(span: NativeSourceSpan) -> string {
     return start + "-" + end;
 }
 
+// M1.A.2: the `{i8*, i64}` ↔ pointer cast arm in `lower_cast_expression`
+// delegates the actual conversion to the `coerce_operand_to_type` shim. The
+// forward direction (aggregate → pointer) always extracts the `i8*` data
+// pointer; a narrower pointer target is then reached with a follow-up
+// bitcast. The reverse direction (pointer → aggregate) builds the aggregate
+// for the requested target shape directly.
+fn pick_agg_cast_shim_target(operand_type: string, target_type: string) -> string {
+    if operand_type == "{i8*, i64}" { return "i8*"; }
+    return target_type;
+}
+
 fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
@@ -1514,6 +1525,66 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                 string_constants: lowered.string_constants
             };
         }
+    }
+
+    // M1.A.2: casts between the `{i8*, i64}` SfnString aggregate and a raw
+    // pointer (`string as * u8`, `* u8 as string`). Both directions are
+    // handled by the shared coercion shim in core_operands.sfn — the forward
+    // direction `extractvalue`s the data pointer, the reverse recovers the
+    // length and builds the aggregate. Routed here (before the pointer/int
+    // matrix, which cannot model the aggregate) so a single implementation
+    // owns the conversion.
+    let mut _agg_cast: boolean = false;
+    if operand.llvm_type == "{i8*, i64}" {
+        if ends_with_pointer_suffix(target_type) { _agg_cast = true; }
+    }
+    if target_type == "{i8*, i64}" {
+        if ends_with_pointer_suffix(operand.llvm_type) { _agg_cast = true; }
+    }
+    if _agg_cast {
+        // Pointer targets narrower than `i8*` need an extra bitcast after the
+        // shim hands back the `i8*` data pointer; route via `i8*` first.
+        let shim_target = pick_agg_cast_shim_target(operand.llvm_type, target_type);
+        let coerced = coerce_operand_to_type(operand, shim_target, current_temp, current_lines, true, null);
+        current_lines = coerced.lines;
+        current_temp = coerced.temp_index;
+        let mut _agg_di: int = 0;
+        loop {
+            if _agg_di >= coerced.diagnostics.length { break; }
+            diagnostics.push(coerced.diagnostics[_agg_di]);
+            _agg_di += 1;
+        }
+        if coerced.operand == null {
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+        let mut result_operand: LLVMOperand = coerced.operand;
+        if result_operand.llvm_type != target_type {
+            let agg_bitcast = format_temp_name(current_temp);
+            current_lines.push("  " + agg_bitcast + " = bitcast "
+                + result_operand.llvm_type
+                + " "
+                + result_operand.value
+                + " to "
+                + target_type);
+            current_temp += 1;
+            result_operand = LLVMOperand {
+                llvm_type: target_type,
+                value: agg_bitcast
+            };
+        }
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: result_operand,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
     }
 
     if ends_with_pointer_suffix(operand.llvm_type) {

@@ -386,8 +386,12 @@ fn analyze_type_layout(context: LayoutContext, visiting: string[], type_annotati
         };
     }
     if trimmed == "string" {
+        // M1.A.2: scalar `string` is the by-value `{i8*, i64}` SfnString
+        // aggregate (data pointer + length) — two eightbytes, 16 bytes,
+        // 8-byte aligned. `string?` and `string[]` stay pointer-sized (8)
+        // because they remain `i8*` (handled by the optional / array cases).
         return TypeLayoutInfo {
-            size: 8,
+            size: 16,
             align: 8,
             diagnostics: diagnostics
         };
@@ -576,6 +580,10 @@ fn find_layout_enum_definition(context: LayoutContext, name: string) -> LayoutEn
 
 // ── Canonical type layouts ───────────────────────────────────────────
 fn canonical_type_layouts() -> CanonicalTypeLayout[] {
+    // M1.A.2 (WIP): sizes regenerated for the 16-byte `{i8*, i64}` string
+    // field ABI. Leaf/struct sizes are fixed-point-verified; the cyclic enum
+    // payloads (Statement and the ForClause/MatchCase cluster it embeds) still
+    // need a layout-engine fixed-point pass — see the PR status notes.
     let mut layouts: CanonicalTypeLayout[] = [];
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
         name: "Token", size: 40, align: 8
@@ -587,66 +595,66 @@ fn canonical_type_layouts() -> CanonicalTypeLayout[] {
         name: "Program", size: 8, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "TypeAnnotation", size: 8, align: 8
+        name: "TypeAnnotation", size: 16, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "TypeParameter", size: 24, align: 8
+        name: "TypeParameter", size: 32, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "Block", size: 24, align: 8
+        name: "Block", size: 32, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
         name: "SourceSpan", size: 32, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "Expression", size: 48, align: 8
+        name: "Expression", size: 64, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "Parameter", size: 40, align: 8
+        name: "Parameter", size: 48, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "WithClause", size: 48, align: 8
+        name: "WithClause", size: 64, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "ObjectField", size: 56, align: 8
+        name: "ObjectField", size: 80, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
         name: "ElseBranch", size: 16, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "ForClause", size: 104, align: 8
+        name: "ForClause", size: 136, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "MatchCase", size: 80, align: 8
+        name: "MatchCase", size: 104, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "FieldDeclaration", size: 32, align: 8
+        name: "FieldDeclaration", size: 48, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "MethodDeclaration", size: 88, align: 8
+        name: "MethodDeclaration", size: 104, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "EnumVariant", size: 24, align: 8
+        name: "EnumVariant", size: 32, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "FunctionSignature", size: 56, align: 8
+        name: "FunctionSignature", size: 64, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "TestDeclaration", size: 64, align: 8
+        name: "TestDeclaration", size: 80, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "Decorator", size: 16, align: 8
+        name: "Decorator", size: 24, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "DecoratorArgument", size: 56, align: 8
+        name: "DecoratorArgument", size: 72, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "NamedSpecifier", size: 8, align: 8
+        name: "NamedSpecifier", size: 24, align: 8
     });
     // NOTE: `Statement` is an enum; its size is driven by the largest payload variant.
     // Keep this in sync with the stage2 LLVM ABI and `ast.layout-manifest`.
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "Statement", size: 144, align: 8
+        name: "Statement", size: 128, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
         name: "EnumField", size: 8, align: 8
