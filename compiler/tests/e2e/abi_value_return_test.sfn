@@ -86,10 +86,14 @@ test "abi: move-wrapped SfnString return still lowers to by-value {i8*, i64}" ![
     assert find(ir, "define {i8*, i64} @mv", 0) >= 0;
 }
 
-test "abi: string return spelling still lowers to i8* (no regression)" ![io] {
+test "abi: string return spelling lowers to the by-value {i8*, i64} (M1.A.2)" ![io] {
     let ir = _emit_ir("strctrl", "fn s(x: * u8) -> string ![io] { return x; }");
-    // `string` is unchanged — single pointer return.
-    assert find(ir, "define i8* @s", 0) >= 0;
-    // ...and never the by-value aggregate (proves `SfnString` is opt-in).
-    assert find(ir, "define {i8*, i64} @s", 0) < 0;
+    // M1.A.2 flipped scalar `string` to the by-value `{i8*, i64}` SfnString
+    // aggregate, so `-> string` and `-> SfnString` now lower identically — the
+    // pre-flip negative control (which pinned `string` to a bare `i8*`) is
+    // inverted by this change. The `* u8` return value widens to the aggregate
+    // via the i8* -> {i8*, i64} bridge (length recovered with sfn_str_len).
+    assert find(ir, "define {i8*, i64} @s", 0) >= 0;
+    // ...and never the legacy single-pointer return.
+    assert find(ir, "define i8* @s", 0) < 0;
 }
