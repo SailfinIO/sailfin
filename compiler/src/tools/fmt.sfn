@@ -1312,7 +1312,20 @@ fn _sort_import_spans(spans: ImportSpan[]) -> ImportSpan[] {
     return sorted;
 }
 
-// Sort the specifiers inside a single import { A, C, B } alphabetically
+// Sort the specifiers inside a single import { A, C, B } alphabetically.
+// A specifier may be an alias (`A as B`); it is treated as ONE unit keyed
+// on the imported name `A`, with the `as B` alias riding along, so sorting
+// never breaks the `imported as local` pairing (the value tokens are
+// re-slotted positionally by `_push_span_sorted`, so a flat name list that
+// straddles `as` would otherwise swap the two sides).
+//
+// Implemented with flat `string[]` / `int[]` arrays and an index-order sort
+// rather than an array of `{ key, names: string[] }` structs: copying a
+// struct that carries an array field during the insertion sort tripped an
+// arm64 codegen/aliasing hazard (the path is unique to multi-specifier
+// aliased imports, which the self-host never exercises). All values live in
+// one flat array; units are tracked by (start, len) offsets and reordered
+// by sorting an index array, so nothing copies an array-bearing struct.
 fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: int, end: int) -> string[] {
     // Find the { and } within this import span
     let mut brace_open = -1;
@@ -1330,27 +1343,59 @@ fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: int, end: int) -> stri
     if brace_open < 0 { return []; }
     if brace_close < 0 { return []; }
 
-    // Collect specifier names between { and }
-    let mut names: string[] = [];
+    // Collect every value lexeme in source order into `all_values`, and
+    // record each comma-separated unit as (start, len) into that flat array.
+    // A unit is the run of value tokens up to the next comma; for `A as B`
+    // that run is [A, B] keyed on A (its first value). The `as` keyword and
+    // commas are non-`value` roles, so they stay in place structurally when
+    // `_push_span_sorted` copies the span.
+    let mut all_values: string[] = [];
+    let mut unit_key: string[] = [];
+    let mut unit_start: int[] = [];
+    let mut unit_len: int[] = [];
+    let mut cur_start: int = 0;
+    let mut cur_len: int = 0;
     let mut k = brace_open + 1;
     loop {
         if k >= brace_close { break; }
         let ft = fmt_tokens[k];
         if strings_equal(ft.role, "value") {
-            names.push(ft.token.lexeme);
+            if cur_len == 0 { cur_start = all_values.length; }
+            all_values.push(ft.token.lexeme);
+            cur_len += 1;
+        } else if strings_equal(ft.token.lexeme, ",") {
+            if cur_len > 0 {
+                unit_key.push(all_values[cur_start]);
+                unit_start.push(cur_start);
+                unit_len.push(cur_len);
+                cur_len = 0;
+            }
         }
         k += 1;
     }
+    if cur_len > 0 {
+        unit_key.push(all_values[cur_start]);
+        unit_start.push(cur_start);
+        unit_len.push(cur_len);
+    }
 
-    // Sort names with insertion sort
-    let mut ni = 1;
+    // Insertion sort an index array `order` by each unit's imported name.
+    let mut order: int[] = [];
+    let mut oi = 0;
     loop {
-        if ni >= names.length { break; }
-        let key_name = names[ni];
-        let mut nj = ni;
+        if oi >= unit_key.length { break; }
+        order.push(oi);
+        oi += 1;
+    }
+    let mut a = 1;
+    loop {
+        if a >= order.length { break; }
+        let key_idx = order[a];
+        let key_name = unit_key[key_idx];
+        let mut b = a;
         loop {
-            if nj <= 0 { break; }
-            let prev_name = names[nj - 1];
+            if b <= 0 { break; }
+            let prev_name = unit_key[order[b - 1]];
             // Compare lexicographically
             let mut ci = 0;
             let min_len = prev_name.length;
@@ -1375,11 +1420,30 @@ fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: int, end: int) -> stri
                 if prev_name.length < key_name.length { cmp = -1; }
             }
             if cmp <= 0 { break; }
-            names[nj] = names[nj - 1];
-            names[nj - 1] = key_name;
-            nj -= 1;
+            order[b] = order[b - 1];
+            order[b - 1] = key_idx;
+            b -= 1;
         }
-        ni += 1;
+        a += 1;
+    }
+
+    // Flatten in sorted unit order, preserving each unit's internal order
+    // (imported first, then alias) so `_push_span_sorted` re-slots the value
+    // positions without breaking `A as B`.
+    let mut names: string[] = [];
+    let mut x = 0;
+    loop {
+        if x >= order.length { break; }
+        let u = order[x];
+        let s = unit_start[u];
+        let n = unit_len[u];
+        let mut y = 0;
+        loop {
+            if y >= n { break; }
+            names.push(all_values[s + y]);
+            y += 1;
+        }
+        x += 1;
     }
 
     return names;
