@@ -38,16 +38,27 @@ let mut _sfn_http_handler_addr: i64 = 0;
 // runtime dispatches to. Parses the request, calls the registered typed
 // handler, and serializes the response to full HTTP/1.1 bytes. Must be a
 // top-level function so its address is a bare code pointer.
-fn _sfn_http_trampoline(raw: string) -> string {
+// M1.A.2: the runtime dispatches to this trampoline through a bare
+// `fn(* u8) -> * u8` code pointer (registered via `sfn_serve_framed`), so
+// its parameter and return MUST keep the `* u8` ABI. Declaring them as
+// `string` worked only while `string` lowered to a bare `i8*`; after the
+// scalar flip a `string` parameter is the two-word `{i8*, i64}` aggregate,
+// which mismatches the runtime's single-pointer call — the second
+// (length) word arrives as a garbage register, so `raw.length` is wrong
+// and the request body is truncated. Take/return `* u8` and bridge to
+// `string` internally: `raw as string` recovers the full request length
+// via `sfn_str_len` (the request buffer is NUL-terminated), and the
+// serialized response is handed back as its data pointer.
+fn _sfn_http_trampoline(raw: * u8) -> * u8 {
     if _sfn_http_handler_addr == 0 {
         return serialize_response(Response {
             status: 500, headers: [], body: ""
-        });
+        }) as * u8;
     }
     let entry: * fn (Request) -> Response = _sfn_http_handler_addr as * fn (Request) -> Response;
-    let req: Request = parse_request(raw);
+    let req: Request = parse_request(raw as string);
     let resp: Response = entry(req);
-    return serialize_response(resp);
+    return serialize_response(resp) as * u8;
 }
 
 // `serve(handler, port)` — start a blocking HTTP/1.1 server that

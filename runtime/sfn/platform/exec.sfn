@@ -184,7 +184,7 @@ extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
 // yet accept char literals (`'/'`), so the byte value is inlined
 // directly — same convention as the `127` / `65280` masks in
 // `runtime/sfn/process.sfn`'s wait-status decoder.
-fn binary_dir(exe: string) -> string {
+fn binary_dir(exe: * u8) -> * u8 {
     // Going through a `string`-typed local first sidesteps the
     // seed's `<literal> as * u8` cast bug — `exe as * u8` works
     // here because `exe` is an alloca-backed parameter, not a
@@ -192,6 +192,12 @@ fn binary_dir(exe: string) -> string {
     // module header.
     let p: * u8 = exe as * u8;
     if p as i64 == 0 { return ""; }
+    // M1.A.2: empty input passes through. Pre-flip this case was reached only
+    // via a null pointer (the seed's `<literal> as * u8` cast bug turned an
+    // empty-string literal into null); the flip fixes that cast, so an empty
+    // string now arrives as a valid non-null pointer to a lone NUL. Without
+    // this guard `strrchr` finds no slash and the dir wrongly collapses to ".".
+    if strlen(p) == 0 { return ""; }
     let slash: * u8 = strrchr(p, 47);
     if slash as i64 == 0 { return "."; }
     if slash as i64 == p as i64 { return "/"; }
@@ -236,7 +242,7 @@ fn binary_dir(exe: string) -> string {
 // call site (program startup). The buffer is zero-initialized
 // so the returned `* u8 as string` views a properly
 // NUL-terminated byte sequence.
-fn exe_path() -> string ![io] {
+fn exe_path() -> * u8 ![io] {
     let buf_size: usize = 4096 as usize;
     let buf: * u8 = malloc(buf_size);
     if buf as i64 == 0 { return ""; }
@@ -317,7 +323,7 @@ fn exe_path() -> string ![io] {
 // `_canonicalize_existing_path` behavior). If `realpath`
 // fails, the un-canonicalized concat is returned — the caller
 // gets a valid string either way.
-fn resolve_runtime_root(exe_path: string) -> string ![io] {
+fn resolve_runtime_root(exe_path: * u8) -> * u8 ![io] {
     // Per the cast-quirk note in the module header, route every
     // string literal through a `string`-typed local first so the
     // `as * u8` cast picks up the alloca-backed slot rather than

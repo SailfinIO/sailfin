@@ -468,6 +468,14 @@ fn map_type_annotation(annotation: string) -> string {
         if optional_marker == "?" {
             let inner_annotation = trim_text(substring(normalized, 0, normalized.length - 1));
             if inner_annotation.length == 0 { return "i8*"; }
+            // M1.A.2: optional `string?` stays a nullable `i8*` (null = none,
+            // non-null = data pointer) — including as a struct field, where
+            // this mapper renders the layout. Scalar `string` flips to the
+            // `{i8*, i64}` aggregate, but the optional-in-container form keeps
+            // the legacy pointer shape so string ops / null checks recognise
+            // it without a `{i8*, i64}*` boxed form.
+            if inner_annotation == "string" { return "i8*"; }
+            if inner_annotation == "SfnString" { return "i8*"; }
             let inner_type = map_type_annotation(inner_annotation);
             let mut _if312: boolean = false;
             if inner_type.length == 0 { _if312 = true; }
@@ -510,11 +518,15 @@ fn map_type_annotation(annotation: string) -> string {
     if normalized == "i8" { _if314d = true; }
     if normalized == "u8" { _if314d = true; }
     if _if314d { return "i8"; }
-    if normalized == "string" { return "i8*"; }
-    // Runtime-internal by-value `SfnString` aggregate spelling (M1.A.2) — see
-    // the matching guard in `map_return_type`. Keeps incidental field/local
-    // uses of `SfnString` consistent with the `{i8*, i64}` return/param ABI.
-    if normalized == "SfnString" { return "{i8*, i64}"; }
+    // M1.A.2: the language-level `string` type lowers to the by-value
+    // `{i8*, i64}` (data, len) SfnString aggregate — the same two-eightbyte
+    // INTEGER-class layout the runtime C ABI already uses. The historical
+    // bare-`i8*` mapping is retired; data-pointer-only consumers extract slot
+    // 0 via the `coerce_pointer_or_struct` shim (core_operands.sfn).
+    let mut _is_str_ann: boolean = false;
+    if normalized == "string" { _is_str_ann = true; }
+    if normalized == "SfnString" { _is_str_ann = true; }
+    if _is_str_ann { return "{i8*, i64}"; }
     if normalized == "void" { return "void"; }
     if normalized.length > 2 {
         let suffix = substring(normalized, normalized.length - 2, normalized.length);
@@ -522,6 +534,17 @@ fn map_type_annotation(annotation: string) -> string {
             let element_annotation = trim_text(substring(normalized, 0, normalized.length - 2));
             let mut element_type = map_type_annotation(element_annotation);
             if element_type.length == 0 { return "i8*"; }
+            // M1.A.2: scalar `string` flips to the `{i8*, i64}` aggregate, but
+            // `string[]` element slots deliberately stay `i8*` for 1.0 (the
+            // aggregate-element array-header churn, #1316-adjacent, is out of
+            // scope). The array-literal lowering clamps element operands to
+            // `i8*` to match; keep the declared element type in lockstep so
+            // alloca/GEP shapes agree. Indexing an element back to a `string`
+            // value recovers the length via the coercion shim.
+            let mut _str_elem: boolean = false;
+            if element_annotation == "string" { _str_elem = true; }
+            if element_annotation == "SfnString" { _str_elem = true; }
+            if _str_elem { element_type = "i8*"; }
             // Arrays of user-value types (enums + inline structs) store the value inline.
             // `map_type_annotation` defaults user types to pointers, so strip that layer
             // when the surface syntax represents a value type.
@@ -545,6 +568,15 @@ fn map_type_annotation(annotation: string) -> string {
 fn map_struct_field_annotation(annotation: string) -> string {
     let result = map_type_annotation(annotation);
     if result == "void" { return ""; }
+    // M1.A.2: strings live as `i8*` in memory (struct/enum fields, array
+    // elements, globals) and only widen to the `{i8*, i64}` SfnString
+    // aggregate in scalar register positions (locals, params, returns). A
+    // by-value string field would shift the byte offsets of every field
+    // after it, breaking the imported-AST field-offset contract the layout
+    // engine and the canonical table encode at the baseline 8-byte width.
+    // Loading such a field into a scalar `string` recovers the length via
+    // `sfn_str_len` (the existing `i8*` -> `{i8*, i64}` coercion bridge).
+    if result == "{i8*, i64}" { return "i8*"; }
     return result;
 }
 
@@ -607,7 +639,14 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
     // `map_parameter_type` / `map_local_type` are caught too), before the
     // boxed-struct path, so it never becomes `%SfnString*`. Not a user-facing
     // type — a runtime ABI spelling only.
-    if normalized == "SfnString" { return "{i8*, i64}"; }
+    //
+    // M1.A.2: the language-level `string` now shares this same by-value
+    // aggregate ABI, so it is routed onto the identical `{i8*, i64}` return /
+    // parameter shape rather than the legacy bare `i8*`.
+    let mut _is_str_ret: boolean = false;
+    if normalized == "string" { _is_str_ret = true; }
+    if normalized == "SfnString" { _is_str_ret = true; }
+    if _is_str_ret { return "{i8*, i64}"; }
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
     if starts_with(normalized, "*") {
@@ -759,6 +798,13 @@ fn map_optional_type(context: TypeContext, annotation: string) -> string {
     }
     let inner = trim_text(substring(trimmed, 0, trimmed.length - 1));
     if inner.length == 0 { return "i8*"; }
+    // M1.A.2: optional `string?` stays a nullable `i8*` (null = none,
+    // non-null = data pointer). Scalar `string` flips to the `{i8*, i64}`
+    // aggregate, but the optional-in-container form keeps the legacy pointer
+    // shape so null checks and the `+`/comparison string paths still
+    // recognise it; length is recovered via the coercion shim where needed.
+    if inner == "string" { return "i8*"; }
+    if inner == "SfnString" { return "i8*"; }
     let inner_type = map_type_annotation(inner);
     let mut _if319: boolean = false;
     if inner_type.length == 0 { _if319 = true; }
@@ -794,6 +840,13 @@ fn map_array_pointer_type(context: TypeContext, annotation: string) -> string {
     let element_annotation = trim_text(substring(trimmed, 0, trimmed.length - 2));
     let mut element_type = map_type_annotation(element_annotation);
     if element_type.length == 0 { return "i8*"; }
+    // M1.A.2: `string[]` element slots stay `i8*` (see the matching clamp in
+    // `map_type_annotation`'s array branch); only scalar `string` flips to the
+    // `{i8*, i64}` aggregate.
+    let mut _str_elem: boolean = false;
+    if element_annotation == "string" { _str_elem = true; }
+    if element_annotation == "SfnString" { _str_elem = true; }
+    if _str_elem { element_type = "i8*"; }
     // Arrays of user-value types store the value inline.
     if layout_annotation_represents_user_value(element_annotation) {
         if ends_with_pointer_suffix(element_type) {

@@ -81,15 +81,22 @@ test "is_heap_type: pointer suffixes are heap (string, struct, array elt)" {
     assert is_heap_type("%SfnArray*");
 }
 
-test "is_heap_type: by-value aggregates are NOT heap until emit_scope_drops can release them" {
-    // `emit_scope_drops` (instructions_helpers.sfn) only knows how to load a
-    // pointer out of the alloca slot and bitcast to `i8*` before calling
-    // `sfn_rc_release`. Aggregate value types (`{i8*, i64}` for SfnString,
-    // `{T*, i64, i64}` for SfnArray, union payloads `{i32, ...}`) cannot be
-    // bitcast to `i8*`; promoting them today would either drop the wrong
-    // pointer or produce invalid LLVM. The predicate stays narrow until
-    // drop emission learns to extract the heap pointer field.
-    assert ! is_heap_type("{i8*, i64}");
+test "is_heap_type: the {i8*, i64} SfnString aggregate is heap (M1.A.2)" {
+    // M1.A.2: scalar `string` is the `{i8*, i64}` aggregate. `emit_scope_drops`
+    // / `_emit_rc_release_triplet` (instructions_helpers.sfn) now extract field
+    // 0 (the heap data pointer) before `sfn_rc_release` — byte-for-byte what
+    // the legacy `i8*` string path did — so the aggregate is droppable and
+    // therefore heap. Field 0 is unambiguous: `{i8*, i64}` is uniquely the
+    // string shape (closures are `{i8*, i8*}`, arrays `{T*, i64, i64}`).
+    assert is_heap_type("{i8*, i64}");
+}
+
+test "is_heap_type: other by-value aggregates are NOT heap until drop emission supports them" {
+    // SfnArray (`{T*, i64, i64}`) and union payloads (`{i32, ...}`) still have
+    // no field-extraction path in `_emit_rc_release_triplet`, so they stay out
+    // of the heap predicate — promoting them today would drop the wrong
+    // pointer or emit invalid LLVM. The predicate widens per-shape as drop
+    // emission learns each one.
     assert ! is_heap_type("{i8*, i64, i64}");
     assert ! is_heap_type("{ i32, i64 }");
 }

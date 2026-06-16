@@ -70,7 +70,7 @@ test_heap_let_in_try_allocates_sentinel() {
     # Carve out try_with_rc and confirm `<slot>.init = alloca i1` appears
     # exactly once (one heap-typed let inside the try body).
     local rc_block
-    rc_block="$(awk '/^define i8\* @try_with_rc/{flag=1} flag{print} /^\}/{if(flag){flag=0}}' "$ll")"
+    rc_block="$(awk '/^define {i8\*, i64} @try_with_rc/{flag=1} flag{print} /^\}/{if(flag){flag=0}}' "$ll")"
     local sentinel_count
     sentinel_count="$(echo "$rc_block" | grep -cE '%[a-zA-Z0-9_]+\.init = alloca i1' || true)"
     if [ "${sentinel_count:-0}" -ne 1 ]; then
@@ -88,7 +88,7 @@ test_sentinel_zero_initialized_in_entry() {
         return 1
     fi
     local rc_block
-    rc_block="$(awk '/^define i8\* @try_with_rc/{flag=1} flag{print} /^\}/{if(flag){flag=0}}' "$ll")"
+    rc_block="$(awk '/^define {i8\*, i64} @try_with_rc/{flag=1} flag{print} /^\}/{if(flag){flag=0}}' "$ll")"
     # The zero-init store must precede the `try0:` label (i.e., it lives
     # in `block.entry`, before any control-flow split).
     local entry_block
@@ -110,7 +110,7 @@ test_sentinel_set_true_after_value_store() {
         return 1
     fi
     local rc_block
-    rc_block="$(awk '/^define i8\* @try_with_rc/{flag=1} flag{print} /^\}/{if(flag){flag=0}}' "$ll")"
+    rc_block="$(awk '/^define {i8\*, i64} @try_with_rc/{flag=1} flag{print} /^\}/{if(flag){flag=0}}' "$ll")"
     if ! echo "$rc_block" | grep -qE 'store i1 1, i1\* %[a-zA-Z0-9_]+\.init'; then
         echo "[test]   missing 'store i1 1' for sentinel in try_with_rc"
         return 1
@@ -156,7 +156,7 @@ test_outer_let_skips_sentinel() {
     # In `try_with_rc`, `result` is bound at the function root scope
     # (outside the try body). It must NOT get a sentinel.
     local rc_block
-    rc_block="$(awk '/^define i8\* @try_with_rc/{flag=1} flag{print} /^\}/{if(flag){flag=0}}' "$ll")"
+    rc_block="$(awk '/^define {i8\*, i64} @try_with_rc/{flag=1} flag{print} /^\}/{if(flag){flag=0}}' "$ll")"
     # Exactly one sentinel total, for `s` in the try body. If `result`
     # also got one, we'd see two.
     local sentinel_count
@@ -193,7 +193,7 @@ test_catch_entry_emission_path_present() {
         return 1
     fi
     local rc_block
-    rc_block="$(awk '/^define i8\* @try_with_rc/{flag=1} flag{print} /^\}/{if(flag){flag=0}}' "$ll")"
+    rc_block="$(awk '/^define {i8\*, i64} @try_with_rc/{flag=1} flag{print} /^\}/{if(flag){flag=0}}' "$ll")"
     local catch_body
     catch_body="$(echo "$rc_block" | awk '/^catch[0-9]+:/{flag=1; next} /^[a-zA-Z0-9._]+:/{flag=0} flag{print}')"
     # M2.7b (#404): the frame-based emission calls @sfn_take_exception
