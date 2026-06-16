@@ -641,7 +641,24 @@ fn runtime_object_cache_key(src_path: string, opt_flag: string) -> string ![io] 
     // sections, and silently reusing it would defeat the strip (coarse
     // `.text`) and break the runtime-root retention. Bumping the tag
     // forces a one-time recompile so cached objects match the link flags.
-    return content + "\n" + opt_flag + "\nsecsplit1";
+    //
+    // M1.A.2 (string `i8*` -> `{i8*, i64}` aggregate flip): the runtime
+    // object key hashes only the *source* + opt-flag, not the compiler's
+    // codegen ABI. The string-ABI flip changed the emitted signatures of
+    // prelude string functions (`find_char`, `string_starts_with`,
+    // `char_code`, ...) from `i8*` to the two-word `{i8*, i64}` aggregate
+    // without touching their source, so a runtime object compiled by a
+    // pre-flip compiler (or restored from CI's `actions/cache`, or staged
+    // by the seed during bootstrap) was silently reused — its `i8*`
+    // prelude then mismatched the flipped `{i8*, i64}` call sites emitted
+    // by the new compiler, so e.g. `find_char` read its 2nd string arg out
+    // of the 1st string's length register and returned garbage (the
+    // `sailfin run` HTTP-consumer `req.path` came back empty -> 404; see
+    // test_http_capsule_serve.sh). Bump the tag to `strabi1` so every
+    // runtime object recompiles once under the aggregate ABI; future
+    // codegen-ABI changes that the source hash cannot see must bump it
+    // again (same contract as the secsplit bump above).
+    return content + "\n" + opt_flag + "\nsecsplit1-strabi1";
 }
 
 // Derive a content-addressed shared-cache `CacheKey` from a
