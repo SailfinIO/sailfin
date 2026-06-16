@@ -616,6 +616,12 @@ fn is_heap_type(llvm_type: string) -> boolean {
     if trimmed == "float" { return false; }
     if trimmed == "double" { return false; }
     if trimmed == "fp128" { return false; }
+    // M1.A.2: the scalar `{i8*, i64}` SfnString aggregate is heap-backed —
+    // its data pointer is an arena/rc allocation that still needs init-sentinel
+    // drop tracking and escape promotion, exactly as the legacy `i8*` string
+    // did. Without this arm a flipped `string` local stopped being recognised
+    // as heap, so try-body string lets lost their guarded `sfn_rc_release`.
+    if trimmed == "{i8*, i64}" { return true; }
     if ends_with_pointer_suffix(trimmed) { return true; }
     return false;
 }
