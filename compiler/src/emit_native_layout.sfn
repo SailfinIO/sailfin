@@ -266,26 +266,6 @@ fn infer_enum_aggregate_layout(context: LayoutContext, enum_name: string, varian
     };
 }
 
-// Returns a fresh `visiting` chain = copy(visiting) + name. The shared
-// `append_string` mutates its argument in place (`collection.push`), so using
-// it to extend `visiting` for a nested recursion pollutes the caller's array
-// — sibling fields of the same by-value type then see the type in `visiting`
-// and are wrongly cycle-guarded to a pointer (8 bytes). Copying first keeps
-// the cycle guard scoped to true ancestors, so a struct with two `Expression`
-// fields sizes both at the full aggregate size. (This is what the hand-pinned
-// canonical table previously compensated for.)
-fn visiting_branch(visiting: string[], name: string) -> string[] {
-    let mut copy: string[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= visiting.length { break; }
-        copy.push(visiting[i]);
-        i += 1;
-    }
-    copy.push(name);
-    return copy;
-}
-
 fn calculate_record_layout(context: LayoutContext, inputs: LayoutFieldInput[], container_kind: string, container_name: string, visiting: string[]) -> RecordLayoutResult {
     let mut diagnostics: string[] = [];
     let mut fields: StructFieldLayoutDescriptor[] = [];
@@ -406,12 +386,8 @@ fn analyze_type_layout(context: LayoutContext, visiting: string[], type_annotati
         };
     }
     if trimmed == "string" {
-        // M1.A.2: scalar `string` is the by-value `{i8*, i64}` SfnString
-        // aggregate (data pointer + length) — two eightbytes, 16 bytes,
-        // 8-byte aligned. `string?` and `string[]` stay pointer-sized (8)
-        // because they remain `i8*` (handled by the optional / array cases).
         return TypeLayoutInfo {
-            size: 16,
+            size: 8,
             align: 8,
             diagnostics: diagnostics
         };
@@ -454,7 +430,7 @@ fn analyze_type_layout(context: LayoutContext, visiting: string[], type_annotati
 
     let struct_definition = find_layout_struct_definition(context, trimmed);
     if struct_definition != null {
-        let nested_visiting = visiting_branch(visiting, trimmed);
+        let nested_visiting = append_string(visiting, trimmed);
         let record = calculate_record_layout(context, struct_definition.fields, "struct", trimmed, nested_visiting);
         let mut _ci0: int = 0;
         loop {
@@ -470,7 +446,7 @@ fn analyze_type_layout(context: LayoutContext, visiting: string[], type_annotati
     }
     let enum_definition = find_layout_enum_definition(context, trimmed);
     if enum_definition != null {
-        let nested_visiting = visiting_branch(visiting, trimmed);
+        let nested_visiting = append_string(visiting, trimmed);
         let aggregate = infer_enum_aggregate_layout(context, trimmed, enum_definition.variants, nested_visiting);
         let mut _ci1: int = 0;
         loop {
@@ -600,14 +576,6 @@ fn find_layout_enum_definition(context: LayoutContext, name: string) -> LayoutEn
 
 // ── Canonical type layouts ───────────────────────────────────────────
 fn canonical_type_layouts() -> CanonicalTypeLayout[] {
-    // M1.A.2: by-value sizes for the 16-byte `{i8*, i64}` string field ABI.
-    // These match what the layout engine now computes from the real field
-    // definitions (verified via `emit-native` on the defining modules) — the
-    // `visiting_branch` fix corrected the cycle-guard pollution that
-    // previously undercounted repeated by-value fields, so this table and the
-    // emitted `.layout` manifests agree. The table remains the source for
-    // cross-module imported types (whose definitions are absent from the
-    // importing module's layout context).
     let mut layouts: CanonicalTypeLayout[] = [];
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
         name: "Token", size: 40, align: 8
@@ -619,68 +587,66 @@ fn canonical_type_layouts() -> CanonicalTypeLayout[] {
         name: "Program", size: 8, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "TypeAnnotation", size: 16, align: 8
+        name: "TypeAnnotation", size: 8, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "TypeParameter", size: 32, align: 8
+        name: "TypeParameter", size: 24, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "Block", size: 32, align: 8
+        name: "Block", size: 24, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
         name: "SourceSpan", size: 32, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "Expression", size: 64, align: 8
+        name: "Expression", size: 48, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "Parameter", size: 48, align: 8
+        name: "Parameter", size: 40, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "WithClause", size: 64, align: 8
+        name: "WithClause", size: 48, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "ObjectField", size: 80, align: 8
+        name: "ObjectField", size: 56, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
         name: "ElseBranch", size: 16, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "ForClause", size: 136, align: 8
+        name: "ForClause", size: 104, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "MatchCase", size: 104, align: 8
+        name: "MatchCase", size: 80, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "FieldDeclaration", size: 48, align: 8
+        name: "FieldDeclaration", size: 32, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "MethodDeclaration", size: 104, align: 8
+        name: "MethodDeclaration", size: 88, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "EnumVariant", size: 32, align: 8
+        name: "EnumVariant", size: 24, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "FunctionSignature", size: 64, align: 8
+        name: "FunctionSignature", size: 56, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "TestDeclaration", size: 80, align: 8
+        name: "TestDeclaration", size: 64, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "Decorator", size: 24, align: 8
+        name: "Decorator", size: 16, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "DecoratorArgument", size: 72, align: 8
+        name: "DecoratorArgument", size: 56, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "NamedSpecifier", size: 24, align: 8
+        name: "NamedSpecifier", size: 8, align: 8
     });
-    // NOTE: `Statement` is an enum; its size is driven by the largest payload
-    // variant — `ForStatement` = ForClause(136) + Block(32) + decorators[](8)
-    // = 176 payload + 8 tag = 184 under the 16-byte string field ABI.
+    // NOTE: `Statement` is an enum; its size is driven by the largest payload variant.
     // Keep this in sync with the stage2 LLVM ABI and `ast.layout-manifest`.
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "Statement", size: 184, align: 8
+        name: "Statement", size: 144, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
         name: "EnumField", size: 8, align: 8

@@ -568,6 +568,15 @@ fn map_type_annotation(annotation: string) -> string {
 fn map_struct_field_annotation(annotation: string) -> string {
     let result = map_type_annotation(annotation);
     if result == "void" { return ""; }
+    // M1.A.2: strings live as `i8*` in memory (struct/enum fields, array
+    // elements, globals) and only widen to the `{i8*, i64}` SfnString
+    // aggregate in scalar register positions (locals, params, returns). A
+    // by-value string field would shift the byte offsets of every field
+    // after it, breaking the imported-AST field-offset contract the layout
+    // engine and the canonical table encode at the baseline 8-byte width.
+    // Loading such a field into a scalar `string` recovers the length via
+    // `sfn_str_len` (the existing `i8*` -> `{i8*, i64}` coercion bridge).
+    if result == "{i8*, i64}" { return "i8*"; }
     return result;
 }
 
