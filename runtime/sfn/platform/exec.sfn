@@ -192,6 +192,12 @@ fn binary_dir(exe: * u8) -> * u8 {
     // module header.
     let p: * u8 = exe as * u8;
     if p as i64 == 0 { return ""; }
+    // M1.A.2: empty input passes through. Pre-flip this case was reached only
+    // via a null pointer (the seed's `<literal> as * u8` cast bug turned an
+    // empty-string literal into null); the flip fixes that cast, so an empty
+    // string now arrives as a valid non-null pointer to a lone NUL. Without
+    // this guard `strrchr` finds no slash and the dir wrongly collapses to ".".
+    if strlen(p) == 0 { return ""; }
     let slash: * u8 = strrchr(p, 47);
     if slash as i64 == 0 { return "."; }
     if slash as i64 == p as i64 { return "/"; }
