@@ -1249,13 +1249,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // "monotonic_millis" → sfn_clock_millis) so it is not duplicated
     // here.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "find_char", symbol: "find_char", return_type: "i64", parameter_types: ["i8*", "i8*", "i64"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "find_char", symbol: "find_char", return_type: "i64", parameter_types: ["{i8*, i64}", "{i8*, i64}", "i64"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string_starts_with", symbol: "string_starts_with", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "string_starts_with", symbol: "string_starts_with", return_type: "i1", parameter_types: ["{i8*, i64}", "{i8*, i64}"], effects: [], native_signature: null, c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "record_eq_flag_message", symbol: "record_eq_flag_message", return_type: "i1", parameter_types: ["i1", "i8*", "i1", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "record_eq_flag_message", symbol: "record_eq_flag_message", return_type: "i1", parameter_types: ["i1", "{i8*, i64}", "i1", "{i8*, i64}"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
     return descriptors;
