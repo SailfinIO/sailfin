@@ -127,6 +127,21 @@ fn _emit_rc_release_triplet(binding: LocalBinding, suffix: string) -> string[] {
     if binding.llvm_type == "i8*" {
         lines.push("  " + drop_temp + " = load i8*, i8** " + binding.pointer);
         lines.push("  call void @sfn_rc_release(i8* " + drop_temp + ")");
+    } else if binding.llvm_type == "{i8*, i64}" {
+        // M1.A.2: a scalar `string` is the `{i8*, i64}` SfnString aggregate.
+        // The heap allocation `sfn_rc_release` must free is the data pointer
+        // in field 0 — releasing it is byte-for-byte what the legacy `i8*`
+        // string path did. The aggregate itself cannot be `bitcast` to `i8*`
+        // (the generic branch below would emit invalid IR), so extract field
+        // 0 first. `{i8*, i64}` is uniquely the string shape (closures are
+        // `{i8*, i8*}`, arrays `{T*, i64, i64}`), so field 0 is always the
+        // heap data pointer.
+        let raw_temp = binding.pointer + ".drop_raw" + suffix;
+        lines.push("  " + raw_temp + " = load {i8*, i64}, {i8*, i64}* "
+            + binding.pointer);
+        lines.push("  " + drop_temp + " = extractvalue {i8*, i64} " + raw_temp
+            + ", 0");
+        lines.push("  call void @sfn_rc_release(i8* " + drop_temp + ")");
     } else {
         let raw_temp = binding.pointer + ".drop_raw" + suffix;
         lines.push("  " + raw_temp + " = load " + binding.llvm_type + ", "
