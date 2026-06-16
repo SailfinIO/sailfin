@@ -84,13 +84,31 @@ statement, or invalid IR), root-caused and fixed:
 `test_struct_field_separator.sh`'s `%Pair = type { i8*, double }` stays valid —
 struct string fields remain `i8*`.
 
-## Known pre-existing failures (NOT M1.A.2)
+## The `sailfin run` cache landmine (fixed)
 
-`test_http_capsule_serve.sh` (the loopback POST round-trip) and `test_lock.sh`
-fail **identically on the clean `origin/main` baseline** inside this sandbox
-container (loopback/networking + workspace-detection artifacts); they pass on
-GitHub CI for `main`. They are container-environment issues, not introduced by
-this branch.
+`test_http_capsule_serve.sh` failed on CI because the runtime-object cache key
+(`runtime_object_cache_key`) hashed only source + opt-flag, never the compiler's
+codegen ABI. The flip changed the emitted signatures of the prelude string
+functions (`find_char`, `string_starts_with`, `char_code`, …) from `i8*` to
+`{i8*, i64}` without changing their source, so a seed-compiled (or CI-restored)
+`i8*` prelude object was silently reused by the flipped compiler's `{i8*, i64}`
+call sites — `find_char` read its 2nd string arg out of the 1st string's length
+register, `req.path` came back empty, and every route 404'd. Fixed by bumping
+the cache tag (`secsplit1` → `secsplit1-strabi1`), forcing a one-time runtime
+recompile under the aggregate ABI. Green on linux-x86_64; macOS body-drain
+passes too.
+
+## Known out-of-scope failures (NOT M1.A.2)
+
+- **macOS arm64 `e2e-sh-2` / `test_http_capsule_serve.sh` "imported serve lowers
+  to the capsule fn" gate (#1370).** Deterministic macOS-only: the imported
+  sfn/http `serve` isn't staged into the lowering `functions` list on Darwin, so
+  the builtin `@sfn_serve` hijacks the call (`core.sfn:1431`). Passes on linux
+  and on `main`'s macOS; an import-context staging defect orthogonal to the
+  string flip. Tracked in #1370 — this PR lands linux-green.
+- Inside this sandbox container, `test_http_capsule_serve.sh` / `test_lock.sh`
+  also fail on the clean `origin/main` baseline (loopback/networking +
+  workspace-detection artifacts); they pass on GitHub CI for `main`.
 
 ## Follow-ups this unblocks
 
