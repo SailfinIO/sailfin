@@ -957,7 +957,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "strings_equal", symbol: "strings_equal", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_str_eq", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "char_code", symbol: "char_code", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+        target: "char_code", symbol: "char_code", return_type: "i64", parameter_types: ["{i8*, i64}"], effects: [], native_signature: null, c_abi_return_type: null
     });
     // #874: `char_from_code(code)` — raw single-byte string constructor, the
     // write counterpart to `char_code`'s read. Bare-name descriptor so user
