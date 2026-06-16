@@ -10,6 +10,7 @@ import {
     LayoutManifest,
     NativeEnum,
     NativeFunction,
+    NativeImport,
     NativeInterface,
     NativeStruct
 } from "../../native_ir";
@@ -20,6 +21,7 @@ import {
     parse_native_structs_for_import
 } from "../../native_ir_api";
 import { apply_layout_manifest_to_module } from "../imports";
+import { find_function_by_name_or_import } from "../rendering_helpers";
 import {
     extend_native_enums,
     extend_native_functions,
@@ -55,6 +57,57 @@ fn parse_single_import_functions(native_text: string) -> NativeFunction[] {
 // Extract struct methods from applied structs.
 fn extract_import_struct_methods(applied_structs: NativeStruct[]) -> NativeFunction[] {
     return flatten_struct_methods(applied_structs);
+}
+
+// Aliased function imports (`import { make as m } from "..."`) bind the call
+// site to the LOCAL alias name (`m`), but imported function signatures are
+// keyed by the EXPORTED name (`make`, possibly mangled `make__<provider>`).
+// The IR-text symbol-mangling pass already rewrites the aliased call symbol
+// (`@m` → `@make__<provider>`), so the only remaining gap is
+// expression-lowering SIGNATURE resolution: `resolve_call_signature` looks the
+// call target (`m`) up in the function table, finds nothing, and emits the
+// `cannot resolve return type` fatal.
+//
+// Mirror `localize_import_symbols_for_program` (effect_imports.sfn): for each
+// aliased specifier, clone the provider's signature under the local alias name
+// so the resolver matches. `candidate_functions` is the combined context table
+// (local + imported + struct methods); `find_function_by_name_or_import`
+// resolves the export by exact name or a unique mangled `name__<provider>`
+// suffix, covering both the bare cross-module case and the mangled test-runner
+// case. The clone carries an empty body — it is a resolution-only entry, never
+// emitted as a definition or a `declare`.
+fn build_import_alias_signatures(imports: NativeImport[], candidate_functions: NativeFunction[]) -> NativeFunction[] {
+    let mut aliases: NativeFunction[] = [];
+    if imports == null { return aliases; }
+    let mut i: int = 0;
+    loop {
+        if i >= imports.length { break; }
+        let imp = imports[i];
+        i += 1;
+        if imp == null { continue; }
+        if imp.kind != "import" { continue; }
+        let specs = imp.specifiers;
+        if specs == null { continue; }
+        let mut s: int = 0;
+        loop {
+            if s >= specs.length { break; }
+            let spec = specs[s];
+            s += 1;
+            if spec == null { continue; }
+            let alias_opt = spec.alias;
+            if alias_opt == null { continue; }
+            let alias_name: string = alias_opt;
+            if alias_name.length == 0 { continue; }
+            if alias_name == spec.name { continue; }
+            let entry = find_function_by_name_or_import(candidate_functions, spec.name);
+            if entry == null { continue; }
+            let src: NativeFunction = entry;
+            aliases.push(NativeFunction {
+                name: alias_name, is_async: src.is_async, parameters: src.parameters, return_type: src.return_type, effects: src.effects, decorators: src.decorators, is_extern: src.is_extern, instructions: []
+            });
+        }
+    }
+    return aliases;
 }
 
 // Gather the per-import contribution (structs/enums/interfaces/functions/

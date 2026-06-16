@@ -98,7 +98,6 @@ import {
 import {
     toml_add_dependency,
     toml_add_dev_dependency,
-    toml_generate,
     toml_get_dependencies,
     toml_get_name,
     toml_get_string,
@@ -3532,41 +3531,6 @@ fn handle_add_command(args: string[]) -> int ![io] {
     return 0;
 }
 
-fn handle_init_command(args: string[]) -> int ![io] {
-    if args.length != 1 {
-        print("usage: sfn init");
-        return 2;
-    }
-    if fs.exists("capsule.toml") {
-        print("capsule.toml already exists in this directory");
-        return 1;
-    }
-    let cwd = _get_env_cmd("PWD");
-    let mut pkg_name: string = "my-capsule";
-    if cwd.length > 0 {
-        let mut last_slash: int = -1;
-        let mut si: int = 0;
-        loop {
-            if si >= cwd.length { break; }
-            if substring(cwd, si, si + 1) == "/" { last_slash = si; }
-            si += 1;
-        }
-        if last_slash >= 0 {
-            if last_slash < cwd.length - 1 {
-                pkg_name = substring(cwd, last_slash + 1, cwd.length);
-            }
-        }
-    }
-    let toml_text = toml_generate(pkg_name, "0.1.0", "", "src/main.sfn");
-    fs.writeFile("capsule.toml", toml_text);
-    if !fs.exists("src") { fs.createDirectory("src", true); }
-    if !fs.exists("src/main.sfn") {
-        fs.writeFile("src/main.sfn", "fn main() ![io] {\n    print(\"Hello, Sailfin!\");\n}\n");
-    }
-    print("initialized capsule: " + pkg_name);
-    return 0;
-}
-
 // `sfn lock`: materialize `workspace.lock` at the workspace root. Walks up
 // from the current directory for `workspace.toml`, resolves the member graph
 // into the flat lock-entry set (#1069), serializes it with the
@@ -3648,67 +3612,6 @@ fn handle_login_command(args: string[]) -> int ![io] {
     }
 
     print("credentials saved to " + cred_path);
-    return 0;
-}
-
-fn handle_guillermo_command() -> int ![io] {
-    print("                                                                               ++++++++++++         ");
-    print("                                                                       ++++++++++++++##*++++++++    ");
-    print("                                                                   ++++++++++++#%%%%%%%%%++++++++++ ");
-    print("                                                                 ++++++++*#%%%%%%%%%%%%%%+++++++++++");
-    print("                                                              #++++++++#%%%%%%%#*++++++++++++++++++*");
-    print("                                                            +++++++++#####*+++++++++++++++++++++++% ");
-    print("                                                         ++++++++++#####+++++++++++++++++++++++##   ");
-    print("                                                    +++++++++++++####%%#++++++*++++++++++++*##      ");
-    print("                                                +++++++++++++++*#####%%%%***+++++++++++#***         ");
-    print("                                            ++++++++++++++++++#*##**#%%%%%%#+++++*##****            ");
-    print("                                        ++++++++++++++++++++**********%%%%%%%%#*****#%              ");
-    print("                                     ++++++++++++++++++++#%%%#*******************%%                 ");
-    print("                                 +++++++++++++++++++++#%%%%%%%%%%##*******##%%%%%                   ");
-    print("                              ++++++++++++++++++++++%%%%#**#%%%%%%%%%%%%%%%%%%%                     ");
-    print("                           +++++++++++++++++++++++#%%%++++++++%%%%%%%%%%%%%%%                       ");
-    print("                        %%#*++++++++++++*********%%%++++++++++%%%%%%%%%%%%%                         ");
-    print("                      %%%%%%%%#****************%%%*+++++++++++%%%%%%%%%%%                           ");
-    print("                   *****%%%%%%%%%*************%%%+++++++++++#%%%%%%%%%%%                            ");
-    print("                 +++++****#%%%%%%%%*********#%%*++++++++++#%%%%%%%%%%%%%                            ");
-    print("               *++++++++****#%%%%%%%*******%%%*+++++++++*%%%%%%%%%%%%%%%                            ");
-    print("             %%%%%%%%%#+++****%%%%%%#*****%%%%+++++++++%%%%%%%%%%%%%%%%%                            ");
-    print("           %%%%###%%%%%%%%%#***%%%%%%***%%%%%%+++++++%%%%%%%%%  %%%%%%%#                            ");
-    print("          %%++++++++#%%%%%%%%%%%%%%%%%%%%%%%%%+++++++*%%%%%     %%%%%%####                          ");
-    print("        %%#+++++++++++#%%%%%%%%%%%%%%%%%%%%%%%*+++++++#%          %%########                        ");
-    print("       %%%+++++++++++++++#%%#%%%%%%%%%%%%%%%%%%*++++++++           ########*********                ");
-    print("      %%%%+++++++++++++++++++++++%%%%%%%%%%%%%%%+++++++++            ####*********++                ");
-    print("     %%%%%*+++++++++++++++++++++++#%%%%%%%%      +++++++++             #*********+                  ");
-    print("    %%%%%%%%*++++++++++++++++++++++%              ****+++++++++++       *******++++++               ");
-    print("   %%%%%%%%%%%%%%#*++++++++++++++++                ********++++++        *** ++++  +++              ");
-    print("   %%%%%%%%%%%%%%%%   +++++++++++                   **********           ***  ++++                  ");
-    print("  %%%%%%%%%%%%%%%    +++++++++++                     ************                                   ");
-    print(" %%%%%%%%%%%%%%    ***++++++++                        ** ****  ****                                 ");
-    print(" %%%%%%%%%%%%%   *******++++                          ***  ***                                      ");
-    print(" %%%%%%%%%%%%   ***********                            *    ***                                     ");
-    print("%%%%%%%%%%%     **********                                                                          ");
-    print("%%%%%%%%%%%      *************                                                                      ");
-    print("%%%%%%%%%%        ***************                                                                   ");
-    print("%%%%%%%%%%         **** ****                                                                        ");
-    print("%%%%%%%%%            ***  ****                                                                      ");
-    print("%%%%%%%%%             **    ***                                                                     ");
-    print("%%%%%%%%%                                                                                           ");
-    print(" %%%%%%%%%                                                            ***                           ");
-    print(" %%%%%%%%%                                                           ***                            ");
-    print("  %%%%%%%%%                                                         ****                            ");
-    print("   %%%%%%%%%                                                       ***                              ");
-    print("   %%%%%%%%%%                                                     ***                               ");
-    print("     %%%%%%%%%                                                  ****                                ");
-    print("      %%%%%%%%%%                                              ##***                                 ");
-    print("       %%%%%%%%%%%                                          #####                                   ");
-    print("         %%%%%%%%%%%                                      #####                                     ");
-    print("           %%%%%%%%%%%%                                ######                                       ");
-    print("              %%%%%%%%%%%%%                        ########                                         ");
-    print("                 %%%%%%%%%%%%%%%%%           ###########                                            ");
-    print("                     %%%%%%%%%%%%%%%%%%%%%%%%%%#####                                                ");
-    print("                           %%%%%%%%%%%%%%%%%%%                                                      ");
-    print("");
-    print("  What's good yo! I'm Guillermo, straight outta the codebase kickin' it 🦎");
     return 0;
 }
 
@@ -3803,9 +3706,7 @@ export {
     handle_package_command,
     handle_add_command,
     handle_config_command,
-    handle_init_command,
     handle_lock_command,
     handle_login_command,
-    handle_guillermo_command,
     handle_fmt_command
 };
