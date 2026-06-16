@@ -307,6 +307,14 @@ fn closure_field_llvm_type(capture: Capture) -> string {
     let mapped = map_type_annotation(annotation);
     if mapped.length == 0 { return "i8*"; }
     if mapped == "void" { return "i8*"; }
+    // M1.A.2: a closure env is a heap container struct holding captures by
+    // value, so a captured `string` rides as an `i8*` data pointer (the same
+    // in-memory container shape as struct fields / array elements), not the
+    // scalar `{i8*, i64}` SfnString aggregate. The capture is widened back to
+    // the aggregate via the i8* -> {i8*, i64} bridge when the lambda body
+    // loads it into a scalar. Keeping the env field pointer-sized preserves
+    // the closure-env layout contract unchanged across the flip.
+    if mapped == "{i8*, i64}" { return "i8*"; }
     return mapped;
 }
 
