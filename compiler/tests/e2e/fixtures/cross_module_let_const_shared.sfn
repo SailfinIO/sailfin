@@ -1,0 +1,26 @@
+// Cross-module module-level `let` constant fixture for issue #1368.
+//
+// Pairs with `compiler/tests/e2e/cross_module_let_const_test.sfn`.
+//
+// Module-level `let` constants lower to an LLVM global. Before #1368 the
+// producer emitted them with `internal` linkage and the importing module
+// never declared/loaded the symbol, so a cross-module (and cross-capsule)
+// reference fell through expression lowering to the zero-default recovery
+// in statement lowering — every imported constant evaluated to `0`,
+// silently. `EXIT_OK == 0` masked the bug until a non-zero consumer
+// (`sfn init`, importing `sfn/cli`'s `EXIT_*`) appeared. These fixtures
+// pin non-zero values (and a negative) end to end so a regression that
+// reintroduces the zero substitution fails the paired test.
+let CONST_ZERO: int = 0;
+let CONST_ONE: int = 1;
+let CONST_USAGE: int = 2;
+let CONST_INTERNAL: int = 70;
+let CONST_NEG: int = -5;
+
+export {
+    CONST_ZERO,
+    CONST_ONE,
+    CONST_USAGE,
+    CONST_INTERNAL,
+    CONST_NEG
+};

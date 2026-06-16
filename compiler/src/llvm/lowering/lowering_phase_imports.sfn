@@ -8,6 +8,7 @@
 // extend_native_functions) from the orchestrator's import set.
 import {
     LayoutManifest,
+    NativeBinding,
     NativeEnum,
     NativeFunction,
     NativeImport,
@@ -15,13 +16,16 @@ import {
     NativeStruct
 } from "../../native_ir";
 import {
+    parse_native_bindings_from_text,
     parse_native_enums_for_import,
     parse_native_functions_for_import,
+    parse_native_imports_for_import,
     parse_native_interfaces_for_import,
     parse_native_structs_for_import
 } from "../../native_ir_api";
 import { apply_layout_manifest_to_module } from "../imports";
-import { find_function_by_name_or_import } from "../rendering_helpers";
+import { collect_exported_symbol_names, find_function_by_name_or_import } from "../rendering_helpers";
+import { string_array_contains } from "../utils";
 import {
     extend_native_enums,
     extend_native_functions,
@@ -42,6 +46,33 @@ struct ImportedModuleSymbols {
     interfaces: NativeInterface[];
     functions: NativeFunction[];
     struct_methods: NativeFunction[];
+    bindings: NativeBinding[];
+}
+
+// Collect the module-level `let` constants an imported text EXPORTS (#1368).
+// Only exported bindings are surfaced: a producer's non-exported globals are
+// an implementation detail the importer must not materialise. The importer
+// value-inlines each exported constant into its own module
+// (`lower_imported_bindings_to_globals`), so the producer's value is read
+// directly with no cross-object link dependency.
+fn parse_single_import_exported_bindings(native_text: string) -> NativeBinding[] {
+    let mut exported: NativeBinding[] = [];
+    let all_bindings = parse_native_bindings_from_text(native_text);
+    if all_bindings.length == 0 { return exported; }
+    let exported_names = collect_exported_symbol_names(parse_native_imports_for_import(native_text));
+    if exported_names.length == 0 { return exported; }
+    let mut index: int = 0;
+    loop {
+        if index >= all_bindings.length { break; }
+        let binding = all_bindings[index];
+        index += 1;
+        if binding == null { continue; }
+        if binding.name == null { continue; }
+        if string_array_contains(exported_names, binding.name) {
+            exported.push(binding);
+        }
+    }
+    return exported;
 }
 
 // Parse imported interfaces from a single import text.
@@ -122,6 +153,7 @@ fn gather_imported_module_symbols(safe_imported_native_texts: string[], safe_imp
     let mut imported_interfaces: NativeInterface[] = [];
     let mut imported_functions: NativeFunction[] = [];
     let mut imported_struct_methods: NativeFunction[] = [];
+    let mut imported_bindings: NativeBinding[] = [];
 
     let manifest_count = safe_imported_manifests.length;
     let mut text_index: int = 0;
@@ -157,6 +189,13 @@ fn gather_imported_module_symbols(safe_imported_native_texts: string[], safe_imp
         imported_functions = extend_native_functions(imported_functions, applied_functions);
         let imported_methods = extract_import_struct_methods(applied_structs);
         imported_struct_methods = extend_native_functions(imported_struct_methods, imported_methods);
+        let exported_bindings = parse_single_import_exported_bindings(native_text);
+        let mut bi: int = 0;
+        loop {
+            if bi >= exported_bindings.length { break; }
+            imported_bindings.push(exported_bindings[bi]);
+            bi += 1;
+        }
         text_index += 1;
     }
 
@@ -176,6 +215,7 @@ fn gather_imported_module_symbols(safe_imported_native_texts: string[], safe_imp
         enums: imported_enums,
         interfaces: imported_interfaces,
         functions: imported_functions,
-        struct_methods: imported_struct_methods
+        struct_methods: imported_struct_methods,
+        bindings: imported_bindings
     };
 }

@@ -1,0 +1,36 @@
+// Runtime regression for issue #1368.
+//
+// Cross-module / cross-capsule import of a module-level `let` constant
+// must resolve to the producer's defined value. Pre-fix the importer
+// loaded a zero: the producer emitted the constant as an `internal global`
+// (invisible across the link) and the importing module never declared or
+// loaded the symbol, so the reference fell through expression lowering to
+// the zero-default recovery in statement lowering. Every imported constant
+// evaluated to `0` — a silent miscompile that `EXIT_OK == 0` masked until
+// a non-zero consumer (`sfn init`) surfaced it.
+//
+// Post-fix the producer exports the constant with external linkage and the
+// importer declares (`@global.<name> = external global <ty>`) and loads it,
+// so the value is the one the producing module defined. These assertions
+// fail pre-fix (the non-zero constants read back as `0`) and pass post-fix.
+import {
+    CONST_ZERO,
+    CONST_ONE,
+    CONST_USAGE,
+    CONST_INTERNAL,
+    CONST_NEG
+} from "./fixtures/cross_module_let_const_shared";
+
+test "cross-module let const: non-zero values resolve to the producer's value (#1368)" {
+    assert CONST_ONE == 1;
+    assert CONST_USAGE == 2;
+    assert CONST_INTERNAL == 70;
+}
+
+test "cross-module let const: zero baseline still resolves" {
+    assert CONST_ZERO == 0;
+}
+
+test "cross-module let const: negative value resolves" {
+    assert CONST_NEG == -5;
+}
