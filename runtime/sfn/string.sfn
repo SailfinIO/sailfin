@@ -64,8 +64,11 @@ extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
 
 extern fn memchr(s: * u8, c: i32, n: usize) -> * u8;
 
-// M2.5 (#403): `strtod` powers the wave-2 `sfn_str_sfn_to_number`
-// proof-of-life trampoline below — the architect spec calls for a
+// #1372: bounded length scan (16 MiB cap) for `sfn_str_len`/`sfn_str_eq`.
+extern fn strnlen(s: * u8, n: usize) -> usize;
+
+// M2.5 (#403): `strtod` powers the real Sailfin `sfn_str_to_number`
+// body below (#1372) — the architect spec calls for a
 // stack-buffered NUL-terminated copy of an SfnString followed by
 // `strtod` parsing. Today's `* u8` payload is already
 // NUL-terminated (literal lowering + arena-routed concat preserve
@@ -80,10 +83,6 @@ extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
 // module a legal Sailfin call surface for its proof-of-life
 // emission.
 extern fn sailfin_runtime_string_length(s: * u8) -> i64;
-
-extern fn strings_equal(a: * u8, b: * u8) -> bool;
-
-extern fn substring_unchecked(text: * u8, start: f64, end: f64) -> * u8;
 
 // M2.4b (#398) + #715: the C-side allocating ops. The Sailfin
 // trampolines below preserve the `sfn_str_sfn_*` infix pattern
@@ -153,45 +152,128 @@ extern fn sfn_arena_global() -> * u8;
 
 extern fn sfn_arena_enabled() -> bool;
 
-// `sfn_str_sfn_len(s)` — Sailfin-side length recovery for the
-// SfnString aggregate. Architect spec
-// (`runtime_architecture.md` §2.2): direct field access on the
-// aggregate's `len` slot, no runtime call. Today's bodies still
-// trampoline through the C scanner because the aggregate-typed
-// parameter flip (M1.A.2) hasn't landed yet; the legacy `i8*`
-// fallback path on the compiler side keeps consuming
-// NUL-terminated buffers.
-fn sfn_str_sfn_len(s: * u8) -> i64 {
-    return sailfin_runtime_string_length(s);
+// #1372: UTF-8 byte length of a validated codepoint — mirrors the
+// branch widths of the C `_utf8_encode`. Used to size an immediate-
+// codepoint pseudo-pointer's grapheme without materialising it (the
+// owning `sfn_str_decode_owned` bridge mallocs per call, which would
+// leak unboundedly on the `char_at`-result hot path — see `sfn_str_len`).
+// NB: decimal literals (128/2048/65536) deliberately — the seed lexer has no
+// `0x` hex support (hex literals silently lower to 0). Decimal is exact and
+// portable across seeds; flip to hex once the lexer learns `0x`.
+fn _sfn_utf8_byte_len(cp: i64) -> i64 {
+    if cp < 128 { return 1; }
+    if cp < 2048 { return 2; }
+    if cp < 65536 { return 3; }
+    return 4;
 }
 
-// `sfn_str_sfn_eq(a, b)` — byte-for-byte equality for two
-// SfnStrings. Architect spec: `len` compare followed by
-// `memcmp(a.data, b.data, a.len)`. Today's body delegates to the
-// C `strings_equal` entrypoint to avoid a second comparison
-// strategy until the aggregate flip lands.
-fn sfn_str_sfn_eq(a: * u8, b: * u8) -> bool { return strings_equal(a, b); }
-
-// `sfn_str_sfn_slice(text, start, end)` — substring view over
-// `text[start..end]`. The architect spec's end-state returns a
-// non-owning `SfnSlice { data: text.data + start, len: end - start }`,
-// but a non-owning view CANNOT be made sound over today's string
-// representation: `text` may be an immediate-codepoint tagged
-// pseudo-pointer (`(cp << 32)`, still produced + guarded throughout
-// `runtime/native/src/sailfin_runtime.c`), so `text + start` is not a
-// real address and any later deref of the view reads arbitrary memory.
-// A sound `slice -> Slice` therefore depends on the SfnString aggregate
-// flip retiring the immediate-pseudo-pointer encoding (tracked at #1283
-// — was the comment-only "M1.A.2" tag). Until then `slice` keeps the
-// allocating `* u8` body (delegating to the C `substring_unchecked`,
-// which materialises a real buffer and clamps the `f64` indices via
-// `_clamp_to_i64`), so #1217 migrates only `append`/`concat` onto the
-// owned surface. The `f64` start/end shape mirrors the registry
-// signature so call sites need no coercion shim.
-fn sfn_str_sfn_slice(text: * u8, start: f64, end: f64) -> * u8 {
-    return substring_unchecked(text, start, end);
+// #1372: the `i`-th UTF-8 byte (0-based) of a validated codepoint `cp`
+// whose encoded length is `n`. Byte-for-byte the C `_utf8_encode` layout.
+// Decimal masks (seed lexer has no `0x`): 0xff=255, 0xc0=192, 0x3f=63,
+// 0x80=128, 0xe0=224, 0xf0=240.
+fn _sfn_utf8_byte(cp: i64, n: i64, i: i64) -> i64 {
+    if n == 1 { return cp & 255; }
+    if n == 2 {
+        if i == 0 { return 192 | (cp >> 6); }
+        return 128 | (cp & 63);
+    }
+    if n == 3 {
+        if i == 0 { return 224 | (cp >> 12); }
+        if i == 1 { return 128 | ((cp >> 6) & 63); }
+        return 128 | (cp & 63);
+    }
+    if i == 0 { return 240 | (cp >> 18); }
+    if i == 1 { return 128 | ((cp >> 12) & 63); }
+    if i == 2 { return 128 | ((cp >> 6) & 63); }
+    return 128 | (cp & 63);
 }
 
+// #1372: compare an immediate codepoint `cp` (a single grapheme) against
+// a real, deref-safe string `real` of byte length `len`. Reproduces the
+// `strcmp(utf8(cp), real)` arm of the C `_strings_equal_fast` without
+// allocating — the loop is bounded by the UTF-8 width (<= 4).
+fn _sfn_imm_eq_real(cp: i64, real: * u8, len: i64) -> bool {
+    let n: i64 = _sfn_utf8_byte_len(cp);
+    if len != n { return false; }
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        if sfn_str_read_byte(real, i) != _sfn_utf8_byte(cp, n, i) {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+// `sfn_str_len(s)` — #1372 (C5 of epic #1308): the real Sailfin body for
+// the `string.length` emission target (the C `sfn_str_len` def is now
+// `static`). Classifies an immediate-codepoint pseudo-pointer FIRST via the
+// non-allocating `sfn_str_immediate_codepoint` bridge (the #714/#716 crash
+// class — `char_at` results arrive tagged; `decode_owned` would malloc per
+// call and leak on this hot path), returning the codepoint's UTF-8 byte
+// width. A real pointer is bounded-scanned with libc `strnlen` (16 MiB cap)
+// after `decode_owned` (a pass-through that does NOT allocate for real
+// pointers but bumps the call-seq, matching the #1315 accessor discipline).
+// Byte-identical to the retired `sailfin_runtime_string_length` delegator,
+// whose non-ASAN path is exactly `strnlen(s, 16 MiB)`.
+fn sfn_str_len(s: * u8) -> i64 {
+    if (s as i64) == 0 { return 0; }
+    let cp: i64 = sfn_str_immediate_codepoint(s);
+    if cp >= 0 { return _sfn_utf8_byte_len(cp); }
+    let real: * u8 = sfn_str_decode_owned(s);
+    return strnlen(real, 16777216) as i64;
+}
+
+// `sfn_str_eq(a, b)` — #1372: the real Sailfin body for the string `==`
+// emission target (the C `sfn_str_eq` def is now `static`). Reproduces
+// `_strings_equal_fast` arm-for-arm: pointer-equal (covers both-null and two
+// identical immediates, whose `(cp<<32)` values match) is equal;
+// exactly-one-null is not; two immediates compare by codepoint; an immediate
+// vs a real string compares the codepoint's UTF-8 bytes against the real
+// bytes (`_sfn_imm_eq_real`); two real strings compare by length + `memcmp`.
+// Immediates are classified via the non-allocating `sfn_str_immediate_codepoint`
+// bridge first — string `==` compares `char_at` results (tagged pseudo-
+// pointers, #714/#716), so an unconditional `decode_owned` would malloc per
+// comparison and leak. The real-involved paths route the (real) operand
+// through `decode_owned` (pass-through, no alloc) for its call-seq bump,
+// preserving the #892 concat-reuse invalidation the C `sfn_str_eq` made on entry.
+fn sfn_str_eq(a: * u8, b: * u8) -> bool {
+    if (a as i64) == (b as i64) { return true; }
+    if (a as i64) == 0 { return false; }
+    if (b as i64) == 0 { return false; }
+    let ca: i64 = sfn_str_immediate_codepoint(a);
+    let cb: i64 = sfn_str_immediate_codepoint(b);
+    if ca >= 0 {
+        if cb >= 0 { return ca == cb; }
+        let rb: * u8 = sfn_str_decode_owned(b);
+        let lb: i64 = strnlen(rb, 16777216) as i64;
+        return _sfn_imm_eq_real(ca, rb, lb);
+    }
+    let ra: * u8 = sfn_str_decode_owned(a);
+    if cb >= 0 {
+        let la: i64 = strnlen(ra, 16777216) as i64;
+        return _sfn_imm_eq_real(cb, ra, la);
+    }
+    let la2: i64 = strnlen(ra, 16777216) as i64;
+    let lb2: i64 = strnlen(b, 16777216) as i64;
+    if la2 != lb2 { return false; }
+    return memcmp(ra, b, la2 as usize) == 0;
+}
+
+// `sfn_str_slice(text, start, end)` — #1372: the real Sailfin body for the
+// `substring` / `string.slice` emission target (the C `sfn_str_slice` def is
+// now `static`). Keeps the ALLOCATING shape: clamps the `f64` indices to i64
+// and calls the i64 substring entrypoint `sailfin_runtime_substring_unchecked`,
+// which materialises a real, decode-safe buffer. It does NOT call the
+// `substring_unchecked` C wrapper (a registry target whose `native_signature`
+// is `sfn_str_slice` → infinite self-recursion). The `f64 -> i64` clamp is
+// inlined: NaN maps to 0 (`v != v`), in-range doubles truncate toward zero;
+// substring indices are small, so the C `_clamp_to_i64` INT64 saturation arms
+// are unnecessary. A non-owning `Slice` view stays blocked on #1283 (an
+// immediate-codepoint pseudo-pointer has no real `text + start` address).
+// `sfn_str_slice` stays the C emission target in this delegating wave;
+// flips to a Sailfin body once a seed with the f64-param fix is pinned.
 // `sfn_str_sfn_to_cstr(s)` — NUL-terminated C string view of `s`.
 // Today's strings already carry a trailing NUL (the literal
 // lowering in `core_strings.sfn::lower_string_literal` writes one
@@ -234,13 +316,13 @@ fn sfn_str_sfn_from_cstr(s: * u8) -> * u8 { return s; }
 // `SAILFIN_USE_ARENA=0` opt-out (ASAN / diagnostics) is honored — when
 // disabled, `arena_addr` is `0` and `owned_buf_new` falls back to
 // libc-backed storage. Params are unchanged (`* u8`, `* u8`) — the byte
-// lengths are recovered via the local `sfn_str_sfn_len`. The two
+// lengths are recovered via the local `sfn_str_len`. The two
 // `owned_buf_append` calls are moves of the unique buffer
 // (consume-and-return); the raw extern interior they route through sits
 // behind `unsafe` inside `ownedbuf.sfn`.
 fn sfn_str_sfn_concat(a: * u8, b: * u8) -> OwnedBuf {
-    let a_len: i64 = sfn_str_sfn_len(a);
-    let b_len: i64 = sfn_str_sfn_len(b);
+    let a_len: i64 = sfn_str_len(a);
+    let b_len: i64 = sfn_str_len(b);
     let mut arena_addr: i64 = 0;
     if sfn_arena_enabled() { arena_addr = sfn_arena_global() as i64; }
     let total: i64 = a_len + b_len;
@@ -393,14 +475,26 @@ fn sfn_str_sfn_from_byte(byte_value: i64) -> * u8 {
     return sfn_str_from_byte(byte_value);
 }
 
-// `sfn_str_sfn_to_number(s)` — parse `s` as a decimal `f64`.
-// Architect spec marshals an SfnString into a stack-buffered
-// NUL-terminated copy before calling `strtod`; today's body
-// reaches `strtod` directly against the already-NUL-terminated
-// `* u8` payload (literal lowering + arena-routed concat preserve
-// the +1 NUL byte). Passes `null` for `endptr` since the parsed
-// length is not exposed at this surface.
-fn sfn_str_sfn_to_number(s: * u8) -> f64 { return strtod(s, null); }
+// `sfn_str_to_number(s)` — #1372: the real Sailfin body for the
+// `string.to_number` emission target (the C `sfn_str_to_number` def is
+// now `static`). Classifies an immediate-codepoint pseudo-pointer FIRST
+// via the non-allocating `sfn_str_immediate_codepoint` bridge — the C
+// body decoded inline before `strtod` because the operand can arrive
+// tagged (#714/#716), and an unconditional owning decode would leak. An
+// immediate is a single codepoint: an ASCII digit yields its value, any
+// other single character yields `0.0` — exactly what `strtod` returns for
+// the equivalent one-character string. A real pointer is already
+// deref-safe, so `strtod` parses the NUL-terminated payload directly
+// (`endptr` discarded via `null`). Null yields `0.0`.
+fn sfn_str_to_number(s: * u8) -> f64 {
+    if (s as i64) == 0 { return 0.0; }
+    let cp: i64 = sfn_str_immediate_codepoint(s);
+    if cp >= 0 {
+        if cp >= 48 && cp <= 57 { return (cp - 48) as f64; }
+        return 0.0;
+    }
+    return strtod(s, null);
+}
 
 // ====================================================================
 // Number / int formatting — real hand-rolled Sailfin bodies (#1314, C3

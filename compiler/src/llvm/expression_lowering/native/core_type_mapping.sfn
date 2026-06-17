@@ -50,6 +50,15 @@ fn map_interface_type_annotation(context: TypeContext, annotation: string) -> st
 fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     if annotation == "number" { return "double"; }
     if annotation == "float" { return "double"; }
+    // #1372: `f64`/`f32` were missing here while `statement_type_mapping.sfn`
+    // and `type_mapping.sfn` map them. The omission made the call-site
+    // parameter-type resolution (`collect_parameter_types` → this fn) mis-map
+    // an `f64` parameter, so a direct call like `g(7.0)` to `fn g(s: f64)`
+    // coerced the `double` argument to a string (`number.to_string`) and
+    // passed `i8*` to a `double` param — silent miscompile. Mirror the
+    // canonical float mapping so every copy agrees.
+    if annotation == "f64" { return "double"; }
+    if annotation == "f32" { return "float"; }
     let mut _if130: boolean = false;
     if annotation == "boolean" { _if130 = true; }
     if annotation == "bool" { _if130 = true; }
