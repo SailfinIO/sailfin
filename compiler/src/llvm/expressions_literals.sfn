@@ -1,13 +1,13 @@
 // compiler/src/llvm/expressions_literals.sfn
 //
 // Literal detection helpers: boolean, null, integer, number, string, character.
+import { trim_text } from "./utils";
 import {
     char_at,
-    char_code,
     index_of,
+    char_code,
     substring
 } from "../string_utils";
-import { trim_text } from "./utils";
 
 // =============================================================================
 // Case-Insensitive Matching

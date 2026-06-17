@@ -2,54 +2,54 @@
 //
 // Sailfin compiler main module and compilation entry points.
 import { Program, Statement } from "./ast";
-import { _env_flag, _legacy_flag_file } from "./cli_commands_utils";
-import { render_diagnostic, split_source_lines } from "./diagnostics_render";
+import { Token } from "./token";
+import { LayoutManifest } from "./native_ir";
+import {
+    typecheck_has_errors,
+    typecheck_diagnostics,
+    typecheck_has_errors_with_prelude,
+    typecheck_diagnostics_with_imports,
+    typecheck_diagnostics_with_prelude,
+    typecheck_diagnostics_with_import_symbols,
+    typecheck_diagnostics_with_import_symbols_prelude
+} from "./typecheck";
+import { number_to_string } from "./num_format";
+import { parse_program } from "./parser/mod";
 import {
     validate_and_render_effects,
     validate_and_render_effects_with_capabilities
 } from "./effect_gate";
-import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import {
-    NativeModule,
     emit_native,
-    emit_native_text_to_file_with_module_name,
-    emit_native_text_with_module_name,
+    NativeModule,
+    report_reexport_violations,
     emit_native_with_module_name,
-    report_reexport_violations
+    emit_native_text_with_module_name,
+    emit_native_text_to_file_with_module_name
 } from "./emit_native";
+import { toml_get_dependencies } from "./toml_parser";
+import { substring } from "./string_utils";
+import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
+import { collect_reexport_violations } from "./reexport_check";
 import { emit_program } from "./emitter_sailfin";
+import { load_prelude_global_names } from "./prelude_globals";
+import { run_ownership_checker } from "./ownership_checker";
+import { test_runner_trace, test_filters_active, test_decl_matches_filters } from "./test_runner_state";
+import { _env_flag, _legacy_flag_file } from "./cli_commands_utils";
+import { render_diagnostic, split_source_lines } from "./diagnostics_render";
+import { runtime_helper_call_names } from "./llvm/runtime_helpers";
+import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
 import {
-    lower_to_llvm_ir,
-    lower_to_llvm_ir_from_text,
-    print_llvm_ir_from_text,
     write_llvm_ir,
+    lower_to_llvm_ir,
+    print_llvm_ir_from_text,
+    lower_to_llvm_ir_from_text,
     write_llvm_ir_from_native_text,
     write_llvm_ir_from_native_text_with_context
 } from "./llvm/lowering/entrypoints";
+import { native_text_passes_lowering_gate } from "./llvm/lowering/lowering_core";
 import { lower_to_llvm_for_tests } from "./llvm/lowering/entrypoints_tests";
 import { write_llvm_ir_for_tests_from_text_with_context } from "./llvm/lowering/entrypoints_tests_writer";
-import { native_text_passes_lowering_gate } from "./llvm/lowering/lowering_core";
-import { runtime_helper_call_names } from "./llvm/runtime_helpers";
-import { LayoutManifest } from "./native_ir";
-import { number_to_string } from "./num_format";
-import { run_ownership_checker } from "./ownership_checker";
-import { parse_program } from "./parser/mod";
-import { load_prelude_global_names } from "./prelude_globals";
-import { collect_reexport_violations } from "./reexport_check";
-import { substring } from "./string_utils";
-import { test_decl_matches_filters, test_filters_active, test_runner_trace } from "./test_runner_state";
-import { Token } from "./token";
-import { toml_get_dependencies } from "./toml_parser";
-import {
-    typecheck_diagnostics,
-    typecheck_diagnostics_with_import_symbols,
-    typecheck_diagnostics_with_import_symbols_prelude,
-    typecheck_diagnostics_with_imports,
-    typecheck_diagnostics_with_prelude,
-    typecheck_has_errors,
-    typecheck_has_errors_with_prelude
-} from "./typecheck";
-import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
 
 fn _ms_since(start_ms: int) -> int {
     let end_ms = monotonic_millis();

@@ -2,8 +2,8 @@
 //
 // Shared SSA temp counter recovery for LLVM lowering paths that cross the
 // self-hosted compiler's module ABI boundary.
-import { char_at, char_code } from "../../../string_utils";
 import { starts_with } from "../../utils";
+import { char_at, char_code } from "../../../string_utils";
 
 // Recover from seed ABI corruption: result temp_index fields can be stale when
 // returned from cross-module calls. Scan emitted lines for the highest %tN

@@ -32,15 +32,15 @@
 import {
     Block,
     Capture,
+    Program,
+    MatchCase,
+    Parameter,
+    Statement,
     ElseBranch,
     Expression,
-    MatchCase,
-    MethodDeclaration,
-    Parameter,
-    Program,
     SourceSpan,
-    Statement,
-    TypeAnnotation
+    TypeAnnotation,
+    MethodDeclaration
 } from "./ast";
 import { strings_equal } from "./string_utils";
 

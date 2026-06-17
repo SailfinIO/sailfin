@@ -28,13 +28,13 @@
 // recursion on the Ok-arm continuation block.
 import {
     Block,
-    ElseBranch,
-    Expression,
     ForClause,
     MatchCase,
-    ObjectField,
     Statement,
-    WithClause
+    ElseBranch,
+    Expression,
+    WithClause,
+    ObjectField
 } from "./ast";
 import { number_to_string } from "./emit_native_state";
 

@@ -11,98 +11,98 @@
 // `write_llvm_ir_for_tests_from_text`) were retired in Stage B PR2's
 // A4 deletion alongside `compile_tests_to_llvm_file_with_module` and
 // the textual import inliner.
-import { NativeArtifact, NativeModule } from "../../emit_native";
 import {
-    LayoutManifest,
-    NativeEnum,
-    NativeFunction,
-    NativeInterface,
-    NativeStruct,
-    ParseNativeResult
-} from "../../native_ir";
+    TypeContext,
+    TraitMetadata,
+    StringConstant,
+    FunctionEffectEntry,
+    LifetimeRegionMetadata,
+    LoweredLLVMLinesResult
+} from "../types";
 import {
-    parse_native_artifact,
-    parse_native_enums_for_import,
-    parse_native_functions_for_import,
-    parse_native_interfaces_for_import,
-    parse_native_structs_for_import
-} from "../../native_ir_api";
-import { substring } from "../../string_utils";
+    index_of,
+    append_string,
+    sanitize_symbol,
+    number_to_string,
+    join_with_separator,
+    string_array_contains
+} from "../utils";
 import {
-    append_function_effect_entry,
     append_unique_effect,
-    collect_direct_function_effects,
-    collect_function_call_graph,
-    collect_runtime_helper_targets,
     find_function_effect_entry,
-    propagate_function_effects
+    propagate_function_effects,
+    collect_function_call_graph,
+    append_function_effect_entry,
+    collect_runtime_helper_targets,
+    collect_direct_function_effects
 } from "../effects";
 import {
     apply_layout_manifest_to_module,
     collect_imported_module_context_for_module
 } from "../imports";
 import {
+    merge_string_constants,
+    render_string_constants,
+    empty_string_constant_set
+} from "../strings";
+import { emit_llvm_function } from "./emission";
+import {
     render_enum_type_definitions,
-    render_imported_function_declarations,
-    render_runtime_helper_declarations,
     render_struct_type_definitions,
-    render_trait_metadata_comments
+    render_trait_metadata_comments,
+    render_runtime_helper_declarations,
+    render_imported_function_declarations
 } from "../rendering";
 import {
-    collect_exported_symbol_names,
-    find_function_by_name,
-    render_interface_type_definitions,
-    render_vtable_constants,
-    render_vtable_type_definitions
-} from "../rendering_helpers";
+    extend_string_lines,
+    module_source_filename,
+    extend_string_lines_checked,
+    ensure_intrinsic_declarations
+} from "./lowering_io";
 import {
-    empty_string_constant_set,
-    merge_string_constants,
-    render_string_constants
-} from "../strings";
+    NativeEnum,
+    NativeStruct,
+    LayoutManifest,
+    NativeFunction,
+    NativeInterface,
+    ParseNativeResult
+} from "../../native_ir";
 import { build_type_context, fixup_enum_layouts } from "../type_context";
-import {
-    FunctionEffectEntry,
-    LifetimeRegionMetadata,
-    LoweredLLVMLinesResult,
-    StringConstant,
-    TraitMetadata,
-    TypeContext
-} from "../types";
-import {
-    append_string,
-    index_of,
-    join_with_separator,
-    number_to_string,
-    sanitize_symbol,
-    string_array_contains
-} from "../utils";
-import { emit_llvm_function } from "./emission";
 import {
     has_fatal_lowering_diagnostic,
     lower_to_llvm_lines_with_parsed_context_for_tests
 } from "./lowering_core";
+import { lower_module_bindings_to_globals } from "./module_globals";
+import { NativeModule, NativeArtifact } from "../../emit_native";
+import { substring } from "../../string_utils";
 import {
-    empty_trait_metadata,
     extend_native_enums,
-    extend_native_functions,
-    extend_native_interfaces,
+    is_test_module_slug,
+    empty_trait_metadata,
     extend_native_structs,
-    is_test_module_slug
+    extend_native_functions,
+    extend_native_interfaces
 } from "./lowering_helpers";
 import {
+    parse_native_artifact,
+    parse_native_enums_for_import,
+    parse_native_structs_for_import,
+    parse_native_functions_for_import,
+    parse_native_interfaces_for_import
+} from "../../native_ir_api";
+import {
+    find_function_by_name,
+    render_vtable_constants,
+    collect_exported_symbol_names,
+    render_vtable_type_definitions,
+    render_interface_type_definitions
+} from "../rendering_helpers";
+import {
+    flatten_struct_methods,
     _join_llvm_lines_linear,
     concat_native_functions,
-    empty_capability_manifest,
-    flatten_struct_methods
+    empty_capability_manifest
 } from "./lowering_helpers_mangling";
-import {
-    ensure_intrinsic_declarations,
-    extend_string_lines,
-    extend_string_lines_checked,
-    module_source_filename
-} from "./lowering_io";
-import { lower_module_bindings_to_globals } from "./module_globals";
 
 // Build and write LLVM IR for tests, threading import-context through
 // from the resolver pass. `imported_manifests` and

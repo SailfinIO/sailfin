@@ -34,54 +34,54 @@
 // Consumers then call `_clang_link_multi` with the main .ll and the
 // capsule .ll paths, and clang produces a linked binary with all
 // capsule symbols resolved.
-import {
-    BuildCacheConfig,
-    CacheKey,
-    CacheStats,
-    cache_clean,
-    cache_compiler_identity,
-    cache_copy_artifact_to,
-    cache_key_for,
-    cache_lookup_artifact,
-    cache_root,
-    cache_store_artifact,
-    canonicalize_flags,
-    empty_build_cache_config,
-    empty_cache_stats,
-    is_valid_digest,
-    sha256_of_file
-} from "./build_cache";
-import {
-    CapsuleArtifactLayout,
-    capsule_artifact_layout_from_specs,
-    ir_path_for_slug,
-    is_safe_scope_name,
-    parse_scope_name
-} from "./capsule_artifact";
-import {
-    _atomic_rename_into_place,
-    _display_capsule_name_cmd,
-    _mktemp_sibling_cmd
-} from "./cli_commands_utils";
-import { emit_subprocess_with_retry } from "./emit_helpers";
 import { _LockEntry, lock_get_versions } from "./lock";
 import {
-    compile_to_llvm_file_with_module,
-    compile_to_llvm_file_with_module_imports,
-    module_name_from_path,
     number_to_string,
-    write_native_text_file_with_module
+    module_name_from_path,
+    compile_to_llvm_file_with_module,
+    write_native_text_file_with_module,
+    compile_to_llvm_file_with_module_imports
 } from "./main";
-import { RuntimeCapsuleArtifacts, enumerate_runtime_capsule_artifacts } from "./runtime_capsule_resolver";
-import { contains_string, substring } from "./string_utils";
+import { resolve_compiler_version_for_cache } from "./version";
 import {
-    toml_get_capabilities_required,
-    toml_get_dependencies,
+    CacheKey,
+    CacheStats,
+    cache_root,
+    cache_clean,
+    cache_key_for,
+    sha256_of_file,
+    is_valid_digest,
+    BuildCacheConfig,
+    empty_cache_stats,
+    canonicalize_flags,
+    cache_store_artifact,
+    cache_lookup_artifact,
+    cache_copy_artifact_to,
+    cache_compiler_identity,
+    empty_build_cache_config
+} from "./build_cache";
+import {
     toml_get_name,
     toml_get_version,
-    toml_get_workspace_members
+    toml_get_dependencies,
+    toml_get_workspace_members,
+    toml_get_capabilities_required
 } from "./toml_parser";
-import { resolve_compiler_version_for_cache } from "./version";
+import { emit_subprocess_with_retry } from "./emit_helpers";
+import { substring, contains_string } from "./string_utils";
+import {
+    ir_path_for_slug,
+    parse_scope_name,
+    is_safe_scope_name,
+    CapsuleArtifactLayout,
+    capsule_artifact_layout_from_specs
+} from "./capsule_artifact";
+import {
+    _mktemp_sibling_cmd,
+    _atomic_rename_into_place,
+    _display_capsule_name_cmd
+} from "./cli_commands_utils";
+import { RuntimeCapsuleArtifacts, enumerate_runtime_capsule_artifacts } from "./runtime_capsule_resolver";
 
 export {
     CapsuleSource,

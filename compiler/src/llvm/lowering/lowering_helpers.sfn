@@ -1,67 +1,67 @@
 // compiler/src/llvm/lowering/lowering_helpers.sfn
 //
 // Shared utility functions for LLVM IR lowering.
-import { NativeArtifact, NativeModule } from "../../emit_native";
 import {
-    LayoutManifest,
-    NativeEnum,
-    NativeEnumLayout,
-    NativeEnumVariant,
-    NativeEnumVariantField,
-    NativeEnumVariantLayout,
-    NativeFunction,
-    NativeImport,
-    NativeImportSpecifier,
-    NativeInstruction,
-    NativeInterface,
-    NativeParameter,
-    NativeStruct,
-    NativeStructField,
-    NativeStructLayout,
-    NativeStructLayoutField,
-    ParseNativeResult
-} from "../../native_ir";
-import {
-    parse_layout_manifest,
-    parse_native_artifact,
-    parse_native_artifact_for_import_context,
-    parse_native_function_count_from_text,
-    parse_native_functions_from_text,
-    select_layout_manifest_artifact,
-    select_text_artifact
-} from "../../native_ir_api";
-import { split_lines } from "../../native_ir_utils_text";
-import { char_code, substring } from "../../string_utils";
-import { append_unique_effect } from "../effects";
-import { resolve_import_artifact_slug, resolve_import_module_slug_for_module } from "../imports";
-import { find_function_by_name, should_internalize_function } from "../rendering";
-import { runtime_helper_descriptors } from "../runtime_helpers";
-import {
-    CapabilityManifest,
+    TypeContext,
     EnumTypeInfo,
+    TraitMetadata,
+    StringConstant,
     EnumVariantInfo,
+    TraitDescriptor,
+    LoweredLLVMResult,
+    CapabilityManifest,
     FunctionEffectEntry,
     ImportedModuleContext,
     LifetimeRegionMetadata,
     LoweredLLVMLinesResult,
-    LoweredLLVMResult,
-    StringConstant,
-    TraitDescriptor,
-    TraitImplementationDescriptor,
-    TraitMetadata,
-    TypeContext
+    TraitImplementationDescriptor
 } from "../types";
 import {
-    append_string,
     index_of,
-    join_with_separator,
-    number_to_string,
-    sanitize_symbol,
+    trim_text,
     starts_with,
-    string_array_contains,
-    trim_text
+    append_string,
+    sanitize_symbol,
+    number_to_string,
+    join_with_separator,
+    string_array_contains
 } from "../utils";
+import { append_unique_effect } from "../effects";
+import { resolve_import_artifact_slug, resolve_import_module_slug_for_module } from "../imports";
+import { find_function_by_name, should_internalize_function } from "../rendering";
 import { extend_string_lines } from "./lowering_io";
+import {
+    NativeEnum,
+    NativeImport,
+    NativeStruct,
+    LayoutManifest,
+    NativeFunction,
+    NativeInterface,
+    NativeParameter,
+    NativeEnumLayout,
+    NativeEnumVariant,
+    NativeInstruction,
+    NativeStructField,
+    ParseNativeResult,
+    NativeStructLayout,
+    NativeImportSpecifier,
+    NativeEnumVariantField,
+    NativeEnumVariantLayout,
+    NativeStructLayoutField
+} from "../../native_ir";
+import { NativeModule, NativeArtifact } from "../../emit_native";
+import { char_code, substring } from "../../string_utils";
+import { runtime_helper_descriptors } from "../runtime_helpers";
+import {
+    select_text_artifact,
+    parse_layout_manifest,
+    parse_native_artifact,
+    select_layout_manifest_artifact,
+    parse_native_functions_from_text,
+    parse_native_function_count_from_text,
+    parse_native_artifact_for_import_context
+} from "../../native_ir_api";
+import { split_lines } from "../../native_ir_utils_text";
 
 fn empty_trait_metadata() -> TraitMetadata {
     return TraitMetadata { interfaces: [], implementations: [] };

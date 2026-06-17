@@ -2,18 +2,18 @@
 //
 // Inline GEP field access helper extracted from core_member_lowering.sfn
 // to keep each function under ~500 .sfn-asm instructions (avoids seed OOM).
-import { find_local_binding } from "../../expressions_bindings";
-import { format_temp_name } from "../../expressions_helpers";
-import { find_struct_field_info, find_struct_info_by_name } from "../../type_context_queries";
 import {
-    ExpressionResult,
     LLVMOperand,
+    TypeContext,
     LocalBinding,
-    ParameterBinding,
     StringConstant,
-    TypeContext
+    ExpressionResult,
+    ParameterBinding
 } from "../../types";
-import { number_to_string, trim_text } from "../../utils";
+import { trim_text, number_to_string } from "../../utils";
+import { format_temp_name } from "../../expressions_helpers";
+import { find_local_binding } from "../../expressions_bindings";
+import { find_struct_field_info, find_struct_info_by_name } from "../../type_context_queries";
 
 // Try to resolve a struct field access via in-memory TypeContext when the
 // base type is i8* (opaque pointer). Returns an ExpressionResult with the

@@ -29,18 +29,18 @@
 // so consumers don't have to redo the join. The manifest stores
 // paths relative to its own directory (Cargo-style); the
 // resolver does the workspace-rooted resolution once.
-import { contains_string, strip_prefix, substring } from "./string_utils";
 import {
-    toml_get_build_kind,
-    toml_get_c_sources,
-    toml_get_include_dirs,
-    toml_get_link_libs,
-    toml_get_ll_sources,
     toml_get_name,
-    toml_get_prelude_entry,
+    toml_get_c_sources,
+    toml_get_link_libs,
+    toml_get_build_kind,
+    toml_get_ll_sources,
     toml_get_sfn_sources,
+    toml_get_include_dirs,
+    toml_get_prelude_entry,
     toml_get_workspace_members
 } from "./toml_parser";
+import { substring, strip_prefix, contains_string } from "./string_utils";
 
 // Resolved per-runtime-capsule build inputs. All paths are
 // workspace-rooted; consumers feed them straight into

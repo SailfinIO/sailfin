@@ -3,45 +3,45 @@
 // Parser for textual `.sfn-asm` artifacts. Type definitions live in
 // native_ir.sfn; utilities and layout parsers in native_ir_utils.sfn.
 import {
-    NativeBinding,
     NativeEnum,
-    NativeFunction,
     NativeImport,
-    NativeInstruction,
+    NativeStruct,
+    NativeBinding,
+    NativeFunction,
     NativeInterface,
     NativeSourceSpan,
-    NativeStruct,
+    NativeInstruction,
     ParseNativeResult
 } from "./native_ir";
-import {
-    append_instruction,
-    append_parameter,
-    apply_meta,
-    parse_enum_definition,
-    parse_source_span,
-    parse_struct_definition
-} from "./native_ir_parser_defs";
-import { gather_instruction, parse_instruction } from "./native_ir_parser_instructions";
-import { parse_decimal_number } from "./native_ir_utils_layout";
-import {
-    line_looks_like_parameter_entry,
-    parse_binding_components,
-    parse_decorator_name,
-    parse_function_name,
-    parse_import_entry,
-    parse_interface_definition,
-    parse_parameter_entry,
-    split_parameter_entries
-} from "./native_ir_utils_parse";
+import { char_code, substring } from "./string_utils";
 import {
     index_of,
+    trim_text,
     split_lines,
     starts_with,
     strip_prefix,
-    strip_quotes,
-    trim_text
+    strip_quotes
 } from "./native_ir_utils_text";
-import { char_code, substring } from "./string_utils";
+import {
+    apply_meta,
+    append_parameter,
+    parse_source_span,
+    append_instruction,
+    parse_enum_definition,
+    parse_struct_definition
+} from "./native_ir_parser_defs";
+import {
+    parse_import_entry,
+    parse_function_name,
+    parse_decorator_name,
+    parse_parameter_entry,
+    split_parameter_entries,
+    parse_binding_components,
+    parse_interface_definition,
+    line_looks_like_parameter_entry
+} from "./native_ir_utils_parse";
+import { parse_decimal_number } from "./native_ir_utils_layout";
+import { parse_instruction, gather_instruction } from "./native_ir_parser_instructions";
 
 fn parse_native_artifact_impl(text: string, include_instructions: boolean, include_top_level_bindings: boolean) -> ParseNativeResult {
     let lines = split_lines(text);

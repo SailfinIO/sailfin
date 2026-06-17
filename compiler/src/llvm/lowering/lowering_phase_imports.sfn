@@ -6,32 +6,32 @@
 // RSS — moving the gather loop here removes ~6 sibling-module imports
 // (parse_native_*_for_import, apply_layout_manifest_to_module,
 // extend_native_functions) from the orchestrator's import set.
+import { string_array_contains } from "../utils";
+import { apply_layout_manifest_to_module } from "../imports";
 import {
-    LayoutManifest,
-    NativeBinding,
     NativeEnum,
-    NativeFunction,
     NativeImport,
-    NativeInterface,
-    NativeStruct
+    NativeStruct,
+    NativeBinding,
+    LayoutManifest,
+    NativeFunction,
+    NativeInterface
 } from "../../native_ir";
 import {
-    parse_native_bindings_from_text,
-    parse_native_enums_for_import,
-    parse_native_functions_for_import,
-    parse_native_imports_for_import,
-    parse_native_interfaces_for_import,
-    parse_native_structs_for_import
-} from "../../native_ir_api";
-import { apply_layout_manifest_to_module } from "../imports";
-import { collect_exported_symbol_names, find_function_by_name_or_import } from "../rendering_helpers";
-import { string_array_contains } from "../utils";
-import {
     extend_native_enums,
+    extend_native_structs,
     extend_native_functions,
-    extend_native_interfaces,
-    extend_native_structs
+    extend_native_interfaces
 } from "./lowering_helpers";
+import {
+    parse_native_enums_for_import,
+    parse_native_bindings_from_text,
+    parse_native_imports_for_import,
+    parse_native_structs_for_import,
+    parse_native_functions_for_import,
+    parse_native_interfaces_for_import
+} from "../../native_ir_api";
+import { collect_exported_symbol_names, find_function_by_name_or_import } from "../rendering_helpers";
 import { flatten_struct_methods } from "./lowering_helpers_mangling";
 
 // Flat-array bundle of everything the imported modules contribute to the

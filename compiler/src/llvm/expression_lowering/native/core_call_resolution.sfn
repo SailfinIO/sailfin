@@ -2,53 +2,52 @@
 //
 // Call target resolution extracted from core_call_lowering.sfn to keep
 // each function under ~500 .sfn-asm instructions (avoids seed OOM).
-import { NativeFunction } from "../../../native_ir";
-import { find_last_index_of_char, index_of, substring } from "../../../string_utils";
-import { is_atomic_builtin, lower_atomic_builtin } from "../../atomics";
-import { is_simple_identifier } from "../../expressions_helpers";
-import { find_function_by_name, find_function_by_name_or_import } from "../../rendering_helpers";
-import { find_runtime_helper, make_concat_descriptor, make_push_descriptor } from "../../runtime_helpers";
-import { empty_string_constant_set, merge_string_constants } from "../../strings";
+import { lower_expression } from "./core";
+import { array_pointer_element_type } from "../arrays";
 import {
-    find_interface_info_by_name,
-    find_struct_info_by_name,
-    resolve_interface_info_for_method_target,
-    resolve_struct_info_for_method_target
-} from "../../type_context_queries";
-import { ends_with_pointer_suffix } from "../../type_mapping";
-import {
-    CallSignatureResolution,
-    CallTargetResolution,
-    ExpressionResult,
     LLVMOperand,
+    TypeContext,
     LocalBinding,
-    MemberAccessParse,
-    ParameterBinding,
-    RuntimeHelperDescriptor,
     StringConstant,
     StructTypeInfo,
-    TypeContext
+    ExpressionResult,
+    ParameterBinding,
+    MemberAccessParse,
+    CallTargetResolution,
+    CallSignatureResolution,
+    RuntimeHelperDescriptor
 } from "../../types";
 import {
     ends_with,
-    number_to_string,
+    trim_text,
     starts_with,
-    trim_text
+    number_to_string
 } from "../../utils";
-import { array_pointer_element_type } from "../arrays";
-// Mutually recursive with core.sfn
-import { lower_expression } from "./core";
+import { sanitize_symbol } from "./core_text";
+import { parse_member_access } from "./core_parse";
+import { is_atomic_builtin, lower_atomic_builtin } from "../../atomics";
+import { merge_string_constants, empty_string_constant_set } from "../../strings";
+import { find_local_binding, find_parameter_binding } from "./core_scopes";
 import { collect_parameter_types } from "./core_helpers";
 import { load_local_operand } from "./core_operands";
-import { parse_member_access } from "./core_parse";
-import { find_local_binding, find_parameter_binding } from "./core_scopes";
-import { sanitize_symbol } from "./core_text";
+import { NativeFunction } from "../../../native_ir";
+import { ends_with_pointer_suffix } from "../../type_mapping";
 import {
-    future_pointer_type_for_return_type,
-    map_array_pointer_type,
+    map_return_type,
     map_parameter_type,
-    map_return_type
+    map_array_pointer_type,
+    future_pointer_type_for_return_type
 } from "./core_type_mapping";
+import { index_of, substring, find_last_index_of_char } from "../../../string_utils";
+import { find_runtime_helper, make_push_descriptor, make_concat_descriptor } from "../../runtime_helpers";
+import { find_function_by_name, find_function_by_name_or_import } from "../../rendering_helpers";
+import { is_simple_identifier } from "../../expressions_helpers";
+import {
+    find_struct_info_by_name,
+    find_interface_info_by_name,
+    resolve_struct_info_for_method_target,
+    resolve_interface_info_for_method_target
+} from "../../type_context_queries";
 
 // Pre-resolution dispatch hook for atomic builtins (M0-Atomics — see
 // `compiler/src/llvm/atomics.sfn` and issue #331). Returns a non-null

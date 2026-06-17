@@ -5,84 +5,84 @@
 import {
     Block,
     Decorator,
-    DecoratorArgument,
-    EnumVariant,
-    ExportSpecifier,
-    Expression,
-    FieldDeclaration,
-    FunctionSignature,
-    ImportSpecifier,
-    MethodDeclaration,
     Parameter,
     Statement,
-    TypeAnnotation,
+    Expression,
+    EnumVariant,
     TypeParameter,
-    decorator_names
+    TypeAnnotation,
+    ExportSpecifier,
+    ImportSpecifier,
+    decorator_names,
+    FieldDeclaration,
+    DecoratorArgument,
+    FunctionSignature,
+    MethodDeclaration
 } from "../ast";
-import { infer_effects } from "../decorator_semantics";
+import {
+    Parser,
+    NamedSpecifier,
+    BlockParseResult,
+    EffectParseResult,
+    MethodParseResult,
+    DecoratorParseResult,
+    ParameterParseResult,
+    StatementParseResult,
+    ImplementsParseResult,
+    EnumVariantParseResult,
+    StructFieldParseResult,
+    ParameterListParseResult,
+    SpecifierListParseResult,
+    TypeParameterParseResult,
+    TypeSeparatorParseResult,
+    InterfaceMemberParseResult
+} from "./types";
+import {
+    trim_text,
+    looks_like_number,
+    strip_loose_quotes,
+    normalize_test_name,
+    strip_surrounding_quotes
+} from "./utils";
+import { Token } from "../token";
+import { parse_block } from "./statements";
+import { normalize_expression, expression_from_tokens } from "./expressions";
+import {
+    skip_trivia,
+    token_slice,
+    append_token,
+    collect_until,
+    filter_trivia,
+    consume_symbol,
+    is_end_of_file,
+    symbol_matches,
+    tokens_to_text,
+    consume_keyword,
+    identifier_text,
+    parser_peek_raw,
+    trim_token_edges,
+    advance_to_symbol,
+    identifier_matches,
+    parser_advance_raw,
+    skip_struct_member,
+    skip_trailing_comma,
+    find_top_level_colon,
+    string_literal_value,
+    collect_parenthesized,
+    find_top_level_symbol,
+    split_tokens_by_comma,
+    skip_enum_variant_entry,
+    source_span_from_tokens,
+    split_token_slices_by_comma,
+    collect_type_annotation_until
+} from "./token_utils";
 import {
     char_at,
     char_code,
-    strings_equal,
-    substring
+    substring,
+    strings_equal
 } from "../string_utils";
-import { Token } from "../token";
-import { expression_from_tokens, normalize_expression } from "./expressions";
-import { parse_block } from "./statements";
-import {
-    advance_to_symbol,
-    append_token,
-    collect_parenthesized,
-    collect_type_annotation_until,
-    collect_until,
-    consume_keyword,
-    consume_symbol,
-    filter_trivia,
-    find_top_level_colon,
-    find_top_level_symbol,
-    identifier_matches,
-    identifier_text,
-    is_end_of_file,
-    parser_advance_raw,
-    parser_peek_raw,
-    skip_enum_variant_entry,
-    skip_struct_member,
-    skip_trailing_comma,
-    skip_trivia,
-    source_span_from_tokens,
-    split_token_slices_by_comma,
-    split_tokens_by_comma,
-    string_literal_value,
-    symbol_matches,
-    token_slice,
-    tokens_to_text,
-    trim_token_edges
-} from "./token_utils";
-import {
-    BlockParseResult,
-    DecoratorParseResult,
-    EffectParseResult,
-    EnumVariantParseResult,
-    ImplementsParseResult,
-    InterfaceMemberParseResult,
-    MethodParseResult,
-    NamedSpecifier,
-    ParameterListParseResult,
-    ParameterParseResult,
-    Parser,
-    SpecifierListParseResult,
-    StatementParseResult,
-    StructFieldParseResult,
-    TypeParameterParseResult,
-    TypeSeparatorParseResult
-} from "./types";
-import {
-    looks_like_number,
-    normalize_test_name,
-    strip_loose_quotes,
-    strip_surrounding_quotes,
-    trim_text
-} from "./utils";
+import { infer_effects } from "../decorator_semantics";
 
 // ============================================================================
 // Type Separator

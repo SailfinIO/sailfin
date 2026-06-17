@@ -20,24 +20,24 @@
 // leaking unjoined tasks. Failing closed with a diagnostic is the v0
 // stance (issue #1181); lifting the restriction (emitting the join on
 // every exit edge) is a follow-up.
-import { NativeFunction, NativeInstruction } from "../../native_ir";
-import { format_temp_name } from "../expressions_helpers";
-import { make_child_scope_id } from "../lifetime";
-import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
-    BlockLoweringResult,
-    LifetimeRegionMetadata,
+    LoopContext,
+    TypeContext,
     LocalBinding,
     LocalMutation,
-    LoopContext,
+    StringConstant,
     ParameterBinding,
     RoutineStructure,
-    StringConstant,
-    TypeContext
+    BlockLoweringResult,
+    LifetimeRegionMetadata
 } from "../types";
-import { extend_string_array, number_to_string } from "../utils";
+import { number_to_string, extend_string_array } from "../utils";
+import { merge_string_constants, empty_string_constant_set } from "../strings";
+import { make_child_scope_id } from "../lifetime";
 import { lower_instruction_range } from "./instructions";
-import { emit_scope_drops, extend_lifetime_regions, extend_mutations } from "./instructions_helpers";
+import { NativeFunction, NativeInstruction } from "../../native_ir";
+import { format_temp_name } from "../expressions_helpers";
+import { emit_scope_drops, extend_mutations, extend_lifetime_regions } from "./instructions_helpers";
 import { get_instruction_tag } from "./lowering_native_helpers";
 
 // Find the `.endroutine` (tag 23) matching the `.routine` at

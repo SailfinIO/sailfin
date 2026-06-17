@@ -19,7 +19,7 @@
 //
 // See docs/rca/2026-04-18-reexport-diagnostic-gep.md.
 import { Program } from "./ast";
-import { contains_string, substring } from "./string_utils";
+import { substring, contains_string } from "./string_utils";
 
 export {
     collect_reexport_violations,

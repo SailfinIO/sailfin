@@ -1,9 +1,9 @@
-import { Decorator, Expression, Statement } from "./ast";
+import { Decorator, Statement, Expression } from "./ast";
 import {
     char_at,
     index_of,
-    strings_equal,
-    substring
+    substring,
+    strings_equal
 } from "./string_utils";
 
 // compiler/src/test_runner_state.sfn

@@ -4,44 +4,44 @@
 // collection helpers.  Split from lowering_helpers.sfn to keep both
 // files under 1000 lines.
 import {
-    NativeFunction,
-    NativeImport,
-    NativeImportSpecifier,
-    NativeInterface,
-    NativeParameter,
-    NativeStruct
-} from "../../native_ir";
-import { substring } from "../../string_utils";
-import { trace_lowering } from "../lowering_debug_state";
-import {
-    CapabilityManifest,
+    TraitMetadata,
     TraitDescriptor,
-    TraitImplementationDescriptor,
-    TraitMetadata
+    CapabilityManifest,
+    TraitImplementationDescriptor
 } from "../types";
 import {
     index_of,
-    join_with_separator,
-    number_to_string,
-    sanitize_symbol,
+    trim_text,
     starts_with,
-    string_array_contains,
-    trim_text
+    sanitize_symbol,
+    number_to_string,
+    join_with_separator,
+    string_array_contains
 } from "../utils";
+import {
+    NativeImport,
+    NativeStruct,
+    NativeFunction,
+    NativeInterface,
+    NativeParameter,
+    NativeImportSpecifier
+} from "../../native_ir";
+import { substring } from "../../string_utils";
 import {
     DeclareSignature,
     MangledModuleResult,
-    apply_symbol_substitutions,
-    collect_available_import_module_names,
-    collect_defined_function_symbols,
-    extract_module_name_from_native_text,
-    find_declare_signature,
-    insert_before_llvm_footer,
     render_function_shim,
-    resolve_import_provider_module_name,
+    find_declare_signature,
     sanitize_module_suffix,
-    should_keep_unmangled_abi_symbol
+    insert_before_llvm_footer,
+    apply_symbol_substitutions,
+    collect_defined_function_symbols,
+    should_keep_unmangled_abi_symbol,
+    resolve_import_provider_module_name,
+    extract_module_name_from_native_text,
+    collect_available_import_module_names
 } from "./lowering_helpers";
+import { trace_lowering } from "../lowering_debug_state";
 
 // #960: scan a `.sfn-asm` native text for struct-method symbols.
 // `flatten_struct_methods` names each method `<StructName><MethodName>`, so a

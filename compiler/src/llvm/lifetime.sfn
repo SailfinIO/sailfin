@@ -2,43 +2,43 @@
 //
 // Lifetime tracking, borrow checking, and ownership analysis for LLVM lowering.
 // Handles borrow expression parsing, lifetime region management, and conflict detection.
+import {
+    LLVMOperand,
+    LocalBinding,
+    OwnershipInfo,
+    ScopeMetadata,
+    StringConstant,
+    ExpressionResult,
+    ParameterBinding,
+    BorrowParseResult,
+    OwnershipAnalysis,
+    BorrowArgumentParse,
+    LifetimeReleaseEvent,
+    OwnershipConsumption,
+    LifetimeRegionMetadata
+} from "./types";
+import {
+    char_at,
+    ends_with,
+    trim_text,
+    starts_with,
+    append_string,
+    sanitize_symbol,
+    number_to_string,
+    is_identifier_part_char,
+    is_identifier_start_char
+} from "./utils";
+import { empty_string_constant_set } from "./strings";
 import { NativeFunction, NativeSourceSpan } from "../native_ir";
+import { unwrap_move_wrapper } from "./type_mapping";
 import { find_char, substring } from "../string_utils";
-import { find_local_binding, find_parameter_binding } from "./expressions_bindings";
 import {
     is_copy_type,
     is_effect_delimiter,
     is_simple_identifier,
     strip_enclosing_parentheses
 } from "./expressions_helpers";
-import { empty_string_constant_set } from "./strings";
-import { unwrap_move_wrapper } from "./type_mapping";
-import {
-    BorrowArgumentParse,
-    BorrowParseResult,
-    ExpressionResult,
-    LLVMOperand,
-    LifetimeRegionMetadata,
-    LifetimeReleaseEvent,
-    LocalBinding,
-    OwnershipAnalysis,
-    OwnershipConsumption,
-    OwnershipInfo,
-    ParameterBinding,
-    ScopeMetadata,
-    StringConstant
-} from "./types";
-import {
-    append_string,
-    char_at,
-    ends_with,
-    is_identifier_part_char,
-    is_identifier_start_char,
-    number_to_string,
-    sanitize_symbol,
-    starts_with,
-    trim_text
-} from "./utils";
+import { find_local_binding, find_parameter_binding } from "./expressions_bindings";
 
 // =============================================================================
 // Borrow Expression Parsing

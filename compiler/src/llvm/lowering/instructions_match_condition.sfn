@@ -1,43 +1,43 @@
 // compiler/src/llvm/lowering/instructions_match_condition.sfn
 //
 // Match case condition lowering (split from instructions_match.sfn).
-import { NativeFunction } from "../../native_ir";
-import { lower_expression } from "../expression_lowering/native/core";
-import { emit_boolean_and, emit_comparison_instruction, harmonise_operands } from "../expression_lowering/native/core_operands";
-import { parse_enum_literal, parse_struct_pattern } from "../expression_lowering/native/core_parse";
-import { is_union_llvm_type, parse_union_payload_types } from "../expression_lowering/native/core_text";
-import { format_temp_name } from "../expressions_helpers";
-import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
-    find_struct_info_by_name,
-    resolve_enum_info_for_literal,
-    resolve_enum_variant_info
-} from "../type_context_queries";
-import {
-    ends_with_pointer_suffix,
-    enum_inst_parse_args,
-    enum_inst_substitute_annotation,
-    layout_annotation_represents_user_value,
-    map_struct_field_annotation,
-    strip_pointer_suffix
-} from "../type_mapping";
-import {
-    EnumTypeInfo,
-    EnumVariantInfo,
     LLVMOperand,
+    TypeContext,
+    EnumTypeInfo,
     LocalBinding,
+    StringConstant,
+    StructTypeInfo,
+    EnumVariantInfo,
+    StructFieldInfo,
+    ParameterBinding,
+    MatchFieldBinding,
     MatchCaseCondition,
     MatchCaseStructure,
-    MatchFieldBinding,
-    MatchStructFieldBinding,
-    ParameterBinding,
-    StringConstant,
-    StructFieldInfo,
-    StructTypeInfo,
-    TypeContext
+    MatchStructFieldBinding
 } from "../types";
-import { number_to_string, trim_text } from "../utils";
+import { trim_text, number_to_string } from "../utils";
+import { merge_string_constants, empty_string_constant_set } from "../strings";
+import { NativeFunction } from "../../native_ir";
+import {
+    enum_inst_parse_args,
+    strip_pointer_suffix,
+    ends_with_pointer_suffix,
+    map_struct_field_annotation,
+    enum_inst_substitute_annotation,
+    layout_annotation_represents_user_value
+} from "../type_mapping";
+import { format_temp_name } from "../expressions_helpers";
+import {
+    find_struct_info_by_name,
+    resolve_enum_variant_info,
+    resolve_enum_info_for_literal
+} from "../type_context_queries";
 import { lower_condition_to_i1 } from "./instructions_condition";
+import { lower_expression } from "../expression_lowering/native/core";
+import { is_union_llvm_type, parse_union_payload_types } from "../expression_lowering/native/core_text";
+import { parse_enum_literal, parse_struct_pattern } from "../expression_lowering/native/core_parse";
+import { emit_boolean_and, harmonise_operands, emit_comparison_instruction } from "../expression_lowering/native/core_operands";
 
 fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperand, subject_type_annotation: string, case: MatchCaseStructure, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchCaseCondition ![io] {
     let mut diagnostics: string[] = [];

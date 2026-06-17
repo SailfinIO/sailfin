@@ -6,25 +6,25 @@
 // and libc declarations.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
-import { NativeFunction } from "../../native_ir";
+import { TypeContext, TraitMetadata } from "../types";
+import { starts_with, number_to_string } from "../utils";
+import { sfn_abi_hash_decimal } from "./abi_hash";
 import {
     render_enum_type_definitions,
-    render_imported_function_declarations,
-    render_runtime_helper_declarations,
     render_struct_type_definitions,
-    render_trait_metadata_comments
+    render_trait_metadata_comments,
+    render_runtime_helper_declarations,
+    render_imported_function_declarations
 } from "../rendering";
+import { extend_string_lines, module_source_filename } from "./lowering_io";
+import { NativeFunction } from "../../native_ir";
+import { async_runtime_declare_lines } from "../runtime_helpers";
 import {
     find_function_by_name,
-    render_interface_type_definitions,
     render_vtable_constants,
-    render_vtable_type_definitions
+    render_vtable_type_definitions,
+    render_interface_type_definitions
 } from "../rendering_helpers";
-import { async_runtime_declare_lines } from "../runtime_helpers";
-import { TraitMetadata, TypeContext } from "../types";
-import { number_to_string, starts_with } from "../utils";
-import { sfn_abi_hash_decimal } from "./abi_hash";
-import { extend_string_lines, module_source_filename } from "./lowering_io";
 
 // Render the LLVM IR preamble: source filename, trait metadata,
 // struct/enum/interface type definitions, async runtime types,

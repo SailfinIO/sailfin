@@ -5,27 +5,27 @@
 // recovery from native text when the ABI corrupts struct fields.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
-import { NativeModule } from "../../emit_native";
+import { number_to_string } from "../utils";
+import { extend_string_lines_checked } from "./lowering_io";
 import {
-    LayoutManifest,
-    NativeBinding,
     NativeEnum,
-    NativeFunction,
     NativeImport,
-    NativeInterface,
     NativeStruct,
+    NativeBinding,
+    LayoutManifest,
+    NativeFunction,
+    NativeInterface,
     ParseNativeResult
 } from "../../native_ir";
-import { parse_native_bindings_from_text, parse_native_functions_from_text } from "../../native_ir_api";
-import { number_to_string } from "../utils";
+import { NativeModule } from "../../emit_native";
 import { is_test_module_slug, sanitize_collection_length } from "./lowering_helpers";
-import { extend_string_lines_checked } from "./lowering_io";
-import { get_struct_fields_at, get_struct_name_at } from "./lowering_native_helpers";
+import { parse_native_bindings_from_text, parse_native_functions_from_text } from "../../native_ir_api";
 import {
+    recover_native_structs_light,
     recover_functions_for_lowering,
-    recover_native_functions_light,
-    recover_native_structs_light
+    recover_native_functions_light
 } from "./lowering_recovery";
+import { get_struct_name_at, get_struct_fields_at } from "./lowering_native_helpers";
 
 // Sanitize a single collection: null-check + length guard.
 // Returns the sanitized array length (0 if dropped).

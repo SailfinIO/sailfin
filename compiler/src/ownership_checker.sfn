@@ -85,21 +85,21 @@
 // Proposal §3.2 / §3.3 / §4; epic #1209; this issue: #1216.
 import {
     Block,
-    Expression,
-    Parameter,
     Program,
-    SourceSpan,
-    Statement
+    Parameter,
+    Statement,
+    Expression,
+    SourceSpan
 } from "./ast";
-import { render_diagnostic } from "./diagnostics_render";
-import { number_to_string } from "./num_format";
 import { Token, TokenKind } from "./token";
+import { number_to_string } from "./num_format";
 import {
     Diagnostic,
-    is_identifier_char,
+    is_owned_type,
     is_linear_type,
-    is_owned_type
+    is_identifier_char
 } from "./typecheck_types";
+import { render_diagnostic } from "./diagnostics_render";
 
 // One tracked binding. `state` is the lattice: "owned" on entry,
 // "moved" once a move site consumes it, "freed" once a disposer consumes

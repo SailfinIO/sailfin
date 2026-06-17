@@ -3,26 +3,26 @@
 // Struct, enum, interface, and model validation helpers for typechecking.
 // Extracted from typecheck.sfn to keep file sizes manageable.
 import {
+    Statement,
+    SourceSpan,
     EnumVariant,
+    TypeParameter,
+    TypeAnnotation,
     FieldDeclaration,
     FunctionSignature,
-    MethodDeclaration,
-    SourceSpan,
-    Statement,
-    TypeAnnotation,
-    TypeParameter
+    MethodDeclaration
 } from "./ast";
-import {
-    char_code_at_text,
-    contains_string,
-    ends_with,
-    index_of,
-    starts_with,
-    strings_equal,
-    strip_prefix,
-    substring
-} from "./string_utils";
 import { Token, TokenKind } from "./token";
+import {
+    index_of,
+    ends_with,
+    substring,
+    starts_with,
+    strip_prefix,
+    strings_equal,
+    contains_string,
+    char_code_at_text
+} from "./string_utils";
 
 // One concrete edit to apply to a source file. `start_*` and `end_*`
 // are inclusive 1-based line/column coordinates the renderer and

@@ -2,48 +2,48 @@
 //
 // Call emission extracted from core_call_lowering.sfn to keep
 // each function under ~500 .sfn-asm instructions (avoids seed OOM).
-import { NativeFunction, NativeParameter } from "../../../native_ir";
-import { find_last_index_of_char, substring } from "../../../string_utils";
-import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
 import {
-    clock_monotonic_id_value,
-    errno_locator_symbol,
-    exe_path_locator,
-    trace_lowering
-} from "../../lowering_debug_state";
+    lower_array_push_in_place,
+    lower_struct_array_concat,
+    array_pointer_element_type
+} from "../arrays";
 import {
-    append_string_constant,
-    find_string_constant_by_name,
-    merge_string_constants
-} from "../../strings";
-import { find_interface_info_by_name } from "../../type_context_queries";
-import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
-import {
-    ExpressionResult,
     LLVMOperand,
+    TypeContext,
     LocalBinding,
-    MemberAccessParse,
-    ParameterBinding,
-    RuntimeHelperDescriptor,
     StringConstant,
-    TypeContext
+    ExpressionResult,
+    ParameterBinding,
+    MemberAccessParse,
+    RuntimeHelperDescriptor
 } from "../../types";
 import {
-    extend_string_array,
-    join_with_separator,
-    number_to_string,
+    trim_text,
     starts_with,
-    trim_text
+    number_to_string,
+    extend_string_array,
+    join_with_separator
 } from "../../utils";
-import {
-    array_pointer_element_type,
-    lower_array_push_in_place,
-    lower_struct_array_concat
-} from "../arrays";
-import { coerce_operand_to_type } from "./core_operands";
+import { sanitize_symbol, find_substring_from } from "./core_text";
 import { parse_member_access } from "./core_parse";
+import {
+    append_string_constant,
+    merge_string_constants,
+    find_string_constant_by_name
+} from "../../strings";
 import { find_local_binding } from "./core_scopes";
-import { find_substring_from, sanitize_symbol } from "./core_text";
+import { coerce_operand_to_type } from "./core_operands";
+import { NativeFunction, NativeParameter } from "../../../native_ir";
+import { strip_pointer_suffix, ends_with_pointer_suffix } from "../../type_mapping";
+import { substring, find_last_index_of_char } from "../../../string_utils";
+import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
+import {
+    trace_lowering,
+    exe_path_locator,
+    errno_locator_symbol,
+    clock_monotonic_id_value
+} from "../../lowering_debug_state";
+import { find_interface_info_by_name } from "../../type_context_queries";
 
 // Slice E.1.5 (#528): if the wrapped diagnostics list contains the ABI
 // primitive mismatch sentinel, return the `llvm lowering [fatal]: ` prefix

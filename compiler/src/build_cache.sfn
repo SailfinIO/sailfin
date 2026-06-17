@@ -63,17 +63,17 @@
 // pass an arbitrary tmp directory without setting environment
 // variables. The convenience reader `cache_root()` is the
 // production-side wrapper that resolves `$SAILFIN_BUILD_CACHE_DIR`.
+import { substring, char_code_at_text } from "./string_utils";
 import {
     _dirname_cmd,
-    _ensure_dir_recursive_cmd,
     _get_env_cmd,
-    _sanitize_filename_cmd,
-    _sha256_of_file_cmd,
     _shell_read_cmd,
+    _write_text_cmd,
+    _sha256_of_file_cmd,
+    _sanitize_filename_cmd,
     _shell_single_quote_arg,
-    _write_text_cmd
+    _ensure_dir_recursive_cmd
 } from "./cli_commands_utils";
-import { char_code_at_text, substring } from "./string_utils";
 
 // ----------------------------------------------------------------
 // Schema version
