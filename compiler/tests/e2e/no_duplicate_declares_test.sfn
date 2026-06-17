@@ -1,0 +1,122 @@
+// Regression: the emitted LLVM IR for a module must not contain
+// exact-duplicate module-scope `declare` lines (PR #1062, issue #1059
+// follow-up).
+//
+// The runtime-helper preamble and the imported-function / inline-preamble
+// declaration paths could each emit a byte-identical
+// `declare <ret> @<sym>(...)` for the same symbol — e.g.
+// `sfn_array_sfn_map`/`filter`/`reduce` are both registered runtime helpers
+// AND `runtime/prelude.sfn` imports, so the prelude IR carried 28 duplicate
+// declares. LLVM's library merges identical declares, but clang's textual-IR
+// parser (`clang -c <module>.ll`, the path the test runner uses to build
+// runtime objects via `_emit_runtime_sfn_to_obj`) rejects the repeat with
+// "invalid redefinition of function", breaking a cold-clone `make test` for
+// every test. The dedup pass in
+// `compiler/src/llvm/lowering/lowering_core.sfn` (dedup_module_declare_lines)
+// fixes it; this test pins the contract so it can't silently regress.
+//
+// Native replacement for the former `test_no_duplicate_declares.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Drives `sfn emit llvm`
+// against `runtime/prelude.sfn` (the densest declare consumer) and asserts
+// on the captured `.ll` text, then re-runs `clang -c` on the IR.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like these. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { split, starts_with } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned compiler. `process.run_capture` treats an
+// empty array as the *empty* environment (not "inherit"), so the relevant
+// variables must be threaded explicitly (PATH for any subprocess the compiler
+// shells out to; SAILFIN_TEST_SCRATCH so a parallel run does not collide on
+// the fixed `build/sailfin` build-cache dir — #1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// `emit llvm` lowers the prelude module to a standalone `.ll` — the exact path
+// `_emit_runtime_sfn_to_obj` (cli_main.sfn) feeds to `clang -c`. Returns the
+// emitted IR text, or "" on emit failure.
+fn _emit_prelude_ir(ll: string) -> string ![io] {
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "runtime/prelude", "-o", ll, "llvm", "runtime/prelude.sfn"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    return fs.readFile(ll);
+}
+
+// Count column-0 `declare ` lines that appear more than once. Function-body
+// lines are indented and never match. Returns the first such duplicate, or ""
+// if every module-scope declare is unique.
+fn _first_duplicate_declare(ir: string) -> string {
+    let lines = split(ir, "\n");
+    let mut declares: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "declare ") {
+            let mut j = 0;
+            loop {
+                if j >= declares.length { break; }
+                if declares[j] == line { return line; }
+                j += 1;
+            }
+            declares.push(line);
+        }
+        i += 1;
+    }
+    return "";
+}
+
+test "no-duplicate-declares: prelude IR has no exact-duplicate module-scope declares" ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-dupdecl-prelude.ll";
+    let ir = _emit_prelude_ir(ll);
+    fs.deleteFile(ll);
+    assert ir.length > 0;
+    let dup = _first_duplicate_declare(ir);
+    // A non-empty result is a duplicated `declare` line — the regression.
+    assert dup.length == 0;
+}
+
+test "no-duplicate-declares: clang -c accepts the emitted prelude IR" ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-dupdecl-prelude-clang.ll";
+    let ir = _emit_prelude_ir(ll);
+    assert ir.length > 0;
+    let obj = dir + "/sfn-dupdecl-prelude.o";
+    if fs.exists(obj) { fs.deleteFile(obj); }
+    let exit = process.run_capture(["clang", "-Wno-override-module", "-c", ll, "-o", obj], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    fs.deleteFile(ll);
+    // clang's textual-IR parser must accept the IR (exit 0). A duplicate
+    // declare would trip "invalid redefinition of function".
+    assert exit == 0;
+    if fs.exists(obj) { fs.deleteFile(obj); }
+}
