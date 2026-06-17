@@ -34,19 +34,19 @@
 // run `sfn check` explicitly.
 import { Program } from "./ast";
 import {
-    capability_violation_to_diagnostic,
-    effect_violation_to_diagnostic,
-    render_diagnostic,
-    split_source_lines
-} from "./diagnostics_render";
-import {
-    CapabilityViolation,
     EffectViolation,
+    CapabilityViolation,
     validate_capsule_capabilities,
     validate_effects_with_imports
 } from "./effect_checker";
 import { ImportSymbolTable } from "./effect_imports";
 import { Diagnostic } from "./typecheck_types";
+import {
+    render_diagnostic,
+    split_source_lines,
+    effect_violation_to_diagnostic,
+    capability_violation_to_diagnostic
+} from "./diagnostics_render";
 
 // -------------------------------------------------------------------
 // Severity selection

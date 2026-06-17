@@ -1,10 +1,10 @@
 // compiler/src/llvm/expression_lowering/native/core_operators.sfn
 //
 // Operator and expression-shape helpers extracted from core.sfn.
-import { char_at, char_code, substring } from "../../../string_utils";
 import { OperatorMatch } from "../../types";
-import { contains_text, starts_with, trim_text } from "../../utils";
-import { char_code_at_text, is_trim_char } from "./core_text";
+import { trim_text, starts_with, contains_text } from "../../utils";
+import { is_trim_char, char_code_at_text } from "./core_text";
+import { char_at, char_code, substring } from "../../../string_utils";
 
 fn lines_end_with_terminator(lines: string[]) -> boolean {
     let mut index: int = lines.length - 1;

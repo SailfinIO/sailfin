@@ -5,33 +5,33 @@
 // and merges results into the output lines.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
-import { NativeFunction } from "../../native_ir";
-import { append_function_effect_entry, find_function_effect_entry } from "../effects";
-import { merge_string_constants, render_string_constants } from "../strings";
 import {
-    FunctionEffectEntry,
-    FunctionLoweringResult,
+    TypeContext,
     LocalBinding,
     StringConstant,
-    TypeContext
+    FunctionEffectEntry,
+    FunctionLoweringResult
 } from "../types";
-import { number_to_string, starts_with, trim_text } from "../utils";
+import { trim_text, starts_with, number_to_string } from "../utils";
+import { find_function_effect_entry, append_function_effect_entry } from "../effects";
+import { merge_string_constants, render_string_constants } from "../strings";
 import { emit_llvm_function } from "./emission";
 import {
     append_string_lines,
-    ensure_intrinsic_declarations,
     extend_string_lines,
-    extend_string_lines_checked
+    extend_string_lines_checked,
+    ensure_intrinsic_declarations
 } from "./lowering_io";
+import { NativeFunction } from "../../native_ir";
 import {
-    get_function_decorators_at,
+    get_function_name_at,
     get_function_effects_at,
-    get_function_instructions_at,
     get_function_is_async_at,
     get_function_is_extern_at,
-    get_function_name_at,
+    get_function_decorators_at,
     get_function_parameters_at,
-    get_function_return_type_at
+    get_function_return_type_at,
+    get_function_instructions_at
 } from "./lowering_native_helpers";
 
 // Lower all local functions to LLVM IR. Returns the full LLVM IR line

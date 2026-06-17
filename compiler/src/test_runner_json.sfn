@@ -26,9 +26,9 @@
 // (issue #364). Both this module and the human-readable test runner
 // (in `cli_commands.sfn`) consume it without copying — keep its
 // definition in `assert_failure.sfn`.
-import { AssertFailure } from "./assert_failure";
-import { Program, SourceSpan, Statement } from "./ast";
+import { Program, Statement, SourceSpan } from "./ast";
 import { substring } from "./string_utils";
+import { AssertFailure } from "./assert_failure";
 
 // Bumped only on a breaking change to any of the three event shapes.
 // Consumers (the planned MCP `sailfin_test_runner` tool, CI scrapers,

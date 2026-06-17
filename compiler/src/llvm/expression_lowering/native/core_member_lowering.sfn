@@ -1,57 +1,56 @@
 // compiler/src/llvm/expression_lowering/native/core_member_lowering.sfn
 //
 // Member access lowering extracted from core.sfn.
-import { NativeFunction } from "../../../native_ir";
-import { index_of, substring } from "../../../string_utils";
-import { find_local_binding } from "../../expressions_bindings";
-import { default_return_literal, format_temp_name } from "../../expressions_helpers";
+import { lower_expression } from "./core";
+import {
+    LLVMOperand,
+    TypeContext,
+    EnumTypeInfo,
+    LocalBinding,
+    StringConstant,
+    StructTypeInfo,
+    EnumVariantInfo,
+    StructFieldInfo,
+    ExpressionResult,
+    ParameterBinding,
+    MemberAccessParse,
+    StringPointerResult
+} from "../../types";
+import {
+    trim_text,
+    starts_with,
+    append_string,
+    contains_text,
+    number_to_string
+} from "../../utils";
+import { sanitize_symbol } from "./core_text";
 import {
     append_string_constant,
     empty_string_constant_set,
     find_string_constant_by_name
 } from "../../strings";
+import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
+import { NativeFunction } from "../../../native_ir";
 import {
-    find_enum_info_by_llvm_type,
-    find_interface_info_by_name,
-    find_struct_field_info,
-    find_struct_info_by_llvm_type,
-    find_struct_info_by_name,
-    find_variant_field_info,
-    resolve_enum_info_for_literal
-} from "../../type_context_queries";
-import {
+    map_type_annotation,
+    strip_pointer_suffix,
     ends_with_pointer_suffix,
     layout_annotation_base_type,
-    layout_annotation_represents_user_value,
-    map_type_annotation,
-    strip_pointer_suffix
+    layout_annotation_represents_user_value
 } from "../../type_mapping";
-import {
-    EnumTypeInfo,
-    EnumVariantInfo,
-    ExpressionResult,
-    LLVMOperand,
-    LocalBinding,
-    MemberAccessParse,
-    ParameterBinding,
-    StringConstant,
-    StringPointerResult,
-    StructFieldInfo,
-    StructTypeInfo,
-    TypeContext
-} from "../../types";
-import {
-    append_string,
-    contains_text,
-    number_to_string,
-    starts_with,
-    trim_text
-} from "../../utils";
-// Mutually recursive with core.sfn
-import { lower_expression } from "./core";
+import { index_of, substring } from "../../../string_utils";
 import { lower_inline_gep_field_access } from "./core_member_helpers";
-import { sanitize_symbol } from "./core_text";
-import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
+import { format_temp_name, default_return_literal } from "../../expressions_helpers";
+import { find_local_binding } from "../../expressions_bindings";
+import {
+    find_struct_field_info,
+    find_variant_field_info,
+    find_struct_info_by_name,
+    find_enum_info_by_llvm_type,
+    find_interface_info_by_name,
+    find_struct_info_by_llvm_type,
+    resolve_enum_info_for_literal
+} from "../../type_context_queries";
 
 fn make_expression_result(lines: string[], temp_index: int, operand: LLVMOperand?, diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
     return ExpressionResult {

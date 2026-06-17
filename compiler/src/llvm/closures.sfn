@@ -55,9 +55,9 @@
 // placeholder behaviour — a regression guard for issue #459's
 // acceptance criterion.
 import { Capture } from "../ast";
+import { trim_text, number_to_string, join_with_separator } from "./utils";
+import { map_type_annotation, ends_with_pointer_suffix } from "./type_mapping";
 import { format_temp_name } from "./expressions_helpers";
-import { ends_with_pointer_suffix, map_type_annotation } from "./type_mapping";
-import { join_with_separator, number_to_string, trim_text } from "./utils";
 
 // Percent-escape every character that doubles as either a marker
 // delimiter (`;` between captures, `:` between a capture's name and

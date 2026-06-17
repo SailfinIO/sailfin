@@ -3,9 +3,9 @@
 // Canonical formatter for .sfn files. Operates on the token stream
 // (not the AST) to preserve comments. One style, no configuration.
 import { lex } from "../lexer";
-import { char_at, strings_equal, substring } from "../string_utils";
 import { Token } from "../token";
 import { import_group, wraps_at_threshold } from "./fmt_rules";
+import { char_at, substring, strings_equal } from "../string_utils";
 
 // ═══════════════════════════════════════════════════════════════════
 // Enriched token for formatting

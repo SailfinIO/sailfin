@@ -1,147 +1,147 @@
 // compiler/src/llvm/lowering/entrypoints.sfn
 //
 // LLVM IR lowering entrypoints — public API surface.
-import { NativeArtifact, NativeModule } from "../../emit_native";
 import {
-    LayoutManifest,
-    NativeBinding,
-    NativeEnum,
-    NativeFunction,
-    NativeImport,
-    NativeImportSpecifier,
-    NativeInstruction,
-    NativeInterface,
-    NativeParameter,
-    NativeStruct,
-    NativeStructField,
-    NativeStructLayout,
-    NativeStructLayoutField,
-    ParseNativeResult
-} from "../../native_ir";
-import {
-    parse_layout_manifest,
-    parse_native_artifact,
-    parse_native_artifact_for_import_context,
-    parse_native_bindings_from_text,
-    parse_native_function_count_from_text,
-    parse_native_functions_for_import,
-    parse_native_functions_from_text,
-    parse_native_imports_for_import,
-    parse_native_interfaces_for_import,
-    parse_native_structs_for_import,
-    select_layout_manifest_artifact,
-    select_text_artifact
-} from "../../native_ir_api";
-import { split_lines } from "../../native_ir_utils_text";
-import { char_code, substring } from "../../string_utils";
-import {
-    append_function_effect_entry,
-    append_unique_effect,
-    build_capability_manifest,
-    collect_direct_function_effects,
-    collect_function_call_graph,
-    collect_runtime_helper_targets,
-    find_function_effect_entry,
-    propagate_function_effects
-} from "../effects";
-import {
-    apply_layout_manifest_to_module,
-    collect_imported_module_context_for_module,
-    resolve_import_artifact_slug,
-    resolve_import_module_slug_for_module
-} from "../imports";
-import {
-    render_enum_type_definitions,
-    render_imported_function_declarations,
-    render_runtime_helper_declarations,
-    render_struct_type_definitions,
-    render_trait_metadata_comments
-} from "../rendering";
-import {
-    collect_exported_symbol_names,
-    find_function_by_name,
-    render_interface_type_definitions,
-    render_test_harness_main,
-    render_vtable_constants,
-    render_vtable_type_definitions,
-    should_internalize_function
-} from "../rendering_helpers";
-import {
-    empty_string_constant_set,
-    merge_string_constants,
-    render_string_constants
-} from "../strings";
-import { build_type_context, fixup_enum_layouts } from "../type_context";
-import {
-    CapabilityManifest,
+    TypeContext,
     EnumTypeInfo,
+    TraitMetadata,
+    StringConstant,
     EnumVariantInfo,
+    TraitDescriptor,
+    LoweredLLVMResult,
+    CapabilityManifest,
     FunctionEffectEntry,
     ImportedModuleContext,
     LifetimeRegionMetadata,
     LoweredLLVMLinesResult,
-    LoweredLLVMResult,
-    StringConstant,
-    TraitDescriptor,
-    TraitImplementationDescriptor,
-    TraitMetadata,
-    TypeContext
+    TraitImplementationDescriptor
 } from "../types";
 import {
-    append_string,
     index_of,
-    join_with_separator,
-    number_to_string,
-    sanitize_symbol,
+    trim_text,
     starts_with,
-    string_array_contains,
-    trim_text
+    append_string,
+    sanitize_symbol,
+    number_to_string,
+    join_with_separator,
+    string_array_contains
 } from "../utils";
+import {
+    append_unique_effect,
+    build_capability_manifest,
+    find_function_effect_entry,
+    propagate_function_effects,
+    collect_function_call_graph,
+    append_function_effect_entry,
+    collect_runtime_helper_targets,
+    collect_direct_function_effects
+} from "../effects";
+import {
+    resolve_import_artifact_slug,
+    apply_layout_manifest_to_module,
+    resolve_import_module_slug_for_module,
+    collect_imported_module_context_for_module
+} from "../imports";
+import {
+    merge_string_constants,
+    render_string_constants,
+    empty_string_constant_set
+} from "../strings";
 import { emit_llvm_function } from "./emission";
 import {
-    compile_native_text_to_llvm_file,
-    compile_native_text_to_llvm_file_with_context,
+    render_enum_type_definitions,
+    render_struct_type_definitions,
+    render_trait_metadata_comments,
+    render_runtime_helper_declarations,
+    render_imported_function_declarations
+} from "../rendering";
+import {
+    append_string_lines,
+    extend_string_lines,
+    module_source_filename,
+    write_llvm_lines_chunked,
+    extend_string_lines_checked,
+    ensure_intrinsic_declarations,
+    extend_lifetime_regions_checked
+} from "./lowering_io";
+import {
+    NativeEnum,
+    NativeImport,
+    NativeStruct,
+    NativeBinding,
+    LayoutManifest,
+    NativeFunction,
+    NativeInterface,
+    NativeParameter,
+    NativeInstruction,
+    NativeStructField,
+    ParseNativeResult,
+    NativeStructLayout,
+    NativeImportSpecifier,
+    NativeStructLayoutField
+} from "../../native_ir";
+import { build_type_context, fixup_enum_layouts } from "../type_context";
+import {
     has_fatal_lowering_diagnostic,
+    compile_native_text_to_llvm_file,
     lower_to_llvm_lines_with_parsed_context,
+    compile_native_text_to_llvm_file_with_context,
     lower_to_llvm_lines_with_parsed_context_for_tests
 } from "./lowering_core";
+import { lower_module_bindings_to_globals } from "./module_globals";
+import { NativeModule, NativeArtifact } from "../../emit_native";
+import { char_code, substring } from "../../string_utils";
 import {
     DeclareSignature,
     MangledModuleResult,
-    collect_available_import_module_names,
-    collect_defined_function_symbols,
-    empty_trait_metadata,
     extend_native_enums,
-    extend_native_functions,
-    extend_native_interfaces,
+    is_test_module_slug,
+    empty_trait_metadata,
+    render_function_shim,
     extend_native_structs,
     find_declare_signature,
+    extend_native_functions,
+    extend_native_interfaces,
     insert_before_llvm_footer,
-    is_test_module_slug,
-    render_function_shim,
+    sanitize_collection_length,
+    collect_defined_function_symbols,
     resolve_import_provider_module_name,
-    sanitize_collection_length
+    collect_available_import_module_names
 } from "./lowering_helpers";
 import {
-    _join_llvm_lines_linear,
-    append_native_function,
-    apply_module_symbol_mangling,
+    select_text_artifact,
+    parse_layout_manifest,
+    parse_native_artifact,
+    parse_native_bindings_from_text,
+    parse_native_imports_for_import,
+    parse_native_structs_for_import,
+    select_layout_manifest_artifact,
+    parse_native_functions_from_text,
+    parse_native_functions_for_import,
+    parse_native_interfaces_for_import,
+    parse_native_function_count_from_text,
+    parse_native_artifact_for_import_context
+} from "../../native_ir_api";
+import { recover_functions_for_lowering } from "./lowering_recovery";
+import {
+    find_function_by_name,
+    render_vtable_constants,
+    render_test_harness_main,
+    should_internalize_function,
+    collect_exported_symbol_names,
+    render_vtable_type_definitions,
+    render_interface_type_definitions
+} from "../rendering_helpers";
+import { split_lines } from "../../native_ir_utils_text";
+import {
     build_trait_metadata,
+    append_native_function,
+    flatten_struct_methods,
+    _join_llvm_lines_linear,
     concat_native_functions,
     empty_capability_manifest,
-    flatten_struct_methods
+    apply_module_symbol_mangling
 } from "./lowering_helpers_mangling";
-import {
-    append_string_lines,
-    ensure_intrinsic_declarations,
-    extend_lifetime_regions_checked,
-    extend_string_lines,
-    extend_string_lines_checked,
-    module_source_filename,
-    write_llvm_lines_chunked
-} from "./lowering_io";
-import { recover_functions_for_lowering } from "./lowering_recovery";
-import { lower_module_bindings_to_globals } from "./module_globals";
 
 fn lower_to_llvm(native_module: NativeModule) -> LoweredLLVMResult ![io] {
     let artifact = select_text_artifact(native_module.artifacts);

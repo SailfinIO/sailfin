@@ -4,31 +4,31 @@
 // native emitter.  Extracted from emit_native.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
 import {
-    EnumVariant,
-    FieldDeclaration,
     Program,
-    Statement
+    Statement,
+    EnumVariant,
+    FieldDeclaration
 } from "./ast";
+import { char_at, starts_with, contains_string } from "./string_utils";
 import {
-    LayoutContext,
-    LayoutEnumDefinition,
-    LayoutEnumVariantDefinition,
-    LayoutFieldInput,
-    LayoutStructDefinition,
+    trim_text,
     NativeState,
-    append_string,
-    builder_emit_blank,
-    builder_emit_line,
     builder_new,
-    builder_to_string,
+    LayoutContext,
+    append_string,
     is_array_type,
-    is_optional_annotation,
-    number_to_string,
     state_emit_line,
+    LayoutFieldInput,
+    number_to_string,
+    builder_emit_line,
+    builder_to_string,
+    builder_emit_blank,
+    LayoutEnumDefinition,
     strip_optional_suffix,
-    trim_text
+    LayoutStructDefinition,
+    is_optional_annotation,
+    LayoutEnumVariantDefinition
 } from "./emit_native_state";
-import { char_at, contains_string, starts_with } from "./string_utils";
 
 // ── Layout-specific data structures ──────────────────────────────────
 struct LayoutEmitResult {

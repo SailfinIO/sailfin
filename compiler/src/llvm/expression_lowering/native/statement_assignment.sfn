@@ -2,57 +2,57 @@
 //
 // Assignment handling extracted from statement.sfn to keep each function
 // under ~500 .sfn-asm instructions (avoids seed OOM).
-import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../../native_ir";
-import { substring } from "../../../string_utils";
-import { default_return_literal, format_temp_name, is_simple_identifier } from "../../expressions_helpers";
-import { empty_string_constant_set, merge_string_constants } from "../../strings";
-import { find_struct_field_index, find_struct_info_by_llvm_type } from "../../type_context_queries";
+import { lower_expression, analyze_value_ownership } from "./core";
+import { array_pointer_element_type } from "../arrays";
 import {
-    array_struct_type_for_element,
-    ends_with_pointer_suffix,
-    strip_pointer_suffix
-} from "../../type_mapping";
-import {
-    AssignmentParseResult,
-    ExpressionResult,
-    ExpressionStatementResult,
     LLVMOperand,
-    LifetimeRegionMetadata,
-    LifetimeReleaseEvent,
+    TypeContext,
     LocalBinding,
     LocalMutation,
     OwnershipInfo,
-    ParameterBinding,
     StringConstant,
-    TypeContext
+    ExpressionResult,
+    ParameterBinding,
+    LifetimeReleaseEvent,
+    AssignmentParseResult,
+    LifetimeRegionMetadata,
+    ExpressionStatementResult
 } from "../../types";
 import {
-    append_parameter_binding,
-    find_parameter_binding,
-    number_to_string,
+    trim_text,
     starts_with,
-    trim_text
+    number_to_string,
+    find_parameter_binding,
+    append_parameter_binding
 } from "../../utils";
-import { array_pointer_element_type } from "../arrays";
 import {
     bindings_mark_local_consumed,
+    bindings_update_local_ownership,
     bindings_mark_parameter_consumed,
-    bindings_reset_local_consumption,
-    bindings_update_local_ownership
+    bindings_reset_local_consumption
 } from "../bindings";
-import { analyze_value_ownership, lower_expression } from "./core";
-import { coerce_operand_to_type } from "./core_operands";
-import { parse_index_expression, parse_member_access } from "./core_parse";
+import { find_substring_from } from "./core_text";
+import { parse_member_access, parse_index_expression } from "./core_parse";
+import { merge_string_constants, empty_string_constant_set } from "../../strings";
 import {
-    append_lifetime_region,
-    append_lifetime_release_event,
     find_local_binding,
+    append_lifetime_region,
     infer_borrow_base_scope,
+    append_lifetime_release_event,
     make_lifetime_region_metadata
 } from "./core_scopes";
-import { find_substring_from } from "./core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
+import { coerce_operand_to_type } from "./core_operands";
 import { recover_temp_from_lines } from "./temp_recovery";
+import { NativeFunction, NativeSourceSpan, NativeInstruction } from "../../../native_ir";
+import {
+    strip_pointer_suffix,
+    ends_with_pointer_suffix,
+    array_struct_type_for_element
+} from "../../type_mapping";
+import { substring } from "../../../string_utils";
+import { format_temp_name, is_simple_identifier, default_return_literal } from "../../expressions_helpers";
+import { find_struct_field_index, find_struct_info_by_llvm_type } from "../../type_context_queries";
 
 // Handles deref (*ptr = value), member access (obj.field = value), and
 // array index (arr[i] = value) assignments. Returns ExpressionStatementResult.

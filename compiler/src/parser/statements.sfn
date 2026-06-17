@@ -5,53 +5,53 @@
 import {
     Block,
     Decorator,
-    ElseBranch,
-    Expression,
     ForClause,
     MatchCase,
-    SourceSpan,
     Statement,
+    ElseBranch,
+    Expression,
+    SourceSpan,
     WithClause
 } from "../ast";
 import {
-    char_at,
-    char_code,
-    strings_equal,
-    substring
-} from "../string_utils";
-import { Token } from "../token";
-import { parse_variable } from "./declarations";
-import { expression_from_tokens } from "./expressions";
-import {
-    append_token,
-    collect_pattern_until_arrow,
-    collect_until,
-    consume_keyword,
-    consume_symbol,
-    find_top_level_identifier,
-    identifier_matches,
-    identifier_text,
-    parser_advance_raw,
-    parser_peek_raw,
-    skip_trivia,
-    source_span_from_tokens,
-    split_token_slices_by_comma,
-    symbol_matches,
-    token_slice,
-    tokens_to_text,
-    trim_token_edges
-} from "./token_utils";
-import {
+    Parser,
     BlockParseResult,
-    BlockStatementParseResult,
+    MatchCaseTokenSplit,
     DecoratorParseResult,
     MatchCaseParseResult,
-    MatchCaseTokenSplit,
+    StatementParseResult,
     MatchCasesParseResult,
-    Parser,
-    StatementParseResult
+    BlockStatementParseResult
 } from "./types";
 import { trim_text } from "./utils";
+import { Token } from "../token";
+import { expression_from_tokens } from "./expressions";
+import {
+    skip_trivia,
+    token_slice,
+    append_token,
+    collect_until,
+    consume_symbol,
+    symbol_matches,
+    tokens_to_text,
+    consume_keyword,
+    identifier_text,
+    parser_peek_raw,
+    trim_token_edges,
+    identifier_matches,
+    parser_advance_raw,
+    source_span_from_tokens,
+    find_top_level_identifier,
+    collect_pattern_until_arrow,
+    split_token_slices_by_comma
+} from "./token_utils";
+import { parse_variable } from "./declarations";
+import {
+    char_at,
+    char_code,
+    substring,
+    strings_equal
+} from "../string_utils";
 
 // Forward declaration for decorators - will be imported from declarations
 // For now we provide a stub that returns empty decorators

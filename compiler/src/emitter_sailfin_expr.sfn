@@ -4,16 +4,16 @@
 // Extracted from emitter_sailfin.sfn to keep modules focused and under size.
 import {
     Block,
-    Expression,
     Parameter,
     Statement,
+    Expression,
     TypeAnnotation
 } from "./ast";
 import {
-    collapse_whitespace,
-    join_with_separator,
+    trim_text,
     quote_string,
-    trim_text
+    collapse_whitespace,
+    join_with_separator
 } from "./emitter_sailfin_utils";
 
 fn format_optional_expression(expression: Expression?) -> string {

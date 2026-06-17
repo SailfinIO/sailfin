@@ -21,9 +21,9 @@
 // and the seed compiler doesn't handle the resulting import cycle
 // cleanly. The duplication is small (one numeric formatter) and
 // keeps this module self-contained for unit testing.
-import { substring } from "./string_utils";
 import { Token } from "./token";
-import { Diagnostic, FixSuggestion, TextEdit } from "./typecheck_types";
+import { substring } from "./string_utils";
+import { TextEdit, Diagnostic, FixSuggestion } from "./typecheck_types";
 
 // Per-file/per-producer event in the envelope. `kind` discriminates
 // "diagnostic" (typecheck/effect/capability findings) from

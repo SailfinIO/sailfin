@@ -5,73 +5,72 @@
 // Implements `lower_expression_statement`, `lower_return_instruction`, and
 // `prepare_parameters`.  Type mapping, suspension detection, async ABI helpers,
 // and expression parsing live in sibling submodules.
-import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../../native_ir";
-import { test_runner_trace } from "../../../test_runner_state";
-import { default_return_literal, is_simple_identifier } from "../../expressions_helpers";
+import { lower_expression, analyze_value_ownership } from "./core";
+// Import types from modular structure
+import {
+    LLVMOperand,
+    TypeContext,
+    LocalBinding,
+    LocalMutation,
+    OwnershipInfo,
+    StringConstant,
+    ParameterBinding,
+    LifetimeReleaseEvent,
+    ParameterPreparation,
+    LifetimeRegionMetadata,
+    ExpressionStatementResult
+} from "../../types";
+// Import utilities
+import {
+    trim_text,
+    starts_with,
+    sanitize_symbol,
+    number_to_string,
+    string_array_contains,
+    append_parameter_binding
+} from "../../utils";
+import {
+    bindings_mark_local_consumed,
+    bindings_find_parameter_binding,
+    bindings_update_local_ownership,
+    bindings_mark_parameter_consumed,
+    bindings_reset_local_consumption
+} from "../bindings";
+import { parse_member_access, parse_index_expression } from "./core_parse";
+// Import string constant management
+import { empty_string_constant_set } from "../../strings";
+import {
+    find_local_binding,
+    promote_local_to_rc,
+    append_local_binding,
+    append_lifetime_region,
+    default_allocation_kind,
+    infer_borrow_base_scope,
+    mark_last_local_consumed,
+    append_lifetime_release_event,
+    make_lifetime_region_metadata,
+    promote_escaping_locals_for_boundaries
+} from "./core_scopes";
 // `format_root_scope_id` lives in the lifetime utilities module; the
 // `core_scopes` re-export points to the same canonical implementation.
 import { format_root_scope_id } from "../../lifetime";
+import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
+import { coerce_operand_to_type } from "./core_operands";
+import { recover_temp_from_lines } from "./temp_recovery";
+import { NativeFunction, NativeSourceSpan, NativeInstruction } from "../../../native_ir";
+import { is_heap_type } from "./core_type_mapping";
+// Submodules extracted from this file
+import { parse_assignment_expression, parse_inline_let_expression } from "./statement_parsing";
+import { lower_lvalue_assignment_stmt } from "./statement_assignment";
+import { detect_suspension_conflicts } from "./statement_suspension";
+import { map_parameter_type, map_struct_type_annotation } from "./statement_type_mapping";
+import { is_simple_identifier, default_return_literal } from "../../expressions_helpers";
+import { test_runner_trace } from "../../../test_runner_state";
+import { trace_lowering } from "../../lowering_debug_state";
 // M1.5.3 (issue #327): drop-emission helpers for explicit returns. The
 // helper walks the scope chain inner-to-outer and emits
 // `sfn_rc_release` calls for every owned RC local at scope close.
 import { emit_drops_for_scope_chain } from "../../lowering/instructions_helpers";
-import { trace_lowering } from "../../lowering_debug_state";
-// Import string constant management
-import { empty_string_constant_set } from "../../strings";
-// Import types from modular structure
-import {
-    ExpressionStatementResult,
-    LLVMOperand,
-    LifetimeRegionMetadata,
-    LifetimeReleaseEvent,
-    LocalBinding,
-    LocalMutation,
-    OwnershipInfo,
-    ParameterBinding,
-    ParameterPreparation,
-    StringConstant,
-    TypeContext
-} from "../../types";
-// Import utilities
-import {
-    append_parameter_binding,
-    number_to_string,
-    sanitize_symbol,
-    starts_with,
-    string_array_contains,
-    trim_text
-} from "../../utils";
-import {
-    bindings_find_parameter_binding,
-    bindings_mark_local_consumed,
-    bindings_mark_parameter_consumed,
-    bindings_reset_local_consumption,
-    bindings_update_local_ownership
-} from "../bindings";
-// Core lowering / analysis lives in ./core; split helpers live in submodules.
-import { analyze_value_ownership, lower_expression } from "./core";
-import { coerce_operand_to_type } from "./core_operands";
-import { parse_index_expression, parse_member_access } from "./core_parse";
-import {
-    append_lifetime_region,
-    append_lifetime_release_event,
-    append_local_binding,
-    default_allocation_kind,
-    find_local_binding,
-    infer_borrow_base_scope,
-    make_lifetime_region_metadata,
-    mark_last_local_consumed,
-    promote_escaping_locals_for_boundaries,
-    promote_local_to_rc
-} from "./core_scopes";
-import { is_heap_type } from "./core_type_mapping";
-import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
-import { lower_lvalue_assignment_stmt } from "./statement_assignment";
-// Submodules extracted from this file
-import { parse_assignment_expression, parse_inline_let_expression } from "./statement_parsing";
-import { detect_suspension_conflicts } from "./statement_suspension";
-import { map_parameter_type, map_struct_type_annotation } from "./statement_type_mapping";
-import { recover_temp_from_lines } from "./temp_recovery";
 
 fn find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {
     return bindings_find_parameter_binding(bindings, name);

@@ -2,29 +2,29 @@
 //
 // LLVM IR rendering functions for declarations and metadata comments.
 // Handles trait metadata comments, runtime helper declarations, and function declarations.
+import { TypeContext, TraitMetadata, RuntimeHelperDescriptor } from "./types";
+import {
+    index_of,
+    trim_text,
+    append_string,
+    sanitize_symbol,
+    number_to_string,
+    join_with_separator,
+    string_array_contains
+} from "./utils";
 import { NativeFunction, NativeParameter } from "../native_ir";
+import { map_return_type, map_parameter_type } from "./type_mapping";
 import { substring } from "../string_utils";
 import {
-    collect_parameter_types,
-    extract_struct_type_from_llvm,
-    render_interface_signature
-} from "./rendering_helpers";
-import {
-    effective_helper_declare_return_type,
     is_async_runtime_target,
-    runtime_helper_descriptors
+    runtime_helper_descriptors,
+    effective_helper_declare_return_type
 } from "./runtime_helpers";
-import { map_parameter_type, map_return_type } from "./type_mapping";
-import { RuntimeHelperDescriptor, TraitMetadata, TypeContext } from "./types";
 import {
-    append_string,
-    index_of,
-    join_with_separator,
-    number_to_string,
-    sanitize_symbol,
-    string_array_contains,
-    trim_text
-} from "./utils";
+    collect_parameter_types,
+    render_interface_signature,
+    extract_struct_type_from_llvm
+} from "./rendering_helpers";
 
 fn clamp_collection_length(value: int, max: int) -> int {
     if value < 0 { return 0; }

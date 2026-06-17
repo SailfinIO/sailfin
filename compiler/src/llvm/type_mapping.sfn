@@ -2,15 +2,15 @@
 //
 // Type annotation mapping for LLVM lowering. Converts Sailfin type annotations
 // to their corresponding LLVM IR types.
-import { char_at, char_code, substring } from "../string_utils";
-import { TypeAllocationInfo, TypeContext } from "./types";
+import { TypeContext, TypeAllocationInfo } from "./types";
 import {
-    ends_with,
     index_of,
-    sanitize_symbol,
+    ends_with,
+    trim_text,
     starts_with,
-    trim_text
+    sanitize_symbol
 } from "./utils";
+import { char_at, char_code, substring } from "../string_utils";
 
 // =============================================================================
 // Character Classification

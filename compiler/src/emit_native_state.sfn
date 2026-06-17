@@ -4,7 +4,7 @@
 // native emitter.  Extracted from emit_native.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
 import { TypeAnnotation } from "./ast";
-import { contains_string, ends_with, substring } from "./string_utils";
+import { ends_with, substring, contains_string } from "./string_utils";
 
 // ── Data structures ──────────────────────────────────────────────────
 struct TextBuilder {

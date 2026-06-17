@@ -12,113 +12,113 @@
 //   lowering_text_utils.sfn     — text processing and structured data parsers
 //   lowering_recovery.sfn       — light recovery parsers for functions/structs/imports
 //   lowering_io.sfn             — string array ops, file I/O, intrinsics
-import { NativeModule } from "../../emit_native";
-import { NativeArtifact } from "../../emit_native_layout";
 import {
-    LayoutManifest,
-    NativeBinding,
-    NativeEnum,
-    NativeFunction,
-    NativeImport,
-    NativeInstruction,
-    NativeInterface,
-    NativeParameter,
-    NativeStruct,
-    NativeStructField,
-    ParseNativeResult
-} from "../../native_ir";
+    TypeContext,
+    LocalBinding,
+    TraitMetadata,
+    StringConstant,
+    FunctionEffectEntry,
+    LifetimeRegionMetadata,
+    LoweredLLVMLinesResult
+} from "../types";
 import {
-    parse_native_artifact,
-    parse_native_bindings_from_text,
-    parse_native_function_count_from_text,
-    parse_native_functions_from_text
-} from "../../native_ir_api";
-import { substring } from "../../string_utils";
-import { test_runner_active, test_runner_trace } from "../../test_runner_state";
+    index_of,
+    trim_text,
+    starts_with,
+    sanitize_symbol,
+    number_to_string,
+    string_array_contains
+} from "../utils";
 import {
     append_unique_effect,
-    collect_direct_function_effects,
+    propagate_function_effects,
     collect_function_call_graph,
     collect_runtime_helper_targets,
-    propagate_function_effects
+    collect_direct_function_effects
 } from "../effects";
 import {
     apply_layout_manifest_to_module,
     collect_imported_module_context_for_module
 } from "../imports";
-import { skip_module_globals, trace_call_lowering, trace_lowering } from "../lowering_debug_state";
-import { collect_exported_symbol_names } from "../rendering_helpers";
-import { empty_string_constant_set, escape_string_for_llvm } from "../strings";
-import {
-    FunctionEffectEntry,
-    LifetimeRegionMetadata,
-    LocalBinding,
-    LoweredLLVMLinesResult,
-    StringConstant,
-    TraitMetadata,
-    TypeContext
-} from "../types";
-import {
-    index_of,
-    number_to_string,
-    sanitize_symbol,
-    starts_with,
-    string_array_contains,
-    trim_text
-} from "../utils";
-import {
-    collect_defined_function_symbols,
-    collect_runtime_helper_targets_from_lines,
-    extend_native_enums,
-    extend_native_interfaces,
-    extend_native_structs,
-    inject_prelude_error_struct,
-    inject_prelude_result_enum,
-    is_test_module_slug,
-    native_enums_have_name,
-    native_structs_have_name,
-    sanitize_module_suffix,
-    seed_default_runtime_helpers
-} from "./lowering_helpers";
-import {
-    apply_module_symbol_mangling,
-    build_trait_metadata,
-    concat_native_functions,
-    empty_capability_manifest,
-    extend_native_functions_inplace,
-    flatten_struct_methods
-} from "./lowering_helpers_mangling";
+import { escape_string_for_llvm, empty_string_constant_set } from "../strings";
 import {
     append_string_lines,
     extend_string_lines,
-    extend_string_lines_checked,
     module_source_filename,
-    write_llvm_lines_chunked
+    write_llvm_lines_chunked,
+    extend_string_lines_checked
 } from "./lowering_io";
-import { lower_all_functions } from "./lowering_phase_functions";
-import { build_import_alias_signatures, gather_imported_module_symbols } from "./lowering_phase_imports";
+import {
+    NativeEnum,
+    NativeImport,
+    NativeStruct,
+    NativeBinding,
+    LayoutManifest,
+    NativeFunction,
+    NativeInterface,
+    NativeParameter,
+    NativeInstruction,
+    NativeStructField,
+    ParseNativeResult
+} from "../../native_ir";
+import { lower_module_bindings_to_globals, lower_imported_bindings_to_globals } from "./module_globals";
+import { NativeModule } from "../../emit_native";
+import { substring } from "../../string_utils";
+import {
+    extend_native_enums,
+    is_test_module_slug,
+    extend_native_structs,
+    native_enums_have_name,
+    sanitize_module_suffix,
+    extend_native_interfaces,
+    native_structs_have_name,
+    inject_prelude_result_enum,
+    inject_prelude_error_struct,
+    seed_default_runtime_helpers,
+    collect_defined_function_symbols,
+    collect_runtime_helper_targets_from_lines
+} from "./lowering_helpers";
+import { emit_type_descriptors } from "./type_descriptors";
+import {
+    parse_native_artifact,
+    parse_native_bindings_from_text,
+    parse_native_functions_from_text,
+    parse_native_function_count_from_text
+} from "../../native_ir_api";
+import { recover_functions_for_lowering } from "./lowering_recovery";
+import { collect_exported_symbol_names } from "../rendering_helpers";
+import { split_lines_local, _parse_lowered_fn_string_constants } from "./lowering_text_utils";
+import { build_type_context_with_recovery } from "./lowering_phase_types";
+import { test_runner_trace, test_runner_active } from "../../test_runner_state";
+import { trace_lowering, skip_module_globals, trace_call_lowering } from "../lowering_debug_state";
 import { render_llvm_preamble } from "./lowering_phase_render";
+import { NativeArtifact } from "../../emit_native_layout";
+import { build_import_alias_signatures, gather_imported_module_symbols } from "./lowering_phase_imports";
 // Phase modules
 import {
-    recover_safe_functions,
-    recover_structs_if_corrupt,
+    sanitize_enums,
+    sanitize_imports,
+    sanitize_structs,
     sanitize_bindings,
+    sanitize_functions,
+    sanitize_interfaces,
     sanitize_diagnostics,
     sanitize_entry_points,
-    sanitize_enums,
-    sanitize_functions,
-    sanitize_imported_manifests,
-    sanitize_imported_native_texts,
-    sanitize_imports,
-    sanitize_interfaces,
+    recover_safe_functions,
     sanitize_lowering_inputs,
-    sanitize_structs
+    recover_structs_if_corrupt,
+    sanitize_imported_manifests,
+    sanitize_imported_native_texts
 } from "./lowering_phase_sanitize";
-import { build_type_context_with_recovery } from "./lowering_phase_types";
-import { recover_functions_for_lowering } from "./lowering_recovery";
-import { _parse_lowered_fn_string_constants, split_lines_local } from "./lowering_text_utils";
-import { lower_imported_bindings_to_globals, lower_module_bindings_to_globals } from "./module_globals";
-import { emit_type_descriptors } from "./type_descriptors";
+import { lower_all_functions } from "./lowering_phase_functions";
+import {
+    build_trait_metadata,
+    flatten_struct_methods,
+    concat_native_functions,
+    empty_capability_manifest,
+    apply_module_symbol_mangling,
+    extend_native_functions_inplace
+} from "./lowering_helpers_mangling";
 
 // Resolve the mangled call symbol for a lifecycle-hook function (#975).
 // Hooks emit under a `hook:<kind>` symbol (emit_native.sfn). Returns the

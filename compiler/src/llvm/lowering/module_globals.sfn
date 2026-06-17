@@ -1,28 +1,28 @@
 // compiler/src/llvm/lowering/module_globals.sfn
 //
 // Module-global lowering: turns `let` bindings into LLVM globals plus optional init function.
-import { NativeBinding } from "../../native_ir";
-import { default_return_literal } from "../expressions_helpers";
-import { is_string_literal, normalise_number_literal } from "../expressions_literals";
-import { format_root_scope_id } from "../lifetime";
-import { empty_string_constant_set } from "../strings";
-import { map_local_type } from "../type_mapping";
 import {
-    BindingLoweringResult,
+    TypeContext,
     LocalBinding,
-    ModuleGlobalLoweringResult,
-    TypeContext
+    BindingLoweringResult,
+    ModuleGlobalLoweringResult
 } from "../types";
 import {
+    trim_text,
+    sanitize_symbol,
+    number_to_string,
+    is_number_literal,
     is_boolean_literal,
     is_integer_literal,
-    is_number_literal,
-    matches_case_insensitive,
-    number_to_string,
-    sanitize_symbol,
     string_array_contains,
-    trim_text
+    matches_case_insensitive
 } from "../utils";
+import { empty_string_constant_set } from "../strings";
+import { format_root_scope_id } from "../lifetime";
+import { NativeBinding } from "../../native_ir";
+import { map_local_type } from "../type_mapping";
+import { default_return_literal } from "../expressions_helpers";
+import { is_string_literal, normalise_number_literal } from "../expressions_literals";
 
 fn module_global_symbol(name: string) -> string {
     return "@global." + sanitize_symbol(name);

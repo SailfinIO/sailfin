@@ -19,8 +19,8 @@
 // the runner here, P3's `pure_assert_*` family, 1.1's
 // `handle_test_command` policy split, and 1.5's `--json` event
 // stream. Keep the struct stable.
-import { split_lines } from "./native_ir_utils_text";
 import { substring } from "./string_utils";
+import { split_lines } from "./native_ir_utils_text";
 
 struct AssertFailure {
     present: boolean;

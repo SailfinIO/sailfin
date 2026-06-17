@@ -3,16 +3,16 @@
 // Shared helper utilities extracted from instructions.sfn so that
 // lower_instruction_range occupies position 1 in its module -- within
 // the v0.1.1 seed's per-module streaming emission limit.
-import { char_code, grapheme_at, substring } from "../../string_utils";
-import { is_scope_descendant } from "../lifetime";
 import {
-    GuardedDropResult,
-    LifetimeRegionMetadata,
     LocalBinding,
     LocalMutation,
-    ScopeDropResult
+    ScopeDropResult,
+    GuardedDropResult,
+    LifetimeRegionMetadata
 } from "../types";
-import { extend_string_array, number_to_string } from "../utils";
+import { number_to_string, extend_string_array } from "../utils";
+import { is_scope_descendant } from "../lifetime";
+import { char_code, substring, grapheme_at } from "../../string_utils";
 
 fn clone_local_bindings(values: LocalBinding[]) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];

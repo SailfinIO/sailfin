@@ -1,27 +1,27 @@
 // compiler/src/llvm/expression_lowering/native/core_parsing.sfn
 //
 // Parsing helpers for expression lowering extracted from core.sfn.
-import { char_at, substring } from "../../../string_utils";
-import { array_struct_type_for_element } from "../../type_mapping";
-import { map_type_annotation } from "../../type_mapping";
 import {
-    ArrayLiteralMetadata,
-    BorrowArgumentParse,
-    BorrowParseResult,
+    TypeContext,
     CastParseResult,
-    RawAddressParseResult,
+    BorrowParseResult,
     TernaryParseResult,
-    TypeContext
+    BorrowArgumentParse,
+    ArrayLiteralMetadata,
+    RawAddressParseResult
 } from "../../types";
 import {
+    trim_text,
+    starts_with,
     append_string,
     is_effect_delimiter,
     is_identifier_part_char,
-    is_identifier_start_char,
-    starts_with,
-    trim_text
+    is_identifier_start_char
 } from "../../utils";
+import { array_struct_type_for_element } from "../../type_mapping";
+import { map_type_annotation } from "../../type_mapping";
 import { map_primitive_type } from "./core_type_mapping";
+import { char_at, substring } from "../../../string_utils";
 
 fn parse_borrow_expression(expression: string) -> BorrowParseResult {
     let trimmed = trim_text(expression);

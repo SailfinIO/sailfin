@@ -12,60 +12,61 @@
 //   emit_native_layout.sfn — struct/enum layout computation & manifest
 import {
     Block,
+    Program,
     Decorator,
+    MatchCase,
+    Parameter,
+    Statement,
     ElseBranch,
     Expression,
+    SourceSpan,
+    TypeAnnotation,
     FieldDeclaration,
     FunctionSignature,
-    MatchCase,
-    MethodDeclaration,
-    Parameter,
-    Program,
-    SourceSpan,
-    Statement,
-    TypeAnnotation
+    MethodDeclaration
 } from "./ast";
-import { block_contains_try, desugar_try_in_block } from "./emit_native_desugar_try";
+import { char_code } from "./string_utils";
 import {
-    append_optional_initializer,
-    append_optional_type_annotation,
-    format_decorator,
-    format_enum_variant,
-    format_expression,
-    format_field,
-    format_function_signature,
-    format_inline_case_body,
-    format_match_case_head,
-    format_optional_expression,
+    state_new,
+    NativeState,
+    LayoutContext,
+    append_unique,
+    state_emit_line,
+    state_emit_blank,
+    state_pop_indent,
+    builder_to_string,
+    state_push_indent,
+    join_with_separator,
+    state_add_diagnostic,
+    join_type_annotations,
+    StatementDispatchResult,
+    state_merge_diagnostics
+} from "./emit_native_state";
+import {
     format_span,
+    format_field,
+    format_decorator,
+    format_expression,
+    format_enum_variant,
+    format_match_case_head,
     format_type_parameters,
+    format_inline_case_body,
     render_export_specifiers,
-    render_native_specifiers
+    render_native_specifiers,
+    format_function_signature,
+    format_optional_expression,
+    append_optional_initializer,
+    append_optional_type_annotation
 } from "./emit_native_format";
 import {
     NativeArtifact,
-    build_layout_context,
-    compute_enum_layout_lines,
-    compute_struct_layout_lines,
     emit_layout_lines,
-    generate_layout_manifest
+    build_layout_context,
+    generate_layout_manifest,
+    compute_enum_layout_lines,
+    compute_struct_layout_lines
 } from "./emit_native_layout";
-import {
-    LayoutContext,
-    NativeState,
-    StatementDispatchResult,
-    append_unique,
-    builder_to_string,
-    join_type_annotations,
-    join_with_separator,
-    state_add_diagnostic,
-    state_emit_blank,
-    state_emit_line,
-    state_merge_diagnostics,
-    state_new,
-    state_pop_indent,
-    state_push_indent
-} from "./emit_native_state";
+import { block_contains_try, desugar_try_in_block } from "./emit_native_desugar_try";
 // #704: import directly from the leaf module rather than the
 // `mod.sfn` re-export barrel. Pre-fix, importing from
 // `./llvm/expression_lowering/native/mod` dragged the entire
@@ -80,7 +81,6 @@ import {
 // `mod.sfn` barrel audit lands, any *new* import from this
 // subtree should likewise target the leaf file directly.
 import { lift_non_capturing_lambdas } from "./llvm/expression_lowering/native/lambda_lowering";
-import { char_code } from "./string_utils";
 
 // ── Public data structures ───────────────────────────────────────────
 struct NativeModule {

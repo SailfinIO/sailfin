@@ -4,33 +4,33 @@
 // emit_llvm_function under ~500 .sfn-asm instructions (avoids seed OOM).
 //
 // NOTE: Mutual import with emission.sfn — see comment there for rationale.
-import { NativeFunction } from "../../native_ir";
-import {
-    future_pointer_type_for_return_type,
-    spawn_ctx_symbol_for_return_type,
-    spawn_symbol_for_return_type
-} from "../expression_lowering/native/statement_suspension";
-import { format_temp_name } from "../expressions_helpers";
-import { empty_string_constant_set, merge_string_constants } from "../strings";
-import { map_return_type } from "../type_mapping";
 import {
     LLVMOperand,
-    LifetimeRegionMetadata,
+    TypeContext,
     LocalBinding,
-    LoweredLLVMFunction,
-    ParameterBinding,
-    ParameterPreparation,
     StringConstant,
-    TypeContext
+    ParameterBinding,
+    LoweredLLVMFunction,
+    ParameterPreparation,
+    LifetimeRegionMetadata
 } from "../types";
 import {
-    extend_string_array,
-    join_with_separator,
+    sanitize_symbol,
     number_to_string,
-    sanitize_symbol
+    extend_string_array,
+    join_with_separator
 } from "../utils";
+import { merge_string_constants, empty_string_constant_set } from "../strings";
 import { emit_llvm_function } from "./emission";
 import { prepare_parameters_from_function } from "./emission";
+import { NativeFunction } from "../../native_ir";
+import { map_return_type } from "../type_mapping";
+import { format_temp_name } from "../expressions_helpers";
+import {
+    spawn_symbol_for_return_type,
+    spawn_ctx_symbol_for_return_type,
+    future_pointer_type_for_return_type
+} from "../expression_lowering/native/statement_suspension";
 
 // Emit async wrapper + impl for an async function. Returns LoweredLLVMFunction.
 fn emit_async_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean) -> LoweredLLVMFunction ![io] {

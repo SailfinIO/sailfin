@@ -93,7 +93,7 @@
 // and Epic #450 for the milestone-level sequencing.
 //
 import { RuntimeHelperDescriptor } from "./types";
-import { join_with_separator, string_array_contains, trim_text } from "./utils";
+import { trim_text, join_with_separator, string_array_contains } from "./utils";
 
 // Synthetic descriptor constructors for array `concat()` and `push()`
 // dispatch. Unlike the ~115 registry entries below (which each carry a

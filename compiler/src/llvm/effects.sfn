@@ -2,35 +2,35 @@
 //
 // Effect system analysis for LLVM lowering. Collects and propagates effects
 // through the function call graph to build capability manifests.
-import { NativeFunction, NativeInstruction } from "../native_ir";
-import { char_at, substring } from "../string_utils";
-import { test_runner_trace } from "../test_runner_state";
-import { find_runtime_helper } from "./runtime_helpers";
 import {
-    CapabilityManifest,
-    CapabilityManifestEntry,
     FunctionCallEntry,
+    CapabilityManifest,
     FunctionEffectEntry,
+    CapabilityManifestEntry,
     RuntimeHelperDescriptor
 } from "./types";
 import {
-    append_string,
-    copy_string_array,
-    find_last_index_of_char,
     index_of,
-    is_effect_delimiter,
-    is_effect_prefix_char,
-    is_identifier_part_char,
-    is_identifier_start_char,
+    trim_text,
     is_trim_char,
-    matches_case_insensitive,
+    append_string,
     matches_keyword,
     number_to_string,
+    copy_string_array,
+    is_effect_delimiter,
     skip_string_literal,
-    string_array_contains,
     string_arrays_equal,
-    trim_text
+    is_effect_prefix_char,
+    string_array_contains,
+    find_last_index_of_char,
+    is_identifier_part_char,
+    is_identifier_start_char,
+    matches_case_insensitive
 } from "./utils";
+import { NativeFunction, NativeInstruction } from "../native_ir";
+import { char_at, substring } from "../string_utils";
+import { find_runtime_helper } from "./runtime_helpers";
+import { test_runner_trace } from "../test_runner_state";
 
 // =============================================================================
 // Effect Collection

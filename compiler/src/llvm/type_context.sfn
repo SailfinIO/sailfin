@@ -4,52 +4,52 @@
 // NativeStruct/NativeEnum/NativeInterface definitions. Lookup and
 // query functions live in type_context_queries.sfn.
 import {
+    VTableInfo,
+    TypeContext,
+    VTableEntry,
+    EnumTypeInfo,
+    LocalBinding,
+    StructTypeInfo,
+    EnumVariantInfo,
+    StructFieldInfo,
+    ParameterBinding,
+    TypeContextBuild,
+    InterfaceTypeInfo,
+    TypeAllocationInfo
+} from "./types";
+import {
+    index_of,
+    trim_text,
+    append_string,
+    sanitize_symbol,
+    number_to_string,
+    is_simple_identifier,
+    string_array_contains,
+    find_last_index_of_char
+} from "./utils";
+import {
     NativeEnum,
-    NativeEnumLayout,
-    NativeEnumVariantLayout,
+    NativeStruct,
     NativeFunction,
     NativeInterface,
-    NativeInterfaceSignature,
-    NativeStruct
+    NativeEnumLayout,
+    NativeEnumVariantLayout,
+    NativeInterfaceSignature
 } from "../native_ir";
+import {
+    map_type_annotation,
+    strip_pointer_suffix,
+    ends_with_pointer_suffix,
+    layout_annotation_base_type,
+    map_struct_field_annotation,
+    layout_annotation_represents_user_value
+} from "./type_mapping";
 import { substring } from "../string_utils";
 import {
     join_with_separator,
     struct_declares_interface,
     struct_satisfies_interface_structurally
 } from "./type_context_queries";
-import {
-    ends_with_pointer_suffix,
-    layout_annotation_base_type,
-    layout_annotation_represents_user_value,
-    map_struct_field_annotation,
-    map_type_annotation,
-    strip_pointer_suffix
-} from "./type_mapping";
-import {
-    EnumTypeInfo,
-    EnumVariantInfo,
-    InterfaceTypeInfo,
-    LocalBinding,
-    ParameterBinding,
-    StructFieldInfo,
-    StructTypeInfo,
-    TypeAllocationInfo,
-    TypeContext,
-    TypeContextBuild,
-    VTableEntry,
-    VTableInfo
-} from "./types";
-import {
-    append_string,
-    find_last_index_of_char,
-    index_of,
-    is_simple_identifier,
-    number_to_string,
-    sanitize_symbol,
-    string_array_contains,
-    trim_text
-} from "./utils";
 
 // =============================================================================
 // Enum Layout Fixups

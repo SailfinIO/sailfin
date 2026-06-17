@@ -4,19 +4,19 @@
 // parser state management, trivia handling, and token-to-text conversion.
 import { SourceSpan } from "../ast";
 import {
-    char_at,
-    char_code,
-    strings_equal,
-    substring
-} from "../string_utils";
+    Parser,
+    CaptureResult,
+    PatternCaptureResult,
+    ParenthesizedParseResult
+} from "./types";
+import { trim_text, string_array_contains } from "./utils";
 import { Token, eof_token } from "../token";
 import {
-    CaptureResult,
-    ParenthesizedParseResult,
-    Parser,
-    PatternCaptureResult
-} from "./types";
-import { string_array_contains, trim_text } from "./utils";
+    char_at,
+    char_code,
+    substring,
+    strings_equal
+} from "../string_utils";
 
 // ============================================================================
 // Parser State Operations

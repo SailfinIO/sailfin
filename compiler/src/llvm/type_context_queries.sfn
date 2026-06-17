@@ -2,28 +2,28 @@
 //
 // TypeContext lookup, query, and resolution functions. Split from
 // type_context.sfn to keep both files under 1000 lines.
-import { NativeFunction, NativeInterface, NativeStruct } from "../native_ir";
-import { substring } from "../string_utils";
-import { ends_with_pointer_suffix, map_type_annotation, strip_pointer_suffix } from "./type_mapping";
 import {
-    EnumTypeInfo,
-    EnumVariantInfo,
-    InterfaceTypeInfo,
-    LocalBinding,
-    ParameterBinding,
-    StructFieldInfo,
-    StructTypeInfo,
-    TypeAllocationInfo,
+    VTableInfo,
     TypeContext,
-    VTableInfo
+    EnumTypeInfo,
+    LocalBinding,
+    StructTypeInfo,
+    EnumVariantInfo,
+    StructFieldInfo,
+    ParameterBinding,
+    InterfaceTypeInfo,
+    TypeAllocationInfo
 } from "./types";
 import {
-    find_last_index_of_char,
     index_of,
+    trim_text,
     is_simple_identifier,
     string_array_contains,
-    trim_text
+    find_last_index_of_char
 } from "./utils";
+import { NativeStruct, NativeFunction, NativeInterface } from "../native_ir";
+import { map_type_annotation, strip_pointer_suffix, ends_with_pointer_suffix } from "./type_mapping";
+import { substring } from "../string_utils";
 
 // =============================================================================
 // Interface Implementation Helpers

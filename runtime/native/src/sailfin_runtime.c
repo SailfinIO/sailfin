@@ -2221,20 +2221,33 @@ static const char *_sfn_str_decode_immediate_owned(const char *s)
     return (const char *)out;
 }
 
-/* #716 audit: safe by delegation — `sailfin_runtime_string_length`
+/* #1372 (C5 of epic #1308): the canonical `sfn_str_len` emission target
+ * is now a real Sailfin body in `runtime/sfn/string.sfn` (decode + bounded
+ * `strnlen`). This C definition is `static` so the linker binds every
+ * emission to the Sailfin body while avoiding a duplicate-symbol collision;
+ * retained (unused) only until #822 deletes this file.
+ *
+ * #716 audit: safe by delegation — `sailfin_runtime_string_length`
  * (line ~2803) opens with an `_is_immediate_codepoint_string` guard and
  * returns the decoded grapheme count, so the immediate pseudo-pointer
  * never reaches a raw dereference here. */
-int64_t sfn_str_len(const char *s)
+static int64_t sfn_str_len(const char *s)
 {
     return sailfin_runtime_string_length((char *)s);
 }
 
-/* #716 audit: safe by delegation — `_strings_equal_fast` (line ~576)
+/* #1372 (C5 of epic #1308): the canonical `sfn_str_eq` emission target is now
+ * a real Sailfin body in `runtime/sfn/string.sfn` (immediate-codepoint
+ * fast-path + length compare + `memcmp`; the decode bridge bumps the call-seq
+ * so the #892 invariant is preserved). This C definition is `static` so the
+ * linker binds every emission to the Sailfin body; retained (unused) only
+ * until #822 deletes this file.
+ *
+ * #716 audit: safe by delegation — `_strings_equal_fast` (line ~576)
  * decodes BOTH operands via `_is_immediate_codepoint_string` before any
  * byte compare, so immediate ⇄ immediate and immediate ⇄ real pointer
  * mixes are all handled. */
-bool sfn_str_eq(const char *a, const char *b)
+static bool sfn_str_eq(const char *a, const char *b)
 {
     // #892: sfn_str_eq is an exported runtime boundary (the lowering target of
     // string `==`, core_operands.sfn:125). It MUST bump _runtime_call_seq at
@@ -2250,9 +2263,15 @@ bool sfn_str_eq(const char *a, const char *b)
     return _strings_equal_fast(a, b);
 }
 
-/* #716 audit: safe by delegation — `sailfin_runtime_substring_unchecked`
+/* #1372 (C5 of epic #1308): the canonical `sfn_str_slice` emission target is
+ * now a real Sailfin body in `runtime/sfn/string.sfn` (clamp + i64
+ * `sailfin_runtime_substring_unchecked`). This C definition is `static` so the
+ * linker binds every emission to the Sailfin body; retained (unused) only
+ * until #822 deletes this file.
+ *
+ * #716 audit: safe by delegation — `sailfin_runtime_substring_unchecked`
  * (line ~2987) guards immediate codepoints before slicing. */
-char *sfn_str_slice(const char *text, double start, double end)
+static char *sfn_str_slice(const char *text, double start, double end)
 {
     /* Route through `_clamp_to_i64` (defined later in this file,
      * forward-declared at the top) so NaN / out-of-range doubles
@@ -2592,13 +2611,20 @@ char *sfn_str_from_byte(int64_t n)
     return out;
 }
 
-/* #716: unlike the other delegators, `sailfin_runtime_string_to_number`
+/* #1372 (C5 of epic #1308): the canonical `sfn_str_to_number` emission
+ * target is now a real Sailfin body in `runtime/sfn/string.sfn` (decode
+ * via the `sfn_str_decode_owned` bridge, then `strtod`). This C definition
+ * is `static` so the linker binds every emission to the Sailfin body while
+ * avoiding a duplicate-symbol collision; retained (unused) only until #822
+ * deletes this file.
+ *
+ * #716: unlike the other delegators, `sailfin_runtime_string_to_number`
  * (line ~3871) does NOT guard immediate codepoints — it hands the
  * operand straight to `strtod`, which would dereference a tagged
  * pseudo-pointer. Decode inline before delegating. A single decoded
  * codepoint that isn't a digit parses to 0.0, exactly as `strtod` would
  * yield for the equivalent real one-char string. */
-double sfn_str_to_number(const char *s)
+static double sfn_str_to_number(const char *s)
 {
     unsigned char imm_scratch[5];
     s = _sfn_str_decode_immediate(s, imm_scratch);
@@ -9066,6 +9092,16 @@ double sailfin_runtime_process_run_v2(SfnArray *argv)
 double sfn_process_run(SfnArray *argv)
 {
     return sailfin_runtime_process_run_v2(argv);
+}
+
+/* #1372: same shim strategy for `sfn_process_exit`. `runtime/sfn/process.sfn`
+ * owns the symbol on POSIX, but that file is skipped on the cross-windows
+ * path (its `platform/rlimit.sfn` deps don't link under mingw-w64), so the
+ * compiler's `process.exit` -> `@sfn_process_exit` descriptor would leave an
+ * undefined reference. Mirror the Sailfin body (`exit((int)code)`). */
+void sfn_process_exit(double code)
+{
+    exit((int)code);
 }
 
 /* #1236: same shim strategy for the spawn-handle family the parallel

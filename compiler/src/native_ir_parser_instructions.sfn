@@ -3,27 +3,27 @@
 // Instruction parsing helpers extracted from native_ir_parser.sfn to keep
 // the module under the seed compiler's OOM threshold.
 import {
-    InstructionDepthState,
-    InstructionGatherResult,
-    InstructionParseResult,
+    NativeSourceSpan,
     NativeInstruction,
-    NativeSourceSpan
+    InstructionDepthState,
+    InstructionParseResult,
+    InstructionGatherResult
 } from "./native_ir";
-import {
-    parse_binding_components,
-    parse_case_instruction,
-    parse_inline_case_instruction,
-    parse_let_instruction
-} from "./native_ir_utils_parse";
+import { substring } from "./string_utils";
 import {
     index_of,
-    maybe_trim_trailing,
+    trim_text,
     starts_with,
     strip_prefix,
-    trim_text,
+    maybe_trim_trailing,
     trim_trailing_delimiters
 } from "./native_ir_utils_text";
-import { substring } from "./string_utils";
+import {
+    parse_let_instruction,
+    parse_case_instruction,
+    parse_binding_components,
+    parse_inline_case_instruction
+} from "./native_ir_utils_parse";
 
 fn initial_instruction_depth_state() -> InstructionDepthState {
     return InstructionDepthState {

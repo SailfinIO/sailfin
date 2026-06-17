@@ -22,8 +22,8 @@ export {
     tokens_to_source
 };
 
-import { char_at, substring } from "./string_utils";
 import { Token } from "./token";
+import { char_at, substring } from "./string_utils";
 
 struct TextBuilder {
     lines: string[];

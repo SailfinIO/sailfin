@@ -4,50 +4,50 @@
 // literals, binary/unary operators, member access, calls, lambdas, and more.
 import {
     Capture,
+    Parameter,
     Expression,
     ObjectField,
-    Parameter,
     TypeAnnotation
 } from "../ast";
 import {
-    char_at,
-    char_code,
-    strings_equal,
-    substring
-} from "../string_utils";
+    Parser,
+    ExpressionTokens,
+    StructTypeNameResult,
+    ExpressionParseResult,
+    ArrayLiteralParseResult,
+    ExpressionCollectResult,
+    CallArgumentsParseResult,
+    ObjectLiteralParseResult,
+    ExpressionBlockParseResult,
+    LambdaParameterParseResult,
+    LambdaParameterListParseResult,
+    ExpressionTypeSeparatorParseResult
+} from "./types";
+import { trim_text, string_array_contains } from "./utils";
 import { Token, TokenKind } from "../token";
-import { spawn_future_kind } from "../typecheck_types";
 import { parse_block } from "./statements";
 import {
+    skip_trivia,
+    token_slice,
     append_token,
     filter_trivia,
-    identifier_matches,
-    identifier_text,
-    parser_advance_raw,
-    parser_peek_raw,
-    skip_trivia,
-    source_span_from_tokens,
-    string_literal_value,
     symbol_matches,
-    token_slice,
     tokens_to_text,
-    trim_token_edges
+    identifier_text,
+    parser_peek_raw,
+    trim_token_edges,
+    identifier_matches,
+    parser_advance_raw,
+    string_literal_value,
+    source_span_from_tokens
 } from "./token_utils";
 import {
-    ArrayLiteralParseResult,
-    CallArgumentsParseResult,
-    ExpressionBlockParseResult,
-    ExpressionCollectResult,
-    ExpressionParseResult,
-    ExpressionTokens,
-    ExpressionTypeSeparatorParseResult,
-    LambdaParameterListParseResult,
-    LambdaParameterParseResult,
-    ObjectLiteralParseResult,
-    Parser,
-    StructTypeNameResult
-} from "./types";
-import { string_array_contains, trim_text } from "./utils";
+    char_at,
+    char_code,
+    substring,
+    strings_equal
+} from "../string_utils";
+import { spawn_future_kind } from "../typecheck_types";
 
 // ============================================================================
 // Expression State Operations

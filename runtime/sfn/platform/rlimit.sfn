@@ -85,7 +85,12 @@ extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
 
 // C runtime's NUL-terminated string equality (also wrapped by
 // `sfn_str_sfn_eq` in `runtime/sfn/string.sfn`).
-extern fn strings_equal(a: * u8, b: * u8) -> bool;
+// #1372: compare via `sfn_str_eq` (the `* u8` runtime equality), NOT the
+// prelude `strings_equal` — under the M1.A.2 `{i8*, i64}` aggregate-string
+// ABI, prelude `strings_equal(left: string, right: string)` lowers to
+// `@strings_equal({i8*,i64}, {i8*,i64})`, so a `(* u8, * u8)` extern call
+// into it reads garbage length fields. `sfn_str_eq` is genuinely `(i8*, i8*)`.
+extern fn sfn_str_eq(a: * u8, b: * u8) -> bool;
 
 // `strtoll(s, NULL, 10)` — the `end` out-parameter is always passed
 // `null`, so the `* u8` surface (vs. the true `char **`) never
@@ -104,7 +109,7 @@ fn _mem_limit_trace_enabled() -> bool {
     let s_empty: string = "";
     if memcmp(v, s_empty as * u8, 1 as usize) == 0 { return false; }
     let s_zero: string = "0";
-    if strings_equal(v, s_zero as * u8) { return false; }
+    if sfn_str_eq(v, s_zero as * u8) { return false; }
     return true;
 }
 
@@ -142,8 +147,8 @@ fn apply_default_mem_limit() -> i32 ![io] {
             let s_unlimited: string = "unlimited";
             let s_off: string = "off";
             let s_zero: string = "0";
-            if strings_equal(env_val, s_unlimited as * u8) || strings_equal(env_val, s_off as * u8)
-                || strings_equal(env_val, s_zero as * u8) {
+            if sfn_str_eq(env_val, s_unlimited as * u8) || sfn_str_eq(env_val, s_off as * u8)
+                || sfn_str_eq(env_val, s_zero as * u8) {
                 let m_off: string = "[mem-limit] self-cap disabled via SAILFIN_MEM_LIMIT\n";
                 _mem_limit_trace(m_off);
                 return 0;

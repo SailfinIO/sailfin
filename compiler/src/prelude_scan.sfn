@@ -11,8 +11,8 @@
 // everything at column 0 and uses only `//` line comments, so a leading
 // `fn ` / `let ` / `extern fn ` / `unsafe extern fn ` uniquely marks a
 // top-level declaration.
-import { split_source_lines } from "./diagnostics_render";
 import { substring } from "./string_utils";
+import { split_source_lines } from "./diagnostics_render";
 
 fn _ps_is_ident_char(ch: string) -> boolean {
     if ch.length == 0 { return false; }

@@ -6,26 +6,26 @@
 // struct/enum literal parsing, member access (`parse_member_access`),
 // index expressions (`parse_index_expression`), range iterables, and
 // brace/bracket/paren balancing utilities.
-import { char_at, char_code, substring } from "../../../string_utils";
-import { is_simple_identifier } from "../../expressions_helpers";
 import {
     EnumLiteralParse,
-    IndexExpressionParse,
     MemberAccessParse,
     RangeIterableParse,
     StructLiteralField,
-    StructLiteralParse
+    StructLiteralParse,
+    IndexExpressionParse
 } from "../../types";
 import { ends_with, is_identifier_start_char } from "../../utils";
-import { split_array_elements } from "../splitting";
 import {
-    append_string,
-    char_code_at_text,
     index_of,
+    trim_text,
+    append_string,
     is_digit_char,
-    string_array_contains,
-    trim_text
+    char_code_at_text,
+    string_array_contains
 } from "./core_text";
+import { split_array_elements } from "../splitting";
+import { char_at, char_code, substring } from "../../../string_utils";
+import { is_simple_identifier } from "../../expressions_helpers";
 
 fn find_matching_closing_brace(text: string, open_index: int) -> int {
     let mut depth: int = 0;

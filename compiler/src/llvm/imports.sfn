@@ -2,26 +2,26 @@
 //
 // Import handling and layout manifest management for LLVM lowering.
 // Resolves imported module paths and applies layout metadata.
-import {
-    LayoutManifest,
-    NativeEnum,
-    NativeImport,
-    NativeStruct
-} from "../native_ir";
-import { parse_layout_manifest, parse_native_imports_for_import } from "../native_ir_api";
-import { substring } from "../string_utils";
-import { test_runner_trace } from "../test_runner_state";
 import { ImportedModuleContext, LayoutManifestApplication } from "./types";
 import {
-    append_string,
-    ends_with,
     index_of,
-    join_with_separator,
-    number_to_string,
+    ends_with,
+    trim_text,
     starts_with,
-    string_array_contains,
-    trim_text
+    append_string,
+    number_to_string,
+    join_with_separator,
+    string_array_contains
 } from "./utils";
+import {
+    NativeEnum,
+    NativeImport,
+    NativeStruct,
+    LayoutManifest
+} from "../native_ir";
+import { substring } from "../string_utils";
+import { parse_layout_manifest, parse_native_imports_for_import } from "../native_ir_api";
+import { test_runner_trace } from "../test_runner_state";
 
 // =============================================================================
 // Import Context Collection

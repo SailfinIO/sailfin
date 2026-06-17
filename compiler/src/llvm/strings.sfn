@@ -2,9 +2,9 @@
 //
 // String constant management for LLVM IR generation. Handles deduplication,
 // escaping, and rendering of string constants in LLVM IR format.
-import { substring } from "../string_utils";
 import { StringConstant } from "./types";
 import { append_string, number_to_string } from "./utils";
+import { substring } from "../string_utils";
 
 // =============================================================================
 // String Constant Set Operations

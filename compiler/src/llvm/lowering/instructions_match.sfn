@@ -1,75 +1,75 @@
 // compiler/src/llvm/lowering/instructions_match.sfn
 //
 // Control flow handler: match instruction lowering.
-import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { index_of, substring } from "../../string_utils";
-import { lower_expression } from "../expression_lowering/native/core";
-import { append_match_arm_mutations } from "../expression_lowering/native/core_match_helpers";
-import { emit_boolean_and, emit_comparison_instruction, harmonise_operands } from "../expression_lowering/native/core_operands";
-import { parse_enum_literal, parse_struct_pattern } from "../expression_lowering/native/core_parse";
+import { emit_phi_merges_for_match, materialize_mutation_values_at_label } from "./phi";
 import {
-    extract_simple_identifier,
-    is_union_llvm_type,
-    parse_union_payload_types
-} from "../expression_lowering/native/core_text";
-import { find_local_binding } from "../expressions_bindings";
-import { format_temp_name } from "../expressions_helpers";
-import { make_child_scope_id } from "../lifetime";
-import { find_function_by_name_or_import } from "../rendering_helpers";
-import { empty_string_constant_set, merge_string_constants } from "../strings";
-import {
-    find_enum_info_by_llvm_type,
-    find_struct_info_by_name,
-    resolve_enum_info_for_literal,
-    resolve_enum_variant_info
-} from "../type_context_queries";
-import {
-    ends_with_pointer_suffix,
-    layout_annotation_represents_user_value,
-    map_struct_field_annotation,
-    strip_pointer_suffix
-} from "../type_mapping";
-import {
-    BlockLoweringResult,
-    EnumTypeInfo,
-    EnumVariantInfo,
     LLVMOperand,
-    LifetimeRegionMetadata,
+    LoopContext,
+    TypeContext,
+    EnumTypeInfo,
     LocalBinding,
     LocalMutation,
-    LoopContext,
+    MatchStructure,
+    StringConstant,
+    StructTypeInfo,
+    EnumVariantInfo,
+    StructFieldInfo,
+    ParameterBinding,
     MatchArmMutations,
+    MatchFieldBinding,
     MatchCaseCondition,
     MatchCaseStructure,
-    MatchFieldBinding,
-    MatchStructFieldBinding,
-    MatchStructure,
-    ParameterBinding,
-    StringConstant,
-    StructFieldInfo,
-    StructTypeInfo,
-    TypeContext
+    BlockLoweringResult,
+    LifetimeRegionMetadata,
+    MatchStructFieldBinding
 } from "../types";
 import {
+    trim_text,
+    number_to_string,
     copy_string_array,
     extend_string_array,
     is_identifier_part_char,
     is_identifier_start_char,
-    merge_parameter_bindings,
-    number_to_string,
-    trim_text
+    merge_parameter_bindings
 } from "../utils";
+import { merge_string_constants, empty_string_constant_set } from "../strings";
+import { make_child_scope_id } from "../lifetime";
 import { lower_instruction_range } from "./instructions";
-import { allocate_block_label, lower_condition_to_i1 } from "./instructions_condition";
+import { NativeFunction, NativeSourceSpan, NativeInstruction } from "../../native_ir";
 import {
-    _parse_int_from_string,
-    clone_local_bindings,
+    strip_pointer_suffix,
+    ends_with_pointer_suffix,
+    map_struct_field_annotation,
+    layout_annotation_represents_user_value
+} from "../type_mapping";
+import { index_of, substring } from "../../string_utils";
+import { find_function_by_name_or_import } from "../rendering_helpers";
+import { format_temp_name } from "../expressions_helpers";
+import {
     emit_scope_drops,
-    extend_lifetime_regions,
-    extend_mutations
+    extend_mutations,
+    clone_local_bindings,
+    _parse_int_from_string,
+    extend_lifetime_regions
 } from "./instructions_helpers";
+import { find_local_binding } from "../expressions_bindings";
+import {
+    find_struct_info_by_name,
+    resolve_enum_variant_info,
+    find_enum_info_by_llvm_type,
+    resolve_enum_info_for_literal
+} from "../type_context_queries";
+import { allocate_block_label, lower_condition_to_i1 } from "./instructions_condition";
 import { lower_match_case_condition } from "./instructions_match_condition";
-import { emit_phi_merges_for_match, materialize_mutation_values_at_label } from "./phi";
+import { lower_expression } from "../expression_lowering/native/core";
+import {
+    is_union_llvm_type,
+    extract_simple_identifier,
+    parse_union_payload_types
+} from "../expression_lowering/native/core_text";
+import { parse_enum_literal, parse_struct_pattern } from "../expression_lowering/native/core_parse";
+import { emit_boolean_and, harmonise_operands, emit_comparison_instruction } from "../expression_lowering/native/core_operands";
+import { append_match_arm_mutations } from "../expression_lowering/native/core_match_helpers";
 
 // Helper: build a LocalBinding for match arm payload extraction.
 // Kept as a separate function so loops never have inline struct literals at the loop
