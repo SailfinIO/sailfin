@@ -67,12 +67,10 @@ test_make_report_contract.sh
 test_make_result_contract.sh
 test_mem_limit_selfcap.sh
 test_monotonic_millis_advances.sh
-test_no_duplicate_declares.sh
 test_numeric_int_float.sh
 test_owned_buf_grow_determinism.sh
 test_owned_buf_roundtrip.sh
 test_publish.sh
-test_reexport.sh
 test_routine_nursery.sh
 test_run_cache_flags.sh
 test_runner_jobs_parallel.sh
@@ -108,7 +106,6 @@ test_sfn_package.sh
 test_sleep_eintr_resume.sh
 test_sleep_unit_semantics.sh
 test_string_aggregate_shape.sh
-test_struct_field_separator.sh
 test_subprocess_emit_clean_env.sh
 test_sync_rejects_unimplemented_concurrency.sh
 test_test_bin_cache.sh

@@ -1,0 +1,93 @@
+// End-to-end regression test for the re-export-of-imported-symbol bug.
+//
+// When a module re-exports a symbol it only imports (no local `fn`
+// definition), the native emitter does not produce a `.fn` signature for that
+// symbol in the re-exporter's `.sfn-asm`. Consumers then either (a) cannot
+// resolve the return type and fall back to `i8*` — dropping boolean `if`
+// guards — or (b) emit a linker call to a `sym__middle_module` symbol that
+// does not exist, producing an "undefined reference" at link time.
+//
+// See docs/rca/2026-04-18-reexport-diagnostic-gep.md for the full story. The
+// shipped fix is Option B: the emitter *refuses* to compile the re-exporter
+// and prints a clear diagnostic, rather than silently emitting a miscompiling
+// `i8*` fallback. This test pins that contract — emitting `middle.sfn` alone
+// (no inlining) must fail with the re-export refusal diagnostic.
+//
+// Native replacement for the former `test_reexport.sh` (test-infra Phase 3,
+// epic #842; ratchet #1327). Drives `sfn emit native` against the shared
+// fixture under `fixtures/reexport/` and asserts on captured stderr.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this one. Assert on the captured
+// output with `sfn/strings` predicates instead. (#842.)
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned compiler. `process.run_capture` treats an
+// empty array as the *empty* environment (not "inherit"), so the relevant
+// variables must be threaded explicitly (PATH for any subprocess the compiler
+// shells out to; SAILFIN_TEST_SCRATCH so a parallel run does not collide on
+// the fixed `build/sailfin` build-cache dir — #1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit `middle.sfn` alone via `sfn emit native`. `sfn emit` does NOT inline
+// relative imports (only `sfn run` rewrites the text), so the parsed AST
+// carries the bare re-export shape and the Option B validator can fire.
+// Returns the emit exit code; the captured stderr is stashed into the global
+// last-emit buffer via `_emit_middle_stderr`.
+fn _emit_middle() -> string ![io] {
+    let dir = _scratch_dir();
+    let asm = dir + "/reexport-middle.sfn-asm";
+    let src = "compiler/tests/e2e/fixtures/reexport/middle.sfn";
+    if fs.exists(asm) { fs.deleteFile(asm); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", asm, "native", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if fs.exists(asm) { fs.deleteFile(asm); }
+    // Encode "compiled successfully" as an empty leading sentinel so callers
+    // can distinguish refusal (non-zero exit) from a clean compile.
+    if exit == 0 { return "EXIT0\n" + err; }
+    return "EXIT1\n" + err;
+}
+
+// Option B (shipped fix): the emitter refuses the implicit re-export and
+// exits non-zero with the diagnostic marker. The marker matches
+// `emit_native.sfn::format_reexport_violation`.
+test "reexport: emit middle alone is refused with the re-export diagnostic" ![io] {
+    let result = _emit_middle();
+    // Non-zero exit — a clean compile (`EXIT0`) would mean the validator did
+    // not fire, the original miscompiling bug shape.
+    assert contains(result, "EXIT1\n");
+    assert contains(result, "re-exports a symbol imported from");
+}
+
+// The diagnostic names the offending symbol and points at the RCA, so a
+// future regression that weakens the message surfaces here too.
+test "reexport: refusal diagnostic names the symbol and the fix" ![io] {
+    let result = _emit_middle();
+    assert contains(result, "reexport_is_yes");
+    assert contains(result, "does not support implicit re-exports");
+}

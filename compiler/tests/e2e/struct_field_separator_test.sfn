@@ -1,0 +1,137 @@
+// End-to-end coverage for struct field declaration separators.
+//
+// Pre-fix shape (PR #289 follow-up): `parse_struct_field` only accepted `;`
+// as a field terminator. A struct declared with Rust/TS-style commas —
+// `struct Pair { name: string, age: number }` — silently parsed as an empty
+// struct (no diagnostic), the LLVM rendering emitted `%Pair = type {}`, and
+// downstream field reads all loaded the lowering's "default zero" (literal
+// "0" through number→string) regardless of the actual struct contents.
+//
+// The actual fix is a 1-line parser change accepting `,` and `;` (and an
+// implicit `}` for the last field), matching the existing
+// `parse_enum_variant_field` precedent. Generic-typed fields capture the
+// whole type via `collect_type_annotation_until` (balances `<`/`>`).
+//
+// Native replacement for the former `test_struct_field_separator.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Drives `sfn emit
+// llvm`/`emit native`/`run` against inline fixtures and asserts on captured
+// IR / program output.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like these. Assert on the captured
+// text with `sfn/strings` predicates instead. (#842.)
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Lower `source` to a standalone `.ll` (kind="llvm") or `.sfn-asm`
+// (kind="native") and return the emitted text. Writes the fixture and output
+// to unique scratch paths keyed by `tag`. Returns "" on emit failure.
+fn _emit(source: string, tag: string, kind: string, ext: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-struct-sep-" + tag + ".sfn";
+    let out = dir + "/sfn-struct-sep-" + tag + ext;
+    fs.writeFile(src, source);
+    if fs.exists(out) { fs.deleteFile(out); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, kind, src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    fs.deleteFile(src);
+    if exit != 0 { return ""; }
+    if !fs.exists(out) { return ""; }
+    let text = fs.readFile(out);
+    fs.deleteFile(out);
+    return text;
+}
+
+// Compile+run `source` and return captured stdout+stderr ("" on build/run
+// failure). Build-and-run isolates via the threaded SAILFIN_TEST_SCRATCH.
+fn _run(source: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-struct-sep-run-" + tag + ".sfn";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(src);
+    if exit != 0 { return ""; }
+    return out + err;
+}
+
+// Comma-separated fields render as a non-empty LLVM type, not `%Pair = type {}`.
+test "struct-sep: comma-separated fields render as non-empty %T = type { ... }" ![io] {
+    let source = "struct Pair {\n    name: string,\n    age: number\n}\n\nfn main() {\n    let p = Pair { name: \"x\", age: 1 };\n}\n";
+    let ir = _emit(source, "comma", "llvm", ".ll");
+    assert ir.length > 0;
+    assert ! contains(ir, "%Pair = type {}");
+    assert contains(ir, "%Pair = type { i8*, double }");
+}
+
+// Mixed comma/semicolon and trailing-omit field separators accepted.
+test "struct-sep: mixed comma/semicolon and trailing-omit separators accepted" ![io] {
+    let source = "struct Trio {\n    a: string,\n    b: number;\n    c: boolean\n}\n\nfn main() {\n    let t = Trio { a: \"hi\", b: 2, c: true };\n}\n";
+    let ir = _emit(source, "mixed", "llvm", ".ll");
+    assert ir.length > 0;
+    assert contains(ir, "%Trio = type { i8*, double, i1 }");
+}
+
+// Struct-string-field comparison reaches the matching branch (round-trips
+// end-to-end through the run pipeline).
+test "struct-sep: struct-string-field comparison reaches the matching branch" ![io] {
+    let source = "struct LLVMOperand {\n    llvm_type: string,\n    value: string\n}\n\nfn classify(operand: LLVMOperand) -> string {\n    if operand.llvm_type == \"i1\" { return \"boolean\"; }\n    if operand.llvm_type == \"i64\" { return \"integer\"; }\n    if operand.llvm_type == \"double\" { return \"float\"; }\n    return \"other\";\n}\n\nfn main() ![io] {\n    let a = LLVMOperand { llvm_type: \"i64\", value: \"%0\" };\n    let b = LLVMOperand { llvm_type: \"double\", value: \"%1\" };\n    let c = LLVMOperand { llvm_type: \"i1\", value: \"%2\" };\n    print.info(classify(a));\n    print.info(classify(b));\n    print.info(classify(c));\n}\n";
+    let out = _run(source, "read");
+    assert contains(out, "integer");
+    assert contains(out, "float");
+    assert contains(out, "boolean");
+}
+
+// Struct-string-field read survives a function boundary.
+test "struct-sep: struct-string-field read survives function boundary" ![io] {
+    let source = "struct Pair {\n    label: string,\n    count: number\n}\n\nfn label_of(p: Pair) -> string {\n    return p.label;\n}\n\nfn main() ![io] {\n    let p = Pair { label: \"alpha\", count: 42 };\n    print.info(label_of(p));\n}\n";
+    let out = _run(source, "through_fn");
+    assert contains(out, "alpha");
+}
+
+// Generic-typed field captures the whole type (Result<T, E>) — the inner
+// comma must not be mistaken for a field terminator.
+test "struct-sep: generic-typed field captures whole type (Result<T, E>)" ![io] {
+    let source = "struct Box {\n    inner: Result<string, number>,\n    label: string\n}\n\nfn unwrap(box: Box) -> Result<string, number> {\n    return box.inner;\n}\n\nfn main() {\n    let b = Box { inner: \"hi\", label: \"x\" };\n}\n";
+    let asm = _emit(source, "generic", "native", ".sfn-asm");
+    assert asm.length > 0;
+    assert contains(asm, ".field inner: Result<string, number>");
+    assert contains(asm, ".field label: string");
+    assert contains(asm, ".fn unwrap(box: Box) -> Result<string, number>");
+}
+
+// Nested generic with a lexer-glued `>>` token captures the whole type.
+test "struct-sep: nested generic with glued '>>' token captures whole type" ![io] {
+    let source = "struct Wrap {\n    deep: Map<string, Result<int, Error>>,\n    other: int\n}\n";
+    let asm = _emit(source, "nested", "native", ".sfn-asm");
+    assert asm.length > 0;
+    assert contains(asm, ".field deep: Map<string, Result<int, Error>>");
+    assert contains(asm, ".field other: int");
+}
