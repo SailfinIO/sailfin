@@ -1,0 +1,128 @@
+// E2E test for monotonic_millis() — issue #819.
+//
+// Native replacement for the former `test_monotonic_millis_advances.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327).
+//
+// Pins the Sailfin-native `monotonic_millis` backend. Before #819 the
+// prelude's `monotonic_millis()` routed through the legacy C
+// `sailfin_runtime_monotonic_millis`; #819 flips the helper-registry rows
+// in `compiler/src/llvm/runtime_helpers.sfn` to the Sailfin-native
+// `@sfn_clock_millis` (defined in `runtime/sfn/clock.sfn`), which reads
+// `CLOCK_MONOTONIC` through #878's `clock_gettime` field-reader and
+// divides nanoseconds down to whole milliseconds.
+//
+// This test compiles and runs a small program that reads
+// `monotonic_millis()` twice, bracketing a short `sleep`, and asserts:
+//   1. the first reading is non-zero (the clock is actually being read,
+//      not a stubbed zero), and
+//   2. the second reading advances by at least 5 ms over the bracketed
+//      sleep (the clock advances across a real interval — monotonic,
+//      non-decreasing, observably progressing).
+// The fixture performs the comparison and prints a single PASS/FAIL
+// marker so the `![io]` test can assert on captured output with
+// `sfn/strings` (the `expect_*` matchers are `![pure]` and unusable from
+// an `![io]` test — #842).
+//
+// A regression that reverted the registry rewire (or broke the
+// nanosecond→millisecond reduction, or returned a constant) makes the
+// fixture print RESULT=FAIL and this test fails loudly.
+//
+// Build hygiene (the load-bearing detail): the fixture source and its
+// output binary live inside a `with_tmp_dir` tree, NOT in
+// `SAILFIN_TEST_SCRATCH` — the runner points that at the fixed
+// `build/sailfin` build-cache dir, which `sfn build`/`sfn run` clean, so
+// writing the source there races the nested compile's own staging. The
+// nested build still threads `SAILFIN_TEST_SCRATCH` through `_child_env`
+// so its `program.ll` cache stays per-invocation under the parallel pool
+// (#1333), while `PATH` lets the nested build find `clang` and its linker.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn build`. `process.run_capture`
+// treats an empty array as the *empty* environment (not "inherit"), so
+// the variables the nested compile needs are threaded explicitly: PATH
+// (+ HOME/TMPDIR) so the build finds `clang` and the linker, and
+// SAILFIN_TEST_SCRATCH so the `program.ll` cache stays per-invocation.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// An out-of-tree marker file for the run's stdout — lives outside the
+// `with_tmp_dir` tree so it survives teardown and can be read afterward.
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-monotonic-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// SLEEP_MS=25 clears scheduler jitter and millisecond-truncation
+// boundaries; MIN_ADVANCE_MS=5 absorbs truncation at the millisecond
+// boundary while still proving the clock moved. monotonic_millis()
+// returns an int (i64) on the M1 int/float backend, so the bounds are
+// integer literals. The FAIL branch carries no `{{...}}` interpolation —
+// those would be expanded by *this* test's own compiler when the fixture
+// is held as a string literal here, not by the fixture's compiler.
+fn _fixture_src() -> string {
+    return "fn main() ![io, clock] {\n"
+        + "    let first = monotonic_millis();\n"
+        + "    sleep(25);\n"
+        + "    let second = monotonic_millis();\n"
+        + "    let advance = second - first;\n"
+        + "    if first > 0 && advance >= 5 {\n"
+        + "        print(\"RESULT=PASS\");\n"
+        + "    } else {\n"
+        + "        print(\"RESULT=FAIL\");\n"
+        + "    }\n"
+        + "}\n";
+}
+
+// Build the fixture in a temp dir and run the binary. Stashes the run's
+// captured stdout to `out_marker` and returns the run's exit code, or
+// `-100` if the build itself failed.
+fn _build_and_run(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/monotonic.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/monotonic";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+test "monotonic_millis() is non-zero and advances (issue #819)" ![io] {
+    let marker = _marker("advance");
+    let exit = _build_and_run(marker);
+    // Assert the build+run succeeded (`-100` == build failure) before
+    // touching the marker: on a build failure the marker is never written.
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // RESULT=PASS only when the first reading is > 0 and the bracketed
+    // sleep advanced the clock by ≥ 5 ms.
+    assert find(out, "RESULT=PASS", 0) >= 0;
+}
