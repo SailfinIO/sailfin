@@ -197,7 +197,24 @@ jobs:
       # shard artifact keeps it bounded (#1234 risk note).
       - name: Install MinGW-w64 cross-compiler (Linux)
         run: |
-          sudo apt-get install -y mingw-w64
+          set -euo pipefail
+          # The Ubuntu universe mirror can stall on the mingw-w64 fetch
+          # (observed hanging indefinitely during a mirror incident).
+          # Bound each apt call with `timeout` and retry with backoff so
+          # a transient stall fails fast and self-recovers instead of
+          # burning the whole job's wall clock.
+          for attempt in 1 2 3; do
+            echo "[mingw] install attempt ${attempt}/3"
+            if sudo timeout 300 apt-get update \
+              && sudo timeout 300 apt-get install -y --no-install-recommends mingw-w64; then
+              echo "[mingw] installed"
+              exit 0
+            fi
+            echo "[mingw] attempt ${attempt} failed or timed out; backing off"
+            sleep $((attempt * 15))
+          done
+          echo "[mingw] failed to install mingw-w64 after 3 attempts" >&2
+          exit 1
 
       - name: Cross-compile for Windows (Linux)
         shell: bash {0}
