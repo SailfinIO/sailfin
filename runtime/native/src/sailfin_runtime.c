@@ -9094,6 +9094,16 @@ double sfn_process_run(SfnArray *argv)
     return sailfin_runtime_process_run_v2(argv);
 }
 
+/* #1372: same shim strategy for `sfn_process_exit`. `runtime/sfn/process.sfn`
+ * owns the symbol on POSIX, but that file is skipped on the cross-windows
+ * path (its `platform/rlimit.sfn` deps don't link under mingw-w64), so the
+ * compiler's `process.exit` -> `@sfn_process_exit` descriptor would leave an
+ * undefined reference. Mirror the Sailfin body (`exit((int)code)`). */
+void sfn_process_exit(double code)
+{
+    exit((int)code);
+}
+
 /* #1236: same shim strategy for the spawn-handle family the parallel
  * test runner (`sfn test --jobs N`) consumes. The Sailfin-native
  * bodies in `runtime/sfn/process.sfn` (posix_spawnp/waitpid/poll) are
