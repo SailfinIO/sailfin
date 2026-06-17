@@ -74,7 +74,6 @@ test_runner_json_multifile.sh
 test_runner_state_marker.sh
 test_runtime_adapter_filesystem.sh
 test_runtime_adapter_http.sh
-test_runtime_array.sh
 test_runtime_c_cache_invalidates.sh
 test_runtime_char_from_code.sh
 test_runtime_exception_frames.sh

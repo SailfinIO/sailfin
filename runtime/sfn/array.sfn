@@ -9,18 +9,23 @@
 // `runtime/native/src/sailfin_runtime.c`) and the byte-addressed array
 // header.
 //
-// Status: trampoline bodies under the `sfn_array_sfn_*` infix.
-// Mirrors the M2.4a string proof-of-life (`runtime/sfn/string.sfn`)
-// and the M2.1 arena module (`runtime/sfn/memory/arena.sfn`): the
-// canonical `sfn_array_*` symbols (without infix) are defined as C
-// trampolines in `runtime/native/src/sailfin_runtime.c` so user
-// emission's `@sfn_array_*` calls resolve at link time without
-// pulling the runtime/sfn/* `.o` files into every test binary
-// (`scripts/run_native_test.sh` doesn't link those today). This
-// module's `sfn_array_sfn_*` exports are the migration unit — when M3
-// retires the C trampolines and replaces the bodies here with
-// arena-backed implementations, these symbols rename to the bare
-// canonical form in a single rollback-safe PR.
+// Status (#1316, C6 of epic #1308): the array *core* —
+// `sfn_array_concat` / `sfn_array_push_string` / `sfn_array_push_slot`
+// — is now **bare-defined here** (link-ownership flipped off the C
+// runtime, mirroring the #1309 arena flip). Their C definitions in
+// `runtime/native/src/sailfin_runtime.c` are retired; emission's
+// `@sfn_array_*` calls resolve to these Sailfin bodies at link because
+// this module is listed in `runtime/native/capsule.toml::sfn-sources`
+// and linked into every binary alongside the C runtime. The bodies
+// still delegate to the legacy `sailfin_runtime_*_v2` C entrypoints
+// (which own the `SailfinPtrArray` header+canary layout and retire in
+// #822), so there is no independent header construction here and no
+// #1205-class layout-divergence hazard.
+//
+// Still under the `sfn_array_sfn_*` infix (proof-of-life, not yet
+// flipped): `create` / `push` / `slice` (spec-ABI stubs) and
+// `map` / `filter` / `reduce` (gated on generics + closures, #766).
+// Those rename to bare form when their real bodies land.
 //
 // Naming: the `_sfn_` infix distinguishes this module's exports from
 // the C trampolines' canonical names. The C runtime's
@@ -89,15 +94,29 @@ fn sfn_array_sfn_create(cap: i64, elem_size: i64, arena: * u8) -> * u8 {
 // up, callers migrate one site at a time.
 fn sfn_array_sfn_push(arr: * u8, elem_ptr: * u8, elem_size: i64, arena: * u8) -> void { }
 
-// `sfn_array_sfn_concat(a, b, elem_size, arena)` — allocate a new
-// array containing both. Architect spec (§2.3): allocate `(a.len +
-// b.len) * elem_size` bytes in the arena, copy both spans, return the
-// new SfnArray. Today's body trampolines to the legacy `_v2`
-// entrypoint, which assumes `char*` elements (`elem_size ==
-// sizeof(void*)`); the `elem_size` and `arena` parameters are
-// accepted to lock the spec ABI but ignored until M3 ships the
-// arena-backed body.
-fn sfn_array_sfn_concat(a: * u8, b: * u8, elem_size: i64, arena: * u8) -> * u8 {
+// `sfn_array_concat(a, b)` — allocate a new array containing both.
+// #1316 (C6 of epic #1308): this is the **bare canonical** link target
+// that `compiler/src/llvm/runtime_helpers.sfn` (`concat` descriptor)
+// and the direct emission sites in
+// `compiler/src/llvm/expression_lowering/arrays.sfn` emit `@sfn_array_concat`
+// against — the C definition in `runtime/native/src/sailfin_runtime.c`
+// is retired and emission now binds here at link (`runtime/sfn/array.sfn`
+// is in `runtime/native/capsule.toml::sfn-sources`, linked into every
+// binary alongside the C runtime).
+//
+// ABI: **2-arg** `(a, b)` to match the descriptor's emitted shape
+// (`parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"]`).
+// The architect spec's 4-arg `(elem_size, *Arena)` form (§2.3) belongs
+// on the arena-backed rewrite once the compiler threads arena pointers
+// through array-allocation sites; defining a 4-arg body here would land
+// a 2-arg emitted call on a 4-arg definition (UB).
+//
+// The body delegates to the still-C `sailfin_runtime_concat_v2` (which
+// produces the `SailfinPtrArray` header+canary layout and is retired in
+// #822), so the result layout is byte-identical to the C path — there
+// is no independent array-header construction here and therefore no
+// #1205-class layout-divergence hazard.
+fn sfn_array_concat(a: * u8, b: * u8) -> * u8 {
     // Allocate-and-copy over raw element storage (#1218 / E9, proposal
     // §5.1): the `_v2` concat allocates a fresh SfnArray container +
     // backing buffer and copies both spans into it. The raw
@@ -130,14 +149,18 @@ fn sfn_array_sfn_slice(arr: * u8, start: i64, end: i64) -> * u8 { return arr; }
 // migration to arena-backed bodies stays a single PR — rename
 // `sfn_array_sfn_*` → `sfn_array_*` and delete the C trampolines in
 // the same change.
-// `sfn_array_sfn_push_string(arr, text)` — append a `char*` to a
-// string array. ABI mirrors the C trampoline `sfn_array_push_string`
-// (which itself forwards to `sailfin_runtime_append_string_v2`); used
-// by `lower_array_push_in_place` for the `i8*`-element fast path.
-// Same realloc + grow contract as the legacy entrypoint
-// (`sailfin_runtime.c:6761`), with the same `max(cap*2, len+1, 8)`
-// growth schedule.
-fn sfn_array_sfn_push_string(arr: * u8, text: * u8) -> * u8 {
+// `sfn_array_push_string(arr, text)` — append a `char*` to a string
+// array. #1316: bare canonical link target for `lower_array_push_in_place`'s
+// `i8*`-element fast path (the `append_string` descriptor); the C
+// definition is retired and emission binds here. Delegates to the
+// still-C `sailfin_runtime_append_string_v2`, which reallocs in place
+// and — at its entry — calls `_runtime_enter()` (the #892 concat-reuse
+// seq bump). The retired C trampoline's *extra* bump was redundant: the
+// counter is monotonic and its sole consumer is the reuse guard, so the
+// delegate's single bump still invalidates the window before the buffer
+// is mutated (an extra bump can only miss a reuse, never corrupt). Same
+// `max(cap*2, len+1, 8)` growth schedule as the legacy entrypoint.
+fn sfn_array_push_string(arr: * u8, text: * u8) -> * u8 {
     // In-place string-element push/grow (#1218 / E9, proposal §5.1): the
     // `_v2` append reallocs `arr`'s backing buffer in place and writes
     // the new element. The raw element-storage interior is the
@@ -146,17 +169,19 @@ fn sfn_array_sfn_push_string(arr: * u8, text: * u8) -> * u8 {
     unsafe { return sailfin_runtime_append_string_v2(arr, text); }
 }
 
-// `sfn_array_sfn_push_slot(data_ptr, len_ptr, cap_ptr, elem_size)` —
-// grow the backing buffer if needed and return a pointer to the next
-// writable slot. ABI mirrors the C trampoline `sfn_array_push_slot`;
-// used by `lower_array_push_in_place` for typed-element pushes (every
-// non-`i8*` element type, e.g. `Token` during lexing). The caller
-// stores into the returned slot directly — keeps the per-push cost at
-// "function call + bounds check + amortized realloc" rather than the
-// generic spec `sfn_array_push`'s "function call + by-pointer copy".
-// When `sfn_array_sfn_push` grows a real body (M3), this wrapper
-// retires.
-fn sfn_array_sfn_push_slot(data_ptr: * * u8, len_ptr: * i64, cap_ptr: * i64, elem_size: i64) -> * u8 {
+// `sfn_array_push_slot(data_ptr, len_ptr, cap_ptr, elem_size)` — grow
+// the backing buffer if needed and return a pointer to the next
+// writable slot. #1316: bare canonical link target (the
+// `array_push_slot` descriptor) for `lower_array_push_in_place`'s
+// typed-element pushes (every non-`i8*` element type, e.g. `Token`
+// during lexing); the C definition is retired and emission binds here.
+// The caller stores into the returned slot directly — keeps the
+// per-push cost at "function call + bounds check + amortized realloc".
+// Delegates to the still-C `sailfin_runtime_array_push_slot_v2` (retired
+// in #822), which bumps the #892 concat-reuse seq at its entry — see
+// `sfn_array_push_string` above for why the dropped trampoline-level
+// bump is correctness-safe.
+fn sfn_array_push_slot(data_ptr: * * u8, len_ptr: * i64, cap_ptr: * i64, elem_size: i64) -> * u8 {
     // In-place push/grow over raw element storage (#1218 / E9, proposal
     // §5.1): the `_v2` slot helper reallocs the backing buffer in place
     // and returns the next writable slot. The raw `* * u8` / `* i64`
