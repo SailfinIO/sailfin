@@ -1,0 +1,140 @@
+// E2E test for the Sailfin-native errno() reader (#876, #893, epic #763).
+//
+// Native replacement for the former `test_errno_reader.sh` (test-infra
+// Phase 3, epic #842; ratchet #1327).
+//
+// `runtime/sfn/platform/errno.sfn` defines `errno() -> i32` as a
+// *host-portable* reader: it calls the `sailfin_intrinsic_errno_location`
+// registry sentinel (#887/#890) to obtain the thread-local errno-slot
+// pointer, then dereferences it via the `sailfin_intrinsic_pointer_read_i32`
+// sentinel (#875). Neither sentinel is a C symbol — the locator folds into
+// the host's concrete locator (`@__errno_location` glibc / `@__error`
+// Darwin / `@_errno` Windows-mingw) at emit time, and the pointer-read
+// folds into a bare `load i32`.
+//
+// This pins that shape against the *real shipped module* (not a scratch
+// fixture). It is host-independent: each platform path is forced via the
+// `SAILFIN_TARGET_OS` target override, which the locator resolution
+// (`runtime_helpers.sfn` / `lowering_debug_state.sfn`) consults *before*
+// the `uname -s` host probe — so it asserts the same thing whether CI runs
+// on Linux or macOS hardware. For each target it pins:
+//
+//   1. typecheck    — `sfn check errno.sfn` exits 0.
+//   2. locator call — emitted IR contains `call i32* @<sym>()`.
+//   3. load i32     — (Linux) emitted IR contains `load i32, i32* %…`.
+//   4. no other sym — the other platforms' locators do NOT appear.
+//   5. no sentinel  — no `call`/`declare` targets either sentinel name,
+//                     so neither links to a nonexistent symbol.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Base child env: PATH/HOME/TMPDIR so the spawned compile finds its tools,
+// SAILFIN_TEST_SCRATCH so any cache dir is per-invocation (#1333), plus the
+// `SAILFIN_TARGET_OS` target override appended by the caller.
+fn _child_env(target_os: string) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    if target_os.length > 0 { e.push("SAILFIN_TARGET_OS=" + target_os); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Whether any single line of `text` contains both `a` and `b` — the faithful
+// stand-in for a `grep -E "a.*b"` over one line.
+fn _any_line_with(text: string, a: string, b: string) -> bool {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], a) && contains(lines[i], b) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+let _ERRNO_SFN: string = "runtime/sfn/platform/errno.sfn";
+
+// Emit IR for the real errno.sfn with the `SAILFIN_TARGET_OS` override set
+// to `target_os`. Returns the IR text, or "" on failure.
+fn _emit_for(target_os: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-errno-" + target_os + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _ERRNO_SFN], _child_env(target_os));
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+test "errno: sfn check passes on runtime/sfn/platform/errno.sfn" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", _ERRNO_SFN], _child_env(""));
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+test "errno: Linux target calls @__errno_location, derefs via load i32, omits others" ![io] {
+    let ir = _emit_for("Linux");
+    assert ir.length > 0;
+    assert _any_line_with(ir, "call i32* ", "@__errno_location()");
+    assert contains(ir, "load i32, i32* %");
+    assert ! _any_line_with(ir, "@__error", "(");
+    assert ! _any_line_with(ir, "@_errno", "(");
+}
+
+test "errno: Darwin target calls @__error, omits others" ![io] {
+    let ir = _emit_for("Darwin");
+    assert ir.length > 0;
+    assert _any_line_with(ir, "call i32* ", "@__error()");
+    assert ! _any_line_with(ir, "@__errno_location", "(");
+    assert ! _any_line_with(ir, "@_errno", "(");
+}
+
+test "errno: Windows target calls @_errno, omits others" ![io] {
+    let ir = _emit_for("Windows");
+    assert ir.length > 0;
+    assert _any_line_with(ir, "call i32* ", "@_errno()");
+    assert ! _any_line_with(ir, "@__errno_location", "(");
+    assert ! _any_line_with(ir, "@__error", "(");
+}
+
+test "errno: neither sentinel symbol is emitted as call/declare" ![io] {
+    let mut i = 0;
+    let targets = ["Linux", "Darwin", "Windows"];
+    loop {
+        if i >= targets.length { break; }
+        let ir = _emit_for(targets[i]);
+        assert ir.length > 0;
+        assert ! _any_line_with(ir, "call ", "@sailfin_intrinsic_errno_location");
+        assert ! _any_line_with(ir, "declare ", "@sailfin_intrinsic_errno_location");
+        assert ! _any_line_with(ir, "call ", "@sailfin_intrinsic_pointer_read_i32");
+        assert ! _any_line_with(ir, "declare ", "@sailfin_intrinsic_pointer_read_i32");
+        i += 1;
+    }
+}
