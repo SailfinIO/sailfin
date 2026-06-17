@@ -16,7 +16,6 @@
 #
 # Format: one bare script basename per line; '#' comments and blank lines ignored.
 
-test_arena_default_on.sh
 test_array_aggregate_shape.sh
 test_binary_capsule_walker.sh
 test_build_diagnostics_format.sh
@@ -80,7 +79,6 @@ test_runtime_adapter_filesystem.sh
 test_runtime_adapter_http.sh
 test_runtime_array.sh
 test_runtime_c_cache_invalidates.sh
-test_runtime_char_from_code.sh
 test_runtime_exception_frames.sh
 test_runtime_exec_path.sh
 test_runtime_helper_declare_integrity.sh

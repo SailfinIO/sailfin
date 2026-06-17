@@ -1,0 +1,66 @@
+// Fixture for compiler/tests/e2e/runtime_char_from_code_test.sfn
+// (issues #874, #1136).
+//
+// `char_from_code(n)` is the raw-byte WRITE primitive for pure-Sailfin
+// code: it builds a 1-byte string whose sole byte is the raw value `n`
+// (1..255) — the write counterpart to the shipped byte read
+// (`char_code(s[i])`). This probe prints one `MARKER=value` line per
+// assertion so the `![io]` test can pin each value from captured stdout.
+// The `{{...}}` interpolation is expanded by *this fixture's* compiler at
+// build time, which is why the fixture lives in its own file rather than
+// as an inline string literal in the test (where the test's own compiler
+// would expand it).
+fn main() ![io] {
+    // (1) Write side, full range: char_from_code(n) yields a one-byte
+    // string for every n in 1..255 — a real heap buffer (never an
+    // immediate-codepoint tagged pointer), so `.length` reads back as 1
+    // on every platform.
+    let mut len_failures: int = 0;
+    let mut n: int = 1;
+    loop {
+        if n > 255 { break; }
+        if char_from_code(n).length != 1 { len_failures += 1; }
+        n += 1;
+    }
+    print("LEN_FAILURES={{len_failures}}");
+
+    // (2) Read round-trip for the full byte range 1..255 via char_code.
+    // #1136 retired the ASLR-dependent immediate-codepoint fast-path on
+    // macOS arm64, so char_code reads every byte back deterministically
+    // on all platforms. The test runs this probe across three process
+    // launches (fresh ASLR each) and requires zero failures every run.
+    let mut rt_failures: int = 0;
+    let mut h: int = 1;
+    loop {
+        if h > 255 { break; }
+        if char_code(char_from_code(h)) != h { rt_failures += 1; }
+        h += 1;
+    }
+    print("ROUNDTRIP_FAILURES={{rt_failures}}");
+
+    // (3) ASCII correctness via literal equality (no char_code dependency
+    // on the result). Covers low/mid/high printable ASCII.
+    let mut ascii_ok: int = 0;
+    if char_from_code(65) == "A" {
+        if char_from_code(48) == "0" {
+            if char_from_code(122) == "z" { ascii_ok = 1; }
+        }
+    }
+    print("ASCII_OK={{ascii_ok}}");
+
+    // (4) Raw high byte: a single byte (length 1), not a 2-byte UTF-8
+    // encode.
+    let hi = char_from_code(200);
+    print("HI_LEN={{hi.length}}");
+    print("HI_CODE={{char_code(hi)}}");
+
+    // (5) Already-shipped multibyte read path still holds.
+    let e = "é";
+    print("EACUTE_LEN={{e.length}}");
+    print("EACUTE_B0={{char_code(e[0])}}");
+    print("EACUTE_B1={{char_code(e[1])}}");
+
+    // (6) Documented byte-0 limitation: unrepresentable -> empty string.
+    let zero = char_from_code(0);
+    print("ZERO_LEN={{zero.length}}");
+}

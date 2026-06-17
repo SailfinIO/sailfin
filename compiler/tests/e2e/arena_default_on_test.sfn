@@ -1,0 +1,100 @@
+// E2E test for the arena allocator default-on contract — issue #324.
+//
+// Native replacement for the former `test_arena_default_on.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). The flip in
+// `runtime/native/src/sailfin_arena.c::_init_arena_enabled` makes the
+// arena on by default for every binary (not just selfhost builds). This
+// test pins three contracts by running `sfn run` on the in-tree
+// hello-world example with `SAILFIN_DUMP_ARENA_STATS=1` and varying
+// `SAILFIN_USE_ARENA`:
+//   1. Default-on: with SAILFIN_USE_ARENA unset, the atexit dump reports
+//      `pages=` and never `stats=disabled`.
+//   2. Explicit opt-in: SAILFIN_USE_ARENA=1 keeps the arena on.
+//   3. Opt-out matrix: SAILFIN_USE_ARENA in {0, "", false} each disable
+//      it (the dump reports `stats=disabled`), mirroring the `_env_flag`
+//      contract in `compiler/src/cli_commands_utils.sfn`.
+//
+// The probe is deterministic — it greps the atexit telemetry token, not
+// RSS — so it is robust without measuring process memory. The compiler
+// process's atexit hook (native_driver.c) observes the same
+// SAILFIN_USE_ARENA the run inherits, so the stats line reflects the
+// arena state under test.
+//
+// `sfn run` compiles + links + executes, so the child env must thread
+// `PATH` (clang + linker) and `SAILFIN_TEST_SCRATCH` (the per-invocation
+// `program.ll` cache dir, #1333). `run_capture` treats an empty array as
+// the *empty* environment, so leaving SAILFIN_USE_ARENA out of the array
+// is exactly the "unset" case. The `expect_*` matchers are `![pure]` and
+// unusable from an `![io]` test, so output is asserted with
+// `sfn/strings::find`.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Base child env for the spawned `sfn run`: PATH/HOME/TMPDIR so the
+// nested build finds clang + linker, SAILFIN_TEST_SCRATCH so the cache
+// dir is per-invocation, and SAILFIN_DUMP_ARENA_STATS=1 to force the
+// atexit telemetry. SAILFIN_USE_ARENA is appended per-case by the caller.
+fn _base_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    e.push("SAILFIN_DUMP_ARENA_STATS=1");
+    return e;
+}
+
+// Run `sfn run examples/basics/hello-world.sfn` under `child_env` and
+// return the captured stderr (where the arena-stats line lands; the
+// example's own output goes to stdout).
+fn _arena_stats(child_env: string[]) -> string ![io] {
+    let _exit = process.run_capture([_sfn_bin(), "run", "examples/basics/hello-world.sfn"], child_env);
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return err;
+}
+
+test "SAILFIN_USE_ARENA unset → arena on (default, #324)" ![io] {
+    // No SAILFIN_USE_ARENA in the env array == unset.
+    let err = _arena_stats(_base_env());
+    assert find(err, "stats=disabled", 0) < 0;
+    assert find(err, "pages=", 0) >= 0;
+}
+
+test "SAILFIN_USE_ARENA=1 → arena on (explicit, #324)" ![io] {
+    let mut e = _base_env();
+    e.push("SAILFIN_USE_ARENA=1");
+    let err = _arena_stats(e);
+    assert find(err, "stats=disabled", 0) < 0;
+    assert find(err, "pages=", 0) >= 0;
+}
+
+test "SAILFIN_USE_ARENA=0 → arena off (opt-out, #324)" ![io] {
+    let mut e = _base_env();
+    e.push("SAILFIN_USE_ARENA=0");
+    let err = _arena_stats(e);
+    assert find(err, "stats=disabled", 0) >= 0;
+}
+
+test "SAILFIN_USE_ARENA='' → arena off (opt-out, #324)" ![io] {
+    let mut e = _base_env();
+    e.push("SAILFIN_USE_ARENA=");
+    let err = _arena_stats(e);
+    assert find(err, "stats=disabled", 0) >= 0;
+}
+
+test "SAILFIN_USE_ARENA=false → arena off (opt-out, #324)" ![io] {
+    let mut e = _base_env();
+    e.push("SAILFIN_USE_ARENA=false");
+    let err = _arena_stats(e);
+    assert find(err, "stats=disabled", 0) >= 0;
+}
