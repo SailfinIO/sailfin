@@ -38,7 +38,6 @@ test_check_resolver_scan_memo.sh
 test_clock_gettime_reader.sh
 test_clock_monotonic_id_sentinel.sh
 test_compiler_debug_toggle_env_vars.sh
-test_config.sh
 test_cross_module_int_signature.sh
 test_cross_module_signature_resolution.sh
 test_cross_windows_runtime_modules.sh
@@ -67,7 +66,6 @@ test_make_report_contract.sh
 test_make_result_contract.sh
 test_mem_limit_selfcap.sh
 test_monotonic_millis_advances.sh
-test_numeric_int_float.sh
 test_owned_buf_grow_determinism.sh
 test_owned_buf_roundtrip.sh
 test_publish.sh
@@ -107,7 +105,6 @@ test_sleep_eintr_resume.sh
 test_sleep_unit_semantics.sh
 test_string_aggregate_shape.sh
 test_subprocess_emit_clean_env.sh
-test_sync_rejects_unimplemented_concurrency.sh
 test_test_bin_cache.sh
 test_thread_local_lowering.sh
 test_try_catch_frames.sh

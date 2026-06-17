@@ -1,0 +1,230 @@
+// End-to-end regression test for issue #617 (sub-task of #613).
+//
+// Native replacement for the former
+// `test_sync_rejects_unimplemented_concurrency.sh` (test-infra Phase 3,
+// epic #842; ratchet #1327).
+//
+// Background: `capsules/sfn/sync/src/mod.sfn` used to export untyped
+// `channel(...)`, `parallel(...)`, and `spawn(...)`, and the prelude
+// exposed identically-named wrappers, all delegating to
+// `sailfin_runtime_{channel,parallel,spawn}` C bridges that silently
+// returned NULL / no-op'd. The "parsed but unenforced" surface was
+// deleted, so any caller that names them must fail at compile time
+// rather than silently linking to a NULL-returning trap.
+//
+// Fail-closed mechanism by surface (post-#1080/#1085/#1091):
+//   - `parallel(...)` / bare `spawn(0, "worker")` keep the paren-call
+//     shape and fail closed as *unresolved calls* — the lowering pass
+//     cannot resolve the return type now the descriptor is gone:
+//     `llvm lowering [fatal]: cannot resolve return type for call to
+//     \`<sym>\``.
+//   - `channel(0)` now has real LLVM lowering (#1085) AND a wired
+//     pthread runtime (#1091), so a caller builds and links cleanly.
+//   - a wholly-undefined callee (`unknown_void_helper()`) is rejected
+//     by the type checker (E0420) before lowering — a different stage,
+//     but the headline contract (rc != 0, no binary) holds.
+//
+// `sfn build`, `sfn emit llvm`, and `sfn emit native` all share the
+// lowering fatal gate (#631/#906), so each surface gets its own
+// assertion.
+//
+// NOTE: diagnostics land on stderr; assert on the captured text with
+// `sfn/strings::find` (the `sfn/test` `expect_*` matchers are `![pure]`
+// and cannot be called from an `![io]` test). (#842.)
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned compiles. `process.run_capture`
+// treats an empty array as the *empty* environment (not "inherit"), so
+// the relevant variables must be threaded explicitly:
+//   - `PATH` (+ `HOME`/`TMPDIR`): the nested `build` links via `clang` +
+//     `mold`/`lld`/`ld`; without `PATH` the linker is not found.
+//   - `SAILFIN_TEST_SCRATCH`: the runner's per-file scratch, which the
+//     compiler routes its `program.ll` build-cache dir under (#1333) so
+//     a parallel run (`--jobs N>1`) does not collide on `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// `sfn build` must fail closed: rc != 0, no output binary, and a
+// `cannot resolve` lowering diagnostic naming `\`symbol\``.
+fn _build_rejected(label: string, source: string, symbol: string) -> bool ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    let out = dir + "/" + label + ".out";
+    fs.writeFile(src, source);
+    if fs.exists(out) { fs.deleteFile(out); }
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", out, src], _child_env());
+    let _o = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let produced = fs.exists(out);
+    if produced { fs.deleteFile(out); }
+    fs.deleteFile(src);
+    if exit == 0 { return false; }
+    if produced { return false; }
+    if find(err, "cannot resolve", 0) < 0 { return false; }
+    if find(err, "`" + symbol + "`", 0) < 0 { return false; }
+    return true;
+}
+
+// `sfn build` must fail closed (rc != 0, no binary) with no requirement
+// on which stage produced the diagnostic — used for the E0420
+// typecheck-stage rejection of a wholly-undefined callee.
+fn _build_fails_closed(label: string, source: string) -> bool ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    let out = dir + "/" + label + ".out";
+    fs.writeFile(src, source);
+    if fs.exists(out) { fs.deleteFile(out); }
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", out, src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    let produced = fs.exists(out);
+    if produced { fs.deleteFile(out); }
+    fs.deleteFile(src);
+    if exit == 0 { return false; }
+    if produced { return false; }
+    return true;
+}
+
+// `sfn build` must succeed: rc == 0 and an output binary on disk.
+fn _build_succeeds(label: string, source: string) -> bool ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    let out = dir + "/" + label + ".out";
+    fs.writeFile(src, source);
+    if fs.exists(out) { fs.deleteFile(out); }
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", out, src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    let produced = fs.exists(out);
+    if produced { fs.deleteFile(out); }
+    fs.deleteFile(src);
+    if exit != 0 { return false; }
+    return produced;
+}
+
+// `sfn emit <mode>` (mode: "llvm" | "native"; ext: ".ll" | ".sfn-asm")
+// must fail closed: rc != 0, no artifact, and a `cannot resolve`
+// diagnostic naming `\`symbol\``.
+fn _emit_rejected(label: string, source: string, mode: string, ext: string, symbol: string) -> bool ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    let out = dir + "/" + label + ext;
+    fs.writeFile(src, source);
+    if fs.exists(out) { fs.deleteFile(out); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, mode, src], _child_env());
+    let _o = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let produced = fs.exists(out);
+    if produced { fs.deleteFile(out); }
+    fs.deleteFile(src);
+    if exit == 0 { return false; }
+    if produced { return false; }
+    if find(err, "cannot resolve", 0) < 0 { return false; }
+    if find(err, "`" + symbol + "`", 0) < 0 { return false; }
+    return true;
+}
+
+// `sfn emit native` must succeed and the `.sfn-asm` must mention `needle`.
+fn _emit_native_succeeds(label: string, source: string, needle: string) -> bool ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    let out = dir + "/" + label + ".sfn-asm";
+    fs.writeFile(src, source);
+    if fs.exists(out) { fs.deleteFile(out); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "native", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 {
+        fs.deleteFile(src);
+        return false;
+    }
+    if !fs.exists(out) {
+        fs.deleteFile(src);
+        return false;
+    }
+    let asm = fs.readFile(out);
+    fs.deleteFile(out);
+    fs.deleteFile(src);
+    return find(asm, needle, 0) >= 0;
+}
+
+// Fixture sources are returned from functions (NOT module-level `let`
+// globals): a top-level `let` whose initializer is a string literal with
+// an escaped `\"` emits a length-miscounted global constant
+// (`@str.global._X` truncated at the first quote — a latent compiler
+// emission bug), whereas a function-local/returned literal lowers
+// correctly. Keep these as functions.
+fn _parallel_import() -> string {
+    return "import { parallel } from \"sfn/sync\";\n\nfn main() ![io] {\n    let _results = parallel([]);\n}\n";
+}
+
+fn _spawn_import() -> string {
+    return "import { spawn } from \"sfn/sync\";\n\nfn main() ![io] {\n    spawn(0, \"worker\");\n}\n";
+}
+
+fn _spawn_prelude() -> string {
+    return "fn main() ![io] {\n    spawn(0, \"worker\");\n}\n";
+}
+
+fn _channel_prelude() -> string {
+    return "fn main() ![io] {\n    let _ch = channel(0);\n}\n";
+}
+
+fn _unknown_void() -> string {
+    return "fn main() ![io] {\n    unknown_void_helper();\n}\n";
+}
+
+test "sync-rejects: sfn build rejects sfn/sync.parallel import (#617)" ![io] {
+    assert _build_rejected("parallel_import_caller", _parallel_import(), "parallel");
+}
+
+test "sync-rejects: sfn build rejects sfn/sync.spawn import (#617)" ![io] {
+    assert _build_rejected("spawn_import_caller", _spawn_import(), "spawn");
+}
+
+test "sync-rejects: sfn build succeeds on channel() now the runtime is wired (#1091)" ![io] {
+    assert _build_succeeds("channel_prelude_caller", _channel_prelude());
+}
+
+test "sync-rejects: sfn build rejects bare prelude spawn() (#617)" ![io] {
+    assert _build_rejected("spawn_prelude_caller", _spawn_prelude(), "spawn");
+}
+
+test "sync-rejects: sfn build fails closed on unknown void helper (#631)" ![io] {
+    assert _build_fails_closed("unknown_void_helper_caller", _unknown_void());
+}
+
+test "sync-rejects: sfn emit llvm fails closed on void spawn() (#631)" ![io] {
+    assert _emit_rejected("spawn_emit_llvm_caller", _spawn_prelude(), "llvm", ".ll", "spawn");
+}
+
+test "sync-rejects: sfn emit native succeeds on channel() now lowering exists (#1085)" ![io] {
+    assert _emit_native_succeeds("channel_emit_native_caller", _channel_prelude(), "channel(");
+}
+
+test "sync-rejects: sfn emit native fails closed on void spawn() (#906)" ![io] {
+    assert _emit_rejected("spawn_emit_native_caller", _spawn_prelude(), "native", ".sfn-asm", "spawn");
+}
