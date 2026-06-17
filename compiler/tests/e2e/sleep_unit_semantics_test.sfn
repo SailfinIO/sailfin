@@ -1,0 +1,126 @@
+// E2E unit-semantics test for sleep() — issue #307.
+//
+// Native replacement for the former `test_sleep_unit_semantics.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327).
+//
+// The pre-fix bug: prelude advertised `sleep(milliseconds: number)` while
+// `sailfin_runtime_sleep(double seconds)` interpreted its input as
+// seconds. `sleep(50)` actually slept for 50 *seconds*, not 50 ms.
+//
+// This test compiles and runs a small program that brackets a
+// `sleep(75)` between two `monotonic_millis()` reads, then asserts the
+// measured elapsed window is plausibly ~75 ms (lower bound 50 ms) and
+// well under the broken-seconds path (upper bound 30000 ms). Bracketing
+// inside the user program isolates the sleep duration from
+// compile/link/start overhead, so the test stays tight and non-flaky.
+// The fixture performs the comparison and prints a single PASS/FAIL
+// marker so the `![io]` test can assert on captured output with
+// `sfn/strings` (the `expect_*` matchers are `![pure]` and unusable from
+// an `![io]` test — #842).
+//
+// Pinned end-to-end: prelude `sleep` / `runtime_sleep_fn`, the
+// helper-registry rewire to `@sfn_sleep`, the Sailfin wrapper in
+// `runtime/sfn/clock.sfn`, the C trampoline `sfn_sleep`, and
+// `sailfin_runtime_sleep` itself. Any layer regressing the units (e.g.
+// the pre-fix C runtime that multiplied input by 1000/1e6) blows the
+// elapsed window past the upper bound and the fixture prints RESULT=FAIL.
+//
+// Build hygiene (the load-bearing detail): the fixture source and its
+// output binary live inside a `with_tmp_dir` tree, NOT in
+// `SAILFIN_TEST_SCRATCH` — the runner points that at the fixed
+// `build/sailfin` build-cache dir, which `sfn build`/`sfn run` clean, so
+// writing the source there races the nested compile's own staging. The
+// nested build still threads `SAILFIN_TEST_SCRATCH` through `_child_env`
+// so its `program.ll` cache stays per-invocation under the parallel pool
+// (#1333), while `PATH` lets the nested build find `clang` and its linker.
+import { find } from "sfn/strings";
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn build`. `process.run_capture`
+// treats an empty array as the *empty* environment (not "inherit"), so
+// the variables the nested compile needs are threaded explicitly: PATH
+// (+ HOME/TMPDIR) so the build finds `clang` and the linker, and
+// SAILFIN_TEST_SCRATCH so the `program.ll` cache stays per-invocation.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// An out-of-tree marker file for the run's stdout — lives outside the
+// `with_tmp_dir` tree so it survives teardown and can be read afterward.
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-sleep-units-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// SLEEP_MS=75 overcomes scheduler jitter; LOWER_MS=50 catches a
+// sub-millisecond interpretation or a no-op sleep; UPPER_MS=30000 sits
+// ~1000x below the 75-second wall time the seconds-interpretation bug
+// would produce. monotonic_millis() returns an int (i64) on the M1
+// int/float backend, so the bounds are integer literals. The FAIL branch
+// carries no `{{...}}` interpolation — those would be expanded by *this*
+// test's own compiler when the fixture is held as a string literal here,
+// not by the fixture's compiler.
+fn _fixture_src() -> string {
+    return "fn main() ![io, clock] {\n"
+        + "    let start = monotonic_millis();\n"
+        + "    sleep(75);\n"
+        + "    let elapsed = monotonic_millis() - start;\n"
+        + "    if elapsed >= 50 && elapsed < 30000 {\n"
+        + "        print(\"RESULT=PASS\");\n"
+        + "    } else {\n"
+        + "        print(\"RESULT=FAIL\");\n"
+        + "    }\n"
+        + "}\n";
+}
+
+// Build the fixture in a temp dir and run the binary. Stashes the run's
+// captured stdout to `out_marker` and returns the run's exit code, or
+// `-100` if the build itself failed.
+fn _build_and_run(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/sleep_units.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/sleep_units";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+test "sleep(N) is N milliseconds end-to-end (issue #307)" ![io] {
+    let marker = _marker("window");
+    let exit = _build_and_run(marker);
+    // Assert the build+run succeeded (`-100` == build failure) before
+    // touching the marker: on a build failure the marker is never written.
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // RESULT=PASS only when the bracketed sleep(75) elapsed in
+    // [50, 30000) ms — milliseconds, not the pre-#307 seconds path.
+    assert find(out, "RESULT=PASS", 0) >= 0;
+}

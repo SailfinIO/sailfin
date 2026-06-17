@@ -65,7 +65,6 @@ test_lowering_no_bare_runtime_emissions.sh
 test_make_report_contract.sh
 test_make_result_contract.sh
 test_mem_limit_selfcap.sh
-test_monotonic_millis_advances.sh
 test_owned_buf_grow_determinism.sh
 test_owned_buf_roundtrip.sh
 test_publish.sh
@@ -102,7 +101,6 @@ test_runtime_string_utf8_numeric.sh
 test_runtime_type_meta.sh
 test_sfn_package.sh
 test_sleep_eintr_resume.sh
-test_sleep_unit_semantics.sh
 test_string_aggregate_shape.sh
 test_subprocess_emit_clean_env.sh
 test_test_bin_cache.sh
