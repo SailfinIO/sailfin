@@ -34,8 +34,6 @@ test_check_effect_call_site_caret.sh
 test_check_json_schema.sh
 test_check_phase_ledger.sh
 test_check_resolver_scan_memo.sh
-test_clock_gettime_reader.sh
-test_clock_monotonic_id_sentinel.sh
 test_compiler_debug_toggle_env_vars.sh
 test_cross_module_int_signature.sh
 test_cross_module_signature_resolution.sh
@@ -46,7 +44,6 @@ test_drop_emission_try_catch.sh
 test_effect_gate_build_path.sh
 test_effect_gate_build_path_entry.sh
 test_errno_locator_platform.sh
-test_errno_reader.sh
 test_escape_promotion_boundaries.sh
 test_exe_path_intrinsic_platform.sh
 test_exe_path_reader.sh

@@ -1,0 +1,186 @@
+// E2E test for the host-aware clock-monotonic clk_id sentinel (#908,
+// epic #763).
+//
+// Native replacement for the former `test_clock_monotonic_id_sentinel.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327).
+//
+// `sailfin_intrinsic_clock_monotonic_id` is a registry sentinel whose
+// lowering branch (`core_call_emission.sfn`) emits a bare `i32` immediate
+// — `1` on Linux/glibc, `6` on Darwin/macOS — chosen at emit time from
+// `SAILFIN_TARGET_OS` (cross-compile target override) or the `uname -s`
+// host probe. Unlike the errno sentinel (a `call`) and the pointer-read
+// sentinel (a `load`), it lowers to NO symbol and NO runtime call: the
+// constant flows straight into the consuming `clock_gettime` call as its
+// `clk_id` argument.
+//
+// Host-independent. The Linux/Darwin base paths are forced via the
+// `SAILFIN_TARGET_OS` override (consulted before the `uname -s` host
+// probe), so they assert the same thing on Linux or macOS CI. The
+// precedence test additionally installs a `uname` shim on PATH forcing the
+// *opposite* host OS, proving `SAILFIN_TARGET_OS` wins over the host probe
+// (the cross-compile path, mirroring the #890 errno sentinel precedence
+// fix). For each path it pins:
+//
+//   1. typecheck       — `sfn check <fixture>` exits 0.
+//   2. clk_id immediate — `call i32 @clock_gettime(i32 1,` on Linux,
+//                        `call i32 @clock_gettime(i32 6,` on Darwin.
+//   3. override wins   — uname-shim=Linux + SAILFIN_TARGET_OS=Darwin → 6.
+//   4. no sentinel leak — no `call`/`declare` targets the sentinel name.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Base child env: PATH/HOME/TMPDIR + SAILFIN_TEST_SCRATCH. The caller
+// appends SAILFIN_TARGET_OS and/or a PATH override per case.
+fn _base_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _env_with_target(target_os: string) -> string[] ![io] {
+    let mut e = _base_env();
+    e.push("SAILFIN_TARGET_OS=" + target_os);
+    return e;
+}
+
+fn _any_line_with(text: string, a: string, b: string) -> bool {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], a) && contains(lines[i], b) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Fixture mirrors the consumer shape (clock.sfn after the seed-gated
+// swap): feed the clk_id sentinel straight into `clock_gettime` as the
+// first argument, exactly where the runtime probe constant sits today.
+fn _fixture_source() -> string {
+    return "struct Timespec {\n    tv_sec: i64,\n    tv_nsec: i64\n}\n\nextern fn clock_gettime(clk_id: i32, ts: * Timespec) -> i32;\n\nfn read_clock() -> i32 {\n    let mut ts: Timespec = Timespec { tv_sec: 0, tv_nsec: 0 };\n    let ts_ptr: * Timespec = & ts;\n    return clock_gettime(sailfin_intrinsic_clock_monotonic_id(), ts_ptr);\n}\n\nfn main() -> void {\n    let r: i32 = read_clock();\n}\n";
+}
+
+fn _fixture_path() -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-clkid.sfn";
+    fs.writeFile(src, _fixture_source());
+    return src;
+}
+
+// Install a `uname` shim under `dir` that reports `os` for `uname -s` and
+// delegates everything else to the real binary, so the compiler's
+// `uname -s` probe resolves to the forced platform. Returns `dir`.
+fn _make_uname_shim(dir: string, os: string) -> string ![io] {
+    fs.createDirectory(dir, true);
+    let shim = dir + "/uname";
+    fs.writeFile(shim, "#!/bin/sh\nif [ \"$1\" = \"-s\" ]; then echo \"" + os
+        + "\"; exit 0; fi\nexec /usr/bin/uname \"$@\"\n");
+    let _ = process.run_capture(["chmod", "+x", shim], _base_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return dir;
+}
+
+fn _emit(src: string, child_env: string[], tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-clkid-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], child_env);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+test "clk_id: sfn check passes on the fixture" ![io] {
+    let src = _fixture_path();
+    let exit = process.run_capture([_sfn_bin(), "check", src], _base_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    fs.deleteFile(src);
+    assert exit == 0;
+}
+
+test "clk_id: Linux target feeds immediate 1, never 6" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Linux"), "linux");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i32 @clock_gettime(i32 1,");
+    assert ! contains(ir, "call i32 @clock_gettime(i32 6,");
+}
+
+test "clk_id: Darwin target feeds immediate 6, never 1" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Darwin"), "darwin");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i32 @clock_gettime(i32 6,");
+    assert ! contains(ir, "call i32 @clock_gettime(i32 1,");
+}
+
+test "clk_id: SAILFIN_TARGET_OS=Darwin overrides uname=Linux (clk_id 6)" ![io] {
+    let src = _fixture_path();
+    let shimdir = _make_uname_shim(_scratch_dir() + "/shim-clkid-override", "Linux");
+    // Build the env by hand so the shim dir is the *only* PATH entry (a
+    // second `PATH=` in the array would be ambiguous). The shim's `uname`
+    // therefore wins over the host's; SAILFIN_TARGET_OS=Darwin must still
+    // override it.
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    e.push("PATH=" + shimdir + ":" + path);
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    e.push("SAILFIN_TARGET_OS=Darwin");
+    let ir = _emit(src, e, "override");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i32 @clock_gettime(i32 6,");
+    assert ! contains(ir, "call i32 @clock_gettime(i32 1,");
+}
+
+test "clk_id: sentinel symbol never emitted as call/declare" ![io] {
+    let src = _fixture_path();
+    let mut i = 0;
+    let targets = ["Linux", "Darwin"];
+    loop {
+        if i >= targets.length { break; }
+        let ir = _emit(src, _env_with_target(targets[i]), "leak-" + targets[i]);
+        assert ir.length > 0;
+        assert ! _any_line_with(ir, "call ", "@sailfin_intrinsic_clock_monotonic_id");
+        assert ! _any_line_with(ir, "declare ", "@sailfin_intrinsic_clock_monotonic_id");
+        i += 1;
+    }
+    fs.deleteFile(src);
+}
