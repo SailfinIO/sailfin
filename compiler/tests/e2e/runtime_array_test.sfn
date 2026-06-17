@@ -1,0 +1,167 @@
+// E2E regression test for runtime/sfn/array.sfn — the Sailfin-native array
+// primitive. Native replacement for the former `test_runtime_array.sh`
+// (test-infra Phase 3, epic #842), updated for the #1316 array-core flip.
+//
+// #1316 (C6 of epic #1308) flipped the array *core* — `sfn_array_concat`,
+// `sfn_array_push_string`, `sfn_array_push_slot` — off the C runtime: they
+// are now **bare-defined** in `runtime/sfn/array.sfn` (delegating to the
+// still-C `sailfin_runtime_*_v2` entrypoints, retired in #822) and the C
+// definitions in `runtime/native/src/sailfin_runtime.c` were removed, so
+// emission binds `@sfn_array_*` to the Sailfin bodies at link. The
+// remaining `create`/`push`/`slice`/`map`/`filter`/`reduce` stay under the
+// `sfn_array_sfn_*` infix (spec stubs / closure-gated), so this test pins
+// the post-flip boundary: which symbols are bare vs. infix.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like these. Assert on the captured
+// `.ll` text with `sfn/strings::contains` instead (#842).
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn` invocations. `process.run_capture`
+// treats an empty array as the *empty* environment (not "inherit"), so the
+// relevant variables are threaded explicitly (PATH for any subprocess the
+// compiler shells out to; SAILFIN_TEST_SCRATCH so a parallel run does not
+// collide on the fixed `build/sailfin` build-cache dir — #1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Lower an existing `.sfn` file to a standalone `.ll` via `sfn emit llvm` and
+// return the IR text. `tag` keys a unique scratch path so sub-tests do not
+// collide; returns "" on emit failure.
+fn _emit_llvm(path: string, tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-runtime-array-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+test "runtime-array: sfn check runtime/sfn/array.sfn is clean" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", "runtime/sfn/array.sfn"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out + err, "ok");
+}
+
+test "runtime-array: sfn fmt --check runtime/sfn/array.sfn is canonical" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "runtime/sfn/array.sfn"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+// #1316: the array core is now bare-defined in the Sailfin module.
+test "runtime-array: array core is bare-defined sfn_array_* (#1316 flip)" ![io] {
+    let ir = _emit_llvm("runtime/sfn/array.sfn", "core_defines");
+    assert ir.length > 0;
+    assert contains(ir, "define i8* @sfn_array_concat(i8* ");
+    assert contains(ir, "define i8* @sfn_array_push_string(i8* ");
+    assert contains(ir, "define i8* @sfn_array_push_slot(i8* ");
+}
+
+// Out of #1316 scope: create/push/slice (spec stubs) and map/filter/reduce
+// (closure-gated, #766) stay under the `sfn_array_sfn_*` infix, with their
+// bare names still owned by the C runtime.
+test "runtime-array: non-core ops remain sfn_array_sfn_* infix" ![io] {
+    let ir = _emit_llvm("runtime/sfn/array.sfn", "infix_defines");
+    assert ir.length > 0;
+    assert contains(ir, "define i8* @sfn_array_sfn_create(i64 ");
+    assert contains(ir, "define void @sfn_array_sfn_push(i8* ");
+    assert contains(ir, "define i8* @sfn_array_sfn_slice(i8* ");
+    assert contains(ir, "define i8* @sfn_array_sfn_map(i8* ");
+    assert contains(ir, "define i8* @sfn_array_sfn_filter(i8* ");
+    assert contains(ir, "define i8* @sfn_array_sfn_reduce(i8* ");
+}
+
+// The bare bodies delegate to the still-C `_v2` entrypoints (retired in #822),
+// so the inlined externs each produce a `declare` line.
+test "runtime-array: bare bodies declare the legacy _v2 delegates" ![io] {
+    let ir = _emit_llvm("runtime/sfn/array.sfn", "v2_declares");
+    assert ir.length > 0;
+    assert contains(ir, "declare i8* @sailfin_runtime_concat_v2(");
+    assert contains(ir, "declare i8* @sailfin_runtime_append_string_v2(");
+    assert contains(ir, "declare i8* @sailfin_runtime_array_push_slot_v2(");
+}
+
+// Coexistence (inverted from the pre-#1316 guard): the still-infix ops must
+// NOT be emitted under their bare names — those collide with the C runtime
+// definitions that still own them. (The three flipped core symbols ARE now
+// emitted bare; that is asserted above.)
+test "runtime-array: non-core bare names not emitted (no C collision)" ![io] {
+    let ir = _emit_llvm("runtime/sfn/array.sfn", "no_clash");
+    assert ir.length > 0;
+    assert ! contains(ir, "@sfn_array_create(");
+    assert ! contains(ir, "@sfn_array_push(");
+    assert ! contains(ir, "@sfn_array_slice(");
+    assert ! contains(ir, "@sfn_array_map(");
+    assert ! contains(ir, "@sfn_array_filter(");
+    assert ! contains(ir, "@sfn_array_reduce(");
+}
+
+// User emission routes through the bare canonical `sfn_array_*` names and
+// contains zero references to the legacy `sailfin_runtime_*` array helpers.
+test "runtime-array: user emission has zero legacy array-helper refs" ![io] {
+    let hello = _emit_llvm("examples/basics/hello-world.sfn", "hello");
+    assert hello.length > 0;
+    assert ! contains(hello, "sailfin_runtime_concat");
+    assert ! contains(hello, "sailfin_runtime_append_string");
+    assert ! contains(hello, "sailfin_runtime_array_push");
+
+    // A heavy module that actually emits typed pushes via
+    // `lower_array_push_in_place` exercises the flipped `@sfn_array_push_slot`
+    // path (hello-world has only vestigial declares).
+    let heavy = _emit_llvm("compiler/src/parser/expressions.sfn", "heavy");
+    assert heavy.length > 0;
+    assert ! contains(heavy, "sailfin_runtime_concat");
+    assert ! contains(heavy, "sailfin_runtime_append_string");
+    assert ! contains(heavy, "sailfin_runtime_array_push");
+    // The flip must route the calls (not silently drop them).
+    assert contains(heavy, "@sfn_array_push_slot(");
+}
+
+// Determinism: back-to-back `emit llvm` runs on a heavy module produce
+// byte-identical IR. Guards against non-deterministic runtime-helper
+// declaration ordering the flip could perturb. (The bash predecessor swept
+// 20×; eight iterations keep the signal at a CI-friendly cost.)
+test "runtime-array: heavy-module emit is deterministic across runs" ![io] {
+    let baseline = _emit_llvm("compiler/src/parser/expressions.sfn", "det_base");
+    assert baseline.length > 0;
+    let mut i = 0;
+    loop {
+        if i >= 8 { break; }
+        let next = _emit_llvm("compiler/src/parser/expressions.sfn", "det_iter");
+        assert next.length > 0;
+        assert next == baseline;
+        i = i + 1;
+    }
+}

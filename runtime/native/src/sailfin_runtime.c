@@ -8958,47 +8958,19 @@ char *sailfin_runtime_array_push_slot_v2(void **data_ptr, int64_t *len_ptr,
  * bare canonical form in a single rollback-safe PR.
  * ===================================================================== */
 
-SfnArray *sfn_array_concat(SfnArray *a, SfnArray *b)
-{
-    /* Today's compiler-emitted call is 2-arg (matches the M1.B `_v2`
-     * shape pre-#399); the registry's `parameter_types` for `concat`
-     * still emits `declare ... @sfn_array_concat({...}*, {...}*)`,
-     * so this trampoline keeps the 2-arg contract to avoid the UB
-     * that would otherwise arise from a 2-arg call landing on a
-     * 4-arg definition. The architect spec's
-     * `(elem_size, *Arena)` shape (§2.3) belongs on a future
-     * `sfn_array_concat_v3` (or the M3 in-place rewrite) once the
-     * compiler threads arena pointers through array-allocation
-     * sites. The Sailfin proof-of-life surface in
-     * `runtime/sfn/array.sfn::sfn_array_sfn_concat` keeps the 4-arg
-     * spec signature so the migration unit stays visible at the
-     * Sailfin layer; that body retires alongside this trampoline
-     * when the spec form lights up. */
-    return sailfin_runtime_concat_v2(a, b);
-}
-
-SfnArray *sfn_array_push_string(SfnArray *a, char *text)
-{
-    /* Drop-in replacement for `sailfin_runtime_append_string_v2`;
-     * emitted by `lower_array_push_in_place` for the `i8*`-element
-     * fast path. #892: bump at this emitter boundary so the seq
-     * advances even though the delegate also enters. */
-    _runtime_enter();
-    return sailfin_runtime_append_string_v2(a, text);
-}
-
-char *sfn_array_push_slot(void **data_ptr, int64_t *len_ptr,
-                          int64_t *cap_ptr, int64_t elem_size)
-{
-    /* Drop-in replacement for `sailfin_runtime_array_push_slot_v2`;
-     * emitted by `lower_array_push_in_place` for typed-element pushes
-     * (every non-`i8*` element type, e.g. `Token` during lexing).
-     * #892: bump at this emitter boundary so the seq advances even
-     * though the delegate also enters. */
-    _runtime_enter();
-    return sailfin_runtime_array_push_slot_v2(data_ptr, len_ptr,
-                                              cap_ptr, elem_size);
-}
+/* sfn_array_concat / sfn_array_push_string / sfn_array_push_slot: the
+ * array core (#1316, C6 of epic #1308) is now defined in
+ * `runtime/sfn/array.sfn` as bare Sailfin exports. The link-ownership
+ * flipped off this C runtime (mirroring the #1309 arena flip) — the
+ * Sailfin bodies still delegate to the `sailfin_runtime_*_v2`
+ * entrypoints below (retired in #822), and those `_v2` bodies still
+ * call `_runtime_enter()` at entry, so the #892 concat-reuse seq is
+ * invalidated before any buffer mutation. The trampolines' formerly
+ * redundant extra `_runtime_enter()` is dropped: the counter is
+ * monotonic and its only consumer is the reuse guard, so a single bump
+ * still invalidates the window (an extra bump can only miss a reuse,
+ * never corrupt). These symbols had zero internal C callers, so the
+ * defs are removed outright rather than `static`-ified. */
 
 SfnArray *sfn_array_create(int64_t cap, int64_t elem_size, void *arena)
 {
