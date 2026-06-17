@@ -57,7 +57,6 @@ test_fn_reference_pthread.sh
 # (same hold-out class), which sfn/test cannot express pre-1.0. (#1323)
 test_http_capsule_serve.sh
 test_lifecycle_hook_ordering.sh
-test_linker_selection.sh
 test_llms_txt_sync.sh
 test_lock.sh
 test_login.sh
@@ -106,6 +105,5 @@ test_subprocess_emit_clean_env.sh
 test_test_bin_cache.sh
 test_thread_local_lowering.sh
 test_try_catch_frames.sh
-test_update_snapshots_flag.sh
 test_work_dir_flag.sh
 test_work_dir_parity.sh

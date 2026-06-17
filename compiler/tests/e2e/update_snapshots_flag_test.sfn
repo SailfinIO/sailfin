@@ -1,0 +1,87 @@
+// End-to-end test for `sfn test --update-snapshots` (#977).
+//
+// Native replacement for the former `test_update_snapshots_flag.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Pins the additivity
+// guarantee that `--update-snapshots` threads `SAILFIN_UPDATE_SNAPSHOTS=1`
+// to each compiled test binary (so `sfn/test::expect_snapshot`
+// re-baselines instead of comparing), and that a plain run does NOT gain
+// the variable.
+//
+// The probe reads the var directly via `env.get`, so the spawned runner's
+// exit code is a faithful proxy for "the test binary saw the var":
+//   - with the flag, the var reaches the test process  -> probe PASSES (exit 0)
+//   - without it, the var is unset                      -> probe FAILS (exit != 0)
+//
+// Covered paths: the single-file leaf exec (a `.sfn` positional) and the
+// multi-file child-runner path (a directory positional, which forks a
+// `<self> test <file>` child that must inherit the variable through its
+// own `env` prefix).
+//
+// This is a build-and-run e2e: the spawned `sfn test` compiles the probe
+// to a binary, so the child env must thread `PATH`/`HOME`/`TMPDIR` (the
+// nested compile runs `clang` + its linker) and `SAILFIN_TEST_SCRATCH`
+// (so the parallel pool does not collide on the fixed `build/sailfin`
+// program.ll cache — #1333). See `.claude/rules/no-bash-e2e.md`.
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The runner exports SAILFIN_UPDATE_SNAPSHOTS=1 iff `--update-snapshots`
+// was passed; the probe assertion fails (non-zero exit) when unset.
+fn _probe_src() -> string {
+    return "test \"update-snapshots flag reaches the test binary\" ![io] {\n"
+        + "    assert env.get(\"SAILFIN_UPDATE_SNAPSHOTS\") == \"1\";\n"
+        + "}\n";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Run `sfn test [flag] <positional>` against a freshly-written probe in a
+// temp dir, returning the runner's exit code. When `dir_positional` is
+// true the directory itself is passed (the multi-file child-runner path);
+// otherwise the single `.sfn` file is passed (the leaf-exec path).
+fn _run_probe(flag: string, dir_positional: bool) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let probe = dir + "/probe_test.sfn";
+        fs.writeFile(probe, _probe_src());
+        let mut argv: string[] = [_sfn_bin(), "test"];
+        if flag.length > 0 { argv.push(flag); }
+        if dir_positional { argv.push(dir); } else { argv.push(probe); }
+        let rc = process.run_capture(argv, _child_env());
+        let _o = process.capture_take_stdout();
+        let _e = process.capture_take_stderr();
+        return rc;
+    });
+}
+
+test "update-snapshots: single-file --update-snapshots threads the var (probe passes)" ![io] {
+    let exit = _run_probe("--update-snapshots", false);
+    assert exit == 0;
+}
+
+test "update-snapshots: single-file no flag leaves the var unset (additive)" ![io] {
+    // The probe asserts the var == "1"; with no flag it is unset, so the
+    // runner must report a failure (non-zero exit).
+    let exit = _run_probe("", false);
+    assert exit != 0;
+}
+
+test "update-snapshots: --update-snapshots propagates to the multi-file child runner" ![io] {
+    let exit = _run_probe("--update-snapshots", true);
+    assert exit == 0;
+}
