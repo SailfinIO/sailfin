@@ -875,7 +875,7 @@ static void _print_alloc_stats(void)
 // `[sailfin-arena] label=... pages=... capacity=... ...` line on
 // process exit when the arena is on, or `stats=disabled` when an
 // explicit `SAILFIN_USE_ARENA={0,'',false}` opt-out is in effect.
-// `test_arena_default_on.sh` pins the contract.
+// `arena_default_on_test.sfn` pins the contract.
 //
 // The C-driver entry point used to register the atexit hook directly;
 // post-#473, Sailfin's `fn main` (`compiler/src/cli_main.sfn`) walks
