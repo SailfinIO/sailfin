@@ -1,0 +1,197 @@
+// End-to-end tests for `sfn config`.
+//
+// Native replacement for the former `test_config.sh` (test-infra
+// Phase 3, epic #842; ratchet #1327). Each test uses a private HOME
+// (under the runner's scratch dir) so the real ~/.sfn/config.toml is
+// never touched, and threads it to the child via the `run_capture` env
+// array (an empty array is the *empty* environment, not "inherit").
+//
+// NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
+// (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
+// called from an `![io]` test). (#842.)
+import { find, contains, to_lower_all } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+struct CfgRun {
+    exit: int,
+    out: string
+}
+
+// A private HOME under the runner's scratch dir (or /tmp), keyed by
+// `tag` so concurrent tests in the parallel pool never collide. Any
+// stale config.toml is removed so each run starts clean.
+fn _home(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let home = base + "/sfn-config-" + tag;
+    fs.createDirectory(home + "/.sfn", true);
+    let cfg = home + "/.sfn/config.toml";
+    if fs.exists(cfg) { fs.deleteFile(cfg); }
+    return home;
+}
+
+// Run `sfn <args...>` with HOME (+ PATH, + any extra env entries)
+// threaded to the child, returning the exit code and combined
+// stdout+stderr.
+fn _run(home: string, args: string[], extra_env: string[]) -> CfgRun ![io] {
+    let mut e: string[] = ["HOME=" + home];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let mut i = 0;
+    loop {
+        if i >= extra_env.length { break; }
+        e.push(extra_env[i]);
+        i += 1;
+    }
+    let mut argv: string[] = [_sfn_bin()];
+    let mut j = 0;
+    loop {
+        if j >= args.length { break; }
+        argv.push(args[j]);
+        j += 1;
+    }
+    let exit = process.run_capture(argv, e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return CfgRun { exit: exit, out: out + err };
+}
+
+// ---- Test 1: no args shows usage ----
+test "config: no args shows usage" ![io] {
+    let home = _home("no_args");
+    let r = _run(home, ["config"], []);
+    assert find(to_lower_all(r.out), "usage", 0) >= 0;
+}
+
+// ---- Test 2: set registry writes config.toml ----
+test "config: set registry writes config.toml" ![io] {
+    let home = _home("set_registry");
+    let r = _run(home, ["config", "set", "registry", "https://example.test"], []);
+    assert r.exit == 0;
+    let cfg = home + "/.sfn/config.toml";
+    assert fs.exists(cfg);
+    let body = fs.readFile(cfg);
+    assert contains(body, "[registry]");
+    assert contains(body, "url = \"https://example.test\"");
+}
+
+// ---- Test 3: set strips trailing slash(es) ----
+test "config: set strips trailing slash" ![io] {
+    let home = _home("trailing_slash");
+    let r = _run(home, ["config", "set", "registry", "https://example.test///"], []);
+    assert r.exit == 0;
+    let body = fs.readFile(home + "/.sfn/config.toml");
+    // The closing quote must sit immediately after `test`; any retained
+    // slash would push it past `test///`.
+    assert contains(body, "url = \"https://example.test\"");
+}
+
+// ---- Test 4: get registry returns default when unset ----
+test "config: get returns default when unset" ![io] {
+    let home = _home("get_default");
+    let r = _run(home, ["config", "get", "registry"], []);
+    assert r.exit == 0;
+    assert find(r.out, "https://pkg.sfn.dev", 0) >= 0;
+}
+
+// ---- Test 5: get registry returns set value ----
+test "config: get returns set value" ![io] {
+    let home = _home("get_set");
+    let _s = _run(home, ["config", "set", "registry", "https://private.corp"], []);
+    let r = _run(home, ["config", "get", "registry"], []);
+    assert r.exit == 0;
+    assert find(r.out, "https://private.corp", 0) >= 0;
+}
+
+// ---- Test 6: SFN_REGISTRY env var wins over config file ----
+test "config: SFN_REGISTRY env overrides config file" ![io] {
+    let home = _home("env_override");
+    let _s = _run(home, ["config", "set", "registry", "https://in-file.test"], []);
+    let r = _run(home, ["config", "get", "registry"], ["SFN_REGISTRY=https://from-env.test"]);
+    assert find(r.out, "https://from-env.test", 0) >= 0;
+}
+
+// ---- Test 7: unset registry reverts to default ----
+test "config: unset reverts to default" ![io] {
+    let home = _home("unset");
+    let _s = _run(home, ["config", "set", "registry", "https://custom.test"], []);
+    let _u = _run(home, ["config", "unset", "registry"], []);
+    let r = _run(home, ["config", "get", "registry"], []);
+    assert find(r.out, "https://pkg.sfn.dev", 0) >= 0;
+}
+
+// ---- Test 8: list shows resolved registry ----
+test "config: list shows resolved registry" ![io] {
+    let home = _home("list");
+    let _s = _run(home, ["config", "set", "registry", "https://list.test"], []);
+    let r = _run(home, ["config", "list"], []);
+    assert find(r.out, "registry = https://list.test", 0) >= 0;
+}
+
+// ---- Test 9: set with unknown key rejected ----
+test "config: set rejects unknown key" ![io] {
+    let home = _home("set_unknown");
+    let r = _run(home, ["config", "set", "bogus-key", "value"], []);
+    assert r.exit != 0;
+}
+
+// ---- Test 10: get with unknown key rejected ----
+test "config: get rejects unknown key" ![io] {
+    let home = _home("get_unknown");
+    let r = _run(home, ["config", "get", "bogus-key"], []);
+    assert r.exit != 0;
+}
+
+// ---- Test 11: set with empty value rejected ----
+test "config: set rejects empty value" ![io] {
+    let home = _home("empty_value");
+    let r = _run(home, ["config", "set", "registry", ""], []);
+    assert r.exit != 0;
+}
+
+// ---- Test 11b: set rejects non-http(s) scheme; no file written ----
+test "config: set rejects non-http scheme" ![io] {
+    let home = _home("bad_scheme");
+    let r = _run(home, ["config", "set", "registry", "ftp://nope.test"], []);
+    assert r.exit != 0;
+    assert ! fs.exists(home + "/.sfn/config.toml");
+}
+
+// ---- Test 11c: set rejects shell metacharacters; no file written ----
+test "config: set rejects shell metacharacters" ![io] {
+    let home = _home("metachars");
+    let r = _run(home, ["config", "set", "registry", "https://bad.test\"; echo pwn"], []);
+    assert r.exit != 0;
+    assert ! fs.exists(home + "/.sfn/config.toml");
+}
+
+// ---- Test 11d: invalid env var falls back to default with warning ----
+test "config: invalid SFN_REGISTRY env falls back to default" ![io] {
+    let home = _home("invalid_env");
+    let r = _run(home, ["config", "get", "registry"], ["SFN_REGISTRY=not a url"]);
+    assert find(r.out, "https://pkg.sfn.dev", 0) >= 0;
+    assert find(to_lower_all(r.out), "warning", 0) >= 0;
+}
+
+// ---- Test 12: unknown subcommand rejected ----
+test "config: rejects unknown subcommand" ![io] {
+    let home = _home("unknown_sub");
+    let r = _run(home, ["config", "quantum", "registry"], []);
+    assert find(to_lower_all(r.out), "unknown subcommand", 0) >= 0;
+}
+
+// ---- Test 13: ~/.sfn and config.toml have restrictive permissions ----
+// `fs.get_perms` returns the lower 12 bits of st_mode as a decimal int:
+// 0o700 == 448, 0o600 == 384.
+test "config: config dir/file permissions are restricted" ![io] {
+    let home = _home("perms");
+    let r = _run(home, ["config", "set", "registry", "https://perm.test"], []);
+    assert r.exit == 0;
+    assert fs.get_perms(home + "/.sfn") == 448;
+    assert fs.get_perms(home + "/.sfn/config.toml") == 384;
+}
