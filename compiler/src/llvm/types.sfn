@@ -207,6 +207,12 @@ struct ModuleGlobalLoweringResult {
     init_function_lines: string[];
     init_function_symbol: string;
     needs_init_call: boolean;
+    // Synthetic `@sailfin_module_init__<module>` function whose body assigns
+    // each runtime-evaluated module global into its `@global.<name>` slot
+    // (#1386). Null when no global needs runtime init. Lowered by the
+    // orchestrator (`lowering_core.sfn`) via `emit_llvm_function`, which has
+    // the `![io]` expression-lowering context this pure pass lacks.
+    init_function: NativeFunction?;
     locals: LocalBinding[];
     string_constants: StringConstant[];
     diagnostics: string[];
