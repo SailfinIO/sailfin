@@ -18,12 +18,13 @@
 #   3. The global declare `@sfn_default_arena = external global ptr`
 #      lands in every emitted module (driven by
 #      `lowering_phase_render.sfn`).
-#   4. The Sailfin module exports the new `sfn_str_sfn_concat` /
-#      `sfn_str_sfn_append` proof-of-life symbols alongside the
-#      wave-1a infix family.
-#   5. The compiler binary exports the canonical C-side
-#      `sfn_str_concat` / `sfn_str_append` text symbols and the
-#      `sfn_default_arena` global symbol so the link surface is
+#   4. The Sailfin module defines the bare canonical `sfn_str_concat` /
+#      `sfn_str_append` emission targets (real SfnString-ABI bodies as
+#      of #1318; the OwnedBuf-returning `sfn_str_sfn_concat` / `_append`
+#      proof-of-life wrappers were retired).
+#   5. The compiler binary exports the canonical `sfn_str_concat` /
+#      `sfn_str_append` text symbols (now Sailfin-defined in string.o)
+#      and the `sfn_default_arena` global symbol so the link surface is
 #      intact.
 
 set -euo pipefail
@@ -76,7 +77,7 @@ test_fmt_clean() {
     return 0
 }
 
-# ---- Test: emitted IR carries a `define` for every new sfn_str_sfn_* export ----
+# ---- Test: emitted IR carries a `define` for the bare canonical exports ----
 test_emit_define_shape() {
     local ll="$SCRATCH/string.ll"
     local log="$SCRATCH/emit.log"
@@ -86,7 +87,9 @@ test_emit_define_shape() {
         return 1
     fi
     local missing=0
-    for sym in sfn_str_sfn_concat sfn_str_sfn_append; do
+    # #1318: the bare canonical names are the real Sailfin bodies now
+    # (the `sfn_str_sfn_concat` / `_append` OwnedBuf wrappers are retired).
+    for sym in sfn_str_concat sfn_str_append; do
         if ! grep -qE "^define .* @${sym}\(" "$ll"; then
             echo "[test]   missing 'define ... @${sym}(' in string.ll"
             missing=$((missing + 1))
@@ -206,13 +209,9 @@ test_compiler_binary_exports_arena_symbols() {
         echo "[test]   compiler binary does not export defined data symbol sfn_default_arena"
         missing=$((missing + 1))
     fi
-    # And the Sailfin-side proof-of-life infix exports.
-    for sym in sfn_str_sfn_concat sfn_str_sfn_append; do
-        if ! grep -qE "[[:space:]][Tt][[:space:]]_?${sym}\$" <<< "$nm_log"; then
-            echo "[test]   compiler binary does not export defined text symbol ${sym}"
-            missing=$((missing + 1))
-        fi
-    done
+    # #1318 retired the `sfn_str_sfn_concat` / `sfn_str_sfn_append`
+    # OwnedBuf proof-of-life infix exports; the bare canonical symbols
+    # checked above (now Sailfin-defined in string.o) are the surface.
     return "$missing"
 }
 
