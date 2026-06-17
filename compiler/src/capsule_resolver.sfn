@@ -1357,8 +1357,27 @@ fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string, work_dir: string) -> b
         // (`""`), and `trace=false` (this path has no `config`).
         ok = emit_subprocess_with_retry(sailfin_exe, src.slug, src.source_path, asm_path, "native", "", 3, false, false);
     } else {
+        // #1333: publish the in-process `.sfn-asm` atomically, mirroring
+        // the subprocess path (`emit_subprocess_with_retry`, #1011).
+        // `write_native_text_file_with_module` rewrites its `-o` target in
+        // place; under the parallel test pool two processes can cold-stage
+        // the *same* shared import to this fixed `build/native/import-
+        // context/<slug>.sfn-asm` concurrently, tearing each other's write
+        // (`link failed` downstream). Emit to a sibling temp + atomic
+        // rename so a peer reader sees a complete prior/new file — never a
+        // partial. Falls back to in-place when `mktemp` is unavailable.
         let source = fs.readFile(src.source_path);
-        ok = write_native_text_file_with_module(source, src.slug, asm_path);
+        let staged = _mktemp_sibling_cmd(asm_path);
+        let mut emit_target: string = asm_path;
+        if staged.length > 0 { emit_target = staged; }
+        ok = write_native_text_file_with_module(source, src.slug, emit_target);
+        if ok {
+            if staged.length > 0 {
+                if !_atomic_rename_into_place(staged, asm_path) { ok = false; }
+            }
+        } else {
+            if staged.length > 0 { process.run(["rm", "-f", staged]); }
+        }
     }
     if !ok {
         print.err("capsule-resolver: failed to emit native text for " + src.slug);
