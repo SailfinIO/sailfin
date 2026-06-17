@@ -87,7 +87,7 @@ import {
     ProjectCapsuleResult,
     empty_resolver_consumer,
     prepare_project_capsules,
-    prepare_project_capsules_for_check
+    stage_capsule_imports_for_emit
 } from "./capsule_resolver";
 import {
     _env_flag,
@@ -2129,11 +2129,14 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
         // Scoped to `llvm`: that is the lowering stage the #1323 gate runs
         // in; `native` emit is import-context-free by design (#906) and
         // `sailfin` is a transpile, so neither needs staging.
+        // `stage_capsule_imports_for_emit` no-ops unless the entry's
+        // capsule.toml declares `[dependencies]`, so a bare runtime/prelude
+        // emit (the cross-windows path) is untouched (#1370 regression).
         if strings_equal(mode, "llvm") && module_name_override.length == 0
             && import_context_root.length == 0 {
             let emit_stage_exe = _resolve_self_path(binary_dir);
-            let emit_stage = prepare_project_capsules_for_check([path], empty_resolver_consumer(), emit_stage_exe, "");
-            if emit_stage.staging_failed {
+            let emit_staged = stage_capsule_imports_for_emit(path, emit_stage_exe, "");
+            if !emit_staged {
                 print.err("sfn emit: warning: capsule import staging incomplete; imported capsule calls may not resolve");
             }
         }
