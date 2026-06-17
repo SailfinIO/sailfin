@@ -117,7 +117,7 @@ import {
 import { build_type_context_with_recovery } from "./lowering_phase_types";
 import { recover_functions_for_lowering } from "./lowering_recovery";
 import { _parse_lowered_fn_string_constants, split_lines_local } from "./lowering_text_utils";
-import { lower_module_bindings_to_globals } from "./module_globals";
+import { lower_imported_bindings_to_globals, lower_module_bindings_to_globals } from "./module_globals";
 import { emit_type_descriptors } from "./type_descriptors";
 
 // Resolve the mangled call symbol for a lifecycle-hook function (#975).
@@ -661,6 +661,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     let imported_interfaces = imported_syms.interfaces;
     let imported_functions = imported_syms.functions;
     let imported_struct_methods = imported_syms.struct_methods;
+    let imported_bindings = imported_syms.bindings;
 
     if debug_lowering { print.err("emit-llvm: phase=imports"); }
 
@@ -848,6 +849,32 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         module_string_constants = _mg.string_constants;
         if _mg.diagnostics.length > 0 {
             diagnostics = extend_string_lines_checked(diagnostics, _mg.diagnostics, "module globals");
+        }
+    }
+    // #1368: materialise module-level `let` constants that imported capsules
+    // EXPORT as the importer's own value-carrying globals, and register a
+    // local binding for each, so a cross-capsule reference loads the
+    // producer's value instead of falling through to the zero-default
+    // recovery in statement lowering. Must run before `lower_all_functions`
+    // so function bodies see the imported-constant bindings in
+    // `module_global_locals`.
+    if imported_bindings.length > 0 {
+        let mut existing_global_names: string[] = [];
+        let mut _eg: int = 0;
+        loop {
+            if _eg >= module_global_locals.length { break; }
+            existing_global_names.push(module_global_locals[_eg].name);
+            _eg += 1;
+        }
+        let _ib = lower_imported_bindings_to_globals(imported_bindings, type_context, existing_global_names);
+        if _ib.preamble_lines.length > 0 {
+            module_preamble_lines = extend_string_lines(module_preamble_lines, _ib.preamble_lines);
+        }
+        let mut _ibl: int = 0;
+        loop {
+            if _ibl >= _ib.locals.length { break; }
+            module_global_locals.push(_ib.locals[_ibl]);
+            _ibl += 1;
         }
     }
     if trace { print.err("test llvm: module globals lowered"); }

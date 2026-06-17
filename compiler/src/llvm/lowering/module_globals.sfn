@@ -20,6 +20,7 @@ import {
     matches_case_insensitive,
     number_to_string,
     sanitize_symbol,
+    string_array_contains,
     trim_text
 } from "../utils";
 
@@ -29,6 +30,24 @@ fn module_global_symbol(name: string) -> string {
 
 fn module_init_symbol(module_name: string) -> string {
     return "@sailfin_module_init__" + sanitize_symbol(module_name);
+}
+
+// Map a binding's source type annotation to its LLVM type. Extracted from
+// `_process_one_binding` so the module-global lowering has a single
+// annotation→LLVM-type mapping (#1368).
+fn _binding_llvm_type(context: TypeContext, type_annotation: string) -> string {
+    let mut llvm_type: string = "";
+    if type_annotation == "string" { llvm_type = "i8*"; } else if type_annotation == "number" {
+        llvm_type = "double";
+    } else if type_annotation == "float" { llvm_type = "double"; } else if type_annotation == "boolean" {
+        llvm_type = "i1";
+    } else if type_annotation == "bool" { llvm_type = "i1"; } else if type_annotation == "i64" {
+        llvm_type = "i64";
+    } else if type_annotation == "i32" { llvm_type = "i32"; } else if type_annotation.length > 0 {
+        llvm_type = map_local_type(context, type_annotation);
+    }
+    if llvm_type.length == 0 { llvm_type = "double"; }
+    return llvm_type;
 }
 
 // Strip surrounding quotes from a string literal (e.g., `"hello"` -> `hello`).
@@ -80,18 +99,7 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
     }
     if type_annotation.length == 0 { return empty_result; }
     let global_name = module_global_symbol(name);
-    let mut llvm_type: string = "";
-    // Fast-path common primitive types
-    if type_annotation == "string" { llvm_type = "i8*"; } else if type_annotation == "number" {
-        llvm_type = "double";
-    } else if type_annotation == "float" { llvm_type = "double"; } else if type_annotation == "boolean" {
-        llvm_type = "i1";
-    } else if type_annotation == "bool" { llvm_type = "i1"; } else if type_annotation == "i64" {
-        llvm_type = "i64";
-    } else if type_annotation == "i32" { llvm_type = "i32"; } else if type_annotation.length > 0 {
-        llvm_type = map_local_type(context, type_annotation);
-    }
-    if llvm_type.length == 0 { llvm_type = "double"; }
+    let llvm_type = _binding_llvm_type(context, type_annotation);
 
     // `extern var NAME: TYPE;` (#1313): bind a C-ABI global symbol
     // (e.g. libc `environ`). Emit `@NAME = external global <ty>` with the
@@ -274,5 +282,93 @@ fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeCont
         locals: locals,
         string_constants: empty_string_constant_set(),
         diagnostics: []
+    };
+}
+
+// Result of materialising imported module-level `let` constants in the
+// importing module: the global definition preamble lines and the
+// `LocalBinding` entries that make a reference resolve + load (#1368).
+struct ImportedBindingLoweringResult {
+    preamble_lines: string[];
+    locals: LocalBinding[];
+}
+
+// Materialise the module-level `let` constants an imported capsule EXPORTS
+// as the importer's own value-carrying globals (#1368).
+//
+// A module-level `let` constant lowers to an `internal global` — invisible
+// across the link boundary — so a cross-capsule reference used to fall
+// through expression lowering to the zero-default recovery in statement
+// lowering and silently read back `0`. Rather than make the producer's
+// symbol external (which would still require linking the producer's object,
+// and a constant-only producer module is not pulled into the link),
+// constant-propagate the value across the import boundary: the importer
+// already parsed the producer's binding — value and all — so we re-lower it
+// here through `_process_one_binding`, emitting a self-contained
+// `@global.<name> = internal global <ty> <value>` plus a `LocalBinding`. A
+// reference then loads the producer-defined value with no cross-object
+// dependency.
+//
+// Only safe-to-duplicate constants flow through: immutable bindings with a
+// compile-time-constant initializer (`needs_init == false`). Mutable module
+// globals are genuine shared state — duplicating them would diverge per
+// importer — and runtime-initialized bindings would duplicate side effects,
+// so both are skipped (out of scope for #1368, which is constants). Names
+// already present in the importing module's own globals (`existing_names`)
+// and duplicate imported names are materialised once.
+fn lower_imported_bindings_to_globals(bindings: NativeBinding[], context: TypeContext, existing_names: string[]) -> ImportedBindingLoweringResult {
+    let scope_id = format_root_scope_id("module");
+    let mut preamble_lines: string[] = [];
+    let mut locals: LocalBinding[] = [];
+    let mut seen: string[] = [];
+    let mut e: int = 0;
+    loop {
+        if e >= existing_names.length { break; }
+        seen.push(existing_names[e]);
+        e += 1;
+    }
+    if bindings == null {
+        return ImportedBindingLoweringResult {
+            preamble_lines: preamble_lines,
+            locals: locals
+        };
+    }
+    let mut index: int = 0;
+    loop {
+        if index >= bindings.length { break; }
+        let binding = bindings[index];
+        index += 1;
+        if binding == null { continue; }
+        let name = binding.name;
+        if name == null { continue; }
+        if name.length == 0 { continue; }
+        // `extern var` C-ABI globals already declare themselves through the
+        // producer's own emission; only ordinary `let` constants flow here.
+        if binding.is_extern { continue; }
+        // Shared mutable state cannot be constant-propagated — skip it.
+        if binding.mutable { continue; }
+        if string_array_contains(seen, name) { continue; }
+        let result = _process_one_binding(binding, context, scope_id);
+        // A runtime-initialized binding would duplicate its init side effects
+        // (and its init helpers may not be imported) — only inline constants.
+        if result.needs_init { continue; }
+        if result.locals.length == 0 { continue; }
+        seen.push(name);
+        let mut pi: int = 0;
+        loop {
+            if pi >= result.preamble_lines.length { break; }
+            preamble_lines.push(result.preamble_lines[pi]);
+            pi += 1;
+        }
+        let mut li: int = 0;
+        loop {
+            if li >= result.locals.length { break; }
+            locals.push(result.locals[li]);
+            li += 1;
+        }
+    }
+    return ImportedBindingLoweringResult {
+        preamble_lines: preamble_lines,
+        locals: locals
     };
 }
