@@ -86,7 +86,8 @@ import {
     ResolverConsumer,
     ProjectCapsuleResult,
     empty_resolver_consumer,
-    prepare_project_capsules
+    prepare_project_capsules,
+    prepare_project_capsules_for_check
 } from "./capsule_resolver";
 import {
     _env_flag,
@@ -2111,6 +2112,30 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
             print("file not found: " + path);
 
             return 1;
+        }
+        // #1370: a user-facing `emit llvm` (no `--module-name` /
+        // `--import-context`, i.e. NOT a build-internal worker emit —
+        // every resolver/worker emit threads at least one of those flags)
+        // stages the consumer capsule's dependencies into the
+        // import-context tree first, exactly as `check` / `build` / `run`
+        // already do. Without this, a COLD `emit llvm` of a capsule that
+        // imports e.g. sfn/http `serve` finds no staged
+        // `build/native/import-context/sfn/http/*.sfn-asm`, so the imported
+        // `serve` never enters the lowering `functions` list and the #1323
+        // gate (`expression_lowering/native/core.sfn`) hijacks the call to
+        // the builtin `@sfn_serve`. A loose `.sfn` outside any capsule
+        // resolves to zero sources and is a no-op, preserving bare-emit
+        // behavior; the guard keeps the self-host worker emits unchanged.
+        // Scoped to `llvm`: that is the lowering stage the #1323 gate runs
+        // in; `native` emit is import-context-free by design (#906) and
+        // `sailfin` is a transpile, so neither needs staging.
+        if strings_equal(mode, "llvm") && module_name_override.length == 0
+            && import_context_root.length == 0 {
+            let emit_stage_exe = _resolve_self_path(binary_dir);
+            let emit_stage = prepare_project_capsules_for_check([path], empty_resolver_consumer(), emit_stage_exe, "");
+            if emit_stage.staging_failed {
+                print.err("sfn emit: warning: capsule import staging incomplete; imported capsule calls may not resolve");
+            }
         }
         let source = fs.readFile(path);
         let mut module_name = module_name_from_path(path);
