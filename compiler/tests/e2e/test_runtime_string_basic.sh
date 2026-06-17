@@ -83,9 +83,20 @@ test_emit_define_shape() {
         return 1
     fi
     local missing=0
-    for sym in sfn_str_sfn_len sfn_str_sfn_eq sfn_str_sfn_slice sfn_str_sfn_to_cstr sfn_str_sfn_from_cstr; do
+    # Still-façade `_sfn_` infix exports (bare names remain C-owned until
+    # their own migration). `sfn_str_sfn_{len,eq,slice}` retired in #1372 —
+    # those bodies are now bare Sailfin defines (see the BARE list below).
+    for sym in sfn_str_sfn_to_cstr sfn_str_sfn_from_cstr; do
         if ! grep -qE "^define .* @${sym}\(" "$ll"; then
             echo "[test]   missing 'define ... @${sym}(' in string.ll"
+            missing=$((missing + 1))
+        fi
+    done
+    # #1372 (len/eq/slice): now Sailfin-defined at the BARE name (the C defs
+    # are `static`), so the real body emits a bare `define`.
+    for sym in sfn_str_len sfn_str_eq sfn_str_slice; do
+        if ! grep -qE "^define .* @${sym}\(" "$ll"; then
+            echo "[test]   missing 'define ... @${sym}(' in string.ll (expected after #1372)"
             missing=$((missing + 1))
         fi
     done
@@ -104,8 +115,12 @@ test_no_bare_sfn_str_define() {
         echo "[test]   $ll missing — test_emit_define_shape must run first"
         return 1
     fi
+    # #1372: `sfn_str_{len,eq,slice}` retired from this list — they are now
+    # real bare Sailfin bodies (the C defs are `static`), so a bare `define`
+    # is expected, not a collision. Only the still-C `to_cstr` / `from_cstr`
+    # trampolines remain.
     local found=0
-    for sym in sfn_str_len sfn_str_eq sfn_str_slice sfn_str_to_cstr sfn_str_from_cstr; do
+    for sym in sfn_str_to_cstr sfn_str_from_cstr; do
         if grep -qE "^define .* @${sym}\(" "$ll"; then
             echo "[test]   collision risk: string.sfn emits 'define ... @${sym}(', conflicts with C trampoline"
             found=$((found + 1))
@@ -178,7 +193,11 @@ test_compiler_binary_exports_sfn_str() {
         return 1
     fi
     local missing=0
-    for sym in sfn_str_len sfn_str_eq sfn_str_slice sfn_str_to_cstr sfn_str_from_cstr sfn_str_sfn_len sfn_str_sfn_eq sfn_str_sfn_slice sfn_str_sfn_to_cstr sfn_str_sfn_from_cstr; do
+    # Bare `sfn_str_{len,eq,slice}` are now Sailfin-defined (#1372); the C
+    # namesakes are `static`. `sfn_str_{to_cstr,from_cstr}` stay C-owned bare
+    # with Sailfin `sfn_str_sfn_{to_cstr,from_cstr}` infix proof-of-life. The
+    # `sfn_str_sfn_{len,eq,slice}` infix exports retired with the #1372 flip.
+    for sym in sfn_str_len sfn_str_eq sfn_str_slice sfn_str_to_cstr sfn_str_from_cstr sfn_str_sfn_to_cstr sfn_str_sfn_from_cstr; do
         # Require a defined text symbol (` T ` / ` t `). The optional
         # `_` prefix accommodates macOS Mach-O while staying tight
         # against substring collisions. A here-string avoids the
