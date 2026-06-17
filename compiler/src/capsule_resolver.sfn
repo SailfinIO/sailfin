@@ -4473,6 +4473,36 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
     };
 }
 
+// #1370: import-context staging tailored for a user-facing `emit llvm`
+// of a capsule consumer. Stages the consumer's declared capsule
+// dependencies (e.g. `sfn/http`) into the import-context tree so the
+// imported functions (e.g. `serve`) enter the lowering `functions` list
+// — exactly as `check` / `build` / `run` already do — and the #1323
+// builtin-serve gate selects the capsule fn instead of `@sfn_serve`.
+//
+// Gated on `manifest_dep_specs` being non-empty — i.e. the entry's
+// `capsule.toml` declares `[dependencies]`. This deliberately EXCLUDES
+// build-internal bare `emit llvm` calls on runtime modules
+// (`runtime/prelude.sfn`, `runtime/sfn/*` — `make ci-cross-windows`),
+// which have NO consumer manifest. Staging such a module's relative
+// sibling closure into the shared import-context makes the subsequent
+// in-process emit pick up the siblings' runtime-helper signatures and
+// render imported-signature `declare`s that conflict with the
+// descriptor declares (the documented pollution hazard — see
+// `_runtime_sfn_ctx_root` in `cli_main.sfn`), producing invalid IR.
+// Returns true when staging was a no-op (no declared deps) or
+// succeeded; false on a slug collision or staging error.
+fn stage_capsule_imports_for_emit(entry_path: string, sailfin_exe: string, work_dir: string) -> boolean ![io] {
+    let entry_paths: string[] = [entry_path];
+    let resolved = _cr_resolve_and_dedupe(entry_paths, empty_resolver_consumer());
+    if resolved.has_collision { return false; }
+    // No declared capsule dependencies → nothing to stage. A bare
+    // runtime/prelude emit (no consumer manifest) lands here untouched.
+    if resolved.manifest_dep_specs.length == 0 { return true; }
+    if resolved.sources.length == 0 { return true; }
+    return stage_capsule_imports(resolved.sources, sailfin_exe, work_dir);
+}
+
 // Resolver pass tuned for `sfn test`: stages `.sfn-asm` import-context
 // (so the typechecker import-loader can read interface declarations
 // for cross-module conformance) AND compiles each capsule source to

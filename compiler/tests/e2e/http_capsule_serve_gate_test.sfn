@@ -1,0 +1,115 @@
+// End-to-end regression for #1370 — the static "imported serve lowers to
+// the capsule fn, not the builtin" gate (#1323), migrated out of
+// `test_http_capsule_serve.sh` (test-infra Phase 3, epic #842).
+//
+// The four BEHAVIORAL checks in that script (server-loopback: a
+// backgrounded blocking `sfn/http` server driven by a socket client)
+// remain a documented bash hold-out — `sfn/test` cannot express a
+// live-server loopback pre-1.0 (no socket-client surface; per-child cwd
+// and a server-spawn test pattern are still missing). See
+// `scripts/e2e_bash_allowlist.txt`. Only the static emit gate — the part
+// #1370 is about — moves here.
+//
+// #1370: a COLD `emit llvm` of a capsule that imports `serve` from
+// `sfn/http` must lower `serve(handler, port)` to the capsule function
+// `@serve__sfn__http__mod` (which calls `@sfn_serve_framed`), NOT the
+// builtin `@sfn_serve`. The bug was that the top-level `emit` command did
+// no capsule import staging — so the imported `serve` never entered the
+// lowering `functions` list, `find_function_by_name_or_import` returned
+// null, and the #1323 gate
+// (`compiler/src/llvm/expression_lowering/native/core.sfn`) hijacked the
+// call to the builtin. The fix makes a user-facing `emit` stage capsule
+// dependencies first, exactly as `check` / `build` / `run` already do.
+//
+// Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
+// cannot be called from an `![io]` test; assert on the captured `.ll`
+// text with `sfn/strings` predicates instead.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// The consumer capsule must live INSIDE the repo tree so workspace
+// discovery (`workspace.toml`) resolves the `sfn/http` dependency — a
+// system tmp dir would not. Repo-relative; the runner starts from the
+// repo root. This is the sole `sfn/http` consumer in the native e2e pool,
+// so the fixed path does not collide under `--jobs N`.
+fn _app_root() -> string { return "build/http-capsule-gate-e2e"; }
+
+fn _write_consumer() -> string ![io] {
+    let root = _app_root();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/http-gate-e2e-app\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"sfn/http serve gate e2e consumer\"\n"
+        + "\n"
+        + "[dependencies]\n"
+        + "\"sfn/http\" = \"*\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "import { serve, Request, Response, not_found } from \"sfn/http\";\n"
+        + "\n"
+        + "fn handle(req: Request) -> Response {\n"
+        + "    if strings_equal(req.path, \"/secret\") {\n"
+        + "        return Response { status: 403, headers: [\"X-Reason: nope\"], body: \"denied\" };\n"
+        + "    }\n"
+        + "    return not_found();\n"
+        + "}\n"
+        + "\n"
+        + "fn main() -> int ![net, io] {\n"
+        + "    serve(handle as * fn (Request) -> Response, 8080);\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+test "http serve gate: cold emit lowers imported serve to the capsule fn, not @sfn_serve" ![io] {
+    let main_path = _write_consumer();
+
+    // Force COLD: drop any previously-staged `sfn/http` import-context so
+    // this genuinely exercises the #1370 path — a warm tree passes even on
+    // the buggy compiler. The emit below re-stages it (the fix's whole
+    // point), so the tree is left no worse than warm.
+    let _rm0 = process.run(["rm", "-rf", "build/native/import-context/sfn/http"]);
+
+    let ll = _app_root() + "/main.ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", main_path], _child_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert fs.exists(ll);
+
+    let ir = fs.readFile(ll);
+
+    // Cleanup the consumer tree (rmdir is non-recursive; rm -rf the tree).
+    let _rm1 = process.run(["rm", "-rf", _app_root()]);
+
+    // The imported capsule `serve` must win — `@serve__sfn__http__mod`.
+    assert contains(ir, "@serve__sfn__http");
+    // The builtin bespoke lowering must NOT fire for the imported serve.
+    assert ! contains(ir, "call void @sfn_serve(");
+}

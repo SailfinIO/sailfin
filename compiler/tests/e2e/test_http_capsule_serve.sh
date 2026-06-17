@@ -10,15 +10,19 @@
 # $REPO_ROOT/build/ (gitignored) so workspace discovery finds the repo
 # workspace.toml.
 #
-# Two checks:
-#   1. GATE (static, via emit): the imported `serve` must NOT lower to the
-#      builtin `@sfn_serve` — it must call the capsule function
-#      `@serve__sfn__http__mod` (which calls `@sfn_serve_framed`). The bare
-#      builtin `serve` (no import) is covered by test_runtime_serve.sh and
-#      must stay green.
-#   2. BEHAVIORAL (loopback): the handler's typed `Response.status` and
-#      `Response.headers` reach the wire — the whole point of the framed
-#      path (plain `sfn_serve` always frames 200 OK).
+# This script holds the BEHAVIORAL (server-loopback) checks only: the
+# handler's typed `Response.status` and `Response.headers` reach the wire
+# (the whole point of the framed path — plain `sfn_serve` always frames
+# 200 OK), POST bodies are drained, over-cap bodies are rejected, and the
+# typed `fetch` client round-trips status + headers. Each starts a
+# backgrounded blocking server and drives it with a socket client, which
+# `sfn/test` cannot express pre-1.0 — hence the bash hold-out
+# (scripts/e2e_bash_allowlist.txt).
+#
+# The static GATE (the imported `serve` must lower to `@serve__sfn__http__mod`,
+# not the builtin `@sfn_serve`) was migrated to a native `sfn/test`
+# regression: compiler/tests/e2e/http_capsule_serve_gate_test.sfn (#1370).
+# Retiring this remaining bash hold-out is tracked by #1381.
 #
 # Usage:
 #   compiler/tests/e2e/test_http_capsule_serve.sh <compiler-binary>
@@ -101,29 +105,12 @@ fn main() -> int ![net, io] {
 SFN
 }
 
-# ---- Test: imported serve lowers to the capsule fn, not the builtin ----
-test_gate_not_hijacked() {
-    write_app 8080
-    local ll="$SCRATCH/main.ll"
-    local log="$SCRATCH/emit.log"
-    if ! "$BINARY" emit -o "$ll" llvm "$APP/src/main.sfn" > "$log" 2>&1; then
-        echo "[test]   sfn emit llvm failed on the consumer entry:"
-        cat "$log"
-        return 1
-    fi
-    local bad=0
-    # The builtin bespoke lowering must NOT fire for the imported serve.
-    if grep -qE "call void @sfn_serve\(" "$ll"; then
-        echo "[test]   imported serve was hijacked to the builtin @sfn_serve (gate failed)"
-        bad=$((bad + 1))
-    fi
-    # The call must target the imported capsule serve.
-    if ! grep -qE "call void @serve__sfn__http" "$ll"; then
-        echo "[test]   expected a call to the capsule serve (@serve__sfn__http...), not found"
-        bad=$((bad + 1))
-    fi
-    return "$bad"
-}
+# NOTE: the static "imported serve lowers to the capsule fn, not the
+# builtin @sfn_serve" gate (#1323) has been migrated to a native
+# `sfn/test` regression — `compiler/tests/e2e/http_capsule_serve_gate_test.sfn`
+# (#1370, epic #842). Only the server-loopback behavioral checks below
+# remain here: they start a backgrounded blocking server and drive it with
+# a socket client, which `sfn/test` cannot express pre-1.0.
 
 # ---- Behavioral: custom status + header reach the wire via the framed path ----
 test_loopback_status_and_headers() {
@@ -552,7 +539,6 @@ PYEOF
     return "$bad"
 }
 
-run_test "imported serve lowers to the capsule fn, not the builtin @sfn_serve" test_gate_not_hijacked
 run_test "typed serve delivers custom status + headers on the wire" test_loopback_status_and_headers
 run_test "POST Content-Length body is drained and reaches req.body" test_loopback_post_body
 run_test "over-cap Content-Length is rejected with a 500" test_loopback_oversize_rejected
