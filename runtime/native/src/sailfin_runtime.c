@@ -2271,7 +2271,7 @@ static bool sfn_str_eq(const char *a, const char *b)
  *
  * #716 audit: safe by delegation — `sailfin_runtime_substring_unchecked`
  * (line ~2987) guards immediate codepoints before slicing. */
-char *sfn_str_slice(const char *text, double start, double end)
+static char *sfn_str_slice(const char *text, double start, double end)
 {
     /* Route through `_clamp_to_i64` (defined later in this file,
      * forward-declared at the top) so NaN / out-of-range doubles

@@ -84,6 +84,13 @@ extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
 // emission.
 extern fn sailfin_runtime_string_length(s: * u8) -> i64;
 
+// #1372: i64-indexed substring entrypoint for `sfn_str_slice`. NOT the
+// `substring_unchecked` C wrapper — that is a registry target whose
+// `native_signature` is `sfn_str_slice`, so a Sailfin call to it re-lowers
+// to `@sfn_str_slice` (infinite self-recursion). `sailfin_runtime_*` carries
+// no registry row, so it lowers to a plain direct call.
+extern fn sailfin_runtime_substring_unchecked(text: * u8, start: i64, end: i64) -> * u8;
+
 // M2.4b (#398) + #715: the C-side allocating ops. The Sailfin
 // trampolines below preserve the `sfn_str_sfn_*` infix pattern
 // (proof-of-life presence under the Sailfin namespace) while the
@@ -270,10 +277,19 @@ fn sfn_str_eq(a: * u8, b: * u8) -> bool {
 // is `sfn_str_slice` → infinite self-recursion). The `f64 -> i64` clamp is
 // inlined: NaN maps to 0 (`v != v`), in-range doubles truncate toward zero;
 // substring indices are small, so the C `_clamp_to_i64` INT64 saturation arms
-// are unnecessary. A non-owning `Slice` view stays blocked on #1283 (an
-// immediate-codepoint pseudo-pointer has no real `text + start` address).
-// `sfn_str_slice` stays the C emission target in this delegating wave;
-// flips to a Sailfin body once a seed with the f64-param fix is pinned.
+// are unnecessary. This requires the f64-parameter codegen fix
+// (`core_type_mapping.sfn`, this PR) to be present in the building seed —
+// hence the seed bump to 0.7.0-alpha.37. A non-owning `Slice` view stays
+// blocked on #1283 (an immediate-codepoint pseudo-pointer has no real
+// `text + start` address).
+fn sfn_str_slice(text: * u8, start: f64, end: f64) -> * u8 {
+    let mut si: i64 = 0;
+    if start == start { si = start as i64; }
+    let mut ei: i64 = 0;
+    if end == end { ei = end as i64; }
+    return sailfin_runtime_substring_unchecked(text, si, ei);
+}
+
 // `sfn_str_sfn_to_cstr(s)` — NUL-terminated C string view of `s`.
 // Today's strings already carry a trailing NUL (the literal
 // lowering in `core_strings.sfn::lower_string_literal` writes one
