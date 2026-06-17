@@ -1,0 +1,125 @@
+// Faster-linker selection guard (#343, PR #1128).
+//
+// Native replacement for the former `test_linker_selection.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Pins the opportunistic
+// linker selection in `_clang_link_multi_with_opt` (cli_main.sfn): the
+// final clang link calls `_resolve_linker()` (cli_commands_utils.sfn),
+// which probes PATH for a faster linker (mold, then lld), honours the
+// `SAILFIN_LINKER` override, and falls back to the system default.
+//
+// Observable CLI contract pinned here:
+//   - the chosen linker is surfaced on a `[link] linker: …` line,
+//   - that line goes to STDERR, never stdout (so it cannot corrupt a
+//     program's stdout under a downstream pipe — the #915 invariant),
+//   - `SAILFIN_LINKER=ld` forces the system default (no `-fuse-ld`),
+//   - `SAILFIN_LINKER=lld` selects lld via the override path (when lld
+//     is installed; otherwise skipped — the ld leg still covers override
+//     parsing),
+//   - the produced binary actually runs in every case.
+//
+// This is a build-and-run e2e: the child env threads `PATH`/`HOME`/
+// `TMPDIR` (the nested compile runs `clang` + its linker) and
+// `SAILFIN_TEST_SCRATCH` (so the parallel pool does not collide on the
+// fixed `build/sailfin` program.ll cache — #1333). Sources are written
+// under the runner's scratch (out of the repo tree) so `sfn build` does
+// not auto-discover `runtime/native/capsule.toml`. See
+// `.claude/rules/no-bash-e2e.md`.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_root() -> string ![io] {
+    let dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length > 0 { return dir; }
+    return "/tmp";
+}
+
+fn _dir(tag: string) -> string ![io] {
+    return _scratch_root() + "/linker-sel-" + tag;
+}
+
+fn _bin(tag: string) -> string ![io] { return _dir(tag) + "/main.bin"; }
+
+// A trivial program with a known, exact stdout.
+fn _src() -> string {
+    return "fn main() ![io] {\n    print(\"LINKER_OK\");\n}\n";
+}
+
+// Build the probe with the given SAILFIN_LINKER value (empty = auto-
+// detect), capturing stdout/stderr to SEPARATE marker files (so the
+// stdout-purity assertion is meaningful). Returns the build exit code.
+fn _build(tag: string, linker: string) -> int ![io] {
+    let dir = _dir(tag);
+    fs.createDirectory(dir, true);
+    let src = dir + "/main.sfn";
+    fs.writeFile(src, _src());
+    let mut e = _child_env();
+    if linker.length > 0 { e.push("SAILFIN_LINKER=" + linker); }
+    let rc = process.run_capture([_sfn_bin(), "build", "-o", _bin(tag), src], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.writeFile(dir + "/build.out", out);
+    fs.writeFile(dir + "/build.err", err);
+    return rc;
+}
+
+test "linker: auto-detect surfaces [link] on stderr (not stdout) and runs" ![io] {
+    let rc = _build("auto", "");
+    assert rc == 0;
+    let out = fs.readFile(_dir("auto") + "/build.out");
+    let err = fs.readFile(_dir("auto") + "/build.err");
+    // The selection line must be present on stderr...
+    assert find(err, "[link] linker:", 0) >= 0;
+    // ...and must NOT leak onto stdout (the #915 / closure-capture bug).
+    assert find(out, "[link] linker:", 0) < 0;
+    let run_rc = process.run_capture([_bin("auto")], []);
+    let run_out = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    assert run_rc == 0;
+    assert find(run_out, "LINKER_OK", 0) >= 0;
+}
+
+test "linker: SAILFIN_LINKER=ld forces the system default and runs" ![io] {
+    let rc = _build("ld", "ld");
+    assert rc == 0;
+    let err = fs.readFile(_dir("ld") + "/build.err");
+    assert find(err, "[link] linker: system default (SAILFIN_LINKER=ld)", 0) >= 0;
+    let run_rc = process.run_capture([_bin("ld")], []);
+    let run_out = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    assert run_rc == 0;
+    assert find(run_out, "LINKER_OK", 0) >= 0;
+}
+
+test "linker: SAILFIN_LINKER=lld selects lld via override (when installed)" ![io] {
+    let rc = _build("lld", "lld");
+    // When lld is unavailable the override hands clang a linker it cannot
+    // find and the build fails — skip (the override-parsing path is still
+    // covered by the ld leg above). Only assert when the build succeeded.
+    if rc == 0 {
+        let err = fs.readFile(_dir("lld") + "/build.err");
+        assert find(err, "[link] linker: lld (SAILFIN_LINKER override)", 0) >= 0;
+        let run_rc = process.run_capture([_bin("lld")], []);
+        let run_out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        assert run_rc == 0;
+        assert find(run_out, "LINKER_OK", 0) >= 0;
+    }
+}
