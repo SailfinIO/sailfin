@@ -376,6 +376,17 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "intrinsic.fs_symlink.posix", symbol: "symlink", return_type: "i32", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    // `mkdtemp(template) -> bool`: POSIX legs call `mkdtemp(3)` (which
+    // mutates the `XXXXXX` template in place and returns the buffer or
+    // NULL); the Windows leg emits a bare `i1 false` stub. The portable
+    // `$TMPDIR`/template construction stays in the Sailfin body; only the
+    // raw `mkdtemp(3)` call (no MinGW symbol) is per-target.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_fs_mkdtemp", symbol: "sailfin_intrinsic_fs_mkdtemp", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "intrinsic.fs_mkdtemp.posix", symbol: "mkdtemp", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
 
     // Network intrinsics.
     // `http.get` / `http.post` member calls flipped (#912) to the

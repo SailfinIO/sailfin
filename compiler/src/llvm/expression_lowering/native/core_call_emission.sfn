@@ -954,6 +954,56 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
         }
     }
 
+    // `mkdtemp(template) -> bool` sentinel (#1308): POSIX legs call
+    // `mkdtemp(3)` (returns the mutated template buffer or NULL); the
+    // Windows leg is a bare `false` stub so the MinGW-absent symbol never
+    // enters the IR.
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_fs_mkdtemp" {
+            if final_operands.length < 1 {
+                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_mkdtemp requires (template: i8*) operand");
+            } else {
+                let _fs_leg = fs_platform_leg();
+                if _fs_leg == "mingw" {
+                    let _fs_stub = LLVMOperand {
+                        llvm_type: "i1",
+                        value: "false"
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_stub,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                } else {
+                    let _fs_tmpl = final_operands[0].value;
+                    let _fs_rc = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_ok = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _fs_rc
+                        + " = call i8* @mkdtemp(i8* "
+                        + _fs_tmpl
+                        + ")");
+                    result_lines.push("  " + _fs_ok + " = icmp ne i8* " + _fs_rc
+                        + ", null");
+                    let _fs_operand = LLVMOperand {
+                        llvm_type: "i1",
+                        value: _fs_ok
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                }
+            }
+        }
+    }
+
     // Pointer-read intrinsics (#875, epic #763): lower directly to an LLVM
     // `load` of the descriptor's width instead of a `call`. The load element
     // type is driven by `return_type` ("i32"/"i64"), not by parsing the
