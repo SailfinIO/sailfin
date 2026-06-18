@@ -570,6 +570,21 @@ test_asan_no_corruption() {
         echo "[test]   AddressSanitizer runtime unavailable (compiler-rt archives missing) — skipping; static 40-byte gate still passed"
         return 0
     fi
+    # Linking is necessary but not sufficient: the ASAN runtime must also
+    # INITIALIZE on this host. On macOS the malloc-zone interceptor can
+    # abort at startup with `CHECK failed: sanitizer_malloc_mac.inc:NNN
+    # "((!asan_init_is_running)) != (0)"` — a sanitizer-runtime start
+    # failure (malloc called during asan init), NOT a finding about our
+    # code. Run the no-op probe under the harness's exact options; if it
+    # can't even start cleanly, SKIP — the static 40-byte gate still pins
+    # the layout. Only a genuine `ERROR: AddressSanitizer` from the real
+    # harness below may fail the test. See `.claude/rules/compiler-safety.md`.
+    if ! SAILFIN_MEM_LIMIT=unlimited ASAN_OPTIONS=detect_leaks=0 \
+        "$SCRATCH/asan_probe" >"$SCRATCH/asan_probe.run.log" 2>&1; then
+        echo "[test]   AddressSanitizer runtime cannot initialize on this host (sanitizer-start failure, not a finding) — skipping; static 40-byte gate still passed"
+        cat "$SCRATCH/asan_probe.run.log"
+        return 0
+    fi
 
     local harness="$SCRATCH/asan_harness.c"
     cat > "$harness" <<'CHARNESS'

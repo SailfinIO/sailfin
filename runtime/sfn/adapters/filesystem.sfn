@@ -244,19 +244,28 @@ extern fn sailfin_runtime_concat_v2(a: * u8, b: * u8) -> * u8;
 
 extern fn sailfin_runtime_append_string_v2(a: * u8, text: * u8) -> * u8;
 
-// Byte offset of `struct dirent::d_name` on Linux glibc. Canonical
-// home: `runtime/sfn/platform/sizes_linux.sfn::DIRENT_DNAME_OFFSET`
-// (which also documents macOS arm64 = 21 as the follow-up). Inlined
-// here as the literal `19` per the #306 cross-module workaround in the
-// file header — the same reason the libc externs above are inlined and
-// `_fs_is_immediate` is a copy rather than an import (importing a
-// *defined* symbol into an `sfn-source` fails lowering; see
-// `errno.sfn`'s Linkage note). `readdir` returns the address of the
-// `struct dirent`; the entry name is the NUL-terminated C string that
-// begins at that address + this offset — `d_name` is an inline char
-// array, not a pointer, so its bytes are read directly with no
-// `pointer_read` step.
-let DIRENT_DNAME_OFFSET: i64 = 19;
+// Byte offset of `struct dirent::d_name`, per platform. `readdir` returns
+// the address of the `struct dirent`; the entry name is the NUL-terminated
+// C string that begins at that address + this offset — `d_name` is an
+// inline char array, not a pointer, so its bytes are read directly with no
+// `pointer_read` step. Canonical home + long-form layout rationale:
+// `runtime/sfn/platform/sizes_linux.sfn`. Inlined here per the #306
+// cross-module workaround in the file header (importing a *defined* symbol
+// into an `sfn-source` fails lowering; see `errno.sfn`'s Linkage note).
+//
+//   - Linux glibc x86_64 / aarch64: 19 (`d_ino` 8 + `d_off` 8 +
+//     `d_reclen` 2 + `d_type` 1).
+//   - macOS arm64 (BSD): 21 (`d_ino` 8 + `d_seekoff` 8 + `d_reclen` 2 +
+//     `d_namlen` 2 + `d_type` 1).
+//
+// #1409: the #1403 port shipped only the Linux `19` unconditionally, so on
+// macOS the name was read from offset 19 (landing in `d_namlen`/`d_type`)
+// and every entry name came back EMPTY — which, via `_collect_header_files_cmd`,
+// turned into an unbounded depth-32 directory-walk blowup. The offset is now
+// selected at runtime by `_fs_dirent_dname_offset()` below.
+let DIRENT_DNAME_OFFSET_LINUX: i64 = 19;
+
+let DIRENT_DNAME_OFFSET_DARWIN: i64 = 21;
 
 // Immediate-codepoint fallback (the same shape `runtime/sfn/io.sfn`'s
 // print family uses). Pre-M1.A.2 a single grapheme can arrive as a
@@ -627,6 +636,18 @@ fn _fs_sort_str_array(arr: * u8) -> void {
 // empty `path` lists the current directory, and an `opendir` failure
 // returns an empty array (never null) so callers can iterate
 // unconditionally.
+// `_fs_dirent_dname_offset()` — byte offset of `struct dirent::d_name`,
+// selected at runtime per platform (Linux 19 / macOS arm64 21). Linux is
+// detected via the `/proc/self/status` existence probe — the same gate
+// `runtime/sfn/platform/rlimit.sfn` uses (present ⇒ Linux; absent ⇒
+// Darwin). Resolving at runtime keeps a single self-hosting binary correct
+// on both targets without an emit-time `cfg` split (#1409).
+fn _fs_dirent_dname_offset() -> i64 ![io] {
+    let proc_status: string = "/proc/self/status";
+    if sfn_fs_exists(proc_status as * u8) { return DIRENT_DNAME_OFFSET_LINUX; }
+    return DIRENT_DNAME_OFFSET_DARWIN;
+}
+
 fn sfn_fs_list_dir(path: * u8) -> * u8 ![io] {
     // Null/empty path ⇒ current directory (C body's `path_str = "."`).
     let mut target: * u8 = path;
@@ -642,11 +663,12 @@ fn sfn_fs_list_dir(path: * u8) -> * u8 ![io] {
     let dir: * u8 = opendir(target);
     if dir as i64 == 0 { return sailfin_runtime_concat_v2(null, null); }
 
+    let dname_off: i64 = _fs_dirent_dname_offset();
     let mut arr: * u8 = sailfin_runtime_concat_v2(null, null);
     loop {
         let entry: * u8 = readdir(dir);
         if entry as i64 == 0 { break; }
-        let name: * u8 = ((entry as i64) + DIRENT_DNAME_OFFSET) as * u8;
+        let name: * u8 = ((entry as i64) + dname_off) as * u8;
         if _fs_name_is_dot(name) { continue; }
         let copy: * u8 = _fs_dup_cstr(name);
         if copy as i64 == 0 { continue; }

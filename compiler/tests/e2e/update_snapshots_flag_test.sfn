@@ -39,16 +39,12 @@ fn _probe_src() -> string {
 }
 
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
+    // SDK/toolchain vars the nested clang/ld need (a minimal set links on
+    // Linux but fails on macOS with `ld: library 'm' not found`, #1410),
+    // and SAILFIN_TEST_SCRATCH for per-invocation build-cache isolation
+    // (#1333). Mirrors serve_loopback_test.sfn / process_environ_test.sfn.
+    return process.environ();
 }
 
 // Run `sfn test [flag] <positional>` against a freshly-written probe in a
