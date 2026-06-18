@@ -285,7 +285,14 @@ jobs:
   build-compiler-macos:
     name: Build compiler [macos-arm64]
     needs: shard-cover
-    runs-on: macos-15
+    # macos-26: the `macos-latest` label migrated to macOS 26 on
+    # 2026-06-15, so macos-15 runners are now scarce (PR queue stalls
+    # waiting for them). The nightly-selfhost canary has been validating
+    # the triple-pass fixed point on macos-26; adopt it here. The two
+    # macOS-only test blockers it exposed are fixed in this lane: the
+    # per-platform `struct dirent` offset (#1409) and the build-and-run
+    # e2e child-env linking (#1410).
+    runs-on: macos-26
     timeout-minutes: 120
     steps:
       - name: Checkout repository
@@ -680,10 +687,12 @@ jobs:
   build-macos:
     name: Build + Test [macos-arm64 / ${{ matrix.shard }}]
     needs: build-compiler-macos
-    runs-on: macos-15
-    # Pinned to macos-15: the `macos-latest` label migrates to macOS 26
-    # starting 2026-06-15. Keep CI on the known-good image; macOS 26 is
-    # being trialed in nightly-selfhost.yml before we adopt it here.
+    # macos-26: adopted from the nightly-selfhost canary now that the
+    # `macos-latest` migration (2026-06-15) has made macos-15 runners
+    # scarce. The shard suite (int-e2e-caps runs serially; e2e-sh-* run
+    # the bash scripts) is green on macOS 26 with the #1409 dirent-offset
+    # and #1410 child-env-linking fixes landed in this PR.
+    runs-on: macos-26
     timeout-minutes: 120
     strategy:
       fail-fast: false
