@@ -49,10 +49,14 @@ jobs:
             fail-fast: false
             matrix:
                 include:
-                    # Pinned to macos-15: `macos-latest` migrates to macOS 26
-                    # on 2026-06-15. Seed-producing build; keep the toolchain
-                    # stable rather than letting the image shift mid-cycle.
-                    - os: macos-15
+                    # macos-26: adopted after the 2026-06-15 `macos-latest`
+                    # migration left macos-15 runners scarce (release jobs
+                    # stalled waiting for a host). Seed-producing build; the
+                    # nightly-selfhost canary validates the triple-pass fixed
+                    # point on macos-26 and PR CI moved to it in the same
+                    # change (#1409 / #1410). The published binary's minimum
+                    # deployment target follows the macOS 26 SDK default.
+                    - os: macos-26
                       package_label: macos-arm64
                       clang: clang
                       # 3-vCPU / 7GB hosted runner — see the test_jobs
