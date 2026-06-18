@@ -1142,6 +1142,17 @@ fn _collect_header_files_cmd(root: string, max_depth: int) -> string[] ![io] {
             loop {
                 if ei >= entries.length { break; }
                 let entry = entries[ei];
+                // Defense-in-depth (#1409): never recurse on an empty entry
+                // name. `dir + "/" + ""` is `dir + "/"` — listing it re-lists
+                // the SAME directory, so a `listDirectory` that returns
+                // empty names (e.g. a wrong `struct dirent` offset on a
+                // platform) would re-enqueue this directory every level and
+                // blow the BFS up 4^depth to `max_depth`. A real directory
+                // entry always has a non-empty name.
+                if entry.length == 0 {
+                    ei += 1;
+                    continue;
+                }
                 let full_path = dir + "/" + entry;
                 if _ends_with_cmd(entry, ".h") { results.push(full_path); } else {
                     let child_entries = fs.listDirectory(full_path);
