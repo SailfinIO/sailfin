@@ -87,14 +87,6 @@ extern fn strnlen(s: * u8, n: usize) -> usize;
 // through and discards the endptr by passing `null`.
 extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
 
-// Trampolines into the legacy C runtime. M2.4b (the concat/append
-// wave gated on #328 drop emission) replaces these with native
-// arena-backed Sailfin bodies; until then the C bodies do the
-// allocation work and these wrappers exist only to give this
-// module a legal Sailfin call surface for its proof-of-life
-// emission.
-extern fn sailfin_runtime_string_length(s: * u8) -> i64;
-
 // #1372: i64-indexed substring entrypoint for `sfn_str_slice`. NOT the
 // `substring_unchecked` C wrapper — that is a registry target whose
 // `native_signature` is `sfn_str_slice`, so a Sailfin call to it re-lowers
@@ -190,13 +182,32 @@ fn sfn_str_from_codepoint(cp: i64) -> * u8 {
     return data;
 }
 
-// #874: raw single-byte string constructor. Unlike `from_codepoint`
-// (UTF-8 encode), this writes the byte value verbatim — the write
-// counterpart to the already-working byte read (`char_code(s[i])`).
-// Returns a fresh NUL-terminated 1-byte buffer for 1..255; the empty
-// string for 0 (unrepresentable under the NUL-terminated model — see
-// the C body) and out-of-range values.
-extern fn sfn_str_from_byte(byte_value: i64) -> * u8;
+// `sfn_str_from_byte(byte_value)` — #874 / #1308 (C5): native Sailfin raw
+// single-byte string constructor (the C `sfn_str_from_byte` def is now
+// `static`). Unlike `from_codepoint` (UTF-8 encode), this writes the byte
+// value verbatim — the write counterpart to the byte read. Returns a fresh
+// arena-backed NUL-terminated 1-byte buffer for 1..255; the empty string for 0
+// (unrepresentable under the NUL-terminated model) and out-of-range values.
+// Same arena-alloc + `_num_put_byte` discipline as `sfn_str_from_codepoint`.
+fn sfn_str_from_byte(byte_value: i64) -> * u8 {
+    if byte_value < 1 {
+        let empty: string = "";
+        return empty as * u8;
+    }
+    if byte_value > 255 {
+        let empty: string = "";
+        return empty as * u8;
+    }
+    let arena: * u8 = sfn_arena_global();
+    let data: * u8 = sfn_arena_alloc(arena, 8 as usize, 8 as usize);
+    if (data as i64) == 0 {
+        let empty: string = "";
+        return empty as * u8;
+    }
+    _num_put_byte(data as i64, byte_value & 255);
+    _num_put_byte(data as i64 + 1, 0);
+    return data;
+}
 
 // #1217 (Phase R1): the process-global arena `concat` builds into, and
 // the arena-mode probe that gates it. `sfn_arena_global()` ALWAYS
@@ -578,7 +589,8 @@ fn sfn_str_append(dst: * u8, suffix_data: * u8, suffix_len: i64, arena_slot: * u
 // exactly as the legacy walker computed.
 fn sfn_str_grapheme_count(s: * u8) -> f64 {
     let real: * u8 = sfn_str_decode_owned(s);
-    return sailfin_runtime_string_length(real) as f64;
+    let len: i64 = strnlen(real, 16777216) as i64;
+    return len as f64;
 }
 
 // `sfn_str_grapheme_at(s, idx)` — the `idx`-th grapheme of `s`. An
@@ -599,7 +611,7 @@ fn sfn_str_grapheme_at(s: * u8, idx: f64) -> * u8 {
     }
     if iidx < 0 { return sfn_str_from_byte(0); }
     let real: * u8 = sfn_str_decode_owned(s);
-    let len: i64 = sailfin_runtime_string_length(real);
+    let len: i64 = strnlen(real, 16777216) as i64;
     if len <= 0 { return sfn_str_from_byte(0); }
     if iidx >= len { return sfn_str_from_byte(0); }
     return sfn_str_grapheme_byte(real, iidx);
@@ -613,7 +625,7 @@ fn sfn_str_byte_at(s: * u8, idx: i64) -> i64 {
     if (s as i64) == 0 { return -1; }
     if idx < 0 { return -1; }
     let real: * u8 = sfn_str_decode_owned(s);
-    let len: i64 = sailfin_runtime_string_length(real);
+    let len: i64 = strnlen(real, 16777216) as i64;
     if idx >= len { return -1; }
     return sfn_str_read_byte(real, idx);
 }
@@ -625,7 +637,7 @@ fn sfn_str_byte_at(s: * u8, idx: i64) -> i64 {
 fn sfn_str_find_byte(s: * u8, byte_value: i64, start_index: i64) -> i64 {
     if (s as i64) == 0 { return -1; }
     let real: * u8 = sfn_str_decode_owned(s);
-    let len: i64 = sailfin_runtime_string_length(real);
+    let len: i64 = strnlen(real, 16777216) as i64;
     let mut start: i64 = start_index;
     if start < 0 { start = 0; }
     if start >= len { return -1; }
@@ -649,7 +661,7 @@ fn sfn_str_codepoint(s: * u8) -> f64 {
     let imm: i64 = sfn_str_immediate_codepoint(s);
     if imm >= 0 { return imm as f64; }
     let real: * u8 = sfn_str_decode_owned(s);
-    let len: i64 = sailfin_runtime_string_length(real);
+    let len: i64 = strnlen(real, 16777216) as i64;
     if len <= 0 { return -1.0; }
     return sfn_str_read_byte(real, 0) as f64;
 }
