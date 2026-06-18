@@ -1,0 +1,64 @@
+// Regression for #1411: `sfn run` (and bare-file dispatch, which delegates
+// to it) must route its top-level `run.ll`/`run` executable under
+// `SAILFIN_TEST_SCRATCH` when set, exactly as `sfn build` does. Before the
+// fix it always wrote the fixed `build/sailfin/run`, so two concurrent
+// `sfn run`/bare-dispatch children in the parallel `sfn test --jobs N` pool
+// clobbered each other's executable and a test asserting on the run's stdout
+// saw another fixture's output (non-deterministic).
+//
+// The collision itself is a *concurrent* pool property and can't be
+// reproduced from a single serial test. What is deterministic — and what
+// locks the fix — is the routing invariant: with a per-invocation scratch,
+// the executable lands under that scratch, NOT under `build/sailfin`. If a
+// regression reverts the fix, `<scratch>/run` is never written and the
+// fixed `build/sailfin/run` collision path returns.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child env = the full parent environment (PATH/HOME/TMPDIR + macOS
+// toolchain vars the nested clang/linker need), but with
+// `SAILFIN_TEST_SCRATCH` forced to `scratch` so the routing target is
+// known regardless of whether this test runs under the pool. Any inherited
+// `SAILFIN_TEST_SCRATCH` entry is dropped first so the forced value wins.
+fn _child_env(scratch: string) -> string[] ![io] {
+    let base = process.environ();
+    let mut e: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base.length { break; }
+        let entry = base[i];
+        if find(entry, "SAILFIN_TEST_SCRATCH=", 0) != 0 { e.push(entry); }
+        i += 1;
+    }
+    e.push("SAILFIN_TEST_SCRATCH=" + scratch);
+    return e;
+}
+
+test "run: executable is routed under SAILFIN_TEST_SCRATCH, not build/sailfin" ![io] {
+    // A unique scratch dir for this invocation so the assertion is not
+    // polluted by a prior `build/sailfin/run` or another test's scratch.
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let scratch = base + "/sfn-run-iso-1411";
+    fs.createDirectory(scratch, true);
+    let exe = scratch + "/run";
+    if fs.exists(exe) { fs.deleteFile(exe); }
+
+    let exit = process.run_capture([_sfn_bin(), "run", "examples/advanced/lambda-closure.sfn"], _child_env(scratch));
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    // The fixture compiled, linked, and ran correctly...
+    assert exit == 0;
+    assert find(out, "7", 0) >= 0;
+    // ...and its executable landed under the per-invocation scratch, proving
+    // `sfn run` no longer hard-codes `build/sailfin/run` (#1411).
+    assert fs.exists(exe);
+
+    if fs.exists(exe) { fs.deleteFile(exe); }
+}

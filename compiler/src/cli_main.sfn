@@ -2685,11 +2685,21 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
             return 1;
         }
 
-        _ensure_dir("build");
-        _ensure_dir("build/sailfin");
+        // #1411: route the top-level `run.ll`/`run` executable under the
+        // per-invocation scratch when one is set (`SAILFIN_TEST_SCRATCH`),
+        // exactly as `sfn build` does (line ~2322). Bare-file dispatch
+        // delegates here (`["run", cmd]`), so it inherits this too. Without
+        // it, two concurrent `sfn run`/bare-dispatch children in the
+        // parallel `sfn test --jobs N` pool both write the fixed
+        // `build/sailfin/run` and clobber each other's executable — a test
+        // asserting on the run's stdout then sees another fixture's output
+        // (non-deterministic, #1411). Empty scratch resolves to
+        // `build/sailfin`, keeping the default invocation byte-for-byte.
+        let run_cache_dir = _resolve_sailfin_cache_dir_for_work("");
+        _ensure_dir(run_cache_dir);
 
-        let ll_path = "build/sailfin/run.ll";
-        let exe_path = "build/sailfin/run";
+        let ll_path = run_cache_dir + "/run.ll";
+        let exe_path = run_cache_dir + "/run";
 
         // Resolve and compile capsule deps before lowering the main file.
         // The unified resolver covers relative imports, manifest-declared
