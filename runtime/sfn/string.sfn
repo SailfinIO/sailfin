@@ -235,8 +235,11 @@ extern fn sfn_arena_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: u
 
 // #1318: the concat/append limit gate raises ValueError (which aborts the
 // process) when a concatenation would exceed `SAILFIN_MAX_STRING_CONCAT`
-// or overflow — byte-faithful to the C `_sfn_str_check_concat_limit`.
-extern fn sailfin_runtime_raise_value_error(message: * u8) -> void;
+// or overflow. #1308: routed to the native Sailfin `sfn_raise_value_error`
+// (`runtime/sfn/exception.sfn` — write(2) + abort, the canonical emission
+// target for `runtime_raise_value_error_fn`) instead of the legacy C
+// `sailfin_runtime_raise_value_error`, resolved as a cross-module extern.
+extern fn sfn_raise_value_error(message: * u8) -> void;
 
 // #1372: UTF-8 byte length of a validated codepoint — mirrors the
 // branch widths of the C `_utf8_encode`. Used to size an immediate-
@@ -463,7 +466,7 @@ fn _sfn_check_concat_limit(alen: i64, blen: i64) -> void {
     if limit > 0 {
         if (alen + blen) > limit {
             let msg: string = "string concat limit exceeded";
-            sailfin_runtime_raise_value_error(msg as * u8);
+            sfn_raise_value_error(msg as * u8);
         }
     }
 }
