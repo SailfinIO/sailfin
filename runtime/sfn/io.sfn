@@ -81,21 +81,13 @@
 // pre-stages; reaching for any other libc surface through an `import`
 // fails the isolated per-module emit with "cannot resolve return type
 // for call to …". So `write` is declared locally here, mirroring the
-// `arena.sfn` / `string.sfn` / `process.sfn` discipline. The
-// `sailfin_runtime_*` C entrypoints are likewise C trampolines (not
-// platform libc), retired by #1308 C7 / #822; inlining is their only
-// declaration site.
+// `arena.sfn` / `string.sfn` / `process.sfn` discipline.
 extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
 
-extern fn sailfin_runtime_print_raw(msg: * u8) -> void;
-
-extern fn sailfin_runtime_print_err(msg: * u8) -> void;
-
-extern fn sailfin_runtime_print_info(msg: * u8) -> void;
-
-extern fn sailfin_runtime_print_warn(msg: * u8) -> void;
-
-extern fn sailfin_runtime_print_error(msg: * u8) -> void;
+// libc `strlen` — recovers the byte length of a NUL-terminated cstring for
+// the `sfn_print_sfn` prelude entry (which carries no length parameter).
+// Inlined per the same #306 cross-module-extern workaround as `write`.
+extern fn strlen(s: * u8) -> usize;
 
 // libc `getenv` — the env-read primitive the native `sfn_getenv` /
 // `sfn_home_dir` bodies below call. Inlined (not imported) for the same
@@ -174,64 +166,97 @@ fn _sfn_print_line(fd: i32, prefix: * u8, prefix_len: i64, data: * u8, len: i64)
     _sfn_write_all(fd, nl as * u8, 1);
 }
 
-// `sfn_print(data, len)` — raw stdout line. Mirrors the retired C
-// `sailfin_runtime_print_raw`: the message bytes followed by `'\n'`.
+// `_sfn_io_utf8_len(cp)` — UTF-8 byte width of a validated codepoint,
+// mirroring `string.sfn`'s `_sfn_utf8_byte_len`. Sizes the buffer
+// `sfn_str_from_codepoint` returns for a decoded immediate-codepoint grapheme
+// without a NUL scan. Decimal literals (the seed lexer has no `0x`).
+fn _sfn_io_utf8_len(cp: i64) -> i64 {
+    if cp < 128 { return 1; }
+    if cp < 2048 { return 2; }
+    if cp < 65536 { return 3; }
+    return 4;
+}
+
+// `_sfn_print_immediate(fd, prefix, prefix_len, data)` — decode a legacy
+// immediate-codepoint tagged pseudo-pointer (pre-M1.A.2) into a real UTF-8
+// buffer via the now-native `sfn_str_from_codepoint`, then emit it through
+// `_sfn_print_line`. Replaces the retired C `sailfin_runtime_print_*`
+// immediate path. A null pointer (codepoint 0) is a no-op, byte-faithful to
+// the C printers' NULL guard. Retires with the immediate encoding (#822).
+fn _sfn_print_immediate(fd: i32, prefix: * u8, prefix_len: i64, data: * u8) -> void ![io] {
+    let raw: i64 = data as i64;
+    if raw == 0 { return; }
+    let mut cp: i64 = raw;
+    if raw > 127 { cp = raw >> 32; }
+    let decoded: * u8 = sfn_str_from_codepoint(cp);
+    _sfn_print_line(fd, prefix, prefix_len, decoded, _sfn_io_utf8_len(cp));
+}
+
+// `sfn_print(data, len)` — raw stdout line: the message bytes followed by
+// `'\n'`. The immediate-codepoint guard now decodes in pure Sailfin
+// (`_sfn_print_immediate`) instead of delegating to the retired C
+// `sailfin_runtime_print_raw`.
 fn sfn_print(data: * u8, len: i64) -> void ![io] {
+    let empty: string = "";
     if _sfn_is_immediate(data) {
-        sailfin_runtime_print_raw(data);
+        _sfn_print_immediate(STDOUT_FD, empty as * u8, 0, data);
         return;
     }
-    let empty: string = "";
     _sfn_print_line(STDOUT_FD, empty as * u8, 0, data, len);
 }
 
 // `sfn_print_err(data, len)` — raw stderr line.
 fn sfn_print_err(data: * u8, len: i64) -> void ![io] {
+    let empty: string = "";
     if _sfn_is_immediate(data) {
-        sailfin_runtime_print_err(data);
+        _sfn_print_immediate(STDERR_FD, empty as * u8, 0, data);
         return;
     }
-    let empty: string = "";
     _sfn_print_line(STDERR_FD, empty as * u8, 0, data, len);
 }
 
 // `sfn_print_info(data, len)` — `[info] `-prefixed stdout line.
 fn sfn_print_info(data: * u8, len: i64) -> void ![io] {
+    let prefix: string = "[info] ";
     if _sfn_is_immediate(data) {
-        sailfin_runtime_print_info(data);
+        _sfn_print_immediate(STDOUT_FD, prefix as * u8, 7, data);
         return;
     }
-    let prefix: string = "[info] ";
     _sfn_print_line(STDOUT_FD, prefix as * u8, 7, data, len);
 }
 
 // `sfn_print_warn(data, len)` — `[warn] `-prefixed stderr line.
 fn sfn_print_warn(data: * u8, len: i64) -> void ![io] {
+    let prefix: string = "[warn] ";
     if _sfn_is_immediate(data) {
-        sailfin_runtime_print_warn(data);
+        _sfn_print_immediate(STDERR_FD, prefix as * u8, 7, data);
         return;
     }
-    let prefix: string = "[warn] ";
     _sfn_print_line(STDERR_FD, prefix as * u8, 7, data, len);
 }
 
 // `sfn_print_error(data, len)` — `[error] `-prefixed stderr line.
 fn sfn_print_error(data: * u8, len: i64) -> void ![io] {
+    let prefix: string = "[error] ";
     if _sfn_is_immediate(data) {
-        sailfin_runtime_print_error(data);
+        _sfn_print_immediate(STDERR_FD, prefix as * u8, 8, data);
         return;
     }
-    let prefix: string = "[error] ";
     _sfn_print_line(STDERR_FD, prefix as * u8, 8, data, len);
 }
 
 // `sfn_print_sfn(msg)` — NUL-terminated-cstring entry kept for the
-// `runtime/prelude.sfn` import. Stays on the immediate-decoding C
-// `sailfin_runtime_print_raw` path: `msg` is a legacy `* u8` that may
-// be an immediate-codepoint tagged pointer (pre-M1.A.2), which the
-// native length-aware printer cannot decode. Retires with the encoding
-// (#822 / #1136).
-fn sfn_print_sfn(msg: * u8) -> void ![io] { sailfin_runtime_print_raw(msg); }
+// `runtime/prelude.sfn` import. Now fully native: an immediate-codepoint
+// tagged pointer decodes through `_sfn_print_immediate`; a real cstring is
+// sized with libc `strlen` and printed via `_sfn_print_line`. No C call.
+fn sfn_print_sfn(msg: * u8) -> void ![io] {
+    let empty: string = "";
+    if _sfn_is_immediate(msg) {
+        _sfn_print_immediate(STDOUT_FD, empty as * u8, 0, msg);
+        return;
+    }
+    _sfn_print_line(STDOUT_FD, empty as * u8, 0, msg, strlen(msg) as i64);
+}
 
 // `_sfn_decode_immediate_name(data)` — decode a legacy immediate-codepoint
 // tagged pseudo-pointer (pre-M1.A.2) into a real NUL-terminated buffer.
@@ -324,14 +349,19 @@ fn sfn_home_dir(arena: * u8) -> SfnString ![io] {
 // `emission.sfn:470`; aliased through `runtime_log_execution_fn` in
 // `runtime/prelude.sfn`). Semantics preserved: print the value through
 // the `[info] `-prefixed stdout line when non-NULL, then return it
-// unchanged. Stays on the immediate-decoding C `sailfin_runtime_print_info`
-// path: `value` is a legacy `* u8` that may be an immediate-codepoint
-// tagged pointer (e.g. a `char_at` / `grapheme_at` result), which the
-// native length-aware printer cannot decode (and `strlen` on a tagged
-// pointer would fault). Carries `![io]` for the print. Descriptor ABI
-// is `(i8*) -> i8*`. The NULL guard uses the `as i64 == 0` idiom (no
-// null comparison on raw `* u8` until `Result<T, E>` lands).
+// unchanged. Now fully native: an immediate-codepoint tagged pointer
+// (e.g. a `char_at` / `grapheme_at` result) decodes through
+// `_sfn_print_immediate`; a real cstring is sized with libc `strlen` and
+// printed via `_sfn_print_line`. No C call. Carries `![io]` for the print.
+// Descriptor ABI is `(i8*) -> i8*`. The NULL guard uses the `as i64 == 0`
+// idiom (no null comparison on raw `* u8` until `Result<T, E>` lands).
 fn sfn_log_execution(value: * u8) -> * u8 ![io] {
-    if value as i64 != 0 { sailfin_runtime_print_info(value); }
+    if value as i64 == 0 { return value; }
+    let prefix: string = "[info] ";
+    if _sfn_is_immediate(value) {
+        _sfn_print_immediate(STDOUT_FD, prefix as * u8, 7, value);
+    } else {
+        _sfn_print_line(STDOUT_FD, prefix as * u8, 7, value, strlen(value) as i64);
+    }
     return value;
 }

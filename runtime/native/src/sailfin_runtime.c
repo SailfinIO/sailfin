@@ -2524,7 +2524,11 @@ static double sfn_str_codepoint(const char *s)
  * UTF-16 surrogate range (U+D800..U+DFFF) is rejected with empty too
  * — those are reserved for UTF-16 encoding and never appear in valid
  * UTF-8. */
-char *sfn_str_from_codepoint(int64_t cp)
+/* #1308 (C5): the canonical `sfn_str_from_codepoint` emission/link target is
+ * now the real Sailfin body in `runtime/sfn/string.sfn`; this C copy is
+ * `static` so it no longer exports the symbol (kept until #822 deletes the
+ * file). No internal C caller references it. */
+static char *sfn_str_from_codepoint(int64_t cp)
 {
     _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
     unsigned char buf[5];
@@ -2593,7 +2597,11 @@ char *sfn_str_from_codepoint(int64_t cp)
  * because the Sailfin frontend can't thread an arena/aggregate yet (M1.A.2).
  * When that flip lands, the body moves into `runtime/sfn/string.sfn` alongside
  * `sfn_str_sfn_from_byte`, in lockstep with `from_codepoint`. */
-char *sfn_str_from_byte(int64_t n)
+/* #1308 (C5): the canonical `sfn_str_from_byte` link target is now the real
+ * Sailfin body in `runtime/sfn/string.sfn`; this C copy is `static` so it no
+ * longer exports the symbol (retires with the file in #822). No internal C
+ * caller references it. */
+static char *sfn_str_from_byte(int64_t n)
 {
     _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
     size_t len = (n >= 1 && n <= 255) ? 1 : 0;
