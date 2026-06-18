@@ -110,44 +110,12 @@ void sfn_arena_destroy(SfnArena *arena)
 
 /* sfn_arena_alloc: now defined in runtime/sfn/memory/arena.sfn (#1309). */
 
-void *sfn_arena_realloc(SfnArena *arena, void *ptr, size_t old_size,
-                        size_t new_size, size_t align)
-{
-    if (!arena)
-        return NULL;
-    if (!ptr)
-        return sfn_arena_alloc(arena, new_size, align);
-    if (new_size <= old_size)
-        return ptr;
-
-    SfnArenaPage *page = arena->current;
-
-    /*
-     * Grow-if-at-tip: if `ptr` is the last allocation on the current page,
-     * and the page has room, just extend in place.
-     */
-    uint8_t *ptr_u8 = (uint8_t *)ptr;
-    uint8_t *tip = page->data + page->used;
-
-    if (ptr_u8 + old_size == tip)
-    {
-        size_t extra = new_size - old_size;
-        if (page->used + extra <= page->capacity)
-        {
-            page->used += extra;
-            arena->total_allocated += extra;
-            return ptr;
-        }
-    }
-
-    /* Not at tip or no room — allocate fresh and copy. */
-    void *new_ptr = sfn_arena_alloc(arena, new_size, align);
-    if (!new_ptr)
-        return NULL;
-    memcpy(new_ptr, ptr, old_size);
-    /* Old memory is "leaked" in the arena — reclaimed at reset/destroy. */
-    return new_ptr;
-}
+/*
+ * sfn_arena_realloc: now defined in runtime/sfn/memory/arena.sfn (the bare
+ * export forwards to `sfn_arena_sfn_realloc`); the prototype in
+ * sailfin_arena.h stays so the C-internal callers in sailfin_runtime.c bind
+ * to the Sailfin definition. sailfin_arena.c no longer defines it (#1308).
+ */
 
 /* ------------------------------------------------------------------ */
 /* Global arena + arena-mode probe                                     */
