@@ -2524,7 +2524,11 @@ static double sfn_str_codepoint(const char *s)
  * UTF-16 surrogate range (U+D800..U+DFFF) is rejected with empty too
  * — those are reserved for UTF-16 encoding and never appear in valid
  * UTF-8. */
-char *sfn_str_from_codepoint(int64_t cp)
+/* #1308 (C5): the canonical `sfn_str_from_codepoint` emission/link target is
+ * now the real Sailfin body in `runtime/sfn/string.sfn`; this C copy is
+ * `static` so it no longer exports the symbol (kept until #822 deletes the
+ * file). No internal C caller references it. */
+static char *sfn_str_from_codepoint(int64_t cp)
 {
     _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
     unsigned char buf[5];

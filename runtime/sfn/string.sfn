@@ -146,7 +146,49 @@ extern fn sfn_str_read_byte(s: * u8, idx: i64) -> i64;
 
 extern fn sfn_str_grapheme_byte(real: * u8, idx: i64) -> * u8;
 
-extern fn sfn_str_from_codepoint(cp: i64) -> * u8;
+// `sfn_str_from_codepoint(cp)` — #1308 (C5): real Sailfin UTF-8 encode of a
+// single codepoint into a fresh arena-backed NUL-terminated buffer (the C
+// `sfn_str_from_codepoint` def is now `static`). Validation mirrors the C
+// body: reject negative, `> 0x10FFFF` (1114111), and the surrogate range
+// `0xD800..0xDFFF` (55296..57343), returning the empty string for an invalid
+// codepoint. Reuses the `_sfn_utf8_byte_len` / `_sfn_utf8_byte` width+byte
+// helpers (#1372) and the concat arena-alloc + `_num_put_byte` byte-write
+// discipline (#1318): a `roundup8(n + 1)` allocation at 8-byte alignment keeps
+// the word read-modify-write in-bounds. No `_runtime_enter` (the concat-reuse
+// window is vestigial) and no owned-string tracking (the arena reclaims).
+// Decimal literals (the seed lexer has no `0x`).
+fn sfn_str_from_codepoint(cp: i64) -> * u8 {
+    if cp < 0 {
+        let empty: string = "";
+        return empty as * u8;
+    }
+    if cp > 1114111 {
+        let empty: string = "";
+        return empty as * u8;
+    }
+    if cp >= 55296 && cp <= 57343 {
+        let empty: string = "";
+        return empty as * u8;
+    }
+
+    let n: i64 = _sfn_utf8_byte_len(cp);
+    let arena: * u8 = sfn_arena_global();
+    let cap: i64 = ((n + 1 + 7) / 8) * 8;
+    let data: * u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
+    if (data as i64) == 0 {
+        let empty: string = "";
+        return empty as * u8;
+    }
+
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        _num_put_byte(data as i64 + i, _sfn_utf8_byte(cp, n, i));
+        i = i + 1;
+    }
+    _num_put_byte(data as i64 + n, 0);
+    return data;
+}
 
 // #874: raw single-byte string constructor. Unlike `from_codepoint`
 // (UTF-8 encode), this writes the byte value verbatim — the write
