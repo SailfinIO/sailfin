@@ -195,26 +195,52 @@ jobs:
       # `build/native/raw/*.ll` and the build work dir's shim — both
       # fresh from the `make rebuild` above. Keeping them out of the
       # shard artifact keeps it bounded (#1234 risk note).
+      - name: Cache MinGW-w64 apt packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/mingw-debs
+          key: apt-mingw-w64-x86-64-${{ runner.os }}-v1
+
       - name: Install MinGW-w64 cross-compiler (Linux)
         run: |
           set -euo pipefail
-          # The Ubuntu universe mirror can stall on the mingw-w64 fetch
-          # (observed hanging indefinitely during a mirror incident).
-          # Bound each apt call with `timeout` and retry with backoff so
-          # a transient stall fails fast and self-recovers instead of
-          # burning the whole job's wall clock.
-          for attempt in 1 2 3; do
-            echo "[mingw] install attempt ${attempt}/3"
-            if sudo timeout 300 apt-get update \
-              && sudo timeout 300 apt-get install -y --no-install-recommends mingw-w64; then
-              echo "[mingw] installed"
-              exit 0
-            fi
-            echo "[mingw] attempt ${attempt} failed or timed out; backing off"
-            sleep $((attempt * 15))
-          done
-          echo "[mingw] failed to install mingw-w64 after 3 attempts" >&2
-          exit 1
+          # `make ci-cross-windows` only uses the x86-64 C cross toolchain
+          # (`clang -target x86_64-w64-mingw32` + `x86_64-w64-mingw32-gcc`).
+          # The `mingw-w64` metapackage drags in ~277 MB across 25 packages —
+          # i686, g++, and both win32/posix runtimes — none of which this
+          # build touches. The i686 `.deb`s were exactly what stalled the
+          # Ubuntu/Azure mirror fetch (#1402). Install just
+          # `gcc-mingw-w64-x86-64` (pulls binutils + the x86-64 sysroot) and
+          # cache the resolved `.deb`s so a cache hit skips the mirror
+          # entirely; on a miss, download is bounded + retried so a transient
+          # mirror stall fails fast and self-recovers.
+          DEB_DIR="$HOME/.cache/mingw-debs"
+          mkdir -p "$DEB_DIR"
+          if ! ls "$DEB_DIR"/*.deb >/dev/null 2>&1; then
+            for attempt in 1 2 3; do
+              echo "[mingw] download attempt ${attempt}/3"
+              if sudo timeout 300 apt-get update \
+                && sudo timeout 300 apt-get install -y --no-install-recommends \
+                     -o Acquire::Retries=3 \
+                     -o Dir::Cache::archives="$DEB_DIR" \
+                     --download-only gcc-mingw-w64-x86-64; then
+                break
+              fi
+              if [ "${attempt}" = 3 ]; then
+                echo "[mingw] download failed after 3 attempts" >&2
+                exit 1
+              fi
+              echo "[mingw] attempt ${attempt} failed or timed out; backing off"
+              sleep $((attempt * 15))
+            done
+            sudo rm -rf "$DEB_DIR/partial"
+            sudo chown -R "$(id -u):$(id -g)" "$DEB_DIR"
+          else
+            echo "[mingw] cache hit: $(ls "$DEB_DIR"/*.deb | wc -l) package(s)"
+          fi
+          sudo dpkg -i "$DEB_DIR"/*.deb \
+            || sudo apt-get install -y --no-install-recommends -f
+          x86_64-w64-mingw32-gcc --version | head -1
 
       - name: Cross-compile for Windows (Linux)
         shell: bash {0}
