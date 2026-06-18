@@ -358,6 +358,25 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "intrinsic.exe_path.darwin.strlen", symbol: "strlen", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
+    // Filesystem sentinels (#1308): retire the last platform-divergent C fs
+    // symbols (`sailfin_adapter_fs_*` / `sailfin_intrinsic_fs_exists`) by
+    // lowering each to a per-target emission sequence (modeled on
+    // `exe_path` above), choosing the host leg via `fs_platform_leg` at emit
+    // time. Only the host leg's symbol ever appears in the IR, so the
+    // Windows cross-build never references a POSIX-only `symlink`/`mkdtemp`
+    // it has no symbol for. The declare loop in `rendering.sfn` skips the
+    // sentinel targets; the concrete leg symbol's `declare` comes from its
+    // dotted concrete row when the post-lowering scan sees the emitted call.
+    //
+    // `symlink(target, link) -> bool`: POSIX legs call `symlink`; the Windows
+    // leg emits a bare `i1 false` stub (no symbol in IR).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_fs_symlink", symbol: "sailfin_intrinsic_fs_symlink", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "intrinsic.fs_symlink.posix", symbol: "symlink", return_type: "i32", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+
     // Network intrinsics.
     // `http.get` / `http.post` member calls flipped (#912) to the
     // Sailfin-native socket client in `runtime/sfn/adapters/http.sfn`:
