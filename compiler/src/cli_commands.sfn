@@ -949,51 +949,65 @@ fn _pool_child_argv(timeout_cmd: string, timeout_secs: string, self_exe: string,
     return _append_test_filter_args(base, name_filter, tag_filter);
 }
 
-// #1236: invocation-stable environment snapshot for pooled children.
-// `process.spawn_with_env` treats its env argument as the child's
-// ENTIRE environment ("empty means empty, never inherit" —
-// `runtime/sfn/process.sfn`), so the pool must reconstruct what the
-// serial path's `process.run` children inherit implicitly. No
-// environ-iteration primitive exists yet (`sfn/os::env_from_current`
-// is a stub for the same reason), so this snapshots the variables
-// the child toolchain actually consults: process basics (PATH for
-// the child's own clang/sh lookups; TMPDIR/HOME for scratch and
-// cache roots) plus every SAILFIN_*/SFN_* knob read by
-// `compiler/src/` and `runtime/`. A variable that resolves to the
-// empty string is omitted rather than passed as empty — `_get_env_cmd`
-// (shell expansion) cannot distinguish unset from set-but-empty, so
-// both shapes are dropped; nothing in the passthrough list treats
-// `VAR=` differently from unset. Resolved ONCE per `sfn test`
-// invocation (each `_get_env_cmd` read is a popen) and reused for
-// every spawn; only the per-child variables vary (see
+// #1236 / #1410: invocation-stable environment snapshot for pooled
+// children. `process.spawn_with_env` treats its env argument as the
+// child's ENTIRE environment ("empty means empty, never inherit" —
+// `runtime/sfn/process.sfn`), so the pool must reproduce what the
+// serial path's `process.run` children inherit implicitly. The
+// historical version hand-curated a passthrough name list and read
+// each via `_get_env_cmd` (one popen per name) because no
+// environ-iteration primitive existed yet. `process.environ()`
+// (`sfn_process_environ`, #1313) now returns the parent's full
+// environment as a `string[]` of `KEY=VALUE` entries — byte-for-byte
+// the env the serial `process.run` path inherits — so the pool snapshots
+// that directly. This both fixes the #1410 macOS link failure (the
+// curated list omitted the SDK/toolchain vars — `SDKROOT`,
+// `DEVELOPER_DIR`, `MACOSX_DEPLOYMENT_TARGET`, … — that the child's
+// `clang`/`ld` need, so pooled builds failed with `ld: library 'm' not
+// found` while the serial path linked fine) and drops ~40 popen calls
+// per `sfn test` invocation. Resolved ONCE per invocation and reused
+// for every spawn; only the per-child variables vary (see
 // `_pool_child_env`).
-fn _pool_env_snapshot() -> string[] ![io] {
-    let passthrough = ["PATH", "HOME", "PWD", "TMPDIR", "USER", "LOGNAME", "LANG", "LC_ALL", "USERPROFILE", "SAILFIN_TEST_TIMEOUT", "SAILFIN_TEST_RETRY", "SAILFIN_TEST_KEEP_SCRATCH", "SAILFIN_TRACE_TEST_RUNNER", "SAILFIN_DUMP_TEST_SOURCES", "SAILFIN_TRACE_EMIT", "SAILFIN_TRACE_LOWERING", "SAILFIN_TRACE_CALL_LOWERING", "SAILFIN_TRACE_ARGV", "SAILFIN_TRACE_CRASH", "SAILFIN_TRACE_FS_WRITE_FILE", "SAILFIN_TRACE_GRAPHEME_AT", "SAILFIN_TRACE_NUMBER_TO_STRING", "SAILFIN_TRACE_STRING_CONCAT", "SAILFIN_TRACE_STRING_LENGTH", "SAILFIN_SKIP_TYPECHECK", "SAILFIN_SKIP_MODULE_GLOBALS", "SAILFIN_TARGET_OS", "SAILFIN_BUILD_CACHE_DIR", "SAILFIN_LINKER", "SAILFIN_NO_CACHE", "SAILFIN_NO_LEGACY_PROBE", "SAILFIN_CACHE_TRACE", "SAILFIN_DISABLE_RUNTIME_SFN_SOURCES", "SAILFIN_USE_ARENA", "SAILFIN_ABI_FORCE_MISMATCH", "SAILFIN_DEBUG_DUMP_BUDGET", "SAILFIN_DUMP_ARENA_STATS", "SFN_TOKEN", "SFN_REGISTRY"];
-    let mut env_flat: string[] = [];
-    let mut i: int = 0;
-    loop {
-        if i >= passthrough.length { break; }
-        let name = passthrough[i];
-        let value = _get_env_cmd(name);
-        if value.length > 0 { env_flat.push(name + "=" + value); }
-        i += 1;
-    }
-    return env_flat;
+fn _pool_env_snapshot() -> string[] ![io] { return process.environ(); }
+
+// True when `entry` ("KEY=VALUE" or "KEY") has key exactly `key` — used
+// to drop the per-child-managed keys from the inherited snapshot before
+// `_pool_child_env` re-appends their canonical per-child values, so the
+// child never sees a duplicate `KEY=` pair (POSIX `getenv` returns the
+// first match, which would otherwise be the inherited — wrong — value).
+fn _env_entry_has_key(entry: string, key: string) -> boolean {
+    let klen: int = key.length;
+    if entry.length < klen { return false; }
+    if !strings_equal(substring(entry, 0, klen), key) { return false; }
+    // Exact key match: either the whole entry (no '=') or "KEY=...".
+    if entry.length == klen { return true; }
+    return strings_equal(substring(entry, klen, klen + 1), "=");
 }
 
-// #1236: per-child environment = the invocation-stable snapshot plus
-// the per-child test-runner variables (`SAILFIN_TEST_SCRATCH`,
+// #1236 / #1410: per-child environment = the invocation-stable snapshot
+// (now the parent's full `process.environ()`) plus the per-child
+// test-runner variables (`SAILFIN_TEST_SCRATCH`,
 // `SAILFIN_TEST_RUNTIME_OBJDIR`, and the conditional
 // `SAILFIN_UPDATE_SNAPSHOTS` / `SAILFIN_TEST_JSON_SUBFRAME` flags),
 // exactly mirroring the serial path's `env` argv prefix. The base
 // snapshot is copied entry-by-entry into a fresh array so per-child
 // pushes can never accumulate into the shared snapshot across spawns.
+// Any inherited copy of a per-child-managed key is dropped first: the
+// snapshot is now the full parent env, which may already carry e.g.
+// `SAILFIN_TEST_SCRATCH` (nested runner) or `SAILFIN_UPDATE_SNAPSHOTS`,
+// and POSIX `getenv` returns the FIRST match — so the inherited value
+// would shadow the per-child one without this filter.
 fn _pool_child_env(base_env: string[], child_scratch: string, runtime_objdir: string, update_snapshots: boolean, json_output: boolean) -> string[] {
     let mut env_flat: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= base_env.length { break; }
-        env_flat.push(base_env[i]);
+        let entry = base_env[i];
+        if !_env_entry_has_key(entry, "SAILFIN_TEST_SCRATCH") && !_env_entry_has_key(entry, "SAILFIN_TEST_RUNTIME_OBJDIR")
+            && !_env_entry_has_key(entry, "SAILFIN_UPDATE_SNAPSHOTS")
+            && !_env_entry_has_key(entry, "SAILFIN_TEST_JSON_SUBFRAME") {
+            env_flat.push(entry);
+        }
         i += 1;
     }
     env_flat.push("SAILFIN_TEST_SCRATCH=" + child_scratch);
@@ -1142,6 +1156,17 @@ fn _collect_header_files_cmd(root: string, max_depth: int) -> string[] ![io] {
             loop {
                 if ei >= entries.length { break; }
                 let entry = entries[ei];
+                // Defense-in-depth (#1409): never recurse on an empty entry
+                // name. `dir + "/" + ""` is `dir + "/"` — listing it re-lists
+                // the SAME directory, so a `listDirectory` that returns
+                // empty names (e.g. a wrong `struct dirent` offset on a
+                // platform) would re-enqueue this directory every level and
+                // blow the BFS up 4^depth to `max_depth`. A real directory
+                // entry always has a non-empty name.
+                if entry.length == 0 {
+                    ei += 1;
+                    continue;
+                }
                 let full_path = dir + "/" + entry;
                 if _ends_with_cmd(entry, ".h") { results.push(full_path); } else {
                     let child_entries = fs.listDirectory(full_path);

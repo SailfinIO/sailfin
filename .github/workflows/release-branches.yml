@@ -1,6 +1,18 @@
 name: CI (branch push)
 
-# Runs the build + test matrix on pushes to main, rc, and beta.
+# Runs the build + test matrix on pushes to the release-prep branches
+# rc and beta.
+#
+# `main` is deliberately NOT triggered here: it is already gated
+# pre-merge by ci.yml (sharded Linux + macOS, on every PR) and validated
+# post-merge by build-quality.yml (Linux + the #615/#807 effect-gate
+# smoke). Re-running the full Linux+macOS matrix on every main push was
+# pure duplication, and its macOS leg drew a scarce macos-arm64 runner
+# from the shared account pool — contending with the feature-branch PRs
+# in ci.yml that the gate actually depends on (the leg was chronically
+# preempted/cancelled before it could finish anyway). rc/beta keep this
+# workflow because nothing else validates them and they are pushed
+# infrequently, so the runner contention is negligible.
 #
 # This workflow validates that the branch is healthy.  It does NOT create
 # releases — use the manual "Release" workflow (release.yml) for that.
@@ -16,7 +28,6 @@ name: CI (branch push)
 on:
     push:
         branches:
-            - main
             - rc
             - beta
         paths-ignore:
@@ -49,10 +60,14 @@ jobs:
             fail-fast: false
             matrix:
                 include:
-                    # Pinned to macos-15: `macos-latest` migrates to macOS 26
-                    # on 2026-06-15. Seed-producing build; keep the toolchain
-                    # stable rather than letting the image shift mid-cycle.
-                    - os: macos-15
+                    # macos-26: adopted after the 2026-06-15 `macos-latest`
+                    # migration left macos-15 runners scarce (release jobs
+                    # stalled waiting for a host). Seed-producing build; the
+                    # nightly-selfhost canary validates the triple-pass fixed
+                    # point on macos-26 and PR CI moved to it in the same
+                    # change (#1409 / #1410). The published binary's minimum
+                    # deployment target follows the macOS 26 SDK default.
+                    - os: macos-26
                       package_label: macos-arm64
                       clang: clang
                       # 3-vCPU / 7GB hosted runner — see the test_jobs

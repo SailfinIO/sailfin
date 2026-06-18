@@ -48,14 +48,6 @@ test_escape_promotion_boundaries.sh
 test_exe_path_intrinsic_platform.sh
 test_exe_path_reader.sh
 test_fn_reference_pthread.sh
-# Server-loopback test: starts a background blocking sfn/http server and
-# drives it with a socket client — the direct sibling of test_runtime_serve.sh
-# (same hold-out class), which sfn/test cannot express pre-1.0. (#1323)
-# Its static emit gate was migrated to a native sfn/test regression
-# (compiler/tests/e2e/http_capsule_serve_gate_test.sfn, #1370); only the
-# behavioral loopback checks remain here. Full retirement tracked by #1381
-# (native server-loopback e2e pattern).
-test_http_capsule_serve.sh
 test_lifecycle_hook_ordering.sh
 test_llms_txt_sync.sh
 test_lock.sh

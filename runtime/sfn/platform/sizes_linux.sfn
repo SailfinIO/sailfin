@@ -19,12 +19,14 @@
 //     2 + `unsigned char d_type` 1 = 19).
 //   - **macOS arm64**: `d_name` sits at offset 21 (`__uint64_t d_ino`
 //     8 + `__uint64_t d_seekoff` 8 + `__uint16_t d_reclen` 2 +
-//     `__uint16_t d_namlen` 2 + `__uint8_t d_type` 1 = 21). Shipping
-//     the Darwin offset (and selecting between the two at emit time
-//     from `uname -s` / `SAILFIN_TARGET_OS`, the same mechanism the
-//     errno locator uses in `errno.sfn`) is a documented follow-up —
-//     the directory adapter is Linux-first scoped for the self-host
-//     target (#1317, epic #1308 C8).
+//     `__uint16_t d_namlen` 2 + `__uint8_t d_type` 1 = 21).
+//
+// #1409: the consumer (`filesystem.sfn::sfn_fs_list_dir`) now selects the
+// offset at RUNTIME via the `/proc/self/status` existence probe (the gate
+// `rlimit.sfn` uses) rather than shipping the Linux `19` unconditionally —
+// reading the macOS name at offset 19 lands in `d_namlen`/`d_type` and
+// returns empty entry names, which blew up the directory walk. This module
+// mirrors that selection so the canonical home stays accurate.
 //
 // Linkage (mirrors the #893 decision for `runtime/sfn/platform/
 // errno.sfn`): this file stays OUT of `runtime/native/capsule.toml`
@@ -41,13 +43,24 @@
 // inlines the errno sentinel chain rather than importing `errno()`.
 // This file is therefore the canonical, type-checked home for the
 // constant — the consumer folds it in until the import path exists.
-// Byte offset of `struct dirent::d_name` on Linux glibc (x86_64 and
-// aarch64 agree at 19). macOS arm64 = 21 is the documented follow-up.
-let DIRENT_DNAME_OFFSET: i64 = 19;
+// Byte offset of `struct dirent::d_name`: 19 on Linux glibc (x86_64 and
+// aarch64 agree), 21 on macOS arm64 (BSD adds `__uint16_t d_namlen`).
+let DIRENT_DNAME_OFFSET_LINUX: i64 = 19;
+
+let DIRENT_DNAME_OFFSET_DARWIN: i64 = 21;
+
+// Linux gate: `/proc/self/status` exists on Linux, never on Darwin — the
+// same cheap probe `runtime/sfn/platform/rlimit.sfn` uses.
+extern fn sfn_fs_exists(path: * u8) -> bool;
 
 // `dirent_dname_offset()` — the canonical accessor adapters will import
 // from here once cross-module resolution of imported defined functions
 // lands in the runtime sfn-source emit path (#306 / epic #763). Until
-// then consumers inline the literal; this proves the constant resolves
-// and type-checks as a real runtime module.
-fn dirent_dname_offset() -> i64 { return DIRENT_DNAME_OFFSET; }
+// then consumers inline the equivalent runtime probe (see
+// `filesystem.sfn::_fs_dirent_dname_offset`); this proves it resolves and
+// type-checks as a real runtime module.
+fn dirent_dname_offset() -> i64 ![io] {
+    let proc_status: string = "/proc/self/status";
+    if sfn_fs_exists(proc_status as * u8) { return DIRENT_DNAME_OFFSET_LINUX; }
+    return DIRENT_DNAME_OFFSET_DARWIN;
+}

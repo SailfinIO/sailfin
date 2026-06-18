@@ -1,0 +1,457 @@
+// Native server-loopback e2e for the typed `sfn/http` `serve` (#1387,
+// part of #1385) — the macOS-arm64 request-delivery regression and the
+// native replacement for the `test_http_capsule_serve.sh` bash hold-out
+// (test-infra Phase 3, epic #842 / #1381).
+//
+// Background. #1387: a built `serve` server on macOS arm64 accepted
+// connections and framed well-formed responses, but the handler saw an
+// empty `Request` (`method=""`, `path=""`, `headers.length==0`,
+// `body=""`) — every route 404'd. The empty-`Request` symptom was an
+// empty/zero-length-string symptom in the `* u8`-request → typed-`Request`
+// path, fixed by the SfnString-ABI string-helper ports (#1401 et al.); the
+// accept loop / recv path in `runtime/sfn/concurrency/serve.sfn` was never
+// the bug. Nothing guarded request delivery on macOS because the only
+// behavioral coverage was a Linux-oriented bash script driven by a Python
+// socket client — exactly the gap this test closes.
+//
+// Why this could not be a `sfn/test` before. The behavioral checks in
+// `test_http_capsule_serve.sh` start a backgrounded BLOCKING `serve`
+// server and drive it with a socket client. The "native server-loopback
+// e2e pattern" was the missing capability (see the allowlist note). It is
+// now expressible: `process.spawn_with_env` runs the server as a
+// background subprocess (handle, not a synchronous drain), and a raw libc
+// socket client — the proven `http.sfn::_connect_tcp` dual-sockaddr idiom,
+// inlined here — drives it over loopback. The server is wrapped in
+// `timeout`/`gtimeout` when available so it self-reaps (there is no
+// process-kill primitive and `serve()` never returns); on a runner with
+// neither, the per-phase compiler caps still bound it, matching the test
+// pool's own tolerance.
+//
+// Coverage (the four behavioral checks migrated from the bash script,
+// plus the #1387 request-delivery assertions): request method + path
+// reach the handler; `GET /` matches `req.path == "/"`; a POST
+// Content-Length body is drained and echoed verbatim; a custom
+// status + header reach the wire via the framed path; an over-cap
+// Content-Length is rejected with a 500 (not a hang).
+//
+// Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
+// cannot be called from an `![io]` test; assert on the captured response
+// text with `sfn/strings::contains` instead.
+import { contains } from "sfn/strings";
+
+// ── libc memory + string + socket surface (test-local raw client) ──
+// Prefixed `_lb_` so the file-local helpers never collide with the
+// external-linkage runtime helpers of the same shape in `http.sfn` /
+// `serve.sfn` (neither is linked into this test binary, but the prefix
+// keeps that guarantee independent of link order).
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+
+extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+
+extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+extern fn close(fd: i32) -> i32;
+
+// The listening port for the loopback server. Fixed (this is the sole
+// server-loopback test in the native e2e pool, so it does not collide
+// under `--jobs N`); high + uncommon to avoid clashing with a developer's
+// local services.
+fn _lb_port() -> i64 { return 18790; }
+
+// The same port as a string literal for the generated server source
+// (int-to-string in the generated-source path is avoided). Must match
+// `_lb_port()`.
+fn _lb_port_str() -> string { return "18790"; }
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the build + server subprocesses. The build LINKS
+// a binary (clang + ld), which on macOS needs the full toolchain
+// environment (the SDK / library search path) — threading just
+// PATH/HOME/TMPDIR (enough for the emit-only gate test) leaves the linker
+// unable to resolve `-lm`. `run_capture`/`spawn_with_env`'s empty env is
+// the EMPTY environment, not "inherit", so snapshot the parent's full
+// environment via `process.environ()` (the propagation idiom from
+// `process_environ_test.sfn`). SAILFIN_TEST_SCRATCH is already in there
+// (the runner sets it), keeping the nested build cache per-invocation
+// under the parallel pool (`.claude/rules/no-bash-e2e.md`).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// Resolve a wall-clock timeout command, mirroring
+// `cli_commands.sfn::_resolve_timeout_cmd`. Empty string => none found;
+// the caller then spawns the never-returning server unwrapped.
+fn _timeout_cmd() -> string ![io] {
+    let probe = process.run(["sh", "-c", "command -v timeout >/dev/null 2>&1"]);
+    if probe == 0 { return "timeout"; }
+    let gprobe = process.run(["sh", "-c", "command -v gtimeout >/dev/null 2>&1"]);
+    if gprobe == 0 { return "gtimeout"; }
+    return "";
+}
+
+// ── raw loopback client (inlined `http.sfn::_connect_tcp` idiom) ──
+// Effect note: `http.sfn`'s socket helpers are `![net]`, but they live in
+// the `sfn/http` capsule whose surface includes `net`. This test compiles
+// under the COMPILER capsule's surface (`compiler/capsule.toml` →
+// `["io", "clock"]`, no `net`), and widening that to `net` to satisfy a
+// test would wrongly assert the compiler is a network program. The libc
+// socket externs carry no effect annotation, so the effect checker infers
+// no `net` requirement for these direct callers — hence they (and
+// `_lb_request`) are left un-annotated, while `_await_ready`/the test keep
+// `![io]` for their `process.*`/`fs.*` calls. (Tightening the effect system
+// to tag raw socket externs is a separate, out-of-scope concern.)
+fn _lb_ptr_off(p: * u8, off: i64) -> * u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as * u8;
+}
+
+// Connect a stream socket to `127.0.0.1:port`. Tries both `sockaddr_in`
+// byte layouts (Linux u16 sin_family at 0; macOS/BSD u8 sin_len at 0 +
+// u8 sin_family at 1), first success wins — the wrong-layout attempt
+// fails fast (EAFNOSUPPORT) without connecting. Returns the connected fd
+// or -1. Identical rationale to `http.sfn::_connect_tcp`.
+fn _lb_connect(port: i64) -> i32 {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 2 { break; }
+        let addr: * u8 = malloc(16 as usize);
+        if addr as i64 == 0 { return 0 - 1; }
+        memset(addr, 0, 16 as usize);
+        if attempt == 0 {
+            memset(_lb_ptr_off(addr, 0), 2, 1 as usize);
+        } else {
+            memset(_lb_ptr_off(addr, 0), 16, 1 as usize);
+            memset(_lb_ptr_off(addr, 1), 2, 1 as usize);
+        }
+        memset(_lb_ptr_off(addr, 2), ((port >> 8) & 255) as i32, 1 as usize);
+        memset(_lb_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
+        // sin_addr = 127.0.0.1
+        memset(_lb_ptr_off(addr, 4), 127, 1 as usize);
+        memset(_lb_ptr_off(addr, 7), 1, 1 as usize);
+        let fd: i32 = socket(2, 1, 0);
+        if fd < 0 {
+            free(addr);
+            return 0 - 1;
+        }
+        let rc: i32 = connect(fd, addr, 16);
+        free(addr);
+        if rc == 0 { return fd; }
+        close(fd);
+        attempt = attempt + 1;
+    }
+    return 0 - 1;
+}
+
+fn _lb_send_all(fd: i32, buf: * u8, total: i64) -> bool {
+    let mut sent: i64 = 0;
+    loop {
+        if sent >= total { break; }
+        let n: i64 = send(fd, _lb_ptr_off(buf, sent), total - sent, 0);
+        if n <= 0 { return false; }
+        sent = sent + n;
+    }
+    return true;
+}
+
+// Drain to EOF (the server frames `Connection: close`, so it closes after
+// the response) and return the bytes as a string. The buffer is
+// intentionally not freed: `* u8 as string` aliases the pointer (no copy),
+// and the test process is short-lived — freeing would dangle the string.
+fn _lb_recv_all(fd: i32) -> string {
+    let mut capacity: i64 = 8192;
+    let mut len: i64 = 0;
+    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    if buf as i64 == 0 { return ""; }
+    let chunk: i64 = 8192;
+    loop {
+        if len + chunk > capacity {
+            let new_cap: i64 = capacity * 2;
+            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            if new_buf as i64 == 0 {
+                free(buf);
+                return "";
+            }
+            buf = new_buf;
+            capacity = new_cap;
+        }
+        let n: i64 = recv(fd, _lb_ptr_off(buf, len), chunk, 0);
+        if n < 0 {
+            free(buf);
+            return "";
+        }
+        if n == 0 { break; }
+        len = len + n;
+    }
+    memset(_lb_ptr_off(buf, len), 0, 1 as usize);
+    return buf as string;
+}
+
+// Open a fresh connection, send `request` verbatim, drain the response,
+// and close. Returns "" on a connect/send failure (server not up yet).
+fn _lb_request(port: i64, request: string) -> string {
+    let fd: i32 = _lb_connect(port);
+    if fd < 0 { return ""; }
+    if !_lb_send_all(fd, request as * u8, strlen(request as * u8) as i64) {
+        close(fd);
+        return "";
+    }
+    let resp = _lb_recv_all(fd);
+    close(fd);
+    return resp;
+}
+
+// Lay out a consumer capsule that depends on `sfn/http` and routes a few
+// paths so the loopback client can observe request delivery. Mirrors the
+// bash hold-out's `write_app`; lives INSIDE the repo tree so workspace
+// discovery resolves the `sfn/http` dependency.
+fn _app_root() -> string { return "build/serve-loopback-e2e"; }
+
+fn _write_server(port_str: string) -> string ![io] {
+    let root = _app_root();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/http-loopback-e2e-app\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"sfn/http serve loopback e2e consumer\"\n"
+        + "\n"
+        + "[dependencies]\n"
+        + "\"sfn/http\" = \"*\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "import { serve, Request, Response, not_found } from \"sfn/http\";\n"
+        + "\n"
+        + "fn handle(req: Request) -> Response {\n"
+        + "    if strings_equal(req.path, \"/\") {\n"
+        + "        return Response { status: 200, headers: [\"X-Root: 1\"], body: \"ROOT-OK\" };\n"
+        + "    }\n"
+        + "    if strings_equal(req.path, \"/secret\") {\n"
+        + "        return Response { status: 403, headers: [\"X-Reason: nope\"], body: \"denied\" };\n"
+        + "    }\n"
+        + "    if strings_equal(req.path, \"/echo\") {\n"
+        + "        return Response { status: 200, headers: [\"X-Echo: 1\"], body: req.body };\n"
+        + "    }\n"
+        + "    if strings_equal(req.path, \"/probe\") {\n"
+        + "        return Response { status: 200, headers: [\"X-Probe: 1\"], body: \"M=\" + req.method + \";P=\" + req.path };\n"
+        + "    }\n"
+        + "    return not_found();\n"
+        + "}\n"
+        + "\n"
+        + "fn main() -> int ![net, io] {\n"
+        + "    serve(handle as * fn (Request) -> Response, "
+        + port_str
+        + ");\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+// A second consumer that drives the live server with the typed `sfn/http`
+// `fetch` CLIENT and prints the parsed status / headers / body — the
+// end-to-end half of the bash hold-out's check 4 (the client-side
+// `parse_response` logic itself is unit-covered by
+// `capsules/sfn/http/tests/wire_test.sfn`). Separate tree from the server
+// so the two builds do not clobber each other.
+fn _client_root() -> string { return "build/serve-loopback-e2e-client"; }
+
+fn _write_fetch_client(port_str: string) -> string ![io] {
+    let root = _client_root();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/http-loopback-e2e-client\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"sfn/http fetch client loopback e2e consumer\"\n"
+        + "\n"
+        + "[dependencies]\n"
+        + "\"sfn/http\" = \"*\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "import { fetch, Response } from \"sfn/http\";\n"
+        + "\n"
+        + "fn main() -> int ![net, io] {\n"
+        + "    let no_headers: string[] = [];\n"
+        + "    let resp = fetch(\"GET\", \"http://127.0.0.1:"
+        + port_str
+        + "/secret\", no_headers, \"\");\n"
+        + "    if resp.status == 403 {\n"
+        + "        print.info(\"FETCH_STATUS=403\");\n"
+        + "    } else {\n"
+        + "        print.info(\"FETCH_STATUS=other\");\n"
+        + "    }\n"
+        + "    let mut i = 0;\n"
+        + "    loop {\n"
+        + "        if i >= resp.headers.length { break; }\n"
+        + "        print.info(\"FETCH_HEADER=\" + resp.headers[i]);\n"
+        + "        i = i + 1;\n"
+        + "    }\n"
+        + "    print.info(\"FETCH_BODY=\" + resp.body);\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+// Compile a consumer to a standalone binary up front (a blocking,
+// synchronous build), so the cold `sfn/http` compile happens ONCE here
+// and is NOT inside the readiness window — a backgrounded `sfn run` would
+// otherwise race a cold capsule build against the poll budget. Threads the
+// full parent environment (the nested build links, needing the toolchain
+// surface; the routed `program.ll` stays under SAILFIN_TEST_SCRATCH,
+// parallel-safe per `.claude/rules/no-bash-e2e.md`). Returns the binary
+// path, or "" on a build failure.
+fn _build_bin(main_path: string, bin: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return bin;
+}
+
+// Spawn the prebuilt blocking server as a background subprocess, wrapped
+// in a wall-clock timeout so it self-reaps — there is no process-kill
+// primitive and `serve()` never returns, so the timeout is the ONLY
+// teardown mechanism. The test guards on a timeout command being present
+// before calling this (see the test body), so `tcmd` is always non-empty
+// here; the length check is defensive. The prebuilt binary listens within
+// ~1s — no compile in the startup path. Returns the spawn handle (unused
+// for teardown — the timeout owns the lifetime).
+fn _spawn_server(bin: string) -> i64 ![io] {
+    let tcmd = _timeout_cmd();
+    let mut argv: string[] = [];
+    if tcmd.length > 0 {
+        argv.push(tcmd);
+        argv.push("60");
+    }
+    argv.push(bin);
+    return process.spawn_with_env(argv, _child_env());
+}
+
+// Poll `GET /probe` until the prebuilt server answers (startup is just the
+// binary launching + bind, ~1s — the cold compile already happened in
+// `_build_bin`). Returns the response, or "" if it never came up within the
+// budget. ~45s budget (90 attempts × ~0.5s) stays under the 60s server
+// timeout in `_spawn_server`.
+fn _await_ready(port: i64) -> string ![io] {
+    let probe = "GET /probe?x=1 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 90 { break; }
+        let resp = _lb_request(port, probe);
+        if resp.length > 0 {
+            if contains(resp, "M=GET") { return resp; }
+        }
+        let _ = process.run(["sleep", "0.5"]);
+        attempt = attempt + 1;
+    }
+    return "";
+}
+
+test "serve loopback: macOS request delivery + framed behavioral round-trips" ![io] {
+    // Teardown of the blocking server relies on a wall-clock timeout (no
+    // process-kill primitive; `serve()` never returns). Without
+    // `timeout`/`gtimeout`, spawning the server would orphan the fixed port
+    // 18790 and poison subsequent runs — so skip cleanly rather than leak
+    // an unkillable child. The plain suite still covers everything else;
+    // CI runners (Linux + coreutils) always have `timeout`. Mirrors the
+    // sanitizer-skip precedent in `.claude/rules/compiler-safety.md`.
+    if _timeout_cmd().length == 0 {
+        print.info("[serve-loopback] SKIP: no timeout/gtimeout to reap the blocking server");
+        return;
+    }
+
+    let port = _lb_port();
+    let main_path = _write_server(_lb_port_str());
+
+    // Compile once (synchronously), then run the prebuilt server.
+    let server_bin = _build_bin(main_path, _app_root() + "/server-bin");
+    assert server_bin.length > 0;
+    let _handle = _spawn_server(server_bin);
+
+    // Readiness + #1387 request delivery: method and path reach the
+    // handler (the empty-Request symptom would yield "M=;P=").
+    let probe_resp = _await_ready(port);
+    print.info("[serve-loopback] probe: " + probe_resp);
+    assert probe_resp.length > 0;
+    assert contains(probe_resp, "HTTP/1.1 200");
+    assert contains(probe_resp, "M=GET");
+    // Query string is stripped from the path by the capsule parser.
+    assert contains(probe_resp, "P=/probe");
+
+    // GET / matches req.path == "/" (issue's pathlen=0 case).
+    let root_resp = _lb_request(port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    print.info("[serve-loopback] root: " + root_resp);
+    assert contains(root_resp, "HTTP/1.1 200");
+    assert contains(root_resp, "ROOT-OK");
+
+    // POST Content-Length body is drained and echoed verbatim.
+    let body = "payload-ABC-123-END";
+    let post_req = "POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 19\r\nConnection: close\r\n\r\n"
+        + body;
+    let echo_resp = _lb_request(port, post_req);
+    print.info("[serve-loopback] echo: " + echo_resp);
+    assert contains(echo_resp, "HTTP/1.1 200");
+    assert contains(echo_resp, "X-Echo: 1");
+    assert contains(echo_resp, body);
+
+    // Custom status + header reach the wire via the framed path.
+    let secret_resp = _lb_request(port, "GET /secret HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    print.info("[serve-loopback] secret: " + secret_resp);
+    assert contains(secret_resp, "HTTP/1.1 403");
+    assert contains(secret_resp, "X-Reason: nope");
+    assert contains(secret_resp, "denied");
+
+    // Over-cap Content-Length is rejected with a 500 (not a hang): declare
+    // 2 MiB (over the 1 MiB cap) but send only a partial body — the server
+    // must reject on the declared length without waiting for the rest.
+    // (The whole ~120-byte request lands in the socket buffer in a single
+    // `send` before the server drains the head and closes, so `_lb_send_all`
+    // does not race a SIGPIPE on the closed peer in practice.)
+    let oversize_req = "POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 2000000\r\nConnection: close\r\n\r\npartial";
+    let oversize_resp = _lb_request(port, oversize_req);
+    print.info("[serve-loopback] oversize: " + oversize_resp);
+    assert contains(oversize_resp, "HTTP/1.1 500");
+
+    // Typed `fetch` client round-trips status + headers from the live
+    // server (the #1323 framed path, proven end-to-end through the
+    // `sfn/http` client). The `sfn/http` capsule is already warm from the
+    // server build, so this second build reuses it.
+    let client_main = _write_fetch_client(_lb_port_str());
+    let client_bin = _build_bin(client_main, _client_root() + "/client-bin");
+    assert client_bin.length > 0;
+    let fexit = process.run_capture([client_bin], _child_env());
+    let fout = process.capture_take_stdout();
+    let _ferr = process.capture_take_stderr();
+    print.info("[serve-loopback] fetch-client: " + fout);
+    assert fexit == 0;
+    assert contains(fout, "FETCH_STATUS=403");
+    assert contains(fout, "FETCH_HEADER=X-Reason: nope");
+    assert contains(fout, "FETCH_BODY=denied");
+
+    // Best-effort cleanup of the consumer trees (the timeout reaps the
+    // server process).
+    let _rm = process.run(["rm", "-rf", _app_root()]);
+    let _rmc = process.run(["rm", "-rf", _client_root()]);
+}
