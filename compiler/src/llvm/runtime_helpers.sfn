@@ -401,6 +401,15 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "intrinsic.fs_exists.mingw", symbol: "GetFileAttributesA", return_type: "i32", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    // `get_perms(path) -> i64`: lower 12 bits of `st_mode`, -1 on error.
+    // POSIX legs `stat(path, &buf)` then load `st_mode` at the per-target
+    // byte offset (`stat_st_mode_offset_value`: 24 Linux / 4 Darwin), mask
+    // `& 0o7777` (4095); the Windows leg is a bare `i64 -1` stub. The `@stat`
+    // declare is provided by the `intrinsic.fs_exists.posix` row above (same
+    // symbol), so no duplicate concrete row is needed here.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_fs_get_perms", symbol: "sailfin_intrinsic_fs_get_perms", return_type: "i64", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
 
     // Network intrinsics.
     // `http.get` / `http.post` member calls flipped (#912) to the
