@@ -1,6 +1,18 @@
 name: CI (branch push)
 
-# Runs the build + test matrix on pushes to main, rc, and beta.
+# Runs the build + test matrix on pushes to the release-prep branches
+# rc and beta.
+#
+# `main` is deliberately NOT triggered here: it is already gated
+# pre-merge by ci.yml (sharded Linux + macOS, on every PR) and validated
+# post-merge by build-quality.yml (Linux + the #615/#807 effect-gate
+# smoke). Re-running the full Linux+macOS matrix on every main push was
+# pure duplication, and its macOS leg drew a scarce macos-arm64 runner
+# from the shared account pool — contending with the feature-branch PRs
+# in ci.yml that the gate actually depends on (the leg was chronically
+# preempted/cancelled before it could finish anyway). rc/beta keep this
+# workflow because nothing else validates them and they are pushed
+# infrequently, so the runner contention is negligible.
 #
 # This workflow validates that the branch is healthy.  It does NOT create
 # releases — use the manual "Release" workflow (release.yml) for that.
@@ -16,7 +28,6 @@ name: CI (branch push)
 on:
     push:
         branches:
-            - main
             - rc
             - beta
         paths-ignore:
