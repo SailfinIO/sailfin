@@ -4280,7 +4280,37 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
 // instead of linking the survivors. Other consumers that read only
 // `ll_paths` (e.g. the `sfn run` path) do not yet check it and would
 // need the same guard to propagate emit failures.
-fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string, work_dir: string) -> ProjectCapsuleResult ![io] {
+// #1405 Bug 2: minimum resolved-closure size at which a positional
+// (non-`-p`) build or test opts into subprocess-per-module isolation.
+// Below it, the closure compiles in-process (cheaper, and avoids
+// perturbing the entry's in-process arena with `process.run` argv
+// allocations — see the `walk_src` note in cli_main.sfn). At or above
+// it, each module compiles in a child with a fresh arena that dies on
+// exit, bounding peak RSS under the 8 GiB self-cap. A whole-compiler-
+// importing source (e.g. a unit test importing `lower_to_llvm_ir_from_text`)
+// resolves ~120 modules, far above this; a typical end-user build with a
+// handful of capsule deps stays in-process.
+fn _cr_positional_isolation_threshold() -> int { return 16; }
+
+// #1405 Bug 2: choose the emit binary for a build/test. A `-p` build
+// always threads a non-empty `sailfin_exe`, which is returned unchanged
+// so the self-host path is byte-for-byte unaffected. A positional
+// build/test arrives with an empty `sailfin_exe`; when a same-generation
+// binary is available (`binary_dir`) and the resolved import closure is
+// large, return `<binary_dir>/sailfin` so `stage_capsule_imports` /
+// `compile_capsule_modules` take their subprocess-per-module path
+// instead of accumulating the entire closure in one never-freed bump
+// arena (the ~15.5 GB cold-compile OOM this issue fixes).
+fn _cr_effective_isolation_exe(sailfin_exe: string, binary_dir: string, source_count: int) -> string {
+    if sailfin_exe.length > 0 { return sailfin_exe; }
+    if binary_dir.length == 0 { return sailfin_exe; }
+    if source_count < _cr_positional_isolation_threshold() {
+        return sailfin_exe;
+    }
+    return binary_dir + "/sailfin";
+}
+
+fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> ProjectCapsuleResult ![io] {
     let empty_paths: string[] = [];
     let empty_events: ModuleCacheEvent[] = [];
     let empty_runtime_capsules: RuntimeCapsuleArtifacts[] = [];
@@ -4323,7 +4353,13 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
         };
     }
 
-    let staged = stage_capsule_imports(resolved.sources, sailfin_exe, work_dir);
+    // #1405 Bug 2: route a large-closure positional build onto the
+    // subprocess-per-module path (fresh arena per child) when a
+    // same-generation binary is available; `-p` builds (non-empty
+    // `sailfin_exe`) are unchanged.
+    let effective_exe = _cr_effective_isolation_exe(sailfin_exe, binary_dir, resolved.sources.length);
+
+    let staged = stage_capsule_imports(resolved.sources, effective_exe, work_dir);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return ProjectCapsuleResult {
@@ -4364,7 +4400,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
             entry_src.push(CapsuleSource {
                 spec: "", source_path: entry_path, slug: entry_slug, ll_path: ""
             });
-            let entry_staged = stage_capsule_imports(entry_src, sailfin_exe, work_dir);
+            let entry_staged = stage_capsule_imports(entry_src, effective_exe, work_dir);
             if !entry_staged {
                 print.err("capsule-resolver: failed to stage entry import-context for "
                     + entry_path);
@@ -4380,7 +4416,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
         }
     }
 
-    let result = compile_capsule_modules(resolved.sources, slug_universe_extra, config, sailfin_exe, work_dir);
+    let result = compile_capsule_modules(resolved.sources, slug_universe_extra, config, effective_exe, work_dir);
     if !result.success {
         // A per-module emit failed (e.g. an effect-gate `E0402`).
         // The helper has already printed the diagnostic; surface the
@@ -4547,7 +4583,7 @@ fn stage_capsule_imports_for_emit(entry_path: string, sailfin_exe: string, work_
 //     own compile path still runs, and any relative-import walking
 //     happens inside the per-entry `enumerate_relative_sources`
 //     branch of `_cr_resolve_and_dedupe`.
-fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string, work_dir: string) -> TestCapsuleResolution ![io] {
+fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string, work_dir: string, binary_dir: string) -> TestCapsuleResolution ![io] {
     let empty_paths: string[] = [];
     let resolved = _cr_resolve_and_dedupe(entry_paths, consumer);
     // Phase F: thread `capabilities_required` through every exit
@@ -4574,11 +4610,17 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
         };
     }
 
-    // Stage E PR1: thread `sailfin_exe` to subprocess-stage
-    // imports too. `handle_test_command` currently passes "",
-    // so this falls back to the in-process path — matches the
-    // PR3 baseline behavior for tests.
-    let staged = stage_capsule_imports(resolved.sources, sailfin_exe, work_dir);
+    // Stage E PR1: thread `sailfin_exe` to subprocess-stage imports too.
+    // #1405 Bug 2: `handle_test_command` now threads a same-generation
+    // `binary_dir`, so a large-closure test (e.g. one importing the whole
+    // compiler via `lower_to_llvm_ir_from_text`) isolates per-module emit
+    // in subprocesses (fresh arena per child) instead of accumulating the
+    // entire closure in one never-freed bump arena and OOMing past the
+    // 8 GiB self-cap on a cold test-bin cache. Small fixtures (below the
+    // closure-size threshold) keep the in-process fast path; a non-empty
+    // `sailfin_exe` is returned unchanged.
+    let effective_exe = _cr_effective_isolation_exe(sailfin_exe, binary_dir, resolved.sources.length);
+    let staged = stage_capsule_imports(resolved.sources, effective_exe, work_dir);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return TestCapsuleResolution {
@@ -4607,7 +4649,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     // #984: `sfn test` resolves the entry as a normal source (no
     // walk-exclusion), so there is no extra slug universe to thread.
     let test_slug_universe_extra: CapsuleSource[] = [];
-    let result = compile_capsule_modules(resolved.sources, test_slug_universe_extra, test_config, sailfin_exe, work_dir);
+    let result = compile_capsule_modules(resolved.sources, test_slug_universe_extra, test_config, effective_exe, work_dir);
     // Surface a compile failure as `staging_failed = true` so the
     // test runner exits 2 instead of trying to link against
     // missing helper objects. (The PR1c stats are dropped on this

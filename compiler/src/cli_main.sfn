@@ -2488,21 +2488,27 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
         // (or build/native/import-context/ when `--work-dir` is unset)
         // where the main module's lowering will find them.
         //
-        // Stage D PR3: subprocess-per-module compile is gated on
-        // `walk_src` (true only for `-p` builds of `kind = "binary"`
-        // capsules), not just `binary_dir`. The 138-module
-        // self-host needs each compile in a fresh arena to fit in
-        // 8 GB, but a typical end-user positional build (a handful
-        // of capsule deps) fits in-process and shouldn't pay the
-        // subprocess spawn cost — and shouldn't have its arena
-        // state perturbed by `process.run`'s argv allocations
-        // either, which has been observed to surface seed-corruption
-        // flakes in the entry's in-process compile downstream.
+        // Stage D PR3: the `-p` self-host (`walk_src`) explicitly
+        // selects `<binary_dir>/sailfin` here so its 138-module compile
+        // runs each module in a fresh-arena subprocess and fits in 8 GB.
+        // A typical end-user positional build (a handful of capsule deps)
+        // fits in-process and shouldn't pay the subprocess spawn cost —
+        // and shouldn't have its arena state perturbed by `process.run`'s
+        // argv allocations, which has surfaced seed-corruption flakes in
+        // the entry's in-process compile downstream.
+        //
+        // #1405 Bug 2: a positional build of a *large-closure* source
+        // (e.g. a compiler unit test importing the whole compiler) cannot
+        // fit in-process either — it OOMs at ~15.5 GB. So we leave the
+        // empty `sailfin_exe` here and let `prepare_project_capsules`
+        // upgrade it to subprocess isolation *only* when the resolved
+        // closure crosses the size threshold (binary_dir is threaded
+        // below for that decision). Small closures stay in-process.
         let mut sailfin_exe: string = "";
         if walk_src {
             if binary_dir.length > 0 { sailfin_exe = binary_dir + "/sailfin"; }
         }
-        let capsule_result = prepare_project_capsules(input_path, cache_config, consumer, sailfin_exe, work_dir);
+        let capsule_result = prepare_project_capsules(input_path, cache_config, consumer, sailfin_exe, work_dir, binary_dir);
         // Issue #991: a per-module emit failure (e.g. an effect-gate
         // `E0402` on an unimported sibling) leaves `ll_paths` empty and
         // silently drops the offending module from the link. Without
@@ -2696,12 +2702,13 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
         // always empty: relative-import `.ll`s take the legacy
         // flat layout (Stage C2b2). When `sfn run -p` lands, this
         // becomes a one-line update mirroring `sfn build`.
-        // Stage D PR3: `sfn run` keeps the in-process compile
-        // path. Subprocess-per-module is gated to `-p` binary
-        // builds only (see the `walk_src` branch above for the
-        // rationale) — `sfn run` doesn't take `-p` yet, and its
-        // typical use case is small fixtures that fit in-process.
-        let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, empty_resolver_consumer(), "", "");
+        // Stage D PR3 / #1405 Bug 2: `sfn run` keeps the in-process
+        // compile path for small fixtures (its typical use case). It
+        // doesn't take `-p` yet, so `sailfin_exe`/`work_dir` stay empty;
+        // threading `binary_dir` lets `prepare_project_capsules` upgrade
+        // to subprocess isolation only when the resolved closure is large
+        // enough to otherwise OOM (a whole-compiler-importing `sfn run`).
+        let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, empty_resolver_consumer(), "", "", binary_dir);
         let capsule_lls = run_capsule_result.ll_paths;
 
         let source = fs.readFile(input_path);

@@ -1905,14 +1905,18 @@ fn handle_test_command(args: string[], runtime_root: string, binary_dir: string)
         // consumer for the same reason — there's no manifest, no
         // `[capsule].name`, and so nothing for
         // host-enum to walk.
-        // Stage D PR3: `sfn test` runs from the legacy `make test`
-        // path that does not thread `binary_dir` through, so pass
-        // an empty `sailfin_exe`. The resolver falls back to the
-        // in-process compile path that has worked for tests since
-        // Stage C2c — test fixtures stay well below the per-module
-        // count where arena pressure becomes an issue.
+        // Stage D PR3 / #1405 Bug 2: `sfn test` keeps the in-process
+        // compile path for ordinary fixtures (which stay well below the
+        // per-module count where arena pressure bites). But a few
+        // compiler unit tests import the whole compiler (e.g. via
+        // `lower_to_llvm_ir_from_text`), and compiling that ~120-module
+        // closure in-process OOMs past the 8 GiB self-cap on a cold
+        // test-bin cache. Thread the same-generation `binary_dir` so the
+        // resolver upgrades *only* those large-closure tests to
+        // subprocess-per-module isolation (fresh arena per child); small
+        // fixtures still take the in-process fast path.
         let consumer = _test_resolver_consumer_for_group(groups[gi].entry_paths[0]);
-        let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths, consumer, "", "");
+        let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths, consumer, "", "", binary_dir);
         if resolution.staging_failed {
             // Resolver already emitted a structured error to stderr
             // (slug collision, stage-write, or compile failure).
