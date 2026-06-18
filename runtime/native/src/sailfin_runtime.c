@@ -34,6 +34,9 @@
 #include <mach/mach_vm.h>
 #include <mach/mach_time.h>
 #endif
+#if defined(__linux__)
+#include <sys/mman.h>
+#endif
 #include <errno.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -361,6 +364,78 @@ char *sailfin_runtime_get_field(char *base, char *field)
     return _get_field_safe_buf;
 }
 
+// Probe whether `text` points inside a mapped, readable memory region.
+//
+// Disambiguates the upper-32-bit immediate-codepoint encoding (a codepoint
+// shifted into bits [32:64) with the low 32 bits zero) from a genuine
+// heap/arena pointer whose low 32 bits happen to be zero. The latter is a rare
+// but real ASLR outcome on both macOS and Linux; without this probe the real
+// pointer is misclassified as an immediate codepoint and the string is silently
+// corrupted (issue #1407: an arena buffer at 0x00007f22_00000000 decoded as
+// U+7F22, replacing an emitted `insertvalue` opcode with garbage `E7 BC A2`).
+//
+// A synthetic immediate (codepoint << 32) is never mapped, so it stays an
+// immediate; a genuine buffer at a low-32-zero address is mapped, so it is
+// treated as a real string.
+//
+// Only defined where the upper-32-bit guard below actually calls it, to avoid
+// an unused-static-function warning on targets without the guard.
+#if (defined(__APPLE__) && !defined(SAILFIN_WITH_ASAN)) || defined(__linux__)
+static bool _sfn_addr_mapped_readable(const char *text)
+{
+#if defined(__APPLE__)
+    mach_vm_address_t query = (mach_vm_address_t)(uintptr_t)text;
+    mach_vm_address_t region = query;
+    mach_vm_size_t region_size = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t object_name = MACH_PORT_NULL;
+
+    kern_return_t kr = mach_vm_region(
+        mach_task_self(),
+        &region,
+        &region_size,
+        VM_REGION_BASIC_INFO_64,
+        (vm_region_info_t)&info,
+        &count,
+        &object_name);
+
+    if (object_name != MACH_PORT_NULL)
+    {
+        mach_port_deallocate(mach_task_self(), object_name);
+    }
+
+    if (kr != KERN_SUCCESS)
+    {
+        return false;
+    }
+    bool readable = (info.protection & VM_PROT_READ) != 0;
+    bool contains = (query >= region) && (query < (region + region_size));
+    return readable && contains;
+#elif defined(__linux__)
+    // `msync()` on the containing page returns 0 when the range is mapped and
+    // -1/ENOMEM when it is not — the standard, side-effect-free "is this pointer
+    // mapped" probe. MS_ASYNC only schedules writeback of dirty pages, so it
+    // never mutates clean/read-only string storage.
+    static long page_size = 0;
+    if (page_size <= 0)
+    {
+        page_size = sysconf(_SC_PAGESIZE);
+        if (page_size <= 0)
+        {
+            page_size = 4096;
+        }
+    }
+    uintptr_t mask = (uintptr_t)page_size - 1u;
+    uintptr_t page = (uintptr_t)text & ~mask;
+    return msync((void *)page, (size_t)page_size, MS_ASYNC) == 0;
+#else
+    (void)text;
+    return false;
+#endif
+}
+#endif
+
 static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codepoint)
 {
     if (!text)
@@ -400,11 +475,12 @@ static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codep
         return false;
     }
 
-#if defined(__APPLE__) && !defined(SAILFIN_WITH_ASAN)
-    // On macOS it is possible (though rare) to have a real, mapped pointer
-    // whose low 32 bits are zero. The upper-32-bit heuristic would wrongly
-    // classify that as an "immediate" codepoint string, causing subtle memory
-    // corruption when the value is later treated as a C string.
+#if (defined(__APPLE__) && !defined(SAILFIN_WITH_ASAN)) || defined(__linux__)
+    // On both macOS and Linux it is possible (though rare) to have a real,
+    // mapped pointer whose low 32 bits are zero. The upper-32-bit heuristic
+    // would wrongly classify that as an "immediate" codepoint string, causing
+    // subtle memory corruption when the value is later treated as a C string
+    // (issue #1407).
     //
     // Guard: only treat this encoding as immediate when the address is not
     // mapped as a readable region.
@@ -450,39 +526,10 @@ static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codep
         if (cached_val == 2)
         {
             // Known-unmapped immediate; skip the expensive kernel query.
-            goto apple_upper32_immediate_done;
+            goto upper32_immediate_done;
         }
 
-        bool mapped_readable = false;
-        {
-            mach_vm_address_t query = (mach_vm_address_t)(uintptr_t)text;
-            mach_vm_address_t region = query;
-            mach_vm_size_t region_size = 0;
-            vm_region_basic_info_data_64_t info;
-            mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-            mach_port_t object_name = MACH_PORT_NULL;
-
-            kern_return_t kr = mach_vm_region(
-                mach_task_self(),
-                &region,
-                &region_size,
-                VM_REGION_BASIC_INFO_64,
-                (vm_region_info_t)&info,
-                &count,
-                &object_name);
-
-            if (object_name != MACH_PORT_NULL)
-            {
-                mach_port_deallocate(mach_task_self(), object_name);
-            }
-
-            if (kr == KERN_SUCCESS)
-            {
-                bool readable = (info.protection & VM_PROT_READ) != 0;
-                bool contains = (query >= region) && (query < (region + region_size));
-                mapped_readable = readable && contains;
-            }
-        }
+        bool mapped_readable = _sfn_addr_mapped_readable(text);
 
         // Store the result.
         for (uint32_t probe = 0; probe < MAP_CACHE_PROBES; probe++)
@@ -502,7 +549,7 @@ static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codep
         }
     }
 
-apple_upper32_immediate_done:
+upper32_immediate_done:
 #endif
 
     if (out_codepoint)
