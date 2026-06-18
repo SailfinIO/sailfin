@@ -193,6 +193,22 @@ fn sfn_mem_free(ptr: * u8) -> void {
     unsafe { free(ptr); }
 }
 
+// #1405 Bug 1: OOM-handler re-entrancy guard for `sfn_alloc_struct`.
+// The OOM diagnostic below materialises a `string` / `* u8` literal,
+// which lowers to its own `sfn_alloc_struct` call (verified in disasm:
+// the OOM branch does `mov $0x32,%edi; call sfn_alloc_struct` to
+// allocate the 50-byte message). Under a genuine host OOM that nested
+// allocation also returns NULL and re-enters the same null branch →
+// unbounded recursion → stack overflow → SIGSEGV (exit 139, no
+// diagnostic). Publishing a non-zero state BEFORE the message
+// allocation breaks the cycle: the re-entrant call sees the flag set
+// and aborts at once (clean SIGABRT, exit 134) instead of recursing —
+// the same recursion-free discipline as `arena.sfn::sfn_arena_global`'s
+// bare `abort()`. Stored as `i64` (0 = inactive, 1 = active) to match
+// this file's and `arena.sfn`'s proven module-global idiom (the
+// non-`i64` module-global quirk noted on `sfn_mem_get_field_buf_addr`).
+let mut _sfn_alloc_oom_active: i64 = 0;
+
 // `sfn_alloc_struct(size_bytes)` — faithful port of
 // `sailfin_runtime_alloc_struct` (`sailfin_runtime.c:4109`), the hottest
 // Category-C primitive (15 descriptor-routed emission sites across array,
@@ -237,6 +253,13 @@ fn sfn_alloc_struct(size_bytes: i64) -> * u8 {
     // so they sit outside the unsafe region. 49 bytes incl. the trailing
     // newline (`write` takes an explicit count, matching `bounds_check`).
     if result as i64 == 0 {
+        // #1405 Bug 1: if we are already inside the OOM path (the message
+        // allocation below re-entered after its own `sfn_alloc_struct`
+        // call failed), abort immediately — clean SIGABRT, no recursion,
+        // no diagnostic. Otherwise publish the flag before allocating the
+        // message so any re-entry hits the guard above.
+        if _sfn_alloc_oom_active != 0 { abort(); }
+        _sfn_alloc_oom_active = 1;
         let msg: * u8 = "[sailfin-oom] sfn_alloc_struct allocation failed\n" as * u8;
         write(2, msg, 49 as usize);
         abort();

@@ -20,7 +20,11 @@
 #                  path is checked via a forked subprocess), get_field
 #                  (returns a stable non-null zeroed buffer), and free
 #                  (null-safe; non-null forwards to libc free in
-#                  non-arena mode).
+#                  non-arena mode), and sfn_alloc_struct's OOM path
+#                  (#1405 Bug 1: a forced allocation failure aborts
+#                  cleanly with SIGABRT instead of recursing through the
+#                  message allocation into a stack-overflow SIGSEGV;
+#                  checked via a forked subprocess).
 
 set -euo pipefail
 
@@ -164,6 +168,7 @@ test_roundtrip_behaviour() {
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <signal.h>
 
 /* Count free() via link-time interposition; intentionally leak (the
  * process is short-lived and the kernel reclaims on exit). The
@@ -174,21 +179,26 @@ void free(void *ptr) {
     if (ptr) free_count++;
 }
 
-/* Arena-mode probe stub: report arena OFF so sfn_mem_free forwards to
- * the counting free() shim above, and so the module-defined
- * `sfn_alloc_struct` (see below) takes its libc-calloc path. */
-int sfn_arena_enabled(void) { return 0; }
+/* Arena-mode probe stub. `oom_mode` is 0 for every test above (arena
+ * OFF → sfn_mem_free forwards to the counting free() shim, and the
+ * module-defined `sfn_alloc_struct` takes its libc-calloc path). The
+ * forked #1405-Bug-1 sub-test flips `oom_mode` to 1, turning the arena
+ * ON *and* making every arena allocation fail, which drives
+ * `sfn_alloc_struct` deterministically into its OOM branch. */
+static int oom_mode = 0;
+int sfn_arena_enabled(void) { return oom_mode; }
 
 /* Arena trampolines referenced by the module-defined `sfn_alloc_struct`
- * (#930). The arena-allocation branch is unreachable here because
- * `sfn_arena_enabled()` returns 0, but the two calls are still present
- * in the emitted IR, so the harness must satisfy them at link time.
- * `sfn_arena_global` returns NULL and `sfn_arena_alloc` forwards to
- * calloc — faithful to the arena-off contract even though neither runs. */
-void *sfn_arena_global(void) { return NULL; }
+ * (#930). With `oom_mode == 0` the arena branch is unreachable and these
+ * mirror the arena-off contract (global NULL, alloc → calloc). With
+ * `oom_mode == 1` (the OOM sub-test) `sfn_arena_global` returns a
+ * non-NULL sentinel and `sfn_arena_alloc` always returns NULL, forcing
+ * `sfn_alloc_struct`'s OOM path. */
+void *sfn_arena_global(void) { return oom_mode ? (void *)0x1 : NULL; }
 void *sfn_arena_alloc(void *arena, size_t size, size_t align) {
     (void)arena;
     (void)align;
+    if (oom_mode) return NULL;
     return calloc(1, size);
 }
 
@@ -208,6 +218,7 @@ extern char *sfn_mem_get_field(char *base, char *field);
 extern void  sfn_mem_copy_bytes(char *dest, char *src, int64_t length);
 extern void  sfn_mem_bounds_check(int64_t index, int64_t length);
 extern void  sfn_mem_free(void *ptr);
+extern void *sfn_alloc_struct(int64_t size);
 
 int main(void) {
     /* ---- copy_bytes: byte-exact copy ---- */
@@ -283,6 +294,38 @@ int main(void) {
     } else {
         fprintf(stderr, "fork failed\n");
         return 9;
+    }
+
+    /* ---- sfn_alloc_struct OOM: clean abort, never re-entrant recursion ---- */
+    /* #1405 Bug 1: the OOM diagnostic in sfn_alloc_struct allocates a
+     * message string, which itself lowers to an sfn_alloc_struct call.
+     * Under a real OOM that nested allocation also fails; without the
+     * re-entrancy guard it recurses until the stack overflows
+     * (SIGSEGV / exit 139), with the guard it aborts at once
+     * (SIGABRT / exit 134). Force OOM via `oom_mode` and assert the child
+     * dies by SIGABRT — a SIGSEGV here means the guard regressed. Checked
+     * out-of-process (fork) so the abort doesn't take down the harness. */
+    pid_t opid = fork();
+    if (opid == 0) {
+        freopen("/dev/null", "w", stderr);
+        oom_mode = 1;            /* arena ON + every arena_alloc fails */
+        sfn_alloc_struct(64);    /* OOM branch must SIGABRT, not recurse */
+        _exit(0);                /* unreachable if the abort fires */
+    } else if (opid > 0) {
+        int ostatus = 0;
+        waitpid(opid, &ostatus, 0);
+        if (!WIFSIGNALED(ostatus)) {
+            fprintf(stderr, "sfn_alloc_struct(OOM) did not abort (status=%d)\n", ostatus);
+            return 10;
+        }
+        if (WTERMSIG(ostatus) != SIGABRT) {
+            fprintf(stderr, "sfn_alloc_struct(OOM) died by signal %d, expected SIGABRT(%d) — re-entrancy guard regressed?\n",
+                    WTERMSIG(ostatus), SIGABRT);
+            return 11;
+        }
+    } else {
+        fprintf(stderr, "fork failed (oom)\n");
+        return 12;
     }
 
     return 0;
