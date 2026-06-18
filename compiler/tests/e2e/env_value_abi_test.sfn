@@ -17,8 +17,8 @@
 // `SAILFIN_TEST_SCRATCH` (routes the `program.ll` build-cache dir per-
 // invocation under the parallel pool, #1333). The fixture's own env (the var
 // under test) is passed to the *run*, not the build.
-import { find } from "sfn/strings";
 import { with_tmp_dir } from "sfn/test";
+import { find } from "sfn/strings";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -27,16 +27,12 @@ fn _sfn_bin() -> string ![io] {
 }
 
 fn _child_env() -> string[] ![io] {
-    let mut e: string[] = [];
-    let path = env.get("PATH");
-    if path.length > 0 { e.push("PATH=" + path); }
-    let home = env.get("HOME");
-    if home.length > 0 { e.push("HOME=" + home); }
-    let tmpdir = env.get("TMPDIR");
-    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
-    let scratch = env.get("SAILFIN_TEST_SCRATCH");
-    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
-    return e;
+    // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
+    // SDK/toolchain vars the nested clang/ld need (a minimal set links on
+    // Linux but fails on macOS with `ld: library 'm' not found`, #1410),
+    // and SAILFIN_TEST_SCRATCH for per-invocation build-cache isolation
+    // (#1333). Mirrors serve_loopback_test.sfn / process_environ_test.sfn.
+    return process.environ();
 }
 
 fn _marker(name: string) -> string ![io] {
