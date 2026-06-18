@@ -1,0 +1,53 @@
+// runtime/sfn/platform/sizes_linux.sfn
+//
+// Minimal per-platform struct-layout constants for the Sailfin-native
+// runtime adapters. Companion to `runtime/sfn/platform/libc.sfn`; see
+// that file's "Layout caveats" block for the long-form rationale on
+// why `struct dirent` / `struct stat` field offsets cannot be reached
+// through the opaque-pointee discipline and must be supplied as
+// per-platform byte offsets instead.
+//
+// First constant: `DIRENT_DNAME_OFFSET`, the byte offset of the
+// `d_name` character array within `struct dirent`. The directory
+// adapter (`runtime/sfn/adapters/filesystem.sfn::sfn_fs_list_dir`)
+// walks `opendir`/`readdir`/`closedir` and reads each entry's name as
+// the NUL-terminated C string that begins at `readdir`'s returned
+// `struct dirent *` plus this offset.
+//
+//   - **Linux glibc x86_64 / aarch64**: `d_name` sits at offset 19
+//     (`ino_t d_ino` 8 + `off_t d_off` 8 + `unsigned short d_reclen`
+//     2 + `unsigned char d_type` 1 = 19).
+//   - **macOS arm64**: `d_name` sits at offset 21 (`__uint64_t d_ino`
+//     8 + `__uint64_t d_seekoff` 8 + `__uint16_t d_reclen` 2 +
+//     `__uint16_t d_namlen` 2 + `__uint8_t d_type` 1 = 21). Shipping
+//     the Darwin offset (and selecting between the two at emit time
+//     from `uname -s` / `SAILFIN_TARGET_OS`, the same mechanism the
+//     errno locator uses in `errno.sfn`) is a documented follow-up —
+//     the directory adapter is Linux-first scoped for the self-host
+//     target (#1317, epic #1308 C8).
+//
+// Linkage (mirrors the #893 decision for `runtime/sfn/platform/
+// errno.sfn`): this file stays OUT of `runtime/native/capsule.toml`
+// `sfn-sources`. `sfn-sources` registration forces a standalone link
+// on every target for a module with no entry point of its own, and
+// nothing imports it yet: the runtime `sfn-source` emit path
+// (`_compile_runtime_sfn_sources` in `cli_main.sfn`) resolves imported
+// *extern* signatures but not imported *defined* functions, so
+// importing `dirent_dname_offset()` into an `sfn-source` would fail
+// lowering with "callee signature is not known to the compiler" (see
+// `errno.sfn`'s Linkage note). Until that cross-module resolution
+// lands, `filesystem.sfn` inlines the literal `19` (with a comment
+// pointing back here as the canonical home) exactly as `clock.sfn`
+// inlines the errno sentinel chain rather than importing `errno()`.
+// This file is therefore the canonical, type-checked home for the
+// constant — the consumer folds it in until the import path exists.
+// Byte offset of `struct dirent::d_name` on Linux glibc (x86_64 and
+// aarch64 agree at 19). macOS arm64 = 21 is the documented follow-up.
+let DIRENT_DNAME_OFFSET: i64 = 19;
+
+// `dirent_dname_offset()` — the canonical accessor adapters will import
+// from here once cross-module resolution of imported defined functions
+// lands in the runtime sfn-source emit path (#306 / epic #763). Until
+// then consumers inline the literal; this proves the constant resolves
+// and type-checks as a real runtime module.
+fn dirent_dname_offset() -> i64 { return DIRENT_DNAME_OFFSET; }

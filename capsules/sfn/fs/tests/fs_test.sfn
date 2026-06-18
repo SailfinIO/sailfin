@@ -18,6 +18,7 @@ import {
     exists,
     write,
     read,
+    read_dir,
     remove
 } from "../src/mod";
 
@@ -166,6 +167,41 @@ test "fs: symlink returns false when link path already exists" ![io] {
     write(link, "occupant");
 
     assert symlink("/tmp", link) == false;
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+// ── read_dir (list_directory) ──────────────────────────────────────
+// Exercises the pure-Sailfin `sfn_fs_list_dir` body (#1317): it must
+// build a real `string[]` of the directory's entries, omit the `.`
+// and `..` pseudo-entries, and return them sorted ascending. Files
+// are written out of order to prove the sort runs.
+test "fs: read_dir lists entries sorted, omitting . and .." ![io] {
+    let scratch = mkdtemp("sfn-fs-test-listdir-");
+    assert scratch.length > 0;
+    write(scratch + "/charlie.txt", "c");
+    write(scratch + "/alpha.txt", "a");
+    write(scratch + "/bravo.txt", "b");
+
+    let entries = read_dir(scratch);
+    // Exactly the three files — `.`/`..` are filtered out.
+    assert entries.length == 3;
+    // Sorted ascending by byte order (libc `strcmp`).
+    assert strings_equal(entries[0], "alpha.txt");
+    assert strings_equal(entries[1], "bravo.txt");
+    assert strings_equal(entries[2], "charlie.txt");
+
+    process.run(["rm", "-rf", scratch]);
+}
+
+// An empty directory lists as a zero-length array (never null), so
+// callers can iterate it unconditionally.
+test "fs: read_dir on an empty directory is empty" ![io] {
+    let scratch = mkdtemp("sfn-fs-test-emptydir-");
+    assert scratch.length > 0;
+
+    let entries = read_dir(scratch);
+    assert entries.length == 0;
 
     process.run(["rm", "-rf", scratch]);
 }
