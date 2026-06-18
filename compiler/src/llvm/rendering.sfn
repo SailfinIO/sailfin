@@ -235,6 +235,9 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             if descriptor.target == "sailfin_intrinsic_fs_mkdtemp" {
                 _preamble_inlined = true;
             }
+            if descriptor.target == "sailfin_intrinsic_fs_exists" {
+                _preamble_inlined = true;
+            }
             if _preamble_inlined {
                 index += 1;
                 continue;

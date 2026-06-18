@@ -387,6 +387,20 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "intrinsic.fs_mkdtemp.posix", symbol: "mkdtemp", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    // `fs_exists(path) -> bool`: POSIX legs `stat(path, &buf) == 0` (a
+    // stack `struct stat` buffer, over-allocated via `stat_buf_size_value`);
+    // the Windows leg `GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES`
+    // (`-1`). Converts the existing C-backed `sailfin_intrinsic_fs_exists`
+    // to an emit-time sequence (the C body retires with #822).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_fs_exists", symbol: "sailfin_intrinsic_fs_exists", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "intrinsic.fs_exists.posix", symbol: "stat", return_type: "i32", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "intrinsic.fs_exists.mingw", symbol: "GetFileAttributesA", return_type: "i32", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
 
     // Network intrinsics.
     // `http.get` / `http.post` member calls flipped (#912) to the

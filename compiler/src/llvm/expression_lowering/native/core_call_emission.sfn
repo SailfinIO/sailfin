@@ -41,8 +41,10 @@ import {
     trace_lowering,
     fs_platform_leg,
     exe_path_locator,
+    stat_buf_size_value,
     errno_locator_symbol,
-    clock_monotonic_id_value
+    clock_monotonic_id_value,
+    stat_st_mode_offset_value
 } from "../../lowering_debug_state";
 import { find_interface_info_by_name } from "../../type_context_queries";
 
@@ -988,6 +990,82 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                         + ")");
                     result_lines.push("  " + _fs_ok + " = icmp ne i8* " + _fs_rc
                         + ", null");
+                    let _fs_operand = LLVMOperand {
+                        llvm_type: "i1",
+                        value: _fs_ok
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                }
+            }
+        }
+    }
+
+    // `fs_exists(path) -> bool` sentinel (#1308): POSIX legs `stat(path,
+    // &buf) == 0` over a stack `struct stat` buffer (over-allocated via
+    // `stat_buf_size_value`); the Windows leg `GetFileAttributesA(path) !=
+    // -1` (INVALID_FILE_ATTRIBUTES). Only the host leg's symbol enters the IR.
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_fs_exists" {
+            if final_operands.length < 1 {
+                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_exists requires (path: i8*) operand");
+            } else {
+                let _fs_leg = fs_platform_leg();
+                let _fs_path = final_operands[0].value;
+                if _fs_leg == "mingw" {
+                    let _fs_attr = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_ok = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _fs_attr
+                        + " = call i32 @GetFileAttributesA(i8* "
+                        + _fs_path
+                        + ")");
+                    result_lines.push("  " + _fs_ok + " = icmp ne i32 "
+                        + _fs_attr
+                        + ", -1");
+                    let _fs_operand = LLVMOperand {
+                        llvm_type: "i1",
+                        value: _fs_ok
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                } else {
+                    let _fs_bufsz = number_to_string(stat_buf_size_value());
+                    let _fs_buf = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_bufp = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_rc = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_ok = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _fs_buf + " = alloca [" + _fs_bufsz
+                        + " x i8]");
+                    result_lines.push("  " + _fs_bufp + " = getelementptr ["
+                        + _fs_bufsz
+                        + " x i8], ["
+                        + _fs_bufsz
+                        + " x i8]* "
+                        + _fs_buf
+                        + ", i32 0, i32 0");
+                    result_lines.push("  " + _fs_rc + " = call i32 @stat(i8* "
+                        + _fs_path
+                        + ", i8* "
+                        + _fs_bufp
+                        + ")");
+                    result_lines.push("  " + _fs_ok + " = icmp eq i32 " + _fs_rc
+                        + ", 0");
                     let _fs_operand = LLVMOperand {
                         llvm_type: "i1",
                         value: _fs_ok
