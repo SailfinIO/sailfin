@@ -93,12 +93,11 @@
 //     `write_lines` reads the `SfnArray` `data`/`len` fields through
 //     the `SfnArrayView` overlay. For a real buffer `strlen` recovers
 //     the byte length. A pre-M1.A.2 immediate-codepoint tagged pointer
-//     in the *content* would crash `strlen`/`fwrite`; `write_file` /
-//     `append_file` decode it in pure Sailfin (#1308: `_fs_decode_immediate`
-//     → the native `sfn_str_from_codepoint`, the same shape `io.sfn`'s
-//     print family uses), while `write_lines` still delegates such entries
-//     to the decoding C adapter (its per-entry decode is a follow-up).
-//     Path arguments are never guarded — they follow the shipped
+//     in the *content* would crash `strlen`/`fwrite`, so all three decode
+//     it in pure Sailfin (#1308: `_fs_decode_immediate` → the native
+//     `sfn_str_from_codepoint`, the same shape `io.sfn`'s print family
+//     uses) — `write_lines` per entry. No C adapter call remains. Path
+//     arguments are never guarded — they follow the shipped
 //     `sfn_fs_read_file` / `_delete` / `_mkdir` convention.
 //
 //   - **`sfn_fs_set_perms` / `sfn_fs_is_executable`** (#1311): pure
@@ -272,8 +271,6 @@ let DIRENT_DNAME_OFFSET: i64 = 19;
 // follow-up). Path arguments are never guarded (paths are always real
 // buffers; even the C adapter never decoded the path). The remaining
 // delegation falls away with the encoding itself (#822 / M1.A.2).
-extern fn sailfin_adapter_fs_write_lines_v2(path: * u8, lines: * u8) -> void;
-
 // `sfn_str_from_codepoint(cp)` — the native Sailfin UTF-8 encoder
 // (`runtime/sfn/string.sfn`, #1308) used to decode an immediate-codepoint
 // `contents` into a real buffer before `fwrite`. Inlined extern per the
@@ -815,13 +812,11 @@ fn sfn_fs_symlink(target: * u8, link: * u8) -> bool ![io] {
 // read through the `SfnArrayView` overlay (`data` address + `len`),
 // and each per-slot `char*` is loaded via
 // `sailfin_intrinsic_pointer_read_i64`; for a real buffer `strlen`
-// recovers its length. Two cases delegate the whole write to the C
-// adapter (which carries the refuse-and-truncate guard + immediate-
-// codepoint decode): an absurd `len > 10000000` from a corrupted-ABI
-// handle, and any entry that is a pre-M1.A.2 immediate-codepoint
-// tagged pointer (which `strlen`/`fwrite` would crash on). The
-// immediate pre-scan runs only after the count is bounded, so the
-// corrupted-handle case never iterates an absurd count.
+// recovers its length; a pre-M1.A.2 immediate-codepoint tagged entry is
+// decoded in pure Sailfin (`_fs_decode_immediate`) before the write. An
+// absurd `len > 10000000` from a corrupted-ABI handle mirrors the C
+// refuse-and-truncate contract natively (open to truncate, then bail).
+// No C call remains.
 fn sfn_fs_write_lines(path: * u8, lines: * u8) -> void ![io] {
     if path as i64 == 0 { return; }
     if lines as i64 == 0 { return; }
@@ -830,30 +825,17 @@ fn sfn_fs_write_lines(path: * u8, lines: * u8) -> void ![io] {
     let mut n: i64 = arr.len;
     if n < 0 { n = 0; }
 
-    // Corrupted-ABI absurd count: defer to the C body (opens, refuses,
-    // leaves the file truncated-empty) rather than scanning it.
+    // Corrupted-ABI absurd count: mirror the C body's refuse-and-truncate
+    // contract in pure Sailfin — `fopen("wb")` truncates the file to empty,
+    // then bail without iterating the bogus count.
     if n > 10000000 {
-        sailfin_adapter_fs_write_lines_v2(path, lines);
+        let mode_trunc: string = "wb";
+        let ft: * File = fopen(path, mode_trunc as * u8);
+        if ft as i64 != 0 { fclose(ft); }
         return;
     }
 
     let data_addr: i64 = arr.data;
-
-    // Immediate-codepoint pre-scan: if any entry is a tagged pointer,
-    // delegate the whole write to the decoding C adapter.
-    if data_addr != 0 {
-        let scan_slots: * i64 = data_addr as * i64;
-        let mut k: i64 = 0;
-        loop {
-            if k >= n { break; }
-            let e: i64 = sailfin_intrinsic_pointer_read_i64(scan_slots + k);
-            if e != 0 && _fs_is_immediate(e as * u8) {
-                sailfin_adapter_fs_write_lines_v2(path, lines);
-                return;
-            }
-            k = k + 1;
-        }
-    }
 
     // Pure path: open (truncate) + write each line.
     let mode_str: string = "wb";
@@ -881,7 +863,9 @@ fn sfn_fs_write_lines(path: * u8, lines: * u8) -> void ![io] {
         if entry_addr == 0 {
             fwrite(nl_ptr, 1 as usize, 1 as usize, f);
         } else {
-            let line: * u8 = entry_addr as * u8;
+            let entry: * u8 = entry_addr as * u8;
+            let mut line: * u8 = entry;
+            if _fs_is_immediate(entry) { line = _fs_decode_immediate(entry); }
             let llen: i64 = strlen(line) as i64;
             if llen > 0 {
                 fwrite(line, 1 as usize, llen as usize, f);
