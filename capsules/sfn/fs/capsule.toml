@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/fs"
-version = "0.3.0"
+version = "0.3.1"
 description = "Filesystem operations for Sailfin"
 
 [dependencies]
