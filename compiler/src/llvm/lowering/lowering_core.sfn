@@ -40,7 +40,12 @@ import {
     apply_layout_manifest_to_module,
     collect_imported_module_context_for_module
 } from "../imports";
-import { escape_string_for_llvm, empty_string_constant_set } from "../strings";
+import {
+    escape_string_for_llvm,
+    merge_string_constants,
+    empty_string_constant_set
+} from "../strings";
+import { emit_llvm_function } from "./emission";
 import {
     append_string_lines,
     extend_string_lines,
@@ -830,6 +835,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     let mut module_preamble_lines: string[] = [];
     let mut module_init_lines: string[] = [];
     let mut module_init_symbol: string = "";
+    let mut module_init_function: NativeFunction? = null;
     let mut module_string_constants: StringConstant[] = empty_string_constant_set();
     if safe_bindings.length == 0 {
         if debug_lowering {
@@ -845,6 +851,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         module_preamble_lines = _mg.preamble_lines;
         module_init_lines = _mg.init_function_lines;
         module_init_symbol = _mg.init_function_symbol;
+        module_init_function = _mg.init_function;
         module_global_locals = _mg.locals;
         module_string_constants = _mg.string_constants;
         if _mg.diagnostics.length > 0 {
@@ -875,6 +882,25 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
             if _ibl >= _ib.locals.length { break; }
             module_global_locals.push(_ib.locals[_ibl]);
             _ibl += 1;
+        }
+    }
+    // #1386: emit the body of `@sailfin_module_init__<module>` so its call
+    // (planted at user-main entry) resolves at link time. The synthetic
+    // function assigns each runtime-evaluated global into `@global.<name>`;
+    // it is lowered here rather than in the pure module-globals pass because
+    // expression lowering is `![io]` and needs the full type/function
+    // context. `needs_module_init_call` is forced false so the init function
+    // does not recursively call itself. Its `@sfn_*` helper calls ride the
+    // post-lowering `collect_runtime_helper_targets_from_lines` scan via
+    // `module_init_lines`; its string constants are merged so they render.
+    if module_init_function != null {
+        let init_lowered = emit_llvm_function(module_init_function, context_functions, [], type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, false);
+        module_init_lines = init_lowered.lines;
+        if init_lowered.diagnostics.length > 0 {
+            diagnostics = extend_string_lines_checked(diagnostics, init_lowered.diagnostics, "module init");
+        }
+        if init_lowered.string_constants.length > 0 {
+            module_string_constants = merge_string_constants(module_string_constants, init_lowered.string_constants);
         }
     }
     if trace { print.err("test llvm: module globals lowered"); }

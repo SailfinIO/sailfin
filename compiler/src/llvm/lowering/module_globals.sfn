@@ -19,7 +19,7 @@ import {
 } from "../utils";
 import { empty_string_constant_set } from "../strings";
 import { format_root_scope_id } from "../lifetime";
-import { NativeBinding } from "../../native_ir";
+import { NativeBinding, NativeFunction, NativeInstruction } from "../../native_ir";
 import { map_local_type } from "../type_mapping";
 import { default_return_literal } from "../expressions_helpers";
 import { is_string_literal, normalise_number_literal } from "../expressions_literals";
@@ -30,6 +30,14 @@ fn module_global_symbol(name: string) -> string {
 
 fn module_init_symbol(module_name: string) -> string {
     return "@sailfin_module_init__" + sanitize_symbol(module_name);
+}
+
+// Bare LLVM function name (no `@`) for the module-init function. Must match
+// `module_init_symbol` after `emit_llvm_function` re-sanitizes + prefixes `@`
+// (the body is composed of symbol-safe characters, so `sanitize_symbol` is
+// idempotent here and the call site / definition agree).
+fn module_init_function_name(module_name: string) -> string {
+    return "sailfin_module_init__" + sanitize_symbol(module_name);
 }
 
 // Map a binding's source type annotation to its LLVM type. Extracted from
@@ -243,6 +251,7 @@ fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeCont
             init_function_lines: [],
             init_function_symbol: init_symbol,
             needs_init_call: false,
+            init_function: null,
             locals: [],
             string_constants: empty_string_constant_set(),
             diagnostics: []
@@ -253,6 +262,12 @@ fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeCont
     let mut preamble_lines: string[] = [];
     let mut locals: LocalBinding[] = [];
     let mut needs_init: boolean = false;
+    // Assignment instructions for the synthetic module-init function: one
+    // `<name> = <value>` per runtime-evaluated global (#1386). Reusing the
+    // ordinary assignment-lowering path means array literals, struct-literal
+    // arrays, function-call initializers, and computed scalars all flow
+    // through the same machinery that already stores into `@global.<name>`.
+    let mut init_instructions: NativeInstruction[] = [];
     let mut index: int = 0;
     loop {
         if index >= bindings.length { break; }
@@ -271,7 +286,34 @@ fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeCont
             locals.push(result.locals[lj]);
             lj += 1;
         }
-        if result.needs_init { needs_init = true; }
+        if result.needs_init {
+            needs_init = true;
+            let init_name = binding.name;
+            let init_value = binding.value;
+            if init_name != null {
+                if init_name.length > 0 {
+                    if init_value != null {
+                        init_instructions.push(NativeInstruction.Expression {
+                            expression: init_name + " = " + init_value, span: null
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let mut init_function: NativeFunction? = null;
+    if needs_init {
+        init_function = NativeFunction {
+            name: module_init_function_name(module_name),
+            is_async: false,
+            parameters: [],
+            return_type: "void",
+            effects: [],
+            decorators: [],
+            is_extern: false,
+            instructions: init_instructions
+        };
     }
 
     return ModuleGlobalLoweringResult {
@@ -279,6 +321,7 @@ fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeCont
         init_function_lines: [],
         init_function_symbol: init_symbol,
         needs_init_call: needs_init,
+        init_function: init_function,
         locals: locals,
         string_constants: empty_string_constant_set(),
         diagnostics: []

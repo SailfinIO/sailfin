@@ -404,9 +404,15 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     let entry_line: string = entry_label + ":";
     lines = append_string(lines, entry_line);
 
+    // #1386: run module-global init exactly once, at user-main entry, before
+    // any user code. Gating on `emit_main_wrapper` (true only for `fn main`)
+    // keeps the call out of every other function — emitting it per-function
+    // would re-run the initializers and reset module globals on each call.
     if needs_module_init_call {
-        let init_call = "  call void " + module_init_symbol + "()";
-        lines = append_string(lines, init_call);
+        if emit_main_wrapper {
+            let init_call = "  call void " + module_init_symbol + "()";
+            lines = append_string(lines, init_call);
+        }
     }
 
     // Apply minimal decorator semantics at entry.

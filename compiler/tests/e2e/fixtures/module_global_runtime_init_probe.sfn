@@ -1,0 +1,35 @@
+// Fixture for module_global_runtime_init_test.sfn (#1386).
+//
+// Exercises module-level globals whose initializers are NOT foldable
+// compile-time constants, so the emitter must define
+// `@sailfin_module_init__<module>` and populate each `@global.<name>`
+// before first use:
+//   - `xs`     — empty array literal (`[]`)
+//   - `pts`    — struct-literal array
+//   - `answer` — function-call (computed-scalar) initializer
+//
+// `add_one` is called twice from `main`; the printed `xs=2` proves the
+// init function runs exactly ONCE (at user-main entry) — if the init
+// call were planted in every function, each `add_one` call would re-run
+// the initializers and reset `xs` to `[]`, yielding `xs=1`.
+struct Point {
+    x: int;
+    y: int;
+}
+
+fn compute() -> int { return 40 + 2; }
+
+let mut xs: int[] = [];
+let mut pts: Point[] = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];
+let answer: int = compute();
+
+fn add_one() { xs.push(1); }
+
+fn main() ![io] {
+    add_one();
+    add_one();
+    print("xs=" + number_to_string(xs.length));
+    print("pts=" + number_to_string(pts.length));
+    print("p1y=" + number_to_string(pts[1].y));
+    print("answer=" + number_to_string(answer));
+}

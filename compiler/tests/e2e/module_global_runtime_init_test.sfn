@@ -1,0 +1,93 @@
+// End-to-end test for runtime-evaluated module-global initialization
+// (#1386).
+//
+// Module-level globals whose initializer is not a foldable compile-time
+// constant (empty/struct-literal arrays, function-call/computed-scalar
+// initializers) require the emitter to DEFINE
+// `@sailfin_module_init__<module>` and call it once at user-main entry.
+// Before the fix the call was planted (twice over: once per function)
+// but the definition was missing, so `sfn build` failed to link with
+// `use of undefined value '@sailfin_module_init__'`.
+//
+// This test builds `fixtures/module_global_runtime_init_probe.sfn` and
+// asserts on its stdout:
+//   - `xs=2`     — the array-literal global is a valid (non-null) array,
+//                  AND init ran exactly ONCE (per-function init would
+//                  reset `xs` on each `add_one` call → `xs=1`).
+//   - `pts=2` / `p1y=4` — the struct-literal-array global initialized.
+//   - `answer=42` — the function-call (computed-scalar) global evaluated.
+//
+// Build/parallel-runner hygiene (temp-dir build, threaded `_child_env`
+// with `PATH` + `SAILFIN_TEST_SCRATCH`) mirrors `sailfin_main_entry_test`
+// — see `.claude/rules/no-bash-e2e.md` for the why.
+import { with_tmp_dir } from "sfn/test";
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _fixture_src() -> string ![io] {
+    return fs.readFile("compiler/tests/e2e/fixtures/module_global_runtime_init_probe.sfn");
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A fresh out-of-tree marker path (survives `with_tmp_dir` teardown).
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-module-global-init-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Build the probe in a temp dir and run it. Stashes captured stdout to
+// `out_marker`; returns the run's exit code, or `-100` on build failure.
+fn _build_and_run(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/probe.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/probe";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let run_exit = process.run_capture([binpath], []);
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        fs.writeFile(out_marker, out);
+        return run_exit;
+    });
+}
+
+test "module-init: runtime-evaluated globals build, link, and initialize once" ![io] {
+    let marker = _marker("probe");
+    let exit = _build_and_run(marker);
+    // Reject the `-100` build-failure sentinel before touching the marker:
+    // the missing-definition link failure surfaces here as a non-zero exit.
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+    // Array-literal global is valid AND init ran exactly once.
+    assert find(out, "xs=2", 0) >= 0;
+    // Struct-literal-array global initialized.
+    assert find(out, "pts=2", 0) >= 0;
+    assert find(out, "p1y=4", 0) >= 0;
+    // Function-call (computed-scalar) global evaluated.
+    assert find(out, "answer=42", 0) >= 0;
+}
