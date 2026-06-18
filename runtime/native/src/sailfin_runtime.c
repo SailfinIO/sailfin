@@ -2792,7 +2792,14 @@ static size_t _sfn_str_check_concat_limit(size_t alen, size_t blen, const char *
     return alen + blen;
 }
 
-SfnString sfn_str_concat(SfnString a, SfnString b, SfnArena **arena_slot)
+/* #1318 (C5 of epic #1308): the canonical `sfn_str_concat` emission target
+ * is now a real Sailfin body in `runtime/sfn/string.sfn` (SfnString
+ * `{i8*, i64}` ABI). This C definition is `static` so the linker binds every
+ * fresh `a + b` call site to the Sailfin body; the same-TU `_arena`
+ * forwarder below keeps the static copy reachable for the pinned seed. The
+ * bare prototype is dropped from `sailfin_runtime.h`. Retires entirely with
+ * `sailfin_runtime.c` (#822). */
+static SfnString sfn_str_concat(SfnString a, SfnString b, SfnArena **arena_slot)
 {
     /* Design note on `SAILFIN_USE_ARENA` opt-out: the arena-aware
      * path is the M1 minimal-viable design per
@@ -2909,7 +2916,12 @@ SfnString sfn_str_concat(SfnString a, SfnString b, SfnArena **arena_slot)
  * `string` locals become aggregates and the peephole moves into
  * `core_ops_lowering`). Shipping the body now closes the wave 1b
  * surface area so the migration is mechanically complete. */
-void sfn_str_append(SfnString *dst, SfnString suffix, SfnArena **arena_slot)
+/* #1318: canonical `sfn_str_append` is now the Sailfin body in
+ * `runtime/sfn/string.sfn` (no emission site targets it — ported for
+ * link-completeness). This C definition is `static`; the same-TU `_arena`
+ * forwarder below binds to it for the pinned seed. The bare prototype is
+ * dropped from `sailfin_runtime.h`. Retires with `sailfin_runtime.c` (#822). */
+static void sfn_str_append(SfnString *dst, SfnString suffix, SfnArena **arena_slot)
 {
     if (dst == NULL)
     {

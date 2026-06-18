@@ -129,8 +129,11 @@ extern "C"
     // seed cut after #715 lands — seed v0.7.0-alpha.7 still emits
     // `@sfn_str_concat_arena` IR against this entrypoint. The next
     // seed bump retires both `_arena` declarations in a follow-up.
-    SfnString sfn_str_concat(SfnString a, SfnString b, SfnArena **arena_slot);
-    void sfn_str_append(SfnString *dst, SfnString suffix, SfnArena **arena_slot);
+    // #1318 (C5 of epic #1308): the bare `sfn_str_concat` / `sfn_str_append`
+    // are now real Sailfin bodies in `runtime/sfn/string.sfn`; their C
+    // definitions are `static`, so the external prototypes are dropped here
+    // (the same-TU `_arena` forwarders below bind to the static copies). The
+    // `_arena`-suffixed prototypes stay until the seed cut after #1318 / #822.
     SfnString sfn_str_concat_arena(SfnString a, SfnString b, SfnArena **arena_slot);
     void sfn_str_append_arena(SfnString *dst, SfnString suffix, SfnArena **arena_slot);
     // #1315 (C4 of epic #1308): exported bridge primitives the Sailfin

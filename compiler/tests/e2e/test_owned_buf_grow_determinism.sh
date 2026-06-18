@@ -75,8 +75,17 @@ emit_one() {
 
 # 1. The owned-buffer aggregate must be emitted byte-identically by both
 #    the defining module (ownedbuf.sfn) and the consuming module
-#    (string.sfn, which imports OwnedBuf/Slice). A drift here mis-links
-#    the boxed-struct ABI (#1217 architect risk #1).
+#    (string.sfn, which imports OwnedBuf). A drift here mis-links the
+#    boxed-struct ABI (#1217 architect risk #1).
+#
+#    #1318 retired the OwnedBuf-returning `sfn_str_sfn_concat` /
+#    `sfn_str_sfn_append` proof-of-life wrappers — the real
+#    `sfn_str_concat` / `sfn_str_append` bodies now allocate through the
+#    arena directly over the SfnString `{i8*, i64}` ABI. string.sfn still
+#    *consumes* the OwnedBuf aggregate (the number/int formatters build
+#    their digit buffers via `owned_buf_new`), so the layout-unification
+#    link contract this test guards is unchanged; only the consumer moved
+#    from the string-move surface to the formatters.
 test_layout_unification() {
     local ob_ll="$SCRATCH/ownedbuf.ll"
     local str_ll="$SCRATCH/string.ll"
@@ -91,16 +100,21 @@ test_layout_unification() {
         echo "[test]   string.sfn did not emit '$shape' — layout drift vs ownedbuf.sfn"
         return 1
     fi
-    # The migrated string surface must carry the owned-move return ABI.
-    # (`sfn_str_sfn_slice` is NOT migrated — a non-owning `Slice` view over
-    # an immediate-codepoint pseudo-pointer is unsound until the C runtime
-    # retires that encoding; tracked at #1283. It keeps its `* u8` body.)
-    if ! grep -qE '^define %OwnedBuf\* @sfn_str_sfn_append\(%OwnedBuf\* ' "$str_ll"; then
-        echo "[test]   string.sfn missing 'define %OwnedBuf* @sfn_str_sfn_append(%OwnedBuf* ...)'"
+    # string.sfn must still link against the cross-module OwnedBuf aggregate
+    # (the number/int formatters' `owned_buf_new`), proving the layout above
+    # is a real shared-ABI surface and not an orphaned type def.
+    if ! grep -qE '^declare %OwnedBuf\* @owned_buf_new\(' "$str_ll"; then
+        echo "[test]   string.sfn missing 'declare %OwnedBuf* @owned_buf_new(...)' — no live OwnedBuf consumer"
         return 1
     fi
-    if ! grep -qE '^define %OwnedBuf\* @sfn_str_sfn_concat\(' "$str_ll"; then
-        echo "[test]   string.sfn missing 'define %OwnedBuf* @sfn_str_sfn_concat(...)'"
+    # The retired wrappers must be gone; the bare canonical emission targets
+    # now carry the SfnString `{i8*, i64}` return ABI (#1318).
+    if grep -qE '@sfn_str_sfn_(concat|append)\(' "$str_ll"; then
+        echo "[test]   string.sfn still emits a retired sfn_str_sfn_concat/append OwnedBuf wrapper"
+        return 1
+    fi
+    if ! grep -qE '^define \{i8\*, i64\} @sfn_str_concat\(' "$str_ll"; then
+        echo "[test]   string.sfn missing 'define {i8*, i64} @sfn_str_concat(...)' (SfnString ABI)"
         return 1
     fi
     return 0
