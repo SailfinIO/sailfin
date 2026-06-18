@@ -88,17 +88,19 @@ test "lowering: io.sfn defines the bare native env readers (C7/R7 flipped)" ![io
     assert ! _contains(ir, "@sailfin_runtime_home_dir");
 }
 
-test "lowering: io.sfn immediate-codepoint guard routes to the C decoders" ![io] {
+test "lowering: io.sfn immediate-codepoint guard decodes natively (no C printers)" ![io] {
     let source = fs.readFile("runtime/sfn/io.sfn");
     let program = parse_program(source);
     let native = emit_native_text_with_module_name(program, "runtime/sfn/io");
     let ir = lower_to_llvm_ir_from_text(native, "runtime/sfn/io");
 
-    // Tagged immediate-codepoint pointers (pre-M1.A.2) can't be decoded
-    // by the length-aware native printers, so the bare bodies fall back
-    // to the immediate-decoding C `sailfin_runtime_print_*` entrypoints.
-    assert _contains(ir, "@sailfin_runtime_print_raw");
-    assert _contains(ir, "@sailfin_runtime_print_info");
+    // #1308: tagged immediate-codepoint pointers (pre-M1.A.2) are now decoded
+    // in pure Sailfin (`_sfn_print_immediate` → the native
+    // `sfn_str_from_codepoint`) instead of delegating to the C
+    // `sailfin_runtime_print_*` entrypoints, which io.sfn no longer references.
+    assert _contains(ir, "@sfn_str_from_codepoint");
+    assert ! _contains(ir, "@sailfin_runtime_print_raw");
+    assert ! _contains(ir, "@sailfin_runtime_print_info");
 }
 
 // User-emission routing: a `print.info(...)` call site flips to the bare
