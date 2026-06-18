@@ -92,12 +92,14 @@
 //     `fopen("wb"/"ab")` + `fwrite` + `fclose` (portable C stdio).
 //     `write_lines` reads the `SfnArray` `data`/`len` fields through
 //     the `SfnArrayView` overlay. For a real buffer `strlen` recovers
-//     the byte length; a pre-M1.A.2 immediate-codepoint tagged pointer
-//     in the *content* would crash `strlen`/`fwrite`, so those cases
-//     delegate the whole write to the decoding C adapter (the same
-//     `_fs_is_immediate` fallback shape `runtime/sfn/io.sfn`'s print
-//     family uses). Path arguments are never guarded — they follow the
-//     shipped `sfn_fs_read_file` / `_delete` / `_mkdir` convention.
+//     the byte length. A pre-M1.A.2 immediate-codepoint tagged pointer
+//     in the *content* would crash `strlen`/`fwrite`; `write_file` /
+//     `append_file` decode it in pure Sailfin (#1308: `_fs_decode_immediate`
+//     → the native `sfn_str_from_codepoint`, the same shape `io.sfn`'s
+//     print family uses), while `write_lines` still delegates such entries
+//     to the decoding C adapter (its per-entry decode is a follow-up).
+//     Path arguments are never guarded — they follow the shipped
+//     `sfn_fs_read_file` / `_delete` / `_mkdir` convention.
 //
 //   - **`sfn_fs_set_perms` / `sfn_fs_is_executable`** (#1311): pure
 //     Sailfin over the portable libc `chmod` / `access` externs —
@@ -262,19 +264,21 @@ let DIRENT_DNAME_OFFSET: i64 = 19;
 // print family uses). Pre-M1.A.2 a single grapheme can arrive as a
 // `string` with no backing buffer — the codepoint tagged into the
 // pointer value itself (#714/#716). The pure `fopen`/`fwrite` bodies
-// below `strlen`/deref the content pointer, which would crash on such
-// a tagged value, so when `_fs_is_immediate(content)` trips they
-// delegate the whole write to these legacy C adapters, which decode
-// the codepoint to UTF-8 before writing. Path arguments are never
-// guarded (they follow the shipped `sfn_fs_read_file` / `_delete` /
-// `_mkdir` convention — paths are always real buffers, and even the C
-// adapter never decoded the path). These fall away with the encoding
-// itself (#822 / M1.A.2).
-extern fn sailfin_adapter_fs_write_file(path: * u8, contents: * u8) -> void;
-
-extern fn sailfin_adapter_fs_append_file(path: * u8, contents: * u8) -> void;
-
+// below `strlen`/deref the content pointer, which would crash on such a
+// tagged value. `write_file` / `append_file` now decode that path in
+// pure Sailfin (`_fs_decode_immediate` → the native
+// `sfn_str_from_codepoint`); only `write_lines` still delegates the whole
+// write to the legacy C adapter (its per-entry immediate decode is a
+// follow-up). Path arguments are never guarded (paths are always real
+// buffers; even the C adapter never decoded the path). The remaining
+// delegation falls away with the encoding itself (#822 / M1.A.2).
 extern fn sailfin_adapter_fs_write_lines_v2(path: * u8, lines: * u8) -> void;
+
+// `sfn_str_from_codepoint(cp)` — the native Sailfin UTF-8 encoder
+// (`runtime/sfn/string.sfn`, #1308) used to decode an immediate-codepoint
+// `contents` into a real buffer before `fwrite`. Inlined extern per the
+// #306 cross-module-extern workaround documented in the file header.
+extern fn sfn_str_from_codepoint(cp: i64) -> * u8;
 
 // `_fs_is_immediate(data)` — is `data` a legacy immediate-codepoint
 // tagged pointer rather than a real string buffer? Inlined copy of
@@ -290,6 +294,18 @@ fn _fs_is_immediate(data: * u8) -> bool {
     if raw >= 0 && raw <= 127 { return true; }
     if raw != 0 && (raw & 4294967295) == 0 { return true; }
     return false;
+}
+
+// `_fs_decode_immediate(data)` — decode a legacy immediate-codepoint tagged
+// pseudo-pointer into a real NUL-terminated buffer via the native
+// `sfn_str_from_codepoint`, mirroring `io.sfn::_sfn_decode_immediate_name`.
+// The caller has already established `data` is immediate and non-null (the
+// ASCII case is `raw`, the shifted case `raw >> 32`).
+fn _fs_decode_immediate(data: * u8) -> * u8 {
+    let raw: i64 = data as i64;
+    let mut cp: i64 = raw;
+    if raw > 127 { cp = raw >> 32; }
+    return sfn_str_from_codepoint(cp);
 }
 
 // Overlay for the unified `SfnArray` layout (`{ data: T*, len: i64,
@@ -399,18 +415,16 @@ fn sfn_fs_write_file(path: * u8, contents: * u8) -> void ![io] {
     if path as i64 == 0 { return; }
     if contents as i64 == 0 { return; }
 
-    if _fs_is_immediate(contents) {
-        sailfin_adapter_fs_write_file(path, contents);
-        return;
-    }
+    let mut real: * u8 = contents;
+    if _fs_is_immediate(contents) { real = _fs_decode_immediate(contents); }
 
     let mode_str: string = "wb";
     let f: * File = fopen(path, mode_str as * u8);
     if f as i64 == 0 { return; }
 
-    let len: i64 = strlen(contents) as i64;
+    let len: i64 = strlen(real) as i64;
     if len > 0 {
-        fwrite(contents, 1 as usize, len as usize, f);
+        fwrite(real, 1 as usize, len as usize, f);
     }
     fclose(f);
 }
@@ -424,18 +438,16 @@ fn sfn_fs_append_file(path: * u8, contents: * u8) -> void ![io] {
     if path as i64 == 0 { return; }
     if contents as i64 == 0 { return; }
 
-    if _fs_is_immediate(contents) {
-        sailfin_adapter_fs_append_file(path, contents);
-        return;
-    }
+    let mut real: * u8 = contents;
+    if _fs_is_immediate(contents) { real = _fs_decode_immediate(contents); }
 
     let mode_str: string = "ab";
     let f: * File = fopen(path, mode_str as * u8);
     if f as i64 == 0 { return; }
 
-    let len: i64 = strlen(contents) as i64;
+    let len: i64 = strlen(real) as i64;
     if len > 0 {
-        fwrite(contents, 1 as usize, len as usize, f);
+        fwrite(real, 1 as usize, len as usize, f);
     }
     fclose(f);
 }
