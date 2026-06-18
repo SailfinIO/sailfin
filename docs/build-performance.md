@@ -373,7 +373,7 @@ Headline measurement:
 > is the open performance item. (macOS does not honor `ulimit -v`, so the 8 GB cap
 > that backstops the Linux/WSL path is unenforced here.)
 
-Open follow-up: **resolved May 6 via #324.** `_init_arena_enabled` now defaults `1` for installed binaries, with `SAILFIN_USE_ARENA=0` (or `""` / `"false"`) as the opt-out kept for at least one release. `sfn check` and `sfn test` for end users get the arena without surfacing an env-var contract; the prior (now retired) `scripts/build.sh` historically kept its explicit `SAILFIN_USE_ARENA=${SAILFIN_USE_ARENA:-1}` export and CI keeps `SAILFIN_USE_ARENA: "1"` in `.github/workflows/ci.yml` as belt-and-suspenders. Pinned by `compiler/tests/e2e/test_arena_default_on.sh`.
+Open follow-up: **resolved May 6 via #324.** `_init_arena_enabled` now defaults `1` for installed binaries, with `SAILFIN_USE_ARENA=0` (or `""` / `"false"`) as the opt-out kept for at least one release. `sfn check` and `sfn test` for end users get the arena without surfacing an env-var contract; the prior (now retired) `scripts/build.sh` historically kept its explicit `SAILFIN_USE_ARENA=${SAILFIN_USE_ARENA:-1}` export and CI keeps `SAILFIN_USE_ARENA: "1"` in `.github/workflows/ci.yml` as belt-and-suspenders. Pinned by `compiler/tests/e2e/arena_default_on_test.sfn`.
 
 ### Phase 5: Long-Lived Compiler Process (Future)
 

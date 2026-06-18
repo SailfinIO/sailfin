@@ -101,7 +101,7 @@ let NANOS_PER_MILLI: i64 = 1000000;
 // intrinsic loads emit *after* the `call @clock_gettime`, against the
 // same alloca the kernel wrote — no stale cached load is reused (the
 // stale-read hazard the issue calls out; see
-// `test_clock_gettime_reader.sh` for the pinned IR ordering).
+// `clock_gettime_reader_test.sfn` for the pinned IR ordering).
 //
 // Effect: `![clock]` — reading the monotonic clock is the `clock`
 // capability, exactly like `sfn_sleep`. (Contrast `errno()`, which is

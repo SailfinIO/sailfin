@@ -149,7 +149,7 @@ extern fn realpath(path: * u8, resolved: * u8) -> * u8;
 // from the retired C driver into `runtime/native/src/sailfin_runtime.c`.
 // `fn main` invokes this once before delegating to the CLI dispatch;
 // the call is a no-op unless `SAILFIN_DUMP_ARENA_STATS` is truthy.
-// Pinned by `compiler/tests/e2e/test_arena_default_on.sh`.
+// Pinned by `compiler/tests/e2e/arena_default_on_test.sfn`.
 extern fn sailfin_runtime_install_arena_telemetry(label: * u8);
 
 // Self-applied compiler memory budget (`runtime/sfn/platform/rlimit.sfn`).

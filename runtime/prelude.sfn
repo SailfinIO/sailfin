@@ -58,7 +58,7 @@
 import { sfn_print_sfn, sfn_log_execution } from "./sfn/io";
 import { sfn_array_sfn_map } from "./sfn/array";
 import { sfn_sleep } from "./sfn/clock";
-import { sfn_str_sfn_concat, sfn_to_debug_string } from "./sfn/string";
+import { sfn_to_debug_string } from "./sfn/string";
 import { sfn_process_run } from "./sfn/process";
 import { sfn_throw } from "./sfn/exception";
 import {

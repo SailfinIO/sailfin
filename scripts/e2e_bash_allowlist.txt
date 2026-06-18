@@ -16,7 +16,6 @@
 #
 # Format: one bare script basename per line; '#' comments and blank lines ignored.
 
-test_arena_default_on.sh
 test_array_aggregate_shape.sh
 test_binary_capsule_walker.sh
 test_build_diagnostics_format.sh
@@ -35,8 +34,6 @@ test_check_effect_call_site_caret.sh
 test_check_json_schema.sh
 test_check_phase_ledger.sh
 test_check_resolver_scan_memo.sh
-test_clock_gettime_reader.sh
-test_clock_monotonic_id_sentinel.sh
 test_compiler_debug_toggle_env_vars.sh
 test_cross_module_int_signature.sh
 test_cross_module_signature_resolution.sh
@@ -47,7 +44,6 @@ test_drop_emission_try_catch.sh
 test_effect_gate_build_path.sh
 test_effect_gate_build_path_entry.sh
 test_errno_locator_platform.sh
-test_errno_reader.sh
 test_escape_promotion_boundaries.sh
 test_exe_path_intrinsic_platform.sh
 test_exe_path_reader.sh
@@ -78,9 +74,7 @@ test_runner_json_multifile.sh
 test_runner_state_marker.sh
 test_runtime_adapter_filesystem.sh
 test_runtime_adapter_http.sh
-test_runtime_array.sh
 test_runtime_c_cache_invalidates.sh
-test_runtime_char_from_code.sh
 test_runtime_exception_frames.sh
 test_runtime_exec_path.sh
 test_runtime_helper_declare_integrity.sh

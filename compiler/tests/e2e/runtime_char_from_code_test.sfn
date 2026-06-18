@@ -1,0 +1,126 @@
+// E2E test for char_from_code() — issues #874, #1136.
+//
+// Native replacement for the former `test_runtime_char_from_code.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). It compiles the probe
+// at `compiler/tests/e2e/fixtures/char_from_code_probe.sfn` once, then
+// runs the binary three times (each launch a fresh ASLR layout) and pins
+// the raw-byte write/read contract on every run:
+//   1. char_from_code(n).length == 1 for every n in 1..255 (write side).
+//   2. char_code(char_from_code(n)) == n for every n in 1..255 — the read
+//      round-trip, including the #1136 ASLR-determinism guard run thrice.
+//   3. char_from_code(65/48/122) == "A"/"0"/"z" (literal ASCII).
+//   4. char_from_code(200) stays a single raw byte (length 1, code 200)
+//      — a codepoint encoder would give length 2.
+//   5. the multibyte READ path still holds: "é" is 2 bytes, 195 then 169.
+//   6. char_from_code(0) returns "" (documented byte-0 limitation).
+//
+// Build hygiene: the binary is built into a `with_tmp_dir` tree, and the
+// nested compile threads `SAILFIN_TEST_SCRATCH` (+ `PATH` for the
+// clang/linker) via `_child_env` so its `program.ll` cache stays
+// per-invocation under the parallel pool (#1333). The `expect_*` matchers
+// are `![pure]` and unusable from an `![io]` test, so output is asserted
+// with `sfn/strings::find`.
+import { with_tmp_dir } from "sfn/test";
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _fixture_src() -> string ![io] {
+    return fs.readFile("compiler/tests/e2e/fixtures/char_from_code_probe.sfn");
+}
+
+// Count non-overlapping occurrences of `needle` in `haystack`.
+fn _count(haystack: string, needle: string) -> int {
+    let mut total: int = 0;
+    let mut from: int = 0;
+    loop {
+        let at = find(haystack, needle, from);
+        if at < 0 { break; }
+        total += 1;
+        from = at + needle.length;
+    }
+    return total;
+}
+
+// A fresh out-of-tree marker path (survives the `with_tmp_dir`
+// teardown), with any stale value removed so each run starts clean.
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-char-from-code-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Build the probe once, then run the binary three times (fresh ASLR each
+// launch) and concatenate the three stdout captures into `out_marker`.
+// Returns 0 on success, or `-100` if the build itself failed.
+fn _build_and_run3(out_marker: string) -> int ![io] {
+    return with_tmp_dir(fn (dir: string) -> int {
+        let srcpath = dir + "/char_from_code.sfn";
+        fs.writeFile(srcpath, _fixture_src());
+        let binpath = dir + "/char_from_code";
+        let build_exit = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        if build_exit != 0 { return -100; }
+        let mut combined = "";
+        let mut i: int = 0;
+        loop {
+            if i >= 3 { break; }
+            let run_exit = process.run_capture([binpath], []);
+            let out = process.capture_take_stdout();
+            let _re = process.capture_take_stderr();
+            if run_exit != 0 { return run_exit; }
+            combined = combined + out;
+            i += 1;
+        }
+        fs.writeFile(out_marker, combined);
+        return 0;
+    });
+}
+
+test "char_from_code writes raw bytes 1..255 and round-trips across ASLR layouts (#874, #1136)" ![io] {
+    let marker = _marker("run");
+    let exit = _build_and_run3(marker);
+    // Reject the `-100` build-failure sentinel before reading the marker.
+    assert exit == 0;
+    let out = fs.readFile(marker);
+    if fs.exists(marker) { fs.deleteFile(marker); }
+
+    // Each marker line is matched with its trailing newline so the check
+    // pins the exact value (e.g. "HI_LEN=1\n" cannot match "HI_LEN=12").
+    // The probe ran three times, so each clean marker must appear exactly
+    // three times — proving the value held on every fresh ASLR layout, not
+    // just one lucky launch. The two failure-counter markers are the
+    // load-bearing #1136 guard: a regression that reintroduced the
+    // ASLR-dependent mis-decode would print a nonzero count (so fewer than
+    // three "=0" lines) on at least one launch.
+    assert _count(out, "LEN_FAILURES=0\n") == 3;
+    assert _count(out, "ROUNDTRIP_FAILURES=0\n") == 3;
+    assert _count(out, "ASCII_OK=1\n") == 3;
+    assert _count(out, "HI_LEN=1\n") == 3;
+    assert _count(out, "HI_CODE=200\n") == 3;
+    assert _count(out, "EACUTE_LEN=2\n") == 3;
+    assert _count(out, "EACUTE_B0=195\n") == 3;
+    assert _count(out, "EACUTE_B1=169\n") == 3;
+    assert _count(out, "ZERO_LEN=0\n") == 3;
+}

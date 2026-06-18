@@ -467,7 +467,7 @@ Steps 2, 3, 4 are independently revertible. Step 1 must precede all of them.
   - No leg emits `call`/`declare` to `sailfin_intrinsic_exe_path` (sentinel must
     vanish into the concrete symbol).
   This test is host-independent and runs on the Linux CI runner.
-- **exec-path reader test** — clone `test_errno_reader.sh` into
+- **exec-path reader test** — clone `errno_reader_test.sfn` into
   `test_exe_path_reader.sh`, pinning the shape of the *real* shipped
   `exec.sfn::exe_path()` body per forced target (locator call + `realpath`
   canonicalization). Host-independent, runs on Linux CI.

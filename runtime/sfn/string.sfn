@@ -36,23 +36,26 @@
 // annotations attach to *adapters* that wrap these primitives,
 // never to the primitives themselves.
 //
-// #1289 / #1283 Gap 1: `OwnedBuf` and its grow-at-tip constructor /
-// append (`owned_buf_new` / `owned_buf_append`) come from the canonical
-// `./memory/ownedbuf` module rather than being inlined here. The inline
-// copy #1217 (Phase R1) shipped existed only because the
-// runtime-sfn-source emit path could not resolve a cross-module
-// struct-returning call — the `OwnedBuf` aggregate return died at
-// `core_call_emission.sfn` with `cannot resolve return type for call
-// to …` (an inline `extern fn` can't carry the struct either — C-ABI
-// only, E0805). #1288 taught `_compile_runtime_sfn_sources` to stage
-// sibling runtime modules' `.sfn-asm` into the import-context the
-// lowering consults, so the call now resolves; with a seed containing
-// #1288 pinned, this consumer collapses the duplication. `concat` /
-// `append` therefore route growth through `ownedbuf.sfn`'s arena
-// externs (`sfn_arena_sfn_*`); `ownedbuf.sfn` and `arena.sfn` are
-// linked alongside this module via `runtime/native/capsule.toml`'s
-// `sfn-sources`.
-import { OwnedBuf, owned_buf_new, owned_buf_append } from "./memory/ownedbuf";
+// #1289 / #1283 Gap 1: `OwnedBuf` and its grow-at-tip constructor
+// (`owned_buf_new`) come from the canonical `./memory/ownedbuf` module
+// rather than being inlined here. The inline copy #1217 (Phase R1) shipped
+// existed only because the runtime-sfn-source emit path could not resolve a
+// cross-module struct-returning call — the `OwnedBuf` aggregate return died
+// at `core_call_emission.sfn` with `cannot resolve return type for call to …`
+// (an inline `extern fn` can't carry the struct either — C-ABI only, E0805).
+// #1288 taught `_compile_runtime_sfn_sources` to stage sibling runtime
+// modules' `.sfn-asm` into the import-context the lowering consults, so the
+// call now resolves; with a seed containing #1288 pinned, this consumer
+// collapses the duplication. `ownedbuf.sfn` and `arena.sfn` are linked
+// alongside this module via `runtime/native/capsule.toml`'s `sfn-sources`.
+//
+// #1318 retired the OwnedBuf-returning `sfn_str_sfn_concat` / `_append`
+// proof-of-life wrappers; the real `sfn_str_concat` / `sfn_str_append` bodies
+// below allocate through the arena directly to match the registry's SfnString
+// `{i8*, i64}` ABI, so `owned_buf_append` is no longer imported. `owned_buf_new`
+// is still used by the number/int formatters (`sfn_int_to_str` /
+// `sfn_number_to_str`).
+import { OwnedBuf, owned_buf_new } from "./memory/ownedbuf";
 
 // Why inline the libc externs? The same reason `arena.sfn` does:
 // the released seed compiler snapshots `runtime/sfn/platform/libc.sfn`
@@ -63,6 +66,14 @@ import { OwnedBuf, owned_buf_new, owned_buf_append } from "./memory/ownedbuf";
 extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
 
 extern fn memchr(s: * u8, c: i32, n: usize) -> * u8;
+
+// #1318: `sfn_str_concat` / `sfn_str_append` copy the operand payloads
+// into arena storage with `memcpy`, and read the `SAILFIN_MAX_STRING_CONCAT`
+// concat-limit env var with `getenv`. Inlined for the same seed-snapshot
+// reason as the libc externs above (the `arena.sfn` / `io.sfn` discipline).
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+extern fn getenv(name: * u8) -> * u8;
 
 // #1372: bounded length scan (16 MiB cap) for `sfn_str_len`/`sfn_str_eq`.
 extern fn strnlen(s: * u8, n: usize) -> usize;
@@ -158,6 +169,21 @@ extern fn sfn_str_from_byte(byte_value: i64) -> * u8;
 extern fn sfn_arena_global() -> * u8;
 
 extern fn sfn_arena_enabled() -> bool;
+
+// #1318: the arena bump allocator + grow-at-tip realloc backing the
+// `sfn_str_concat` / `sfn_str_append` bodies. The bare `sfn_arena_alloc`
+// is the Sailfin export in `runtime/sfn/memory/arena.sfn` (#1309);
+// `sfn_arena_realloc` is still the C arena entrypoint (retires with the
+// rest of `sailfin_arena.c` in #822). Both are reached as C-ABI externs,
+// the same discipline `ownedbuf.sfn` follows for `sfn_arena_sfn_*`.
+extern fn sfn_arena_alloc(arena: * u8, size: usize, align: usize) -> * u8;
+
+extern fn sfn_arena_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, align: usize) -> * u8;
+
+// #1318: the concat/append limit gate raises ValueError (which aborts the
+// process) when a concatenation would exceed `SAILFIN_MAX_STRING_CONCAT`
+// or overflow — byte-faithful to the C `_sfn_str_check_concat_limit`.
+extern fn sailfin_runtime_raise_value_error(message: * u8) -> void;
 
 // #1372: UTF-8 byte length of a validated codepoint — mirrors the
 // branch widths of the C `_utf8_encode`. Used to size an immediate-
@@ -308,61 +334,181 @@ fn sfn_str_sfn_to_cstr(s: * u8) -> * u8 { return s; }
 // aggregate shape) doesn't need to add it then.
 fn sfn_str_sfn_from_cstr(s: * u8) -> * u8 { return s; }
 
-// `sfn_str_sfn_concat(a, b)` — proof-of-life Sailfin trampoline
-// for the M2.4b allocating wave. Architect spec
-// (`runtime_architecture.md` §2.2): bump `a.len + b.len` bytes
-// into the supplied arena, memcpy both payloads, return the
-// `SfnString` aggregate. Today's body delegates to the legacy
-// NUL-terminated `sailfin_runtime_string_concat` because the
-// Sailfin frontend can't take an SfnString aggregate by value
-// (M1.A.2 hasn't landed). The user-emission hot path bypasses
-// this wrapper entirely and lands on the C entrypoint
-// `sfn_str_concat`, which has the real arena ABI.
+// #1318 (C5 of epic #1308): real Sailfin `sfn_str_concat` / `sfn_str_append`
+// bodies over the registry's SfnString `{i8*, i64}` ABI. The bare names ARE
+// the emission targets (`runtime_helpers.sfn`: `string.concat` →
+// `return_type "{i8*, i64}"`, `parameter_types ["{i8*, i64}", "{i8*, i64}",
+// "ptr"]`, `native_signature "sfn_str_concat"`); the C defs in
+// `sailfin_runtime.c` are now `static`, so the linker binds every `a + b`
+// call site to these definitions. The retired `sfn_str_sfn_concat` /
+// `sfn_str_sfn_append` OwnedBuf proof-of-life wrappers had the wrong ABI (an
+// infix the registry never targeted).
 //
-// #1217 (Phase R1): `concat` returns an owned `OwnedBuf` (proposal
-// §5.1 "concat returns owned") built by appending both operands into a
-// fresh buffer via the canonical `owned_buf_new` / `owned_buf_append`
-// (imported from `./memory/ownedbuf` — #1289 collapsed the inlined
-// `_str_buf_*` copy once #1288's sibling-staging let the cross-module
-// `OwnedBuf`-returning call resolve). The result is the unique owner of
-// its bytes, so the chained-append grow-at-tip the architect spec
-// describes is sound by construction — no aliasing of either input's
-// storage (the #1205 hazard class). Storage is the process-global arena
-// when arena mode is on, gated on `sfn_arena_enabled()` so the
-// `SAILFIN_USE_ARENA=0` opt-out (ASAN / diagnostics) is honored — when
-// disabled, `arena_addr` is `0` and `owned_buf_new` falls back to
-// libc-backed storage. Params are unchanged (`* u8`, `* u8`) — the byte
-// lengths are recovered via the local `sfn_str_len`. The two
-// `owned_buf_append` calls are moves of the unique buffer
-// (consume-and-return); the raw extern interior they route through sits
-// behind `unsafe` inside `ownedbuf.sfn`.
-fn sfn_str_sfn_concat(a: * u8, b: * u8) -> OwnedBuf {
-    let a_len: i64 = sfn_str_len(a);
-    let b_len: i64 = sfn_str_len(b);
-    let mut arena_addr: i64 = 0;
-    if sfn_arena_enabled() { arena_addr = sfn_arena_global() as i64; }
-    let total: i64 = a_len + b_len;
-    let buf: OwnedBuf = owned_buf_new(arena_addr, total);
-    let grown: OwnedBuf = owned_buf_append(buf, a as i64, a_len);
-    return owned_buf_append(grown, b as i64, b_len);
+// ABI. A `{i8*, i64}` operand passed by value is two integer eightbytes
+// (System V / AAPCS), so each `SfnString` parameter splits into a
+// `(data: * u8, len: i64)` scalar pair — the same register classification
+// `io.sfn`'s `sfn_getenv` relies on, and the only self-host-safe spelling
+// under the seed (an `SfnString`-typed *parameter* hits the aggregate-by-value
+// gap `io.sfn` documents). The bodies return a bare `* u8`; the `-> SfnString`
+// return-path coercion wraps it into `{i8*, i64}`, recovering the length via
+// `sfn_str_len` (a NUL scan) — byte-identical to the C body's `{data, total}`
+// because the buffer is NUL-terminated at `total` and the `* u8` string model
+// carries no embedded NULs.
+//
+// ⚠️ Reuse-window. The C `sfn_str_concat` is window-agnostic — the
+// `_concat_reuse_*` globals it once warned about are vestigial (declared,
+// never read/written). These bodies mirror that exactly: they allocate fresh
+// per call and introduce NO `_runtime_enter` / reuse-seq bump. (Over-bumping a
+// hot path was the O(n²)/8 GiB-OOM failure mode of the abandoned real-buffer
+// attempt; avoided here by construction.) `sfn_str_decode_owned` (the
+// immediate-decode bridge) is a pass-through for real pointers, so the chained
+// `a + b + c` hot path performs no extra allocation.
+// `_sfn_resolve_arena(arena_slot)` derefs the `SfnArena **` slot once to the
+// live arena handle, falling back to the process-global arena when the slot
+// or its contents are null (the C `sfn_str_concat`'s defensive resolution).
+// Concat is unconditionally arena-backed by design — the `SAILFIN_USE_ARENA=0`
+// opt-out routes only the legacy C entrypoints — so this never gates on
+// `sfn_arena_enabled()`.
+fn _sfn_resolve_arena(arena_slot: * u8) -> * u8 {
+    if (arena_slot as i64) != 0 {
+        let slot: * i64 = arena_slot as * i64;
+        let handle: i64 = atomic_load(slot);
+        if handle != 0 { return handle as * u8; }
+    }
+    return sfn_arena_global();
 }
 
-// `sfn_str_sfn_append(buf, suffix_addr, suffix_len)` — #1217 (Phase
-// R1): the append hot path, a **move** over `OwnedBuf` (proposal §5.1
-// "`sfn_str_sfn_append` takes/returns `OwnedBuf` (move)"). It consumes
-// the unique `buf`, appends `suffix_len` bytes from `suffix_addr`, and
-// returns the (possibly relocated) buffer — delegating to the canonical
-// `owned_buf_append` (imported from `./memory/ownedbuf`), which routes
-// growth through the arena's grow-if-at-tip realloc. Because the
-// caller's `buf` is the unique live owner (the ownership checker proves
-// it; no alias), the in-place grow-at-tip is sound — this is the
-// structural close of the #1205 aliasing hazard. The delegation routes
-// through `ownedbuf.sfn`; the raw extern interior sits behind `unsafe`
-// there. The compiler has no callers of `string.append` yet (the
-// descriptor row is symbol-parking), so the signature flip breaks no
-// call site.
-fn sfn_str_sfn_append(buf: OwnedBuf, suffix_addr: i64, suffix_len: i64) -> OwnedBuf {
-    return owned_buf_append(buf, suffix_addr, suffix_len);
+// Cached `SAILFIN_MAX_STRING_CONCAT` limit (`-1` = unprobed). Mirrors the C
+// `_sfn_str_check_concat_limit` default of 20000000; a negative env value
+// clamps to 0 (disabled). The env literal is bound to a `string` local before
+// the `* u8` cast — the proven env-read pattern (`arena.sfn` / `io.sfn`); the
+// inline `getenv("…" as * u8)` form miscompiles under the seed. A provisional
+// value is published before the read for the same re-entrancy discipline as
+// `arena.sfn`.
+let mut _sfn_concat_limit_state: i64 = -1;
+
+fn _sfn_concat_limit() -> i64 {
+    if _sfn_concat_limit_state < 0 {
+        _sfn_concat_limit_state = 20000000;
+        let name: string = "SAILFIN_MAX_STRING_CONCAT";
+        let env: * u8 = getenv(name as * u8);
+        if (env as i64) != 0 {
+            let parsed: i64 = strtod(env, null) as i64;
+            if parsed < 0 { _sfn_concat_limit_state = 0; } else {
+                _sfn_concat_limit_state = parsed;
+            }
+        }
+    }
+    return _sfn_concat_limit_state;
+}
+
+// `_sfn_check_concat_limit(alen, blen)` raises ValueError (aborting the
+// process) when `alen + blen` exceeds the configured limit — byte-faithful to
+// the C gate so a runaway concat can't silently exhaust the arena.
+fn _sfn_check_concat_limit(alen: i64, blen: i64) -> void {
+    let limit: i64 = _sfn_concat_limit();
+    if limit > 0 {
+        if (alen + blen) > limit {
+            let msg: string = "string concat limit exceeded";
+            sailfin_runtime_raise_value_error(msg as * u8);
+        }
+    }
+}
+
+// `sfn_str_concat(a, b, arena_slot)` — bump `a.len + b.len + 1` bytes into the
+// resolved arena, memcpy both (immediate-decoded) payloads, NUL-terminate, and
+// return the `{data, total}` aggregate. See the family comment above.
+//
+// Allocation. The C body requested `sfn_arena_alloc(arena, total + 1, 1)`;
+// this asks for `roundup8(total + 1)` bytes at 8-byte alignment instead. That
+// is ABI-invisible (the returned `* u8` still points at `total` bytes + a NUL)
+// but required: the seed cannot lower a direct single-byte `* u8` store, so
+// the trailing NUL is written with the word read-modify-write `_num_put_byte`,
+// which must stay inside an 8-aligned allocation whose capacity is a multiple
+// of 8 (the `ownedbuf.sfn` word-load discipline) to avoid an over-read past
+// the page tip.
+fn sfn_str_concat(a_data: * u8, a_len: i64, b_data: * u8, b_len: i64, arena_slot: * u8) -> SfnString {
+    let mut alen: i64 = a_len;
+    if alen < 0 { alen = 0; }
+    let mut blen: i64 = b_len;
+    if blen < 0 { blen = 0; }
+    _sfn_check_concat_limit(alen, blen);
+    let total: i64 = alen + blen;
+    // i64 overflow guard (mirrors the C `alen > SIZE_MAX - blen` arm).
+    if total < alen {
+        let overflow: string = "";
+        return overflow;
+    }
+
+    let arena: * u8 = _sfn_resolve_arena(arena_slot);
+    let cap: i64 = ((total + 1 + 7) / 8) * 8;
+    let data: * u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
+    if (data as i64) == 0 {
+        let empty: string = "";
+        return empty;
+    }
+
+    // Decode immediate-codepoint operands before the memcpy (a pass-through for
+    // real pointers, so the chained-concat hot path does not allocate). `alen`
+    // / `blen` are already the decoded UTF-8 byte widths the caller computed.
+    let a_real: * u8 = sfn_str_decode_owned(a_data);
+    let b_real: * u8 = sfn_str_decode_owned(b_data);
+    if alen > 0 {
+        if (a_real as i64) != 0 { memcpy(data, a_real, alen as usize); }
+    }
+    if blen > 0 {
+        if (b_real as i64) != 0 {
+            memcpy((data as i64 + alen) as * u8, b_real, blen as usize);
+        }
+    }
+    _num_put_byte(data as i64 + total, 0);
+    return data;
+}
+
+// `sfn_str_append(dst, suffix, arena_slot)` — grow `dst` in place (or relocate)
+// to hold `dst.len + suffix.len` bytes via the arena's grow-if-at-tip realloc,
+// memcpy the (immediate-decoded) suffix at the tail, NUL-terminate, and write
+// the updated `{data, len}` back through `dst` (a `SfnString *`). No emission
+// site targets this (`native_signature: null` at `runtime_helpers.sfn`); it is
+// ported for link-completeness, sharing concat's arena / limit machinery. The
+// `dst` fields are read/written through the `{data@0, len@8}` layout with the
+// `atomic_load` / `atomic_store` word discipline the runtime uses for `* T`
+// field access under the seed. An immediate-codepoint / null `dst.data` has no
+// real buffer to grow, so the body no-ops (the C body's guard).
+fn sfn_str_append(dst: * u8, suffix_data: * u8, suffix_len: i64, arena_slot: * u8) -> void {
+    if (dst as i64) == 0 { return; }
+    if suffix_len <= 0 { return; }
+    if (suffix_data as i64) == 0 { return; }
+
+    let data_slot: * i64 = dst as * i64;
+    let len_slot: * i64 = (dst as i64 + 8) as * i64;
+    let old_data: i64 = atomic_load(data_slot);
+    let old_len: i64 = atomic_load(len_slot);
+    if old_data == 0 { return; }
+    if sfn_str_immediate_codepoint(old_data as * u8) >= 0 { return; }
+
+    let mut olen: i64 = old_len;
+    if olen < 0 { olen = 0; }
+    let mut slen: i64 = suffix_len;
+    if slen < 0 { slen = 0; }
+    _sfn_check_concat_limit(olen, slen);
+    let new_len: i64 = olen + slen;
+    if new_len < olen { return; }
+
+    let arena: * u8 = _sfn_resolve_arena(arena_slot);
+    let new_cap: i64 = ((new_len + 1 + 7) / 8) * 8;
+    let grown: * u8 = sfn_arena_realloc(arena, old_data as * u8, (olen + 1) as usize, new_cap as usize, 8 as usize);
+    if (grown as i64) == 0 { return; }
+
+    let suffix_real: * u8 = sfn_str_decode_owned(suffix_data);
+    if slen > 0 {
+        if (suffix_real as i64) != 0 {
+            memcpy((grown as i64 + olen) as * u8, suffix_real, slen as usize);
+        }
+    }
+    _num_put_byte(grown as i64 + new_len, 0);
+    atomic_store(data_slot, grown as i64);
+    atomic_store(len_slot, new_len);
 }
 
 // #1315 (C4 of epic #1308) — real Sailfin accessor bodies.
