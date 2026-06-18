@@ -191,13 +191,13 @@ extern "C"
     SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text);
     SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value);
 
-    // M1.B v2 array helpers — accept the SfnArray struct (heap-boxed) by
-    // pointer, with `cap` exposed inline. Bodies allocate plain malloc'd
-    // backing storage (no hidden header / canary slots) and grow via
-    // realloc when `len == cap`. Legacy entrypoints above remain the
+    // M1.B v2 array helpers — `sailfin_runtime_concat_v2` /
+    // `sailfin_runtime_append_string_v2` are now defined in
+    // `runtime/sfn/array.sfn` (#1308 link-ownership flip); the C bodies are
+    // retained `static` with no external linkage, so their prototypes are
+    // dropped here. They accept the SfnArray struct (heap-boxed) by pointer
+    // with `cap` exposed inline. Legacy entrypoints above remain the
     // first-pass / seed-compiled IR's link target.
-    SfnArray *sailfin_runtime_concat_v2(SfnArray *a, SfnArray *b);
-    SfnArray *sailfin_runtime_append_string_v2(SfnArray *a, char *text);
 
     // M5.3 (#471): convert C `(argc, argv)` into the SfnArray ABI shape
     // that user `fn main(argv: string[])` expects. The emitted `@main`
@@ -230,16 +230,12 @@ extern "C"
     // newly appended slot (caller writes the element bytes there).
     char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int64_t elem_size);
 
-    // M1.B v2 byte-wise push: takes an explicit cap pointer. Grows by
-    // realloc when `*len_ptr == *cap_ptr` (doubling cap, minimum 8) and
-    // writes the new buffer back through `*data_ptr` and the new
-    // capacity through `*cap_ptr`. Returns a pointer to the slot for
-    // the just-incremented length so the caller can store the new
-    // element. No hidden header, no canary slots.
-    char *sailfin_runtime_array_push_slot_v2(void **data_ptr,
-                                             int64_t *len_ptr,
-                                             int64_t *cap_ptr,
-                                             int64_t elem_size);
+    // M1.B v2 byte-wise push: now defined in `runtime/sfn/array.sfn`
+    // (#1308 link-ownership flip); the C body is retained `static` only, so
+    // its prototype is dropped here. Takes an explicit cap pointer, grows by
+    // realloc when `*len_ptr == *cap_ptr` (doubling cap, minimum 8), writes
+    // the new buffer back through `*data_ptr` and the new capacity through
+    // `*cap_ptr`, and returns a pointer to the just-incremented slot.
 
     // ---- Byte helpers ----
 
