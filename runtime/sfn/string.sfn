@@ -132,20 +132,28 @@ extern fn sailfin_runtime_string_to_number(s: * u8) -> f64;
 // `_concat_reuse_*` globals are write-only, never read). The remaining
 // immediate-arms in the bodies below are now provably dead (`cp` is always
 // -1); they are deleted, along with the C classifier + ~36 consumer guards, in
-// the #822 file-deletion cleanup. `read_byte` / `grapheme_byte` stay C externs
-// (the seed cannot lower a sub-word load / byte-store + arena-alloc).
+// the #822 file-deletion cleanup.
 //
-// #1308 (two-phase): the `load_byte` builtin that replaces these bridges ships
-// in the compiler in a prior PR; the runtime flip to call it lands once a seed
-// carrying `load_byte` is pinned (the seed typechecks this module during the
-// self-host build, so it must recognize the builtin first).
+// #1308: `read_byte` / `grapheme_byte` are now native Sailfin (the C defs are
+// deleted, seed 0.7.0-alpha.41 carries the `load_byte` builtin). They read a
+// single byte from `real` via `load_byte` (compiler/src/llvm/byte_load.sfn) — a
+// true `load i8` + `zext`, sound at any alignment, unlike the word-load
+// `_owned_buf_load_byte` which over-reads the enclosing 8-aligned word and is
+// only safe on padded `owned_buf_new` storage. `read_byte` is byte-identical to
+// the C `(int64_t)(unsigned char)real[idx]`; `grapheme_byte` reuses
+// `sfn_str_from_byte` (the arena-backed single-byte producer) for the 1-byte
+// buffer the C body built with `malloc(2)`.
 fn sfn_str_immediate_codepoint(s: * u8) -> i64 { return -1; }
 
 fn sfn_str_decode_owned(s: * u8) -> * u8 { return s; }
 
-extern fn sfn_str_read_byte(s: * u8, idx: i64) -> i64;
+fn sfn_str_read_byte(s: * u8, idx: i64) -> i64 {
+    return load_byte((s as i64) + idx);
+}
 
-extern fn sfn_str_grapheme_byte(real: * u8, idx: i64) -> * u8;
+fn sfn_str_grapheme_byte(real: * u8, idx: i64) -> * u8 {
+    return sfn_str_from_byte(load_byte((real as i64) + idx));
+}
 
 // `sfn_str_from_codepoint(cp)` — #1308 (C5): real Sailfin UTF-8 encode of a
 // single codepoint into a fresh arena-backed NUL-terminated buffer (the C
