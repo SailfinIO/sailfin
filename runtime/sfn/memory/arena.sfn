@@ -120,6 +120,21 @@ extern fn strcmp(a: * u8, b: * u8) -> i32;
 
 extern fn abort() -> void;
 
+// Telemetry path (#1309 `sfn_arena_print_stats` port). `strlen`
+// measures each NUL-terminated literal/rendered piece and `write`
+// emits straight to fd 2 (stderr). The raw libc write avoids the
+// `{i8*, i64}` aggregate-string ABI hazard a `* u8 as string` round-trip
+// would carry (cf. the #1372 note in `runtime/sfn/platform/rlimit.sfn`)
+// and keeps the snapshot bytes exact. Integers are rendered inline (see
+// `_arena_write_i64`) rather than via `string.sfn`'s `sfn_int_to_str`:
+// arena.sfn is emitted and linked **standalone** by
+// `test_runtime_memory_arena.sh`, so it must depend on nothing beyond
+// libc + the symbols that harness stubs — a cross-module
+// `sfn_int_to_str` reference would fail that link.
+extern fn strlen(s: * u8) -> usize;
+
+extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+
 // `ArenaPage` is the per-page bookkeeping header (32 bytes, four
 // i64 slots). `data_addr` points at the page's backing byte buffer
 // (malloc'd separately from this header). `capacity` is the buffer
@@ -702,4 +717,148 @@ fn sfn_arena_sfn_rewind(encoded_mark: number) -> void {
     // current allocation target.
     mark_page.used = used;
     arena.current_addr = walker;
+}
+
+// ====================================================================
+// Arena statistics (#1309). Port of the atexit telemetry helper
+// `sfn_arena_print_stats` (`sailfin_arena.c:139`), the last live
+// consumer of which is the C runtime's process-exit path
+// (`sailfin_runtime.c:713`). The bare `sfn_arena_print_stats` forwarder
+// below is the link target that caller binds to by name.
+//
+// Telemetry precision is non-contractual, so this renders raw byte
+// counts as plain integers (no float MB formatting) and utilization as
+// an integer percent — sidestepping float formatting entirely while
+// keeping the grep-recognizable token shape:
+//   [sailfin-arena] pages=<N> capacity=<bytes> used=<bytes> allocated=<bytes> utilization=<pct>%
+//
+// Integers are formatted inline — arena.sfn is emitted and linked
+// **standalone** by `test_runtime_memory_arena.sh`, so it must not
+// reference `string.sfn`'s `sfn_int_to_str` (which would fail that
+// link). The byte stores reuse the same word-aligned
+// `atomic_load`/`atomic_store` discipline as `string.sfn`'s
+// `_num_put_byte`, so a single-byte write never races a neighbouring
+// byte in the same 8-byte word.
+// `_arena_put_byte(addr, value)` stores one byte at `addr` via a
+// read-modify-write on its enclosing 8-byte word. Same construction as
+// `string.sfn::_num_put_byte`.
+fn _arena_put_byte(addr: i64, value: i64) -> void {
+    let word_addr: i64 = (addr / 8) * 8;
+    let shift: i64 = (addr - word_addr) * 8;
+    let slot: * i64 = word_addr as * i64;
+    let word: i64 = atomic_load(slot);
+    let mask: i64 = 255 << shift;
+    let current: i64 = word & mask;
+    let placed: i64 = (value & 255) << shift;
+    atomic_store(slot, (word - current) + placed);
+}
+
+// `_arena_write_lit(s)` writes a NUL-terminated string literal to fd 2
+// using its `strlen`. Used for the fixed label tokens.
+fn _arena_write_lit(s: * u8) -> void ![io] {
+    if s as i64 == 0 { return; }
+    let _ = write(2, s, strlen(s));
+}
+
+// `_arena_write_i64(value)` renders a non-negative i64 as decimal into a
+// small malloc'd scratch buffer and writes it to fd 2. The stats values
+// (page count, byte sums, percent) are all non-negative, so no sign
+// handling is needed; a 20-byte buffer holds any i64's decimal digits.
+fn _arena_write_i64(value: i64) -> void ![io] {
+    let buf: * u8 = malloc(24 as usize);
+    if buf as i64 == 0 { return; }
+    let base: i64 = buf as i64;
+
+    if value == 0 {
+        _arena_put_byte(base, 48);
+        let _ = write(2, buf, 1 as usize);
+        free(buf);
+        return;
+    }
+
+    // Count digits.
+    let mut nd: i64 = 0;
+    let mut t: i64 = value;
+    loop {
+        if t == 0 { break; }
+        t = t / 10;
+        nd = nd + 1;
+    }
+
+    // Write least-significant digit first into the reserved span.
+    let mut wp: i64 = nd - 1;
+    let mut x: i64 = value;
+    loop {
+        if x == 0 { break; }
+        let d: i64 = x % 10;
+        _arena_put_byte(base + wp, 48 + d);
+        wp = wp - 1;
+        x = x / 10;
+    }
+
+    let _ = write(2, buf, nd as usize);
+    free(buf);
+}
+
+// `sfn_arena_sfn_print_stats(arena)` walks the page chain summing each
+// page's `capacity` and `used`, counts pages, and reads
+// `total_allocated`. **All sums/counts are computed first** so the
+// reported numbers are a clean snapshot — the subsequent rendering
+// `malloc`s scratch from libc (not this arena), but even so the figures
+// are already captured into locals and cannot be perturbed. Null arena
+// is a no-op.
+fn sfn_arena_sfn_print_stats(arena: * u8) -> void ![io] {
+    if arena as i64 == 0 { return; }
+    let a: * Arena = arena as * Arena;
+
+    // Snapshot pass: walk first→next summing capacity/used and counting
+    // pages before any rendering happens.
+    let mut total_capacity: i64 = 0;
+    let mut total_used: i64 = 0;
+    let mut page_count: i64 = 0;
+    let mut walker: i64 = a.first_addr;
+    loop {
+        if walker == 0 { break; }
+        let p: * ArenaPage = walker as * ArenaPage;
+        total_capacity = total_capacity + p.capacity;
+        total_used = total_used + p.used;
+        page_count = page_count + 1;
+        walker = p.next_addr;
+    }
+    let total_allocated: i64 = a.total_allocated;
+
+    // Integer-percent utilization (0 when there is no capacity).
+    let mut utilization: i64 = 0;
+    if total_capacity > 0 {
+        utilization = (total_used * 100) / total_capacity;
+    }
+
+    // Render after the snapshot is fully captured.
+    let prefix: string = "[sailfin-arena] pages=";
+    let sep_capacity: string = " capacity=";
+    let sep_used: string = " used=";
+    let sep_allocated: string = " allocated=";
+    let sep_util: string = " utilization=";
+    let suffix: string = "%\n";
+
+    _arena_write_lit(prefix as * u8);
+    _arena_write_i64(page_count);
+    _arena_write_lit(sep_capacity as * u8);
+    _arena_write_i64(total_capacity);
+    _arena_write_lit(sep_used as * u8);
+    _arena_write_i64(total_used);
+    _arena_write_lit(sep_allocated as * u8);
+    _arena_write_i64(total_allocated);
+    _arena_write_lit(sep_util as * u8);
+    _arena_write_i64(utilization);
+    _arena_write_lit(suffix as * u8);
+}
+
+// `sfn_arena_print_stats(arena)` — bare-named entry point. Forwards to
+// `sfn_arena_sfn_print_stats`. Mirrors the `sfn_arena_realloc` forwarder
+// (#1309): the C `sfn_arena_print_stats` body retires, this becomes the
+// link target the C-runtime atexit telemetry path
+// (`sailfin_runtime.c:713`) binds to by name.
+fn sfn_arena_print_stats(arena: * u8) -> void ![io] {
+    sfn_arena_sfn_print_stats(arena);
 }

@@ -18,10 +18,12 @@
 #                    `sfn_arena_mark` / `sfn_arena_rewind` (those names
 #                    belong to the live C arena and would collide at
 #                    link until M3 retires the C source).
-#   3. encoding roundtrip — link the emitted `.ll` against the real C
-#                    arena (`runtime/native/src/sailfin_arena.c`) and a
-#                    harness that, with arena mode ON, runs
-#                    mark → alloc → rewind and asserts the rewind
+#   3. encoding roundtrip — link the emitted `.ll` (which #1309 made
+#                    self-contained: `sfn_arena_create`/`alloc`/`global`/
+#                    `enabled` and the `sfn_arena_sfn_mark`/`_rewind` pair
+#                    all live in arena.sfn now that `sailfin_arena.c` is
+#                    deleted) against a harness that, with arena mode ON,
+#                    runs mark → alloc → rewind and asserts the rewind
 #                    reclaims the post-mark bump (a fresh alloc reuses
 #                    the rewound offset). Also asserts mark on a
 #                    on an enabled arena rewind(0) resets to the page-0
@@ -119,11 +121,14 @@ test_no_bare_c_arena_collision() {
 }
 
 test_mark_rewind_roundtrip() {
-    # Functional roundtrip against the REAL C arena. The Sailfin
-    # mark/rewind bodies read the process-global arena via the C
+    # Functional roundtrip against the Sailfin arena. #1309 deleted
+    # `sailfin_arena.c`, so the emitted `arena.ll` is self-contained:
+    # `sfn_arena_create`/`alloc`/`global`/`enabled` plus the
+    # `sfn_arena_sfn_mark`/`_rewind` pair all live there. The Sailfin
+    # mark/rewind bodies read the process-global arena via the Sailfin
     # `sfn_arena_global()` and walk its page chain by field offset, so
-    # the harness links the actual `sailfin_arena.c` (not a stub) and
-    # drives it with arena mode forced on.
+    # the harness links only `arena.ll` (no C arena) and drives it with
+    # arena mode forced on.
     local ll="$SCRATCH/arena.ll"
     if [ ! -f "$ll" ]; then
         echo "[test]   $ll missing — test_emit_define_shape must run first"
@@ -137,12 +142,7 @@ test_mark_rewind_roundtrip() {
         return 0
     fi
 
-    local arena_c="$REPO_ROOT/runtime/native/src/sailfin_arena.c"
     local arena_inc="$REPO_ROOT/runtime/native/include"
-    if [ ! -f "$arena_c" ]; then
-        echo "[test]   C arena source missing at $arena_c"
-        return 1
-    fi
 
     local harness="$SCRATCH/harness.c"
     cat > "$harness" <<'CHARNESS'
@@ -174,13 +174,12 @@ void sfn_type_register(void *meta) { (void)meta; }
 void *sfn_alloc_struct(long size_bytes) { return calloc(1, (size_t)size_bytes); }
 
 /* The Sailfin allocator bodies in arena.ll reference
- * `malloc`/`free`/`memcpy` — all satisfied by libc. #1309 moved
- * `sfn_arena_enabled` / `sfn_arena_global` / `sfn_arena_alloc` /
- * `sfn_arena_create` INTO arena.ll (the C namesakes were removed); this
- * harness links arena.ll for those and sailfin_arena.c for the still-C
- * `sfn_arena_realloc`/`reset`/`destroy`/`print_stats`/`mark`/`rewind`
- * that share the same global handle. We force arena mode on by setting
- * the env var before the first `sfn_arena_global()` call. */
+ * `malloc`/`free`/`memcpy` — all satisfied by libc. #1309 deleted
+ * `sailfin_arena.c`: `sfn_arena_enabled` / `sfn_arena_global` /
+ * `sfn_arena_alloc` / `sfn_arena_create` and the
+ * `sfn_arena_sfn_mark`/`_rewind` pair all live in arena.ll now, so this
+ * harness links arena.ll alone (no C arena). We force arena mode on by
+ * setting the env var before the first `sfn_arena_global()` call. */
 int main(void) {
     /* ---- DISABLED arena: mark→0.0, rewind inert (genuine no-op) ----
      * Run first, in a forked child that never enables the arena (the
@@ -269,11 +268,11 @@ int main(void) {
 CHARNESS
 
     local bin="$SCRATCH/roundtrip"
-    # Link the emitted Sailfin arena IR + the real C arena. `-lm` for
-    # the seed's libm literal-coercion references; `-Wno-override-module`
-    # for the emitted target triple.
+    # Link the emitted Sailfin arena IR (self-contained as of #1309).
+    # `-lm` for the seed's libm literal-coercion references;
+    # `-Wno-override-module` for the emitted target triple.
     if ! "$clang_bin" -Wno-override-module -I"$arena_inc" \
-            "$harness" "$ll" "$arena_c" -o "$bin" -lm 2>"$SCRATCH/clang.log"; then
+            "$harness" "$ll" -o "$bin" -lm 2>"$SCRATCH/clang.log"; then
         echo "[test]   clang failed to link arena mark/rewind harness:"
         cat "$SCRATCH/clang.log"
         return 1
