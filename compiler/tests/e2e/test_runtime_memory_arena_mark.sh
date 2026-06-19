@@ -105,11 +105,13 @@ test_no_bare_c_arena_collision() {
         echo "[test]   $ll missing — test_emit_define_shape must run first"
         return 1
     fi
-    # The ported pair must NOT define the bare C names, which are live
-    # exports of the C arena. Anchored at line start so the `declare`
-    # of `sfn_arena_global` (a different symbol) cannot trip it, and
-    # the `$` after `(` so `sfn_arena_mark` does not match
-    # `sfn_arena_sfn_mark`.
+    # The ported pair must NOT bare-define `sfn_arena_mark` /
+    # `sfn_arena_rewind` — those struct-returning C symbols were deleted in
+    # #1309 (sailfin_arena.c is gone); the live mark/rewind path is the
+    # `sfn_arena_sfn_*` family, and a stray bare define would be a dangling
+    # export. Anchored at line start so the `declare` of `sfn_arena_global`
+    # (a different symbol) cannot trip it, and the `$` after `(` so
+    # `sfn_arena_mark` does not match `sfn_arena_sfn_mark`.
     local found=0
     for sym in sfn_arena_mark sfn_arena_rewind; do
         if grep -qE "^define .* @${sym}\(" "$ll"; then

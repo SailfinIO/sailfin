@@ -96,29 +96,26 @@ test_compiler_binary_exports_sfn_arena_sfn() {
     return "$missing"
 }
 
-# ---- Test: the compiler binary still exports the remaining C arena symbols ----
+# ---- Test: the surviving bare arena forwarders stay exported (#1309) ----
 test_compiler_binary_keeps_c_arena_exports() {
-    # Coexistence invariant. #1309 moved the arena *core* —
-    # `sfn_arena_create` / `sfn_arena_alloc` (+ the global handle /
-    # arena-mode probe) — into the Sailfin module, but the rest of the C
-    # arena (`reset` / `destroy` / `realloc`, plus `print_stats` / `mark`
-    # / `rewind`) stays the production implementation, operating on the
-    # same shared global handle, until #822 retires
-    # `runtime/native/src/sailfin_arena.c`. This asserts those still-C
-    # symbols remain exported: a patch that accidentally drops the
-    # remaining C arena before #822 — silently routing production through
-    # absent helpers — trips here. (create/alloc are checked as
-    # Sailfin-owned below; they must NOT be re-added to this C list.)
-    # Same defined-text-symbol regex as the Sailfin-export assertion
-    # above (` T ` / ` t `, optional macOS `_` prefix) so an undefined
-    # reference cannot pass for an export and Mach-O mangling does not
-    # produce false negatives.
+    # #1309 deleted `runtime/native/src/sailfin_arena.c`. `sfn_arena_reset` /
+    # `sfn_arena_destroy` and the struct-returning `sfn_arena_mark` /
+    # `sfn_arena_rewind` are GONE (reset/destroy had zero callers; mark/rewind
+    # were only reached by the deleted C intrinsic wrappers, and emitted code
+    # routes those intrinsics to the Sailfin `sfn_arena_sfn_mark` / `_rewind`).
+    # Only `sfn_arena_realloc` and `sfn_arena_print_stats` survive — as bare
+    # Sailfin forwarders (arena.sfn) that the C-internal `sailfin_runtime.c`
+    # callers + the atexit telemetry path bind to by name. Assert those two
+    # remain exported; a regression dropping them breaks that link. The full
+    # C-arena retirement (and this whole file's deletion) is #822.
+    # Same defined-text-symbol regex as the Sailfin-export assertion above
+    # (` T ` / ` t `, optional macOS `_` prefix).
     local nm_log
     nm_log="$(nm "$BINARY" 2>/dev/null || true)"
     local missing=0
-    for sym in sfn_arena_reset sfn_arena_destroy sfn_arena_realloc sfn_arena_print_stats sfn_arena_mark sfn_arena_rewind; do
+    for sym in sfn_arena_realloc sfn_arena_print_stats; do
         if ! grep -qE "[[:space:]][Tt][[:space:]]_?${sym}\$" <<< "$nm_log"; then
-            echo "[test]   compiler binary missing still-C arena export: $sym (looked for ' T|t [_]${sym}' in nm output)"
+            echo "[test]   compiler binary missing bare arena forwarder: $sym (looked for ' T|t [_]${sym}' in nm output)"
             missing=$((missing + 1))
         fi
     done
@@ -165,7 +162,7 @@ test_nm_grep_sfn_arena_spec_names() {
 run_test "runtime/native/capsule.toml sfn-sources lists the arena module" test_manifest_lists_arena
 run_test "compiler binary exports five sfn_arena_sfn_* Sailfin symbols" test_compiler_binary_exports_sfn_arena_sfn
 run_test "compiler binary exports bare arena-core (create/alloc/global/enabled) from Sailfin" test_compiler_binary_exports_bare_arena_core
-run_test "compiler binary still exports remaining C arena symbols (reset/destroy/realloc/...)" test_compiler_binary_keeps_c_arena_exports
+run_test "compiler binary exports surviving bare arena forwarders (realloc/print_stats)" test_compiler_binary_keeps_c_arena_exports
 run_test "nm | grep sfn_arena_alloc matches at least one symbol (#394 spec)" test_nm_grep_sfn_arena_spec_names
 
 echo "[summary] $PASS passed, $FAIL failed"
