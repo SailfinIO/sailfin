@@ -364,239 +364,6 @@ char *sailfin_runtime_get_field(char *base, char *field)
     return _get_field_safe_buf;
 }
 
-// Probe whether `text` points inside a mapped, readable memory region.
-//
-// Disambiguates the upper-32-bit immediate-codepoint encoding (a codepoint
-// shifted into bits [32:64) with the low 32 bits zero) from a genuine
-// heap/arena pointer whose low 32 bits happen to be zero. The latter is a rare
-// but real ASLR outcome on both macOS and Linux; without this probe the real
-// pointer is misclassified as an immediate codepoint and the string is silently
-// corrupted (issue #1407: an arena buffer at 0x00007f22_00000000 decoded as
-// U+7F22, replacing an emitted `insertvalue` opcode with garbage `E7 BC A2`).
-//
-// A synthetic immediate (codepoint << 32) is never mapped, so it stays an
-// immediate; a genuine buffer at a low-32-zero address is mapped, so it is
-// treated as a real string.
-//
-// Only defined where the upper-32-bit guard below actually calls it, to avoid
-// an unused-static-function warning on targets without the guard.
-#if (defined(__APPLE__) && !defined(SAILFIN_WITH_ASAN)) || defined(__linux__)
-static bool _sfn_addr_mapped_readable(const char *text)
-{
-#if defined(__APPLE__)
-    mach_vm_address_t query = (mach_vm_address_t)(uintptr_t)text;
-    mach_vm_address_t region = query;
-    mach_vm_size_t region_size = 0;
-    vm_region_basic_info_data_64_t info;
-    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
-    mach_port_t object_name = MACH_PORT_NULL;
-
-    kern_return_t kr = mach_vm_region(
-        mach_task_self(),
-        &region,
-        &region_size,
-        VM_REGION_BASIC_INFO_64,
-        (vm_region_info_t)&info,
-        &count,
-        &object_name);
-
-    if (object_name != MACH_PORT_NULL)
-    {
-        mach_port_deallocate(mach_task_self(), object_name);
-    }
-
-    if (kr != KERN_SUCCESS)
-    {
-        return false;
-    }
-    bool readable = (info.protection & VM_PROT_READ) != 0;
-    bool contains = (query >= region) && (query < (region + region_size));
-    return readable && contains;
-#elif defined(__linux__)
-    // `msync()` on the containing page returns 0 when the range is mapped and
-    // -1/ENOMEM when it is not — the standard, side-effect-free "is this pointer
-    // mapped" probe. MS_ASYNC only schedules writeback of dirty pages, so it
-    // never mutates clean/read-only string storage.
-    static long page_size = 0;
-    if (page_size <= 0)
-    {
-        page_size = sysconf(_SC_PAGESIZE);
-        if (page_size <= 0)
-        {
-            page_size = 4096;
-        }
-    }
-    uintptr_t mask = (uintptr_t)page_size - 1u;
-    uintptr_t page = (uintptr_t)text & ~mask;
-    return msync((void *)page, (size_t)page_size, MS_ASYNC) == 0;
-#else
-    (void)text;
-    return false;
-#endif
-}
-#endif
-
-static bool _is_immediate_codepoint_string(const char *text, uint32_t *out_codepoint)
-{
-    if (!text)
-    {
-        return false;
-    }
-
-    uintptr_t raw = (uintptr_t)text;
-    // Secondary encoding: sometimes a single-byte grapheme leaks through as a
-    // near-null pointer (e.g. 0x2e for '.'). Treat ASCII values as immediate
-    // codepoints so we never attempt to dereference them as C strings.
-    if (raw < 4096u)
-    {
-        uint32_t codepoint = (uint32_t)raw;
-        if (codepoint > 0 && codepoint <= 0x7fu)
-        {
-            if (out_codepoint)
-            {
-                *out_codepoint = codepoint;
-            }
-            return true;
-        }
-        return false;
-    }
-
-    // Heuristic: sometimes a "string" leaks as an integer codepoint shifted
-    // into the upper 32 bits (e.g., 0x0000003c00000000). Treat that as a
-    // single-codepoint UTF-8 string.
-    if ((raw & 0xffffffffu) != 0)
-    {
-        return false;
-    }
-
-    uint32_t codepoint = (uint32_t)(raw >> 32);
-    if (codepoint == 0 || codepoint > 0x10ffffu)
-    {
-        return false;
-    }
-
-#if (defined(__APPLE__) && !defined(SAILFIN_WITH_ASAN)) || defined(__linux__)
-    // On both macOS and Linux it is possible (though rare) to have a real,
-    // mapped pointer whose low 32 bits are zero. The upper-32-bit heuristic
-    // would wrongly classify that as an "immediate" codepoint string, causing
-    // subtle memory corruption when the value is later treated as a C string
-    // (issue #1407).
-    //
-    // Guard: only treat this encoding as immediate when the address is not
-    // mapped as a readable region.
-    {
-        // Cache the (rare but expensive) address mapping check.
-        // Immediate-codepoint pseudo strings repeat heavily (e.g. '/', '.',
-        // letters when building paths), so without caching this guard can
-        // dominate runtime and cause timeouts.
-        enum
-        {
-            MAP_CACHE_SIZE = 256,
-            MAP_CACHE_PROBES = 8
-        };
-        static uintptr_t map_cache_keys[MAP_CACHE_SIZE];
-        static uint8_t map_cache_vals[MAP_CACHE_SIZE];
-        // vals: 0 empty, 1 mapped+readable, 2 not-mapped-or-not-readable
-
-        uintptr_t key = raw;
-        uint32_t h = (uint32_t)(key ^ (key >> 32) ^ (key >> 12));
-        uint32_t slot = h & (MAP_CACHE_SIZE - 1);
-
-        uint8_t cached_val = 0;
-        for (uint32_t probe = 0; probe < MAP_CACHE_PROBES; probe++)
-        {
-            uint32_t idx = (slot + probe) & (MAP_CACHE_SIZE - 1);
-            uintptr_t existing = map_cache_keys[idx];
-            uint8_t existing_val = map_cache_vals[idx];
-            if (existing == key && existing_val != 0)
-            {
-                cached_val = existing_val;
-                break;
-            }
-            if (existing_val == 0)
-            {
-                break;
-            }
-        }
-
-        if (cached_val == 1)
-        {
-            return false;
-        }
-        if (cached_val == 2)
-        {
-            // Known-unmapped immediate; skip the expensive kernel query.
-            goto upper32_immediate_done;
-        }
-
-        bool mapped_readable = _sfn_addr_mapped_readable(text);
-
-        // Store the result.
-        for (uint32_t probe = 0; probe < MAP_CACHE_PROBES; probe++)
-        {
-            uint32_t idx = (slot + probe) & (MAP_CACHE_SIZE - 1);
-            if (map_cache_vals[idx] == 0 || map_cache_keys[idx] == key)
-            {
-                map_cache_keys[idx] = key;
-                map_cache_vals[idx] = mapped_readable ? 1 : 2;
-                break;
-            }
-        }
-
-        if (mapped_readable)
-        {
-            return false;
-        }
-    }
-
-upper32_immediate_done:
-#endif
-
-    if (out_codepoint)
-    {
-        *out_codepoint = codepoint;
-    }
-    return true;
-}
-
-// Encode a Unicode codepoint as UTF-8 into buf (which must have room for 5 bytes).
-// Returns the number of bytes written (1-4), or 0 on error.
-static int _codepoint_to_utf8(uint32_t cp, char *buf)
-{
-    if (cp <= 0x7fu)
-    {
-        buf[0] = (char)cp;
-        buf[1] = '\0';
-        return 1;
-    }
-    if (cp <= 0x7ffu)
-    {
-        buf[0] = (char)(0xc0u | (cp >> 6));
-        buf[1] = (char)(0x80u | (cp & 0x3fu));
-        buf[2] = '\0';
-        return 2;
-    }
-    if (cp <= 0xffffu)
-    {
-        buf[0] = (char)(0xe0u | (cp >> 12));
-        buf[1] = (char)(0x80u | ((cp >> 6) & 0x3fu));
-        buf[2] = (char)(0x80u | (cp & 0x3fu));
-        buf[3] = '\0';
-        return 3;
-    }
-    if (cp <= 0x10ffffu)
-    {
-        buf[0] = (char)(0xf0u | (cp >> 18));
-        buf[1] = (char)(0x80u | ((cp >> 12) & 0x3fu));
-        buf[2] = (char)(0x80u | ((cp >> 6) & 0x3fu));
-        buf[3] = (char)(0x80u | (cp & 0x3fu));
-        buf[4] = '\0';
-        return 4;
-    }
-    buf[0] = '\0';
-    return 0;
-}
-
 // Fast string equality check that handles immediate codepoint strings.
 // Called from the LLVM-level replacement of the prelude's grapheme-based
 // strings_equal (which is O(n^2) due to per-character grapheme_at calls).
@@ -611,26 +378,6 @@ bool _strings_equal_fast(const char *a, const char *b)
         return false;
     }
 
-    uint32_t a_cp = 0, b_cp = 0;
-    bool a_imm = _is_immediate_codepoint_string(a, &a_cp);
-    bool b_imm = _is_immediate_codepoint_string(b, &b_cp);
-
-    if (a_imm && b_imm)
-    {
-        return a_cp == b_cp;
-    }
-    if (a_imm)
-    {
-        char buf[5];
-        _codepoint_to_utf8(a_cp, buf);
-        return strcmp(buf, b) == 0;
-    }
-    if (b_imm)
-    {
-        char buf[5];
-        _codepoint_to_utf8(b_cp, buf);
-        return strcmp(a, buf) == 0;
-    }
     return strcmp(a, b) == 0;
 }
 
@@ -1539,10 +1286,6 @@ static void _track_owned_string(char *ptr)
     {
         return; /* Arena handles bulk deallocation — no per-string tracking. */
     }
-    if (_is_immediate_codepoint_string(ptr, NULL))
-    {
-        return;
-    }
     pthread_mutex_lock(&_sailfin_owned_string_lock);
     _owned_table_insert_unlocked(ptr);
     pthread_mutex_unlock(&_sailfin_owned_string_lock);
@@ -1575,38 +1318,6 @@ static int _cmp_cstr_ptr(const void *a, const void *b)
     return strcmp(sa, sb);
 }
 
-static size_t _utf8_encode(uint32_t codepoint, unsigned char out[5])
-{
-    if (codepoint <= 0x7fu)
-    {
-        out[0] = (unsigned char)codepoint;
-        out[1] = 0;
-        return 1;
-    }
-    if (codepoint <= 0x7ffu)
-    {
-        out[0] = (unsigned char)(0xc0u | (codepoint >> 6));
-        out[1] = (unsigned char)(0x80u | (codepoint & 0x3fu));
-        out[2] = 0;
-        return 2;
-    }
-    if (codepoint <= 0xffffu)
-    {
-        out[0] = (unsigned char)(0xe0u | (codepoint >> 12));
-        out[1] = (unsigned char)(0x80u | ((codepoint >> 6) & 0x3fu));
-        out[2] = (unsigned char)(0x80u | (codepoint & 0x3fu));
-        out[3] = 0;
-        return 3;
-    }
-
-    out[0] = (unsigned char)(0xf0u | (codepoint >> 18));
-    out[1] = (unsigned char)(0x80u | ((codepoint >> 12) & 0x3fu));
-    out[2] = (unsigned char)(0x80u | ((codepoint >> 6) & 0x3fu));
-    out[3] = (unsigned char)(0x80u | (codepoint & 0x3fu));
-    out[4] = 0;
-    return 4;
-}
-
 static void _print_line(FILE *stream, const char *prefix, const char *msg)
 {
     if (!stream)
@@ -1622,17 +1333,7 @@ static void _print_line(FILE *stream, const char *prefix, const char *msg)
         fputs(prefix, stream);
     }
 
-    uint32_t codepoint = 0;
-    if (_is_immediate_codepoint_string(msg, &codepoint))
-    {
-        unsigned char buf[5] = {0};
-        _utf8_encode(codepoint, buf);
-        fputs((const char *)buf, stream);
-    }
-    else
-    {
-        fputs(msg, stream);
-    }
+    fputs(msg, stream);
     fputc('\n', stream);
     fflush(stream);
 }
@@ -1950,10 +1651,6 @@ void sailfin_runtime_mark_persistent(char *ptr)
     {
         return; /* Arena handles bulk deallocation — no persistent tracking. */
     }
-    if (_is_immediate_codepoint_string(ptr, NULL))
-    {
-        return;
-    }
     pthread_mutex_lock(&_sailfin_persistent_lock);
     _persistent_table_insert_unlocked(ptr);
     pthread_mutex_unlock(&_sailfin_persistent_lock);
@@ -1990,10 +1687,6 @@ void sailfin_runtime_string_drop(char *text)
     }
 
     if (!text)
-    {
-        return;
-    }
-    if (_is_immediate_codepoint_string(text, NULL))
     {
         return;
     }
@@ -2213,37 +1906,6 @@ int64_t sailfin_runtime_string_length(char *text);
  * internal C callers (`sailfin_runtime_substring`, the `sfn_str_slice` C wrapper). */
 static char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end);
 
-/* #716: Immediate-codepoint pseudo-pointer guard for the `sfn_str_*`
- * trampoline family.
- *
- * `char_at(text, i)` (and other single-grapheme readers) sometimes
- * returns a codepoint *tagged into the pointer itself* rather than a
- * heap/literal `i8*` — the legacy `(codepoint << 32)` encoding, plus a
- * near-null ASCII form, both classified by
- * `_is_immediate_codepoint_string` above. A trampoline that dereferences
- * its operand directly (via `_safe_strlen_asan`, `memchr`, `s[i]`,
- * `strtod`, …) will SIGSEGV on such a value: `_safe_strlen_asan` rejects
- * the near-null form but the `(cp << 32)` form has zero high bits and
- * sails through into an unmapped read (this is exactly the
- * `0x6800000000` crash from #714). Any body that does NOT trampoline
- * through a legacy `sailfin_runtime_*` entry that already decodes MUST
- * route its operand through one of these helpers first.
- *
- * `_sfn_str_decode_immediate` writes the 1-4 UTF-8 bytes (+ NUL) into a
- * caller-owned 5-byte scratch buffer and is for within-call consumption.
- * Retires with the M1.A.2 type-mapping flip that eliminates the encoding
- * entirely. */
-static const char *_sfn_str_decode_immediate(const char *s, unsigned char scratch[5])
-{
-    uint32_t cp = 0;
-    if (_is_immediate_codepoint_string(s, &cp))
-    {
-        _utf8_encode(cp, scratch); /* NUL-terminates the buffer */
-        return (const char *)scratch;
-    }
-    return s;
-}
-
 /* #1308: `_sfn_str_decode_immediate_owned` (the owning immediate-decode helper
  * for `sfn_str_to_cstr`/`from_cstr`) is deleted — both bridges flipped to
  * trivial Sailfin identity bodies, leaving it without a caller. */
@@ -2252,12 +1914,7 @@ static const char *_sfn_str_decode_immediate(const char *s, unsigned char scratc
  * is now a real Sailfin body in `runtime/sfn/string.sfn` (decode + bounded
  * `strnlen`). This C definition is `static` so the linker binds every
  * emission to the Sailfin body while avoiding a duplicate-symbol collision;
- * retained (unused) only until #822 deletes this file.
- *
- * #716 audit: safe by delegation — `sailfin_runtime_string_length`
- * (line ~2803) opens with an `_is_immediate_codepoint_string` guard and
- * returns the decoded grapheme count, so the immediate pseudo-pointer
- * never reaches a raw dereference here. */
+ * retained (unused) only until #822 deletes this file. */
 static int64_t sfn_str_len(const char *s)
 {
     return sailfin_runtime_string_length((char *)s);
@@ -2268,12 +1925,7 @@ static int64_t sfn_str_len(const char *s)
  * fast-path + length compare + `memcmp`; the decode bridge bumps the call-seq
  * so the #892 invariant is preserved). This C definition is `static` so the
  * linker binds every emission to the Sailfin body; retained (unused) only
- * until #822 deletes this file.
- *
- * #716 audit: safe by delegation — `_strings_equal_fast` (line ~576)
- * decodes BOTH operands via `_is_immediate_codepoint_string` before any
- * byte compare, so immediate ⇄ immediate and immediate ⇄ real pointer
- * mixes are all handled. */
+ * until #822 deletes this file. */
 static bool sfn_str_eq(const char *a, const char *b)
 {
     // #892: sfn_str_eq is an exported runtime boundary (the lowering target of
@@ -2445,8 +2097,6 @@ static int64_t sfn_str_byte_at(const char *s, int64_t idx)
      * pseudo-pointer must be materialized into real UTF-8 bytes first
      * or the length probe / index read would fault on a tagged
      * address. */
-    unsigned char imm_scratch[5];
-    s = _sfn_str_decode_immediate(s, imm_scratch);
     /* Upper-bound check via the same `_safe_strlen_asan` length probe
      * `sfn_str_find_byte` uses, so out-of-range indexes return -1
      * instead of dereferencing past the buffer (Copilot review on
@@ -2480,8 +2130,6 @@ static int64_t sfn_str_find_byte(const char *s, int64_t byte_value, int64_t star
     /* #716: `_safe_strlen_asan` + `memchr(s + start, ...)` dereference
      * the operand, so decode immediate codepoints into real bytes
      * before scanning. */
-    unsigned char imm_scratch[5];
-    s = _sfn_str_decode_immediate(s, imm_scratch);
     int64_t start = start_index < 0 ? 0 : start_index;
     bool truncated = false;
     int64_t len = (int64_t)_safe_strlen_asan((char *)s, &truncated);
@@ -2632,8 +2280,6 @@ static char *sfn_str_from_byte(int64_t n)
  * yield for the equivalent real one-char string. */
 static double sfn_str_to_number(const char *s)
 {
-    unsigned char imm_scratch[5];
-    s = _sfn_str_decode_immediate(s, imm_scratch);
     return sailfin_runtime_string_to_number((char *)s);
 }
 
@@ -2836,39 +2482,8 @@ static SfnString sfn_str_concat(SfnString a, SfnString b, SfnArena **arena_slot)
         }
     }
 
-    /* The pre-M1.A.2 frontend lowers `string` to `i8*` for locals
-     * and parameters, which means the legacy runtime's tagged
-     * immediate codepoint encoding (a single-codepoint "string"
-     * encoded as `((uint64_t)codepoint << 32)`, recognised by
-     * `_is_immediate_codepoint_string`) reaches us in the
-     * `{i8*, i64}` aggregate's data slot. Decode those into a
-     * stack buffer before the memcpy so we never dereference the
-     * tagged pointer as a real address.
-     *
-     * `_is_immediate_codepoint_string` covers BOTH the
-     * upper-32-bits encoding (e.g. `0x6800000000` for 'h') and
-     * the near-null ASCII encoding (e.g. `(char *)0x2e` for '.').
-     * `_utf8_encode` writes 1-4 UTF-8 bytes for any valid
-     * codepoint, matching the byte length the caller computed via
-     * `sfn_str_len` / `sailfin_runtime_string_length` (both walk
-     * `_utf8_encode` for immediate inputs and return the same byte
-     * count). */
-    unsigned char a_imm_buf[5] = {0};
-    unsigned char b_imm_buf[5] = {0};
     const char *a_data = a.data;
     const char *b_data = b.data;
-    uint32_t a_cp = 0;
-    uint32_t b_cp = 0;
-    if (_is_immediate_codepoint_string(a.data, &a_cp))
-    {
-        _utf8_encode(a_cp, a_imm_buf);
-        a_data = (const char *)a_imm_buf;
-    }
-    if (_is_immediate_codepoint_string(b.data, &b_cp))
-    {
-        _utf8_encode(b_cp, b_imm_buf);
-        b_data = (const char *)b_imm_buf;
-    }
 
     /* Apply the same limit/overflow gate the legacy
      * `sailfin_runtime_string_concat` uses (Copilot review feedback
@@ -2952,10 +2567,6 @@ static void sfn_str_append(SfnString *dst, SfnString suffix, SfnArena **arena_sl
     {
         return;
     }
-    if (_is_immediate_codepoint_string(dst->data, NULL))
-    {
-        return;
-    }
 
     SfnArena *arena;
     if (arena_slot != NULL && *arena_slot != NULL)
@@ -2971,18 +2582,7 @@ static void sfn_str_append(SfnString *dst, SfnString suffix, SfnArena **arena_sl
         }
     }
 
-    /* Decode tagged immediate codepoint encoding for the suffix
-     * (same rationale as `sfn_str_concat` above — the
-     * pre-M1.A.2 frontend can present `b.data` as a tagged
-     * pointer when the source value is a 1-codepoint literal). */
-    unsigned char suffix_imm_buf[5] = {0};
     const char *suffix_data = suffix.data;
-    uint32_t suffix_cp = 0;
-    if (_is_immediate_codepoint_string(suffix.data, &suffix_cp))
-    {
-        _utf8_encode(suffix_cp, suffix_imm_buf);
-        suffix_data = (const char *)suffix_imm_buf;
-    }
 
     /* Apply the shared limit/overflow gate (same as
      * `sfn_str_concat` — Copilot review feedback on PR #714). */
@@ -3086,14 +2686,6 @@ int64_t sailfin_runtime_string_length(char *text)
         return 0;
     }
 
-    uint32_t codepoint = 0;
-    if (_is_immediate_codepoint_string(text, &codepoint))
-    {
-        unsigned char buf[5] = {0};
-        size_t len = _utf8_encode(codepoint, buf);
-        return (int64_t)len;
-    }
-
     bool truncated = false;
     int64_t length = (int64_t)_safe_strlen_asan(text, &truncated);
 
@@ -3107,7 +2699,7 @@ int64_t sailfin_runtime_string_length(char *text)
         _maybe_print_string_backtrace(
             "string_length",
             text,
-            _is_immediate_codepoint_string(text, NULL),
+            false,
             _asan_poisoned(text),
             true,
             NULL,
@@ -3175,48 +2767,6 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
         return out;
     }
 
-    uint32_t codepoint = 0;
-    if (_is_immediate_codepoint_string(text, &codepoint))
-    {
-        unsigned char buf[5] = {0};
-        int64_t n = (int64_t)_utf8_encode(codepoint, buf);
-        if (start < 0)
-        {
-            start = 0;
-        }
-        if (start > n)
-        {
-            start = n;
-        }
-        if (end < start)
-        {
-            end = start;
-        }
-        if (end > n)
-        {
-            end = n;
-        }
-
-        int64_t length = end - start;
-        char *out = (char *)_rt_malloc((size_t)length + 1);
-        if (!out)
-        {
-            return NULL;
-        }
-        if (length > 0)
-        {
-            memcpy(out, buf + start, (size_t)length);
-        }
-        out[length] = '\0';
-        if (_alloc_stats_enabled)
-        {
-            _alloc_stats_substring_calls++;
-            _alloc_stats_substring_bytes += (uint64_t)((size_t)length + 1u);
-        }
-        _track_owned_string(out);
-        return out;
-    }
-
     bool truncated = false;
     int64_t n = (int64_t)_safe_strlen_asan(text, &truncated);
     if (truncated)
@@ -3277,49 +2827,6 @@ static char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int6
         {
             _alloc_stats_substring_calls++;
             _alloc_stats_substring_bytes += 1;
-        }
-        _track_owned_string(out);
-        return out;
-    }
-
-    // Preserve immediate-codepoint strings without dereferencing.
-    uint32_t codepoint = 0;
-    if (_is_immediate_codepoint_string(text, &codepoint))
-    {
-        unsigned char buf[5] = {0};
-        int64_t n = (int64_t)_utf8_encode(codepoint, buf);
-        if (start < 0)
-        {
-            start = 0;
-        }
-        if (end < start)
-        {
-            end = start;
-        }
-        if (start > n)
-        {
-            start = n;
-        }
-        if (end > n)
-        {
-            end = n;
-        }
-
-        int64_t length = end - start;
-        char *out = (char *)_rt_malloc((size_t)length + 1);
-        if (!out)
-        {
-            return NULL;
-        }
-        if (length > 0)
-        {
-            memcpy(out, buf + start, (size_t)length);
-        }
-        out[length] = '\0';
-        if (_alloc_stats_enabled)
-        {
-            _alloc_stats_substring_calls++;
-            _alloc_stats_substring_bytes += (uint64_t)((size_t)length + 1u);
         }
         _track_owned_string(out);
         return out;
@@ -3396,62 +2903,16 @@ char *sailfin_runtime_string_concat(char *a, char *b)
         b = "";
     }
 
-    uint32_t a_codepoint = 0;
-    uint32_t b_codepoint = 0;
-    bool a_immediate = _is_immediate_codepoint_string(a, &a_codepoint);
-    bool b_immediate = _is_immediate_codepoint_string(b, &b_codepoint);
-
-    static int trace_immediate = -1;
-    if (trace_immediate < 0)
-    {
-        trace_immediate = _env_enabled("SAILFIN_TRACE_IMMEDIATE_STRINGS") ? 1 : 0;
-    }
-
-    if (trace_immediate && (a_immediate || b_immediate))
-    {
-        static int immediate_budget = 64;
-        if (immediate_budget > 0)
-        {
-            immediate_budget--;
-            fprintf(
-                stderr,
-                "[stage2-native] string_concat immediate arg(s): a=%p%s cp=%u (0x%x) b=%p%s cp=%u (0x%x)\n",
-                (void *)a,
-                a_immediate ? " immediate" : "",
-                (unsigned)a_codepoint,
-                (unsigned)a_codepoint,
-                (void *)b,
-                b_immediate ? " immediate" : "",
-                (unsigned)b_codepoint,
-                (unsigned)b_codepoint);
-            fflush(stderr);
-
-            // Backtrace is gated separately to keep noise low by default.
-            _maybe_print_string_backtrace(
-                "string_concat immediate",
-                a,
-                a_immediate,
-                false,
-                false,
-                b,
-                b_immediate,
-                false,
-                false);
-        }
-    }
-
-    bool a_poisoned = (!a_immediate && _asan_poisoned(a));
-    bool b_poisoned = (!b_immediate && _asan_poisoned(b));
+    bool a_poisoned = _asan_poisoned(a);
+    bool b_poisoned = _asan_poisoned(b);
     if (a_poisoned || b_poisoned)
     {
         fprintf(
             stderr,
-            "[stage2-native] string_concat got poisoned arg(s): a=%p%s%s b=%p%s%s\n",
+            "[stage2-native] string_concat got poisoned arg(s): a=%p%s b=%p%s\n",
             (void *)a,
-            a_immediate ? " immediate" : "",
             a_poisoned ? " poisoned" : "",
             (void *)b,
-            b_immediate ? " immediate" : "",
             b_poisoned ? " poisoned" : "");
         fflush(stderr);
     }
@@ -3471,23 +2932,19 @@ char *sailfin_runtime_string_concat(char *a, char *b)
             trace_budget--;
             fprintf(
                 stderr,
-                "[stage2-native] string_concat(a=%p%s%s, b=%p%s%s)\n",
+                "[stage2-native] string_concat(a=%p%s, b=%p%s)\n",
                 (void *)a,
-                a_immediate ? " immediate" : "",
                 a_poisoned ? " poisoned" : "",
                 (void *)b,
-                b_immediate ? " immediate" : "",
                 b_poisoned ? " poisoned" : "");
             fflush(stderr);
         }
     }
 
-    unsigned char a_buf[5] = {0};
-    unsigned char b_buf[5] = {0};
     bool a_truncated = false;
     bool b_truncated = false;
-    size_t alen = a_immediate ? _utf8_encode(a_codepoint, a_buf) : _safe_strlen_asan(a, &a_truncated);
-    size_t blen = b_immediate ? _utf8_encode(b_codepoint, b_buf) : _safe_strlen_asan(b, &b_truncated);
+    size_t alen = _safe_strlen_asan(a, &a_truncated);
+    size_t blen = _safe_strlen_asan(b, &b_truncated);
 
     static int concat_limit_init = 0;
     static size_t concat_limit = 0;
@@ -3549,30 +3006,26 @@ char *sailfin_runtime_string_concat(char *a, char *b)
         {
             fprintf(
                 stderr,
-                "[stage2-native] string_concat large total=%zu alen=%zu blen=%zu a=%p%s%s cp=%u b=%p%s%s cp=%u\n",
+                "[stage2-native] string_concat large total=%zu alen=%zu blen=%zu a=%p%s b=%p%s\n",
                 total_len,
                 alen,
                 blen,
                 (void *)a,
-                a_immediate ? " immediate" : "",
                 a_truncated ? " truncated" : "",
-                (unsigned)a_codepoint,
                 (void *)b,
-                b_immediate ? " immediate" : "",
-                b_truncated ? " truncated" : "",
-                (unsigned)b_codepoint);
+                b_truncated ? " truncated" : "");
             fflush(stderr);
 
-            if ((a_immediate || b_immediate) || (a_truncated || b_truncated))
+            if (a_truncated || b_truncated)
             {
                 _maybe_print_string_backtrace(
                     "string_concat large",
                     a,
-                    a_immediate,
+                    false,
                     a_poisoned,
                     a_truncated,
                     b,
-                    b_immediate,
+                    false,
                     b_poisoned,
                     b_truncated);
             }
@@ -3584,11 +3037,11 @@ char *sailfin_runtime_string_concat(char *a, char *b)
         _maybe_print_string_backtrace(
             "string_concat suspicious",
             a,
-            a_immediate,
+            false,
             a_poisoned,
             a_truncated,
             b,
-            b_immediate,
+            false,
             b_poisoned,
             b_truncated);
     }
@@ -3615,14 +3068,7 @@ char *sailfin_runtime_string_concat(char *a, char *b)
                 preview_len = 8;
             }
 
-            if (b_immediate)
-            {
-                memcpy(preview_buf, b_buf, preview_len);
-            }
-            else
-            {
-                memcpy(preview_buf, (const unsigned char *)b, preview_len);
-            }
+            memcpy(preview_buf, (const unsigned char *)b, preview_len);
 
             if (blen == 1 && preview_buf[0] >= 32 && preview_buf[0] < 127)
             {
@@ -3643,11 +3089,11 @@ char *sailfin_runtime_string_concat(char *a, char *b)
         _maybe_print_string_backtrace(
             "string_concat unterminated",
             a,
-            a_immediate,
+            false,
             a_poisoned,
             a_truncated,
             b,
-            b_immediate,
+            false,
             b_poisoned,
             b_truncated);
     }
@@ -3692,23 +3138,8 @@ char *sailfin_runtime_string_concat(char *a, char *b)
         _alloc_stats_string_concat_bytes += (uint64_t)alloc_size;
     }
 
-    if (a_immediate)
-    {
-        memcpy(out, a_buf, alen);
-    }
-    else
-    {
-        memcpy(out, a, alen);
-    }
-
-    if (b_immediate)
-    {
-        memcpy(out + alen, b_buf, blen);
-    }
-    else
-    {
-        memcpy(out + alen, b, blen);
-    }
+    memcpy(out, a, alen);
+    memcpy(out + alen, b, blen);
 
     memset(out + alen + blen, 0, 1 + pad);
     _track_owned_string(out);
@@ -3769,7 +3200,7 @@ char *sailfin_runtime_string_concat(char *a, char *b)
                         const char *needle = "source_filename";
                         size_t needle_len = strlen(needle);
 
-                        if (!a_immediate && a && alen >= needle_len)
+                        if (a && alen >= needle_len)
                         {
                             size_t limit = alen;
                             if (limit > (size_t)(2 * 1024 * 1024))
@@ -3786,7 +3217,7 @@ char *sailfin_runtime_string_concat(char *a, char *b)
                             }
                         }
 
-                        if (!b_immediate && b && blen >= needle_len)
+                        if (b && blen >= needle_len)
                         {
                             size_t limit = blen;
                             if (limit > (size_t)(2 * 1024 * 1024))
@@ -3827,53 +3258,25 @@ char *sailfin_runtime_string_concat(char *a, char *b)
 
                     if (a)
                     {
-                        if (a_immediate)
+                        bool truncated = false;
+                        size_t n = _safe_strlen_asan(a, &truncated);
+                        size_t take = n < 32 ? n : 32;
+                        if (take > 0)
                         {
-                            unsigned char tmp[5] = {0};
-                            size_t n = _utf8_encode(a_codepoint, tmp);
-                            size_t take = n < 32 ? n : 32;
-                            if (take > 0)
-                            {
-                                memcpy(a_preview, tmp, take);
-                            }
-                            a_preview[take] = '\0';
+                            memcpy(a_preview, a, take);
                         }
-                        else
-                        {
-                            bool truncated = false;
-                            size_t n = _safe_strlen_asan(a, &truncated);
-                            size_t take = n < 32 ? n : 32;
-                            if (take > 0)
-                            {
-                                memcpy(a_preview, a, take);
-                            }
-                            a_preview[take] = '\0';
-                        }
+                        a_preview[take] = '\0';
                     }
                     if (b)
                     {
-                        if (b_immediate)
+                        bool truncated = false;
+                        size_t n = _safe_strlen_asan(b, &truncated);
+                        size_t take = n < 32 ? n : 32;
+                        if (take > 0)
                         {
-                            unsigned char tmp[5] = {0};
-                            size_t n = _utf8_encode(b_codepoint, tmp);
-                            size_t take = n < 32 ? n : 32;
-                            if (take > 0)
-                            {
-                                memcpy(b_preview, tmp, take);
-                            }
-                            b_preview[take] = '\0';
+                            memcpy(b_preview, b, take);
                         }
-                        else
-                        {
-                            bool truncated = false;
-                            size_t n = _safe_strlen_asan(b, &truncated);
-                            size_t take = n < 32 ? n : 32;
-                            if (take > 0)
-                            {
-                                memcpy(b_preview, b, take);
-                            }
-                            b_preview[take] = '\0';
-                        }
+                        b_preview[take] = '\0';
                     }
 
                     fprintf(
@@ -3894,11 +3297,11 @@ char *sailfin_runtime_string_concat(char *a, char *b)
                 _maybe_print_string_backtrace(
                     "llvm_corrupt_prefix",
                     a,
-                    a_immediate,
+                    false,
                     a_poisoned,
                     a_truncated,
                     b,
-                    b_immediate,
+                    false,
                     b_poisoned,
                     b_truncated);
             }
@@ -3989,13 +3392,8 @@ char *sailfin_runtime_string_append(char *buf, char *suffix)
         return sailfin_runtime_string_concat(buf, suffix);
     }
 
-    uint32_t suffix_codepoint = 0;
-    bool suffix_immediate = _is_immediate_codepoint_string(suffix, &suffix_codepoint);
-    unsigned char suffix_buf[5] = {0};
     bool suffix_truncated = false;
-    size_t suffix_len = suffix_immediate
-                            ? _utf8_encode(suffix_codepoint, suffix_buf)
-                            : _safe_strlen_asan(suffix, &suffix_truncated);
+    size_t suffix_len = _safe_strlen_asan(suffix, &suffix_truncated);
 
     if (suffix_truncated)
     {
@@ -4071,14 +3469,7 @@ char *sailfin_runtime_string_append(char *buf, char *suffix)
         pthread_mutex_unlock(&_sailfin_owned_string_lock);
     }
 
-    if (suffix_immediate)
-    {
-        memcpy(out + buf_len, suffix_buf, suffix_len);
-    }
-    else
-    {
-        memcpy(out + buf_len, suffix, suffix_len);
-    }
+    memcpy(out + buf_len, suffix, suffix_len);
     memset(out + buf_len + suffix_len, 0, 1 + pad);
 
     _track_owned_string(out);
@@ -4564,39 +3955,22 @@ SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
             {
                 first = out->data[0];
             }
-            uint32_t first_cp = 0;
-            bool first_immediate = _is_immediate_codepoint_string(first, &first_cp);
-
             char preview_buf[40];
             preview_buf[0] = '\0';
             if (first)
             {
-                if (first_immediate)
+                bool preview_truncated = false;
+                size_t n = _safe_strlen_asan(first, &preview_truncated);
+                size_t take = n < 32 ? n : 32;
+                if (take > 0)
                 {
-                    unsigned char tmp[5] = {0};
-                    size_t n = _utf8_encode(first_cp, tmp);
-                    size_t take = n < (sizeof(preview_buf) - 1) ? n : (sizeof(preview_buf) - 1);
-                    if (take > 0)
-                    {
-                        memcpy(preview_buf, tmp, take);
-                    }
-                    preview_buf[take] = '\0';
+                    memcpy(preview_buf, first, take);
                 }
-                else
-                {
-                    bool preview_truncated = false;
-                    size_t n = _safe_strlen_asan(first, &preview_truncated);
-                    size_t take = n < 32 ? n : 32;
-                    if (take > 0)
-                    {
-                        memcpy(preview_buf, first, take);
-                    }
-                    preview_buf[take] = '\0';
-                }
+                preview_buf[take] = '\0';
             }
             fprintf(
                 stderr,
-                "[stage2-native] array_concat large alen=%lld blen=%lld total=%zu a=%p b=%p out=%p first=%p%s cp=%u preview=\"%s\"\n",
+                "[stage2-native] array_concat large alen=%lld blen=%lld total=%zu a=%p b=%p out=%p first=%p preview=\"%s\"\n",
                 (long long)alen,
                 (long long)blen,
                 total,
@@ -4604,8 +3978,6 @@ SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
                 (void *)b,
                 (void *)out,
                 (void *)first,
-                first_immediate ? " immediate" : "",
-                (unsigned)first_cp,
                 preview_buf);
             fflush(stderr);
 
@@ -4635,12 +4007,7 @@ SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
                 for (size_t idx = 0; idx < limit; idx++)
                 {
                     char *s = out->data[idx];
-                    uint32_t cp = 0;
                     if (!s)
-                    {
-                        continue;
-                    }
-                    if (_is_immediate_codepoint_string(s, &cp))
                     {
                         continue;
                     }
@@ -4725,23 +4092,19 @@ SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
     }
     if (trace_append_source_enabled && text)
     {
-        uint32_t tcp = 0;
-        if (!_is_immediate_codepoint_string(text, &tcp))
+        const char *needle = "source_filename";
+        if (strncmp(text, needle, strlen(needle)) == 0)
         {
-            const char *needle = "source_filename";
-            if (strncmp(text, needle, strlen(needle)) == 0)
-            {
-                pthread_mutex_lock(&_sailfin_trace_header_lock);
-                _sailfin_tracked_source_filename = text;
-                pthread_mutex_unlock(&_sailfin_trace_header_lock);
-                fprintf(
-                    stderr,
-                    "[stage2-native] array_append SAW source_filename out=%p len=%lld text=%p\n",
-                    (void *)out,
-                    (long long)out->len,
-                    (void *)text);
-                fflush(stderr);
-            }
+            pthread_mutex_lock(&_sailfin_trace_header_lock);
+            _sailfin_tracked_source_filename = text;
+            pthread_mutex_unlock(&_sailfin_trace_header_lock);
+            fprintf(
+                stderr,
+                "[stage2-native] array_append SAW source_filename out=%p len=%lld text=%p\n",
+                (void *)out,
+                (long long)out->len,
+                (void *)text);
+            fflush(stderr);
         }
     }
 
@@ -4833,96 +4196,53 @@ SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
             // not relevant to missing LLVM module headers; optionally skip them.
             if (trace_append_skip_proto && first)
             {
-                uint32_t fcp = 0;
-                if (!_is_immediate_codepoint_string(first, &fcp))
+                const char *proto = "; Sailfin Native Prototype";
+                if (strncmp(first, proto, strlen(proto)) == 0)
                 {
-                    const char *proto = "; Sailfin Native Prototype";
-                    if (strncmp(first, proto, strlen(proto)) == 0)
-                    {
-                        return out;
-                    }
+                    return out;
                 }
             }
 
             trace_append_budget--;
 
-            uint32_t first_cp = 0;
-            bool first_immediate = _is_immediate_codepoint_string(first, &first_cp);
-            uint32_t value_cp = 0;
-            bool value_immediate = _is_immediate_codepoint_string(text, &value_cp);
-
             char first_preview[40];
             first_preview[0] = '\0';
             if (first)
             {
-                if (first_immediate)
+                bool truncated = false;
+                size_t n = _safe_strlen_asan(first, &truncated);
+                size_t take = n < 32 ? n : 32;
+                if (take > 0)
                 {
-                    unsigned char tmp[5] = {0};
-                    size_t n = _utf8_encode(first_cp, tmp);
-                    size_t take = n < 32 ? n : 32;
-                    if (take > 0)
-                    {
-                        memcpy(first_preview, tmp, take);
-                    }
-                    first_preview[take] = '\0';
+                    memcpy(first_preview, first, take);
                 }
-                else
-                {
-                    bool truncated = false;
-                    size_t n = _safe_strlen_asan(first, &truncated);
-                    size_t take = n < 32 ? n : 32;
-                    if (take > 0)
-                    {
-                        memcpy(first_preview, first, take);
-                    }
-                    first_preview[take] = '\0';
-                }
+                first_preview[take] = '\0';
             }
 
             char value_preview[40];
             value_preview[0] = '\0';
             if (text)
             {
-                if (value_immediate)
+                bool truncated = false;
+                size_t n = _safe_strlen_asan(text, &truncated);
+                size_t take = n < 32 ? n : 32;
+                if (take > 0)
                 {
-                    unsigned char tmp[5] = {0};
-                    size_t n = _utf8_encode(value_cp, tmp);
-                    size_t take = n < 32 ? n : 32;
-                    if (take > 0)
-                    {
-                        memcpy(value_preview, tmp, take);
-                    }
-                    value_preview[take] = '\0';
+                    memcpy(value_preview, text, take);
                 }
-                else
-                {
-                    bool truncated = false;
-                    size_t n = _safe_strlen_asan(text, &truncated);
-                    size_t take = n < 32 ? n : 32;
-                    if (take > 0)
-                    {
-                        memcpy(value_preview, text, take);
-                    }
-                    value_preview[take] = '\0';
-                }
+                value_preview[take] = '\0';
             }
 
-            uint32_t cp = 0;
-            bool imm = _is_immediate_codepoint_string(text, &cp);
             fprintf(
                 stderr,
-                "[stage2-native] array_append len=%lld total=%zu a=%p out=%p first=%p%s cp=%u first_preview=\"%s\" value=%p%s cp=%u value_preview=\"%s\"\n",
+                "[stage2-native] array_append len=%lld total=%zu a=%p out=%p first=%p first_preview=\"%s\" value=%p value_preview=\"%s\"\n",
                 (long long)alen,
                 total,
                 (void *)a,
                 (void *)out,
                 (void *)first,
-                first_immediate ? " immediate" : "",
-                (unsigned)first_cp,
                 first_preview,
                 (void *)text,
-                imm ? " immediate" : "",
-                (unsigned)cp,
                 value_preview);
             fflush(stderr);
 
@@ -4951,12 +4271,7 @@ SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
                 for (size_t idx = 0; idx < limit; idx++)
                 {
                     char *s = out->data[idx];
-                    uint32_t scp = 0;
                     if (!s)
-                    {
-                        continue;
-                    }
-                    if (_is_immediate_codepoint_string(s, &scp))
                     {
                         continue;
                     }
@@ -5167,79 +4482,42 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
             first = array->data[0];
         }
 
-        uint32_t first_cp = 0;
-        bool first_immediate = _is_immediate_codepoint_string(first, &first_cp);
-        uint32_t value_cp = 0;
-        bool value_immediate = _is_immediate_codepoint_string(value, &value_cp);
-
         char first_preview[40];
         first_preview[0] = '\0';
         if (first)
         {
-            if (first_immediate)
+            bool truncated = false;
+            size_t n = _safe_strlen_asan(first, &truncated);
+            size_t take = n < 32 ? n : 32;
+            if (take > 0)
             {
-                unsigned char tmp[5] = {0};
-                size_t n = _utf8_encode(first_cp, tmp);
-                size_t take = n < 32 ? n : 32;
-                if (take > 0)
-                {
-                    memcpy(first_preview, tmp, take);
-                }
-                first_preview[take] = '\0';
+                memcpy(first_preview, first, take);
             }
-            else
-            {
-                bool truncated = false;
-                size_t n = _safe_strlen_asan(first, &truncated);
-                size_t take = n < 32 ? n : 32;
-                if (take > 0)
-                {
-                    memcpy(first_preview, first, take);
-                }
-                first_preview[take] = '\0';
-            }
+            first_preview[take] = '\0';
         }
 
         char value_preview[40];
         value_preview[0] = '\0';
         if (value)
         {
-            if (value_immediate)
+            bool truncated = false;
+            size_t n = _safe_strlen_asan(value, &truncated);
+            size_t take = n < 32 ? n : 32;
+            if (take > 0)
             {
-                unsigned char tmp[5] = {0};
-                size_t n = _utf8_encode(value_cp, tmp);
-                size_t take = n < 32 ? n : 32;
-                if (take > 0)
-                {
-                    memcpy(value_preview, tmp, take);
-                }
-                value_preview[take] = '\0';
+                memcpy(value_preview, value, take);
             }
-            else
-            {
-                bool truncated = false;
-                size_t n = _safe_strlen_asan(value, &truncated);
-                size_t take = n < 32 ? n : 32;
-                if (take > 0)
-                {
-                    memcpy(value_preview, value, take);
-                }
-                value_preview[take] = '\0';
-            }
+            value_preview[take] = '\0';
         }
 
         fprintf(
             stderr,
-            "[stage2-native] array_push len=%lld out=%p first=%p%s cp=%u first_preview=\"%s\" value=%p%s cp=%u value_preview=\"%s\"\n",
+            "[stage2-native] array_push len=%lld out=%p first=%p first_preview=\"%s\" value=%p value_preview=\"%s\"\n",
             (long long)len,
             (void *)array,
             (void *)first,
-            first_immediate ? " immediate" : "",
-            (unsigned)first_cp,
             first_preview,
             (void *)value,
-            value_immediate ? " immediate" : "",
-            (unsigned)value_cp,
             value_preview);
         fflush(stderr);
 
@@ -5268,12 +4546,7 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
             for (size_t idx = 0; idx < limit; idx++)
             {
                 char *s = array->data[idx];
-                uint32_t cp = 0;
                 if (!s)
-                {
-                    continue;
-                }
-                if (_is_immediate_codepoint_string(s, &cp))
                 {
                     continue;
                 }
@@ -6195,23 +5468,6 @@ char *sailfin_runtime_grapheme_at(char *text, double index)
     }
     if (!text)
     {
-        return "";
-    }
-
-    // Immediate-codepoint pseudo-strings are tagged pointers and must never be
-    // dereferenced. Treat them as a single grapheme at index 0.
-    uint32_t immediate_codepoint = 0;
-    if (_is_immediate_codepoint_string(text, &immediate_codepoint))
-    {
-        int64_t idx = (int64_t)index;
-        if ((double)idx != index)
-        {
-            return "";
-        }
-        if (idx == 0)
-        {
-            return text;
-        }
         return "";
     }
 
@@ -7378,12 +6634,6 @@ double sailfin_runtime_char_code(char *text)
         return -1.0;
     }
 
-    uint32_t codepoint = 0;
-    if (_is_immediate_codepoint_string(text, &codepoint))
-    {
-        return (double)codepoint;
-    }
-
     unsigned char first = (unsigned char)text[0];
     if (first == 0)
     {
@@ -7485,20 +6735,17 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
         return;
     }
 
-    uint32_t codepoint = 0;
-    bool immediate = _is_immediate_codepoint_string(contents_str, &codepoint);
-
     // Enhanced debugging for zero-length writes
     if (trace_write_enabled)
     {
         uintptr_t addr = (uintptr_t)contents_str;
-        fprintf(stderr, "[native] fs.writeFile PRE-LENGTH contents=%p immediate=%d cp=%u addr_low32=0x%x addr_high32=0x%x\n",
-                (void *)contents_str, immediate ? 1 : 0, (unsigned)codepoint,
+        fprintf(stderr, "[native] fs.writeFile PRE-LENGTH contents=%p addr_low32=0x%x addr_high32=0x%x\n",
+                (void *)contents_str,
                 (unsigned)(addr & 0xffffffffu), (unsigned)(addr >> 32));
         fflush(stderr);
 
         // Check for premature null termination around 65535
-        if (!immediate && contents_str)
+        if (contents_str)
         {
             size_t check_start = 65530;
             size_t check_end = 65545;
@@ -7521,30 +6768,15 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
         preview_buf[0] = '\0';
         int64_t len64 = -1;
 
-        if (immediate)
+        len64 = sailfin_runtime_string_length((char *)contents_str);
+        bool truncated = false;
+        size_t n = _safe_strlen_asan(contents_str, &truncated);
+        size_t take = n < 32 ? n : 32;
+        if (take > 0)
         {
-            unsigned char tmp[5] = {0};
-            size_t n = _utf8_encode(codepoint, tmp);
-            size_t take = n < 32 ? n : 32;
-            if (take > 0)
-            {
-                memcpy(preview_buf, tmp, take);
-            }
-            preview_buf[take] = '\0';
-            len64 = (int64_t)n;
+            memcpy(preview_buf, contents_str, take);
         }
-        else
-        {
-            len64 = sailfin_runtime_string_length((char *)contents_str);
-            bool truncated = false;
-            size_t n = _safe_strlen_asan(contents_str, &truncated);
-            size_t take = n < 32 ? n : 32;
-            if (take > 0)
-            {
-                memcpy(preview_buf, contents_str, take);
-            }
-            preview_buf[take] = '\0';
-        }
+        preview_buf[take] = '\0';
 
         long long source_filename_at = -1;
         long long prototype_at = -1;
@@ -7552,7 +6784,7 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
         size_t range_len = 0;
         size_t range_offset = 0;
         bool in_recent_range = false;
-        if (!immediate && len64 > 0)
+        if (len64 > 0)
         {
             const char *hay = contents_str;
             size_t hay_len = (size_t)len64;
@@ -7590,11 +6822,9 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
 
         fprintf(
             stderr,
-            "[native] fs.writeFile path=%s contents=%p%s cp=%u len=%lld preview=\"%s\" marker_source_filename=%lld marker_prototype=%lld range_base=%p range_len=%zu range_offset=%zu\n",
+            "[native] fs.writeFile path=%s contents=%p len=%lld preview=\"%s\" marker_source_filename=%lld marker_prototype=%lld range_base=%p range_len=%zu range_offset=%zu\n",
             path_str,
             (void *)contents_str,
-            immediate ? " immediate" : "",
-            (unsigned)codepoint,
             (long long)len64,
             preview_buf,
             source_filename_at,
@@ -7605,22 +6835,10 @@ void sailfin_adapter_fs_write_file(void *path, void *contents)
         fflush(stderr);
     }
 
-    if (immediate)
+    int64_t len64 = sailfin_runtime_string_length((char *)contents_str);
+    if (len64 > 0)
     {
-        unsigned char buf[5] = {0};
-        size_t len = _utf8_encode(codepoint, buf);
-        if (len > 0)
-        {
-            (void)fwrite(buf, 1, len, f);
-        }
-    }
-    else
-    {
-        int64_t len64 = sailfin_runtime_string_length((char *)contents_str);
-        if (len64 > 0)
-        {
-            (void)fwrite(contents_str, 1, (size_t)len64, f);
-        }
+        (void)fwrite(contents_str, 1, (size_t)len64, f);
     }
     fclose(f);
 }
@@ -7641,24 +6859,10 @@ void sailfin_adapter_fs_append_file(void *path, void *contents)
         return;
     }
 
-    uint32_t codepoint = 0;
-    bool immediate = _is_immediate_codepoint_string(contents_str, &codepoint);
-    if (immediate)
+    int64_t len64 = sailfin_runtime_string_length((char *)contents_str);
+    if (len64 > 0)
     {
-        unsigned char buf[5] = {0};
-        size_t len = _utf8_encode(codepoint, buf);
-        if (len > 0)
-        {
-            (void)fwrite(buf, 1, len, f);
-        }
-    }
-    else
-    {
-        int64_t len64 = sailfin_runtime_string_length((char *)contents_str);
-        if (len64 > 0)
-        {
-            (void)fwrite(contents_str, 1, (size_t)len64, f);
-        }
+        (void)fwrite(contents_str, 1, (size_t)len64, f);
     }
 
     fclose(f);
@@ -7717,24 +6921,10 @@ void sailfin_adapter_fs_write_lines(void *path, SailfinPtrArray *lines)
             continue;
         }
 
-        uint32_t codepoint = 0;
-        bool immediate = _is_immediate_codepoint_string(line, &codepoint);
-        if (immediate)
+        int64_t len64 = sailfin_runtime_string_length((char *)line);
+        if (len64 > 0)
         {
-            unsigned char buf[5] = {0};
-            size_t len = _utf8_encode(codepoint, buf);
-            if (len > 0)
-            {
-                (void)fwrite(buf, 1, len, f);
-            }
-        }
-        else
-        {
-            int64_t len64 = sailfin_runtime_string_length((char *)line);
-            if (len64 > 0)
-            {
-                (void)fwrite(line, 1, (size_t)len64, f);
-            }
+            (void)fwrite(line, 1, (size_t)len64, f);
         }
 
         (void)fwrite("\n", 1, 1, f);
