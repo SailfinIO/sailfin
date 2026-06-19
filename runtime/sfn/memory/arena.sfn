@@ -555,6 +555,17 @@ fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usiz
     }
 }
 
+// `sfn_arena_realloc(arena, ptr, old_size, new_size, align)` — bare-named
+// entry point. Forwards to `sfn_arena_sfn_realloc`, which owns the
+// grow-if-at-tip discipline. Mirrors the `sfn_arena_alloc` forwarder
+// (#1309): the C `sfn_arena_realloc` body retires, this becomes the link
+// target for both the `string.sfn` concat/append path and the C-internal
+// `sailfin_runtime.c` callers (which bind to it through the surviving
+// `sailfin_arena.h` prototype). Faithful to `sailfin_arena.c:113`.
+fn sfn_arena_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, align: usize) -> * u8 {
+    return sfn_arena_sfn_realloc(arena, ptr, old_size, new_size, align);
+}
+
 // ====================================================================
 // Mark / rewind over the process-global arena (#927, sub-issue of
 // #390). Port of the double-encoding wrappers

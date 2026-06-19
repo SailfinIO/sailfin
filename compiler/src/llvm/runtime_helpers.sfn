@@ -358,6 +358,45 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "intrinsic.exe_path.darwin.strlen", symbol: "strlen", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
+    // Filesystem sentinels (#1308): retire the last platform-divergent C fs
+    // symbols by lowering each `fs.*` op to a per-target emission sequence
+    // (modeled on `exe_path` above), choosing the host leg via
+    // `fs_platform_leg` at emit time. Only the host leg's symbol ever appears
+    // in the IR, so the Windows cross-build never references a POSIX-only
+    // `symlink`/`mkdtemp` it has no symbol for. The declare loop in
+    // `rendering.sfn` skips these sentinel targets.
+    //
+    // NO per-leg "concrete" rows (unlike `exe_path`): the host-leg symbols the
+    // sentinels emit (`symlink`/`mkdtemp`/`stat`/`GetFileAttributesA`) are real
+    // libc symbols already declared via `extern fn` in the firing module
+    // (`runtime/sfn/platform/libc.sfn`, inlined into `filesystem.sfn`), so the
+    // extern is the single source of the `declare`. A concrete row carrying a
+    // bare libc name (`symlink`/`mkdtemp`/`stat`) collides with same-named
+    // user/capsule functions — e.g. `sfn/fs`'s public `fn mkdtemp`
+    // (`@mkdtemp__sfn__fs__mod`): the declare machinery stamps the registry
+    // signature onto the imported mangled symbol and llvm-as rejects the
+    // redefinition. Reusing the libc extern avoids both the duplication and the
+    // collision. `exe_path` needed concrete rows only because `readlink` /
+    // `_NSGetExecutablePath` are in no `extern fn` accept-list. The sentinel
+    // bodies are called WITHOUT an extern so the registry-by-name match
+    // attaches the descriptor:
+    //   symlink(target, link) -> bool   ; POSIX `symlink`,  Windows `false` stub
+    //   mkdtemp(template)     -> bool    ; POSIX `mkdtemp(3)`, Windows `false` stub
+    //   fs_exists(path)       -> bool    ; POSIX `stat`==0,  Windows GetFileAttributesA
+    //   get_perms(path)       -> i64     ; POSIX stat+st_mode, Windows `-1` stub
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_fs_symlink", symbol: "sailfin_intrinsic_fs_symlink", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_fs_mkdtemp", symbol: "sailfin_intrinsic_fs_mkdtemp", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_fs_exists", symbol: "sailfin_intrinsic_fs_exists", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_fs_get_perms", symbol: "sailfin_intrinsic_fs_get_perms", return_type: "i64", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
+    });
+
     // Network intrinsics.
     // `http.get` / `http.post` member calls flipped (#912) to the
     // Sailfin-native socket client in `runtime/sfn/adapters/http.sfn`:

@@ -8810,7 +8810,11 @@ static SfnArray *_sfn_array_alloc_v2(int64_t initial_cap, size_t elem_size)
     return out;
 }
 
-SfnArray *sailfin_runtime_concat_v2(SfnArray *a, SfnArray *b)
+/* #1308 residual: the bare `sailfin_runtime_concat_v2` link target is now
+ * defined in `runtime/sfn/array.sfn` (link-ownership flip, mechanism 1).
+ * This C body is retained `static` for any in-file caller; it is no longer
+ * an exported symbol and the header prototype is dropped. */
+static SfnArray *sailfin_runtime_concat_v2(SfnArray *a, SfnArray *b)
 {
     int64_t alen = (a && a->len > 0) ? a->len : 0;
     int64_t blen = (b && b->len > 0) ? b->len : 0;
@@ -8896,7 +8900,9 @@ SfnArray *sailfin_runtime_argv_to_string_array(int argc, char **argv)
     return arr;
 }
 
-SfnArray *sailfin_runtime_append_string_v2(SfnArray *a, char *text)
+/* #1308 residual: bare link target now defined in
+ * `runtime/sfn/array.sfn`; this C body is retained `static` only. */
+static SfnArray *sailfin_runtime_append_string_v2(SfnArray *a, char *text)
 {
     _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window
     if (!a)
@@ -8943,7 +8949,9 @@ SfnArray *sailfin_runtime_append_string_v2(SfnArray *a, char *text)
     return a;
 }
 
-char *sailfin_runtime_array_push_slot_v2(void **data_ptr, int64_t *len_ptr,
+/* #1308 residual: bare link target now defined in
+ * `runtime/sfn/array.sfn`; this C body is retained `static` only. */
+static char *sailfin_runtime_array_push_slot_v2(void **data_ptr, int64_t *len_ptr,
                                          int64_t *cap_ptr, int64_t elem_size)
 {
     _runtime_enter(); // #892: bump seq to invalidate the concat-reuse window

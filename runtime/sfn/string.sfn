@@ -224,11 +224,10 @@ extern fn sfn_arena_global() -> * u8;
 extern fn sfn_arena_enabled() -> bool;
 
 // #1318: the arena bump allocator + grow-at-tip realloc backing the
-// `sfn_str_concat` / `sfn_str_append` bodies. The bare `sfn_arena_alloc`
-// is the Sailfin export in `runtime/sfn/memory/arena.sfn` (#1309);
-// `sfn_arena_realloc` is still the C arena entrypoint (retires with the
-// rest of `sailfin_arena.c` in #822). Both are reached as C-ABI externs,
-// the same discipline `ownedbuf.sfn` follows for `sfn_arena_sfn_*`.
+// `sfn_str_concat` / `sfn_str_append` bodies. Both `sfn_arena_alloc`
+// (#1309) and `sfn_arena_realloc` (#1308) are now the Sailfin exports in
+// `runtime/sfn/memory/arena.sfn`. Both are reached as C-ABI externs, the
+// same discipline `ownedbuf.sfn` follows for `sfn_arena_sfn_*`.
 extern fn sfn_arena_alloc(arena: * u8, size: usize, align: usize) -> * u8;
 
 extern fn sfn_arena_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, align: usize) -> * u8;

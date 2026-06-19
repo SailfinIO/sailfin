@@ -11,16 +11,35 @@
 //
 // Status (#1316, C6 of epic #1308): the array *core* —
 // `sfn_array_concat` / `sfn_array_push_string` / `sfn_array_push_slot`
-// — is now **bare-defined here** (link-ownership flipped off the C
+// — is **bare-defined here** (link-ownership flipped off the C
 // runtime, mirroring the #1309 arena flip). Their C definitions in
 // `runtime/native/src/sailfin_runtime.c` are retired; emission's
 // `@sfn_array_*` calls resolve to these Sailfin bodies at link because
 // this module is listed in `runtime/native/capsule.toml::sfn-sources`
-// and linked into every binary alongside the C runtime. The bodies
-// still delegate to the legacy `sailfin_runtime_*_v2` C entrypoints
-// (which own the `SailfinPtrArray` header+canary layout and retire in
-// #822), so there is no independent header construction here and no
-// #1205-class layout-divergence hazard.
+// and linked into every binary alongside the C runtime.
+//
+// Status (#1308 residual): the `sailfin_runtime_*_v2` trio the core
+// wrappers delegate to — `concat_v2` / `append_string_v2` /
+// `array_push_slot_v2` — is **now also bare-defined here** in Sailfin
+// (link-ownership flip, mechanism 1). The C bodies in
+// `runtime/native/src/sailfin_runtime.c` are `static`-ified and the
+// header prototypes dropped; emission's `@sfn_array_*` wrappers and the
+// `runtime/sfn/adapters/filesystem.sfn` C-ABI externs resolve to these
+// Sailfin definitions at link. The `SfnArray` container layout
+// (`{ data: * u8 @0, len: i64 @8, cap: i64 @16 }`, 24 bytes,
+// byte-identical to the C `SfnArray` / LLVM `{i8*, i64, i64}`) is read
+// and written through the `atomic_load` / `atomic_store` word discipline
+// the rest of the runtime uses for raw `* T` field access; allocation
+// routes through the already-flipped Sailfin arena (`sfn_arena_alloc` /
+// `sfn_arena_realloc`) with a libc `calloc` / `realloc` fallback when the
+// arena is disabled — exactly the dual-mode `_rt_calloc` / `_rt_realloc`
+// contract the C bodies used. The #892 `_runtime_enter()` seq bump the C
+// `append_string_v2` / `array_push_slot_v2` performed is intentionally
+// NOT reproduced: the `_runtime_call_seq` counter and the
+// `_concat_reuse_*` window it gated are vestigial in the C runtime (the
+// counter is written but never read, the reuse window never reused), so
+// dropping the bump is correctness-safe — the same reasoning
+// `runtime/sfn/string.sfn`'s concat flip records.
 //
 // Still under the `sfn_array_sfn_*` infix (proof-of-life, not yet
 // flipped): `create` / `push` / `slice` (spec-ABI stubs) and
@@ -40,26 +59,266 @@
 // *adapters* that wrap these primitives, never to the primitives
 // themselves.
 //
-// Why inline the legacy externs? The same reason `arena.sfn` and
+// Why inline the libc / arena externs? The same reason `arena.sfn` and
 // `string.sfn` do: the released seed compiler snapshots
 // `runtime/sfn/platform/libc.sfn` at build time. Inlining keeps this
 // module self-contained for every seed, regardless of which
 // declarations have shipped on the cross-module path.
-// Trampolines into the M1.B `_v2` C entrypoints in
-// `runtime/native/src/sailfin_runtime.c`. The `* u8` parameter spelling
-// stands in for `SfnArray*` — at the LLVM IR level `* u8` lowers to
-// `i8*` and the `_v2` entrypoints accept the SfnArray pointer as an
-// opaque pointer ABI. The compiler-emitted call sites continue to
-// type the SfnArray pointer as `{ i8**, i64, i64 }*`; both spellings
-// are pointer-ABI-compatible at the System V x86_64 register level
-// (the linker resolves by symbol name only). The bodies below will
-// be rewritten in-place once M3 retires the legacy entrypoints in
-// favor of arena-backed allocation per §2.1.1.
-extern fn sailfin_runtime_concat_v2(a: * u8, b: * u8) -> * u8;
+//
+// Allocation primitives. The `_v2` bodies below route container +
+// backing-buffer allocation through the already-flipped Sailfin arena
+// (`sfn_arena_alloc` / `sfn_arena_realloc`, bare-defined in
+// `runtime/sfn/memory/arena.sfn`) when the process arena is enabled, and
+// fall through to libc `calloc` / `realloc` otherwise — exactly the
+// dual-mode `_rt_calloc` / `_rt_realloc` contract the retired C bodies
+// used (`runtime/native/src/sailfin_runtime.c`). `memcpy` / `memset`
+// move and zero the element storage.
+extern fn calloc(count: usize, size: usize) -> * u8;
 
-extern fn sailfin_runtime_append_string_v2(a: * u8, text: * u8) -> * u8;
+extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
 
-extern fn sailfin_runtime_array_push_slot_v2(data_ptr: * * u8, len_ptr: * i64, cap_ptr: * i64, elem_size: i64) -> * u8;
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+extern fn memset(ptr: * u8, value: i32, n: usize) -> * u8;
+
+extern fn sfn_arena_enabled() -> bool;
+
+extern fn sfn_arena_global() -> * u8;
+
+extern fn sfn_arena_alloc(arena: * u8, size: usize, align: usize) -> * u8;
+
+extern fn sfn_arena_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, align: usize) -> * u8;
+
+// `_sfn_array_rt_calloc(count, size)` — dual-mode zero-filled allocation,
+// the Sailfin mirror of the retired C `_rt_calloc` (`sailfin_runtime.c`):
+// under arena mode bump `count * size` bytes off the process-global arena
+// and zero-fill (the bump allocator returns uninitialised page memory);
+// otherwise libc `calloc`, which zeroes for free. Returns null on the
+// multiplication overflow the C body guards.
+fn _sfn_array_rt_calloc(count: i64, size: i64) -> * u8 {
+    if count < 0 { return null; }
+    if size <= 0 { return null; }
+    let total: i64 = count * size;
+    // overflow guard: `count != 0 && total / count != size`
+    if count != 0 {
+        if (total / count) != size { return null; }
+    }
+    if sfn_arena_enabled() {
+        let p: * u8 = sfn_arena_alloc(sfn_arena_global(), total as usize, 8 as usize);
+        if (p as i64) != 0 { memset(p, 0, total as usize); }
+        return p;
+    }
+    return calloc(count as usize, size as usize);
+}
+
+// `_sfn_array_rt_realloc(ptr, old_bytes, new_bytes)` — dual-mode grow,
+// the Sailfin mirror of the retired C `_rt_realloc`: arena-aware
+// grow-if-at-tip under arena mode, libc `realloc` otherwise (which
+// ignores `old_bytes`).
+fn _sfn_array_rt_realloc(ptr: * u8, old_bytes: i64, new_bytes: i64) -> * u8 {
+    if sfn_arena_enabled() {
+        return sfn_arena_realloc(sfn_arena_global(), ptr, old_bytes as usize, new_bytes as usize, 8 as usize);
+    }
+    return realloc(ptr, new_bytes as usize);
+}
+
+// `_sfn_array_alloc_v2(initial_cap, elem_size)` — allocate a zeroed
+// `SfnArray` container (`{ data @0, len @8, cap @16 }`, 24 bytes) and, if
+// `initial_cap > 0`, a zeroed `initial_cap * elem_size` backing buffer.
+// Faithful Sailfin port of the C `_sfn_array_alloc_v2`: the container is
+// `_rt_calloc`-style zeroed so `data`/`len` start null/0; on a backing-
+// buffer multiplication overflow the container is dropped (returns null).
+// `cap` is set to `initial_cap` only after the buffer is in hand.
+fn _sfn_array_alloc_v2(initial_cap: i64, elem_size: i64) -> * u8 {
+    // 24-byte container, zero-initialised (data @0 = null, len @8 = 0,
+    // cap @16 = 0). Raw allocation + field stores (#1218 / E9): the
+    // container is freshly allocated and uniquely owned here.
+    unsafe {
+        let out: * u8 = _sfn_array_rt_calloc(1, 24);
+        if (out as i64) == 0 { return null; }
+        if initial_cap > 0 {
+            let buf: * u8 = _sfn_array_rt_calloc(initial_cap, elem_size);
+            if (buf as i64) == 0 {
+                // backing-buffer overflow / OOM — drop the container.
+                // Under arena mode the container leaks into the arena
+                // (reclaimed in bulk at exit), matching the C `_rt_free`
+                // no-op; under malloc mode the seed has no `free` wired
+                // here, so the container is a bounded leak on the error
+                // path (the C `_rt_free` freed it). The error path is
+                // OOM/overflow only — not a steady-state leak.
+                return null;
+            }
+            let data_slot: * i64 = out as * i64;
+            atomic_store(data_slot, buf as i64);
+            let cap_slot: * i64 = (out as i64 + 16) as * i64;
+            atomic_store(cap_slot, initial_cap);
+        }
+        return out;
+    }
+}
+
+// `sailfin_runtime_concat_v2(a, b)` — allocate a fresh `SfnArray` of
+// `char*` elements holding both inputs' element spans (shallow pointer
+// copy). Bare-defined here (link-ownership flip, #1308 residual); the C
+// body is `static`-ified. Reads `a`/`b` through the `{ data @0, len @8 }`
+// layout, allocates `total` slots, shallow-copies both spans, sets `len`.
+// The `cap` the allocator wrote equals `total`. Element slots are 8-byte
+// `char*` words, written with `atomic_store`.
+fn sailfin_runtime_concat_v2(a: * u8, b: * u8) -> * u8 {
+    unsafe {
+        let mut alen: i64 = 0;
+        let mut adata: i64 = 0;
+        if (a as i64) != 0 {
+            let al: i64 = atomic_load((a as i64 + 8) as * i64);
+            if al > 0 { alen = al; }
+            adata = atomic_load(a as * i64);
+        }
+        let mut blen: i64 = 0;
+        let mut bdata: i64 = 0;
+        if (b as i64) != 0 {
+            let bl: i64 = atomic_load((b as i64 + 8) as * i64);
+            if bl > 0 { blen = bl; }
+            bdata = atomic_load(b as * i64);
+        }
+        let total: i64 = alen + blen;
+        let out: * u8 = _sfn_array_alloc_v2(total, 8);
+        if (out as i64) == 0 { return null; }
+        // out.len = total
+        atomic_store((out as i64 + 8) as * i64, total);
+        let buf: i64 = atomic_load(out as * i64);
+        if buf != 0 {
+            if adata != 0 {
+                let mut i: i64 = 0;
+                loop {
+                    if i >= alen { break; }
+                    let v: i64 = atomic_load((adata + i * 8) as * i64);
+                    atomic_store((buf + i * 8) as * i64, v);
+                    i = i + 1;
+                }
+            }
+            if bdata != 0 {
+                let mut j: i64 = 0;
+                loop {
+                    if j >= blen { break; }
+                    let v: i64 = atomic_load((bdata + j * 8) as * i64);
+                    atomic_store((buf + (alen + j) * 8) as * i64, v);
+                    j = j + 1;
+                }
+            }
+        }
+        return out;
+    }
+}
+
+// `sailfin_runtime_append_string_v2(a, text)` — append a `char*` to a
+// string array (`{ char**, i64, i64 }`), growing the backing buffer in
+// place when `len >= cap`. Bare-defined here (#1308 residual); the C body
+// is `static`-ified. The `max(cap*2, len+1, 8)` grow rule, the doubling-
+// overflow guard, the `new_cap * 8` multiplication-overflow guard, and
+// the zero-fill of the freshly grown tail are ported faithfully from the
+// C body. The #892 `_runtime_enter()` seq bump is intentionally omitted
+// (vestigial counter — see the module header).
+fn sailfin_runtime_append_string_v2(a: * u8, text: * u8) -> * u8 {
+    unsafe {
+        let mut arr: * u8 = a;
+        if (arr as i64) == 0 {
+            arr = _sfn_array_alloc_v2(0, 8);
+            if (arr as i64) == 0 { return null; }
+        }
+        let data_slot: * i64 = arr as * i64;
+        let len_slot: * i64 = (arr as i64 + 8) as * i64;
+        let cap_slot: * i64 = (arr as i64 + 16) as * i64;
+        let mut len: i64 = atomic_load(len_slot);
+        if len < 0 { len = 0; }
+        let mut cap: i64 = atomic_load(cap_slot);
+        if cap < 0 { cap = 0; }
+        if len >= cap {
+            let mut doubled: i64 = cap * 2;
+            if cap < 8 { doubled = 8; }
+            if doubled < cap { return null; }
+            let need: i64 = len + 1;
+            let mut new_cap: i64 = doubled;
+            if need > doubled { new_cap = need; }
+            if new_cap < 0 { return null; }
+            // multiplication-overflow guard: new_cap * 8 must not wrap.
+            // SIZE_MAX / 8 is 0x1FFFFFFFFFFFFFFF on a 64-bit host.
+            if new_cap > 2305843009213693951 { return null; }
+            let old_bytes: i64 = cap * 8;
+            let new_bytes: i64 = new_cap * 8;
+            let old_data: i64 = atomic_load(data_slot);
+            let new_data: * u8 = _sfn_array_rt_realloc(old_data as * u8, old_bytes, new_bytes);
+            if (new_data as i64) == 0 { return null; }
+            // Zero the freshly grown tail so unused slots read as null.
+            memset((new_data as i64 + old_bytes) as * u8, 0, (new_bytes - old_bytes) as usize);
+            atomic_store(data_slot, new_data as i64);
+            atomic_store(cap_slot, new_cap);
+        }
+        let base: i64 = atomic_load(data_slot);
+        atomic_store((base + len * 8) as * i64, text as i64);
+        atomic_store(len_slot, len + 1);
+        return arr;
+    }
+}
+
+// `sailfin_runtime_array_push_slot_v2(data_ptr, len_ptr, cap_ptr,
+// elem_size)` — grow the backing buffer if `len >= cap` and return a
+// pointer to the next writable slot (`base + len * elem_size`); the
+// caller stores its typed element into the returned slot. Bare-defined
+// here (#1308 residual); the C body is `static`-ified. Writes the grown
+// `data`/`cap`/`len` back through the raw out-param pointers with
+// `atomic_store`. All the C guards (null out-params, `elem_size` range,
+// negative len/cap clamp, doubling-overflow, `new_cap * elem_size`
+// overflow, grown-tail zero-fill) are ported faithfully. The #892
+// `_runtime_enter()` seq bump is intentionally omitted (vestigial).
+fn sailfin_runtime_array_push_slot_v2(data_ptr: * * u8, len_ptr: * i64, cap_ptr: * i64, elem_size: i64) -> * u8 {
+    unsafe {
+        if (data_ptr as i64) == 0 { return null; }
+        if (len_ptr as i64) == 0 { return null; }
+        if (cap_ptr as i64) == 0 { return null; }
+        if elem_size <= 0 { return null; }
+        if elem_size > 1048576 { return null; }
+        let data_slot: * i64 = data_ptr as * i64;
+        let len_slot: * i64 = len_ptr as * i64;
+        let cap_slot: * i64 = cap_ptr as * i64;
+        let mut len: i64 = atomic_load(len_slot);
+        let mut cap: i64 = atomic_load(cap_slot);
+        if len < 0 {
+            len = 0;
+            atomic_store(len_slot, 0);
+        }
+        if cap < 0 {
+            cap = 0;
+            atomic_store(cap_slot, 0);
+        }
+        if len >= cap {
+            let mut doubled: i64 = cap * 2;
+            if cap < 8 { doubled = 8; }
+            if doubled < cap { return null; }
+            let need: i64 = len + 1;
+            let mut new_cap: i64 = doubled;
+            if need > doubled { new_cap = need; }
+            if new_cap < 0 { return null; }
+            // multiplication-overflow guard: new_cap * elem_size must not
+            // exceed SIZE_MAX (0xFFFFFFFFFFFFFFFF unsigned). Mirror the C
+            // `new_cap > SIZE_MAX / elem_size` test in signed i64 space
+            // using the positive half-range as a conservative bound.
+            if new_cap > (9223372036854775807 / elem_size) { return null; }
+            let old_bytes: i64 = cap * elem_size;
+            let new_bytes: i64 = new_cap * elem_size;
+            let old_data: i64 = atomic_load(data_slot);
+            let new_data: * u8 = _sfn_array_rt_realloc(old_data as * u8, old_bytes, new_bytes);
+            if (new_data as i64) == 0 { return null; }
+            memset((new_data as i64 + old_bytes) as * u8, 0, (new_bytes - old_bytes) as usize);
+            atomic_store(data_slot, new_data as i64);
+            atomic_store(cap_slot, new_cap);
+            cap = new_cap;
+        }
+        let base: i64 = atomic_load(data_slot);
+        let slot: i64 = base + len * elem_size;
+        atomic_store(len_slot, len + 1);
+        return slot as * u8;
+    }
+}
 
 // `sfn_array_sfn_create(cap, elem_size, arena)` — allocate initial
 // capacity. Architect spec (§2.3): drop the legacy hidden-header /

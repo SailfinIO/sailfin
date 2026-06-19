@@ -5,8 +5,9 @@
 // #1316 (C6 of epic #1308) flipped the array *core* — `sfn_array_concat`,
 // `sfn_array_push_string`, `sfn_array_push_slot` — off the C runtime: they
 // are now **bare-defined** in `runtime/sfn/array.sfn` (delegating to the
-// still-C `sailfin_runtime_*_v2` entrypoints, retired in #822) and the C
-// definitions in `runtime/native/src/sailfin_runtime.c` were removed, so
+// `sailfin_runtime_*_v2` entrypoints, themselves flipped to pure Sailfin in
+// the same module — #1308) and the C definitions in
+// `runtime/native/src/sailfin_runtime.c` were removed, so
 // emission binds `@sfn_array_*` to the Sailfin bodies at link. The
 // remaining `create`/`push`/`slice`/`map`/`filter`/`reduce` stay under the
 // `sfn_array_sfn_*` infix (spec stubs / closure-gated), so this test pins
@@ -103,14 +104,17 @@ test "runtime-array: non-core ops remain sfn_array_sfn_* infix" ![io] {
     assert contains(ir, "define i8* @sfn_array_sfn_reduce(i8* ");
 }
 
-// The bare bodies delegate to the still-C `_v2` entrypoints (retired in #822),
-// so the inlined externs each produce a `declare` line.
-test "runtime-array: bare bodies declare the legacy _v2 delegates" ![io] {
-    let ir = _emit_llvm("runtime/sfn/array.sfn", "v2_declares");
+// #1308: the `_v2` entrypoints are now defined in pure Sailfin in
+// `runtime/sfn/array.sfn` (flipped off the C runtime — the C bodies were
+// static-ified and their `sailfin_runtime.h` prototypes dropped), so emitting
+// the module produces a bare `define` for each. Pre-#1308 these were inlined
+// externs producing `declare`s.
+test "runtime-array: _v2 delegates are now Sailfin-defined (#1308 flip)" ![io] {
+    let ir = _emit_llvm("runtime/sfn/array.sfn", "v2_defines");
     assert ir.length > 0;
-    assert contains(ir, "declare i8* @sailfin_runtime_concat_v2(");
-    assert contains(ir, "declare i8* @sailfin_runtime_append_string_v2(");
-    assert contains(ir, "declare i8* @sailfin_runtime_array_push_slot_v2(");
+    assert contains(ir, "define i8* @sailfin_runtime_concat_v2(");
+    assert contains(ir, "define i8* @sailfin_runtime_append_string_v2(");
+    assert contains(ir, "define i8* @sailfin_runtime_array_push_slot_v2(");
 }
 
 // Coexistence (inverted from the pre-#1316 guard): the still-infix ops must

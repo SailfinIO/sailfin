@@ -154,17 +154,17 @@ test_no_bare_sfn_arena_define() {
     fi
     # Coexistence regression (post-#1309). The arena *core* —
     # `sfn_arena_create` / `sfn_arena_alloc` / `sfn_arena_global` /
-    # `sfn_arena_enabled` — is now Sailfin-owned (those C definitions
-    # were removed from `sailfin_arena.c`), so arena.sfn MUST emit bare
-    # `define`s for them (asserted positively below). The remaining
-    # still-C entry points — `sfn_arena_reset` / `sfn_arena_destroy` /
-    # `sfn_arena_realloc` (and `print_stats` / `mark` / `rewind`) —
-    # keep their C definitions, so arena.sfn must NOT emit bare
-    # `define`s for those names or `make compile` fails at link with a
-    # duplicate symbol. #822 retires the rest of the C arena and this
+    # `sfn_arena_enabled` / `sfn_arena_realloc` — is now Sailfin-owned
+    # (those C definitions were removed from `sailfin_arena.c`; realloc
+    # by #1308), so arena.sfn MUST emit bare `define`s for them (asserted
+    # positively below). The remaining still-C entry points —
+    # `sfn_arena_reset` / `sfn_arena_destroy` (and `print_stats` / `mark`
+    # / `rewind`) — keep their C definitions, so arena.sfn must NOT emit
+    # bare `define`s for those names or `make compile` fails at link with
+    # a duplicate symbol. #822 retires the rest of the C arena and this
     # split collapses.
     local found=0
-    for sym in sfn_arena_reset sfn_arena_destroy sfn_arena_realloc; do
+    for sym in sfn_arena_reset sfn_arena_destroy; do
         if grep -qE "^define .* @${sym}\(" "$ll"; then
             echo "[test]   collision risk: arena.sfn emits 'define ... @${sym}(', conflicts with C arena"
             found=$((found + 1))
@@ -174,10 +174,12 @@ test_no_bare_sfn_arena_define() {
 }
 
 test_bare_core_defines() {
-    # #1309: the four bare arena-core exports must be DEFINED by
+    # #1309/#1308: the bare arena-core exports must be DEFINED by
     # arena.sfn now that their C namesakes are gone — this is the link
-    # ownership the whole refactor turns on. Anchored at line start so
-    # a `call` site does not satisfy the assertion.
+    # ownership the whole refactor turns on. `sfn_arena_realloc` joins
+    # the set with #1308 (its C body in `sailfin_arena.c` was deleted).
+    # Anchored at line start so a `call` site does not satisfy the
+    # assertion.
     local ll="$SCRATCH/arena.ll"
     if [ ! -f "$ll" ]; then
         echo "[test]   $ll missing — test_emit_define_shape must run first"
@@ -190,6 +192,10 @@ test_bare_core_defines() {
     fi
     if ! grep -qE "^define i8\* @sfn_arena_alloc\(i8\* " "$ll"; then
         echo "[test]   missing 'define i8* @sfn_arena_alloc(i8* ...)'"
+        missing=$((missing + 1))
+    fi
+    if ! grep -qE "^define i8\* @sfn_arena_realloc\(i8\* " "$ll"; then
+        echo "[test]   missing 'define i8* @sfn_arena_realloc(i8* ...)'"
         missing=$((missing + 1))
     fi
     if ! grep -qE "^define i8\* @sfn_arena_global\(" "$ll"; then
