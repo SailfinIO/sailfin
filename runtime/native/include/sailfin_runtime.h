@@ -377,12 +377,6 @@ extern "C"
     bool sailfin_runtime_is_whitespace_char(double ch);
     bool sailfin_runtime_is_alpha_char(double ch);
 
-    // ---- Fast string helpers (unchecked) ----
-
-    // These helpers assume the caller has already validated bounds.
-    // They exist to avoid repeatedly scanning large strings with strlen.
-    char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end);
-
     // ---- Safety ----
 
     void sailfin_runtime_bounds_check(int64_t index, int64_t length);

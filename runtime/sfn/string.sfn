@@ -87,13 +87,6 @@ extern fn strnlen(s: * u8, n: usize) -> usize;
 // through and discards the endptr by passing `null`.
 extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
 
-// #1372: i64-indexed substring entrypoint for `sfn_str_slice`. NOT the
-// `substring_unchecked` C wrapper — that is a registry target whose
-// `native_signature` is `sfn_str_slice`, so a Sailfin call to it re-lowers
-// to `@sfn_str_slice` (infinite self-recursion). `sailfin_runtime_*` carries
-// no registry row, so it lowers to a plain direct call.
-extern fn sailfin_runtime_substring_unchecked(text: * u8, start: i64, end: i64) -> * u8;
-
 // M2.4b (#398) + #715: the C-side allocating ops. The Sailfin
 // trampolines below preserve the `sfn_str_sfn_*` infix pattern
 // (proof-of-life presence under the Sailfin namespace) while the
@@ -349,26 +342,92 @@ fn sfn_str_eq(a: * u8, b: * u8) -> bool {
     return memcmp(ra, b, la2 as usize) == 0;
 }
 
+// `_sfn_substring_unchecked(text, start, end)` — #1308 (M1.A.2): the i64-indexed
+// substring entrypoint, now a real Sailfin body (the C
+// `sailfin_runtime_substring_unchecked` def is `static`, retaining only its two
+// internal C callers). Byte-faithful to that C body's three arms:
+//   1. NULL text → the empty string.
+//   2. Immediate-codepoint pseudo-pointer (classified by the non-allocating
+//      `sfn_str_immediate_codepoint` bridge, #714/#716): slice the codepoint's
+//      UTF-8 encoding WITHOUT dereferencing `text`. Both bounds clamp to the
+//      encoded width `n` (the C `start > n` / `end > n` arms); bytes are written
+//      via `_sfn_utf8_byte` directly, so no real buffer is materialised.
+//   3. Real pointer: truly unchecked — trust the caller's bounds (already
+//      validated via `.length`), clamping only `start >= 0` and `end >= start`,
+//      then `memcpy [start, end)`.
+// Arena-backed (the process-global arena, like `sfn_str_concat` /
+// `sfn_str_from_codepoint`) rather than the C body's `_rt_malloc` + owned-string
+// tracking: the arena reclaims on rewind, the discipline the rest of the ported
+// string surface already follows. The `roundup8(length + 1)` 8-aligned alloc +
+// `_num_put_byte` trailing NUL keeps the word read-modify-write in-bounds (the
+// seed cannot lower a single-byte `* u8` store). A non-owning `Slice` view stays
+// blocked on #1283 (an immediate pseudo-pointer has no real `text + start`).
+fn _sfn_substring_unchecked(text: * u8, start: i64, end: i64) -> * u8 {
+    if (text as i64) == 0 {
+        let empty: string = "";
+        return empty as * u8;
+    }
+
+    let cp: i64 = sfn_str_immediate_codepoint(text);
+    if cp >= 0 {
+        let n: i64 = _sfn_utf8_byte_len(cp);
+        let mut s: i64 = start;
+        if s < 0 { s = 0; }
+        let mut e: i64 = end;
+        if e < s { e = s; }
+        if s > n { s = n; }
+        if e > n { e = n; }
+        let length: i64 = e - s;
+        let cap: i64 = ((length + 1 + 7) / 8) * 8;
+        let arena: * u8 = sfn_arena_global();
+        let out: * u8 = sfn_arena_alloc(arena, cap as usize, 8 as usize);
+        if (out as i64) == 0 {
+            let empty: string = "";
+            return empty as * u8;
+        }
+        let mut i: i64 = 0;
+        loop {
+            if i >= length { break; }
+            _num_put_byte(out as i64 + i, _sfn_utf8_byte(cp, n, s + i));
+            i = i + 1;
+        }
+        _num_put_byte(out as i64 + length, 0);
+        return out;
+    }
+
+    let mut rs: i64 = start;
+    if rs < 0 { rs = 0; }
+    let mut re: i64 = end;
+    if re < rs { re = rs; }
+    let length2: i64 = re - rs;
+    let cap2: i64 = ((length2 + 1 + 7) / 8) * 8;
+    let arena2: * u8 = sfn_arena_global();
+    let out2: * u8 = sfn_arena_alloc(arena2, cap2 as usize, 8 as usize);
+    if (out2 as i64) == 0 {
+        let empty: string = "";
+        return empty as * u8;
+    }
+    if length2 > 0 {
+        memcpy(out2, (text as i64 + rs) as * u8, length2 as usize);
+    }
+    _num_put_byte(out2 as i64 + length2, 0);
+    return out2;
+}
+
 // `sfn_str_slice(text, start, end)` — #1372: the real Sailfin body for the
 // `substring` / `string.slice` emission target (the C `sfn_str_slice` def is
 // now `static`). Keeps the ALLOCATING shape: clamps the `f64` indices to i64
-// and calls the i64 substring entrypoint `sailfin_runtime_substring_unchecked`,
-// which materialises a real, decode-safe buffer. It does NOT call the
-// `substring_unchecked` C wrapper (a registry target whose `native_signature`
-// is `sfn_str_slice` → infinite self-recursion). The `f64 -> i64` clamp is
-// inlined: NaN maps to 0 (`v != v`), in-range doubles truncate toward zero;
-// substring indices are small, so the C `_clamp_to_i64` INT64 saturation arms
-// are unnecessary. This requires the f64-parameter codegen fix
-// (`core_type_mapping.sfn`, this PR) to be present in the building seed —
-// hence the seed bump to 0.7.0-alpha.37. A non-owning `Slice` view stays
-// blocked on #1283 (an immediate-codepoint pseudo-pointer has no real
-// `text + start` address).
+// and calls the Sailfin i64 substring entrypoint `_sfn_substring_unchecked`
+// (#1308 M1.A.2), which materialises a real, decode-safe buffer. The `f64 -> i64`
+// clamp is inlined: NaN maps to 0 (`v != v`), in-range doubles truncate toward
+// zero; substring indices are small, so the C `_clamp_to_i64` INT64 saturation
+// arms are unnecessary.
 fn sfn_str_slice(text: * u8, start: f64, end: f64) -> * u8 {
     let mut si: i64 = 0;
     if start == start { si = start as i64; }
     let mut ei: i64 = 0;
     if end == end { ei = end as i64; }
-    return sailfin_runtime_substring_unchecked(text, si, ei);
+    return _sfn_substring_unchecked(text, si, ei);
 }
 
 // `sfn_str_sfn_to_cstr(s)` — NUL-terminated C string view of `s`.
