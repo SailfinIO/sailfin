@@ -8,6 +8,28 @@
 > **Status delta since 2026-04-15** (keep this list short; once an item is
 > fully shipped fold it into the body and remove the bullet here):
 >
+> - **Immediate-codepoint encoding teardown (2026-06-19, #1420/#1421/#1422,
+>   epic #1308).** Three PRs retired the `(byte << 32)` immediate-codepoint
+>   pseudo-pointer encoding end-to-end.
+>   (#1420 — producer flip): both producers (`sailfin_runtime_grapheme_at`
+>   and `sfn_str_grapheme_byte`) now return a real 1-byte buffer on every
+>   platform; the Linux-only `#if !defined(__APPLE__)` tagged-pointer fast-paths
+>   are deleted. No immediate-codepoint value can exist at runtime.
+>   (#1421 — bridge flip): `sfn_str_immediate_codepoint` and
+>   `sfn_str_decode_owned` are now **trivial Sailfin bodies** in
+>   `runtime/sfn/string.sfn` (`-> -1` and `-> s`); the C defs + header
+>   prototypes are deleted. The `_runtime_enter` concat-reuse bump is dropped
+>   (the `_concat_reuse_*` globals are vestigial — write-only, never read).
+>   (#1422 — to_cstr flip): `sfn_str_to_cstr` is now a trivial Sailfin
+>   identity body; the C def deleted. `sfn_str_from_cstr` deleted (no caller,
+>   no emission row). Relink residual dropped 9 → 6 across these three PRs.
+>   Residual-6: `sfn_str_read_byte` + `sfn_str_grapheme_byte` (sub-word load,
+>   retire at #822), `sailfin_runtime_string_concat` (ABI-hard, 8 C-internal
+>   callers), `sfn_default_arena`, `serve`, `mark_persistent`. The
+>   `_is_immediate_codepoint_string` classifier + ~36 consumer guards in
+>   `sailfin_runtime.c` are now dead code (no producer feeds them) and retire
+>   with the C file at #822. Seed cut to `0.7.0-alpha.39`.
+>
 > - **String accessor family flipped to Sailfin (2026-06-15, #1315, C4 of
 >   epic #1308).** `sfn_str_byte_at`, `sfn_str_find_byte`, `sfn_str_codepoint`,
 >   `sfn_str_grapheme_at`, and `sfn_str_grapheme_count` now have **real Sailfin
@@ -15,12 +37,11 @@
 >   definitions in `sailfin_runtime.c` were made `static`; `nm` confirms
 >   `string.sfn`'s object defines these symbols and `sailfin_runtime.o` no
 >   longer does. The `_sfn_` infix wrappers for these five are retired.
->   Because the immediate-codepoint pseudo-pointer encoding (`(cp<<32)`) is
->   still live (retires with #822/#1283), the Sailfin bodies call four narrow
->   C bridge primitives that remain in `sailfin_runtime.c` and retire with
->   the encoding deletion: `sfn_str_decode_owned`, `sfn_str_immediate_codepoint`,
->   `sfn_str_read_byte`, and `sfn_str_grapheme_byte` (platform-gated,
->   `#if !__APPLE__`). Their prototypes were added to `sailfin_runtime.h`.
+>   Four narrow C bridge primitives remain: `sfn_str_read_byte` and
+>   `sfn_str_grapheme_byte` (the seed cannot lower a sub-word `* u8` load —
+>   retire with #822); `sfn_str_decode_owned` and `sfn_str_immediate_codepoint`
+>   **flipped to trivial Sailfin bodies in #1421** (see above). Their
+>   prototypes in `sailfin_runtime.h` were deleted in #1421.
 >   `codepoint` and `grapheme_count` return `f64` to match the existing
 >   registry `double` C-ABI + `round+fptosi` coercion; no `runtime_helpers.sfn`
 >   change and no seed cut were required. Legacy
@@ -83,10 +104,12 @@
 >        are retired. The prelude-side `runtime.X` → import flip
 >        additionally needs a `string` ↔ `* u8` / `int` ↔ `float`
 >        boundary cast that's out of scope per the issue's audit-only
->        `In:` list. Remaining C residue: the four bridge primitives
->        `sfn_str_decode_owned`, `sfn_str_immediate_codepoint`,
->        `sfn_str_read_byte`, and `sfn_str_grapheme_byte` retire with the
->        immediate-codepoint encoding deletion (#822/#1283).
+>        `In:` list. Remaining C residue: `sfn_str_decode_owned` and
+>        `sfn_str_immediate_codepoint` **flipped to trivial Sailfin bodies
+>        (#1421, 2026-06-19)** — encoding retired (#1420), so classification
+>        always returns -1 and decode is the identity. `sfn_str_read_byte`
+>        and `sfn_str_grapheme_byte` remain in C (seed cannot lower a
+>        sub-word `* u8` load) and retire with #822.
 >
 >   The audit invariant the M2.12b flip targets is **"every
 >   M2-replaced symbol's emitted call lands on the canonical `sfn_*`
@@ -374,14 +397,14 @@ calls to it in current code paths.
 
 | Symbol | Status | Notes |
 |---|---|---|
-| `sailfin_runtime_string_length` | ✅ | Uses `_safe_strlen_asan` with ASAN-safe scanning and a tunable `SAILFIN_MAX_STRLEN_SCAN` cap. **#1372 (C5 of epic #1308):** `sfn_str_len` (the `string.length` emission target) and `sfn_str_eq` (string `==`) are now **real Sailfin bodies** in `runtime/sfn/string.sfn`; the C namesakes are `static`. Both classify immediate-codepoint pseudo-pointers via the non-allocating `sfn_str_immediate_codepoint` bridge first (handling them without the per-call malloc `sfn_str_decode_owned` would leak on the `char_at`-result hot path); a real pointer routes through `decode_owned` (pass-through, no alloc, bumps the call-seq for the #892 concat-reuse invariant) then `strnlen` (16 MiB cap) / `memcmp`. `sfn_str_eq`'s mixed immediate-vs-real arm compares the codepoint's UTF-8 bytes (`_sfn_imm_eq_real`, decimal masks). Byte-identical to the retired delegators. |
+| `sailfin_runtime_string_length` | ✅ | Uses `_safe_strlen_asan` with ASAN-safe scanning and a tunable `SAILFIN_MAX_STRLEN_SCAN` cap. **#1372 (C5 of epic #1308):** `sfn_str_len` (the `string.length` emission target) and `sfn_str_eq` (string `==`) are now **real Sailfin bodies** in `runtime/sfn/string.sfn`; the C namesakes are `static`. Both call `sfn_str_immediate_codepoint` (classify) and `sfn_str_decode_owned` (identity pass-through); a real pointer routes through `strnlen` (16 MiB cap) / `memcmp`. `sfn_str_eq`'s mixed immediate-vs-real arm compares the codepoint's UTF-8 bytes (`_sfn_imm_eq_real`, decimal masks). **#1421 (epic #1308, 2026-06-19):** both bridge calls are now Sailfin bodies (`-> -1` / `-> s`); the immediate-arms are provably dead (encoding retired by #1420) and will be deleted with the C file at #822. Byte-identical to the retired delegators. |
 | `sailfin_runtime_substring` / `_substring_unchecked` | ✅ | Byte-range memcpy over UTF-8 C strings |
-| `sailfin_runtime_string_concat` | ✅ | malloc+copy; guarded by `SAILFIN_MAX_STRING_CONCAT`. **#1318 (C5 of epic #1308):** `sfn_str_concat` (the `string.concat`/`+` emission target) is now a **real Sailfin body** in `runtime/sfn/string.sfn` over the registry's SfnString `{i8*, i64}` ABI — `(a_data, a_len, b_data, b_len, arena_slot)` scalar split (the io.sfn precedent), arena-slot deref, immediate operands decoded via `sfn_str_decode_owned` before two `memcpy` + NUL, `SAILFIN_MAX_STRING_CONCAT` limit/overflow gate; the C namesake is `static`. The retired `sfn_str_sfn_concat(...) -> OwnedBuf` proof-of-life wrapper had the wrong ABI (an infix the registry never targeted). Byte-faithful to the window-agnostic C body (no `_runtime_enter` / reuse-seq bump — see the corrected note below). C body retires with #822. |
+| `sailfin_runtime_string_concat` | ✅ | malloc+copy; guarded by `SAILFIN_MAX_STRING_CONCAT`. **#1318 (C5 of epic #1308):** `sfn_str_concat` (the `string.concat`/`+` emission target) is now a **real Sailfin body** in `runtime/sfn/string.sfn` over the registry's SfnString `{i8*, i64}` ABI — `(a_data, a_len, b_data, b_len, arena_slot)` scalar split (the io.sfn precedent), arena-slot deref, operands passed through `sfn_str_decode_owned` before two `memcpy` + NUL, `SAILFIN_MAX_STRING_CONCAT` limit/overflow gate; the C namesake is `static`. The retired `sfn_str_sfn_concat(...) -> OwnedBuf` proof-of-life wrapper had the wrong ABI (an infix the registry never targeted). Byte-faithful to the window-agnostic C body (no `_runtime_enter` / reuse-seq bump — see the corrected note below). C body retires with #822. **#1421 (epic #1308, 2026-06-19):** `sfn_str_decode_owned` is now a trivial Sailfin body (`-> s`); immediate-codepoint operands no longer exist (producer retired by #1420), so the decode path is a no-op identity call. |
 | `sailfin_runtime_string_append` | ✅ | realloc-based in-place extend; compiler emits this for chained `+` intermediates where aliasing is provable. **#1318 (C5 of epic #1308):** `sfn_str_append` (no emission site — `native_signature: null`; ported for link-completeness) is now a **real Sailfin body** in `runtime/sfn/string.sfn`: `(dst, suffix_data, suffix_len, arena_slot)`, grow-at-tip via `sfn_arena_realloc`, writes the updated `{data, len}` back through the `SfnString *` (`atomic_load`/`atomic_store` word discipline); the C namesake is `static`. The retired `sfn_str_sfn_append(buf: OwnedBuf, ...) -> OwnedBuf` proof-of-life wrapper had the wrong ABI. **#1372 (C5 of epic #1308):** `sfn_str_slice` (the `substring` emission target) is now a **real Sailfin body** (clamp the `f64` indices to i64, then `sailfin_runtime_substring_unchecked` — it avoids the registry-hijacked `substring_unchecked` wrapper, which would self-recurse to `@sfn_str_slice`); the C namesake is `static`. This required fixing a seed codegen bug (`core_type_mapping.sfn::map_primitive_type` was missing `f64`/`f32`, so the call-site param resolver stringified `f64` arguments to directly-called Sailfin functions) and a seed bump to 0.7.0-alpha.37 carrying that fix. C bodies stay live for seed-built IR until M3. |
-| `sailfin_runtime_string_to_number` / `number_to_string` | ✅ | **Number/int formatting flipped to Sailfin (#1314, C3 of epic #1308):** `sfn_int_to_str` (arena-backed i64 digit loop) and `sfn_number_to_str` (hand-rolled `%.15g`-equivalent dtoa — exact integer fast path + 15-significant-digit scaling, no `snprintf`) now have real bodies in `runtime/sfn/string.sfn`; the C namesakes in `sailfin_runtime.c` are `static` so the linker binds every emission to the Sailfin bodies. The proof-of-life `_sfn` infix wrappers are retired for these two. Correctness ceiling (out of suite scope): exact-half ties at the 15th significant digit round half-up vs libc half-to-even, and extreme subnormals / `-0.0` may diverge — a bignum dtoa is post-1.0. Legacy `sailfin_runtime_number_to_string` stays C until #822. **#1372 (C5 of epic #1308):** `sfn_str_to_number` (the `string.to_number` emission target) is now a **real Sailfin body** in `runtime/sfn/string.sfn` — classifies immediate codepoints via `sfn_str_immediate_codepoint` (an ASCII digit yields its value, any other single char `0.0`), else `strtod` on the real pointer; the C namesake is `static`. |
-| `sailfin_runtime_grapheme_count` / `grapheme_at` | ✅ | Legacy C bodies stay (internal callers; retire under #822). **#1315 (C4 of epic #1308):** `sfn_str_grapheme_count` / `sfn_str_grapheme_at` are now **real Sailfin bodies** in `runtime/sfn/string.sfn`; the C namesakes are `static`. Byte-indexed; returns immediate-codepoint pseudo-strings (`(cp<<32)`) for ASCII. C bridge primitives `sfn_str_grapheme_byte` (platform-gated, `#if !__APPLE__`) and `sfn_str_decode_owned` remain until #822/#1283. `grapheme_count` returns `f64` to match the registry's `double` + `round+fptosi` ABI. |
-| `sailfin_runtime_byte_at` / `find_byte_index` | ✅ | Legacy C bodies stay (internal callers; retire under #822). **#1315 (C4 of epic #1308):** `sfn_str_byte_at` / `sfn_str_find_byte` are now **real Sailfin bodies** in `runtime/sfn/string.sfn`; the C namesakes are `static`. Uses `sfn_str_read_byte` C bridge primitive (seed cannot lower a single-byte `* u8` load in Sailfin; retires with #822/#1283). |
-| `sailfin_runtime_char_code` | ✅ | Legacy C body stays (internal callers; retire under #822). **#1315 (C4 of epic #1308):** `sfn_str_codepoint` is now a **real Sailfin body** in `runtime/sfn/string.sfn`; the C namesake is `static`. Handles immediate-codepoint and real strings via `sfn_str_immediate_codepoint` and `sfn_str_decode_owned` C bridge primitives (retire with #822/#1283). Returns `f64` to match the registry's `double` + `round+fptosi` ABI. |
+| `sailfin_runtime_string_to_number` / `number_to_string` | ✅ | **Number/int formatting flipped to Sailfin (#1314, C3 of epic #1308):** `sfn_int_to_str` (arena-backed i64 digit loop) and `sfn_number_to_str` (hand-rolled `%.15g`-equivalent dtoa — exact integer fast path + 15-significant-digit scaling, no `snprintf`) now have real bodies in `runtime/sfn/string.sfn`; the C namesakes in `sailfin_runtime.c` are `static` so the linker binds every emission to the Sailfin bodies. The proof-of-life `_sfn` infix wrappers are retired for these two. Correctness ceiling (out of suite scope): exact-half ties at the 15th significant digit round half-up vs libc half-to-even, and extreme subnormals / `-0.0` may diverge — a bignum dtoa is post-1.0. Legacy `sailfin_runtime_number_to_string` stays C until #822. **#1372 (C5 of epic #1308):** `sfn_str_to_number` (the `string.to_number` emission target) is now a **real Sailfin body** in `runtime/sfn/string.sfn` — classifies via `sfn_str_immediate_codepoint` (an ASCII digit yields its value, any other single char `0.0`), else `strtod` on the real pointer; the C namesake is `static`. **#1421 (epic #1308, 2026-06-19):** `sfn_str_immediate_codepoint` is now a trivial Sailfin body (`-> -1`); the immediate-arm is provably dead and retires with the C file at #822. |
+| `sailfin_runtime_grapheme_count` / `grapheme_at` | ✅ | Legacy C bodies stay (internal callers; retire under #822). **#1315 (C4 of epic #1308):** `sfn_str_grapheme_count` / `sfn_str_grapheme_at` are now **real Sailfin bodies** in `runtime/sfn/string.sfn`; the C namesakes are `static`. **#1420 (epic #1308, 2026-06-19):** the `(byte << 32)` immediate-codepoint fast-path in `sailfin_runtime_grapheme_at` and `sfn_str_grapheme_byte` is **retired** — both producers now return a real 1-byte buffer on every platform; the Linux-only `#if !defined(__APPLE__)` tagged-pointer paths are deleted. `sfn_str_decode_owned` and `sfn_str_immediate_codepoint` **flipped to trivial Sailfin identity bodies (#1421)** — C defs + header protos deleted. C bridge primitive `sfn_str_grapheme_byte` remains in C (sub-word buffer alloc; retire with #822). `grapheme_count` returns `f64` to match the registry's `double` + `round+fptosi` ABI. |
+| `sailfin_runtime_byte_at` / `find_byte_index` | ✅ | Legacy C bodies stay (internal callers; retire under #822). **#1315 (C4 of epic #1308):** `sfn_str_byte_at` / `sfn_str_find_byte` are now **real Sailfin bodies** in `runtime/sfn/string.sfn`; the C namesakes are `static`. Uses `sfn_str_read_byte` C bridge primitive (seed cannot lower a single-byte `* u8` load in Sailfin; retires with #822 when the SfnString aggregate flip lands). |
+| `sailfin_runtime_char_code` | ✅ | Legacy C body stays (internal callers; retire under #822). **#1315 (C4 of epic #1308):** `sfn_str_codepoint` is now a **real Sailfin body** in `runtime/sfn/string.sfn`; the C namesake is `static`. Handles immediate-codepoint and real strings via `sfn_str_immediate_codepoint` and `sfn_str_decode_owned` bridge calls. **#1421 (epic #1308, 2026-06-19):** both bridges are now trivial Sailfin bodies (C defs + header protos deleted); the immediate-arms in `sfn_str_codepoint` are now provably dead (encoding retired by #1420) and will be deleted with the C file at #822. Returns `f64` to match the registry's `double` + `round+fptosi` ABI. |
 | `sailfin_runtime_is_decimal_digit/whitespace_char/alpha_char` | ✅ | |
 | `sailfin_runtime_copy_bytes`, `bounds_check` | ✅ | **Ported to Sailfin** (#927): `sfn_mem_copy_bytes` / `sfn_mem_bounds_check` in `runtime/sfn/memory/mem.sfn`. Descriptors flipped; C bodies retained for seed-built IR until M3. |
 | `sailfin_runtime_get_field` | ✅ | **Ported to Sailfin** (#927): `sfn_mem_get_field` in `runtime/sfn/memory/mem.sfn`. Returns a lazily-allocated zeroed 4 KB safe buffer (reads as empty string / zero array / `0`/`false`); statically-resolvable members + `.variant` are handled ahead of this fallback by the GEP-replacement pass in `core_member_lowering.sfn`. |
@@ -508,11 +531,14 @@ survives until process exit. This is why per-module compiler RAM reaches
 These exist to survive the current C-string ABI and missing ownership model.
 All of them should **disappear** in the Sailfin-native runtime:
 
-- **Immediate-codepoint tagged pointers.** Single-byte ASCII graphemes are
-  returned as `(codepoint << 32)` cast to `char*` — never dereferenced, detected
-  by `_is_immediate_codepoint_string`. Avoids a malloc per ASCII `grapheme_at`
-  call in the hot lexer path, at the cost of a pointer-tag convention every
-  runtime helper must check.
+- **Immediate-codepoint tagged pointers. ~~Live~~ → RETIRED (#1420, 2026-06-19).**
+  The `(codepoint << 32)` encoding and its producer fast-paths in
+  `sailfin_runtime_grapheme_at` / `sfn_str_grapheme_byte` are deleted. Both
+  producers now return a real 1-byte buffer on every platform. The
+  `_is_immediate_codepoint_string` classifier and ~36 consumer guards in
+  `sailfin_runtime.c` are dead code (no producer feeds them) and retire with
+  the C file at #822. The bridge functions `sfn_str_immediate_codepoint` and
+  `sfn_str_decode_owned` became trivial Sailfin no-ops in #1421.
 - **Owned-string hash table** (`_sailfin_owned_table`) with open addressing,
   tombstones, and a pthread mutex. Tracks strings the runtime allocated so
   `string_drop` can safely free them (when enabled).
@@ -769,8 +795,9 @@ Entrypoints that are C-based today and must be gone by 1.0:
 ## Pre-1.0 Acceptance Checklist
 
 - [ ] Compiler lowering emits the Sailfin-native ABI — no C strings, no
-      `SailfinPtrArray` header convention, no immediate-codepoint tagged
-      pointers.
+      `SailfinPtrArray` header convention. (Immediate-codepoint tagged
+      pointers retired at the producer level in #1420; classifier + consumer
+      guards are dead code pending the #822 C-file deletion.)
 - [ ] C runtime removed from build artifacts and packaging.
 - [ ] Native runtime implements core helpers (strings, arrays, exceptions,
       process execution, logging, timing) with equivalent semantics and tests.
