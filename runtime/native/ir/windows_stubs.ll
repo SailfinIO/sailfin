@@ -28,3 +28,18 @@
 define i32 @apply_default_mem_limit() {
   ret i32 0
 }
+
+; Legacy untyped `serve(handler, config?)` prelude target
+; (`runtime/sfn/concurrency/serve.sfn`, excluded from RUNTIME_MODS —
+; serve.sfn pulls BSD-socket + scheduler externs that cannot resolve
+; in a static mingw link; the process.sfn/rlimit.sfn exclusion
+; precedent). #1308 flipped this symbol from a no-op C body to a
+; Sailfin no-op in serve.sfn; since that module is not in the Windows
+; runtime set, `prelude.o`'s reference needs this stub. A no-op is the
+; byte-identical Windows behavior (the C body was also a no-op); the
+; real typed `serve(handler, port)` server (`sfn_serve`) is unaffected.
+; Sync pinned by
+; compiler/tests/e2e/test_cross_windows_runtime_modules.sh.
+define void @sailfin_runtime_serve(i8* %handler, i8* %config) {
+  ret void
+}
