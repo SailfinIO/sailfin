@@ -104,21 +104,21 @@
 //     Sailfin over the portable libc `chmod` / `access` externs —
 //     both link and behave identically on Linux / macOS / Windows.
 //
-//   - **`sfn_fs_get_perms`**: stays a C trampoline. Recovering
-//     `st_mode` needs the native `struct stat`, whose `st_mode` byte
-//     offset diverges per platform (24 on Linux x86_64, 4 on macOS
-//     arm64), so a fixed-offset Sailfin read returns garbage off-Linux
-//     and fails the macOS fs tests.
-//
-//   - **`sfn_fs_mkdtemp` / `sfn_fs_symlink`**: stay C trampolines —
-//     `mkdtemp(3)` / `symlink(2)` have no MinGW symbol, so a direct
-//     libc call breaks the Windows cross-compile link of the shared
-//     `filesystem.ll`. The C bodies' `#if defined(_WIN32)` stubs are
-//     the only Windows-safe source.
-//
-//   Porting `get_perms` / `mkdtemp` / `symlink` to pure Sailfin is the
-//   documented #1311 follow-up (gated on the #468 `cfg`/stub story).
-//   `list_dir` / `read_bytes` are now pure Sailfin (#1317, epic #1308
+//   - **`sfn_fs_get_perms` / `sfn_fs_mkdtemp` / `sfn_fs_symlink` /
+//     `sfn_fs_exists`** (epic #1308, fs-runtime flip): route through
+//     the per-target `sailfin_intrinsic_fs_*` sentinels the compiler
+//     lowers in `runtime_helpers.sfn` — a POSIX libc `call` on
+//     Linux/macOS (`stat` / `mkdtemp` / `symlink`), a bare stub on
+//     Windows — so the single `filesystem.ll` links on every target
+//     without a C trampoline. The sentinel calls carry no `extern`
+//     (the registry-by-name match attaches the descriptor, exactly
+//     like `exec.sfn`'s `sailfin_intrinsic_exe_path`); the libc
+//     symbols the dispatcher emits `call`s against (`symlink` /
+//     `mkdtemp` / `stat` / `GetFileAttributesA`) are `declare`d via
+//     the inlined `extern fn`s below. `get_perms`'s per-platform
+//     `st_mode` offset and `mkdtemp`'s `#if _WIN32` stub now live
+//     inside the sentinel lowering, not a fixed-offset Sailfin read.
+//   `list_dir` / `read_bytes` are pure Sailfin (#1317, epic #1308
 //   C8 — Linux-first; macOS `dirent` offset 21 is the documented
 //   follow-up in `platform/sizes_linux.sfn`).
 //
@@ -167,23 +167,24 @@ extern fn chmod(path: * u8, mode: i32) -> i32;
 
 extern fn access(path: * u8, mode: i32) -> i32;
 
-// Platform-divergent adapters that stay C trampolines (the C bodies
-// carry the per-platform layout + `#if defined(_WIN32)` stubs and
-// retire with #822):
-//   - `mkdtemp(3)` / `symlink(2)` have **no MinGW symbol**, so a
-//     direct libc call breaks the Windows `sailfin.exe` link
-//     (`undefined reference to mkdtemp/symlink`).
-//   - `struct stat`'s `st_mode` offset differs per platform (24 on
-//     Linux x86_64, 4 on macOS arm64), so a fixed-offset Sailfin
-//     read for `get_perms` returns garbage off-Linux (the macOS fs
-//     tests fail). The C body reads the native `struct stat`.
-// Porting all three to pure Sailfin is the documented #1311
-// follow-up, gated on a per-platform `cfg`/stub story (#468).
-extern fn sailfin_adapter_fs_mkdtemp(prefix: * u8) -> * u8;
+// libc symbols the per-target `sailfin_intrinsic_fs_*` sentinel
+// dispatcher emits `call`s against (epic #1308 fs-runtime flip).
+// The sentinels themselves are registry-by-name intrinsics — called
+// WITHOUT an `extern` (like `exec.sfn`'s `sailfin_intrinsic_exe_path`)
+// — but the libc `declare`s they lower to come from `extern fn` in
+// THIS firing module (there are no registry concrete rows for them,
+// by design, to avoid colliding with same-named capsule funcs). All
+// four are inlined unconditionally: an unused `declare` on a platform
+// that never `call`s it is link-safe (no relocation), so the Windows
+// cross-build (which lowers `GetFileAttributesA` for `fs_exists` and
+// stubs the rest) links cleanly too.
+extern fn symlink(target: * u8, link: * u8) -> i32;
 
-extern fn sailfin_adapter_fs_symlink(target: * u8, link: * u8) -> bool;
+extern fn mkdtemp(template: * u8) -> * u8;
 
-extern fn sailfin_adapter_fs_get_perms(path: * u8) -> i64;
+extern fn stat(path: * u8, statbuf: * u8) -> i32;
+
+extern fn GetFileAttributesA(path: * u8) -> i32;
 
 // M3.1b additions. `memcpy` / `strlen` / `strchr` back the
 // recursive `sfn_fs_mkdir` component walk; `unlink` / `mkdir` are
@@ -204,13 +205,19 @@ extern fn mkdir(path: * u8, mode: i32) -> i32;
 
 extern fn rmdir(path: * u8) -> i32;
 
-// `sailfin_intrinsic_fs_exists` — `stat(2)`-based existence probe,
-// kept as a C-backed intrinsic (out of #1311 scope; it carries a
-// `#if defined(_WIN32)` stub and retires with #822 when
-// `sailfin_runtime.c` is deleted). `sfn_fs_mkdir` / `sfn_fs_exists`
-// below route through it.
-extern fn sailfin_intrinsic_fs_exists(path: * u8) -> bool;
+// `getenv` backs `sfn_fs_mkdtemp`'s `$TMPDIR` anchoring (epic #1308
+// fs-runtime flip): the env literal is bound to a `string` local
+// before the `* u8` cast — the proven env-read pattern (`string.sfn`
+// `_sfn_concat_limit`, `arena.sfn`); the inline `getenv("…" as * u8)`
+// form miscompiles under the seed.
+extern fn getenv(name: * u8) -> * u8;
 
+// `sailfin_intrinsic_fs_exists` is no longer an `extern` here: with
+// the declaration removed, the `sfn_fs_exists` body's call fires the
+// per-target `sailfin_intrinsic_fs_exists` SENTINEL (registry-by-name)
+// instead of binding to the C symbol — `stat(path)==0` on POSIX,
+// `GetFileAttributesA` on Windows. `sfn_fs_mkdir` / `sfn_fs_exists`
+// route through the sentinel.
 // Directory-enumeration primitives for the pure-Sailfin
 // `sfn_fs_list_dir` body (#1317, epic #1308 C8). `opendir` / `readdir`
 // / `closedir` are declared canonically in `runtime/sfn/platform/
@@ -484,14 +491,13 @@ fn sfn_fs_rmdir(path: * u8) -> bool ![io] {
 }
 
 // `sfn_fs_exists(path)` — true iff `path` resolves on disk (files
-// and directories alike). Trampolines to the legacy C
-// `sailfin_intrinsic_fs_exists` (`stat(2)`-based). A pure-Sailfin
-// port would call raw `stat`, which has no linkable MinGW symbol
-// (the C runtime reaches it through the header→`_stat64i32`
-// remapping the IR can't replicate), so the Windows cross-compile
-// link would fail; the C body is the Windows-safe source. The
-// scattered `fs.exists` call sites across the compiler + `exec.sfn`
-// route through this canonical wrapper now.
+// and directories alike). With the `extern fn sailfin_intrinsic_fs_exists`
+// declaration removed (epic #1308 fs-runtime flip), this call fires the
+// per-target `sailfin_intrinsic_fs_exists` SENTINEL the compiler lowers:
+// POSIX `stat(path, &buf) == 0` on Linux/macOS, `GetFileAttributesA` on
+// Windows — the `stat` libc `declare` comes from the inlined `extern fn`
+// above. The scattered `fs.exists` call sites across the compiler +
+// `exec.sfn` route through this canonical wrapper now.
 fn sfn_fs_exists(path: * u8) -> bool ![io] {
     return sailfin_intrinsic_fs_exists(path);
 }
@@ -773,32 +779,85 @@ fn sfn_fs_set_perms(path: * u8, mode: i64) -> bool ![io] {
 }
 
 // `sfn_fs_get_perms(path)` — return the lower 12 bits of `st_mode`
-// (perm + sticky/setuid/setgid), or -1 on any error. Trampolines to
-// the legacy C `sailfin_adapter_fs_get_perms`: recovering `st_mode`
-// needs the native `struct stat` layout, whose `st_mode` byte offset
-// diverges per platform (24 on Linux x86_64, 4 on macOS arm64), so a
-// fixed-offset Sailfin read returns garbage off-Linux. The C body
-// reads the real `struct stat`, keeping `get_perms` correct on every
-// target (the macOS fs tests exercise this). Pure-Sailfin port is the
-// documented #1311 follow-up, gated on a per-platform sizes/offset
-// story (#468). POSIX-only (#366).
+// (perm + sticky/setuid/setgid), or -1 on any error. Routes through
+// the per-target `sailfin_intrinsic_fs_get_perms` sentinel (epic
+// #1308 fs-runtime flip): POSIX `stat` + the platform-correct
+// `st_mode` low-12-bit extraction on Linux/macOS, `-1` stub on
+// Windows. The per-platform `struct stat` offset that made a
+// fixed-offset Sailfin read return garbage off-Linux now lives inside
+// the sentinel lowering. POSIX-only (#366).
 fn sfn_fs_get_perms(path: * u8) -> i64 ![io] {
-    return sailfin_adapter_fs_get_perms(path);
+    return sailfin_intrinsic_fs_get_perms(path);
+}
+
+// `_fs_empty_string()` — a fresh 1-byte malloc'd `""` (NUL only),
+// matching the C `sailfin_adapter_fs_mkdtemp` error contract: the
+// caller checks length, never frees, so a malloc'd empty buffer is
+// the agreed shape.
+fn _fs_empty_string() -> * u8 {
+    let empty: * u8 = malloc(1 as usize);
+    if (empty as i64) != 0 { memset(empty, 0, 1 as usize); }
+    return empty;
 }
 
 // `sfn_fs_mkdtemp(prefix)` — create a unique directory (mode `0700`)
-// and return its malloc'd absolute path, or an empty malloc'd string
-// on error. Trampolines to the legacy C `sailfin_adapter_fs_mkdtemp`,
-// which carries the `$TMPDIR` anchoring + `mkdtemp(3)` template
-// construction *and* the `#if defined(_WIN32)` stub. `mkdtemp(3)` has
-// no MinGW symbol, so a pure-Sailfin body calling raw `mkdtemp` would
-// break the Windows cross-compile link (the single `filesystem.ll` is
-// built for both targets); the trampoline is the only Windows-safe
-// shape until a per-platform `cfg`/stub story (#468) lands. Porting
-// this body to pure Sailfin is the documented #1311 follow-up.
+// and return its malloc'd path, or an empty malloc'd string on error.
+// The `$TMPDIR` anchoring + `mkdtemp(3)` template construction is now
+// pure Sailfin (epic #1308 fs-runtime flip); the in-place mutation +
+// `#if defined(_WIN32)` stub live behind the per-target
+// `sailfin_intrinsic_fs_mkdtemp` sentinel (POSIX `mkdtemp(template)`,
+// `false` stub on Windows — no MinGW `mkdtemp` symbol). Layout matches
+// the retired C body byte-for-byte: `[<dir>/]<prefix>XXXXXX\0`, where
+// `<dir>` is `$TMPDIR` (or `/tmp`) only when `prefix` has no `/`.
 // POSIX-only (#366).
 fn sfn_fs_mkdtemp(prefix: * u8) -> * u8 ![io] {
-    return sailfin_adapter_fs_mkdtemp(prefix);
+    let mut pfx: * u8 = "" as * u8;
+    if (prefix as i64) != 0 { pfx = prefix; }
+    let prefix_len: i64 = strlen(pfx) as i64;
+
+    // `has_dir` iff `prefix` contains a `/` (byte 47). When absent,
+    // anchor under `$TMPDIR` (or `/tmp`); else `prefix` is itself a
+    // full template prefix.
+    let has_dir: bool = (strchr(pfx, 47) as i64) != 0;
+    let mut dir: * u8 = "" as * u8;
+    let mut dir_len: i64 = 0;
+    if !has_dir {
+        let tmpdir_name: string = "TMPDIR";
+        let env_dir: * u8 = getenv(tmpdir_name as * u8);
+        if (env_dir as i64) != 0 && strlen(env_dir) > (0 as usize) {
+            dir = env_dir;
+        } else { dir = "/tmp" as * u8; }
+        dir_len = strlen(dir) as i64;
+    }
+
+    // Layout: [dir] [/] [prefix] [XXXXXX] [\0]. `sep` is the one '/'
+    // byte inserted only when a directory was prepended.
+    let mut sep: i64 = 0;
+    if dir_len > 0 { sep = 1; }
+    let needed: i64 = dir_len + sep + prefix_len + 6 + 1;
+    let buf: * u8 = malloc(needed as usize);
+    if (buf as i64) == 0 { return _fs_empty_string(); }
+
+    let mut off: i64 = 0;
+    if dir_len > 0 {
+        memcpy(buf, dir, dir_len as usize);
+        off = dir_len;
+        // Write the '/' separator (byte 47) at `off`.
+        memset(((buf as i64) + off) as * u8, 47, 1 as usize);
+        off = off + 1;
+    }
+    memcpy(((buf as i64) + off) as * u8, pfx, prefix_len as usize);
+    off = off + prefix_len;
+    // Six 'X' bytes (byte 88) — the `mkdtemp` template suffix.
+    memset(((buf as i64) + off) as * u8, 88, 6 as usize);
+    off = off + 6;
+    // Trailing NUL.
+    memset(((buf as i64) + off) as * u8, 0, 1 as usize);
+
+    // The sentinel mutates `buf` in place to the created dir path on
+    // success.
+    if sailfin_intrinsic_fs_mkdtemp(buf) { return buf; }
+    return _fs_empty_string();
 }
 
 // `sfn_fs_is_executable(path)` — true iff the current process has
@@ -814,15 +873,14 @@ fn sfn_fs_is_executable(path: * u8) -> bool ![io] {
 
 // `sfn_fs_symlink(target, link)` — create `link` pointing at
 // `target` (`symlink(2)`; per POSIX the target need not exist, so
-// dangling symlinks are allowed). Trampolines to the legacy C
-// `sailfin_adapter_fs_symlink`: `symlink(2)` has no MinGW symbol at
-// all (the C body stubs it under `#if defined(_WIN32)`), so a pure
-// call would break the Windows cross-compile link of the shared
-// `filesystem.ll`. Same Windows-safe-trampoline rationale as
-// `sfn_fs_mkdtemp`; pure-Sailfin port is the documented #1311
-// follow-up (gated on the #468 `cfg`/stub story). POSIX-only (#366).
+// dangling symlinks are allowed). Routes through the per-target
+// `sailfin_intrinsic_fs_symlink` sentinel (epic #1308 fs-runtime
+// flip): `symlink(target, link) == 0` on POSIX, `false` stub on
+// Windows (no MinGW `symlink` symbol). The `symlink` libc `declare`
+// the sentinel lowers to comes from the inlined `extern fn` above.
+// POSIX-only (#366).
 fn sfn_fs_symlink(target: * u8, link: * u8) -> bool ![io] {
-    return sailfin_adapter_fs_symlink(target, link);
+    return sailfin_intrinsic_fs_symlink(target, link);
 }
 
 // `sfn_fs_write_lines(path, lines)` — write each entry of the
