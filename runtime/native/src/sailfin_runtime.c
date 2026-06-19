@@ -2396,32 +2396,13 @@ char *sailfin_runtime_number_to_string(double value);
  * retire wholesale with the SfnString aggregate flip / immediate-encoding
  * deletion (#1283 / #822). Do NOT grow this surface. */
 
-/* Materialize an immediate-codepoint pseudo-pointer into a real,
- * deref-safe, NUL-terminated buffer; pass genuine pointers through
- * untouched. Owning variant (the result outlives the call). Also bumps
- * `_runtime_call_seq` (#892): `sfn_str_byte_at`/`sfn_str_find_byte` are
- * called mid-IR-emission and must invalidate the concat-reuse window;
- * routing the bump here covers both (and is conservatively safe for the
- * other read callers, which did not bump before). */
-const char *sfn_str_decode_owned(const char *s)
-{
-    _runtime_enter();
-    return _sfn_str_decode_immediate_owned(s);
-}
-
-/* If `s` is an immediate-codepoint pseudo-pointer, return its codepoint;
- * else -1. Lets the Sailfin `codepoint` body preserve the legacy
- * `sailfin_runtime_char_code` immediate fast-path without dereferencing
- * a tagged address. */
-int64_t sfn_str_immediate_codepoint(const char *s)
-{
-    uint32_t cp = 0;
-    if (_is_immediate_codepoint_string(s, &cp))
-    {
-        return (int64_t)cp;
-    }
-    return -1;
-}
+/* #1308 (immediate-encoding teardown): `sfn_str_decode_owned` and
+ * `sfn_str_immediate_codepoint` are now trivial Sailfin bodies in
+ * `runtime/sfn/string.sfn` (post-producer-flip, no immediate can exist, so
+ * decode is identity and classification is always -1). The C definitions are
+ * deleted — they had zero C-internal callers. `_sfn_str_decode_immediate_owned`
+ * survives (still used by `sfn_str_to_cstr`/`from_cstr` at the identity-bridge
+ * sites) and retires with the C file at #822. */
 
 /* Single in-bounds byte read. `s` must be deref-safe (post-decode) and
  * `0 <= idx < len`. Stays in C because the seed cannot lower a

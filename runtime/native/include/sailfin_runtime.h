@@ -141,8 +141,8 @@ extern "C"
     // decode, single-byte read, platform-gated grapheme production). These
     // retire with the immediate-encoding deletion (#1283 / #822); do not
     // grow this surface. See the bridge block in `sailfin_runtime.c`.
-    const char *sfn_str_decode_owned(const char *s);
-    int64_t sfn_str_immediate_codepoint(const char *s);
+    // #1308: sfn_str_decode_owned / sfn_str_immediate_codepoint flipped to
+    // trivial Sailfin bodies (string.sfn); C defs + protos deleted.
     int64_t sfn_str_read_byte(const char *s, int64_t idx);
     char *sfn_str_grapheme_byte(const char *real, int64_t idx);
     extern SfnArena *sfn_default_arena;
