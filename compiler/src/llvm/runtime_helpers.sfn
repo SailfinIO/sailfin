@@ -358,59 +358,6 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "intrinsic.exe_path.darwin.strlen", symbol: "strlen", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
-    // Filesystem sentinels (#1308): retire the last platform-divergent C fs
-    // symbols (`sailfin_adapter_fs_*` / `sailfin_intrinsic_fs_exists`) by
-    // lowering each to a per-target emission sequence (modeled on
-    // `exe_path` above), choosing the host leg via `fs_platform_leg` at emit
-    // time. Only the host leg's symbol ever appears in the IR, so the
-    // Windows cross-build never references a POSIX-only `symlink`/`mkdtemp`
-    // it has no symbol for. The declare loop in `rendering.sfn` skips the
-    // sentinel targets; the concrete leg symbol's `declare` comes from its
-    // dotted concrete row when the post-lowering scan sees the emitted call.
-    //
-    // `symlink(target, link) -> bool`: POSIX legs call `symlink`; the Windows
-    // leg emits a bare `i1 false` stub (no symbol in IR).
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_fs_symlink", symbol: "sailfin_intrinsic_fs_symlink", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "intrinsic.fs_symlink.posix", symbol: "symlink", return_type: "i32", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    // `mkdtemp(template) -> bool`: POSIX legs call `mkdtemp(3)` (which
-    // mutates the `XXXXXX` template in place and returns the buffer or
-    // NULL); the Windows leg emits a bare `i1 false` stub. The portable
-    // `$TMPDIR`/template construction stays in the Sailfin body; only the
-    // raw `mkdtemp(3)` call (no MinGW symbol) is per-target.
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_fs_mkdtemp", symbol: "sailfin_intrinsic_fs_mkdtemp", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "intrinsic.fs_mkdtemp.posix", symbol: "mkdtemp", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    // `fs_exists(path) -> bool`: POSIX legs `stat(path, &buf) == 0` (a
-    // stack `struct stat` buffer, over-allocated via `stat_buf_size_value`);
-    // the Windows leg `GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES`
-    // (`-1`). Converts the existing C-backed `sailfin_intrinsic_fs_exists`
-    // to an emit-time sequence (the C body retires with #822).
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_fs_exists", symbol: "sailfin_intrinsic_fs_exists", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "intrinsic.fs_exists.posix", symbol: "stat", return_type: "i32", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "intrinsic.fs_exists.mingw", symbol: "GetFileAttributesA", return_type: "i32", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
-    });
-    // `get_perms(path) -> i64`: lower 12 bits of `st_mode`, -1 on error.
-    // POSIX legs `stat(path, &buf)` then load `st_mode` at the per-target
-    // byte offset (`stat_st_mode_offset_value`: 24 Linux / 4 Darwin), mask
-    // `& 0o7777` (4095); the Windows leg is a bare `i64 -1` stub. The `@stat`
-    // declare is provided by the `intrinsic.fs_exists.posix` row above (same
-    // symbol), so no duplicate concrete row is needed here.
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sailfin_intrinsic_fs_get_perms", symbol: "sailfin_intrinsic_fs_get_perms", return_type: "i64", parameter_types: ["i8*"], effects: ["io"], native_signature: null, c_abi_return_type: null
-    });
-
     // Network intrinsics.
     // `http.get` / `http.post` member calls flipped (#912) to the
     // Sailfin-native socket client in `runtime/sfn/adapters/http.sfn`:

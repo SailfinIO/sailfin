@@ -105,20 +105,6 @@ let mut _clock_monotonic_id_value: int = 0;
 let mut _exe_path_locator_initialized: boolean = false;
 let mut _exe_path_locator_value: string = "";
 
-// Filesystem-sentinel target-OS resolvers (#1308, retiring the last
-// platform-divergent C fs symbols via the emit-time sentinel seam, same
-// pattern as `exe_path_locator` above). `_fs_platform_leg_value` holds the
-// leg tag (`linux`/`darwin`/`mingw`); `_stat_st_mode_offset_value` holds
-// the byte offset of `st_mode` in `struct stat` (24 on Linux x86_64, 4 on
-// macOS arm64); `_stat_buf_size_value` is a safe over-allocation for a
-// stack `struct stat` buffer. Each lazily resolved + cached once.
-let mut _fs_platform_leg_initialized: boolean = false;
-let mut _fs_platform_leg_value: string = "";
-let mut _stat_st_mode_offset_initialized: boolean = false;
-let mut _stat_st_mode_offset_value: int = 0;
-let mut _stat_buf_size_initialized: boolean = false;
-let mut _stat_buf_size_value: int = 0;
-
 // True when the user requested LLVM-lowering stderr trace via
 // `SAILFIN_TRACE_LOWERING=1` (or the legacy `.trace_lowering` file).
 // Read in 11 sites across `lowering/`, `expression_lowering/`, and
@@ -253,55 +239,4 @@ fn exe_path_locator() -> string ![io] {
         _exe_path_locator_initialized = true;
     }
     return _exe_path_locator_value;
-}
-
-// Resolve the filesystem-sentinel leg the call-emission dispatcher
-// (`core_call_emission.sfn`) should emit for the `sailfin_intrinsic_fs_*`
-// sentinels (#1308). Same resolution order + lazy cache as
-// `exe_path_locator` above:
-//   "Darwin"  -> "darwin"   (POSIX `stat`/`symlink`/`mkdtemp`)
-//   "Windows" -> "mingw"    (Win stub legs — no POSIX symbol in the IR)
-//   otherwise -> "linux"    (POSIX leg; the dominant default, never wrong)
-fn fs_platform_leg() -> string ![io] {
-    if !_fs_platform_leg_initialized {
-        let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
-        if os.length == 0 { os = _shell_read_cmd("uname -s"); }
-        if os == "Darwin" { _fs_platform_leg_value = "darwin"; } else if os == "Windows" {
-            _fs_platform_leg_value = "mingw";
-        } else { _fs_platform_leg_value = "linux"; }
-        _fs_platform_leg_initialized = true;
-    }
-    return _fs_platform_leg_value;
-}
-
-// Byte offset of `st_mode` within `struct stat`, baked per target for the
-// `sailfin_intrinsic_fs_get_perms` sentinel (#1308). macOS arm64 places
-// `st_mode` at offset 4; Linux x86_64 at offset 24. Windows falls through
-// to the Linux value harmlessly — its `get_perms` leg is a bare stub that
-// never reads the buffer. Same resolution order + lazy cache as the
-// resolvers above.
-fn stat_st_mode_offset_value() -> int ![io] {
-    if !_stat_st_mode_offset_initialized {
-        let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
-        if os.length == 0 { os = _shell_read_cmd("uname -s"); }
-        if os == "Darwin" { _stat_st_mode_offset_value = 4; } else {
-            _stat_st_mode_offset_value = 24;
-        }
-        _stat_st_mode_offset_initialized = true;
-    }
-    return _stat_st_mode_offset_value;
-}
-
-// Size (bytes) of a stack `struct stat` buffer for the `stat`-based fs
-// sentinels (`fs_exists` / `get_perms`, #1308). A fixed over-allocation
-// large enough for both targets (`sizeof(struct stat)` is 144 on Linux
-// x86_64 and macOS arm64); over-allocating an `alloca` is harmless and
-// avoids a per-target size constant. Lazily cached for symmetry with the
-// sibling resolvers (the value is target-independent today).
-fn stat_buf_size_value() -> int ![io] {
-    if !_stat_buf_size_initialized {
-        _stat_buf_size_value = 160;
-        _stat_buf_size_initialized = true;
-    }
-    return _stat_buf_size_value;
 }
