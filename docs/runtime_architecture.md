@@ -2295,7 +2295,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 | `sailfin_runtime_spawn_*` | `sfn_spawn` | M4 |
 | `sailfin_runtime_await_*` | `sfn_await` | M4 |
 | `sailfin_runtime_channel` | `sfn_channel_create` | M4 |
-| `sailfin_runtime_serve` | `sfn_serve` | M4 |
+| `sailfin_runtime_serve` | Sailfin no-op in `serve.sfn` (distinct from `sfn_serve`) | M4 — **✓ #1308**: the typed `serve(handler, port)` syntax already lowers to the real `sfn_serve` server (#1092). This row is the *legacy untyped* `serve(handler, config?)` prelude target (`runtime_serve_fn`, declared unconditionally), which was always a no-op C stub. Flipped to a Sailfin no-op `fn sailfin_runtime_serve` so no emitted module demands a C symbol; C body + header proto deleted. Retiring the dead prelude `serve()` fallback itself is a separate API cleanup. |
 | `sailfin_runtime_is_string/number/boolean/array/callable`, `instance_of`, `resolve_type` | `sfn_is_*` / `sfn_instance_of` / `sfn_resolve_type` | M2 — ✓ #911 |
 | `sailfin_runtime_sha256_hex` | `sfn/crypto` capsule | M3 |
 | `sailfin_runtime_base64_encode` | `sfn/crypto` capsule | M3 |
