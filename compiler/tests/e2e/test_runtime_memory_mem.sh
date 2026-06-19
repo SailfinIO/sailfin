@@ -202,17 +202,14 @@ void *sfn_arena_alloc(void *arena, size_t size, size_t align) {
     return calloc(1, size);
 }
 
-/* Runtime hook the seed compiler installs in emitted IR that the harness
- * must satisfy at link time but does not exercise:
- *   - `sailfin_runtime_mark_persistent` — persistent-pointer bookkeeping
- *     the seed emits on every heap return (the get_field malloc'd
- *     buffer). No-op stub.
- * The boxed-struct allocator the seed previously emitted for the
- * bounds_check abort-diagnostic string literal
- * (`sailfin_runtime_alloc_struct`) is, as of #930, the module-defined
- * `sfn_alloc_struct` above — it is no longer an external the harness
- * provides. */
-void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }
+/* Runtime hooks the seed compiler installs in emitted IR that the harness
+ * must satisfy at link time: the boxed-struct allocator
+ * (`sailfin_runtime_alloc_struct`, as of #930) and the persistent-pointer
+ * marker (`sailfin_runtime_mark_persistent`, as of #1308) are now BOTH
+ * module-defined by mem.sfn (`sfn_alloc_struct` above; the bare no-op
+ * `sailfin_runtime_mark_persistent` linked from mem.o) — the harness no
+ * longer stubs either, and stubbing mark_persistent now collides with the
+ * module definition at link. */
 
 extern char *sfn_mem_get_field(char *base, char *field);
 extern void  sfn_mem_copy_bytes(char *dest, char *src, int64_t length);

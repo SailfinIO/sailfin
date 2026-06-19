@@ -193,6 +193,18 @@ fn sfn_mem_free(ptr: * u8) -> void {
     unsafe { free(ptr); }
 }
 
+// `sailfin_runtime_mark_persistent(ptr)` — #1308: the caller-side
+// persistent-pointer marker the emitter pairs with every `sfn_alloc_struct`
+// (struct/string heap allocations; pinned by runtime_call_dispatch_test).
+// Under the arena — the shipped default and now the sole supported allocator
+// (non-arena retired per the #1308 design gate) — the arena owns bulk
+// deallocation, so persistent tracking is unnecessary: a no-op, exactly what
+// the C body did when `sfn_arena_enabled()`. The legacy non-arena
+// `_sailfin_persistent_table` insert + the dead `sailfin_runtime_string_drop`
+// reader retire with the C runtime (#822). No registry change — emission still
+// targets the bare `sailfin_runtime_mark_persistent`.
+fn sailfin_runtime_mark_persistent(ptr: * u8) -> void { }
+
 // #1405 Bug 1: OOM-handler re-entrancy guard for `sfn_alloc_struct`.
 // The OOM diagnostic below materialises a `string` / `* u8` literal,
 // which lowers to its own `sfn_alloc_struct` call (verified in disasm:

@@ -8,6 +8,23 @@
 > **Status delta since 2026-04-15** (keep this list short; once an item is
 > fully shipped fold it into the body and remove the bullet here):
 >
+> - **Arena-cluster flips (2026-06-19, #1425 + mark_persistent, epic #1308).**
+>   (#1425 — serve): the legacy untyped `serve(handler, config?)` prelude
+>   target `sailfin_runtime_serve` (always a no-op C stub; distinct from the
+>   typed `serve` → `sfn_serve` server) is now a Sailfin no-op in
+>   `runtime/sfn/concurrency/serve.sfn`; C body + header proto deleted. Needed
+>   a `windows_stubs.ll` strong stub (serve.sfn is excluded from the
+>   cross-windows `RUNTIME_MODS`). (mark_persistent): per the design-gate
+>   decision to **retire the non-arena allocator path** (arena is the sole
+>   supported allocator — `runtime_architecture.md:1927`), the caller-side
+>   `sailfin_runtime_mark_persistent` (emitted at every `sfn_alloc_struct`) is
+>   now a Sailfin no-op in `runtime/sfn/memory/mem.sfn`; the C body is
+>   file-`static` (its one internal caller, the dead non-arena
+>   `sailfin_runtime_string_drop`, retires with the C file at #822). No
+>   registry change — emission is byte-identical. **Relink residual 6 → 4.**
+>   Residual-4: `sfn_str_read_byte` + `sfn_str_grapheme_byte` (sub-word load,
+>   #822), `sailfin_runtime_string_concat` (ABI-hard, 8 callers),
+>   `sfn_default_arena` (needs a defining-global frontend primitive).
 > - **Immediate-codepoint encoding teardown (2026-06-19, #1420/#1421/#1422,
 >   epic #1308).** Three PRs retired the `(byte << 32)` immediate-codepoint
 >   pseudo-pointer encoding end-to-end.
