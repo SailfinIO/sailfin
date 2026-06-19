@@ -450,6 +450,14 @@ fn sfn_str_slice(text: * u8, start: f64, end: f64) -> * u8 {
 // must be threaded for the copy.
 fn sfn_str_sfn_to_cstr(s: * u8) -> * u8 { return s; }
 
+// `sfn_str_to_cstr(s)` — #1308: the bare runtime-FFI entrypoint `process.sfn`
+// calls to materialize a NUL-terminated C string for `execve`/`posix_spawn`
+// (the C def is deleted). Post immediate-encoding teardown (#1420/#1421) every
+// `* u8` is already a real NUL-terminated buffer, so this is the identity (the
+// old C body's `_sfn_str_decode_immediate_owned` is now a no-op decode). No
+// registry emission row — it is runtime-to-runtime FFI, resolved at link.
+fn sfn_str_to_cstr(s: * u8) -> * u8 { return s; }
+
 // `sfn_str_sfn_from_cstr(s)` — adopt a NUL-terminated C buffer as
 // an SfnString. The architect spec scans for the NUL terminator
 // with `memchr` to recover the byte length and constructs the

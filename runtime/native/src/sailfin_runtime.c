@@ -2244,32 +2244,9 @@ static const char *_sfn_str_decode_immediate(const char *s, unsigned char scratc
     return s;
 }
 
-/* #716: Owning variant for the identity ABI bridges (`sfn_str_to_cstr` /
- * `sfn_str_from_cstr`) whose result outlives the call, so a stack
- * scratch buffer cannot back it. Materializes an immediate codepoint
- * into a tracked `_rt_malloc` buffer; genuine pointers pass through
- * untouched (preserving the identity-bridge contract for real strings).
- * On allocation failure it returns the original operand — no worse than
- * today's behaviour, and OOM is already fatal elsewhere. */
-static const char *_sfn_str_decode_immediate_owned(const char *s)
-{
-    uint32_t cp = 0;
-    if (!_is_immediate_codepoint_string(s, &cp))
-    {
-        return s;
-    }
-    unsigned char buf[5];
-    size_t n = _utf8_encode(cp, buf);
-    char *out = (char *)_rt_malloc(n + 1);
-    if (!out)
-    {
-        return s;
-    }
-    memcpy(out, buf, n);
-    out[n] = '\0';
-    _track_owned_string(out);
-    return (const char *)out;
-}
+/* #1308: `_sfn_str_decode_immediate_owned` (the owning immediate-decode helper
+ * for `sfn_str_to_cstr`/`from_cstr`) is deleted — both bridges flipped to
+ * trivial Sailfin identity bodies, leaving it without a caller. */
 
 /* #1372 (C5 of epic #1308): the canonical `sfn_str_len` emission target
  * is now a real Sailfin body in `runtime/sfn/string.sfn` (decode + bounded
@@ -2346,15 +2323,10 @@ static char *sfn_str_slice(const char *text, double start, double end)
  * materializes such inputs into a real, tracked NUL-terminated
  * buffer so the returned pointer is always dereferenceable; genuine
  * pointers are still returned unchanged. */
-const char *sfn_str_to_cstr(const char *s)
-{
-    return _sfn_str_decode_immediate_owned(s);
-}
-
-const char *sfn_str_from_cstr(const char *s)
-{
-    return _sfn_str_decode_immediate_owned(s);
-}
+/* #1308: sfn_str_to_cstr flipped to a trivial identity Sailfin body
+ * (runtime/sfn/string.sfn) — post immediate-encoding teardown every string is a
+ * real NUL-terminated buffer, so the decode is a no-op. sfn_str_from_cstr had
+ * no callers (no emission row, no runtime caller) and is deleted with it. */
 
 /* M2.5 (#403): wave-2 trampolines for the canonical sfn_str_* / sfn_*_to_str
  * names. Mirror the M2.4a wave-1 pattern: the compiler's runtime_helpers.sfn
