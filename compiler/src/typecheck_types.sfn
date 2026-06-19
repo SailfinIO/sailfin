@@ -1171,6 +1171,12 @@ fn is_builtin_call_name(name: string) -> boolean {
     if strings_equal(name, "atomic_sub") { _ret = true; }
     if strings_equal(name, "atomic_cas") { _ret = true; }
     if strings_equal(name, "atomic_fence") { _ret = true; }
+    // `load_byte(addr: int) -> int` is a call-form lowering primitive
+    // (#1308): a single-byte `load i8` + `zext`, recognized by name and
+    // emitted inline (compiler/src/llvm/byte_load.sfn). It resolves to
+    // no source-level declaration, so the #812 walker must treat it as a
+    // builtin or every `load_byte` call false-positives E0420.
+    if strings_equal(name, "load_byte") { _ret = true; }
     return _ret;
 }
 

@@ -2035,10 +2035,10 @@ char *sailfin_runtime_number_to_string(double value);
  * sites) and retires with the C file at #822. */
 
 /* Single in-bounds byte read. `s` must be deref-safe (post-decode) and
- * `0 <= idx < len`. Stays in C because the seed cannot lower a
- * single-byte `* u8` load in Sailfin, and a Sailfin word-load would
- * over-read an unpadded buffer's tail (an ASAN heap/global-buffer-
- * overflow). */
+ * `0 <= idx < len`. Stays in C until a seed carrying the `load_byte` builtin
+ * (compiler/src/llvm/byte_load.sfn) is pinned — a Sailfin word-load would
+ * over-read an unpadded buffer's tail (an ASAN heap/global-buffer-overflow).
+ * #1308: the native flip lands once that seed ships. */
 int64_t sfn_str_read_byte(const char *s, int64_t idx)
 {
     return (int64_t)(unsigned char)s[idx];

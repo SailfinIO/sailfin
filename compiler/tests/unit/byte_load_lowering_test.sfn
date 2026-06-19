@@ -1,0 +1,71 @@
+// Unit tests for the `load_byte` builtin (#1308 — C→Sailfin runtime
+// migration). `load_byte(addr: int) -> int` is the single-byte load
+// primitive that lets `sfn_str_read_byte` / `sfn_str_grapheme_byte`
+// retire their C bridges: a true `load i8` + `zext`, sound at any
+// alignment (unlike the word-load `_owned_buf_load_byte`, which
+// over-reads the enclosing 8-aligned word).
+//
+// Two layers of coverage, mirroring `atomic_load_store_test.sfn`:
+//   1. Predicate surface — `is_byte_load_builtin` gates the dispatch
+//      hook (compiler/src/llvm/byte_load.sfn). A regression that
+//      loosens it to a prefix/suffix match is caught here.
+//   2. Golden-IR shape — the inttoptr + `load i8` + `zext` emission,
+//      pinned in-process via parse → emit_native → lower_to_llvm_ir.
+//      ONE lowering call for the file (the suite's per-process memory
+//      budget makes multiple lowerings a poor trade).
+import { parse_program } from "../../src/parser/mod";
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { index_of } from "../../src/string_utils";
+import { is_byte_load_builtin } from "../../src/llvm/byte_load";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+// ── Predicate recognises the reserved name ──
+test "byte_load: is_byte_load_builtin recognises load_byte" {
+    assert is_byte_load_builtin("load_byte");
+}
+
+test "byte_load: is_byte_load_builtin tolerates surrounding whitespace" {
+    assert is_byte_load_builtin(" load_byte ");
+}
+
+// ── Predicate rejects non-matching / near-miss identifiers ──
+test "byte_load: is_byte_load_builtin rejects unrelated identifiers" {
+    assert ! is_byte_load_builtin("foo");
+    assert ! is_byte_load_builtin("");
+}
+
+test "byte_load: is_byte_load_builtin rejects partial / near-miss names" {
+    // Defence against a future regression that loosens the predicate to
+    // a startsWith / endsWith match — only the exact name should fire.
+    assert ! is_byte_load_builtin("load");
+    assert ! is_byte_load_builtin("byte");
+    assert ! is_byte_load_builtin("load_byt");
+    assert ! is_byte_load_builtin("load_bytex");
+    assert ! is_byte_load_builtin("store_byte");
+}
+
+// ── Golden-IR shape ──
+// `load_byte(addr: int)` lowers to `inttoptr i64 … to i8*` +
+// `load i8, i8* …, align 1` + `zext i8 … to i64`. Assert the stable
+// pieces (the three opcodes and the i8→i64 widening), not the full
+// instruction lines whose SSA register names vary. The `zext` (not
+// `sext`) is load-bearing: a signed extension would make bytes >= 0x80
+// negative and corrupt every UTF-8 comparison on the self-host path.
+test "lowering: load_byte emits inttoptr + load i8 + zext (#1308)" ![io] {
+    let source = "fn read_first(addr: int) -> int {\n"
+        + "    return load_byte(addr);\n"
+        + "}";
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "byte_load_test");
+    let ir = lower_to_llvm_ir_from_text(native, "byte_load_test");
+
+    assert _contains(ir, "inttoptr i64");
+    assert _contains(ir, "load i8, i8*");
+    assert _contains(ir, "align 1");
+    assert _contains(ir, "zext i8");
+    assert _contains(ir, "to i64");
+}

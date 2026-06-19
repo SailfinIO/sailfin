@@ -35,7 +35,8 @@ import {
     resolve_call_signature,
     resolve_call_method_target,
     try_dispatch_atomic_builtin,
-    _parse_fn_pointer_annotation
+    _parse_fn_pointer_annotation,
+    try_dispatch_byte_load_builtin
 } from "./core_call_resolution";
 import { lower_enum_literal } from "./core_literals_lowering";
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
@@ -236,6 +237,13 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     // entire call pipeline.
     let atomic_dispatch = try_dispatch_atomic_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
     if atomic_dispatch != null { return atomic_dispatch; }
+
+    // Pre-resolution dispatch for the `load_byte` builtin (#1308). Like
+    // the atomics, it lowers to inline LLVM (inttoptr + `load i8` +
+    // `zext`) rather than a function call, so it short-circuits the rest
+    // of the call pipeline.
+    let byte_load_dispatch = try_dispatch_byte_load_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
+    if byte_load_dispatch != null { return byte_load_dispatch; }
 
     // Plain C-ABI function-pointer dispatch (#1089). A call whose target is
     // a local/parameter typed `* fn (A) -> R` is an env-less indirect call

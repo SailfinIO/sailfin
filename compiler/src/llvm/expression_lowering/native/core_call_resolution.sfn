@@ -29,6 +29,7 @@ import { is_atomic_builtin, lower_atomic_builtin } from "../../atomics";
 import { merge_string_constants, empty_string_constant_set } from "../../strings";
 import { find_local_binding, find_parameter_binding } from "./core_scopes";
 import { collect_parameter_types } from "./core_helpers";
+import { lower_byte_load, is_byte_load_builtin } from "../../byte_load";
 import { load_local_operand } from "./core_operands";
 import { NativeFunction } from "../../../native_ir";
 import { ends_with_pointer_suffix } from "../../type_mapping";
@@ -67,6 +68,19 @@ import {
 fn try_dispatch_atomic_builtin(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
     if !is_atomic_builtin(trimmed_target) { return null; }
     return lower_atomic_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
+}
+
+// Pre-resolution dispatch hook for the `load_byte` builtin (#1308 —
+// C→Sailfin runtime migration). Returns a non-null `ExpressionResult`
+// when `trimmed_target` is `load_byte`; the caller short-circuits the
+// call pipeline without consulting the runtime-helper registry. Like
+// the atomic builtins, `load_byte` lowers to inline LLVM (inttoptr +
+// `load i8` + `zext`) rather than a `call @symbol(...)`. Short-circuiting
+// here also prevents a future user-defined `load_byte` from shadowing
+// the primitive the string runtime depends on.
+fn try_dispatch_byte_load_builtin(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+    if !is_byte_load_builtin(trimmed_target) { return null; }
+    return lower_byte_load(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
 }
 
 // ── Closure-callee detection (issue #689) ────────────────────────────
@@ -1452,6 +1466,7 @@ export {
     resolve_parsed_method_dispatch,
     resolve_call_signature,
     try_dispatch_atomic_builtin,
+    try_dispatch_byte_load_builtin,
     _parse_fn_pointer_annotation,
     _ClosureSignatureParse
 };

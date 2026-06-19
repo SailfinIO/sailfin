@@ -1,0 +1,147 @@
+// compiler/src/llvm/byte_load.sfn
+//
+// The `load_byte` builtin and its LLVM lowering. `load_byte(addr: int)
+// -> int` reads a single byte from the raw address `addr` and
+// zero-extends it to `int` (i64). Like the atomic builtins (see
+// `atomics.sfn`), the reserved name bypasses normal call resolution
+// and lowers directly to LLVM instructions rather than a runtime-helper
+// call:
+//
+//   load_byte(addr: int) -> int  →
+//     %p = inttoptr i64 <addr> to i8*
+//     %b = load i8, i8* %p, align 1
+//     %r = zext i8 %b to i64
+//
+// Why this exists (#1308 — C→Sailfin runtime migration): the seed's
+// only single-byte read was `_owned_buf_load_byte` (ownedbuf.sfn),
+// which loads the *enclosing 8-aligned i64 word* via `atomic_load` and
+// shift/masks the byte out. That word-load over-reads up to 7 bytes
+// past the index, so it is only sound on the 8-aligned/padded buffers
+// `owned_buf_new` produces. `sfn_str_read_byte` / `sfn_str_grapheme_byte`
+// read arbitrary `* u8` backing buffers (getenv results, string
+// literals, foreign buffers) with no padding guarantee, which is why
+// they stayed C bridges. `load_byte` is the true single-byte load
+// (`load i8` + `zext`) that is sound at any address and any alignment,
+// retiring both bridges. Address-based (not pointer-typed) to match the
+// existing runtime byte idiom (`_owned_buf_load_byte(addr: i64)`,
+// `_num_put_byte(addr: i64, ...)`), which deliberately passes i64
+// addresses to avoid `* u8` pointer-type friction under the seed.
+//
+// `zext` (not `sext`): the byte is unsigned (0..255), matching the C
+// `(int64_t)(unsigned char)s[idx]`. A `sext` would make bytes >= 0x80
+// negative and corrupt every UTF-8 comparison on the self-host path.
+import {
+    LLVMOperand,
+    TypeContext,
+    LocalBinding,
+    StringConstant,
+    ExpressionResult,
+    ParameterBinding
+} from "./types";
+import { trim_text, number_to_string, extend_string_array } from "./utils";
+import { merge_string_constants } from "./strings";
+import { NativeFunction } from "../native_ir";
+import { format_temp_name } from "./expressions_helpers";
+// Mutually recursive with `lower_expression` (which dispatches calls
+// back through the byte-load hook): the same cycle the atomic builtins
+// rely on — see `atomics.sfn`.
+import { lower_expression } from "./expression_lowering/native/core";
+
+// Predicate over the reserved `load_byte` name. Used by the
+// pre-resolution dispatch hook in `lower_call_expression` (see
+// `core_call_resolution.sfn`) to short-circuit before consulting the
+// runtime-helper registry.
+fn is_byte_load_builtin(name: string) -> boolean {
+    let trimmed = trim_text(name);
+    if trimmed == "load_byte" { return true; }
+    return false;
+}
+
+// Lower a `load_byte(addr)` call. Caller has already validated that
+// `is_byte_load_builtin(name)` is true. Lowers the address argument
+// through `lower_expression` (as `i64`), then emits the inttoptr +
+// single-byte load + zext triple. Returns an `ExpressionResult` whose
+// `operand` is the zero-extended i64 byte value.
+fn lower_byte_load(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let mut diagnostics: string[] = [];
+    let mut current_lines = lines;
+    let mut current_temp = temp_index;
+    let mut collected_strings: StringConstant[] = [];
+
+    if arguments.length != 1 {
+        // `[fatal]` sentinel so the emit-level entrypoints
+        // (`compile_native_text_to_llvm_file`, `write_llvm_ir`) refuse
+        // to write IR rather than silently dropping the load — mirrors
+        // the atomic-builtin arity gate (issue #306 contract).
+        let diag1 = "llvm lowering [fatal] [E0806]: load_byte expects exactly 1 argument (`int` address), got "
+            + number_to_string(arguments.length);
+        print.err(diag1);
+        diagnostics.push(diag1);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let addr_text = trim_text(arguments[0]);
+    let addr_lowered = lower_expression(addr_text, bindings, locals, current_temp, current_lines, functions, context, "i64");
+    diagnostics = extend_string_array(diagnostics, addr_lowered.diagnostics);
+    collected_strings = merge_string_constants(collected_strings, addr_lowered.string_constants);
+    current_lines = addr_lowered.lines;
+    current_temp = addr_lowered.temp_index;
+
+    if addr_lowered.operand == null {
+        diagnostics.push("llvm lowering: load_byte failed to lower address argument");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let addr_operand = addr_lowered.operand;
+    let addr_type = trim_text(addr_operand.llvm_type);
+    if addr_type != "i64" {
+        let diag2 = "llvm lowering [fatal] [E0806]: load_byte expects argument 0 of type `int` (i64), got `"
+            + addr_type
+            + "`";
+        print.err(diag2);
+        diagnostics.push(diag2);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let ptr_name = format_temp_name(current_temp);
+    current_temp += 1;
+    let byte_name = format_temp_name(current_temp);
+    current_temp += 1;
+    let result_name = format_temp_name(current_temp);
+    current_temp += 1;
+
+    current_lines.push("  " + ptr_name + " = inttoptr i64 " + addr_operand.value
+        + " to i8*");
+    current_lines.push("  " + byte_name + " = load i8, i8* " + ptr_name
+        + ", align 1");
+    current_lines.push("  " + result_name + " = zext i8 " + byte_name
+        + " to i64");
+
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: LLVMOperand { llvm_type: "i64", value: result_name },
+        diagnostics: diagnostics,
+        string_constants: collected_strings
+    };
+}
+
+export { is_byte_load_builtin, lower_byte_load };
