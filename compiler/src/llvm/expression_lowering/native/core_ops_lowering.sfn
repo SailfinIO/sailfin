@@ -406,16 +406,15 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
 
             // M1.7.2d (#721): route through descriptor-driven dispatch.
             // The `string.concat` descriptor pins the three parameter
-            // types (`{i8*, i64}`, `{i8*, i64}`, `ptr`); the third
-            // operand `ptr @sfn_default_arena` is the global pointer
-            // slot primed at module load by the C constructor in
-            // `runtime/native/src/sailfin_runtime.c`. The downstream
-            // `extractvalue` (still owned by this lowering, not by
-            // the descriptor) recovers the data pointer so the rest
-            // of the pipeline keeps treating string operands as `i8*`.
+            // types (`{i8*, i64}`, `{i8*, i64}`, `ptr`); the third is
+            // the arena-slot `ptr`. #1308: now a null pointer rather
+            // than `ptr @sfn_default_arena` — `sfn_str_concat` resolves
+            // the arena via `_sfn_resolve_arena`, which falls back to
+            // `sfn_arena_global()` on a null slot, so no Sailfin object
+            // references the C global `sfn_default_arena` anymore.
             let arena_operand = LLVMOperand {
                 llvm_type: "ptr",
-                value: "@sfn_default_arena"
+                value: "null"
             };
             let concat_operands: LLVMOperand[] = [lhs_agg.operand, rhs_agg.operand, arena_operand];
             let concat_result = emit_runtime_call("string.concat", concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
@@ -639,10 +638,10 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             }
             // M1.7.2d (#721): route through descriptor-driven dispatch
             // (see the earlier call site in this file for the full
-            // migration note).
+            // migration note). #1308: arena slot is a null pointer.
             let arena_operand = LLVMOperand {
                 llvm_type: "ptr",
-                value: "@sfn_default_arena"
+                value: "null"
             };
             let concat_operands: LLVMOperand[] = [lhs_agg.operand, rhs_agg.operand, arena_operand];
             let concat_result = emit_runtime_call("string.concat", concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
