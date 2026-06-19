@@ -87,22 +87,12 @@ extern fn strnlen(s: * u8, n: usize) -> usize;
 // through and discards the endptr by passing `null`.
 extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
 
-// M2.4b (#398) + #715: the C-side allocating ops. The Sailfin
-// trampolines below preserve the `sfn_str_sfn_*` infix pattern
-// (proof-of-life presence under the Sailfin namespace) while the
-// canonical `sfn_str_concat` / `sfn_str_append` symbols live on
-// the C side (#715 promoted these from their interim `_arena`
-// suffix to the bare canonical names). The two `* u8` parameters
-// mirror the wave-1a pattern — today's Sailfin frontend can't
-// pass / return the SfnString aggregate by value, so the bodies
-// bridge through the legacy NUL-terminated concat. The user IR
-// emission lands directly on `@sfn_str_concat` (the C entrypoint
-// with the new arena-aware ABI); these wrappers are not on the
-// hot path.
-extern fn sailfin_runtime_string_concat(a: * u8, b: * u8) -> * u8;
-
-extern fn sailfin_runtime_string_append(buf: * u8, suffix: * u8) -> * u8;
-
+// #1308: the legacy C `sailfin_runtime_string_concat` / `_append` externs were
+// deleted here — they had zero callers (the canonical `sfn_str_concat` /
+// `sfn_str_append` have been real Sailfin bodies since #1318, and the last
+// Sailfin demand on the legacy concat — `resolve_runtime_root` in exec.sfn —
+// was retargeted to the native `+` path). The C definitions are now purely
+// C-internal and retire with the C runtime at #822.
 // `sailfin_runtime_string_to_number` is the still-C `strtod` boundary
 // `to_number` delegates to (allocating-op family — retires in #1318/#822).
 // Returns `double` (System V x86_64 `%xmm0`), matched exactly here.

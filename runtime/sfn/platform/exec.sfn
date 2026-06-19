@@ -143,16 +143,6 @@ extern fn realpath(path: * u8, resolved: * u8) -> * u8;
 // the filesystem adapter.
 extern fn sfn_fs_exists(path: * u8) -> bool;
 
-// `sailfin_runtime_string_concat` is the C runtime's
-// NUL-terminated concat. Used to build the
-// `<exe_dir>/runtime` / `<exe_dir>/../runtime` / ...
-// candidate strings without rolling a manual concat loop here.
-// M2.4b's pure-Sailfin concat is keyed on the M1.A.2
-// aggregate-by-value parameter flip; until that lands, this C
-// trampoline is the only way to produce a fresh NUL-terminated
-// buffer from two `* u8` inputs.
-extern fn sailfin_runtime_string_concat(a: * u8, b: * u8) -> * u8;
-
 // `memcmp` is needed for the empty-string check in
 // `resolve_runtime_root`'s `$SAILFIN_RUNTIME_ROOT` override
 // branch — the C original treats an empty env value as "not
@@ -341,12 +331,18 @@ fn resolve_runtime_root(exe_path: * u8) -> * u8 ![io] {
         }
     }
     let exe_dir_str: string = binary_dir(exe_path);
-    let exe_dir: * u8 = exe_dir_str as * u8;
     let mut idx: i32 = 0;
     loop {
         if idx >= 3 { break; }
-        let suffix: * u8 = _candidate_suffix(idx);
-        let candidate: * u8 = sailfin_runtime_string_concat(exe_dir, suffix);
+        // #1308: build `<exe_dir><suffix>` via the native `string` `+`
+        // operator (lowers to `sfn_str_concat`, a real Sailfin arena-backed
+        // body) instead of the legacy C `sailfin_runtime_string_concat` extern
+        // — the last Sailfin-side demand on that C symbol. `candidate_str` is a
+        // computed (alloca-backed) string, so the `as * u8` cast takes the safe
+        // slot-load path, not the literal-cast quirk.
+        let suffix: string = _candidate_suffix(idx);
+        let candidate_str: string = exe_dir_str + suffix;
+        let candidate: * u8 = candidate_str as * u8;
         if sfn_fs_exists(candidate) {
             let canon: * u8 = realpath(candidate, null);
             if canon as i64 != 0 { return canon as string; }
@@ -366,18 +362,12 @@ fn resolve_runtime_root(exe_path: * u8) -> * u8 ![io] {
 // prefixed strings at module scope (verified during M2.7a
 // bring-up), and a switch-on-index dispatch is the cheapest
 // workaround until that bug closes.
-fn _candidate_suffix(idx: i32) -> * u8 {
-    // Route through `string`-typed locals to dodge the seed's
-    // `<literal> as * u8` cast bug — see the cast-quirk note in
-    // the module header. The slot-load makes the cast safe.
-    if idx == 0 {
-        let s0: string = "/runtime";
-        return s0 as * u8;
-    }
-    if idx == 1 {
-        let s1: string = "/../runtime";
-        return s1 as * u8;
-    }
-    let s2: string = "/../../runtime";
-    return s2 as * u8;
+fn _candidate_suffix(idx: i32) -> string {
+    // #1308: returns `string` (was `* u8`) so the caller can build the
+    // candidate path with the native `string` `+` operator. The literals are
+    // returned directly — the cast-quirk only bit the `<literal> as * u8` form,
+    // which is now gone from this path.
+    if idx == 0 { return "/runtime"; }
+    if idx == 1 { return "/../runtime"; }
+    return "/../../runtime";
 }
