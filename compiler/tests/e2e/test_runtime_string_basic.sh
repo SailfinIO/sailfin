@@ -115,12 +115,14 @@ test_no_bare_sfn_str_define() {
         echo "[test]   $ll missing — test_emit_define_shape must run first"
         return 1
     fi
-    # #1372: `sfn_str_{len,eq,slice}` retired from this list — they are now
-    # real bare Sailfin bodies (the C defs are `static`), so a bare `define`
-    # is expected, not a collision. Only the still-C `to_cstr` / `from_cstr`
-    # trampolines remain.
+    # #1372: `sfn_str_{len,eq,slice}` retired from this list (real bare Sailfin
+    # bodies). #1308: `sfn_str_to_cstr` flipped to a bare Sailfin identity body
+    # (so a bare `define` is now expected, asserted by the export test below) and
+    # `sfn_str_from_cstr` was deleted (dead). The still-C bridges string.sfn must
+    # NOT bare-define are `read_byte` / `grapheme_byte` (sub-word load the seed
+    # can't lower; called as externs → `declare`, not `define`). Retire at #822.
     local found=0
-    for sym in sfn_str_to_cstr sfn_str_from_cstr; do
+    for sym in sfn_str_read_byte sfn_str_grapheme_byte; do
         if grep -qE "^define .* @${sym}\(" "$ll"; then
             echo "[test]   collision risk: string.sfn emits 'define ... @${sym}(', conflicts with C trampoline"
             found=$((found + 1))
@@ -194,10 +196,12 @@ test_compiler_binary_exports_sfn_str() {
     fi
     local missing=0
     # Bare `sfn_str_{len,eq,slice}` are now Sailfin-defined (#1372); the C
-    # namesakes are `static`. `sfn_str_{to_cstr,from_cstr}` stay C-owned bare
-    # with Sailfin `sfn_str_sfn_{to_cstr,from_cstr}` infix proof-of-life. The
-    # `sfn_str_sfn_{len,eq,slice}` infix exports retired with the #1372 flip.
-    for sym in sfn_str_len sfn_str_eq sfn_str_slice sfn_str_to_cstr sfn_str_from_cstr sfn_str_sfn_to_cstr sfn_str_sfn_from_cstr; do
+    # namesakes are `static`. #1308: `sfn_str_to_cstr` is now Sailfin-defined
+    # too (bare identity body); `sfn_str_from_cstr` was deleted (dead, no caller)
+    # so it is dropped here. The Sailfin `sfn_str_sfn_{to_cstr,from_cstr}` infix
+    # proof-of-life bodies stay. The `sfn_str_sfn_{len,eq,slice}` infix exports
+    # retired with the #1372 flip.
+    for sym in sfn_str_len sfn_str_eq sfn_str_slice sfn_str_to_cstr sfn_str_sfn_to_cstr sfn_str_sfn_from_cstr; do
         # Require a defined text symbol (` T ` / ` t `). The optional
         # `_` prefix accommodates macOS Mach-O while staying tight
         # against substring collisions. A here-string avoids the
