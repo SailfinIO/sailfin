@@ -39,9 +39,12 @@ import { substring, find_last_index_of_char } from "../../../string_utils";
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
 import {
     trace_lowering,
+    fs_platform_leg,
     exe_path_locator,
+    stat_buf_size_value,
     errno_locator_symbol,
-    clock_monotonic_id_value
+    clock_monotonic_id_value,
+    stat_st_mode_offset_value
 } from "../../lowering_debug_state";
 import { find_interface_info_by_name } from "../../type_context_queries";
 
@@ -891,6 +894,308 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                         operand: _ep_operand,
                         diagnostics: result_diagnostics,
                         string_constants: _ep_constants
+                    };
+                }
+            }
+        }
+    }
+
+    // Filesystem sentinels (#1308): retire the last platform-divergent C fs
+    // symbols by lowering each to a per-target sequence (modeled on
+    // `exe_path` above), choosing the host leg via `fs_platform_leg`. Only
+    // the host leg's symbol enters the IR, so the Windows cross-build never
+    // references a POSIX-only `symlink`/`mkdtemp` it has no symbol for.
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_fs_symlink" {
+            if final_operands.length < 2 {
+                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_symlink requires (target: i8*, link: i8*) operands");
+            } else {
+                let _fs_leg = fs_platform_leg();
+                if _fs_leg == "mingw" {
+                    // Windows stub: no `symlink` symbol in the IR; always fail.
+                    let _fs_stub = LLVMOperand {
+                        llvm_type: "i1",
+                        value: "false"
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_stub,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                } else {
+                    // POSIX (linux/darwin): symlink(target, link) == 0 => true.
+                    let _fs_target = final_operands[0].value;
+                    let _fs_link = final_operands[1].value;
+                    let _fs_rc = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_ok = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _fs_rc
+                        + " = call i32 @symlink(i8* "
+                        + _fs_target
+                        + ", i8* "
+                        + _fs_link
+                        + ")");
+                    result_lines.push("  " + _fs_ok + " = icmp eq i32 " + _fs_rc
+                        + ", 0");
+                    let _fs_operand = LLVMOperand {
+                        llvm_type: "i1",
+                        value: _fs_ok
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                }
+            }
+        }
+    }
+
+    // `mkdtemp(template) -> bool` sentinel (#1308): POSIX legs call
+    // `mkdtemp(3)` (returns the mutated template buffer or NULL); the
+    // Windows leg is a bare `false` stub so the MinGW-absent symbol never
+    // enters the IR.
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_fs_mkdtemp" {
+            if final_operands.length < 1 {
+                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_mkdtemp requires (template: i8*) operand");
+            } else {
+                let _fs_leg = fs_platform_leg();
+                if _fs_leg == "mingw" {
+                    let _fs_stub = LLVMOperand {
+                        llvm_type: "i1",
+                        value: "false"
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_stub,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                } else {
+                    let _fs_tmpl = final_operands[0].value;
+                    let _fs_rc = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_ok = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _fs_rc
+                        + " = call i8* @mkdtemp(i8* "
+                        + _fs_tmpl
+                        + ")");
+                    result_lines.push("  " + _fs_ok + " = icmp ne i8* " + _fs_rc
+                        + ", null");
+                    let _fs_operand = LLVMOperand {
+                        llvm_type: "i1",
+                        value: _fs_ok
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                }
+            }
+        }
+    }
+
+    // `fs_exists(path) -> bool` sentinel (#1308): POSIX legs `stat(path,
+    // &buf) == 0` over a stack `struct stat` buffer (over-allocated via
+    // `stat_buf_size_value`); the Windows leg `GetFileAttributesA(path) !=
+    // -1` (INVALID_FILE_ATTRIBUTES). Only the host leg's symbol enters the IR.
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_fs_exists" {
+            if final_operands.length < 1 {
+                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_exists requires (path: i8*) operand");
+            } else {
+                let _fs_leg = fs_platform_leg();
+                let _fs_path = final_operands[0].value;
+                if _fs_leg == "mingw" {
+                    let _fs_attr = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_ok = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _fs_attr
+                        + " = call i32 @GetFileAttributesA(i8* "
+                        + _fs_path
+                        + ")");
+                    result_lines.push("  " + _fs_ok + " = icmp ne i32 "
+                        + _fs_attr
+                        + ", -1");
+                    let _fs_operand = LLVMOperand {
+                        llvm_type: "i1",
+                        value: _fs_ok
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                } else {
+                    let _fs_bufsz = number_to_string(stat_buf_size_value());
+                    let _fs_buf = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_bufp = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_rc = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_ok = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    result_lines.push("  " + _fs_buf + " = alloca [" + _fs_bufsz
+                        + " x i8]");
+                    result_lines.push("  " + _fs_bufp + " = getelementptr ["
+                        + _fs_bufsz
+                        + " x i8], ["
+                        + _fs_bufsz
+                        + " x i8]* "
+                        + _fs_buf
+                        + ", i32 0, i32 0");
+                    result_lines.push("  " + _fs_rc + " = call i32 @stat(i8* "
+                        + _fs_path
+                        + ", i8* "
+                        + _fs_bufp
+                        + ")");
+                    result_lines.push("  " + _fs_ok + " = icmp eq i32 " + _fs_rc
+                        + ", 0");
+                    let _fs_operand = LLVMOperand {
+                        llvm_type: "i1",
+                        value: _fs_ok
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                }
+            }
+        }
+    }
+
+    // `get_perms(path) -> i64` sentinel (#1308): POSIX legs `stat` the path,
+    // and on success load `st_mode` at the per-target byte offset
+    // (`stat_st_mode_offset_value`), mask the low 12 bits (`& 0o7777`), and
+    // zext to i64; a `stat` failure yields -1 via a phi. The Windows leg is
+    // a bare `i64 -1` stub. The stat buffer is `align 8` (struct stat's
+    // alignment) so the `st_mode` load is naturally aligned.
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_fs_get_perms" {
+            if final_operands.length < 1 {
+                result_diagnostics.push("llvm lowering: sailfin_intrinsic_fs_get_perms requires (path: i8*) operand");
+            } else {
+                let _fs_leg = fs_platform_leg();
+                if _fs_leg == "mingw" {
+                    let _fs_stub = LLVMOperand {
+                        llvm_type: "i64",
+                        value: "-1"
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_stub,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
+                } else {
+                    let _fs_path = final_operands[0].value;
+                    let _fs_id = number_to_string(result_temp);
+                    let _fs_bufsz = number_to_string(stat_buf_size_value());
+                    let _fs_off = number_to_string(stat_st_mode_offset_value());
+                    let _fs_buf = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_bufp = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_rc = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_okc = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_modep = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_modepi = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_mode = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_masked = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_mode64 = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_out = format_temp_name(result_temp);
+                    result_temp = result_temp + 1;
+                    let _fs_ok_lbl = "get_perms_ok_" + _fs_id;
+                    let _fs_fail_lbl = "get_perms_fail_" + _fs_id;
+                    let _fs_done_lbl = "get_perms_done_" + _fs_id;
+                    result_lines.push("  " + _fs_buf + " = alloca [" + _fs_bufsz
+                        + " x i8], align 8");
+                    result_lines.push("  " + _fs_bufp + " = getelementptr ["
+                        + _fs_bufsz
+                        + " x i8], ["
+                        + _fs_bufsz
+                        + " x i8]* "
+                        + _fs_buf
+                        + ", i32 0, i32 0");
+                    result_lines.push("  " + _fs_rc + " = call i32 @stat(i8* "
+                        + _fs_path
+                        + ", i8* "
+                        + _fs_bufp
+                        + ")");
+                    result_lines.push("  " + _fs_okc + " = icmp eq i32 "
+                        + _fs_rc
+                        + ", 0");
+                    result_lines.push("  br i1 " + _fs_okc + ", label %"
+                        + _fs_ok_lbl
+                        + ", label %"
+                        + _fs_fail_lbl);
+                    result_lines.push("");
+                    result_lines.push(_fs_ok_lbl + ":");
+                    result_lines.push("  " + _fs_modep
+                        + " = getelementptr i8, i8* "
+                        + _fs_bufp
+                        + ", i64 "
+                        + _fs_off);
+                    result_lines.push("  " + _fs_modepi + " = bitcast i8* "
+                        + _fs_modep
+                        + " to i32*");
+                    result_lines.push("  " + _fs_mode + " = load i32, i32* "
+                        + _fs_modepi);
+                    result_lines.push("  " + _fs_masked + " = and i32 "
+                        + _fs_mode
+                        + ", 4095");
+                    result_lines.push("  " + _fs_mode64 + " = zext i32 "
+                        + _fs_masked
+                        + " to i64");
+                    result_lines.push("  br label %" + _fs_done_lbl);
+                    result_lines.push("");
+                    result_lines.push(_fs_fail_lbl + ":");
+                    result_lines.push("  br label %" + _fs_done_lbl);
+                    result_lines.push("");
+                    result_lines.push(_fs_done_lbl + ":");
+                    result_lines.push("  " + _fs_out + " = phi i64 [ "
+                        + _fs_mode64
+                        + ", %"
+                        + _fs_ok_lbl
+                        + " ], [ -1, %"
+                        + _fs_fail_lbl
+                        + " ]");
+                    let _fs_operand = LLVMOperand {
+                        llvm_type: "i64",
+                        value: _fs_out
+                    };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: _fs_operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
                     };
                 }
             }
