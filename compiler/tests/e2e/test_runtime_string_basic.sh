@@ -103,32 +103,28 @@ test_emit_define_shape() {
     return "$missing"
 }
 
-# ---- Test: emitted IR does NOT collide with C trampolines ----
+# ---- Test: read_byte / grapheme_byte are now bare Sailfin defines ----
 #
-# Coexistence regression: a regression that flips a Sailfin export
-# to a bare `sfn_str_*` define would collide with the C trampoline
-# at link time and break `make compile`. Pin the `_sfn_` infix as
-# the marker until M2.4b removes the C trampolines.
+# #1308 (seed 0.7.0-alpha.41): `read_byte` / `grapheme_byte` flipped to native
+# Sailfin bodies over the `load_byte` builtin (a true `load i8` + `zext`); the C
+# trampolines are deleted. A bare `define @sfn_str_read_byte(` /
+# `@sfn_str_grapheme_byte(` is now the required shape — a regression back to an
+# `extern`/`declare` would mean the flip was reverted (and the C body is gone,
+# so it would also fail to link). The remaining C bridges retire at #822.
 test_no_bare_sfn_str_define() {
     local ll="$SCRATCH/string.ll"
     if [ ! -f "$ll" ]; then
         echo "[test]   $ll missing — test_emit_define_shape must run first"
         return 1
     fi
-    # #1372: `sfn_str_{len,eq,slice}` retired from this list (real bare Sailfin
-    # bodies). #1308: `sfn_str_to_cstr` flipped to a bare Sailfin identity body
-    # (so a bare `define` is now expected, asserted by the export test below) and
-    # `sfn_str_from_cstr` was deleted (dead). The still-C bridges string.sfn must
-    # NOT bare-define are `read_byte` / `grapheme_byte` (sub-word load the seed
-    # can't lower; called as externs → `declare`, not `define`). Retire at #822.
-    local found=0
+    local missing=0
     for sym in sfn_str_read_byte sfn_str_grapheme_byte; do
-        if grep -qE "^define .* @${sym}\(" "$ll"; then
-            echo "[test]   collision risk: string.sfn emits 'define ... @${sym}(', conflicts with C trampoline"
-            found=$((found + 1))
+        if ! grep -qE "^define .* @${sym}\(" "$ll"; then
+            echo "[test]   expected 'define ... @${sym}(' in string.ll (native #1308 flip)"
+            missing=$((missing + 1))
         fi
     done
-    return "$found"
+    return "$missing"
 }
 
 # ---- Test: emitted IR declares the libc/runtime trampolines bodies use ----
@@ -235,7 +231,7 @@ test_manifest_lists_string() {
 run_test "sfn check runtime/sfn/string.sfn passes" test_check_clean
 run_test "sfn fmt --check runtime/sfn/string.sfn is canonical" test_fmt_clean
 run_test "sfn emit llvm produces define for every sfn_str_sfn_* export" test_emit_define_shape
-run_test "sfn emit llvm does not collide with C trampoline sfn_str_* names" test_no_bare_sfn_str_define
+run_test "sfn emit llvm bare-defines native read_byte / grapheme_byte (#1308)" test_no_bare_sfn_str_define
 run_test "sfn emit llvm declares memcmp and memchr trampolines" test_emit_libc_declares
 run_test "user emission no longer calls @sailfin_runtime_string_length / @substring / @substring_unchecked / @strings_equal" test_user_emission_is_flipped
 run_test "compiler binary exports defined sfn_str_* and sfn_str_sfn_* symbols" test_compiler_binary_exports_sfn_str

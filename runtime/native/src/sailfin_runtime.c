@@ -2034,36 +2034,11 @@ char *sailfin_runtime_number_to_string(double value);
  * survives (still used by `sfn_str_to_cstr`/`from_cstr` at the identity-bridge
  * sites) and retires with the C file at #822. */
 
-/* Single in-bounds byte read. `s` must be deref-safe (post-decode) and
- * `0 <= idx < len`. Stays in C until a seed carrying the `load_byte` builtin
- * (compiler/src/llvm/byte_load.sfn) is pinned — a Sailfin word-load would
- * over-read an unpadded buffer's tail (an ASAN heap/global-buffer-overflow).
- * #1308: the native flip lands once that seed ships. */
-int64_t sfn_str_read_byte(const char *s, int64_t idx)
-{
-    return (int64_t)(unsigned char)s[idx];
-}
-
-/* Bootstrap grapheme production lifted verbatim from
- * `sailfin_runtime_grapheme_at`: return a real 1-byte arena/heap buffer for
- * the byte at `idx`. `real` must be deref-safe and `idx` in bounds
- * (caller-checked). #1308: the Linux-only immediate-codepoint pseudo-pointer
- * fast-path is retired — this producer now emits a real buffer on every
- * platform (the macOS path since #1136), so no immediate ever enters the
- * decoder. Do NOT re-add a tagged-pointer fast-path. */
-char *sfn_str_grapheme_byte(const char *real, int64_t idx)
-{
-    unsigned char byte = (unsigned char)real[idx];
-    char *out = (char *)_rt_malloc(2);
-    if (!out)
-    {
-        return NULL;
-    }
-    out[0] = (char)byte;
-    out[1] = '\0';
-    _track_owned_string(out);
-    return out;
-}
+/* #1308: `sfn_str_read_byte` and `sfn_str_grapheme_byte` are now native Sailfin
+ * bodies in `runtime/sfn/string.sfn`. The single-byte `* u8` read that kept them
+ * in C is now expressible via the `load_byte` builtin (a true `load i8` + `zext`,
+ * sound at any alignment — compiler/src/llvm/byte_load.sfn, shipped in seed
+ * 0.7.0-alpha.41), so the C defs are deleted. They had zero C-internal callers. */
 
 /* #1315: canonical emission target is now a real Sailfin body in
  * `runtime/sfn/string.sfn`. This C definition is `static` so the linker

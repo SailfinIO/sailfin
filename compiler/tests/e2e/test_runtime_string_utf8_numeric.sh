@@ -132,43 +132,31 @@ test_emit_define_shape() {
     return "$missing"
 }
 
-# ---- Test: emitted IR does NOT collide with the still-C trampolines ----
+# ---- Test: read_byte / grapheme_byte are now bare Sailfin defines ----
 #
-# Coexistence regression: a regression that flips a still-façade Sailfin
-# export to a bare wave-2 name would collide with the C trampoline at
-# link time and break `make compile`. Pin the `_sfn_` infix as the marker
-# until each C trampoline retires. NOTE: `sfn_number_to_str` /
-# `sfn_int_to_str` (as of #1314) and the accessor family
-# `sfn_str_{grapheme_count,grapheme_at,byte_at,find_byte,codepoint}` (as
-# of #1315) are deliberately ABSENT from this list — their bare bodies are
-# now real Sailfin (string.sfn) and the C namesakes are `static`, so a
-# bare `define` for them is expected, not a collision. Only the still-C
-# allocating/encode ops (retired in #1318 / #822) stay here.
+# #1308 (seed 0.7.0-alpha.41): `read_byte` / `grapheme_byte` were the last
+# still-C string bridges. They flipped to native Sailfin bodies over the
+# `load_byte` builtin (a true `load i8` + `zext`), and the C trampolines are
+# deleted — so a bare `define @sfn_str_read_byte(` / `@sfn_str_grapheme_byte(`
+# is now the required shape, not a collision. A regression back to an
+# `extern`/`declare` would mean the flip was reverted (and would fail to link,
+# the C body being gone). The remaining still-C allocating ops retire at #822.
 test_no_bare_sfn_str_define() {
     local ll="$SCRATCH/string.ll"
     if [ ! -f "$ll" ]; then
         echo "[test]   $ll missing — test_emit_define_shape must run first"
         return 1
     fi
-    # #1372: `sfn_str_to_number` retired from this list; #1308: the encode/
-    # alloc ops `sfn_str_from_codepoint` / `sfn_str_from_byte` are now real bare
-    # Sailfin bodies too (C defs `static`), so a bare `define` for them is
-    # expected, not a collision. #1308 (immediate-encoding teardown):
-    # `sfn_str_decode_owned` / `sfn_str_immediate_codepoint` are now trivial
-    # Sailfin bodies (C defs DELETED), so they also moved to the define list
-    # above. The remaining still-C bridges string.sfn externs (and must NOT
-    # define) are `read_byte` / `grapheme_byte` — they need a sub-word load the
-    # seed can't lower, and retire with the C file at #822.
-    local found=0
+    local missing=0
     for sym in \
         sfn_str_read_byte \
         sfn_str_grapheme_byte; do
-        if grep -qE "^define .* @${sym}\(" "$ll"; then
-            echo "[test]   collision risk: string.sfn emits 'define ... @${sym}(', conflicts with C trampoline"
-            found=$((found + 1))
+        if ! grep -qE "^define .* @${sym}\(" "$ll"; then
+            echo "[test]   expected 'define ... @${sym}(' in string.ll (native #1308 flip)"
+            missing=$((missing + 1))
         fi
     done
-    return "$found"
+    return "$missing"
 }
 
 # ---- Test: emitted IR declares strtod ----
@@ -338,7 +326,7 @@ test_immediate_codepoint_hack_unreachable() {
 run_test "sfn check runtime/sfn/string.sfn + libc.sfn passes" test_check_clean
 run_test "sfn fmt --check runtime/sfn/string.sfn + libc.sfn is canonical" test_fmt_clean
 run_test "sfn emit llvm produces define for every wave-2 sfn_str_sfn_* / sfn_*_sfn export" test_emit_define_shape
-run_test "sfn emit llvm does not collide with C trampoline wave-2 sfn_str_* / sfn_*_to_str names" test_no_bare_sfn_str_define
+run_test "sfn emit llvm bare-defines native read_byte / grapheme_byte (#1308)" test_no_bare_sfn_str_define
 run_test "sfn emit llvm declares strtod" test_emit_libc_declares
 run_test "user emission no longer calls the seven legacy C symbols from issue #403 AC #1" test_user_emission_is_flipped
 run_test "compiler binary exports defined wave-2 sfn_str_* / sfn_*_to_str and _sfn_* / _sfn symbols" test_compiler_binary_exports_wave2

@@ -138,15 +138,11 @@ extern "C"
     // `_arena`-suffixed prototypes stay until the seed cut after #1318 / #822.
     SfnString sfn_str_concat_arena(SfnString a, SfnString b, SfnArena **arena_slot);
     void sfn_str_append_arena(SfnString *dst, SfnString suffix, SfnArena **arena_slot);
-    // #1315 (C4 of epic #1308): exported bridge primitives the Sailfin
-    // string-accessor bodies in `runtime/sfn/string.sfn` call (single-byte
-    // read, platform-gated grapheme production). These retire once a seed
-    // carrying the `load_byte` builtin is pinned (#1308 two-phase); do not
-    // grow this surface. See the bridge block in `sailfin_runtime.c`.
-    // #1308: sfn_str_decode_owned / sfn_str_immediate_codepoint flipped to
-    // trivial Sailfin bodies (string.sfn); C defs + protos deleted.
-    int64_t sfn_str_read_byte(const char *s, int64_t idx);
-    char *sfn_str_grapheme_byte(const char *real, int64_t idx);
+    // #1308: sfn_str_decode_owned / sfn_str_immediate_codepoint /
+    // sfn_str_read_byte / sfn_str_grapheme_byte all flipped to native Sailfin
+    // bodies (string.sfn); C defs + protos deleted. The single-byte read now
+    // lowers via the `load_byte` builtin (compiler/src/llvm/byte_load.sfn,
+    // shipped in seed 0.7.0-alpha.41).
     extern SfnArena *sfn_default_arena;
     // Drop/free a runtime-owned string (no-op for non-owned/persistent values).
     void sailfin_runtime_string_drop(char *text);
