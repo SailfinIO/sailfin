@@ -123,9 +123,20 @@ extern fn sailfin_runtime_string_to_number(s: * u8) -> f64;
 // site. Returning `f64` here keeps that ABI byte-identical, so no
 // registry edit and no seed cut are needed (the seed still emits the
 // `double`-coerced call sites).
-extern fn sfn_str_decode_owned(s: * u8) -> * u8;
+// #1308 (immediate-encoding teardown): `sfn_str_immediate_codepoint` and
+// `sfn_str_decode_owned` are now trivial Sailfin bodies (the C defs are
+// deleted). After the producer flip (#1420) no `(byte << 32)` immediate can
+// exist at runtime, so classification always reports "not an immediate" and
+// decoding is the identity. The decode bridge's old `_runtime_enter` bump is
+// dropped: the concat-reuse window it invalidated is vestigial (the
+// `_concat_reuse_*` globals are write-only, never read). The remaining
+// immediate-arms in the bodies below are now provably dead (`cp` is always
+// -1); they are deleted, along with the C classifier + ~36 consumer guards, in
+// the #822 file-deletion cleanup. `read_byte` / `grapheme_byte` stay C externs
+// (the seed cannot lower a sub-word load / byte-store + arena-alloc).
+fn sfn_str_immediate_codepoint(s: * u8) -> i64 { return -1; }
 
-extern fn sfn_str_immediate_codepoint(s: * u8) -> i64;
+fn sfn_str_decode_owned(s: * u8) -> * u8 { return s; }
 
 extern fn sfn_str_read_byte(s: * u8, idx: i64) -> i64;
 
