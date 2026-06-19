@@ -105,8 +105,8 @@ test_emit_define_shape() {
         fi
     done
     # #1315 (accessors) + #1372 (len/eq/to_number/slice) + #1308
-    # (from_codepoint/from_byte): now Sailfin-defined at the BARE name (the C
-    # defs are `static`).
+    # (from_codepoint/from_byte; decode_owned/immediate_codepoint): now
+    # Sailfin-defined at the BARE name (the C defs are `static` or deleted).
     for sym in \
         sfn_str_grapheme_count \
         sfn_str_grapheme_at \
@@ -118,6 +118,8 @@ test_emit_define_shape() {
         sfn_str_slice \
         sfn_str_to_number \
         sfn_str_from_codepoint \
+        sfn_str_decode_owned \
+        sfn_str_immediate_codepoint \
         sfn_str_from_byte; do
         if ! grep -qE "^define .* @${sym}\(" "$ll"; then
             echo "[test]   missing 'define ... @${sym}(' in string.ll (expected after #1315)"
@@ -151,12 +153,14 @@ test_no_bare_sfn_str_define() {
     # #1372: `sfn_str_to_number` retired from this list; #1308: the encode/
     # alloc ops `sfn_str_from_codepoint` / `sfn_str_from_byte` are now real bare
     # Sailfin bodies too (C defs `static`), so a bare `define` for them is
-    # expected, not a collision. The still-C symbols string.sfn externs (and
-    # must NOT define) are the #1315 narrow bridges — retired in #1283 / #822.
+    # expected, not a collision. #1308 (immediate-encoding teardown):
+    # `sfn_str_decode_owned` / `sfn_str_immediate_codepoint` are now trivial
+    # Sailfin bodies (C defs DELETED), so they also moved to the define list
+    # above. The remaining still-C bridges string.sfn externs (and must NOT
+    # define) are `read_byte` / `grapheme_byte` — they need a sub-word load the
+    # seed can't lower, and retire with the C file at #822.
     local found=0
     for sym in \
-        sfn_str_decode_owned \
-        sfn_str_immediate_codepoint \
         sfn_str_read_byte \
         sfn_str_grapheme_byte; do
         if grep -qE "^define .* @${sym}\(" "$ll"; then
