@@ -1106,10 +1106,13 @@ ci-cross-windows:
 		: "the same cascade the resolver uses, so a seed-emit flake can no"; \
 		: "longer escape into the mingw clang. This replaces the hand-"; \
 		: "inlined shell retry loop that mirrored the resolver. clock + exec"; \
-		: "re-emit with SAILFIN_TARGET_OS=Windows (see the RUNTIME_MODS"; \
-		: "comment above for the per-module target-override rationale)."; \
+		: "+ filesystem re-emit with SAILFIN_TARGET_OS=Windows: clock/exec for"; \
+		: "the errno/exe_path sentinels, filesystem for the #1308 fs sentinels"; \
+		: "(symlink/mkdtemp/get_perms/exists) whose Windows leg is a bare stub"; \
+		: "so the MinGW-absent symbols never enter the IR. See the RUNTIME_MODS"; \
+		: "comment above for the per-module target-override rationale."; \
 		rm -f "$$ll"; \
-		if [ "$$mod" = "clock" ] || [ "$$mod" = "exec" ]; then \
+		if [ "$$mod" = "clock" ] || [ "$$mod" = "exec" ] || [ "$$mod" = "filesystem" ]; then \
 			SAILFIN_TARGET_OS=Windows $(NATIVE_OUT) emit --attempts 3 --validate -o "$$ll" llvm "$$src" >/dev/null || { \
 				echo "[cross-windows][error] failed to emit valid $$mod IR" >&2; exit 1; }; \
 		else \
