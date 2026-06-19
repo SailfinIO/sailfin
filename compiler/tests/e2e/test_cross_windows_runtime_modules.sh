@@ -128,6 +128,26 @@ if grep -q 'define i32 @apply_default_mem_limit' "$REPO_ROOT/runtime/native/ir/w
 else
     fail "missing @apply_default_mem_limit stub in windows_stubs.ll — Windows link would break"
 fi
+# serve.sfn (concurrency/) is excluded from RUNTIME_MODS like the rest
+# of concurrency/, but #1308 moved the legacy `sailfin_runtime_serve`
+# no-op off the C runtime and into serve.sfn, so `prelude.o`'s
+# reference needs the strong Windows stub. (The real typed-serve server
+# `sfn_serve` is unaffected — it is never linked into cross-windows.)
+if echo "$sfn_vals" | norm | grep -q '^runtime/sfn/concurrency/serve\.sfn$'; then
+    ok "serve.sfn present in manifest sfn-sources (exclusion is meaningful)"
+else
+    fail "serve.sfn no longer in manifest — revisit the cross-windows serve stub"
+fi
+if echo "$actual" | grep -q '^runtime/sfn/concurrency/serve\.sfn$'; then
+    fail "serve.sfn is in RUNTIME_MODS — pulls socket/scheduler externs mingw cannot resolve"
+else
+    ok "serve.sfn excluded from cross-windows RUNTIME_MODS"
+fi
+if grep -q 'define void @sailfin_runtime_serve' "$REPO_ROOT/runtime/native/ir/windows_stubs.ll"; then
+    ok "strong @sailfin_runtime_serve stub present in windows_stubs.ll"
+else
+    fail "missing @sailfin_runtime_serve stub in windows_stubs.ll — Windows link would break (#1308)"
+fi
 ll_line="$(grep -E '^ll-sources[[:space:]]*=' "$MANIFEST" | head -n1 || true)"
 if echo "$ll_line" | grep -q 'windows_stubs'; then
     fail "windows_stubs.ll is in ll-sources — would duplicate @apply_default_mem_limit on Linux/macOS"

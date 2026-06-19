@@ -633,3 +633,14 @@ fn sfn_serve_framed(handler: * u8, port: i32) -> void ![net, io] {
 
     close(listen_fd);
 }
+
+// `sailfin_runtime_serve(handler, config)` — #1308: the legacy untyped
+// `serve(handler, config?)` prelude builtin lowers to this 2-arg symbol
+// (registry row `runtime_serve_fn`, declared unconditionally by
+// `lowering_helpers.sfn`). It has always been a pure no-op — the real
+// HTTP server is the typed `serve(handler, port)` syntax form, which the
+// bespoke `Serve`-node lowering routes directly to `sfn_serve` above. This
+// Sailfin no-op replaces the deleted C stub so no emitted module demands a
+// C symbol; behaviour is byte-identical (no-op -> no-op). Retiring the dead
+// prelude `serve()` fallback itself is a separate API cleanup.
+fn sailfin_runtime_serve(handler: * u8, config: * u8) -> void { }

@@ -5397,12 +5397,6 @@ void *sailfin_runtime_await_ptr(struct SailfinFuturePtr *future)
     return result;
 }
 
-void sailfin_runtime_serve(char *handler, char *config)
-{
-    (void)handler;
-    (void)config;
-}
-
 char *sailfin_runtime_array_map(char *array, char *fn)
 {
     (void)fn;

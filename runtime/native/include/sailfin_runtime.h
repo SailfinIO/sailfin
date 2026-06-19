@@ -317,7 +317,6 @@ extern "C"
     char *sailfin_runtime_channel(double capacity);
     char *sailfin_runtime_parallel(char *thunk);
     void sailfin_runtime_spawn(char *thunk, char *name);
-    void sailfin_runtime_serve(char *handler, char *config);
 
     // ---- Futures (native runtime) ----
 
