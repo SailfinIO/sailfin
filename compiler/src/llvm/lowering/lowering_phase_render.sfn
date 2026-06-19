@@ -216,18 +216,15 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     // Runtime global
     lines.push("@runtime = external global i8**");
 
-    // M2.4b (#398): the arena-aware string concat / append entrypoints
-    // (`@sfn_str_concat_arena` / `@sfn_str_append_arena`) take a third
-    // `ptr` argument that the call sites populate with
-    // `ptr @sfn_default_arena`. The slot is an `SfnArena *` defined in
-    // `runtime/native/src/sailfin_runtime.c` and primed at module load
-    // by a `__attribute__((constructor))` calling `sfn_arena_global()`.
-    // Declaring it here keeps every emitted module's IR self-consistent
-    // — even modules that never call concat carry the declare so
-    // linker behaviour is uniform.
-    lines.push("@sfn_default_arena = external global ptr");
-    lines.push("");
-
+    // #1308: the arena-aware string concat / env entrypoints take a
+    // trailing `ptr` arena-slot argument. The call sites now populate
+    // that slot with a null pointer (the runtime resolves the arena via
+    // `_sfn_resolve_arena` → cheap cached `sfn_arena_global()` on null),
+    // so no emitted module references the C global `@sfn_default_arena`
+    // anymore — the previously-unconditional `external global`
+    // declaration is dropped, retiring that residual symbol. The C
+    // definition + its module-load constructor retire with the C runtime
+    // (#822).
     // ABI version globals (issue #392 / M1.C; issue #462). Every
     // emitted module declares these so the runtime can detect ABI
     // mismatches at load time. `linkonce_odr` linkage coalesces

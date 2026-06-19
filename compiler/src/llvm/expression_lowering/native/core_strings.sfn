@@ -152,18 +152,16 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: int, li
     // The `string.concat` descriptor (runtime_helpers.sfn) pins the
     // three parameter types (`{i8*, i64}`, `{i8*, i64}`, `ptr`) and
     // resolves the symbol via `native_signature`; the call site
-    // contributes the operands, including the third
-    // `ptr @sfn_default_arena` — the global pointer slot primed at
-    // module load by the C constructor in
-    // `runtime/native/src/sailfin_runtime.c`. The downstream
-    // `extractvalue` (still owned by this lowering, not by the
-    // descriptor) recovers the data pointer so the rest of the
-    // pipeline keeps treating string operands as `i8*` until the
-    // M1.A.2 flip lands.
-    let arena_operand = LLVMOperand {
-        llvm_type: "ptr",
-        value: "@sfn_default_arena"
-    };
+    // contributes the operands, including the third arena-slot `ptr`.
+    // #1308: the slot is now a null pointer rather than
+    // `ptr @sfn_default_arena`. The runtime `sfn_str_concat` resolves
+    // the arena via `_sfn_resolve_arena`, which falls back to the
+    // cheap cached `sfn_arena_global()` on a null slot (string.sfn),
+    // so no Sailfin object references the C global `sfn_default_arena`
+    // anymore — retiring that residual symbol. The downstream
+    // `extractvalue` recovers the data pointer so the rest of the
+    // pipeline keeps treating string operands as `i8*`.
+    let arena_operand = LLVMOperand { llvm_type: "ptr", value: "null" };
     let concat_operands: LLVMOperand[] = [left_aligned.operand, right_aligned.operand, arena_operand];
     let concat_result = emit_runtime_call("string.concat", concat_operands, empty_runtime_call_overrides(), right_aligned.temp_index, right_aligned.lines);
     let mut _concat_di: int = 0;

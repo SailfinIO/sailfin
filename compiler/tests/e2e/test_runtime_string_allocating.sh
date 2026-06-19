@@ -7,25 +7,27 @@
 #      additions.
 #   2. The emitted IR for a `let s = a + b` source defines the
 #      arena-aware call shape (#715 renamed the symbol from
-#      `sfn_str_concat_arena` to the bare canonical name):
+#      `sfn_str_concat_arena` to the bare canonical name; #1308 then
+#      replaced the `ptr @sfn_default_arena` operand with `ptr null`):
 #        %t = call {i8*, i64} @sfn_str_concat({i8*, i64} ...,
 #                                             {i8*, i64} ...,
-#                                             ptr @sfn_default_arena)
+#                                             ptr null)
 #        %p = extractvalue {i8*, i64} %t, 0
 #      and no longer emits the legacy 2-arg `@sfn_str_concat(...)`
 #      shape, the `_arena`-suffixed transitional name, or any
 #      `@sailfin_runtime_string_concat*` form for fresh user emission.
-#   3. The global declare `@sfn_default_arena = external global ptr`
-#      lands in every emitted module (driven by
-#      `lowering_phase_render.sfn`).
+#   3. No emitted module references `@sfn_default_arena` (#1308): the
+#      previously-unconditional `external global` declaration is dropped
+#      now that the call sites pass a null slot.
 #   4. The Sailfin module defines the bare canonical `sfn_str_concat` /
 #      `sfn_str_append` emission targets (real SfnString-ABI bodies as
 #      of #1318; the OwnedBuf-returning `sfn_str_sfn_concat` / `_append`
 #      proof-of-life wrappers were retired).
 #   5. The compiler binary exports the canonical `sfn_str_concat` /
-#      `sfn_str_append` text symbols (now Sailfin-defined in string.o)
-#      and the `sfn_default_arena` global symbol so the link surface is
-#      intact.
+#      `sfn_str_append` text symbols (now Sailfin-defined in string.o).
+#      The `sfn_default_arena` data symbol is still present as the C
+#      global (sailfin_runtime.c), which retires with the C runtime
+#      (#822); fresh Sailfin emission no longer references it.
 
 set -euo pipefail
 
@@ -116,16 +118,19 @@ SAILFIN_EOF
         cat "$log"
         return 1
     fi
-    # The full call shape must appear verbatim — the `, ptr @sfn_default_arena)`
-    # tail is the discriminator that catches a regression to the 2-arg form.
-    # We anchor the symbol on the literal `\(` rather than a `\b` word
-    # boundary: BSD/macOS `grep -E` treats `\b` as a backspace (see
-    # `test_runtime_libc_skeleton.sh` lines 95-102), and the `(` that
-    # follows the symbol is unambiguous in LLVM call lines — a regression
-    # to `@sfn_str_concat_arena(` cannot collide because the `_arena`
-    # bytes appear before the `(`, not after `@sfn_str_concat`.
-    if ! grep -qE 'call \{i8\*, i64\} @sfn_str_concat\(\{i8\*, i64\} [^,]+, \{i8\*, i64\} [^,]+, ptr @sfn_default_arena\)' "$ll"; then
-        echo "[test]   expected 'call {i8*, i64} @sfn_str_concat(..., ptr @sfn_default_arena)' in emitted IR:"
+    # The full call shape must appear verbatim — the `, ptr null)` tail is
+    # the discriminator that catches a regression to the 2-arg form. #1308
+    # replaced the old `ptr @sfn_default_arena` operand with `ptr null`
+    # (the runtime resolves the arena via `_sfn_resolve_arena`'s
+    # `sfn_arena_global()` fallback on a null slot), dropping the last
+    # Sailfin reference to the C global. We anchor the symbol on the
+    # literal `\(` rather than a `\b` word boundary: BSD/macOS `grep -E`
+    # treats `\b` as a backspace (see `test_runtime_libc_skeleton.sh`
+    # lines 95-102), and the `(` that follows the symbol is unambiguous in
+    # LLVM call lines — a regression to `@sfn_str_concat_arena(` cannot
+    # collide because the `_arena` bytes appear before the `(`.
+    if ! grep -qE 'call \{i8\*, i64\} @sfn_str_concat\(\{i8\*, i64\} [^,]+, \{i8\*, i64\} [^,]+, ptr null\)' "$ll"; then
+        echo "[test]   expected 'call {i8*, i64} @sfn_str_concat(..., ptr null)' in emitted IR:"
         grep -nE 'call .* @sfn_str_concat' "$ll" | head -5
         return 1
     fi
@@ -162,16 +167,22 @@ SAILFIN_EOF
     return 0
 }
 
-# ---- Test: every emitted module declares @sfn_default_arena ----
-test_global_declare_present() {
+# ---- Test: no emitted module references @sfn_default_arena (#1308) ----
+# The arena-slot operand is `ptr null` now, so the previously-
+# unconditional `@sfn_default_arena = external global ptr` declaration
+# is dropped and no module references the C global. The `@sfn_str_concat`
+# declare keeps its 3-arg ptr-tail signature (only the call operand
+# changed, not the function's ABI).
+test_arena_global_not_referenced() {
     local fixture="$SCRATCH/concat_fixture.sfn"
     local ll="$SCRATCH/concat_fixture.ll"
     if [ ! -f "$ll" ]; then
         echo "[test]   $ll missing — test_concat_lowers_to_arena_form must run first"
         return 1
     fi
-    if ! grep -qE '^@sfn_default_arena = external global ptr$' "$ll"; then
-        echo "[test]   expected '@sfn_default_arena = external global ptr' declare in emitted IR"
+    if grep -qE 'sfn_default_arena' "$ll"; then
+        echo "[test]   emitted IR still references sfn_default_arena (expected none after #1308):"
+        grep -nE 'sfn_default_arena' "$ll" | head -3
         return 1
     fi
     if ! grep -qE '^declare \{i8\*, i64\} @sfn_str_concat\(\{i8\*, i64\}, \{i8\*, i64\}, ptr\)' "$ll"; then
@@ -219,7 +230,7 @@ run_test "sfn check runtime/sfn/string.sfn passes" test_check_clean
 run_test "sfn fmt --check runtime/sfn/string.sfn is canonical" test_fmt_clean
 run_test "sfn emit llvm produces define for every new sfn_str_sfn_* export" test_emit_define_shape
 run_test "let s = a + b lowers to arena-aware @sfn_str_concat call" test_concat_lowers_to_arena_form
-run_test "emitted IR declares @sfn_default_arena and @sfn_str_concat" test_global_declare_present
+run_test "emitted IR drops @sfn_default_arena, keeps @sfn_str_concat declare" test_arena_global_not_referenced
 run_test "compiler binary exports sfn_str_concat / sfn_str_append (+ transitional _arena forwarders) / sfn_default_arena" test_compiler_binary_exports_arena_symbols
 
 echo ""

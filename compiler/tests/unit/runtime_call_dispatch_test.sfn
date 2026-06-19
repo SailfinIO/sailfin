@@ -26,12 +26,12 @@
 //   - `alloc_struct` (no attrs) — same descriptor without the override,
 //                              pins that the empty `return_attributes`
 //                              path stays attribute-free (no stray space).
+import { LLVMOperand } from "../../src/llvm/types";
 import {
-    RuntimeCallOverrides,
     emit_runtime_call,
+    RuntimeCallOverrides,
     empty_runtime_call_overrides
 } from "../../src/llvm/expression_lowering/native/runtime_call";
-import { LLVMOperand } from "../../src/llvm/types";
 
 // SfnString aggregate — `string.concat` parameter type per the M1.A
 // lock-in (see `runtime_helpers.sfn` lines 407-431).
@@ -54,20 +54,22 @@ fn _ptr_operand(value: string) -> LLVMOperand {
 test "emit_runtime_call: string.concat renders SfnString-aggregate call to sfn_str_concat" ![io] {
     // M2.4b (#398) + #715: the descriptor points at the arena-aware
     // `sfn_str_concat` entrypoint (bare name post-#715 rename) with a
-    // third `ptr` argument that fresh user emission populates with
-    // `ptr @sfn_default_arena`. The return type is the SfnString
-    // aggregate `{i8*, i64}`; the hardcoded call-site emitters follow
-    // the `call` with an `extractvalue` to recover the legacy `i8*`
-    // operand. This fixture pins the call shape itself; the extract
-    // step lives in the call-site emitters and is covered by the e2e
-    // test `test_runtime_string_allocating.sh`.
+    // third `ptr` argument. #1308: fresh user emission populates that
+    // slot with `ptr null` (the runtime resolves the arena via
+    // `_sfn_resolve_arena`'s `sfn_arena_global()` fallback), so the
+    // fixture uses the null operand to match real emission. The return
+    // type is the SfnString aggregate `{i8*, i64}`; the hardcoded
+    // call-site emitters follow the `call` with an `extractvalue` to
+    // recover the legacy `i8*` operand. This fixture pins the call shape
+    // itself; the extract step lives in the call-site emitters and is
+    // covered by the e2e test `test_runtime_string_allocating.sh`.
     let lhs = _sfn_string_operand("%a");
     let rhs = _sfn_string_operand("%b");
-    let arena = _ptr_operand("@sfn_default_arena");
+    let arena = _ptr_operand("null");
     let operands: LLVMOperand[] = [lhs, rhs, arena];
     let result = emit_runtime_call("string.concat", operands, empty_runtime_call_overrides(), 0, []);
     assert result.lines.length == 1;
-    assert result.lines[0] == "  %t0 = call {i8*, i64} @sfn_str_concat({i8*, i64} %a, {i8*, i64} %b, ptr @sfn_default_arena)";
+    assert result.lines[0] == "  %t0 = call {i8*, i64} @sfn_str_concat({i8*, i64} %a, {i8*, i64} %b, ptr null)";
     assert result.temp_index == 1;
     assert result.operand != null;
     assert result.diagnostics.length == 0;

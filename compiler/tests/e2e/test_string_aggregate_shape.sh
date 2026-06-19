@@ -8,7 +8,7 @@
 #     `sailfin_runtime_string_length` call).
 #   - `+` on strings emits the arena-aware aggregate call shape
 #     (renamed in #715 to the bare canonical symbol):
-#       call {i8*, i64} @sfn_str_concat({i8*, i64}, {i8*, i64}, ptr @sfn_default_arena)
+#       call {i8*, i64} @sfn_str_concat({i8*, i64}, {i8*, i64}, ptr null)
 #     followed by an `extractvalue {i8*, i64} %t, 0` that recovers
 #     the legacy `i8*` operand. The C-side `sfn_str_concat_arena`
 #     forwarder still exports (so seed-built IR keeps linking) but
@@ -143,9 +143,13 @@ test_no_array_consumer_pattern() {
 # followed by an `extractvalue {i8*, i64} %t, 0` that recovers the
 # legacy `i8*` operand for the rest of the lowering pipeline. #715
 # retired the legacy 2-arg `sfn_str_concat` trampoline and promoted
-# the arena-aware function to the bare canonical name, so the
-# emitted shape is now
-#   call {i8*, i64} @sfn_str_concat({i8*, i64}, {i8*, i64}, ptr @sfn_default_arena)
+# the arena-aware function to the bare canonical name. #1308 then
+# replaced the third `ptr @sfn_default_arena` operand with `ptr null`
+# (the runtime resolves the arena via `_sfn_resolve_arena`'s
+# `sfn_arena_global()` fallback on a null slot), dropping the last
+# Sailfin reference to the C global `sfn_default_arena`. The emitted
+# shape is now
+#   call {i8*, i64} @sfn_str_concat({i8*, i64}, {i8*, i64}, ptr null)
 # Fresh emission must reach the bare `@sfn_str_concat` symbol — not
 # the `_arena`-suffixed transitional forwarder, not the (now-deleted)
 # 2-arg shape, and not the legacy `sailfin_runtime_string_concat_v2`
@@ -159,7 +163,7 @@ test_string_concat_uses_aggregate_abi() {
         return 1
     fi
     local called
-    called="$(grep -cE 'call \{i8\*, i64\} @sfn_str_concat\(\{i8\*, i64\} [^,]+, \{i8\*, i64\} [^,]+, ptr @sfn_default_arena\)' "$LL" || true)"
+    called="$(grep -cE 'call \{i8\*, i64\} @sfn_str_concat\(\{i8\*, i64\} [^,]+, \{i8\*, i64\} [^,]+, ptr null\)' "$LL" || true)"
     if [ "${called:-0}" -lt 1 ]; then
         echo "[test]   expected at least one arena-shape call to sfn_str_concat, got ${called:-0}"
         return 1
