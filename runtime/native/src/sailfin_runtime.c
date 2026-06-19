@@ -2434,20 +2434,15 @@ int64_t sfn_str_read_byte(const char *s, int64_t idx)
 }
 
 /* Bootstrap grapheme production lifted verbatim from
- * `sailfin_runtime_grapheme_at` (line ~6130): for an ASCII byte return
- * the immediate-codepoint pseudo-pointer (Linux only — the macOS gate
- * cannot live in Sailfin), else a real 1-byte arena/heap buffer. `real`
- * must be deref-safe and `idx` in bounds (caller-checked). */
+ * `sailfin_runtime_grapheme_at`: return a real 1-byte arena/heap buffer for
+ * the byte at `idx`. `real` must be deref-safe and `idx` in bounds
+ * (caller-checked). #1308: the Linux-only immediate-codepoint pseudo-pointer
+ * fast-path is retired — this producer now emits a real buffer on every
+ * platform (the macOS path since #1136), so no immediate ever enters the
+ * decoder. Do NOT re-add a tagged-pointer fast-path. */
 char *sfn_str_grapheme_byte(const char *real, int64_t idx)
 {
     unsigned char byte = (unsigned char)real[idx];
-#if !defined(__APPLE__)
-    if (byte <= 0x7fu)
-    {
-        uintptr_t packed = ((uintptr_t)byte) << 32;
-        return (char *)packed;
-    }
-#endif
     char *out = (char *)_rt_malloc(2);
     if (!out)
     {
@@ -6307,34 +6302,19 @@ char *sailfin_runtime_grapheme_at(char *text, double index)
 
     unsigned char byte = (unsigned char)text[idx];
 
-    // Bootstrap implementation: treat each UTF-8 byte as a grapheme.
-    // To avoid allocating on hot paths (compiler parsing), return an
-    // immediate-codepoint pseudo-string for ASCII bytes.
+    // Bootstrap implementation: treat each UTF-8 byte as a grapheme, returning
+    // a real 1-byte buffer.
     //
-    // NOTE: For bytes >= 0x80 we preserve legacy behaviour (a raw single-byte
-    // C string) because immediate-codepoint strings are interpreted as Unicode
-    // codepoints by other runtime helpers.
-    //
-    // macOS arm64 (#1136): the immediate-codepoint tag for an ASCII byte is the
-    // address `byte << 32` — e.g. 0x100000000 for byte 1, which is the
-    // executable's __TEXT load base. `_is_immediate_codepoint_string`'s
-    // mach_vm_region guard treats a mapped+readable address as a real pointer,
-    // so any ASCII byte whose `byte << 32` lands on a mapped region (ASLR-
-    // dependent, varies run to run) is mis-decoded and dereferenced. Drop the
-    // immediate fast-path on Apple platforms and fall through to a real 1-byte
-    // buffer; the decoder then never sees an immediate from this producer on
-    // macOS. This is an interim, platform-scoped retirement of the immediate-
-    // codepoint scheme — the permanent fix is the SfnString aggregate flip
-    // (M1.A.2, docs/runtime_architecture.md §2.2), which deletes the scheme
-    // (and this branch) wholesale. Do NOT re-add a tagged-pointer fast-path
-    // here. Linux keeps the immediate encoding (low addresses are unmapped).
-#if !defined(__APPLE__)
-    if (byte <= 0x7fu)
-    {
-        uintptr_t packed = ((uintptr_t)byte) << 32;
-        return (char *)packed;
-    }
-#endif
+    // #1308 (immediate-encoding teardown): the immediate-codepoint
+    // pseudo-pointer fast-path (`byte << 32` for ASCII bytes) is retired on
+    // every platform. It was already retired on macOS arm64 (#1136), where the
+    // tag `byte << 32` (e.g. 0x100000000 for byte 1) collided with the
+    // executable's __TEXT load base and was mis-decoded as a real pointer under
+    // ASLR. With both producers (`grapheme_at` and `sfn_str_grapheme_byte`)
+    // emitting real buffers, no immediate ever enters the decoder, so the
+    // classifier + ~40 consumer guards become dead code (deleted in the
+    // follow-up guard-deletion slice). Do NOT re-add a tagged-pointer fast-path
+    // here. The permanent end-state is the SfnString aggregate flip (M1.A.2).
 
     // Allocate via the arena-aware helper, not raw malloc(2): in arena mode
     // (SAILFIN_USE_ARENA=1, the CI default) `_track_owned_string` no-ops
