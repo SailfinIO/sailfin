@@ -60,7 +60,9 @@ extern "C"
 
     // ---- Core helpers (minimal set) ----
 
-    void sailfin_runtime_mark_persistent(char *ptr);
+    // (#1308) sailfin_runtime_mark_persistent is now Sailfin-defined
+    // (runtime/sfn/memory/mem.sfn); the C copy is file-static, so no
+    // prototype is exported here.
 
     void sailfin_runtime_print_raw(char *msg);
     void sailfin_runtime_print_err(char *msg);

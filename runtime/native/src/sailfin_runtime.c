@@ -1641,7 +1641,13 @@ static SAILFIN_NOINLINE bool _asan_poisoned(const void *addr)
 }
 #endif
 
-void sailfin_runtime_mark_persistent(char *ptr)
+/* #1308: the bare `sailfin_runtime_mark_persistent` is now Sailfin-defined
+ * (a no-op in runtime/sfn/memory/mem.sfn — the arena makes persistent
+ * tracking unnecessary). This C copy is `static` so the only remaining
+ * internal caller (the legacy non-arena `sailfin_runtime_string_drop`) keeps
+ * a private definition; emitted code binds to the Sailfin symbol. Retires
+ * wholesale with the non-arena path at #822. */
+static void sailfin_runtime_mark_persistent(char *ptr)
 {
     if (!ptr)
     {
