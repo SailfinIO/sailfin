@@ -1,3 +1,12 @@
+// #1308 (M1.A.2): regression coverage for the Sailfin-native substring body
+// (`_sfn_substring_unchecked` in `runtime/sfn/string.sfn`) that replaced the C
+// `sailfin_runtime_substring_unchecked` entrypoint (now `static`). The
+// `substring_unchecked(...)` builtin lowers via the registry to `sfn_str_slice`,
+// which now calls the Sailfin body. The crash-sensitive arm is the
+// immediate-codepoint pseudo-pointer (`src[i]`, a tagged bufferless grapheme on
+// Linux): the body must classify it via `sfn_str_immediate_codepoint` and slice
+// the codepoint's UTF-8 encoding WITHOUT dereferencing the pseudo-pointer — a
+// wrong deref segfaults the suite (#714/#716 class).
 test "string: substring_unchecked returns expected slice" {
     let text = "hello";
     let result = substring_unchecked(text, 1, 4);
@@ -7,4 +16,50 @@ test "string: substring_unchecked returns expected slice" {
 test "string: substring_unchecked handles empty spans" {
     let text = "hello";
     assert substring_unchecked(text, 2, 2) == "";
+}
+
+test "string: substring_unchecked full-range and head/tail slices" {
+    let text = "hello";
+    assert substring_unchecked(text, 0, 5) == "hello";
+    assert substring_unchecked(text, 0, 1) == "h";
+    assert substring_unchecked(text, 4, 5) == "o";
+}
+
+test "string: substring_unchecked clamps a negative start to 0" {
+    let text = "hello";
+    assert substring_unchecked(text, -3, 2) == "he";
+}
+
+test "string: substring_unchecked on an empty string is empty" {
+    let text = "";
+    assert substring_unchecked(text, 0, 0) == "";
+}
+
+// Immediate-codepoint path: `src[i]` is a tagged pseudo-pointer on Linux. The
+// body slices the 1-byte UTF-8 encoding of the grapheme without dereferencing.
+test "string: substring_unchecked of an immediate grapheme (full)" {
+    let src = "hello";
+    let g = src[0];
+    assert substring_unchecked(g, 0, 1) == "h";
+}
+
+test "string: substring_unchecked of an immediate grapheme (empty span)" {
+    let src = "hello";
+    let g = src[1];
+    assert substring_unchecked(g, 0, 0) == "";
+}
+
+// End beyond the grapheme width clamps to the encoded length (the C `end > n`
+// arm); slicing a 1-byte immediate with [0, 5) yields the whole grapheme.
+test "string: substring_unchecked of an immediate grapheme clamps end" {
+    let src = "hello";
+    let g = src[2];
+    assert substring_unchecked(g, 0, 5) == "l";
+}
+
+// Start at/after the grapheme width yields empty (the C `start > n` arm).
+test "string: substring_unchecked of an immediate grapheme past end" {
+    let src = "hello";
+    let g = src[3];
+    assert substring_unchecked(g, 1, 1) == "";
 }

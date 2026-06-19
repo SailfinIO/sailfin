@@ -2208,7 +2208,10 @@ void sailfin_runtime_debug_dump_ptr(void *ptr)
  * the project's CWD without a guaranteed prelude.o probe). */
 int64_t sailfin_runtime_string_length(char *text);
 
-char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end);
+/* #1308 (M1.A.2): bare def flipped to Sailfin (`_sfn_substring_unchecked` in
+ * runtime/sfn/string.sfn). This C copy is now `static`, serving only the two
+ * internal C callers (`sailfin_runtime_substring`, the `sfn_str_slice` C wrapper). */
+static char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end);
 
 /* #716: Immediate-codepoint pseudo-pointer guard for the `sfn_str_*`
  * trampoline family.
@@ -3311,7 +3314,7 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
     return out;
 }
 
-char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end)
+static char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end)
 {
     _runtime_enter();
     _maybe_init_alloc_stats();
