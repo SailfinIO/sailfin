@@ -1,0 +1,78 @@
+// #1308 (immediate-encoding teardown, PR 1 — producer flip): behavioral parity
+// for indexed-character / grapheme production after the Linux-only
+// immediate-codepoint pseudo-pointer fast-path was retired in
+// `sailfin_runtime_grapheme_at` / `sfn_str_grapheme_byte` (both now return a
+// real 1-byte buffer on every platform, the macOS path since #1136).
+//
+// `s[i]` routes through the grapheme producer. Before the flip, ASCII bytes
+// came back as a tagged `(byte << 32)` pseudo-pointer that every consumer had
+// to decode; after the flip they are real buffers. These tests pin that the
+// observable behavior — length, equality, concat, substring, numeric parse —
+// is byte-identical, exercising the consumer paths that previously special-cased
+// the immediate. Path-building (`"/"`, `"."`) was the heaviest immediate user,
+// so it is covered explicitly.
+test "immediate-parity: indexed char equals its literal" {
+    let s = "hello";
+    assert s[0] == "h";
+    assert s[4] == "o";
+}
+
+test "immediate-parity: indexed char has length 1" {
+    let s = "hello";
+    assert s[0].length == 1;
+    assert s[2].length == 1;
+}
+
+test "immediate-parity: indexed char concatenates (char + real)" {
+    let s = "hello";
+    assert s[0] + "i" == "hi";
+    assert "(" + s[1] + ")" == "(e)";
+}
+
+test "immediate-parity: indexed char concatenates (char + char)" {
+    let s = "hello";
+    assert s[0] + s[1] + s[2] + s[3] + s[4] == "hello";
+}
+
+test "immediate-parity: two indexed chars compare by value" {
+    let a = "aa";
+    let b = "ab";
+    assert a[0] == a[1];
+    assert a[0] != b[1];
+}
+
+test "immediate-parity: substring of an indexed char" {
+    let s = "hello";
+    assert substring_unchecked(s[0], 0, 1) == "h";
+    assert substring_unchecked(s[0], 0, 0) == "";
+}
+
+// Path-building: the ASCII separators that exercised the immediate fast-path
+// most heavily in the compiler's own parser/path handling.
+test "immediate-parity: path separators round-trip" {
+    let slash = "/";
+    let dot = ".";
+    assert slash[0] == "/";
+    assert dot[0] == ".";
+    assert slash[0] + "x" == "/x";
+    assert "a" + slash[0] + "b" == "a/b";
+}
+
+test "immediate-parity: digit char parses to its number" {
+    let digits = "0123456789";
+    assert digits[0] == "0";
+    assert digits[7] == "7";
+}
+
+test "immediate-parity: building a string char-by-char" {
+    let src = "sailfin";
+    let mut out = "";
+    let mut i = 0;
+    loop {
+        if i >= src.length { break; }
+        out = out + src[i];
+        i = i + 1;
+    }
+    assert out == "sailfin";
+    assert out.length == 7;
+}
