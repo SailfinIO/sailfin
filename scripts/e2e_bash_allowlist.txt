@@ -51,7 +51,6 @@ test_fn_reference_pthread.sh
 test_lifecycle_hook_ordering.sh
 test_llms_txt_sync.sh
 test_lock.sh
-test_login.sh
 test_lowering_no_bare_runtime_emissions.sh
 test_make_report_contract.sh
 test_make_result_contract.sh
@@ -77,7 +76,6 @@ test_runtime_memory_mem.sh
 test_runtime_memory_rc.sh
 test_runtime_obj_shared_cache.sh
 test_runtime_parallel_combinator.sh
-test_runtime_process.sh
 test_runtime_scheduler_skeleton.sh
 test_runtime_serve.sh
 test_runtime_sfn_sources_active.sh

@@ -1,0 +1,147 @@
+// End-to-end tests for `sfn login`.
+//
+// Native replacement for the former `test_login.sh` (test-infra Phase 3,
+// epic #842; ratchet #1327). Each test uses a private HOME (under the
+// runner's scratch dir) so the real ~/.sfn/credentials is never touched,
+// and threads it to the child via the `run_capture` / `spawn_with_env`
+// env array (an empty array is the *empty* environment, not "inherit").
+//
+// NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
+// (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test). (#842.)
+import { find, contains, to_lower_all } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+struct LoginRun {
+    exit: int,
+    out: string
+}
+
+// A private, freshly-cleaned HOME under the runner's scratch dir (or
+// /tmp), keyed by `tag` so concurrent tests in the parallel pool never
+// collide. Any stale ~/.sfn subtree is removed so each run starts with
+// no credentials directory at all (the `creates ~/.sfn` test depends on
+// this).
+fn _home(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let home = base + "/sfn-login-" + tag;
+    let creds = home + "/.sfn/credentials";
+    if fs.exists(creds) { fs.deleteFile(creds); }
+    let sfndir = home + "/.sfn";
+    if fs.exists(sfndir) { fs.removeDirectory(sfndir); }
+    fs.createDirectory(home, true);
+    return home;
+}
+
+// Child env: HOME (+ PATH so any nested tool resolves) threaded
+// explicitly, since an empty array is the empty environment.
+fn _env(home: string) -> string[] ![io] {
+    let mut e: string[] = ["HOME=" + home];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    return e;
+}
+
+// Run `sfn <args...>` with HOME threaded to the child, returning the exit
+// code and combined stdout+stderr.
+fn _run(home: string, args: string[]) -> LoginRun ![io] {
+    let mut argv: string[] = [_sfn_bin()];
+    let mut i = 0;
+    loop {
+        if i >= args.length { break; }
+        argv.push(args[i]);
+        i += 1;
+    }
+    let exit = process.run_capture(argv, _env(home));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return LoginRun { exit: exit, out: out + err };
+}
+
+// ---- Test 1: login with token argument writes credentials ----
+test "login: token argument writes credentials" ![io] {
+    let home = _home("with_arg");
+    let r = _run(home, ["login", "test-token-abc123"]);
+    assert r.exit == 0;
+    let creds = home + "/.sfn/credentials";
+    assert fs.exists(creds);
+    assert fs.readFile(creds) == "test-token-abc123";
+}
+
+// ---- Test 2: login overwrites existing credentials ----
+test "login: overwrites existing credentials" ![io] {
+    let home = _home("overwrites");
+    fs.createDirectory(home + "/.sfn", true);
+    fs.writeFile(home + "/.sfn/credentials", "old-token");
+    let r = _run(home, ["login", "new-token-xyz"]);
+    assert r.exit == 0;
+    assert fs.readFile(home + "/.sfn/credentials") == "new-token-xyz";
+}
+
+// ---- Test 3: login creates ~/.sfn directory if missing ----
+test "login: creates ~/.sfn directory" ![io] {
+    let home = _home("creates_dir");
+    assert ! fs.exists(home + "/.sfn");
+    let r = _run(home, ["login", "dir-test-token"]);
+    assert r.exit == 0;
+    assert fs.exists(home + "/.sfn");
+    assert fs.exists(home + "/.sfn/credentials");
+}
+
+// ---- Test 4: login rejects empty token (no credentials written) ----
+test "login: rejects empty token" ![io] {
+    let home = _home("empty_token");
+    let r = _run(home, ["login", ""]);
+    assert r.exit != 0;
+    assert ! fs.exists(home + "/.sfn/credentials");
+}
+
+// ---- Test 5: login with too many args shows usage ----
+test "login: too many args shows usage" ![io] {
+    let home = _home("too_many_args");
+    let r = _run(home, ["login", "a", "b"]);
+    assert find(to_lower_all(r.out), "usage", 0) >= 0;
+}
+
+// ---- Test 6: login output confirms save path ----
+test "login: output confirms credentials saved" ![io] {
+    let home = _home("output_message");
+    let r = _run(home, ["login", "msg-token"]);
+    assert r.exit == 0;
+    assert contains(r.out, "credentials saved");
+}
+
+// ---- Test 7: login interactive reads the token from stdin ----
+// `run_capture` does not pipe stdin, so drive the interactive path with
+// the spawn handle API: spawn the child, write the token, close stdin so
+// the read sees EOF, then wait for exit.
+test "login: interactive reads token from stdin" ![io] {
+    let home = _home("interactive");
+    let id = process.spawn_with_env([_sfn_bin(), "login"], _env(home));
+    assert id != 0;
+    let _written = process.handle_write(id, "stdin-token-999\n");
+    process.handle_close_stdin(id);
+    let _out = process.handle_read_stdout(id);
+    let _err = process.handle_read_stderr(id);
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+    assert fs.exists(home + "/.sfn/credentials");
+    assert fs.readFile(home + "/.sfn/credentials") == "stdin-token-999";
+}
+
+// ---- Test 8: login sets restrictive permissions ----
+// `fs.get_perms` returns the lower 12 bits of st_mode as a decimal int:
+// 0o700 == 448 (the ~/.sfn dir), 0o600 == 384 (the credentials file).
+test "login: sets restrictive permissions" ![io] {
+    let home = _home("permissions");
+    let r = _run(home, ["login", "perm-token"]);
+    assert r.exit == 0;
+    assert fs.get_perms(home + "/.sfn") == 448;
+    assert fs.get_perms(home + "/.sfn/credentials") == 384;
+}

@@ -1,0 +1,123 @@
+// End-to-end test for runtime/sfn/process.sfn — the Sailfin-native
+// replacement for `sailfin_runtime_process_run_v2` shipped under M2.9
+// (issue #405, epic #389).
+//
+// Native replacement for the former `test_runtime_process.sh` (test-infra
+// Phase 3, epic #842; ratchet #1327). Pins the migration's contract:
+//
+//   1. typecheck — `sfn check runtime/sfn/process.sfn` reports `ok`.
+//   2. fmt       — `sfn fmt --check runtime/sfn/process.sfn` is canonical.
+//   3. emit shape — the module emits
+//        `define double @sfn_process_run({ i8**, i64, i64 }* %argv)`
+//      alongside `declare`s for `@posix_spawnp` + `@waitpid`, matching the
+//      legacy C trampoline's call signature exactly so the descriptor's
+//      `c_abi_return_type: "double"` redirect lands on a compatible ABI.
+//   4. user-emission flip — emission of a small program that calls
+//      `process.run([...])` references `@sfn_process_run` (not the legacy
+//      `@sailfin_runtime_process_run` / `_v2` symbols) at the call site.
+//
+// The integration spawn of `echo hello` (full self-host + link) lives in
+// `compiler/tests/integration/process_run_test.sfn`; this test pins the
+// frontend/emit shape contract from the seed binary.
+//
+// NOTE: assert on captured output / emitted IR with `sfn/strings`
+// predicates (the `sfn/test` `expect_*` matchers are `![pure]` and cannot
+// be called from an `![io]` test). (#842.)
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The Sailfin-native process runtime module, relative to the repo root the
+// runner starts from.
+fn _skeleton() -> string { return "runtime/sfn/process.sfn"; }
+
+// A per-invocation scratch dir for emitted IR, under the runner's scratch
+// (or /tmp), so parallel pool runs never collide on the output path.
+fn _scratch() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-runtime-process";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// ---- Test 1: `sfn check` passes on the process runtime module ----
+test "runtime/process: sfn check reports ok" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", _skeleton()], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    // "checked <file> ok" — match the literal "checked " + " ok" pair.
+    let combined = out + err;
+    assert find(combined, "checked", 0) >= 0;
+    assert find(combined, " ok", 0) >= 0;
+}
+
+// ---- Test 2: `sfn fmt --check` is canonical ----
+test "runtime/process: sfn fmt --check is canonical" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", _skeleton()], []);
+    let _ = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+// ---- Test 3: emit shape — sfn_process_run define + posix_spawnp/waitpid ----
+test "runtime/process: emit produces sfn_process_run define + posix calls" ![io] {
+    let ll = _scratch() + "/process.ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _skeleton()], []);
+    let _ = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+    assert fs.exists(ll);
+    let ir = fs.readFile(ll);
+    // The Sailfin function must emit at the bare unmangled name with the
+    // SfnArray ABI shape `{ i8**, i64, i64 }*` so the runtime helper
+    // descriptor's `native_signature` redirect lands at link time.
+    assert contains(ir, "define double @sfn_process_run({ i8**, i64, i64 }* %argv) {");
+    // The body must call posix_spawnp + waitpid directly (the point of the
+    // M2.9 migration). `call i32 @posix_spawnp(` does not match the
+    // `declare i32 @posix_spawnp(` line.
+    assert contains(ir, "call i32 @posix_spawnp(");
+    assert contains(ir, "call i32 @waitpid(");
+}
+
+// ---- Test 4: emit declares the inlined libc + posix externs ----
+test "runtime/process: emit declares libc + posix externs" ![io] {
+    let ll = _scratch() + "/process.ll";
+    // Reuse the IR from test 3 if present; otherwise emit it.
+    if !fs.exists(ll) {
+        let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _skeleton()], []);
+        let _ = process.capture_take_stdout();
+        let _e = process.capture_take_stderr();
+        assert exit == 0;
+    }
+    let ir = fs.readFile(ll);
+    assert contains(ir, "declare i32 @posix_spawnp(");
+    assert contains(ir, "declare i32 @waitpid(");
+    assert contains(ir, "declare i8* @malloc(");
+    assert contains(ir, "declare void @free(");
+}
+
+// ---- Test 5: user emission flips process.run to @sfn_process_run ----
+test "runtime/process: user emission calls @sfn_process_run" ![io] {
+    let dir = _scratch();
+    let driver = dir + "/driver.sfn";
+    fs.writeFile(driver, "fn main() -> int ![io] {\n    let rc = process.run([\"echo\", \"hello\"]);\n    return rc;\n}\n");
+    let ll = dir + "/driver.ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", driver], []);
+    let _ = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+    let ir = fs.readFile(ll);
+    // The call site must land on @sfn_process_run.
+    assert contains(ir, "call double @sfn_process_run(");
+    // The legacy symbol may still appear as a vestigial `declare`, but
+    // must NOT appear as a `call` instruction — the "unreferenced in user
+    // emission" contract. The trailing "(" excludes the `_v2` variant.
+    assert ! contains(ir, "call double @sailfin_runtime_process_run(");
+    assert ! contains(ir, "call double @sailfin_runtime_process_run_v2(");
+}
