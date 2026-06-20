@@ -1,0 +1,221 @@
+// runtime/sfn/platform/process_windows.sfn
+//
+// Windows (mingw-w64) process family — the module split that lets the
+// last C runtime file (`runtime/native/src/sailfin_runtime.c`) be
+// deleted (#822 / epic #1308).
+//
+// WHY A SEPARATE MODULE. Sailfin has no source-level platform
+// conditional (`#ifdef`); a plain `extern fn` lowers to an unconditional
+// `declare`, and a plain call emits an unconditional `call`. So a single
+// `process.sfn` cannot hold both the POSIX `posix_spawnp` body and the
+// Win32 `CreateProcessA` body — the unused extern family would leave
+// undefined references on each target. Instead:
+//   - `runtime/sfn/process.sfn` keeps the POSIX bodies (posix_spawnp /
+//     waitpid). It is in `runtime/native/capsule.toml` (native builds)
+//     and is DELIBERATELY EXCLUDED from the cross-windows RUNTIME_MODS.
+//   - this module provides the same `@sfn_process_*` symbols for Windows.
+//     It is in the cross-windows RUNTIME_MODS ONLY and is NOT in
+//     `capsule.toml`, so its Win32 externs never enter Linux/macOS IR.
+// This mirrors the retired `sailfin_runtime.c` `#if defined(_WIN32)`
+// branch (the `CreateProcessA` body at :5564 and the `@sfn_process_*`
+// forwarders at :8163). Sync of the RUNTIME_MODS membership is pinned by
+// `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.
+//
+// CONTRACT. `run` and `exit` are REAL (the shipped Windows installer
+// must spawn clang/linker). The capture/handle/environ family is
+// degraded-but-linking (failure sentinels / empty results), preserving
+// the exact behaviour the retired C `_WIN32` shims provided — a real
+// Windows implementation (CreatePipe / GetEnvironmentStringsA) is
+// post-1.0 follow-up.
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn memset(ptr: * u8, value: i32, n: usize) -> * u8;
+
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+extern fn exit(code: i32) -> void;
+
+// Identity bridge `string`/`* u8` (a Sailfin `string` lowers to a bare
+// NUL-terminated `i8*` on the pinned seed), same as `process.sfn`.
+extern fn sfn_str_to_cstr(s: * u8) -> * u8;
+
+// ── Win32 kernel32 (implicitly linked by mingw; no extra `-l`). ──────
+extern fn CreateProcessA(app: * u8, cmdline: * u8, pattr: * u8, tattr: * u8, inherit: i32, flags: i32, env: * u8, cwd: * u8, si: * u8, pi: * u8) -> i32;
+
+extern fn WaitForSingleObject(handle: i64, ms: i32) -> i32;
+
+extern fn GetExitCodeProcess(handle: i64, code: * i32) -> i32;
+
+extern fn CloseHandle(handle: i64) -> i32;
+
+// First field of `STARTUPINFOA` (104 bytes on x86_64). `CreateProcessA`
+// requires `.cb = sizeof(STARTUPINFOA)`; every other field is zero. The
+// buffer is `malloc(104)` + `memset 0`, then `.cb` is written through
+// this one-field overlay (the remaining 100 bytes stay zero).
+struct WinStartupInfo {
+    cb: i32;
+}
+
+// `sfn_process_run(argv)` — real Windows spawn. Mirrors the retired
+// `sailfin_runtime.c:5564` `CreateProcessA` body: build a single quoted
+// command line (`"arg0" "arg1" ...`), spawn, block until exit, return
+// the child's exit code as a float. 127 on any setup/spawn failure (the
+// conventional shell "could not execute" code, matching the POSIX body).
+fn sfn_process_run(argv: string[]) -> float ![io] {
+    let len: i64 = argv.length;
+    if len <= 0 { return 127.0; }
+
+    // 1-char source buffers for the quote / space separators, copied via
+    // `memcpy` (no single-byte store — a word-RMW byte store would
+    // over-read past a `malloc`'d buffer's tail; #1316-class hazard).
+    let quote: string = "\"";
+    let space: string = " ";
+    let empty: string = "";
+    let q: * u8 = sfn_str_to_cstr(quote as * u8);
+    let sp: * u8 = sfn_str_to_cstr(space as * u8);
+    let nul: * u8 = sfn_str_to_cstr(empty as * u8);
+
+    // Command-line length: each arg contributes its bytes + two quotes +
+    // one separating space, plus a trailing NUL.
+    let mut total: i64 = 0;
+    let mut i: i64 = 0;
+    loop {
+        if i >= len { break; }
+        let a: * u8 = sfn_str_to_cstr(argv[i] as * u8);
+        total = total + (strlen(a) as i64) + 3;
+        i = i + 1;
+    }
+
+    let cmdline: * u8 = malloc((total + 1) as usize);
+    if cmdline as i64 == 0 { return 127.0; }
+    let base: i64 = cmdline as i64;
+    let mut wp: i64 = 0;
+    i = 0;
+    loop {
+        if i >= len { break; }
+        if i > 0 {
+            memcpy((base + wp) as * u8, sp, 1 as usize);
+            wp = wp + 1;
+        }
+        memcpy((base + wp) as * u8, q, 1 as usize);
+        wp = wp + 1;
+        let a: * u8 = sfn_str_to_cstr(argv[i] as * u8);
+        let n: i64 = strlen(a) as i64;
+        if n > 0 {
+            memcpy((base + wp) as * u8, a, n as usize);
+            wp = wp + n;
+        }
+        memcpy((base + wp) as * u8, q, 1 as usize);
+        wp = wp + 1;
+        i = i + 1;
+    }
+    memcpy((base + wp) as * u8, nul, 1 as usize);
+
+    // STARTUPINFOA: zeroed, `.cb = 104`.
+    let si: * u8 = malloc(104 as usize);
+    if si as i64 == 0 {
+        free(cmdline);
+        return 127.0;
+    }
+    memset(si, 0, 104 as usize);
+    let si_view: * WinStartupInfo = si as * WinStartupInfo;
+    si_view.cb = 104;
+
+    // PROCESS_INFORMATION (24 bytes): `{ hProcess@0, hThread@8, ... }`,
+    // zeroed.
+    let pi: * u8 = malloc(24 as usize);
+    if pi as i64 == 0 {
+        free(cmdline);
+        free(si);
+        return 127.0;
+    }
+    memset(pi, 0, 24 as usize);
+
+    let ok: i32 = CreateProcessA(null, cmdline, null, null, 0, 0, null, null, si, pi);
+    free(cmdline);
+    if ok == 0 {
+        free(si);
+        free(pi);
+        return 127.0;
+    }
+
+    let h_process: i64 = atomic_load(pi as * i64);
+    let h_thread: i64 = atomic_load((pi as i64 + 8) as * i64);
+
+    // INFINITE = 0xFFFFFFFF. Passed as i32 `-1` (same bit pattern,
+    // no hex literal — hex folds to 0 on the seed and would make the
+    // wait non-blocking, racing the exit-code read).
+    let _wait: i32 = WaitForSingleObject(h_process, -1);
+
+    let mut code: i32 = 0;
+    let code_ptr: * i32 = & code;
+    let _got: i32 = GetExitCodeProcess(h_process, code_ptr);
+
+    let _c1: i32 = CloseHandle(h_process);
+    let _c2: i32 = CloseHandle(h_thread);
+    free(si);
+    free(pi);
+
+    let result: float = code;
+    return result;
+}
+
+// `sfn_process_exit(code)` — real. Mirrors the retired
+// `sailfin_runtime.c:8189` `exit((int)code)`.
+fn sfn_process_exit(code: float) -> void ![io] { exit(code as i32); }
+
+// ── Degraded-but-linking family (preserves the retired `_WIN32`
+// failure-sentinel contract). ───────────────────────────────────────
+// `_pw_empty_cstr()` — a fresh 1-byte NUL-terminated buffer, the empty
+// string the C `_WIN32` capture/read shims returned.
+fn _pw_empty_cstr() -> * u8 {
+    let p: * u8 = malloc(1 as usize);
+    if p as i64 == 0 { return p; }
+    memset(p, 0, 1 as usize);
+    return p;
+}
+
+fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
+    return -1;
+}
+
+fn sfn_process_capture_take_stdout() -> * u8 ![io] { return _pw_empty_cstr(); }
+
+fn sfn_process_capture_take_stderr() -> * u8 ![io] { return _pw_empty_cstr(); }
+
+// `0` is the spawn-handle failure sentinel (not -1) — matches the C
+// `_WIN32` contract (`sailfin_runtime.c:8195`).
+fn sfn_process_spawn_with_env(argv: string[], env_flat: string[]) -> i64 ![io] {
+    return 0;
+}
+
+fn sfn_process_handle_write(handle_id: i64, data: * u8) -> i64 ![io] {
+    return -1;
+}
+
+fn sfn_process_handle_close_stdin(handle_id: i64) -> void ![io] { return; }
+
+fn sfn_process_handle_read_stdout(handle_id: i64) -> * u8 ![io] {
+    return _pw_empty_cstr();
+}
+
+fn sfn_process_handle_read_stderr(handle_id: i64) -> * u8 ![io] {
+    return _pw_empty_cstr();
+}
+
+fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] { return -1; }
+
+// `sfn_process_environ()` — empty `SfnArray` (`{ data@0, len@8, cap@16 }`
+// = 24 bytes, all zero). Must be a valid header (not null) so callers'
+// `.length` reads do not crash. Matches the C `_WIN32` empty-array shim
+// (`sailfin_runtime.c:8231`).
+fn sfn_process_environ() -> * u8 ![io] {
+    let arr: * u8 = malloc(24 as usize);
+    if arr as i64 == 0 { return arr; }
+    memset(arr, 0, 24 as usize);
+    return arr;
+}

@@ -30,7 +30,7 @@ kind = "runtime"
 # reformatting here would silently make every getter return `[]`
 # and the resolver would surface zero artifacts. A regression test
 # against this exact manifest text guards the format.
-c-sources = ["src/sailfin_runtime.c"]
+c-sources = []
 ll-sources = ["ir/runtime_globals.ll"]
 # `sfn-sources` lists Sailfin runtime modules compiled and
 # linked alongside the C sources above. M2.1 (#394) populates
@@ -55,7 +55,7 @@ ll-sources = ["ir/runtime_globals.ll"]
 # and the formerly-load-bearing allowlist is gone.
 #
 # Single-line array per the parser limitation noted above.
-sfn-sources = ["../sfn/memory/arena.sfn", "../sfn/memory/rc.sfn", "../sfn/memory/mem.sfn", "../sfn/memory/ownedbuf.sfn", "../sfn/string.sfn", "../sfn/array.sfn", "../sfn/clock.sfn", "../sfn/process.sfn", "../sfn/io.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/platform/exec.sfn", "../sfn/platform/rlimit.sfn", "../sfn/adapters/filesystem.sfn", "../sfn/adapters/http.sfn", "../sfn/concurrency/scheduler.sfn", "../sfn/concurrency/nursery.sfn", "../sfn/concurrency/future.sfn", "../sfn/concurrency/channel.sfn", "../sfn/concurrency/parallel.sfn", "../sfn/concurrency/serve.sfn"]
+sfn-sources = ["../sfn/memory/arena.sfn", "../sfn/memory/rc.sfn", "../sfn/memory/mem.sfn", "../sfn/memory/ownedbuf.sfn", "../sfn/string.sfn", "../sfn/array.sfn", "../sfn/clock.sfn", "../sfn/process.sfn", "../sfn/io.sfn", "../sfn/exception.sfn", "../sfn/assert.sfn", "../sfn/type_meta.sfn", "../sfn/platform/exec.sfn", "../sfn/platform/rlimit.sfn", "../sfn/adapters/filesystem.sfn", "../sfn/adapters/http.sfn", "../sfn/concurrency/scheduler.sfn", "../sfn/concurrency/nursery.sfn", "../sfn/concurrency/future.sfn", "../sfn/concurrency/channel.sfn", "../sfn/concurrency/parallel.sfn", "../sfn/concurrency/serve.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm", "-lpthread"]
 

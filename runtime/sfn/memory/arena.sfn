@@ -862,3 +862,53 @@ fn sfn_arena_sfn_print_stats(arena: * u8) -> void ![io] {
 fn sfn_arena_print_stats(arena: * u8) -> void ![io] {
     sfn_arena_sfn_print_stats(arena);
 }
+
+// `sfn_arena_telemetry_dump(label)` — emit the arena-stats telemetry line
+// to stderr if `SAILFIN_DUMP_ARENA_STATS` is truthy. Sailfin replacement
+// for the retired C atexit hook `sailfin_runtime_install_arena_telemetry`
+// (#822 / #1308): the install-an-atexit-callback mechanism needed a
+// frontend address-of-function primitive that does not exist, so the dump
+// is invoked inline at the single exit funnel of `fn main`
+// (`compiler/src/cli_main.sfn`) instead — covering every normal `sfn`
+// completion (the only loss vs. atexit is a dump on a mid-build abort,
+// which is acceptable for debug-only telemetry).
+//
+// Output is byte-compatible with the retired C `_arena_stats_atexit`:
+//   enabled : `[sailfin-arena] label=<label> ` + `sfn_arena_print_stats`
+//   disabled: `[sailfin-arena] label=<label> stats=disabled (SAILFIN_USE_ARENA="<v>" opt-out)\n`
+// Pinned by `compiler/tests/e2e/arena_default_on_test.sfn` and
+// `compiler/tests/e2e/test_check_resolver_scan_memo.sh`.
+//
+// `SAILFIN_DUMP_ARENA_STATS` gate mirrors the C
+// `_arena_stats_telemetry_enabled`: truthy means non-null, non-empty, and
+// first byte != '0'. `load_byte` reads the first byte directly (the seed's
+// `* u8` byte-load gap is closed as of the pinned seed; `string.sfn`
+// already relies on it). Each literal is bound to a `string` local before
+// the `as * u8` cast — the proven env-read pattern (`getenv("…" as * u8)`
+// miscompiles inline under the seed; see `sfn_arena_enabled` above).
+fn sfn_arena_telemetry_dump(label: * u8) -> void ![io] {
+    let dump_name: string = "SAILFIN_DUMP_ARENA_STATS";
+    let flag: * u8 = getenv(dump_name as * u8);
+    if flag as i64 == 0 { return; }
+    let b0: i64 = load_byte(flag as i64);
+    if b0 == 0 { return; }
+    if b0 == 48 { return; }
+
+    let prefix: string = "[sailfin-arena] label=";
+    let sep: string = " ";
+    _arena_write_lit(prefix as * u8);
+    _arena_write_lit(label);
+    _arena_write_lit(sep as * u8);
+
+    if sfn_arena_enabled() {
+        sfn_arena_sfn_print_stats(sfn_arena_global());
+    } else {
+        let use_name: string = "SAILFIN_USE_ARENA";
+        let optout: * u8 = getenv(use_name as * u8);
+        let head: string = "stats=disabled (SAILFIN_USE_ARENA=\"";
+        let tail: string = "\" opt-out)\n";
+        _arena_write_lit(head as * u8);
+        if optout as i64 != 0 { _arena_write_lit(optout); }
+        _arena_write_lit(tail as * u8);
+    }
+}

@@ -62,13 +62,18 @@ prelude_val="$(echo "$prelude_line" \
 # platform/rlimit.sfn (its getrlimit/setrlimit libc externs do not
 # exist under mingw; Windows resolves @apply_default_mem_limit from
 # the strong no-op stub in runtime/native/ir/windows_stubs.ll, which
-# only the cross-windows link consumes), normalized to repo-relative
+# only the cross-windows link consumes), PLUS process_windows.sfn — the
+# Windows-only module (#822/#1308) that replaces the excluded process.sfn
+# and owns the @sfn_process_* family (it is intentionally NOT in the
+# manifest, the inverse of process.sfn). Normalized to repo-relative
 # paths.
-expected="$( { echo "$prelude_val"; echo "$sfn_vals"; } \
+expected="$( { echo "$prelude_val"; echo "$sfn_vals"; \
+      echo "runtime/sfn/platform/process_windows.sfn"; } \
     | norm \
     | grep -v '^runtime/sfn/process\.sfn$' \
     | grep -v '^runtime/sfn/concurrency/' \
     | grep -v '^runtime/sfn/platform/rlimit\.sfn$' \
+    | grep -v '^runtime/sfn/assert\.sfn$' \
     | grep -v '^$' \
     | sort -u )"
 
@@ -95,16 +100,32 @@ else
 fi
 
 # The process.sfn exclusion must stay meaningful: it must be in the
-# manifest, and it must NOT be linked by cross-windows.
+# manifest (so Linux/macOS get the posix_spawnp body), and it must NOT be
+# linked by cross-windows (mingw has no posix_spawnp/waitpid).
 if echo "$sfn_vals" | norm | grep -q '^runtime/sfn/process\.sfn$'; then
     ok "process.sfn present in manifest sfn-sources (exclusion is meaningful)"
 else
     fail "process.sfn no longer in manifest — revisit the cross-windows exclusion"
 fi
 if echo "$actual" | grep -q '^runtime/sfn/process\.sfn$'; then
-    fail "process.sfn is in RUNTIME_MODS — would duplicate the _WIN32 C @sfn_process_run"
+    fail "process.sfn is in RUNTIME_MODS — its posix_spawnp/waitpid externs cannot resolve under mingw"
 else
     ok "process.sfn excluded from cross-windows RUNTIME_MODS"
+fi
+
+# process_windows.sfn is the inverse of process.sfn (#822/#1308): it owns
+# the Windows @sfn_process_* family (real CreateProcessA run/exit), so it
+# MUST be in RUNTIME_MODS and MUST NOT be in the manifest (Linux/macOS
+# would otherwise compile its Win32 CreateProcessA externs and fail).
+if echo "$actual" | grep -q '^runtime/sfn/platform/process_windows\.sfn$'; then
+    ok "process_windows.sfn present in cross-windows RUNTIME_MODS"
+else
+    fail "process_windows.sfn missing from RUNTIME_MODS — Windows @sfn_process_run would be undefined"
+fi
+if echo "$sfn_vals" | norm | grep -q '^runtime/sfn/platform/process_windows\.sfn$'; then
+    fail "process_windows.sfn is in the manifest — Win32 CreateProcessA externs would break the Linux/macOS build"
+else
+    ok "process_windows.sfn absent from manifest sfn-sources (cross-windows-only module)"
 fi
 
 # The rlimit.sfn exclusion must stay meaningful too: in the manifest
@@ -128,6 +149,22 @@ if grep -q 'define i32 @apply_default_mem_limit' "$REPO_ROOT/runtime/native/ir/w
 else
     fail "missing @apply_default_mem_limit stub in windows_stubs.ll — Windows link would break"
 fi
+
+# assert.sfn (#822/#1308): in the manifest (Linux/macOS test harness needs
+# the real SFAF fail.bin handler), excluded from RUNTIME_MODS (its
+# fopen/fwrite sink is test-harness plumbing); Windows resolves
+# runtime_assert_fail_fn/sailfin_assert_fail from the abort stubs pinned
+# below.
+if echo "$sfn_vals" | norm | grep -q '^runtime/sfn/assert\.sfn$'; then
+    ok "assert.sfn present in manifest sfn-sources (exclusion is meaningful)"
+else
+    fail "assert.sfn no longer in manifest — revisit the cross-windows exclusion"
+fi
+if echo "$actual" | grep -q '^runtime/sfn/assert\.sfn$'; then
+    fail "assert.sfn is in RUNTIME_MODS — its SFAF fopen sink is Linux/macOS-only"
+else
+    ok "assert.sfn excluded from cross-windows RUNTIME_MODS"
+fi
 # serve.sfn (concurrency/) is excluded from RUNTIME_MODS like the rest
 # of concurrency/, but #1308 moved the legacy `sailfin_runtime_serve`
 # no-op off the C runtime and into serve.sfn, so `prelude.o`'s
@@ -148,6 +185,18 @@ if grep -q 'define void @sailfin_runtime_serve' "$REPO_ROOT/runtime/native/ir/wi
 else
     fail "missing @sailfin_runtime_serve stub in windows_stubs.ll — Windows link would break (#1308)"
 fi
+# #822/#1308: with sailfin_runtime.c deleted, Windows now resolves the
+# mingw-absent POSIX `realpath` (load-bearing — exe_path/runtime-root
+# resolution calls it every startup) and the assertion handlers
+# (`runtime_assert_fail_fn`/`sailfin_assert_fail`, which the standalone
+# cross-windows module emit does not produce) from windows_stubs.ll.
+for sym in realpath runtime_assert_fail_fn sailfin_assert_fail; do
+    if grep -qE "define [^@]*@$sym\\b" "$REPO_ROOT/runtime/native/ir/windows_stubs.ll"; then
+        ok "strong @$sym stub present in windows_stubs.ll (#822)"
+    else
+        fail "missing @$sym stub in windows_stubs.ll — Windows link would break after sailfin_runtime.c deletion (#822)"
+    fi
+done
 ll_line="$(grep -E '^ll-sources[[:space:]]*=' "$MANIFEST" | head -n1 || true)"
 if echo "$ll_line" | grep -q 'windows_stubs'; then
     fail "windows_stubs.ll is in ll-sources — would duplicate @apply_default_mem_limit on Linux/macOS"
