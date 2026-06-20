@@ -210,6 +210,43 @@ fn sailfin_runtime_concat_v2(a: * u8, b: * u8) -> * u8 {
     }
 }
 
+// `sailfin_runtime_argv_to_string_array(argc, argv)` — build a Sailfin
+// `string[]` (`SfnArray` of `char*`) from the C `(argc, argv)` the emitted
+// `@main` wrapper receives. Bare-defined here (link-ownership flip, #1308
+// residual / #822); the C body is `static`-ified. Faithful port of the C
+// body: a NULL `argv` (or negative `argc`) clamps to an empty array so a
+// caller's `argv[i]` deref always sees a consistent (empty) array rather
+// than `len = argc` over NULL element pointers. argv[0] (the program name)
+// is preserved at index 0 — `cli_main`'s dispatch strips it. The strings
+// are pointer-copied (no `strdup`): argv outlives `main`, so the array's
+// element pointers stay valid for the process lifetime. Element slots are
+// 8-byte `char*` words written with `atomic_store`, matching `concat_v2`.
+fn sailfin_runtime_argv_to_string_array(argc: i32, argv: * * u8) -> * u8 {
+    unsafe {
+        let mut n: i64 = argc as i64;
+        if n < 0 { n = 0; }
+        if (argv as i64) == 0 { n = 0; }
+        let out: * u8 = _sfn_array_alloc_v2(n, 8);
+        if (out as i64) == 0 { return null; }
+        // out.len = n (the allocator already wrote cap = n).
+        atomic_store((out as i64 + 8) as * i64, n);
+        if n > 0 {
+            let buf: i64 = atomic_load(out as * i64);
+            let src: i64 = argv as i64;
+            if buf != 0 && src != 0 {
+                let mut i: i64 = 0;
+                loop {
+                    if i >= n { break; }
+                    let p: i64 = atomic_load((src + i * 8) as * i64);
+                    atomic_store((buf + i * 8) as * i64, p);
+                    i = i + 1;
+                }
+            }
+        }
+        return out;
+    }
+}
+
 // `sailfin_runtime_append_string_v2(a, text)` — append a `char*` to a
 // string array (`{ char**, i64, i64 }`), growing the backing buffer in
 // place when `len >= cap`. Bare-defined here (#1308 residual); the C body

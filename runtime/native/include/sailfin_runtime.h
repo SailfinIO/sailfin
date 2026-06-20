@@ -197,19 +197,14 @@ extern "C"
     // with `cap` exposed inline. Legacy entrypoints above remain the
     // first-pass / seed-compiled IR's link target.
 
-    // M5.3 (#471): convert C `(argc, argv)` into the SfnArray ABI shape
-    // that user `fn main(argv: string[])` expects. The emitted `@main`
-    // wrapper calls this from its prologue; argv[0] is preserved so
-    // user code observes the C convention (argv[0] = program name).
-    SfnArray *sailfin_runtime_argv_to_string_array(int argc, char **argv);
-
-    // M5.3 (#471): emit an uncaught-panic message + newline to stderr.
-    // Lives behind a distinct symbol from the user-facing `sfn_print_*`
-    // family so the IO-flip pin in
-    // `compiler/tests/e2e/test_runtime_io_extended.sh` (which forbids
-    // `sailfin_runtime_print_*` references in user IR) doesn't snag
-    // the wrapper's catch-pad emission.
-    void sailfin_runtime_panic_emit(char *msg);
+    // M5.3 (#471) `@main`-wrapper helpers — `sailfin_runtime_argv_to_string_array`
+    // (C `(argc, argv)` → SfnArray) and `sailfin_runtime_panic_emit`
+    // (uncaught-panic message + newline to stderr) — are now defined in
+    // `runtime/sfn/array.sfn` / `runtime/sfn/io.sfn` (#822 / #1308
+    // link-ownership flip); the C bodies are retained `static` with no
+    // external linkage, so their prototypes are dropped here. The emitted
+    // `@main` wrapper still calls them by name; the bare Sailfin
+    // definitions are the link target.
 
     // M5.5 (#473): install the arena-allocator process-exit telemetry
     // hook ported from the retired C driver. Called once from the

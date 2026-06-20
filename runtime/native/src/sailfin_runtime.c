@@ -7892,14 +7892,11 @@ static SfnArray *sailfin_runtime_concat_v2(SfnArray *a, SfnArray *b)
     return out;
 }
 
-/* M5.3 (#471): emit an uncaught-panic message and newline to stderr,
- * then flush. The emitted `@main` wrapper invokes this from its catch
- * landing pad before returning exit code 1 — equivalent in effect to
- * `sailfin_runtime_print_err` but kept under a dedicated symbol so the
- * IO-flip pin in test_runtime_io_extended.sh (which forbids
- * `sailfin_runtime_print_*` references in user IR after the SfnString
- * migration) doesn't have to whitelist the wrapper's call site. */
-void sailfin_runtime_panic_emit(char *msg)
+/* #822 / #1308 residual: the bare `sailfin_runtime_panic_emit` link target
+ * is now defined in `runtime/sfn/io.sfn`; this C body is retained `static`
+ * only (no external linkage). Emit an uncaught-panic message and newline to
+ * stderr. */
+static void sailfin_runtime_panic_emit(char *msg)
 {
     if (msg)
     {
@@ -7909,14 +7906,13 @@ void sailfin_runtime_panic_emit(char *msg)
     }
 }
 
-/* M5.3 (#471): build a Sailfin `string[]` (SfnArray of `char*`) from
- * the C `(argc, argv)` the emitted `@main` wrapper receives. Pointer-
- * copies argv[0..argc) without `strdup` — the C runtime keeps these
- * strings live for the lifetime of `main`, and `main` cannot outlive
- * them. argv[0] (the program name) is preserved so user code sees the
- * standard C convention; the compiler's own `sailfin_cli_main_with_paths`
- * (M5.4 caller) will strip it if it wants the bare argument list. */
-SfnArray *sailfin_runtime_argv_to_string_array(int argc, char **argv)
+/* #822 / #1308 residual: the bare `sailfin_runtime_argv_to_string_array`
+ * link target is now defined in `runtime/sfn/array.sfn`; this C body is
+ * retained `static` only (no external linkage). Builds a Sailfin
+ * `string[]` (SfnArray of `char*`) from the C `(argc, argv)` the emitted
+ * `@main` wrapper receives — pointer-copies argv[0..argc) (argv outlives
+ * `main`); argv[0] is preserved. */
+static SfnArray *sailfin_runtime_argv_to_string_array(int argc, char **argv)
 {
     /* Defensive: a NULL argv with argc > 0 would leave the resulting
      * SfnArray with `len = argc` and NULL element pointers, which the
