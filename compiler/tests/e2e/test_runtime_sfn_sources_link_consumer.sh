@@ -81,14 +81,11 @@ required = []
 
 [build]
 kind = "runtime"
-# Intentionally omit native_driver.c — it defines `main` for the
-# compiler binary itself and would conflict with the consumer's
-# `main()`. The remaining c-sources cover the arena and runtime
-# helpers — enough to satisfy the link without an entry-point
-# clash. (#964 deleted the sha256/base64 C sources after #816/#817
-# ported them to the `sfn/crypto` capsule, so they no longer appear
-# here.)
-c-sources = ["src/sailfin_runtime.c"]
+# #822/#1308: the runtime is fully Sailfin-owned — sailfin_runtime.c is
+# deleted, so c-sources is empty. The runtime helper symbols the consumer
+# links against now come from the sfn-sources below (the same shape the
+# real runtime/native/capsule.toml carries).
+c-sources = []
 ll-sources = ["ir/runtime_globals.ll"]
 # PR 2 of the sleep migration (issue 397) deleted the C
 # `sfn_sleep` trampoline, so `clock.sfn` is now required at link
