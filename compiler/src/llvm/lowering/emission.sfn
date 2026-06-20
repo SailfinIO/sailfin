@@ -183,7 +183,8 @@ fn _emit_make_parameter_binding(name: string, llvm_name: string, llvm_type: stri
         llvm_type: llvm_type,
         type_annotation: type_annotation,
         consumed: false,
-        span: null
+        span: null,
+        narrowed_variant: ""
     };
 }
 

@@ -171,6 +171,11 @@ struct ParameterBinding {
     type_annotation: string;
     consumed: boolean;
     span: NativeSourceSpan?;
+    // Flow-sensitive variant narrowing for an enum parameter guarded by
+    // `if <name>.variant == "<V>"` (mirror of LocalBinding.narrowed_variant
+    // — the guarded base is often a parameter, e.g. the AST-pass dispatch
+    // `fn f(statement: Statement)`). Empty = no narrowing.
+    narrowed_variant: string;
 }
 
 struct ParameterPreparation {
@@ -200,6 +205,14 @@ struct LocalBinding {
     // Empty string = no sentinel (binding is outside any try body, or this
     // is a non-let binding such as a catch variable / for-loop iterator).
     init_sentinel: string;
+    // Flow-sensitive variant narrowing (issue: enum member-access type
+    // resolution). When this binding is an enum value guarded by an
+    // enclosing `if <name>.variant == "<V>"`, this holds "<V>" for the
+    // guarded region so member access (`<name>.field`) resolves the field
+    // against variant V specifically — rather than mis-inferring `double`
+    // when several variants share the field name with different types.
+    // Empty string = no narrowing in effect.
+    narrowed_variant: string;
 }
 
 struct ModuleGlobalLoweringResult {
