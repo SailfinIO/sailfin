@@ -40,7 +40,6 @@ test_effect_gate_build_path_entry.sh
 test_escape_promotion_boundaries.sh
 test_exe_path_reader.sh
 test_fn_reference_pthread.sh
-test_lifecycle_hook_ordering.sh
 test_llms_txt_sync.sh
 test_lock.sh
 test_lowering_no_bare_runtime_emissions.sh
@@ -61,7 +60,6 @@ test_runtime_exception_frames.sh
 test_runtime_exec_path.sh
 test_runtime_helper_declare_integrity.sh
 test_runtime_implicit_capsule_link.sh
-test_runtime_int_helpers_legacy_path.sh
 test_runtime_memory_arena.sh
 test_runtime_memory_arena_mark.sh
 test_runtime_memory_mem.sh
