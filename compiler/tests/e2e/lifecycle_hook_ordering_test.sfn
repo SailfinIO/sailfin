@@ -1,0 +1,108 @@
+// End-to-end test for lifecycle-hook ordering (#975).
+//
+// Native replacement for the former `test_lifecycle_hook_ordering.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). The compiler wraps each
+// `test` body with the file's `before_all`/`before_each`/`after_each`/
+// `after_all` hooks so the observed stdout order is:
+//   before_all, (before_each, <test>, after_each)*, after_all
+// and the `all N tests passed` count excludes the hooks.
+//
+// This is a build-and-run e2e: the spawned `sfn test` compiles the
+// fixture to a harness binary, so the child env threads the full parent
+// environment (PATH/HOME/TMPDIR for clang + its linker; SAILFIN_TEST_SCRATCH
+// for per-invocation build-cache isolation under the parallel pool —
+// #1333; see `.claude/rules/no-bash-e2e.md`).
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
+// an `![io]` test (#842).
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Inherit the full parent environment: PATH/HOME/TMPDIR (plus any macOS
+// SDK/toolchain vars) for the nested clang/linker, and SAILFIN_TEST_SCRATCH
+// for per-invocation build-cache isolation (#1333). Mirrors
+// update_snapshots_flag_test.sfn.
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// A hooks-bearing fixture: four lifecycle hooks plus two ordinary tests.
+// Each block prints a distinctive marker via `print.info`, so the captured
+// stdout order pins the wrapping order across both tests.
+fn _fixture_src() -> string {
+    return "before_all ![io] {\n    print.info(\"BEFORE_ALL\");\n}\n\n"
+        + "before_each ![io] {\n    print.info(\"BEFORE_EACH\");\n}\n\n"
+        + "after_each ![io] {\n    print.info(\"AFTER_EACH\");\n}\n\n"
+        + "after_all ![io] {\n    print.info(\"AFTER_ALL\");\n}\n\n"
+        + "test \"alpha\" ![io] {\n    print.info(\"TEST_ALPHA\");\n}\n\n"
+        + "test \"beta\" ![io] {\n    print.info(\"TEST_BETA\");\n}\n";
+}
+
+struct TestRun {
+    exit: int,
+    out: string
+}
+
+// Write the fixture into a fresh temp dir and run `sfn test [args...] <dir>`,
+// returning the exit code and combined stdout+stderr.
+fn _run_test_dir(args: string[]) -> TestRun ![io] {
+    let dir = fs.mkdtemp("sfn-lifecycle-");
+    fs.writeFile(dir + "/lifecycle_test.sfn", _fixture_src());
+    let mut argv: string[] = [_sfn_bin(), "test"];
+    let mut i = 0;
+    loop {
+        if i >= args.length { break; }
+        argv.push(args[i]);
+        i += 1;
+    }
+    argv.push(dir);
+    let exit = process.run_capture(argv, _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return TestRun { exit: exit, out: out + err };
+}
+
+// ---- Test 1: hooks wrap tests in the documented order ----
+test "lifecycle hooks: wrap tests in before_all/before_each/after_each/after_all order" ![io] {
+    let r = _run_test_dir([]);
+    assert r.exit == 0;
+    let out = r.out;
+    // Resolve the marker positions; the two repeated hooks are located in
+    // turn by restarting the search past the previous hit.
+    let before_all = find(out, "BEFORE_ALL", 0);
+    let be1 = find(out, "BEFORE_EACH", 0);
+    let alpha = find(out, "TEST_ALPHA", 0);
+    let ae1 = find(out, "AFTER_EACH", 0);
+    let be2 = find(out, "BEFORE_EACH", be1 + 1);
+    let beta = find(out, "TEST_BETA", 0);
+    let ae2 = find(out, "AFTER_EACH", ae1 + 1);
+    let after_all = find(out, "AFTER_ALL", 0);
+    // before_all, (before_each, alpha, after_each), (before_each, beta,
+    // after_each), after_all.
+    assert before_all >= 0;
+    assert before_all < be1;
+    assert be1 < alpha;
+    assert alpha < ae1;
+    assert ae1 < be2;
+    assert be2 < beta;
+    assert beta < ae2;
+    assert ae2 < after_all;
+    // The PASS count excludes the four hooks.
+    assert find(out, "all 2 tests passed", 0) >= 0;
+}
+
+// ---- Test 2: a non-matching -k drops a hooks-bearing file cleanly ----
+// Hooks alone must not keep the file alive and trim it to a hooks-only,
+// main-less harness that fails to link. With `-k zzz_nomatch` matching no
+// test the file is dropped: the run exits 0 and no hook/test body runs.
+test "lifecycle hooks: non-matching -k skips a hooks-bearing file without an empty-harness link failure" ![io] {
+    let r = _run_test_dir(["-k", "zzz_nomatch"]);
+    assert r.exit == 0;
+    assert find(r.out, "TEST_ALPHA", 0) < 0;
+    assert find(r.out, "BEFORE_EACH", 0) < 0;
+    assert find(r.out, "no main", 0) < 0;
+}

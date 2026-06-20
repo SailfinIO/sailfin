@@ -1,0 +1,149 @@
+// E2E regression test for the `c_abi_return_type` post-call coercion in
+// the legacy `coerce_and_emit_call` path (#634, extended under #639).
+//
+// Native replacement for the former `test_runtime_int_helpers_legacy_path.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327).
+//
+// User-written calls to bare-target `double`-ABI helpers flow through
+// `core_call_lowering` -> `core_call_emission.coerce_and_emit_call`, NOT
+// through `emit_runtime_call`. The unit coverage exercises only
+// `emit_runtime_call`, so a refactor could silently regress
+// `coerce_and_emit_call`'s coercion and re-introduce the `%xmm0`/`%rax`
+// register-class mismatch that crashed PR #637 (see #641 RCA).
+//
+// Worked example: the nullary bare-target helper
+// `sailfin_intrinsic_runtime_arena_mark()` — descriptor carries
+// `c_abi_return_type: "double"` (the body returns `double`; the
+// caller-visible type is `i64`). Since #927 its body is the Sailfin-native
+// `@sfn_arena_sfn_mark` (still `double` C-ABI), so this remains the
+// canonical `double`->`i64` coercion guard. Emitting it via `emit llvm`
+// drives the legacy call-emission path because the call site is
+// user-written (not a synthesized lowering call).
+//
+// NOTE: assert on the captured `.ll` / log text with `sfn/strings`
+// predicates — the `sfn/test` `expect_*` matchers are `![pure]` and cannot
+// be called from an `![io]` test (#842).
+import { contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Base child env: PATH/HOME/TMPDIR so the spawned compile finds its tools,
+// and SAILFIN_TEST_SCRATCH so any cache dir is per-invocation (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A minimal #634-shaped reproducer: two `int`-returning functions each
+// bind `sailfin_intrinsic_runtime_arena_mark()` to an `int` local, so the
+// emitted IR holds two coercion sequences and >= 4 `alloca i64` slots.
+fn _fixture_src() -> string {
+    return "fn _delta_since(start_mark: int) -> int {\n"
+        + "    let end_mark = sailfin_intrinsic_runtime_arena_mark();\n"
+        + "    let delta = end_mark - start_mark;\n"
+        + "    if delta < 0 { return 0; }\n"
+        + "    return delta;\n"
+        + "}\n"
+        + "\n"
+        + "fn main() ![io] {\n"
+        + "    let m0 = sailfin_intrinsic_runtime_arena_mark();\n"
+        + "    let elapsed = _delta_since(m0);\n"
+        + "    print.info(\"ok\");\n"
+        + "}\n";
+}
+
+struct EmitResult {
+    ir: string,
+    log: string
+}
+
+// Whether any single line of `text` contains both `a` and `b` — the
+// faithful stand-in for a `grep -E "a.*b"` over one line.
+fn _any_line_with(text: string, a: string, b: string) -> bool {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], a) && contains(lines[i], b) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Count the non-overlapping occurrences of `needle` in `text`.
+fn _count_lines_with(text: string, needle: string) -> int {
+    let lines = split(text, "\n");
+    let mut n = 0;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], needle) { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+// Write the fixture into a fresh temp dir and `emit llvm` it, returning the
+// emitted IR text and the combined stdout+stderr log (the ABI-mismatch
+// warning, if any, lands on stderr).
+fn _emit() -> EmitResult ![io] {
+    let dir = fs.mkdtemp("sfn-int-helpers-");
+    let src = dir + "/let_int_infer.sfn";
+    let ll = dir + "/let_int_infer.ll";
+    fs.writeFile(src, _fixture_src());
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let mut ir = "";
+    if exit == 0 && fs.exists(ll) { ir = fs.readFile(ll); }
+    return EmitResult { ir: ir, log: out + err };
+}
+
+// ---- 1. The three-landmark coercion sequence ----
+test "int helpers: legacy path emits call double + round + fptosi to i64 for arena_mark()" ![io] {
+    let r = _emit();
+    assert r.ir.length > 0;
+    // The registry flip must be honored by coerce_and_emit_call, else the
+    // #637 register-class mismatch returns.
+    assert contains(r.ir, "call double @sfn_arena_sfn_mark()");
+    assert contains(r.ir, "call double @round(double");
+    assert _any_line_with(r.ir, "fptosi double ", " to i64");
+}
+
+// ---- 2. let-binding allocas are i64 (callers see the declared type) ----
+test "int helpers: let bindings for arena_mark() lower to alloca i64" ![io] {
+    let r = _emit();
+    assert r.ir.length > 0;
+    // Two i64 functions x two i64 let-binding allocas each gives >= 4.
+    assert _count_lines_with(r.ir, "= alloca i64") >= 4;
+}
+
+// ---- 3. No ABI primitive mismatch warnings (#634 headline) ----
+test "int helpers: arena_mark() lowering emits zero ABI primitive mismatch warnings" ![io] {
+    let r = _emit();
+    assert r.ir.length > 0;
+    // A double-ABI helper coerced to int must not warn.
+    assert ! contains(r.log, "ABI primitive mismatch");
+}
+
+// ---- 4. The declare line matches the C ABI, not the caller-visible type ----
+test "int helpers: declare for sfn_arena_sfn_mark matches the double ABI" ![io] {
+    let r = _emit();
+    assert r.ir.length > 0;
+    // `declare double` matches the body's ABI; a `declare i64` here would
+    // produce the %rax-vs-%xmm0 mismatch that crashed #637.
+    assert contains(r.ir, "declare double @sfn_arena_sfn_mark()");
+    assert ! contains(r.ir, "declare i64 @sfn_arena_sfn_mark()");
+}
