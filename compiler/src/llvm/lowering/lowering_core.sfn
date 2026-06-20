@@ -951,7 +951,22 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         _pli += 1;
     }
     runtime_helpers = seed_default_runtime_helpers(tmp_helpers);
-    let mut lines = render_llvm_preamble(native_module.module_name, type_context, trait_metadata, context_functions, local_functions, imported_functions, runtime_helpers, debug_lowering);
+    // #1436: detect whether this module *defines* `@runtime` (the
+    // `extern var runtime: * u8 = null` in `runtime/sfn/runtime_globals.sfn`
+    // lowers to a `@runtime = global ...` line in the module-globals
+    // preamble). The defining module must NOT also emit the `external
+    // global` declaration — that would be a duplicate-symbol redefinition.
+    let mut module_defines_runtime: boolean = false;
+    let mut _rdi: int = 0;
+    loop {
+        if _rdi >= module_preamble_lines.length { break; }
+        if starts_with(module_preamble_lines[_rdi], "@runtime = global ") {
+            module_defines_runtime = true;
+            break;
+        }
+        _rdi += 1;
+    }
+    let mut lines = render_llvm_preamble(native_module.module_name, type_context, trait_metadata, context_functions, local_functions, imported_functions, runtime_helpers, module_defines_runtime, debug_lowering);
     // M2.10 (#402): inject `@__sfn_type_desc.*` globals and the
     // `declare void @sfn_type_register(i8*)` into the preamble.
     // Constructor + `@llvm.global_ctors` lines were appended to

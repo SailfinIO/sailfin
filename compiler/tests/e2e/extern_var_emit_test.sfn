@@ -122,3 +122,26 @@ test "extern-var: a defining global is still loadable" ![io] {
     assert ir.length > 0;
     assert _has_line_with_both(ir, "load", "@owned_slot");
 }
+
+// #1436: `@runtime` is the one runtime global whose definition moved out of
+// `runtime/native/ir/runtime_globals.ll` into a Sailfin object
+// (`runtime/sfn/runtime_globals.sfn`). Every emitted module declares
+// `@runtime = external global i8**` in its preamble; the module that *also*
+// defines it must suppress that declaration or the two collide as a
+// duplicate symbol. This pins the suppression: the defining module emits the
+// strong `@runtime = global ... null` definition and NOT the `external`
+// reference.
+fn _runtime_def_probe() -> string {
+    return "extern var runtime: * u8 = null;\n" + "fn anchor() -> i32 {\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+test "extern-var: defining @runtime suppresses the redundant external decl" ![io] {
+    let ir = _emit_llvm(_runtime_def_probe(), "runtime-def");
+    assert ir.length > 0;
+    // The single strong definition is emitted.
+    assert _has_line_with_both(ir, "@runtime = global", "null");
+    // ...and the would-be-duplicate `external global` declaration is gone.
+    assert ! contains(ir, "@runtime = external global");
+}

@@ -32,7 +32,7 @@ import {
 // function declarations, and libc declarations.
 //
 // Returns the preamble as a string[] of LLVM IR lines.
-fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_metadata: TraitMetadata, context_functions: NativeFunction[], local_functions: NativeFunction[], imported_functions: NativeFunction[], runtime_helpers: string[], debug_lowering: boolean) -> string[] ![io] {
+fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_metadata: TraitMetadata, context_functions: NativeFunction[], local_functions: NativeFunction[], imported_functions: NativeFunction[], runtime_helpers: string[], module_defines_runtime: boolean, debug_lowering: boolean) -> string[] ![io] {
     let mut lines: string[] = [];
     lines.push("source_filename = \"" + module_source_filename(module_name)
         + "\"");
@@ -213,8 +213,16 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     }
     lines.push("");
 
-    // Runtime global
-    lines.push("@runtime = external global i8**");
+    // Runtime global. Every module that *references* `@runtime` keeps the
+    // `external global` declaration; the single module that *defines* it
+    // (`runtime/sfn/runtime_globals.sfn`, via `extern var runtime: * u8 =
+    // null` → `@runtime = global i8* null`, #1436) emits that definition
+    // through the module-globals path instead, so emitting the `external`
+    // declaration here too would be a duplicate-symbol redefinition. Skip
+    // it in the defining module.
+    if !module_defines_runtime {
+        lines.push("@runtime = external global i8**");
+    }
 
     // #1308: the arena-aware string concat / env entrypoints take a
     // trailing `ptr` arena-slot argument. The call sites now populate
