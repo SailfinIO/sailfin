@@ -1,0 +1,172 @@
+// End-to-end test for the M1.B array-literal ABI lock (issue #393).
+//
+// Native replacement for the former `test_array_aggregate_shape.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Pins the emitted LLVM
+// IR contract for array literals and the runtime helper signatures that
+// consume them:
+//   - `let xs = [1, 2, 3]` materializes a `{ T*, i64, i64 }` aggregate
+//     (data, len, cap). Pointer arrays (`string[]`) widen the data slot
+//     to `T**`; value arrays use `T*` directly. Both carry the cap field
+//     at offset 2.
+//   - The literal lowering writes all three slots: a `getelementptr
+//     ..., i32 0, i32 0` for data, `..., i32 0, i32 1` for len, and a
+//     fresh `..., i32 0, i32 2` for cap (initialized to len).
+//   - `xs.length` resolves to slot 1 of the array struct.
+//   - The runtime registry routes `concat` / `append_string` /
+//     `array_push_slot` to their canonical `sfn_array_*` entrypoints; the
+//     legacy `sailfin_runtime_*` symbols must not appear in fresh IR.
+//
+// Driven through `sfn emit llvm` as a subprocess (the production lowering
+// path) and asserted on the captured `.ll` text. NOTE on matchers: the
+// `sfn/test` `expect_*` matchers are `![pure]` and so cannot be called
+// from an `![io]` test; assert on the IR text with `sfn/strings`
+// predicates instead (#842).
+import { contains, split, ends_with } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit the fixture's LLVM IR and return its text (or "" on failure). The
+// `tag` keeps the per-invocation `.ll` path unique so concurrent tests in
+// the parallel pool never share an output file.
+fn _emit_ir(tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-arrayagg-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", "compiler/tests/e2e/fixtures/array_aggregate_shape.sfn"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+// Count lines that contain `a`, also contain `b` (when non-empty), and
+// end with `ends` (when non-empty) — the faithful stand-in for a
+// per-line `grep -cE` over the emitted IR.
+fn _count_match(text: string, a: string, b: string, ends: string) -> int {
+    let lines = split(text, "\n");
+    let mut n = 0;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let l = lines[i];
+        let mut ok = contains(l, a);
+        if ok && b.length > 0 { ok = contains(l, b); }
+        if ok && ends.length > 0 { ok = ends_with(l, ends); }
+        if ok { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+fn _count(text: string, needle: string) -> int {
+    return _count_match(text, needle, "", "");
+}
+
+// B1 — Three-field aggregate type appears in the emitted IR.
+test "array-agg: emitted IR contains the { T*, i64, i64 } aggregate" ![io] {
+    let ir = _emit_ir("b1");
+    assert ir.length > 0;
+    assert _count(ir, "*, i64, i64 }") >= 4;
+}
+
+// B2 — `[1.0, 2.0, 3.0]` lowers to a value-typed `{ double*, i64, i64 }`.
+test "array-agg: numeric literal lowers to { double*, i64, i64 }" ![io] {
+    let ir = _emit_ir("b2");
+    assert ir.length > 0;
+    assert _count(ir, "{ double*, i64, i64 }") >= 1;
+}
+
+// B3 — `["one", "two"]` lowers to a pointer-typed `{ i8**, i64, i64 }`.
+test "array-agg: string literal lowers to { i8**, i64, i64 }" ![io] {
+    let ir = _emit_ir("b3");
+    assert ir.length > 0;
+    assert _count(ir, "{ i8**, i64, i64 }") >= 1;
+}
+
+// B4 — Cap slot (i32 0, i32 2) is written by the literal lowering.
+test "array-agg: literal lowering writes the cap slot (i32 0, i32 2)" ![io] {
+    let ir = _emit_ir("b4");
+    assert ir.length > 0;
+    assert _count_match(ir, "= getelementptr ", ", i32 0, i32 2", "") >= 1;
+}
+
+// B5 — The cap value stored for a 3-element literal is `i64 3`, written by
+// the store immediately following a slot-2 (cap) GEP.
+test "array-agg: cap slot stores i64 3 for a 3-element literal" ![io] {
+    let ir = _emit_ir("b5");
+    assert ir.length > 0;
+    let lines = split(ir, "\n");
+    let mut found = false;
+    let mut i = 0;
+    loop {
+        if i + 1 >= lines.length { break; }
+        let l = lines[i];
+        if contains(l, "= getelementptr ") && ends_with(l, ", i32 0, i32 2") {
+            if contains(lines[i + 1], "store i64 3, i64* ") { found = true; }
+        }
+        i += 1;
+    }
+    assert found;
+}
+
+// B6 — `xs.length` resolves to slot 1 (GEP or extractvalue), no runtime call.
+test "array-agg: xs.length reads slot 1 of the array struct" ![io] {
+    let ir = _emit_ir("b6");
+    assert ir.length > 0;
+    let gep1 = _count_match(ir, "= getelementptr ", ", i32 0, i32 1", "");
+    let ev1 = _count_match(ir, "= extractvalue ", ", i64, i64 }", ", 1");
+    assert gep1 + ev1 >= 1;
+}
+
+// B7 — Runtime helpers route through canonical `sfn_array_*` names (M2.6);
+// the legacy `sailfin_runtime_*` symbols must not appear in fresh IR.
+test "array-agg: runtime helpers route through canonical sfn_array_* symbols" ![io] {
+    let ir = _emit_ir("b7");
+    assert ir.length > 0;
+    assert _count(ir, "declare { i8**, i64, i64 }* @sfn_array_concat") >= 1;
+    assert _count(ir, "declare { i8**, i64, i64 }* @sfn_array_push_string") >= 1;
+    assert _count(ir, "@sailfin_runtime_concat") == 0;
+    assert _count(ir, "@sailfin_runtime_append_string") == 0;
+    assert _count(ir, "@sailfin_runtime_array_push_slot") == 0;
+}
+
+// B8 — `sfn_array_push_slot` declare carries the cap pointer parameter.
+test "array-agg: sfn_array_push_slot declare carries the cap pointer parameter" ![io] {
+    let ir = _emit_ir("b8");
+    assert ir.length > 0;
+    assert _count(ir, "declare i8* @sfn_array_push_slot(i8**, i64*, i64*, i64)") >= 1;
+}
+
+// B9 — No legacy 2-field `{ T*, i64 }` array shape leaks into the new IR.
+test "array-agg: no legacy { T*, i64 } 2-field array shape leaks into new IR" ![io] {
+    let ir = _emit_ir("b9");
+    assert ir.length > 0;
+    assert _count(ir, "*, i64 }") == 0;
+}
