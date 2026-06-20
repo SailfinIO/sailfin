@@ -1,0 +1,172 @@
+// runtime/sfn/assert.sfn
+//
+// Assertion-failure handler (#822 / #1308). Ports `sailfin_assert_fail`
+// and the `runtime_assert_fail_fn` trampoline out of the deleted
+// `runtime/native/src/sailfin_runtime.c`.
+//
+// The compiler emits `call @runtime_assert_fail_fn(file, line, col, msg)`
+// for every `assert` it cannot prove true at compile time
+// (`runtime_helpers.sfn:599`, `native_signature: null` — a bare runtime
+// symbol). Every user program and EVERY `*_test.sfn` links against it via
+// the runtime capsule, so this is on the critical path for the whole test
+// suite — not just the compiler self-host (which folds its own asserts and
+// therefore never exercised this symbol, which is why the relink
+// experiment did not surface it).
+//
+// On a failed assertion it writes a structured SFAF record to
+// `${SAILFIN_TEST_SCRATCH}/fail.bin` (the format parsed by
+// `compiler/src/assert_failure.sfn`: six `\n`-joined lines —
+// `SFAF` / `v:1` / `file:<path>` / `line:<dec>` / `col:<dec>` / `msg:<text>`,
+// file/msg newline-stripped) so the test runner can surface typed
+// file:line:col attribution, then raises a value error so the assertion
+// propagates (catchable, and fatal if uncaught). The legacy
+// `SAILFIN_TEST_FAIL_FD` borrowed-fd path the C body also supported is
+// dropped: nothing sets that env (only the C handler ever read it).
+//
+// Excluded from the cross-windows RUNTIME_MODS (its `fopen`/`fwrite`
+// sink + the SFAF protocol are Linux/macOS test-harness plumbing);
+// Windows resolves `@runtime_assert_fail_fn` / `@sailfin_assert_fail`
+// from the abort stubs in `runtime/native/ir/windows_stubs.ll`. Sync
+// pinned by `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.
+extern fn malloc(size: usize) -> * u8;
+
+extern fn memset(ptr: * u8, value: i32, n: usize) -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+extern fn getenv(name: * u8) -> * u8;
+
+extern fn fopen(path: * u8, mode: * u8) -> * u8;
+
+extern fn fwrite(ptr: * u8, size: usize, nmemb: usize, fp: * u8) -> i64;
+
+extern fn fclose(fp: * u8) -> i32;
+
+extern fn sfn_str_to_cstr(s: * u8) -> * u8;
+
+// Raise a value error so an uncaught assertion terminates the process
+// and a `try`/`catch` can observe it. Sailfin-native (exception.sfn).
+extern fn sfn_raise_value_error(message: * u8) -> void;
+
+// The SFAF record is written PIECE-BY-PIECE with `fwrite` (the proven
+// `arena.sfn` stats pattern), NOT via `string + ...` concat: in a runtime
+// module `string + i64` does not reliably stringify the integer (it
+// produced empty `line:`/`col:` fields and corrupted the literal prefix
+// in testing). Each piece is a literal, a stripped string, or a manually
+// formatted decimal. The file is opened in append mode and these writes
+// are sequential within one process, so they concatenate in order.
+// `_assert_write_lit(fp, lit)` — write a string literal's bytes to `fp`.
+fn _assert_write_lit(fp: * u8, lit: string) -> void ![io] {
+    let c: * u8 = sfn_str_to_cstr(lit as * u8);
+    if (c as i64) == 0 { return; }
+    let n: i64 = strlen(c) as i64;
+    if n > 0 {
+        let _ = fwrite(c, 1 as usize, n as usize, fp);
+    }
+}
+
+// `_assert_write_stripped(fp, s)` — write `s`'s bytes to `fp` with every
+// `\n` (10) / `\r` (13) replaced by a space, so the value cannot break
+// the line-delimited SFAF record. `load_byte` reads each source byte;
+// each output byte is staged in a 1-byte `memset` buffer (a word-RMW byte
+// store could over-read past a `malloc` tail) and `fwrite`-n.
+fn _assert_write_stripped(fp: * u8, s: * u8) -> void ![io] {
+    if (s as i64) == 0 { return; }
+    let n: i64 = strlen(s) as i64;
+    if n <= 0 { return; }
+    let one: * u8 = malloc(1 as usize);
+    if (one as i64) == 0 { return; }
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        let c: i64 = load_byte((s as i64) + i);
+        let mut outc: i64 = c;
+        if c == 10 || c == 13 { outc = 32; }
+        memset(one, outc as i32, 1 as usize);
+        let _ = fwrite(one, 1 as usize, 1 as usize, fp);
+        i = i + 1;
+    }
+}
+
+// `_assert_write_i64(fp, value)` — write `value` as decimal to `fp`.
+// line/col are non-negative source positions; a negative clamps to 0.
+// Digits are formed least-significant-first into a 24-byte buffer via
+// `memset` (single-byte stores), then written.
+fn _assert_write_i64(fp: * u8, value: i64) -> void ![io] {
+    let mut v: i64 = value;
+    if v < 0 { v = 0; }
+    if v == 0 {
+        let zero: string = "0";
+        _assert_write_lit(fp, zero);
+        return;
+    }
+    let buf: * u8 = malloc(24 as usize);
+    if (buf as i64) == 0 { return; }
+    let base: i64 = buf as i64;
+    let mut nd: i64 = 0;
+    let mut t: i64 = v;
+    loop {
+        if t == 0 { break; }
+        t = t / 10;
+        nd = nd + 1;
+    }
+    let mut wp: i64 = nd - 1;
+    let mut x: i64 = v;
+    loop {
+        if x == 0 { break; }
+        let d: i64 = x % 10;
+        memset((base + wp) as * u8, (48 + d) as i32, 1 as usize);
+        wp = wp - 1;
+        x = x / 10;
+    }
+    let _ = fwrite(buf, 1 as usize, nd as usize, fp);
+}
+
+// `sailfin_assert_fail(file, line, col, msg)` — the assertion-failure
+// handler. Writes the SFAF record (if a test scratch dir is set) then
+// raises a value error.
+fn sailfin_assert_fail(file: * u8, line: i64, col: i64, msg: * u8) -> void ![io] {
+    let scratch_name: string = "SAILFIN_TEST_SCRATCH";
+    let scratch: * u8 = getenv(scratch_name as * u8);
+    if (scratch as i64) != 0 {
+        let scratch_s: string = scratch as string;
+        if scratch_s.length > 0 {
+            let path: string = scratch_s + "/fail.bin";
+            let mode: string = "ab";
+            let fp: * u8 = fopen(path as * u8, mode as * u8);
+            if (fp as i64) != 0 {
+                let hdr: string = "SFAF\nv:1\nfile:";
+                let nl_line: string = "\nline:";
+                let nl_col: string = "\ncol:";
+                let nl_msg: string = "\nmsg:";
+                let nl: string = "\n";
+                let fallback: string = "assertion failed";
+                _assert_write_lit(fp, hdr);
+                _assert_write_stripped(fp, file);
+                _assert_write_lit(fp, nl_line);
+                _assert_write_i64(fp, line);
+                _assert_write_lit(fp, nl_col);
+                _assert_write_i64(fp, col);
+                _assert_write_lit(fp, nl_msg);
+                if (msg as i64) != 0 { _assert_write_stripped(fp, msg); } else {
+                    _assert_write_lit(fp, fallback);
+                }
+                _assert_write_lit(fp, nl);
+                let _ = fclose(fp);
+            }
+        }
+    }
+    let raise_msg: * u8 = msg;
+    if (raise_msg as i64) == 0 {
+        let fallback2: string = "assertion failed";
+        raise_msg = fallback2 as * u8;
+    }
+    sfn_raise_value_error(raise_msg);
+}
+
+// `runtime_assert_fail_fn(file, line, col, msg)` — the bare trampoline
+// the compiler emits (`runtime_helpers.sfn:599`). Line/col arrive as
+// Sailfin `number` (LLVM `double`); clamp to `i64` and forward.
+fn runtime_assert_fail_fn(file: * u8, line: float, col: float, msg: * u8) -> void ![io] {
+    sailfin_assert_fail(file, line as i64, col as i64, msg);
+}

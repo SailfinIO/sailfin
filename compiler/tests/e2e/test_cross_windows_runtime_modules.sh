@@ -73,6 +73,7 @@ expected="$( { echo "$prelude_val"; echo "$sfn_vals"; \
     | grep -v '^runtime/sfn/process\.sfn$' \
     | grep -v '^runtime/sfn/concurrency/' \
     | grep -v '^runtime/sfn/platform/rlimit\.sfn$' \
+    | grep -v '^runtime/sfn/assert\.sfn$' \
     | grep -v '^$' \
     | sort -u )"
 
@@ -147,6 +148,22 @@ if grep -q 'define i32 @apply_default_mem_limit' "$REPO_ROOT/runtime/native/ir/w
     ok "strong @apply_default_mem_limit stub present in windows_stubs.ll"
 else
     fail "missing @apply_default_mem_limit stub in windows_stubs.ll — Windows link would break"
+fi
+
+# assert.sfn (#822/#1308): in the manifest (Linux/macOS test harness needs
+# the real SFAF fail.bin handler), excluded from RUNTIME_MODS (its
+# fopen/fwrite sink is test-harness plumbing); Windows resolves
+# runtime_assert_fail_fn/sailfin_assert_fail from the abort stubs pinned
+# below.
+if echo "$sfn_vals" | norm | grep -q '^runtime/sfn/assert\.sfn$'; then
+    ok "assert.sfn present in manifest sfn-sources (exclusion is meaningful)"
+else
+    fail "assert.sfn no longer in manifest — revisit the cross-windows exclusion"
+fi
+if echo "$actual" | grep -q '^runtime/sfn/assert\.sfn$'; then
+    fail "assert.sfn is in RUNTIME_MODS — its SFAF fopen sink is Linux/macOS-only"
+else
+    ok "assert.sfn excluded from cross-windows RUNTIME_MODS"
 fi
 # serve.sfn (concurrency/) is excluded from RUNTIME_MODS like the rest
 # of concurrency/, but #1308 moved the legacy `sailfin_runtime_serve`
