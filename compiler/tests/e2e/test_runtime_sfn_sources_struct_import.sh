@@ -102,15 +102,15 @@ kind = "runtime"
 c-sources = []
 ll-sources = ["ir/runtime_globals.ll"]
 sfn-sources = ["../sfn/structlib.sfn", "../sfn/structuse.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/io.sfn", "../sfn/memory/arena.sfn", "../sfn/memory/ownedbuf.sfn", "../sfn/string.sfn", "../sfn/array.sfn", "../sfn/memory/mem.sfn"]
-include-dirs = ["include"]
+include-dirs = []
 link-libs = ["-lm"]
 prelude-entry = "../prelude.sfn"
 EOF
 
     # Mirror the repo's runtime/native tree + the real runtime
     # modules the manifest references (symlinks, no copies).
-    ln -s "$REPO_ROOT/runtime/native/src" "$ws/runtime/native/src"
-    ln -s "$REPO_ROOT/runtime/native/include" "$ws/runtime/native/include"
+    # (#822: `src/` and `include/` are deleted from the repo; only
+    # `ir/` carries the linkable `runtime_globals.ll`.)
     ln -s "$REPO_ROOT/runtime/native/ir" "$ws/runtime/native/ir"
     ln -s "$REPO_ROOT/runtime/prelude.sfn" "$ws/runtime/prelude.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/clock.sfn" "$ws/runtime/sfn/clock.sfn"

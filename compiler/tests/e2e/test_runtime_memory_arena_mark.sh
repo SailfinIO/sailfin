@@ -144,8 +144,6 @@ test_mark_rewind_roundtrip() {
         return 0
     fi
 
-    local arena_inc="$REPO_ROOT/runtime/native/include"
-
     local harness="$SCRATCH/harness.c"
     cat > "$harness" <<'CHARNESS'
 #include <stddef.h>
@@ -154,7 +152,16 @@ test_mark_rewind_roundtrip() {
 #include <stdlib.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include "sailfin_arena.h"
+#include <stdbool.h>
+
+/* The Sailfin arena API — formerly declared in the deleted
+ * runtime/native/include/sailfin_arena.h (#822). All bodies live in
+ * arena.ll now; the handle is opaque to this harness (threaded through
+ * the API, never dereferenced), so a forward-declared type suffices. */
+typedef struct SfnArena SfnArena;
+extern bool      sfn_arena_enabled(void);
+extern SfnArena *sfn_arena_global(void);
+extern void     *sfn_arena_alloc(SfnArena *arena, size_t size, size_t align);
 
 /* The Sailfin mark/rewind bodies call these (declared in arena.ll). */
 extern double sfn_arena_sfn_mark(void);
@@ -273,7 +280,7 @@ CHARNESS
     # Link the emitted Sailfin arena IR (self-contained as of #1309).
     # `-lm` for the seed's libm literal-coercion references;
     # `-Wno-override-module` for the emitted target triple.
-    if ! "$clang_bin" -Wno-override-module -I"$arena_inc" \
+    if ! "$clang_bin" -Wno-override-module \
             "$harness" "$ll" -o "$bin" -lm 2>"$SCRATCH/clang.log"; then
         echo "[test]   clang failed to link arena mark/rewind harness:"
         cat "$SCRATCH/clang.log"

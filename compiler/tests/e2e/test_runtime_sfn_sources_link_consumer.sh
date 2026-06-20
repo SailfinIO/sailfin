@@ -58,7 +58,7 @@ run_test() {
 setup_workspace() {
     local ws="$1"
     rm -rf "$ws"
-    mkdir -p "$ws/runtime/native/src" "$ws/runtime/native/include" "$ws/runtime/native/ir"
+    mkdir -p "$ws/runtime/native/ir"
     mkdir -p "$ws/runtime/sfn"
     mkdir -p "$ws/capsules/sfn/test-app/src"
 
@@ -120,17 +120,16 @@ ll-sources = ["ir/runtime_globals.ll"]
 # to its defines at link). Without both, string.sfn's emit dies with
 # "cannot resolve return type for call to `owned_buf_new`".
 sfn-sources = ["../sfn/test_marker.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/io.sfn", "../sfn/memory/arena.sfn", "../sfn/memory/ownedbuf.sfn", "../sfn/string.sfn", "../sfn/array.sfn", "../sfn/memory/mem.sfn"]
-include-dirs = ["include"]
+include-dirs = []
 link-libs = ["-lm"]
 prelude-entry = "../prelude.sfn"
 EOF
 
     # Mirror the repo's runtime/native tree into the scratch
-    # workspace so the c-sources resolve. Cheap symlinks keep
-    # this tiny — no copies.
-    rm -rf "$ws/runtime/native/src" "$ws/runtime/native/include" "$ws/runtime/native/ir"
-    ln -s "$REPO_ROOT/runtime/native/src" "$ws/runtime/native/src"
-    ln -s "$REPO_ROOT/runtime/native/include" "$ws/runtime/native/include"
+    # workspace so the ll-sources resolve. Cheap symlinks keep
+    # this tiny — no copies. (#822: `src/` and `include/` are deleted
+    # from the repo; only `ir/` carries the linkable `runtime_globals.ll`.)
+    rm -rf "$ws/runtime/native/ir"
     ln -s "$REPO_ROOT/runtime/native/ir" "$ws/runtime/native/ir"
 
     # Mirror prelude.sfn (the runtime capsule's prelude-entry).
