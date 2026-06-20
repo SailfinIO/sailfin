@@ -1,0 +1,83 @@
+// E2E golden-IR regression test for channel producer/consumer lowering
+// (issue #1091, epic #965 M4 Wave 2). Verifies that channel send/receive
+// operations lower to the correct `sfn_channel_*` symbols in LLVM IR.
+//
+// Native replacement for the former `test_channel_producer_consumer_ir.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Real thread execution is
+// NOT tested here — this pins only that emitted IR contains the expected
+// call symbols. The emit subprocess is bounded by the runner's own per-test
+// timeout (no in-test deadlock guard is needed).
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    // Inherit the full parent environment so the emit subprocess sees PATH
+    // and SAILFIN_TEST_SCRATCH (per-invocation build-cache isolation, #1333).
+    return process.environ();
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Write `source` to a scratch fixture, emit its LLVM IR, and return the IR
+// text (or "" on emit failure). `label` keys the per-test fixture/output
+// paths so concurrent tests in the parallel pool never collide.
+fn _emit_ir(label: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/chan-" + label + ".sfn";
+    let ll = dir + "/chan-" + label + ".ll";
+    fs.writeFile(src, source);
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    fs.deleteFile(src);
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+// channel(N) + ch.send() → sfn_channel_send in IR.
+test "channel-ir: ch.send() lowers to sfn_channel_send (#1091)" ![io] {
+    let ir = _emit_ir("send", "fn producer(ch: channel) ![io] {\n    ch.send(42);\n}\nfn main() ![io] {\n    let ch = channel(4);\n    producer(ch);\n}\n");
+    assert ir.length > 0;
+    assert contains(ir, "sfn_channel_send");
+}
+
+// channel(N) + ch.receive() → sfn_channel_recv in IR (#1266).
+test "channel-ir: ch.receive() lowers to sfn_channel_recv (#1266)" ![io] {
+    let ir = _emit_ir("recv", "fn consumer(ch: channel) ![io] -> int {\n    return ch.receive();\n}\nfn main() ![io] {\n    let ch = channel(4);\n    let val = consumer(ch);\n}\n");
+    assert ir.length > 0;
+    assert contains(ir, "sfn_channel_recv");
+}
+
+// channel(N) → sfn_channel_create in a producer/consumer context.
+test "channel-ir: channel(N) lowers to sfn_channel_create (#1091)" ![io] {
+    let ir = _emit_ir("create", "fn main() ![io] {\n    let ch = channel(8);\n    ch.send(1);\n    let v = ch.receive();\n}\n");
+    assert ir.length > 0;
+    assert contains(ir, "sfn_channel_create");
+}
+
+// A minimal producer/consumer program lowers all three channel symbols.
+test "channel-ir: full producer/consumer program emits all three symbols (#1091)" ![io] {
+    let ir = _emit_ir("full", "fn producer(ch: channel, value: int) ![io] {\n    ch.send(value);\n}\n\nfn consumer(ch: channel) ![io] -> int {\n    return ch.receive();\n}\n\nfn main() ![io] {\n    let ch = channel(4);\n    producer(ch, 99);\n    let result = consumer(ch);\n}\n");
+    assert ir.length > 0;
+    assert contains(ir, "sfn_channel_create");
+    assert contains(ir, "sfn_channel_send");
+    assert contains(ir, "sfn_channel_recv");
+}

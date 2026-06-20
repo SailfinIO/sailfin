@@ -2,7 +2,7 @@
 # E2E runtime round-trip test for the Sailfin-native channel runtime
 # (issue #1266, epic #965 M4).
 #
-# Unlike test_channel_producer_consumer_ir.sh (which only inspects the
+# Unlike channel_producer_consumer_ir_test.sfn (which only inspects the
 # emitted IR), this test actually RUNS producer/consumer programs via
 # `sailfin run`, so it proves the emitted channel ABI links against
 # `runtime/sfn/concurrency/channel.sfn` (no `undefined symbol:

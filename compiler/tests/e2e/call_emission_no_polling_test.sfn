@@ -1,0 +1,121 @@
+// E2E test for M2.7c — call-site exception polling removal (issue #406,
+// epic #389). Pins that compiler-emitted IR contains zero
+// `call ... @sailfin_runtime_has_exception` instructions, the per-call-site
+// polling that the legacy TLS-based try/catch path emitted after every
+// function call inside a try body.
+//
+// Native replacement for the former `test_call_emission_no_polling.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327).
+//
+// The legacy TLS-polling shape was replaced wholesale by inline
+// setjmp/longjmp primitives when `instructions_try.sfn` was rewritten
+// (PR #733). This test locks that property in: emitted IR for the heavy
+// lowering modules and representative fixtures contains zero
+// `call ... @sailfin_runtime_has_exception` lines. A regression that
+// reintroduces per-call-site polling fails this test before it lands.
+//
+// We check `call` lines, not `declare` lines — the compiler-side
+// `RuntimeHelperDescriptor` for `has_exception` stays registered for ABI
+// completeness (and the C symbol stays exported until M3 deletes the C
+// runtime body), so a `declare i1 @sailfin_runtime_has_exception()` may
+// still surface. What MUST be zero is the call-site count.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains, split } from "sfn/strings";
+
+let _SYMBOL: string = "@sailfin_runtime_has_exception";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    // Inherit the full parent environment so the emit subprocess sees PATH
+    // and SAILFIN_TEST_SCRATCH (per-invocation build-cache isolation, #1333).
+    return process.environ();
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit LLVM IR for the file at `source_path`, returning the IR text (or ""
+// on emit failure). `label` keys the per-test output path.
+fn _emit_path(label: string, source_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/nopoll-" + label + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", source_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+// Emit LLVM IR for an inline `source` fixture, returning the IR text.
+fn _emit_source(label: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/nopoll-" + label + ".sfn";
+    fs.writeFile(src, source);
+    let ir = _emit_path(label, src);
+    fs.deleteFile(src);
+    return ir;
+}
+
+// Count call-site instructions targeting the symbol. A call site is a line
+// that contains both the ` call ` token and the symbol mention — `declare`
+// lines carry the symbol but never the ` call ` token, so they are excluded
+// (the same disambiguation the legacy `grep ' call '` audit used).
+fn _count_call_sites(ir: string) -> int {
+    let lines = split(ir, "\n");
+    let mut n = 0;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if contains(line, " call ") && contains(line, _SYMBOL) { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+// ---- (1) heavy compiler module: lowering_core.sfn ----
+test "no-polling: lowering_core.sfn IR has zero has_exception call sites" ![io] {
+    let ir = _emit_path("lowering_core", "compiler/src/llvm/lowering/lowering_core.sfn");
+    assert ir.length > 0;
+    assert _count_call_sites(ir) == 0;
+}
+
+// ---- (2) heavy compiler module: instructions_try.sfn (the migration target) ----
+test "no-polling: instructions_try.sfn IR has zero has_exception call sites" ![io] {
+    let ir = _emit_path("instructions_try", "compiler/src/llvm/lowering/instructions_try.sfn");
+    assert ir.length > 0;
+    assert _count_call_sites(ir) == 0;
+}
+
+// ---- (3) try/catch fixture: the emission path that USES try must not
+//          reintroduce polling at any call site ----
+test "no-polling: try/catch fixture IR has zero has_exception call sites" ![io] {
+    let ir = _emit_source("try_catch", "fn helper(x: int) -> int { return x + 1; }\n\nfn main() ![io] {\n    try {\n        let a: int = helper(1);\n        let b: int = helper(a);\n        let c: int = helper(b);\n        print(\"ok\");\n    } catch (e) {\n        print(\"caught: \" + e);\n    }\n}\n");
+    assert ir.length > 0;
+    assert _count_call_sites(ir) == 0;
+}
+
+// ---- (4) representative non-try module: pure function-call traffic must
+//          also be polling-free (catches a change that emits polling
+//          unconditionally after every call, not just inside try bodies) ----
+test "no-polling: pure call-traffic IR has zero has_exception call sites" ![io] {
+    let ir = _emit_source("pure_calls", "fn add(a: int, b: int) -> int { return a + b; }\nfn mul(a: int, b: int) -> int { return a * b; }\n\nfn compute(seed: int) -> int {\n    let a: int = add(seed, 1);\n    let b: int = mul(a, 2);\n    let c: int = add(b, mul(seed, 3));\n    return c;\n}\n\nfn main() ![io] {\n    let result: int = compute(7);\n    print(\"done\");\n}\n");
+    assert ir.length > 0;
+    assert _count_call_sites(ir) == 0;
+}
