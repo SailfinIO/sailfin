@@ -1,0 +1,212 @@
+// E2E test for the host-aware executable-path sentinel (#967, epic #390).
+//
+// Native replacement for the former `test_exe_path_intrinsic_platform.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Mirrors the sibling
+// `errno_locator_test.sfn` / `clock_monotonic_id_sentinel_test.sfn` (same
+// epic-#763-class host-aware sentinel shape).
+//
+// `sailfin_intrinsic_exe_path(buf: i8*, size: i64) -> i64` is a registry
+// sentinel whose lowering branch (`core_call_emission.sfn`) emits a
+// per-target *sequence* — not a plain symbol swap — chosen at emit time
+// from `exe_path_locator` (`SAILFIN_TARGET_OS` override, else `uname -s`):
+//
+//   Linux   -> readlink("/proc/self/exe", buf, size)
+//   Darwin  -> _NSGetExecutablePath(buf, *size) + strlen on the success path
+//   Windows -> GetModuleFileNameA(NULL, buf, size)
+//
+// This lets the same compiler source link on every platform when built
+// natively (only the host's concrete symbol is ever called/declared).
+//
+// Host-independent. The Linux/Darwin/Windows legs are forced via the
+// `SAILFIN_TARGET_OS` override (consulted before the `uname -s` host
+// probe), so they assert the same thing on Linux or macOS CI. A precedence
+// test additionally installs a `uname` shim on PATH forcing the *opposite*
+// host OS, proving `SAILFIN_TARGET_OS` wins over the host probe. For each
+// leg it pins:
+//
+//   1. typecheck    — `sfn check <fixture>` exits 0 (the sentinel is
+//                     seeded into the resolution scope; no extern needed).
+//   2. leg call     — emitted IR contains the host primitive's `call`.
+//   3. leg declare  — the host primitive's `declare`.
+//   4. no other leg — neither of the other two platforms' primitives appear.
+//   5. no sentinel  — no `call`/`declare` targets the sentinel name
+//                     (`sailfin_intrinsic_exe_path`).
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Base child env: PATH/HOME/TMPDIR + SAILFIN_TEST_SCRATCH. The caller
+// appends SAILFIN_TARGET_OS and/or a PATH override per case.
+fn _base_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _env_with_target(target_os: string) -> string[] ![io] {
+    let mut e = _base_env();
+    e.push("SAILFIN_TARGET_OS=" + target_os);
+    return e;
+}
+
+fn _any_line_with(text: string, a: string, b: string) -> bool {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], a) && contains(lines[i], b) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Fixture mirrors the real consumer shape (exec.sfn::exe_path): allocate a
+// buffer and a size, then call the sentinel. The sentinel name is seeded as
+// a source-level global by `runtime_helper_call_names()`, so no extern is
+// needed for it; `malloc` is externed because the fixture does not import
+// the prelude.
+fn _fixture_source() -> string {
+    return "extern fn malloc(size: usize) -> * u8;\n\nfn probe_exe_path() -> i64 {\n    let cap: i64 = 4096;\n    let buf: * u8 = malloc(cap as usize);\n    return sailfin_intrinsic_exe_path(buf, cap);\n}\n\nfn main() -> void {\n    let n: i64 = probe_exe_path();\n}\n";
+}
+
+fn _fixture_path() -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-exe-path-probe.sfn";
+    fs.writeFile(src, _fixture_source());
+    return src;
+}
+
+// Install a `uname` shim under `dir` that reports `os` for `uname -s` and
+// delegates everything else to the real binary, so the compiler's
+// `uname -s` probe resolves to the forced platform. Returns `dir`.
+fn _make_uname_shim(dir: string, os: string) -> string ![io] {
+    fs.createDirectory(dir, true);
+    let shim = dir + "/uname";
+    fs.writeFile(shim, "#!/bin/sh\nif [ \"$1\" = \"-s\" ]; then echo \"" + os
+        + "\"; exit 0; fi\nexec /usr/bin/uname \"$@\"\n");
+    let _ = process.run_capture(["chmod", "+x", shim], _base_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return dir;
+}
+
+fn _emit(src: string, child_env: string[], tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-exe-path-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], child_env);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+test "exe-path: sfn check passes on the fixture" ![io] {
+    let src = _fixture_path();
+    let exit = process.run_capture([_sfn_bin(), "check", src], _base_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    fs.deleteFile(src);
+    assert exit == 0;
+}
+
+test "exe-path: Linux leg readlinks /proc/self/exe, no Darwin/Windows primitive" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Linux"), "linux");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i64 @readlink(");
+    assert contains(ir, "declare i64 @readlink(");
+    // The dispatcher interns the /proc/self/exe literal as a private global
+    // and passes its i8* as readlink's first arg.
+    assert _any_line_with(ir, "private unnamed_addr constant", "c\"/proc/self/exe");
+    assert ! contains(ir, "@_NSGetExecutablePath(");
+    assert ! contains(ir, "@GetModuleFileNameA(");
+}
+
+test "exe-path: Darwin leg uses _NSGetExecutablePath + alloca + strlen, no others" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Darwin"), "darwin");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i32 @_NSGetExecutablePath(");
+    assert contains(ir, "declare i32 @_NSGetExecutablePath(");
+    assert contains(ir, "alloca i32");
+    assert contains(ir, "call i64 @strlen(");
+    assert ! contains(ir, "@readlink(");
+    assert ! contains(ir, "@GetModuleFileNameA(");
+}
+
+test "exe-path: Windows leg uses GetModuleFileNameA, no Linux/Darwin primitive" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Windows"), "windows");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i32 @GetModuleFileNameA(");
+    assert contains(ir, "declare i32 @GetModuleFileNameA(");
+    assert ! contains(ir, "@readlink(");
+    assert ! contains(ir, "@_NSGetExecutablePath(");
+}
+
+test "exe-path: SAILFIN_TARGET_OS=Darwin overrides uname=Linux (_NSGetExecutablePath)" ![io] {
+    let src = _fixture_path();
+    let shimdir = _make_uname_shim(_scratch_dir() + "/shim-exe-path-override", "Linux");
+    // Build the env by hand so the shim dir leads PATH (a second `PATH=` in
+    // the array would be ambiguous). The shim's `uname` therefore wins over
+    // the host's; SAILFIN_TARGET_OS=Darwin must still override it.
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    e.push("PATH=" + shimdir + ":" + path);
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    e.push("SAILFIN_TARGET_OS=Darwin");
+    let ir = _emit(src, e, "override");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i32 @_NSGetExecutablePath(");
+    assert ! contains(ir, "@readlink(");
+}
+
+test "exe-path: sentinel symbol never emitted as call/declare" ![io] {
+    let src = _fixture_path();
+    let targets = ["Linux", "Darwin", "Windows"];
+    let mut i = 0;
+    loop {
+        if i >= targets.length { break; }
+        let ir = _emit(src, _env_with_target(targets[i]), "leak-" + targets[i]);
+        assert ir.length > 0;
+        assert ! _any_line_with(ir, "call ", "@sailfin_intrinsic_exe_path");
+        assert ! _any_line_with(ir, "declare ", "@sailfin_intrinsic_exe_path");
+        i += 1;
+    }
+    fs.deleteFile(src);
+}
