@@ -1094,7 +1094,7 @@ ci-cross-windows:
 	: "readlink reference once the MinGW stub is gone; Windows selects the"; \
 	: "GetModuleFileNameA leg instead. The rest are target-independent IR"; \
 	: "compiled for mingw. Each <module>:<source> pair is space-separated."; \
-	RUNTIME_MODS="prelude:runtime/prelude.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn ownedbuf:runtime/sfn/memory/ownedbuf.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn process_windows:runtime/sfn/platform/process_windows.sfn"; \
+	RUNTIME_MODS="prelude:runtime/prelude.sfn runtime_globals:runtime/sfn/runtime_globals.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn ownedbuf:runtime/sfn/memory/ownedbuf.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn process_windows:runtime/sfn/platform/process_windows.sfn"; \
 	RUNTIME_OBJS=""; \
 	for pair in $$RUNTIME_MODS; do \
 		mod="$${pair%%:*}"; \
@@ -1130,7 +1130,8 @@ ci-cross-windows:
 	: "#822 / #1308: sailfin_runtime.c is DELETED — the runtime is fully"; \
 	: "Sailfin-owned. The Windows @sfn_process_* family now comes from"; \
 	: "process_windows.sfn (in RUNTIME_MODS above); shell_capture from io.sfn."; \
-	: "Only the runtime_globals.ll data object remains (no C left)."; \
+	: "@runtime (#1436) now comes from runtime_globals.sfn (in RUNTIME_MODS);"; \
+	: "runtime_globals.ll is now just the @sfn_default_arena data object."; \
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/native/ir/runtime_globals.ll \
 		-o "$$WIN_OBJ/runtime_globals.o"; \
 	: "Windows-only strong stubs for symbols whose Sailfin modules are"; \
