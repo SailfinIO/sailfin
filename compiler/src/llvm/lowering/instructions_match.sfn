@@ -85,7 +85,8 @@ fn _match_make_local_binding(name: string, pointer: string, llvm_type: string, s
         scope_id: scope_id,
         scope_depth: scope_depth,
         allocation_kind: "arena",
-        init_sentinel: ""
+        init_sentinel: "",
+        narrowed_variant: ""
     };
 }
 
@@ -763,7 +764,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
 
                         base_locals.push(LocalBinding {
                             name: subject_name, pointer: local_alloca_temp, llvm_type: payload_type, type_annotation: "", ownership: null, consumed: false, scope_id: make_child_scope_id(scope_id, body_labels[index]), scope_depth: scope_depth
-                                + 1, allocation_kind: "arena", init_sentinel: ""
+                                + 1, allocation_kind: "arena", init_sentinel: "", narrowed_variant: ""
                         });
                         base_local_id += 1;
                     }

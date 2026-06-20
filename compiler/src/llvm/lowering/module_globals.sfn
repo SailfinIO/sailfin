@@ -181,7 +181,8 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
             scope_id: scope_id,
             scope_depth: 0,
             allocation_kind: "arena",
-            init_sentinel: ""
+            init_sentinel: "",
+            narrowed_variant: ""
         };
         return BindingLoweringResult {
             preamble_lines: extern_preamble,
@@ -282,7 +283,8 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
         scope_id: scope_id,
         scope_depth: 0,
         allocation_kind: "arena",
-        init_sentinel: ""
+        init_sentinel: "",
+        narrowed_variant: ""
     };
     let mut locals: LocalBinding[] = [];
     locals.push(local);

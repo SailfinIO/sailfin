@@ -311,7 +311,8 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         scope_id: loop_body_scope_id,
         scope_depth: scope_depth + 1,
         allocation_kind: "arena",
-        init_sentinel: ""
+        init_sentinel: "",
+        narrowed_variant: ""
     };
     let header_load = load_local_operand(iteration_binding, current_temp, current_lines);
     let mut _ci16: int = 0;

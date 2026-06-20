@@ -103,7 +103,8 @@ fn _ipc_make_parameter_binding(name: string, llvm_name: string, llvm_type: strin
         llvm_type: llvm_type,
         type_annotation: type_annotation,
         consumed: false,
-        span: null
+        span: null,
+        narrowed_variant: ""
     };
 }
 
@@ -118,7 +119,8 @@ fn _ipc_make_local_binding(name: string, pointer: string, llvm_type: string, typ
         scope_id: scope_id,
         scope_depth: scope_depth,
         allocation_kind: default_allocation_kind(),
-        init_sentinel: ""
+        init_sentinel: "",
+        narrowed_variant: ""
     };
 }
 

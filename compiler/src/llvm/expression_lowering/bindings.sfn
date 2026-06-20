@@ -31,7 +31,8 @@ fn bindings_mark_parameter_consumed(bindings: ParameterBinding[], name: string) 
                 llvm_type: binding.llvm_type,
                 type_annotation: binding.type_annotation,
                 consumed: true,
-                span: binding.span
+                span: binding.span,
+                narrowed_variant: binding.narrowed_variant
             };
             result.push(updated);
         } else { result.push(binding); }
@@ -57,7 +58,8 @@ fn bindings_mark_local_consumed(locals: LocalBinding[], name: string) -> LocalBi
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
                 allocation_kind: entry.allocation_kind,
-                init_sentinel: entry.init_sentinel
+                init_sentinel: entry.init_sentinel,
+                narrowed_variant: entry.narrowed_variant
             };
             result.push(updated);
         } else { result.push(entry); }
@@ -83,7 +85,8 @@ fn bindings_reset_local_consumption(locals: LocalBinding[], name: string) -> Loc
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
                 allocation_kind: entry.allocation_kind,
-                init_sentinel: entry.init_sentinel
+                init_sentinel: entry.init_sentinel,
+                narrowed_variant: entry.narrowed_variant
             };
             result.push(updated);
         } else { result.push(entry); }
@@ -109,7 +112,8 @@ fn bindings_update_local_ownership(locals: LocalBinding[], name: string, ownersh
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
                 allocation_kind: entry.allocation_kind,
-                init_sentinel: entry.init_sentinel
+                init_sentinel: entry.init_sentinel,
+                narrowed_variant: entry.narrowed_variant
             };
             result.push(updated);
         } else { result.push(entry); }

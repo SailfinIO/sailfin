@@ -716,7 +716,7 @@ fn _lower_closure_env_load_prologue_marker(marker: string, bindings: ParameterBi
         if bi >= prologue.bindings.length { break; }
         let loaded = prologue.bindings[bi];
         new_bindings.push(ParameterBinding {
-            name: loaded.name, llvm_name: loaded.llvm_name, llvm_type: loaded.llvm_type, type_annotation: captures[bi].type_text, consumed: false, span: null
+            name: loaded.name, llvm_name: loaded.llvm_name, llvm_type: loaded.llvm_type, type_annotation: captures[bi].type_text, consumed: false, span: null, narrowed_variant: ""
         });
         bi += 1;
     }

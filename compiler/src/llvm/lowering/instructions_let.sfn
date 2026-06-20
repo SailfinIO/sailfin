@@ -592,7 +592,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         if _is_channel_init { local_type_annotation = "channel"; }
     }
     current_locals = append_local_binding(current_locals, LocalBinding {
-        name: instruction.name, pointer: pointer, llvm_type: llvm_type, type_annotation: local_type_annotation, ownership: ownership, consumed: false, scope_id: scope_id, scope_depth: scope_depth, allocation_kind: "arena", init_sentinel: init_sentinel
+        name: instruction.name, pointer: pointer, llvm_type: llvm_type, type_annotation: local_type_annotation, ownership: ownership, consumed: false, scope_id: scope_id, scope_depth: scope_depth, allocation_kind: "arena", init_sentinel: init_sentinel, narrowed_variant: ""
     });
 
     let mutation = LocalMutation {
