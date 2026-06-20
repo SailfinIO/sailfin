@@ -721,28 +721,20 @@ fn _do_determinism_check(pass1_out: string, is_library: boolean, cap_capsule_nam
 }
 
 // Issue #940: validate the declarative runtime bundle by the
-// presence of `<root>/native/capsule.toml` (the manifest the
-// implicit runtime-capsule resolver reads) alongside the C runtime
-// source, include root, and global IR. Previously this probed for a
+// presence of `<root>/native/capsule.toml` (the manifest the implicit
+// runtime-capsule resolver reads). Previously this probed for a
 // Makefile-staged `prelude.o` via `_runtime_prelude_path`; with the
 // prelude now emitted from source via the capsule's `prelude-entry`,
 // the manifest is the load-bearing artifact, and `_runtime_prelude_path`
-// is gone.
+// is gone. #822: the C runtime source (`native/src/sailfin_runtime.c`)
+// and the include root (`native/include/`) are deleted, so the manifest
+// is the sole bundle anchor — the `ll-sources` it lists
+// (`native/ir/runtime_globals.ll`) are resolved by the runtime-capsule
+// resolver from the manifest, not probed here.
 fn _runtime_bundle_exists(root: string) -> boolean ![io] {
     if root.length == 0 { return false; }
-    let include_dir = _path_join(root, "native/include");
-    let runtime_src = _path_join(root, "native/src/sailfin_runtime.c");
-    let runtime_ir = _path_join(root, "native/ir/runtime_globals.ll");
     let manifest = _path_join(root, "native/capsule.toml");
-    let mut _bundle_ok: boolean = false;
-    if fs.exists(include_dir) {
-        if fs.exists(runtime_src) {
-            if fs.exists(runtime_ir) {
-                if fs.exists(manifest) { _bundle_ok = true; }
-            }
-        }
-    }
-    return _bundle_ok;
+    return fs.exists(manifest);
 }
 
 // Last `/`-separated segment of a path. Returns the input itself
