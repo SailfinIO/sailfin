@@ -250,7 +250,7 @@ fn emit_statement_declarations(state: NativeState, statement: Statement) -> Stat
     }
     if statement.variant == "ExternVarDeclaration" {
         return StatementDispatchResult {
-            state: emit_extern_var(state, statement.name, statement.type_annotation, statement.decorators),
+            state: emit_extern_var(state, statement.name, statement.type_annotation, statement.initializer, statement.decorators),
             handled: true
         };
     }
@@ -389,10 +389,19 @@ fn emit_extern_function(state: NativeState, signature: FunctionSignature, unsafe
 // directive. The native-IR parser collects it as an extern module binding
 // (`NativeBinding { is_extern: true }`), which lowers to an
 // `@NAME = external global <ty>` declaration whose references auto-load.
-fn emit_extern_var(state: NativeState, name: string, type_annotation: TypeAnnotation, decorators: Decorator[]) -> NativeState {
+//
+// With an initializer (`extern var NAME: TYPE = INIT;`) the directive
+// carries the value (`.extern-var NAME : TYPE = INIT`), so exactly one
+// module *defines* the C-ABI symbol (`@NAME = global <ty> <init>`) while
+// every other `extern var NAME: TYPE;` stays an `external global`
+// reference (#1436 defining-global primitive).
+fn emit_extern_var(state: NativeState, name: string, type_annotation: TypeAnnotation, initializer: string?, decorators: Decorator[]) -> NativeState {
     let mut current = emit_decorators(state, decorators);
     let mut line: string = ".extern-var " + name;
     line = append_optional_type_annotation(line, type_annotation);
+    if initializer != null {
+        if initializer.length > 0 { line = line + " = " + initializer; }
+    }
     return state_emit_line(current, line);
 }
 

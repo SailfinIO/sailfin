@@ -94,3 +94,31 @@ test "extern-var: a reference emits a real load from the global" ![io] {
     // The reference is not elided — it loads from `@environ`.
     assert _has_line_with_both(ir, "load", "@environ");
 }
+
+// Defining-global primitive (#1436): an initializer turns the reference
+// declaration into a single strong *definition* of the C-ABI symbol, so a
+// Sailfin object can own a runtime global that a hand-written `.ll` used to
+// define. The verbatim symbol, no `@global.` mangling, no `internal`.
+fn _def_probe() -> string {
+    return "extern var owned_slot: * u8 = null;\n"
+        + "fn read_slot() -> * u8 {\n"
+        + "    return owned_slot;\n"
+        + "}\n";
+}
+
+test "extern-var: an initializer emits a strong `@NAME = global` definition" ![io] {
+    let ir = _emit_llvm(_def_probe(), "def");
+    assert ir.length > 0;
+    // Strong external definition of the verbatim symbol with the null init.
+    assert _has_line_with_both(ir, "@owned_slot = global", "null");
+    // Not the `external global` reference form, never `internal`, never mangled.
+    assert ! contains(ir, "@owned_slot = external global");
+    assert ! contains(ir, "@owned_slot = internal");
+    assert ! contains(ir, "@global.owned_slot");
+}
+
+test "extern-var: a defining global is still loadable" ![io] {
+    let ir = _emit_llvm(_def_probe(), "defload");
+    assert ir.length > 0;
+    assert _has_line_with_both(ir, "load", "@owned_slot");
+}

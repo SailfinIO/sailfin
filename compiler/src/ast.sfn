@@ -277,6 +277,7 @@ enum Statement {
     ExternVarDeclaration {
         name: string;
         type_annotation: TypeAnnotation;
+        initializer: string?;
         name_span: SourceSpan?;
         decorators: Decorator[];
     },

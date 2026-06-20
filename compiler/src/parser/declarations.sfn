@@ -1013,9 +1013,25 @@ fn parse_extern_var(initial_parser: Parser, starts_with_unsafe: boolean, decorat
         if arrow_result.found { parser = arrow_result.parser; }
     }
 
-    let capture = collect_until(skip_trivia(parser), [";"]);
+    // Capture the type up to either `=` (defining-global initializer) or
+    // `;` (a bare reference declaration). An initializer turns the
+    // `extern var` into a single strong *definition* of the C-ABI symbol
+    // (`@NAME = global <ty> <init>`) so a Sailfin object can own a runtime
+    // global instead of a hand-written `.ll` (#1436); without one it stays
+    // an `external global` reference (#1313).
+    let capture = collect_until(skip_trivia(parser), ["=", ";"]);
     parser = capture.parser;
     let type_text = trim_text(tokens_to_text(capture.tokens));
+
+    parser = skip_trivia(parser);
+    let mut initializer: string? = null;
+    if symbol_matches(parser_peek_raw(parser), "=") {
+        parser = consume_symbol(parser, "=");
+        let init_capture = collect_until(skip_trivia(parser), [";"]);
+        parser = init_capture.parser;
+        let init_text = trim_text(tokens_to_text(init_capture.tokens));
+        if init_text.length > 0 { initializer = init_text; }
+    }
 
     parser = skip_trivia(parser);
     parser = consume_symbol(parser, ";");
@@ -1023,6 +1039,7 @@ fn parse_extern_var(initial_parser: Parser, starts_with_unsafe: boolean, decorat
     let statement = Statement.ExternVarDeclaration {
         name: name,
         type_annotation: TypeAnnotation { text: type_text },
+        initializer: initializer,
         name_span: name_span,
         decorators: decorators
     };
