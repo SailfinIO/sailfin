@@ -18,7 +18,6 @@
 
 test_array_aggregate_shape.sh
 test_binary_capsule_walker.sh
-test_build_diagnostics_format.sh
 test_build_json_schema.sh
 test_call_emission_no_polling.sh
 test_capsule_artifact_sidecar.sh
@@ -30,7 +29,6 @@ test_channel_producer_consumer_ir.sh
 test_channel_runtime_roundtrip.sh
 test_check_compiler_src.sh
 test_check_cross_module_conformance.sh
-test_check_effect_call_site_caret.sh
 test_check_json_schema.sh
 test_check_phase_ledger.sh
 test_check_resolver_scan_memo.sh
