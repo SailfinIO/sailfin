@@ -1,0 +1,145 @@
+// End-to-end test for the M1.A string-literal ABI lock (issue #391) and
+// the M1.2 `sfn_str_concat` registry flip (issue #461).
+//
+// Native replacement for the former `test_string_aggregate_shape.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Pins the emitted LLVM
+// IR contract for string literals:
+//   - Literals lower to `{i8*, i64}` aggregates (data ptr + byte length),
+//     each built via an `insertvalue {i8*, i64} undef, i8*` data slot and
+//     an `i64 N, 1` length slot.
+//   - `s.length` resolves to a direct `extractvalue ..., 1` (no
+//     `sailfin_runtime_string_length` call).
+//   - `+` on strings emits the arena-aware aggregate call shape (the bare
+//     canonical symbol since #715, with a `ptr null` arena slot since
+//     #1308): `call {i8*, i64} @sfn_str_concat({i8*, i64}, {i8*, i64},
+//     ptr null)`, followed by an `extractvalue ..., 0` that recovers the
+//     legacy `i8*` operand. The transitional `_arena` forwarder, the
+//     2-arg shape, and the legacy `sailfin_runtime_string_concat_v2`
+//     entrypoint must all be absent from fresh emission.
+//   - No consumer re-extracts a literal as `[N x i8]`.
+//
+// Driven through `sfn emit llvm` as a subprocess and asserted on the
+// captured `.ll` text. NOTE on matchers: the `sfn/test` `expect_*`
+// matchers are `![pure]` and so cannot be called from an `![io]` test;
+// assert on the IR text with `sfn/strings` predicates instead (#842).
+import { contains, split, ends_with } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit the fixture's LLVM IR and return its text (or "" on failure). The
+// `tag` keeps the per-invocation `.ll` path unique so concurrent tests in
+// the parallel pool never share an output file.
+fn _emit_ir(tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-stringagg-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", "compiler/tests/e2e/fixtures/string_aggregate_shape.sfn"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+// Count lines that contain `a`, also contain `b` (when non-empty), and
+// end with `ends` (when non-empty) — the faithful stand-in for a
+// per-line `grep -cE` over the emitted IR.
+fn _count_match(text: string, a: string, b: string, ends: string) -> int {
+    let lines = split(text, "\n");
+    let mut n = 0;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let l = lines[i];
+        let mut ok = contains(l, a);
+        if ok && b.length > 0 { ok = contains(l, b); }
+        if ok && ends.length > 0 { ok = ends_with(l, ends); }
+        if ok { n += 1; }
+        i += 1;
+    }
+    return n;
+}
+
+fn _count(text: string, needle: string) -> int {
+    return _count_match(text, needle, "", "");
+}
+
+// A1 — Aggregate type appears in the emitted IR.
+test "string-agg: literal lowers to {i8*, i64} aggregate" ![io] {
+    let ir = _emit_ir("a1");
+    assert ir.length > 0;
+    assert _count(ir, "{i8*, i64}") >= 4;
+}
+
+// A2 — Each literal builds the aggregate via an `insertvalue undef, i8*`
+// data slot (4 literals + 1 coercion shim = 5).
+test "string-agg: literal builds aggregate via insertvalue ops" ![io] {
+    let ir = _emit_ir("a2");
+    assert ir.length > 0;
+    assert _count(ir, "= insertvalue {i8*, i64} undef, i8*") == 5;
+}
+
+// A3 — Literal byte length is `i64 5, 1` for both "hello" and "world"
+// (each used twice → 4 length-slot inserts).
+test "string-agg: literal byte-length is i64 N, not N+1" ![io] {
+    let ir = _emit_ir("a3");
+    assert ir.length > 0;
+    assert _count_match(ir, "= insertvalue {i8*, i64} %", ", i64 5, 1", "") == 4;
+}
+
+// A4 — `s.length` resolves to a direct `extractvalue ..., 1` with no
+// `sailfin_runtime_string_length` call.
+test "string-agg: s.length is a direct extractvalue, no string_length call" ![io] {
+    let ir = _emit_ir("a4");
+    assert ir.length > 0;
+    assert _count_match(ir, "= extractvalue {i8*, i64} %", "", ", 1") >= 1;
+    assert _count(ir, "@sailfin_runtime_string_length(") == 0;
+}
+
+// A5 — No consumer extracts the literal as `[N x i8]`.
+test "string-agg: no consumer extracts the literal as [N x i8]" ![io] {
+    let ir = _emit_ir("a5");
+    assert ir.length > 0;
+    assert _count(ir, "extractvalue [") == 0;
+}
+
+// A6 — `+` uses the arena-aware `{i8*, i64}` ABI on the bare canonical
+// `sfn_str_concat` symbol; the transitional `_arena` forwarder, the 2-arg
+// shape, and the legacy `sailfin_runtime_string_concat_v2` entrypoint are
+// all absent.
+test "string-agg: string concat uses {i8*, i64} aggregate ABI" ![io] {
+    let ir = _emit_ir("a6");
+    assert ir.length > 0;
+    assert _count(ir, "declare {i8*, i64} @sfn_str_concat({i8*, i64}, {i8*, i64}, ptr)") == 1;
+    assert _count_match(ir, "call {i8*, i64} @sfn_str_concat(", ", ptr null)", "") >= 1;
+    assert _count_match(ir, "= extractvalue {i8*, i64} %", "", ", 0") >= 1;
+    assert _count(ir, "call i8* @sfn_str_concat(") == 0;
+    assert _count(ir, "@sfn_str_concat_arena(") == 0;
+    assert _count(ir, "call i8* @sailfin_runtime_string_concat_v2(") == 0;
+}

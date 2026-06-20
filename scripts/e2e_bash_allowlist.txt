@@ -16,7 +16,6 @@
 #
 # Format: one bare script basename per line; '#' comments and blank lines ignored.
 
-test_array_aggregate_shape.sh
 test_binary_capsule_walker.sh
 test_build_json_schema.sh
 test_call_emission_no_polling.sh
@@ -85,7 +84,6 @@ test_runtime_string_utf8_numeric.sh
 test_runtime_type_meta.sh
 test_sfn_package.sh
 test_sleep_eintr_resume.sh
-test_string_aggregate_shape.sh
 test_subprocess_emit_clean_env.sh
 test_test_bin_cache.sh
 test_thread_local_lowering.sh
