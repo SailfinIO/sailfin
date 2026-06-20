@@ -88,7 +88,7 @@ kind = "runtime"
 # clash. (#964 deleted the sha256/base64 C sources after #816/#817
 # ported them to the `sfn/crypto` capsule, so they no longer appear
 # here.)
-c-sources = ["src/sailfin_arena.c", "src/sailfin_runtime.c"]
+c-sources = ["src/sailfin_runtime.c"]
 ll-sources = ["ir/runtime_globals.ll"]
 # PR 2 of the sleep migration (issue 397) deleted the C
 # `sfn_sleep` trampoline, so `clock.sfn` is now required at link

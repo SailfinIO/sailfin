@@ -1125,8 +1125,9 @@ ci-cross-windows:
 	done; \
 	\
 	echo "[cross-windows] compiling C runtime..."; \
-	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_arena.c \
-		-o "$$WIN_OBJ/sailfin_arena.o"; \
+	: "#1309: sailfin_arena.c is deleted; the arena is fully Sailfin-owned"; \
+	: "(arena is in RUNTIME_MODS above, so its object carries every sfn_arena_*"; \
+	: "symbol incl. print_stats). Only sailfin_runtime.c remains."; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_runtime.c \
 		-o "$$WIN_OBJ/sailfin_runtime.o"; \
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/native/ir/runtime_globals.ll \
@@ -1148,7 +1149,6 @@ ci-cross-windows:
 	\
 	echo "[cross-windows] linking sailfin.exe..."; \
 	$(MINGW_CC) -static -o "$$WIN_OUT" \
-		"$$WIN_OBJ/sailfin_arena.o" \
 		"$$WIN_OBJ/sailfin_runtime.o" \
 		"$$WIN_OBJ/runtime_globals.o" \
 		"$$WIN_OBJ/windows_stubs.o" \

@@ -99,7 +99,7 @@ kind = "runtime"
 # `./memory/ownedbuf` (#1289): ownedbuf.sfn so string's emit resolves
 # the cross-module struct-returning call, arena.sfn so ownedbuf's
 # `sfn_arena_sfn_*` externs resolve at link.
-c-sources = ["src/sailfin_arena.c", "src/sailfin_runtime.c"]
+c-sources = ["src/sailfin_runtime.c"]
 ll-sources = ["ir/runtime_globals.ll"]
 sfn-sources = ["../sfn/structlib.sfn", "../sfn/structuse.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/io.sfn", "../sfn/memory/arena.sfn", "../sfn/memory/ownedbuf.sfn", "../sfn/string.sfn", "../sfn/array.sfn", "../sfn/memory/mem.sfn"]
 include-dirs = ["include"]

@@ -157,12 +157,11 @@ test_no_bare_sfn_arena_define() {
     # `sfn_arena_enabled` / `sfn_arena_realloc` — is now Sailfin-owned
     # (those C definitions were removed from `sailfin_arena.c`; realloc
     # by #1308), so arena.sfn MUST emit bare `define`s for them (asserted
-    # positively below). The remaining still-C entry points —
-    # `sfn_arena_reset` / `sfn_arena_destroy` (and `print_stats` / `mark`
-    # / `rewind`) — keep their C definitions, so arena.sfn must NOT emit
-    # bare `define`s for those names or `make compile` fails at link with
-    # a duplicate symbol. #822 retires the rest of the C arena and this
-    # split collapses.
+    # positively below). `sfn_arena_reset` / `sfn_arena_destroy` were
+    # deleted entirely in #1309 (zero callers; sailfin_arena.c is gone),
+    # so arena.sfn must NOT bare-define them — a stray bare define would be
+    # a dangling export. (The live reset/mark/rewind path is the
+    # `sfn_arena_sfn_*` family.)
     local found=0
     for sym in sfn_arena_reset sfn_arena_destroy; do
         if grep -qE "^define .* @${sym}\(" "$ll"; then
@@ -668,7 +667,6 @@ int main(void) {
 }
 CHARNESS
 
-    local arena_c="$REPO_ROOT/runtime/native/src/sailfin_arena.c"
     local inc="$REPO_ROOT/runtime/native/include"
     local arena_obj="$SCRATCH/arena_ll.o"
     local bin="$SCRATCH/asan_roundtrip"
@@ -684,11 +682,13 @@ CHARNESS
         cat "$log"
         return 1
     fi
-    # ASAN-instrument the C harness + the still-C arena; link the plain
-    # Sailfin object. SAILFIN_MEM_LIMIT=unlimited so the linked binary's
-    # own self-cap does not abort the shadow reservation.
+    # ASAN-instrument the C harness; link the plain Sailfin arena object
+    # (#1309: sailfin_arena.c is deleted — realloc/print_stats are in
+    # arena.ll now, so the harness exercises the C harness reads against the
+    # Sailfin-defined arena). SAILFIN_MEM_LIMIT=unlimited so the linked
+    # binary's own self-cap does not abort the shadow reservation.
     if ! "$clang_bin" -fsanitize=address -Wno-override-module \
-        -I"$inc" "$harness" "$arena_c" "$arena_obj" -o "$bin" -lm 2>"$log"; then
+        -I"$inc" "$harness" "$arena_obj" -o "$bin" -lm 2>"$log"; then
         echo "[test]   clang failed to build ASAN harness:"
         cat "$log"
         return 1

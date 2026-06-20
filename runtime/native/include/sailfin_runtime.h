@@ -405,20 +405,12 @@ extern "C"
     bool sailfin_adapter_fs_is_executable(void *path);
     bool sailfin_adapter_fs_symlink(void *target, void *link);
 
-    // Arena mark/rewind. Phase 5a (`docs/proposals/phase-5a-arena-reset.md`)
-    // exposes the existing bump-allocator's mark/rewind primitive to
-    // Sailfin code so in-process multi-module tools (`sfn check`,
-    // `sfn test`'s test-discovery loop) can reclaim per-iteration
-    // scratch allocations without invalidating cross-iteration state.
-    //
-    // The mark is encoded as a Sailfin `number` (double-precision
-    // float; 53-bit mantissa holds any integer ≤ 2^53). Encoding:
-    // page_index * 2^32 + used. When the arena is disabled
-    // (SAILFIN_USE_ARENA unset) both functions are no-ops and the
-    // encoded mark is 0; the rewind side accepts any value without
-    // crashing.
-    double sailfin_intrinsic_runtime_arena_mark(void);
-    void sailfin_intrinsic_runtime_arena_rewind(double encoded_mark);
+    // Arena mark/rewind: #1309 retired the C
+    // `sailfin_intrinsic_runtime_arena_mark` / `…_rewind` wrappers.
+    // Emitted code routes those intrinsic targets to the Sailfin
+    // `sfn_arena_sfn_mark` / `sfn_arena_sfn_rewind` exports via the
+    // runtime-helper registry, so no C prototype is needed. See
+    // `runtime/sfn/memory/arena.sfn`.
 
     // HTTP adapter stubs.
     void *sailfin_adapter_http_get(void *request);

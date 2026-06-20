@@ -57,39 +57,17 @@ extern "C"
      */
     SfnArena *sfn_arena_create(size_t default_page_size);
 
-    /* Reset all pages to used=0. Does NOT free backing pages. */
-    void sfn_arena_reset(SfnArena *arena);
-
-    /* Free all backing pages and the arena struct itself. */
-    void sfn_arena_destroy(SfnArena *arena);
-
-    /* ---------- Mark / rewind ---------- */
     /*
-     * Stack-discipline checkpoint into the arena. Phase 5a (see
-     * `docs/proposals/phase-5a-arena-reset.md`) ships these so
-     * in-process multi-module tools (`sfn check`, `sfn test`) can
-     * reclaim per-iteration scratch without invalidating allocations
-     * made before the loop.
-     *
-     * `sfn_arena_mark` snapshots the current page + used offset.
-     * `sfn_arena_rewind` walks pages back to the snapshot and zeros
-     * `used` on every page strictly after the marked page; the
-     * marked page itself rewinds to its snapshot offset. Pages
-     * allocated since the mark stay attached to the arena for reuse
-     * on the next allocation burst.
-     *
-     * Mark/rewind is strictly LIFO. Caller is responsible for not
-     * holding pointers to memory above the rewind target — same
-     * contract as `sfn_arena_reset`.
+     * #1309: `sfn_arena_reset` / `sfn_arena_destroy`, the
+     * struct-returning `sfn_arena_mark` / `sfn_arena_rewind`, the
+     * `SfnArenaMark` typedef, and `sfn_arena_print_stats` are retired.
+     * `reset`/`destroy` had no callers; the live mark/rewind +
+     * print-stats paths are the Sailfin `sfn_arena_sfn_mark` /
+     * `sfn_arena_sfn_rewind` / `sfn_arena_sfn_print_stats` exports in
+     * `runtime/sfn/memory/arena.sfn`. The bare `sfn_arena_print_stats`
+     * the C atexit telemetry caller binds to is now a Sailfin export,
+     * so no prototype lives here.
      */
-    typedef struct SfnArenaMark
-    {
-        SfnArenaPage *page; /* Page that was current at mark time */
-        size_t used;        /* Used offset on that page at mark time */
-    } SfnArenaMark;
-
-    SfnArenaMark sfn_arena_mark(SfnArena *arena);
-    void sfn_arena_rewind(SfnArena *arena, SfnArenaMark mark);
 
     /* ---------- Allocation ---------- */
 
@@ -134,7 +112,16 @@ extern "C"
     /* Get the process-global arena (lazily created on first call). */
     SfnArena *sfn_arena_global(void);
 
-    /* Print arena statistics to stderr. */
+    /*
+     * Print arena statistics to stderr.
+     *
+     * #1309: defined in runtime/sfn/memory/arena.sfn (the bare Sailfin
+     * `sfn_arena_print_stats` export forwards to
+     * `sfn_arena_sfn_print_stats`). This prototype stays so the
+     * C-runtime atexit telemetry caller (sailfin_runtime.c) binds to
+     * the Sailfin definition by name; sailfin_arena.c no longer defines
+     * it.
+     */
     void sfn_arena_print_stats(SfnArena *arena);
 
 #ifdef __cplusplus
