@@ -1076,9 +1076,11 @@ ci-cross-windows:
 	: "ci-cross-windows itself (was staged by 'make rebuild', deleted"; \
 	: "in #941). RUNTIME_MODS is this bridge's copy of"; \
 	: "runtime/native/capsule.toml's sfn-sources (+ the prelude-entry),"; \
-	: "MINUS process.sfn — Windows resolves @sfn_process_run from the"; \
-	: "_WIN32 C wrapper in sailfin_runtime.c, so linking the Sailfin"; \
-	: "object too would duplicate the symbol — and MINUS"; \
+	: "MINUS process.sfn (its posix_spawnp/waitpid libc externs do not"; \
+	: "exist under mingw) PLUS process_windows.sfn in its place — the"; \
+	: "module split (#822/#1308) that owns the Windows @sfn_process_*"; \
+	: "family (real CreateProcessA run/exit, degraded rest) now that the"; \
+	: "_WIN32 C wrapper in sailfin_runtime.c is DELETED — and MINUS"; \
 	: "platform/rlimit.sfn, whose getrlimit/setrlimit libc externs do"; \
 	: "not exist under mingw; Windows resolves @apply_default_mem_limit"; \
 	: "from the strong no-op stub in runtime/native/ir/windows_stubs.ll"; \
@@ -1092,7 +1094,7 @@ ci-cross-windows:
 	: "readlink reference once the MinGW stub is gone; Windows selects the"; \
 	: "GetModuleFileNameA leg instead. The rest are target-independent IR"; \
 	: "compiled for mingw. Each <module>:<source> pair is space-separated."; \
-	RUNTIME_MODS="prelude:runtime/prelude.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn ownedbuf:runtime/sfn/memory/ownedbuf.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn"; \
+	RUNTIME_MODS="prelude:runtime/prelude.sfn arena:runtime/sfn/memory/arena.sfn rc:runtime/sfn/memory/rc.sfn mem:runtime/sfn/memory/mem.sfn ownedbuf:runtime/sfn/memory/ownedbuf.sfn string:runtime/sfn/string.sfn array:runtime/sfn/array.sfn clock:runtime/sfn/clock.sfn io:runtime/sfn/io.sfn exception:runtime/sfn/exception.sfn type_meta:runtime/sfn/type_meta.sfn exec:runtime/sfn/platform/exec.sfn filesystem:runtime/sfn/adapters/filesystem.sfn http:runtime/sfn/adapters/http.sfn process_windows:runtime/sfn/platform/process_windows.sfn"; \
 	RUNTIME_OBJS=""; \
 	for pair in $$RUNTIME_MODS; do \
 		mod="$${pair%%:*}"; \
@@ -1124,12 +1126,11 @@ ci-cross-windows:
 		RUNTIME_OBJS="$$RUNTIME_OBJS $$obj"; \
 	done; \
 	\
-	echo "[cross-windows] compiling C runtime..."; \
-	: "#1309: sailfin_arena.c is deleted; the arena is fully Sailfin-owned"; \
-	: "(arena is in RUNTIME_MODS above, so its object carries every sfn_arena_*"; \
-	: "symbol incl. print_stats). Only sailfin_runtime.c remains."; \
-	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_runtime.c \
-		-o "$$WIN_OBJ/sailfin_runtime.o"; \
+	echo "[cross-windows] compiling runtime globals (last non-Sailfin object)..."; \
+	: "#822 / #1308: sailfin_runtime.c is DELETED — the runtime is fully"; \
+	: "Sailfin-owned. The Windows @sfn_process_* family now comes from"; \
+	: "process_windows.sfn (in RUNTIME_MODS above); shell_capture from io.sfn."; \
+	: "Only the runtime_globals.ll data object remains (no C left)."; \
 	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/native/ir/runtime_globals.ll \
 		-o "$$WIN_OBJ/runtime_globals.o"; \
 	: "Windows-only strong stubs for symbols whose Sailfin modules are"; \
@@ -1149,7 +1150,6 @@ ci-cross-windows:
 	\
 	echo "[cross-windows] linking sailfin.exe..."; \
 	$(MINGW_CC) -static -o "$$WIN_OUT" \
-		"$$WIN_OBJ/sailfin_runtime.o" \
 		"$$WIN_OBJ/runtime_globals.o" \
 		"$$WIN_OBJ/windows_stubs.o" \
 		"$$WIN_OBJ/native.linked.o" \

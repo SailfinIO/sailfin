@@ -43,3 +43,40 @@ define i32 @apply_default_mem_limit() {
 define void @sailfin_runtime_serve(i8* %handler, i8* %config) {
   ret void
 }
+
+; POSIX `realpath` (#822 / #1308): mingw-w64 does not ship it, and the
+; retired `sailfin_runtime.c` provided a `_WIN32` shim forwarding to
+; `_fullpath`. `runtime/sfn/platform/exec.sfn::exe_path` /
+; `resolve_runtime_root` call `realpath` on every startup to canonicalize
+; the binary path, so a working body is load-bearing on Windows (a broken
+; one means the compiler cannot locate its runtime root). The Sailfin
+; callers pass NULL for `resolved`, so `_fullpath` mallocs the buffer.
+; This stub is cross-windows-only; Linux/macOS resolve `realpath` from
+; libc. Sync pinned by test_cross_windows_runtime_modules.sh.
+declare i8* @_fullpath(i8* %resolved, i8* %path, i32 %maxlen)
+define i8* @realpath(i8* %path, i8* %resolved) {
+  %r = call i8* @_fullpath(i8* %resolved, i8* %path, i32 260)
+  ret i8* %r
+}
+
+; Assertion-failure handlers (#822 / #1308). On Linux/macOS the compiler's
+; whole-program link emits `@runtime_assert_fail_fn` /
+; `@sailfin_assert_fail` from the `runtime.assert_fail` builtin (used by
+; `runtime/prelude.sfn`); the standalone cross-windows module emit does
+; not, and the retired `sailfin_runtime.c` was their Windows provider.
+; A failed assertion is a compiler bug, so terminating via `abort()` is
+; the correct terminal behavior — the byte-for-byte Windows diagnostic
+; message (file:line:col) is a post-1.0 follow-up (the cross-windows
+; bridge is degraded for several such debug surfaces). These stubs are
+; cross-windows-only; Linux/macOS keep the real bodies. Signatures match
+; the emitted call sites (`runtime_assert_fail_fn` takes Sailfin `number`
+; = `double` line/col; `sailfin_assert_fail` takes `i64`).
+declare void @abort()
+define void @runtime_assert_fail_fn(i8* %file, double %line, double %col, i8* %msg) {
+  call void @abort()
+  unreachable
+}
+define void @sailfin_assert_fail(i8* %file, i64 %line, i64 %col, i8* %msg) {
+  call void @abort()
+  unreachable
+}

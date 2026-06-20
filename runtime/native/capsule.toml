@@ -30,7 +30,7 @@ kind = "runtime"
 # reformatting here would silently make every getter return `[]`
 # and the resolver would surface zero artifacts. A regression test
 # against this exact manifest text guards the format.
-c-sources = ["src/sailfin_runtime.c"]
+c-sources = []
 ll-sources = ["ir/runtime_globals.ll"]
 # `sfn-sources` lists Sailfin runtime modules compiled and
 # linked alongside the C sources above. M2.1 (#394) populates

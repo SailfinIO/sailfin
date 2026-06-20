@@ -104,6 +104,25 @@ extern fn getenv(name: * u8) -> * u8;
 // (#822 / #1136).
 extern fn sfn_str_from_codepoint(cp: i64) -> * u8;
 
+// libc surface for `sailfin_runtime_shell_capture` (popen-based command
+// capture). `popen`/`pclose`/`fread` are provided by glibc on
+// Linux/macOS and by mingw's msvcrt on Windows, so this body links on
+// every target io.sfn is compiled for (it is in both
+// `runtime/native/capsule.toml` and the cross-windows RUNTIME_MODS).
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn realloc(ptr: * u8, size: usize) -> * u8;
+
+extern fn memset(ptr: * u8, value: i32, n: usize) -> * u8;
+
+extern fn popen(cmd: * u8, mode: * u8) -> * u8;
+
+extern fn pclose(fp: * u8) -> i32;
+
+extern fn fread(ptr: * u8, size: usize, nmemb: usize, fp: * u8) -> i64;
+
 // stdout / stderr file descriptors — the `write(2)` targets for the
 // print family. Matches the C `_print_line` stream routing: raw/info to
 // stdout (fd 1), err/warn/error to stderr (fd 2).
@@ -273,6 +292,59 @@ fn sailfin_runtime_panic_emit(msg: * u8) -> void ![io] {
     _sfn_write_all(2, msg, strlen(msg) as i64);
     let nl: string = "\n";
     _sfn_write_all(2, nl as * u8, 1);
+}
+
+// `_sfn_shell_empty()` — a fresh 1-byte NUL-terminated buffer, the empty
+// string the C `sailfin_runtime_shell_capture` returned on any failure
+// path (its callers — `_shell_read_cmd` / `_cr_shell_read` — treat the
+// result as a `string` and immediately iterate, so a null would crash).
+fn _sfn_shell_empty() -> * u8 {
+    let p: * u8 = malloc(1 as usize);
+    if p as i64 == 0 { return p; }
+    memset(p, 0, 1 as usize);
+    return p;
+}
+
+// `sailfin_runtime_shell_capture(cmd)` — run `cmd` through `popen` and
+// return its captured stdout as a fresh NUL-terminated buffer. Bare
+// link-ownership flip (#822 / #1308 — the 4th and final Linux residual):
+// the C body (`_popen_read_all` + the `_rt_calloc` copy) is retired and
+// `sailfin_runtime.c` deleted. The 3 compiler call sites
+// (`emit_helpers`/`capsule_resolver`/`cli_commands_utils`) keep their
+// `extern fn sailfin_runtime_shell_capture` and bind here. Faithful port:
+// `popen(cmd,"r")`, read in growing chunks, NUL-terminate. Returns a
+// fresh empty string (never null) on any failure.
+fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8 ![io] {
+    if (cmd as i64) == 0 { return _sfn_shell_empty(); }
+    let mode: string = "r";
+    let fp: * u8 = popen(cmd, mode as * u8);
+    if (fp as i64) == 0 { return _sfn_shell_empty(); }
+
+    let mut cap: i64 = 4096;
+    let mut len: i64 = 0;
+    let mut buf: * u8 = malloc(cap as usize);
+    if (buf as i64) == 0 {
+        let _ = pclose(fp);
+        return _sfn_shell_empty();
+    }
+    loop {
+        let want: i64 = cap - len - 1;
+        if want <= 0 { break; }
+        let n: i64 = fread((buf as i64 + len) as * u8, 1 as usize, want as usize, fp);
+        if n <= 0 { break; }
+        len = len + n;
+        if len + 1 >= cap {
+            cap = cap * 2;
+            let tmp: * u8 = realloc(buf, cap as usize);
+            if (tmp as i64) == 0 { break; }
+            buf = tmp;
+        }
+    }
+    let _ = pclose(fp);
+    // NUL-terminate at buf[len] via `memset` (exactly one byte — a
+    // word-RMW byte store could over-read past the allocation tail).
+    memset((buf as i64 + len) as * u8, 0, 1 as usize);
+    return buf;
 }
 
 // `_sfn_decode_immediate_name(data)` — decode a legacy immediate-codepoint
