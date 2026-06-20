@@ -6,18 +6,10 @@
 ; i8**`; the single strong definition now comes from the Sailfin runtime
 ; object linked via `sfn-sources`.
 
-; `@sfn_default_arena` (#822 / #1308) — the IR-visible default-arena slot.
-; The compiler SOURCE no longer emits references to it (#1428 switched the
-; arena operand to a literal `null`), but the pinned macOS-arm64 seed
-; binary still emits load-from-`@sfn_default_arena` references in some
-; modules (typecheck / num_format / parser / effect_gate); the linux-x86_64
-; seed does not. The deleted `sailfin_runtime.c` was their provider
-; (`SfnArray *sfn_default_arena = NULL;`). Re-provide the global here so the
-; macOS link resolves. A `null` value is correct, not just link-satisfying:
-; the runtime threads this slot through `string.sfn::_sfn_resolve_arena`,
-; which returns `sfn_arena_global()` whenever the slot's handle is 0 — so a
-; null slot resolves to the real global arena on every path, identical to
-; #1428's direct-`null` emission. Linked on all targets; unreferenced and
-; harmless where the seed does not emit it. Retires once the seed is bumped
-; past the #1428 propagation (drop this global then).
-@sfn_default_arena = global i8* null
+; `@sfn_default_arena` (#822 / #1308 / #1437) retired. The transitional
+; `null` global only existed to satisfy a pre-#1428 macOS-arm64 seed whose
+; emitter still produced load-from-`@sfn_default_arena` references. The
+; pinned seed (v0.7.0-alpha.44) is built post-#1428 on every platform — its
+; emitter threads `ptr null` directly (resolved by
+; `string.sfn::_sfn_resolve_arena` to the real global arena), so no seed
+; references the symbol anymore and the global is gone.
