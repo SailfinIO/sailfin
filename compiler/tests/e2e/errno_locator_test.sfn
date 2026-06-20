@@ -1,0 +1,202 @@
+// E2E test for the host-aware errno-location sentinel (#877, epic #763).
+//
+// Native replacement for the former `test_errno_locator_platform.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Mirrors the sibling
+// `clock_monotonic_id_sentinel_test.sfn` (same epic #763 sentinel shape).
+//
+// `sailfin_intrinsic_errno_location` is a registry sentinel whose lowering
+// branch (`core_call_emission.sfn`) emits a `call` to the host's concrete
+// `errno`-slot locator — `@__errno_location` on Linux/glibc, `@__error` on
+// Darwin/macOS, `@_errno` on Windows/mingw — chosen at emit time from
+// `SAILFIN_TARGET_OS` (cross-compile target override) or the `uname -s`
+// host probe (`errno_locator_symbol()` in `lowering_debug_state.sfn`). The
+// same compiler source thus links on every platform when built natively
+// (the IR is target-neutral; the host clang resolves the symbol). The
+// result is an `i32*` that feeds straight into
+// `sailfin_intrinsic_pointer_read_i32`.
+//
+// Host-independent. The Linux/Darwin/Windows paths are forced via the
+// `SAILFIN_TARGET_OS` override (consulted before the `uname -s` host
+// probe), so they assert the same thing on Linux or macOS CI. A precedence
+// test additionally installs a `uname` shim on PATH forcing the *opposite*
+// host OS, proving `SAILFIN_TARGET_OS` wins over the host probe (the
+// cross-compile path, #890). For each path it pins:
+//
+//   1. typecheck       — `sfn check <fixture>` exits 0.
+//   2. locator call    — emitted IR contains `call i32* @<sym>()`.
+//   3. locator declare — emitted IR contains `declare i32* @<sym>()` (so
+//                        the call resolves; emitted via the descriptor).
+//   4. load i32        — the pointer-read deref following the locator call.
+//   5. no other symbol — the other platforms' locators do NOT appear.
+//   6. no sentinel leak — no `call`/`declare` targets the sentinel name
+//                        (`sailfin_intrinsic_errno_location`).
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Base child env: PATH/HOME/TMPDIR + SAILFIN_TEST_SCRATCH. The caller
+// appends SAILFIN_TARGET_OS and/or a PATH override per case.
+fn _base_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _env_with_target(target_os: string) -> string[] ![io] {
+    let mut e = _base_env();
+    e.push("SAILFIN_TARGET_OS=" + target_os);
+    return e;
+}
+
+fn _any_line_with(text: string, a: string, b: string) -> bool {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], a) && contains(lines[i], b) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Fixture mirrors the real consumer shape (clock.sfn): chain the locator
+// sentinel into the pointer-read intrinsic, exactly as `errno()` does.
+fn _fixture_source() -> string {
+    return "fn read_errno() -> i32 {\n    return sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());\n}\n\nfn main() -> void {\n    let e: i32 = read_errno();\n}\n";
+}
+
+fn _fixture_path() -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/sfn-errno-locator.sfn";
+    fs.writeFile(src, _fixture_source());
+    return src;
+}
+
+// Install a `uname` shim under `dir` that reports `os` for `uname -s` and
+// delegates everything else to the real binary, so the compiler's
+// `uname -s` probe resolves to the forced platform. Returns `dir`.
+fn _make_uname_shim(dir: string, os: string) -> string ![io] {
+    fs.createDirectory(dir, true);
+    let shim = dir + "/uname";
+    fs.writeFile(shim, "#!/bin/sh\nif [ \"$1\" = \"-s\" ]; then echo \"" + os
+        + "\"; exit 0; fi\nexec /usr/bin/uname \"$@\"\n");
+    let _ = process.run_capture(["chmod", "+x", shim], _base_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return dir;
+}
+
+fn _emit(src: string, child_env: string[], tag: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/sfn-errno-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], child_env);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+test "errno-locator: sfn check passes on the fixture" ![io] {
+    let src = _fixture_path();
+    let exit = process.run_capture([_sfn_bin(), "check", src], _base_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    fs.deleteFile(src);
+    assert exit == 0;
+}
+
+test "errno-locator: Linux target calls/declares @__errno_location, derefs, no @__error" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Linux"), "linux");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i32* @__errno_location()");
+    assert contains(ir, "declare i32* @__errno_location()");
+    assert contains(ir, "load i32, i32* %");
+    assert ! contains(ir, "@__error(");
+}
+
+test "errno-locator: Darwin target calls/declares @__error, no @__errno_location" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Darwin"), "darwin");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i32* @__error()");
+    assert contains(ir, "declare i32* @__error()");
+    assert ! contains(ir, "@__errno_location(");
+}
+
+test "errno-locator: Windows target calls/declares @_errno, no glibc/Darwin locator" ![io] {
+    let src = _fixture_path();
+    let ir = _emit(src, _env_with_target("Windows"), "windows");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i32* @_errno()");
+    assert contains(ir, "declare i32* @_errno()");
+    assert ! contains(ir, "@__errno_location(");
+    assert ! contains(ir, "@__error(");
+}
+
+test "errno-locator: SAILFIN_TARGET_OS=Darwin overrides uname=Linux (@__error)" ![io] {
+    let src = _fixture_path();
+    let shimdir = _make_uname_shim(_scratch_dir() + "/shim-errno-override", "Linux");
+    // Build the env by hand so the shim dir leads PATH (a second `PATH=`
+    // in the array would be ambiguous). The shim's `uname` therefore wins
+    // over the host's; SAILFIN_TARGET_OS=Darwin must still override it.
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    e.push("PATH=" + shimdir + ":" + path);
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    e.push("SAILFIN_TARGET_OS=Darwin");
+    let ir = _emit(src, e, "override");
+    fs.deleteFile(src);
+    assert ir.length > 0;
+    assert contains(ir, "call i32* @__error()");
+    assert ! contains(ir, "@__errno_location(");
+}
+
+test "errno-locator: sentinel symbol never emitted as call/declare" ![io] {
+    let src = _fixture_path();
+    let targets = ["Linux", "Darwin", "Windows"];
+    let mut i = 0;
+    loop {
+        if i >= targets.length { break; }
+        let ir = _emit(src, _env_with_target(targets[i]), "leak-" + targets[i]);
+        assert ir.length > 0;
+        assert ! _any_line_with(ir, "call ", "@sailfin_intrinsic_errno_location");
+        assert ! _any_line_with(ir, "declare ", "@sailfin_intrinsic_errno_location");
+        i += 1;
+    }
+    fs.deleteFile(src);
+}

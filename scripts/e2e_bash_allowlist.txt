@@ -37,9 +37,7 @@ test_cross_module_signature_resolution.sh
 test_cross_windows_runtime_modules.sh
 test_effect_gate_build_path.sh
 test_effect_gate_build_path_entry.sh
-test_errno_locator_platform.sh
 test_escape_promotion_boundaries.sh
-test_exe_path_intrinsic_platform.sh
 test_exe_path_reader.sh
 test_fn_reference_pthread.sh
 test_lifecycle_hook_ordering.sh
