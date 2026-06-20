@@ -35,9 +35,6 @@ test_compiler_debug_toggle_env_vars.sh
 test_cross_module_int_signature.sh
 test_cross_module_signature_resolution.sh
 test_cross_windows_runtime_modules.sh
-test_drop_emission_escape_promotion.sh
-test_drop_emission_mid_exit.sh
-test_drop_emission_try_catch.sh
 test_effect_gate_build_path.sh
 test_effect_gate_build_path_entry.sh
 test_errno_locator_platform.sh
