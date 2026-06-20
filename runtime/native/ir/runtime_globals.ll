@@ -1,8 +1,10 @@
-; Native definition for the Stage2 external @runtime global.
-; The stage2 IR declares `@runtime = external global i8**`.
-; Defining it as an `i8*` global yields an `i8**`-typed symbol.
-
-@runtime = global i8* null
+; `@runtime` (#1436) is no longer defined here — it moved to a
+; Sailfin-emitted object (`runtime/sfn/runtime_globals.sfn`, via the
+; `extern var NAME: T = init` defining-global primitive #1440, with the
+; redundant `external` declaration suppressed in the defining module by
+; #1445). Every emitted module still declares `@runtime = external global
+; i8**`; the single strong definition now comes from the Sailfin runtime
+; object linked via `sfn-sources`.
 
 ; `@sfn_default_arena` (#822 / #1308) — the IR-visible default-arena slot.
 ; The compiler SOURCE no longer emits references to it (#1428 switched the

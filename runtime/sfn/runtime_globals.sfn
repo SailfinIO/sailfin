@@ -1,0 +1,36 @@
+// runtime/sfn/runtime_globals.sfn
+//
+// Sailfin-owned definitions of the process-wide runtime globals that the
+// hand-written `runtime/native/ir/*.ll` link-glue used to provide. This is
+// the Sailfin replacement for the `@runtime` slot in
+// `runtime/native/ir/runtime_globals.ll` — part of epic #1308 / the
+// unfinished tail of #822 (whose acceptance, `find runtime/native -name
+// '*.ll'` empty, is the keystone for deleting `runtime/native/` entirely).
+//
+// `@runtime` (#1436) — the process runtime-context slot. Every emitted
+// module declares it `@runtime = external global i8**` and member-access
+// lowering loads through it (`core_member_lowering.sfn` →
+// `lower_runtime_global_reference`: `load i8*, i8** @runtime`). Exactly one
+// object must *define* the symbol; the rest keep the `external`
+// declaration. This module is that definer.
+//
+// The defining-global primitive `extern var NAME: TYPE = INIT;` (#1440)
+// emits `@runtime = global i8* null` — byte-identical to the definition the
+// retired `.ll` line carried (`* u8` lowers to `i8*`; a `null` pointer is
+// the only constant a pointer global can take, and it is the correct
+// initial value: the runtime threads this slot and resolves it lazily).
+// The compiler suppresses the redundant `@runtime = external global i8**`
+// preamble declaration in whichever module also defines the symbol
+// (#1445, `lowering_phase_render.sfn` / `lowering_core.sfn`), so this module
+// emits the definition alone and every other module keeps the reference.
+//
+// Universality: this module is listed in `runtime/native/capsule.toml`'s
+// `sfn-sources`, so its object is linked into every Sailfin program
+// alongside the rest of the native runtime — the same unconditional reach
+// the `.ll` had. No Sailfin code references the `runtime` binding (the
+// `@runtime` consumer is a compiler-internal lowering path, not a
+// source-level identifier), so naming it `runtime` here does not shadow
+// the `runtime.*` builtin namespace in any caller.
+//
+// Effects: none. This is a pure data definition below the I/O layer.
+extern var runtime: * u8 = null;
