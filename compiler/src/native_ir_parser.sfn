@@ -180,7 +180,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
             if include_top_level_bindings {
                 let parsed = parse_binding_components(trim_text(strip_prefix(line, ".extern-var ")));
                 bindings.push(NativeBinding {
-                    name: parsed.name, mutable: false, is_thread_local: false, is_extern: true, type_annotation: parsed.type_annotation, value: null
+                    name: parsed.name, mutable: false, is_thread_local: false, is_extern: true, type_annotation: parsed.type_annotation, value: parsed.value
                 });
             }
             index += 1;

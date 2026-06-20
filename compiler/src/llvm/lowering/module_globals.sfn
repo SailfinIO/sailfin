@@ -80,6 +80,44 @@ fn _strip_string_quotes(s: string) -> string {
     return s;
 }
 
+// Render the constant LLVM initializer for a defining `extern var`
+// (`extern var NAME: TYPE = INIT;`). A defining global must carry a
+// compile-time constant, so only literal forms are honored; anything else
+// falls back to the type's zero/null default rather than emitting an
+// invalid runtime expression as a global initializer. Pointer types take
+// `null` (the only constant pointer), matching the runtime-global slots
+// this primitive replaces (e.g. `@runtime = global i8* null`, #1436).
+fn _extern_definition_initializer(llvm_type: string, value: string?) -> string {
+    if value == null { return default_return_literal(llvm_type); }
+    let init_expr = trim_text(value);
+    let mut is_pointer: boolean = false;
+    if llvm_type.length > 0 {
+        if llvm_type[llvm_type.length - 1] == "*" { is_pointer = true; }
+    }
+    if is_pointer {
+        if init_expr == "null" { return "null"; }
+        return default_return_literal(llvm_type);
+    }
+    if llvm_type == "double" {
+        if is_number_literal(init_expr) {
+            return normalise_number_literal(init_expr);
+        }
+    }
+    if llvm_type == "i64" {
+        if is_integer_literal(init_expr) { return init_expr; }
+    }
+    if llvm_type == "i32" {
+        if is_integer_literal(init_expr) { return init_expr; }
+    }
+    if llvm_type == "i1" {
+        if is_boolean_literal(init_expr) {
+            if matches_case_insensitive(init_expr, "true") { return "1"; }
+            return "0";
+        }
+    }
+    return default_return_literal(llvm_type);
+}
+
 // Process a single module binding and return its lowered preamble lines,
 // a zero-or-one-element locals array, and whether it needs runtime init.
 fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: string) -> BindingLoweringResult {
@@ -118,7 +156,21 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
     if binding.is_extern {
         let extern_symbol = "@" + sanitize_symbol(name);
         let mut extern_preamble: string[] = [];
-        extern_preamble.push(extern_symbol + " = external global " + llvm_type);
+        // With an initializer the `extern var` *defines* the C-ABI symbol
+        // (`@NAME = global <ty> <init>`, strong external linkage, verbatim
+        // name) so a Sailfin object can own a runtime global that one of the
+        // hand-written `runtime/native/ir/*.ll` files used to define (#1436);
+        // exactly one module may carry the initializer or the link fails with
+        // a duplicate symbol (the C-tentative-definition contract). Without
+        // one it stays an `external global` reference (#1313).
+        if binding.value != null {
+            let init_literal = _extern_definition_initializer(llvm_type, binding.value);
+            extern_preamble.push(extern_symbol + " = global " + llvm_type + " "
+                + init_literal);
+        } else {
+            extern_preamble.push(extern_symbol + " = external global "
+                + llvm_type);
+        }
         let extern_local = LocalBinding {
             name: name,
             pointer: extern_symbol,

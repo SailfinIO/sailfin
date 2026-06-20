@@ -44,3 +44,31 @@ test "parser: `extern fn` still dispatches to a function declaration" ![io] {
     assert program.statements.length == 1;
     assert program.statements[0].variant == "ExternFunctionDeclaration";
 }
+
+// Defining-global primitive (#1436): an initializer turns the reference
+// declaration into a strong definition of the C-ABI symbol.
+test "parser: a bare extern var has no initializer" ![io] {
+    let program = parse_program("extern var errno: i32;");
+    let stmt = program.statements[0];
+    assert stmt.variant == "ExternVarDeclaration";
+    assert stmt.init_value == null;
+}
+
+test "parser: `extern var NAME: TYPE = null;` captures the initializer" ![io] {
+    let program = parse_program("extern var runtime: * u8 = null;");
+    assert program.statements.length == 1;
+    let stmt = program.statements[0];
+    assert stmt.variant == "ExternVarDeclaration";
+    assert stmt.name == "runtime";
+    assert stmt.init_value != null;
+    assert stmt.init_value == "null";
+    assert _contains(stmt.type_annotation.text, "u8");
+}
+
+test "parser: a defining extern var with an integer initializer" ![io] {
+    let program = parse_program("extern var counter: i64 = 0;");
+    let stmt = program.statements[0];
+    assert stmt.variant == "ExternVarDeclaration";
+    assert stmt.name == "counter";
+    assert stmt.init_value == "0";
+}

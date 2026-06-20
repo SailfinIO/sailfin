@@ -279,6 +279,14 @@ enum Statement {
         type_annotation: TypeAnnotation;
         name_span: SourceSpan?;
         decorators: Decorator[];
+        // Defining-global initializer for `extern var NAME: T = init;`
+        // (#1436); null for a bare reference declaration (#1313). Named
+        // `init_value`, NOT `initializer`, deliberately: `VariableDeclaration`
+        // already has a field `initializer: Expression?`, and a same-named
+        // field with a *different* type on another `Statement` variant makes
+        // enum member-access type resolution mis-infer `statement.initializer`
+        // (it resolved to the default `double`, miscompiling unrelated passes).
+        init_value: string?;
     },
     StructDeclaration {
         name: string;
