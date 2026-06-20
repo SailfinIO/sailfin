@@ -1,0 +1,91 @@
+// End-to-end test for `sfn check` effect-violation call-site carets.
+//
+// B1 (Track B in docs/proposals/check-architecture.md) plumbs source
+// spans through `Expression.Identifier` and `Expression.Member` so the
+// effect checker can attribute violations to the offending call site
+// rather than the function declaration. This test exercises the full
+// parse → typecheck → effect-check → render pipeline against a fixture
+// whose function declaration is far enough above the offending call
+// that confusing the two would be obvious in `--> file:line:column`
+// output.
+//
+// Native replacement for the former `test_check_effect_call_site_caret.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). `sfn check` is a
+// frontend-only pass (no link), so the child is spawned with an empty
+// environment, mirroring `sfn/test`'s own `assert_compiles`.
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
+// an `![io]` test (#842).
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `noisy_helper` is declared at line 4, but the offending `print.info`
+// is at line 8. Pre-B1 the diagnostic would caret at line 4; post-B1
+// it must caret at line 8 (the `print` namespace).
+fn _fixture_source() -> string {
+    return "// 1\n" + "// 2\n" + "// 3\n"
+        + "fn noisy_helper(x: number) -> number {\n"
+        + "    let mut total: number = 0;\n"
+        + "    let other: number = 0;\n"
+        + "    total = total + x;\n"
+        + "    print.info(\"recording\");\n"
+        + "    return total + other;\n"
+        + "}\n"
+        + "\n"
+        + "fn main() {\n"
+        + "    let _ = noisy_helper(1);\n"
+        + "}\n"
+        + "\n"
+        + "export { noisy_helper };\n";
+}
+
+// Write the fixture under a fresh temp dir and run `sfn check` over it,
+// returning the combined stdout+stderr. The diagnostic renderer writes
+// to stderr; combining keeps the assertions agnostic to the stream.
+struct _CheckRun {
+    exit: int;
+    output: string;
+    path: string;
+}
+
+fn _run_check() -> _CheckRun ![io] {
+    let dir = fs.mkdtemp("sfn-check-callsite-");
+    let path = dir + "/leak.sfn";
+    fs.writeFile(path, _fixture_source());
+    let exit = process.run_capture([_sfn_bin(), "check", path], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(path);
+    fs.removeDirectory(dir);
+    return _CheckRun { exit: exit, output: out + err, path: path };
+}
+
+// ---- Test 1: sfn check fires E0400 on the missing ![io] ----
+test "check call-site caret: fires E0400 on missing ![io]" ![io] {
+    let r = _run_check();
+    // Diagnostics found → exit code 1.
+    assert r.exit == 1;
+    assert find(r.output, "E0400", 0) >= 0;
+}
+
+// ---- Test 2: caret lands on the call site (line 8), not the declaration ----
+test "check call-site caret: E0400 carets at the print.info call (line 8)" ![io] {
+    let r = _run_check();
+    // The renderer emits `--> <file>:<line>:<column>`. After B1, the
+    // E0400 violation should reference line 8 (`print.info(...)`).
+    assert find(r.output, "leak.sfn:8:", 0) >= 0;
+}
+
+// ---- Test 3: the declaration site (line 4) is not the caret ----
+test "check call-site caret: caret is the call site, not the declaration (line 4)" ![io] {
+    let r = _run_check();
+    // The primary caret must be the call site; the declaration at line 4
+    // must not be carated.
+    assert find(r.output, "leak.sfn:4:", 0) < 0;
+}

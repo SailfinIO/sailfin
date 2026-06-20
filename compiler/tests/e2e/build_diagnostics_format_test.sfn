@@ -1,0 +1,130 @@
+// End-to-end test: build-path typecheck diagnostics use the unified
+// `error[Exxxx]: --> file:line:col` shape, not the legacy `[typecheck]
+// --> line N, column N` shape.
+//
+// Track B B4 (`docs/proposals/check-architecture.md`) deleted the
+// in-`main.sfn` renderer chain and routed every `compile_to_*` entry's
+// typecheck-error sites through `diagnostics_render.render_diagnostic` —
+// the same renderer `sfn check` already uses (since A3). This test locks
+// the unified shape: a typecheck-error fixture compiled via `sfn run`
+// (build path) emits the new format, never the legacy.
+//
+// Native replacement for the former `test_build_diagnostics_format.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327).
+//
+// The error fixtures fail at typecheck (frontend), so they never reach
+// the linker. The negative-control clean fixture compiles AND runs, so
+// its `sfn run` is given a real child env (PATH for `clang`/linker) and
+// `SAILFIN_TEST_SCRATCH` so the build-cache stays per-invocation under
+// the parallel pool (`.claude/rules/no-bash-e2e.md`).
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
+// an `![io]` test (#842).
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// A build-spawning `sfn run` needs PATH (clang + linker) and an
+// isolated build-cache root under SAILFIN_TEST_SCRATCH so the parallel
+// pool does not collide on the fixed `build/sailfin/program.ll`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Fixture with a single typecheck error: a duplicate `process`
+// declaration on line 5. E0001 is the canonical duplicate-symbol
+// diagnostic the `sfn check` e2e tests already exercise — using the
+// same code here means both surfaces share the renderer.
+fn _dup_source() -> string {
+    return "fn process(x: number) -> number {\n" + "    return x;\n" + "}\n"
+        + "\n"
+        + "fn process(x: number) -> number {\n"
+        + "    return x + 1;\n"
+        + "}\n"
+        + "\n"
+        + "fn main() {\n"
+        + "    let _ = process(1);\n"
+        + "}\n";
+}
+
+fn _clean_source() -> string {
+    return "fn add(a: number, b: number) -> number {\n" + "    return a + b;\n"
+        + "}\n"
+        + "\n"
+        + "fn main() {\n"
+        + "    let _ = add(1, 2);\n"
+        + "}\n";
+}
+
+// Run `sfn run` over a fixture and return combined stdout+stderr. The
+// build path writes typecheck diagnostics to stderr; combining keeps
+// the assertions stream-agnostic.
+fn _run_build(source: string, name: string) -> string ![io] {
+    let dir = fs.mkdtemp("sfn-build-fmt-");
+    let path = dir + "/" + name;
+    fs.writeFile(path, source);
+    let _exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(path);
+    fs.removeDirectory(dir);
+    return out + err;
+}
+
+// ---- Test 1: stderr carries the new error[Exxxx]: header ----
+test "build diagnostics: build-path uses new error[E0001]: header" ![io] {
+    let output = _run_build(_dup_source(), "dup.sfn");
+    assert find(output, "error[E0001]:", 0) >= 0;
+}
+
+// ---- Test 2: no legacy [typecheck] line-prefix ----
+test "build diagnostics: no legacy [typecheck] prefix" ![io] {
+    let output = _run_build(_dup_source(), "dup.sfn");
+    // The legacy renderer prefixed lines with `[typecheck] `. The
+    // unified renderer instead emits a `[kind: typecheck]` suffix. The
+    // bracket-adjacent `[typecheck]` token only appears in the legacy
+    // form (the new form reads `[kind: typecheck]`).
+    assert find(output, "[typecheck]", 0) < 0;
+}
+
+// ---- Test 3: source-location uses file:line:col, not "line N, column N" ----
+test "build diagnostics: unified file:line:col source location" ![io] {
+    let output = _run_build(_dup_source(), "dup.sfn");
+    // Unified format: `  --> <path>:<line>:<col>` — the duplicate is on
+    // line 5, column 4.
+    assert find(output, "dup:5:4", 0) >= 0;
+    // Legacy format `  --> line N, column N` (no file path) must be gone.
+    assert find(output, "--> line ", 0) < 0;
+}
+
+// ---- Test 4: caret line points at the duplicate identifier ----
+test "build diagnostics: caret diagnostic present" ![io] {
+    let output = _run_build(_dup_source(), "dup.sfn");
+    assert find(output, "^^^", 0) >= 0;
+}
+
+// ---- Test 5: kind suffix annotates the diagnostic as typecheck ----
+test "build diagnostics: carries [kind: typecheck] suffix" ![io] {
+    let output = _run_build(_dup_source(), "dup.sfn");
+    assert find(output, "[kind: typecheck]", 0) >= 0;
+}
+
+// ---- Test 6: negative control — clean fixture produces no E0001 ----
+test "build diagnostics: clean fixture produces no E0001" ![io] {
+    let output = _run_build(_clean_source(), "clean.sfn");
+    assert find(output, "error[E0001]:", 0) < 0;
+}
