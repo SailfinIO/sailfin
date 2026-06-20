@@ -51,7 +51,7 @@ test "parser: a bare extern var has no initializer" ![io] {
     let program = parse_program("extern var errno: i32;");
     let stmt = program.statements[0];
     assert stmt.variant == "ExternVarDeclaration";
-    assert stmt.initializer == null;
+    assert stmt.init_value == null;
 }
 
 test "parser: `extern var NAME: TYPE = null;` captures the initializer" ![io] {
@@ -60,8 +60,8 @@ test "parser: `extern var NAME: TYPE = null;` captures the initializer" ![io] {
     let stmt = program.statements[0];
     assert stmt.variant == "ExternVarDeclaration";
     assert stmt.name == "runtime";
-    assert stmt.initializer != null;
-    assert stmt.initializer == "null";
+    assert stmt.init_value != null;
+    assert stmt.init_value == "null";
     assert _contains(stmt.type_annotation.text, "u8");
 }
 
@@ -70,5 +70,5 @@ test "parser: a defining extern var with an integer initializer" ![io] {
     let stmt = program.statements[0];
     assert stmt.variant == "ExternVarDeclaration";
     assert stmt.name == "counter";
-    assert stmt.initializer == "0";
+    assert stmt.init_value == "0";
 }

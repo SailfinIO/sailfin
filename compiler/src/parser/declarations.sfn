@@ -1039,9 +1039,9 @@ fn parse_extern_var(initial_parser: Parser, starts_with_unsafe: boolean, decorat
     let statement = Statement.ExternVarDeclaration {
         name: name,
         type_annotation: TypeAnnotation { text: type_text },
-        initializer: initializer,
         name_span: name_span,
-        decorators: decorators
+        decorators: decorators,
+        init_value: initializer
     };
     return StatementParseResult { parser: parser, statement: statement };
 }

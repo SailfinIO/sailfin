@@ -250,7 +250,7 @@ fn emit_statement_declarations(state: NativeState, statement: Statement) -> Stat
     }
     if statement.variant == "ExternVarDeclaration" {
         return StatementDispatchResult {
-            state: emit_extern_var(state, statement.name, statement.type_annotation, statement.initializer, statement.decorators),
+            state: emit_extern_var(state, statement.name, statement.type_annotation, statement.init_value, statement.decorators),
             handled: true
         };
     }
