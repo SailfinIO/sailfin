@@ -1,0 +1,117 @@
+// End-to-end test for the M1.5.3 mid-function-exit drop seam (issue #327).
+//
+// Native replacement for the former `test_drop_emission_mid_exit.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Drives `sfn emit llvm`
+// on `fixtures/drop_emission_mid_exit.sfn` (and `examples/basics/hello-
+// world.sfn`) and pins, on the emitted IR:
+//
+//   1. `declare void @sfn_rc_release(i8*)` is still emitted (the M1.5.2
+//      ABI seam survives).
+//   2. No drop temp lands without a counter suffix — a bare `%<slot>.drop =`
+//      would mean two terminators in one scope re-defined the same temp,
+//      the regression class M1.5.3 was written to avoid.
+//   3. When drop temps DO appear, every one uses the `%<slot>.drop.<n>`
+//      counter shape (vacuously true today: the fixture emits zero drops).
+//   4. hello-world.sfn still compiles cleanly through the new hooks.
+//
+// IR assertions use `sfn/strings::find`/`contains` over the read-back `.ll`
+// (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test; #842). The emitting child inherits the full parent
+// environment via `process.environ()` so its build-cache routes under the
+// runner's `SAILFIN_TEST_SCRATCH` (#1333) for parallel-pool isolation.
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// True iff `ll` contains a bare drop temp: a `.drop` slot followed (after
+// optional spaces/tabs) by `=` with NO `.<n>` counter suffix. Mirrors the
+// legacy `grep -E '%l[0-9]+\.drop[[:space:]]*='` regression probe; the
+// counter form `%<slot>.drop.<n> =` (`.drop` immediately followed by `.`)
+// is explicitly excluded.
+fn _has_bare_drop(ll: string) -> boolean {
+    let mut pos: int = 0;
+    loop {
+        let idx = find(ll, ".drop", pos);
+        if idx < 0 { break; }
+        let after = idx + 5;
+        // A `.drop.` counter form is fine — skip it.
+        if substring(ll, after, after + 1) == "." {
+            pos = after;
+            continue;
+        }
+        // Otherwise skip spaces/tabs and look for the `=` of a definition.
+        let mut j = after;
+        loop {
+            let c = substring(ll, j, j + 1);
+            if c == " " {
+                j += 1;
+                continue;
+            }
+            if c == "\t" {
+                j += 1;
+                continue;
+            }
+            break;
+        }
+        if substring(ll, j, j + 1) == "=" { return true; }
+        pos = after;
+    }
+    return false;
+}
+
+fn _ll_path(tag: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-mid-exit-" + tag + ".ll";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Emit LLVM IR for `source` to `out_path` and return it as a string.
+// Returns "" when the emit failed.
+fn _emit_ir(out_path: string, source: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_path, "llvm", source], process.environ());
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(out_path) { return ""; }
+    return fs.readFile(out_path);
+}
+
+fn _fixture() -> string {
+    return "compiler/tests/e2e/fixtures/drop_emission_mid_exit.sfn";
+}
+
+test "mid-exit: emits declare void @sfn_rc_release(i8*)" ![io] {
+    let ll = _emit_ir(_ll_path("declare"), _fixture());
+    assert ll.length > 0;
+    assert contains(ll, "declare void @sfn_rc_release(i8*)");
+}
+
+test "mid-exit: fixture emits valid IR (no duplicate-temp regression)" ![io] {
+    let ll = _emit_ir(_ll_path("valid"), _fixture());
+    assert ll.length > 0;
+    assert ! _has_bare_drop(ll);
+}
+
+test "mid-exit: drop temps use the counter shape when present" ![io] {
+    let ll = _emit_ir(_ll_path("shape"), _fixture());
+    assert ll.length > 0;
+    // Vacuous today (the fixture emits zero drops). If any drop temp lands,
+    // it must carry a `%<slot>.drop.<n>` counter suffix; a bare drop would
+    // already have tripped `_has_bare_drop` above.
+    if find(ll, ".drop", 0) >= 0 { assert contains(ll, ".drop."); }
+    assert ! _has_bare_drop(ll);
+}
+
+test "mid-exit: hello-world.sfn still compiles cleanly through the hooks" ![io] {
+    let ll = _emit_ir(_ll_path("hello"), "examples/basics/hello-world.sfn");
+    assert ll.length > 0;
+    assert contains(ll, "declare void @sfn_rc_release(i8*)");
+    assert ! _has_bare_drop(ll);
+}

@@ -1,0 +1,155 @@
+// End-to-end test for try/catch init-sentinel guarded drops (M1.5.4,
+// issue #328).
+//
+// Native replacement for the former `test_drop_emission_try_catch.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Drives `sfn emit llvm`
+// on `fixtures/drop_emission_try_catch_basic.sfn` and pins, on the emitted
+// IR for `try_with_rc` / `try_no_rc`:
+//
+//   1. A heap-typed `let` inside the `try` body allocates exactly one `i1`
+//      init sentinel (`<slot>.init = alloca i1`).
+//   2. The sentinel is zero-initialized in the entry block.
+//   3. The sentinel is set to true (`store i1 1`) inside the try body.
+//   4. A primitive-typed try-body `let` allocates NO sentinel.
+//   5. The outer-scope `let` allocates no sentinel (exactly one sentinel
+//      total in `try_with_rc`).
+//   6. The catch handler is well-formed: a frame-based `@sfn_take_exception`
+//      call plus the exception-slot store.
+//   7. `declare void @sfn_rc_release(i8*)` is still emitted.
+//
+// IR assertions use `sfn/strings::find`/`contains` over the read-back `.ll`
+// (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test; #842). The emitting child inherits the full parent
+// environment via `process.environ()` so its build-cache routes under the
+// runner's `SAILFIN_TEST_SCRATCH` (#1333) for parallel-pool isolation.
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Count non-overlapping occurrences of `needle` in `haystack`.
+fn _count(haystack: string, needle: string) -> int {
+    if needle.length == 0 { return 0; }
+    let mut n: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find(haystack, needle, pos);
+        if idx < 0 { break; }
+        n += 1;
+        pos = idx + needle.length;
+    }
+    return n;
+}
+
+// Body text of the function whose `define` line contains `anchor` (e.g.
+// "@try_with_rc"), from the start of its `define` line through its closing
+// `}`. Empty string when the anchor is absent.
+fn _fn_body(ll: string, anchor: string) -> string {
+    let idx = find(ll, anchor, 0);
+    if idx < 0 { return ""; }
+    let mut start = idx;
+    loop {
+        if start <= 0 { break; }
+        if substring(ll, start - 1, start) == "\n" { break; }
+        start -= 1;
+    }
+    let close = find(ll, "\n}", idx);
+    let mut end = close;
+    if end < 0 { end = ll.length; } else { end = close + 2; }
+    return substring(ll, start, end);
+}
+
+// Text of `body` between the first occurrence of `from` and the next
+// occurrence of `to` (exclusive of both); to end-of-text if `to` is absent.
+// Used to carve a labeled basic block out of a function body.
+fn _between(body: string, from: string, to: string) -> string {
+    let fi = find(body, from, 0);
+    if fi < 0 { return ""; }
+    let start = fi + from.length;
+    let ti = find(body, to, start);
+    let mut end = ti;
+    if end < 0 { end = body.length; }
+    return substring(body, start, end);
+}
+
+fn _ll_path(tag: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-try-catch-drop-" + tag + ".ll";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+fn _emit_ir(out_path: string) -> string ![io] {
+    let fixture = "compiler/tests/e2e/fixtures/drop_emission_try_catch_basic.sfn";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_path, "llvm", fixture], process.environ());
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(out_path) { return ""; }
+    return fs.readFile(out_path);
+}
+
+test "try-catch: heap-typed try-body let allocates one init sentinel" ![io] {
+    let ll = _emit_ir(_ll_path("sentinel"));
+    assert ll.length > 0;
+    let rc_block = _fn_body(ll, "@try_with_rc");
+    assert _count(rc_block, ".init = alloca i1") == 1;
+}
+
+test "try-catch: sentinel is zero-initialized in the entry block" ![io] {
+    let ll = _emit_ir(_ll_path("zero"));
+    assert ll.length > 0;
+    let rc_block = _fn_body(ll, "@try_with_rc");
+    let entry = _between(rc_block, "block.entry:", "try0:");
+    // The zero-init `store i1 0` targeting the `.init` sentinel lives in
+    // the entry block, before any control-flow split.
+    assert contains(entry, "store i1 0, i1* %");
+    assert contains(entry, ".init");
+}
+
+test "try-catch: sentinel is set true inside the try body" ![io] {
+    let ll = _emit_ir(_ll_path("settrue"));
+    assert ll.length > 0;
+    let rc_block = _fn_body(ll, "@try_with_rc");
+    assert contains(rc_block, "store i1 1, i1* %");
+    let try_body = _between(rc_block, "try0:", "catch");
+    assert contains(try_body, "store i1 1, i1* %");
+    assert contains(try_body, ".init");
+}
+
+test "try-catch: primitive try-body let gets no sentinel" ![io] {
+    let ll = _emit_ir(_ll_path("primitive"));
+    assert ll.length > 0;
+    let int_block = _fn_body(ll, "@try_no_rc");
+    assert _count(int_block, "alloca i1") == 0;
+}
+
+test "try-catch: outer-scope let gets no sentinel (one total)" ![io] {
+    let ll = _emit_ir(_ll_path("outer"));
+    assert ll.length > 0;
+    let rc_block = _fn_body(ll, "@try_with_rc");
+    // Only the try-body let allocates a sentinel; the outer `result` does not.
+    assert _count(rc_block, "alloca i1") == 1;
+}
+
+test "try-catch: catch handler is well-formed with the emission path wired" ![io] {
+    let ll = _emit_ir(_ll_path("machinery"));
+    assert ll.length > 0;
+    let rc_block = _fn_body(ll, "@try_with_rc");
+    let catch_body = _between(rc_block, "catch", "merge");
+    // Frame-based take-exception (the per-try frame pointer as its arg) ...
+    assert contains(catch_body, "call i8* @sfn_take_exception(i8* %");
+    // ... and the exception-slot store into a local pointer.
+    assert contains(catch_body, "i8** %l");
+}
+
+test "try-catch: emits declare void @sfn_rc_release(i8*)" ![io] {
+    let ll = _emit_ir(_ll_path("declare"));
+    assert ll.length > 0;
+    assert contains(ll, "declare void @sfn_rc_release(i8*)");
+}
