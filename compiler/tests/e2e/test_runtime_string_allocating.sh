@@ -25,9 +25,11 @@
 #      proof-of-life wrappers were retired).
 #   5. The compiler binary exports the canonical `sfn_str_concat` /
 #      `sfn_str_append` text symbols (now Sailfin-defined in string.o).
-#      The `sfn_default_arena` data symbol is still present as the C
-#      global (sailfin_runtime.c), which retires with the C runtime
-#      (#822); fresh Sailfin emission no longer references it.
+#      The `sfn_default_arena` data symbol RETIRED with the C runtime
+#      (`sailfin_runtime.c` deleted, #822) and is no longer asserted: it
+#      is dead-stripped on linux-x86_64 (unreferenced) and survives only
+#      transitionally on macos-arm64 (the pinned seed still emits it),
+#      so its presence is platform-dependent until the next seed bump.
 
 set -euo pipefail
 
@@ -202,24 +204,30 @@ test_compiler_binary_exports_arena_symbols() {
         return 1
     fi
     local missing=0
-    # #715: the canonical names are now bare `sfn_str_concat` /
-    # `sfn_str_append`. The `_arena`-suffixed forwarders stay
-    # exported one more release cycle so seed-built IR (which still
-    # emits the `_arena` suffix) keeps linking through the renamed
-    # bodies; this loop pins both name forms until the next seed
-    # bump retires the transitional forwarders.
-    for sym in sfn_str_concat sfn_str_append sfn_str_concat_arena sfn_str_append_arena; do
+    # #715: the canonical names are bare `sfn_str_concat` / `sfn_str_append`
+    # (Sailfin-defined in string.o). #822/#1308: the transitional
+    # `_arena`-suffixed forwarders (`sfn_str_concat_arena` /
+    # `sfn_str_append_arena`) retired with the C runtime — they lived in
+    # `sailfin_runtime.c` for old seeds that emitted the `@..._arena` IR,
+    # but the pinned alpha.41 seed emits the bare names (zero references,
+    # so the self-host link no longer needs them), and they were deleted
+    # with the file. Only the bare canonical names are asserted now.
+    for sym in sfn_str_concat sfn_str_append; do
         if ! grep -qE "[[:space:]][Tt][[:space:]]_?${sym}\$" <<< "$nm_log"; then
             echo "[test]   compiler binary does not export defined text symbol ${sym}"
             missing=$((missing + 1))
         fi
     done
-    # The global arena pointer slot must show up as a data symbol
-    # (' D ' / ' d ' / ' B ' / ' b ' / ' S ' / ' s ') — not a text symbol.
-    if ! grep -qE "[[:space:]][BbDdSs][[:space:]]_?sfn_default_arena\$" <<< "$nm_log"; then
-        echo "[test]   compiler binary does not export defined data symbol sfn_default_arena"
-        missing=$((missing + 1))
-    fi
+    # #822/#1308: the `sfn_default_arena` data symbol is no longer asserted.
+    # It retired with the C runtime (`sailfin_runtime.c` deleted). The
+    # compiler SOURCE emits `ptr null` for the arena slot (#1428), so on
+    # linux-x86_64 nothing references the symbol and the linker dead-strips
+    # it from the binary; a transitional `null` global lives in
+    # runtime_globals.ll only because the pinned macos-arm64 seed still
+    # emits references (it is platform-dependent and retires at the next
+    # seed bump). The arena-allocating surface is covered by the
+    # sfn_str_concat / sfn_str_append text-symbol checks above and the
+    # "emitted IR drops @sfn_default_arena" test.
     # #1318 retired the `sfn_str_sfn_concat` / `sfn_str_sfn_append`
     # OwnedBuf proof-of-life infix exports; the bare canonical symbols
     # checked above (now Sailfin-defined in string.o) are the surface.
@@ -231,7 +239,7 @@ run_test "sfn fmt --check runtime/sfn/string.sfn is canonical" test_fmt_clean
 run_test "sfn emit llvm produces define for every new sfn_str_sfn_* export" test_emit_define_shape
 run_test "let s = a + b lowers to arena-aware @sfn_str_concat call" test_concat_lowers_to_arena_form
 run_test "emitted IR drops @sfn_default_arena, keeps @sfn_str_concat declare" test_arena_global_not_referenced
-run_test "compiler binary exports sfn_str_concat / sfn_str_append (+ transitional _arena forwarders) / sfn_default_arena" test_compiler_binary_exports_arena_symbols
+run_test "compiler binary exports sfn_str_concat / sfn_str_append" test_compiler_binary_exports_arena_symbols
 
 echo ""
 echo "[summary] $PASS passed, $FAIL failed"
