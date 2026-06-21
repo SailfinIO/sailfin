@@ -18,13 +18,11 @@
 
 test_binary_capsule_walker.sh
 test_build_json_schema.sh
-test_call_emission_no_polling.sh
 test_capsule_artifact_sidecar.sh
 test_capsule_build.sh
 test_capsule_byname_import_link.sh
 test_capsule_dead_strip_guard.sh
 test_capsule_ir_layout.sh
-test_channel_producer_consumer_ir.sh
 test_channel_runtime_roundtrip.sh
 test_check_compiler_src.sh
 test_check_cross_module_conformance.sh
