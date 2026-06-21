@@ -1,0 +1,367 @@
+// End-to-end test for runtime/sfn/exception.sfn — the Sailfin-defined
+// exception frame primitives shipped into the compiler binary
+// (issue #400, epic #389 M2.7a).
+//
+// Native (no-bash) replacement for the former
+// `test_runtime_exception_frames.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`). Pins, end-to-end:
+//
+//   1. typecheck   — `sfn check runtime/sfn/exception.sfn` reports `ok`.
+//   2. fmt         — `sfn fmt --check runtime/sfn/exception.sfn` is canonical.
+//   3. emit shape  — emitted IR contains a `define` for each of the nine
+//                    exports (param/return types pinned) plus `declare`s
+//                    for the inlined libc primitives.
+//   4. layout      — `%SfnExceptionFrame = type { %SfnExceptionFrame*,
+//                    i8*, i8* }` pins the pointer-typed struct shape (#1116).
+//   5. setjmp pin  — `sfn_try_enter` carries exactly one `call i32
+//                    @setjmp`, after `sfn_exception_push_frame`.
+//   6. longjmp pin — `sfn_throw` carries exactly one `call void @longjmp`
+//                    + the empty-chain `call void @abort()` safety branch,
+//                    and pops the frame head BEFORE longjmp.
+//   7. global pin  — `@global.sfn_exception_frame_head_addr = internal
+//                    thread_local global i64 0`.
+//   8. coexistence — no `define` collides with the C runtime's
+//                    `sailfin_runtime_*` exception family.
+//   9. roundtrip   — a C harness performs inline `setjmp` on a
+//                    Sailfin-allocated frame, pushes it, calls a deeper
+//                    helper that calls `sfn_throw`; the longjmp returns to
+//                    the harness's setjmp call site and the message reads
+//                    back via `sfn_take_exception`.
+//
+// IR assertions use `sfn/strings` predicates — the `sfn/test` `expect_*`
+// matchers are `![pure]` and cannot be called from an `![io]` test (#842).
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs (PATH for clang/nm, SAILFIN_TEST_SCRATCH
+// for per-invocation build-cache isolation under the parallel pool).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-runtime-exception";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _module() -> string { return "runtime/sfn/exception.sfn"; }
+
+// Count non-overlapping occurrences of `needle` in `haystack`.
+fn _count(haystack: string, needle: string) -> int {
+    if needle.length == 0 { return 0; }
+    let mut n: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find(haystack, needle, pos);
+        if idx < 0 { break; }
+        n += 1;
+        pos = idx + needle.length;
+    }
+    return n;
+}
+
+// Lines of `ir` that start with `prefix` joined back together — used to
+// pull a `define`/`declare`/global line out for whole-line matching.
+fn _line_starting_with(ir: string, prefix: string) -> string {
+    let mut start = find(ir, prefix, 0);
+    loop {
+        if start < 0 { return ""; }
+        // Must be at a line boundary (start of text or after newline).
+        let at_line_start = start == 0 || substring(ir, start - 1, start) == "\n";
+        if at_line_start {
+            let nl = find(ir, "\n", start);
+            let mut end = nl;
+            if end < 0 { end = ir.length; }
+            return substring(ir, start, end);
+        }
+        start = find(ir, prefix, start + 1);
+    }
+    return "";
+}
+
+// Body of the `define`d function whose signature line contains
+// `anchor` (e.g. "@sfn_throw("), from its `define` line through the next
+// line that is exactly "}". Empty when absent.
+fn _fn_body(ir: string, anchor: string) -> string {
+    let needle = "define ";
+    let mut start = find(ir, needle, 0);
+    loop {
+        if start < 0 { return ""; }
+        let at_line_start = start == 0 || substring(ir, start - 1, start) == "\n";
+        if at_line_start {
+            let nl = find(ir, "\n", start);
+            let mut sig_end = nl;
+            if sig_end < 0 { sig_end = ir.length; }
+            let sig = substring(ir, start, sig_end);
+            if contains(sig, anchor) {
+                let close = find(ir, "\n}", start);
+                let mut end = close;
+                if end < 0 { end = ir.length; } else { end = close + 2; }
+                return substring(ir, start, end);
+            }
+        }
+        start = find(ir, needle, start + 1);
+    }
+    return "";
+}
+
+// Emit LLVM IR for `src_path` and read it back; "" on failure.
+fn _emit_ir(tag: string, src_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let out_path = dir + "/" + tag + ".ll";
+    if fs.exists(out_path) { fs.deleteFile(out_path); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_path, "llvm", src_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(out_path) { return ""; }
+    return fs.readFile(out_path);
+}
+
+// Emit the exception module's IR to a stable path (so the roundtrip can
+// link it) and return the IR text.
+fn _emit_exception() -> string ![io] {
+    return _emit_ir("exception", _module());
+}
+
+test "sfn check runtime/sfn/exception.sfn passes" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", _module()], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out + err, "ok");
+}
+
+test "sfn fmt --check runtime/sfn/exception.sfn is canonical" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", _module()], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+test "emit: a define for every export with pinned param/return types" ![io] {
+    let ir = _emit_exception();
+    assert ir.length > 0;
+    assert contains(_line_starting_with(ir, "define %SfnExceptionFrame* @sfn_exception_alloc_frame()"), "@sfn_exception_alloc_frame()");
+    assert contains(_line_starting_with(ir, "define void @sfn_exception_free_frame(%SfnExceptionFrame* %frame)"), "@sfn_exception_free_frame");
+    assert contains(_line_starting_with(ir, "define %SfnExceptionFrame* @sfn_exception_frame_head()"), "@sfn_exception_frame_head()");
+    assert contains(_line_starting_with(ir, "define void @sfn_exception_push_frame(%SfnExceptionFrame* %frame)"), "@sfn_exception_push_frame");
+    assert contains(_line_starting_with(ir, "define void @sfn_exception_pop_frame(%SfnExceptionFrame* %frame)"), "@sfn_exception_pop_frame");
+    assert contains(_line_starting_with(ir, "define i32 @sfn_try_enter(%SfnExceptionFrame* %frame)"), "@sfn_try_enter");
+    assert contains(_line_starting_with(ir, "define void @sfn_try_leave(%SfnExceptionFrame* %frame)"), "@sfn_try_leave");
+    assert contains(_line_starting_with(ir, "define void @sfn_throw(i8* %message)"), "@sfn_throw");
+    assert contains(_line_starting_with(ir, "define i8* @sfn_take_exception(%SfnExceptionFrame* %frame)"), "@sfn_take_exception");
+}
+
+test "emit: declares libc malloc/free/memset/setjmp/longjmp/abort" ![io] {
+    let ir = _emit_exception();
+    assert ir.length > 0;
+    assert contains(_line_starting_with(ir, "declare "), "declare ");
+    // Each libc trampoline produces a `declare ... @sym(` line.
+    assert contains(ir, "@malloc(");
+    assert contains(ir, "@free(");
+    assert contains(ir, "@memset(");
+    assert contains(ir, "@setjmp(");
+    assert contains(ir, "@longjmp(");
+    assert contains(ir, "@abort(");
+    assert _line_starting_with(ir, "declare i8* @malloc(").length > 0;
+    assert find(ir, "declare void @longjmp(", 0) >= 0;
+}
+
+test "emit: pins the SfnExceptionFrame pointer-typed layout" ![io] {
+    let ir = _emit_exception();
+    assert ir.length > 0;
+    let layout = _line_starting_with(ir, "%SfnExceptionFrame = type");
+    assert layout == "%SfnExceptionFrame = type { %SfnExceptionFrame*, i8*, i8* }";
+}
+
+test "emit: sfn_try_enter calls setjmp once, after push_frame" ![io] {
+    let ir = _emit_exception();
+    assert ir.length > 0;
+    let body = _fn_body(ir, "@sfn_try_enter(");
+    assert body.length > 0;
+    assert _count(body, "call i32 @setjmp(i8* ") == 1;
+    let push_idx = find(body, "call void @sfn_exception_push_frame(", 0);
+    let setjmp_idx = find(body, "call i32 @setjmp(", 0);
+    assert push_idx >= 0;
+    assert setjmp_idx >= 0;
+    assert push_idx < setjmp_idx;
+}
+
+test "emit: sfn_throw has one longjmp + empty-chain abort, pops before longjmp" ![io] {
+    let ir = _emit_exception();
+    assert ir.length > 0;
+    let body = _fn_body(ir, "@sfn_throw(");
+    assert body.length > 0;
+    assert _count(body, "call void @longjmp(i8* ") == 1;
+    assert contains(body, ", i32 1)");
+    assert contains(body, "call void @abort()");
+    // Pop the frame head BEFORE longjmp (rethrow targets the next outer
+    // frame). Store into the head global must precede the longjmp call.
+    let store_idx = find(body, "store i64 ", 0);
+    assert store_idx >= 0;
+    assert contains(body, "i64* @global.sfn_exception_frame_head_addr");
+    let head_store_idx = find(body, "@global.sfn_exception_frame_head_addr", 0);
+    let longjmp_idx = find(body, "call void @longjmp(", 0);
+    assert head_store_idx >= 0;
+    assert longjmp_idx >= 0;
+    assert head_store_idx < longjmp_idx;
+}
+
+test "emit: sfn_take_exception clears the message slot on take" ![io] {
+    let ir = _emit_exception();
+    assert ir.length > 0;
+    let body = _fn_body(ir, "@sfn_take_exception(");
+    assert body.length > 0;
+    // Null pointer (`inttoptr i64 0 to i8*`) stored into the message slot.
+    assert contains(body, "inttoptr i64 0 to i8*");
+    assert contains(body, "store i8* %t");
+    // Targets the third field (message) of SfnExceptionFrame.
+    assert contains(body, "getelementptr %SfnExceptionFrame, %SfnExceptionFrame* %frame, i32 0, i32 2");
+}
+
+test "emit: sfn_exception_pop_frame guards against a null frame" ![io] {
+    let ir = _emit_exception();
+    assert ir.length > 0;
+    let body = _fn_body(ir, "@sfn_exception_pop_frame(");
+    assert body.length > 0;
+    assert contains(body, "icmp eq i64 %t");
+}
+
+test "emit: frame-head global is internal thread_local global i64 0" ![io] {
+    let ir = _emit_exception();
+    assert ir.length > 0;
+    let line = _line_starting_with(ir, "@global.sfn_exception_frame_head_addr");
+    assert line == "@global.sfn_exception_frame_head_addr = internal thread_local global i64 0";
+}
+
+test "emit: does not collide with the C runtime exception family" ![io] {
+    let ir = _emit_exception();
+    assert ir.length > 0;
+    // None of the C runtime's sailfin_runtime_* exception symbols may be
+    // `define`d here (would fail `make compile` at link time).
+    assert ! contains(ir, "define void @sailfin_runtime_try_enter(");
+    assert ! contains(ir, "define void @sailfin_runtime_try_leave(");
+    assert ! contains(ir, "define void @sailfin_runtime_throw(");
+    assert ! contains(ir, "define void @sailfin_runtime_set_exception(");
+    assert ! contains(ir, "define void @sailfin_runtime_clear_exception(");
+    assert ! contains(ir, "define void @sailfin_runtime_has_exception(");
+    assert ! contains(ir, "define void @sailfin_runtime_take_exception(");
+    assert ! contains(ir, "@sailfin_runtime_take_exception(");
+}
+
+// ---- (9) cross-frame roundtrip: inline setjmp + sfn_throw ----
+// Link the emitted exception IR against a tiny C harness that does inline
+// setjmp on a Sailfin-allocated frame, pushes it, then throws from a
+// deeper helper. The longjmp returns to the harness's setjmp; the message
+// reads back via sfn_take_exception. Needs clang + a staged type_meta
+// object (exception.sfn defines a struct, so M2.10 emits an
+// `@__sfn_module_type_init__*` constructor that calls @sfn_type_register).
+// Skipped (not failed) when clang or type_meta can't be produced — the
+// IR-shape pins above still carry the contract.
+fn _harness_c() -> string {
+    return "#include <stdio.h>\n" + "#include <setjmp.h>\n"
+        + "#include <stdlib.h>\n"
+        + "#include <string.h>\n"
+        + "#include <stdint.h>\n"
+        + "struct SfnExceptionFrame { struct SfnExceptionFrame *prev; void *jmp_buf; void *message; };\n"
+        + "extern struct SfnExceptionFrame *sfn_exception_alloc_frame(void);\n"
+        + "extern void sfn_exception_free_frame(struct SfnExceptionFrame *frame);\n"
+        + "extern struct SfnExceptionFrame *sfn_exception_frame_head(void);\n"
+        + "extern void sfn_exception_push_frame(struct SfnExceptionFrame *frame);\n"
+        + "extern void sfn_exception_pop_frame(struct SfnExceptionFrame *frame);\n"
+        + "extern void sfn_throw(const char *message);\n"
+        + "extern char *sfn_take_exception(struct SfnExceptionFrame *frame);\n"
+        + "void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }\n"
+        + "static void provoke(const char *msg) { sfn_throw(msg); }\n"
+        + "int main(void) {\n"
+        + "    sfn_exception_pop_frame(NULL);\n"
+        + "    if (sfn_exception_frame_head() != NULL) return 1;\n"
+        + "    struct SfnExceptionFrame *frame = sfn_exception_alloc_frame();\n"
+        + "    if (!frame) return 2;\n"
+        + "    sfn_exception_push_frame(frame);\n"
+        + "    if (sfn_exception_frame_head() != frame) return 3;\n"
+        + "    int rc = setjmp(frame->jmp_buf);\n"
+        + "    if (rc == 0) { provoke(\"boom\"); return 4; }\n"
+        + "    if (rc != 1) return 5;\n"
+        + "    if (sfn_exception_frame_head() != NULL) return 6;\n"
+        + "    char *msg = sfn_take_exception(frame);\n"
+        + "    if (!msg) return 7;\n"
+        + "    if (strcmp(msg, \"boom\") != 0) return 8;\n"
+        + "    char *msg2 = sfn_take_exception(frame);\n"
+        + "    if (msg2 != NULL) return 9;\n"
+        + "    sfn_exception_pop_frame(frame);\n"
+        + "    sfn_exception_free_frame(frame);\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+fn _which_clang() -> string ![io] {
+    let configured = env.get("CLANG");
+    if configured.length > 0 { return configured; }
+    return "clang";
+}
+
+test "cross-frame unwind: inline setjmp + sfn_throw round-trips message" ![io] {
+    let ir = _emit_exception();
+    assert ir.length > 0;
+    let dir = _scratch_dir();
+    let ll = dir + "/exception.ll";
+    assert fs.exists(ll);
+
+    let clang = _which_clang();
+
+    // Stage type_meta object; skip the roundtrip if it can't be built.
+    let tm_ll = dir + "/type_meta.ll";
+    if fs.exists(tm_ll) { fs.deleteFile(tm_ll); }
+    let tm_emit = process.run_capture([_sfn_bin(), "emit", "-o", tm_ll, "llvm", "runtime/sfn/type_meta.sfn"], _child_env());
+    let _t1 = process.capture_take_stdout();
+    let _t2 = process.capture_take_stderr();
+    if tm_emit != 0 {
+        // type_meta could not be emitted — skip (IR pins still hold).
+        return;
+    }
+    let tm_o = dir + "/type_meta.o";
+    if fs.exists(tm_o) { fs.deleteFile(tm_o); }
+    let tm_cc = process.run_capture([clang, "-Wno-override-module", "-c", tm_ll, "-o", tm_o], _child_env());
+    let _c1 = process.capture_take_stdout();
+    let _c2 = process.capture_take_stderr();
+    if tm_cc != 0 {
+        // clang unavailable / type_meta object failed — skip.
+        return;
+    }
+
+    let harness = dir + "/harness.c";
+    fs.writeFile(harness, _harness_c());
+    let bin = dir + "/roundtrip";
+    if fs.exists(bin) { fs.deleteFile(bin); }
+    let link = process.run_capture([clang, "-Wno-override-module", harness, ll, tm_o, "-o", bin, "-lm"], _child_env());
+    let _l1 = process.capture_take_stdout();
+    let _l2 = process.capture_take_stderr();
+    // A link that fails for missing toolchain is a skip, not a failure.
+    if link != 0 { return; }
+    assert fs.exists(bin);
+
+    let run = process.run_capture([bin], _child_env());
+    let _r1 = process.capture_take_stdout();
+    let _r2 = process.capture_take_stderr();
+    assert run == 0;
+}

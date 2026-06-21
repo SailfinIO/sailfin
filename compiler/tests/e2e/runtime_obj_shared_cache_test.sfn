@@ -1,0 +1,157 @@
+// End-to-end test for the shared runtime-object cache fix (#1096).
+//
+// Native (no-bash) replacement for the former
+// `test_runtime_obj_shared_cache.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`).
+//
+// Before #1096, runtime C/LL/sfn objects were cached only in the
+// per-build work-dir (a `<obj>.o.key` sidecar under `<work-dir>/sailfin/`),
+// never in the shared content-addressed cache root the `.ll` module cache
+// uses. A second build into a *sibling* work-dir therefore always missed
+// every runtime object even with an identical source tree and a warm
+// shared cache, dragging the build-quality gate's hit-rate to 0.90.
+//
+// This test pins the contract that the warm sibling pass now hits the
+// runtime objects from the shared cache:
+//   1. Build A (cold shared cache) misses + stores the runtime objects.
+//   2. The shared cache root holds `runtime.o` entries after build A.
+//   3. Build B into a SIBLING work-dir, same shared cache root, MUST
+//      cache-hit every runtime object: misses=0 with hits>=1.
+//
+// A one-line program keeps this to seconds (it has no `.ll` module-cache
+// deps of its own, so the `[cache]` summary reflects only the runtime
+// objects). Both builds share ONE dedicated `SAILFIN_BUILD_CACHE_DIR`
+// under the test scratch so the run is genuinely cold and never touches
+// the repo's `build/cache/` tree. The two work-dirs are siblings, exactly
+// as the build-quality gate's `det-pass1` -> `det-pass2` pair.
+//
+// NOTE: assert on the captured `[cache]` summary with `sfn/strings`
+// predicates — the `sfn/test` `expect_*` matchers are `![pure]` and
+// cannot be called from an `![io]` test (#842). The summary prints to
+// stderr (#915); `run_capture` splits stdout/stderr so we concatenate.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child env for a nested build: PATH (clang/linker), HOME, TMPDIR, the
+// inherited SAILFIN_TEST_SCRATCH, plus the dedicated shared cache root.
+fn _build_env(cache_dir: string) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
+    return e;
+}
+
+// Build `src` into `work_dir`, sharing `cache_dir`. Returns combined
+// stdout+stderr (the `[cache]` summary prints to stderr).
+fn _do_build(src: string, work_dir: string, out_bin: string, cache_dir: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", src, "-o", out_bin, "--work-dir", work_dir], _build_env(cache_dir));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let _ = exit;
+    return out + err;
+}
+
+// Recursively search `dir` for a file named `target`. fs.listDirectory is
+// non-recursive; a path whose listing has entries is a directory, a
+// zero-entry listing is a regular file.
+fn _has_file_named(dir: string, target: string) -> boolean ![io] {
+    if !fs.exists(dir) { return false; }
+    let entries = fs.listDirectory(dir);
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        i = i + 1;
+        if name == "." || name == ".." { continue; }
+        let full = dir + "/" + name;
+        let sub = fs.listDirectory(full);
+        if sub.length > 0 {
+            if _has_file_named(full, target) { return true; }
+        } else if name == target { return true; }
+    }
+    return false;
+}
+
+// A kernel-unique per-invocation root (mirrors the bash `mktemp -d`). A
+// fresh root every run is REQUIRED: the shared cache must be genuinely
+// cold for build A's miss/store assertions, so a fixed reused path (which
+// would be warm on a second run under the same SAILFIN_TEST_SCRATCH) is
+// unsound. `fs.mkdtemp` gives a collision-free dir under TMPDIR.
+fn _root(tag: string) -> string ![io] {
+    let r = fs.mkdtemp("sfn-rt-shared-" + tag + "-");
+    return r;
+}
+
+// Materialize the one-line program. No `.ll` module-cache deps of its own,
+// so the `[cache]` summary reflects only the runtime objects.
+fn _write_hello(root: string) -> string ![io] {
+    let src = root + "/hello.sfn";
+    fs.writeFile(src, "fn main() -> int {\n    return 0;\n}\n");
+    return src;
+}
+
+// ---- Test 1: cold build A misses + stores runtime objects ----
+test "cold build A misses + stores runtime objects (#1096)" ![io] {
+    let root = _root("coldA");
+    let cache = root + "/cache";
+    let work_a = root + "/passA";
+    let src = _write_hello(root);
+
+    let log = _do_build(src, work_a, root + "/hello-A", cache);
+
+    // A `[cache]` summary must appear on the cold build.
+    assert find(log, "[cache]", 0) >= 0;
+    // Cold: runtime objects were not previously cached → misses>=1
+    // (i.e. the summary does NOT report misses=0).
+    assert find(log, "misses=0", 0) < 0;
+    // Cold: at least one store (the summary does NOT report stores=0).
+    assert find(log, "stores=0", 0) < 0;
+}
+
+// ---- Test 2: the shared cache root holds runtime-obj entries ----
+test "shared cache root holds runtime-obj entries after a cold build (#1096)" ![io] {
+    let root = _root("populate");
+    let cache = root + "/cache";
+    let work_a = root + "/passA";
+    let src = _write_hello(root);
+
+    let _log = _do_build(src, work_a, root + "/hello-A", cache);
+
+    // build_cache.sfn::_filename_for_kind names runtime-obj artifacts
+    // `runtime.o`; the shared cache root must hold at least one.
+    assert _has_file_named(cache, "runtime.o");
+}
+
+// ---- Test 3: warm sibling build B hits runtime objects from the cache --
+test "warm sibling build B hits runtime objects from the shared cache (#1096)" ![io] {
+    let root = _root("warmB");
+    let cache = root + "/cache";
+    let work_a = root + "/passA";
+    let work_b = root + "/passB";
+    let src = _write_hello(root);
+
+    // Build A: cold shared cache -> store the runtime objects.
+    let _logA = _do_build(src, work_a, root + "/hello-A", cache);
+
+    // Build B: SIBLING work-dir, SAME shared cache root -> all hits.
+    let logB = _do_build(src, work_b, root + "/hello-B", cache);
+
+    // A `[cache]` summary must appear on the warm sibling build.
+    assert find(logB, "[cache]", 0) >= 0;
+    // Warm: the runtime objects are served from the shared cache across
+    // work-dirs → hits>=1 (NOT hits=0) and misses=0.
+    assert find(logB, "hits=0", 0) < 0;
+    assert find(logB, "misses=0", 0) >= 0;
+}

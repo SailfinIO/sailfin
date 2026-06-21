@@ -1,0 +1,347 @@
+// End-to-end test for the per-capsule `.ll` layout (Stage C2b2).
+//
+// Native replacement for the former `test_capsule_ir_layout.sh`
+// (test-infra Phase 3, epic #842; `.claude/rules/no-bash-e2e.md`).
+//
+// Verifies that `sfn build -p <capsule>` routes module `.ll` outputs into
+// the canonical per-capsule tree from proposal §4.4:
+//
+//   build/capsules/<dep-scope>/<dep-name>/ir/<rel>.ll
+//       — for sources of manifest-declared deps
+//   build/capsules/<consumer-scope>/<consumer-name>/ir/<rel>.ll
+//       — for intra-capsule (relative-import) sources of a `-p` consumer
+//   build/sailfin/capsules/<mangled>.ll
+//       — legacy fallback (must NOT appear for manifest deps / relatives)
+//
+// Also re-confirms that build_report `deps.ll_paths` and the
+// capsule_artifact.sfn sidecar reflect the new paths, and that the
+// sidecar `modules[]` entries align `slug` + `ir_path` for both routing
+// categories.
+//
+// Fixture: a `demo/widget` library with a relative import (./util) AND a
+// manifest dep (sfn/math) so both routing rules are exercised. It lives
+// in-tree under build/ so discover_workspace_root finds the repo's
+// workspace.toml (which registers the in-tree capsules/ tree; no symlinks
+// required). Content is deterministic so concurrent parallel runs are safe.
+//
+// NOTE: the bash original `cd`'d into the scratch project and built `-p .`,
+// which made `module_name_from_path` yield the bare project-relative slug
+// `src/util`. The native runner cannot change CWD, so it builds
+// `-p build/sfn-ir-layout-test`; the relative module's slug then carries
+// the project-root prefix (`build/sfn-ir-layout-test/src/util`). The
+// slug-alignment assertions therefore lock the CWD-independent invariant:
+// the slug ends with `src/util` and its tail matches the ir_path tail.
+//
+// NOTE: assert on captured output / parse JSON with `sfn/strings`
+// predicates — the `sfn/test` `expect_*` matchers are `![pure]` and cannot
+// be used from an `![io]` test, and sfn/json::parse hangs when imported
+// transitively via the workspace resolver in the compiler test context.
+// (#842; see capsule_artifact_sidecar_test.sfn for the same workaround.)
+import {
+    contains,
+    find,
+    starts_with,
+    ends_with
+} from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build spawns a nested clang + linker, so the child needs PATH.
+// SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
+// so the parallel pool does not collide on build/sailfin.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// In-tree fixture root (CWD-relative = repo root).
+fn _capsule_root() -> string { return "build/sfn-ir-layout-test"; }
+
+// Sidecar path: CWD-relative (repo root), matching how `sfn build -p`
+// writes it for a library named demo/widget.
+fn _sidecar() -> string { return "build/capsules/demo/widget/manifest.json"; }
+
+// JSON build report path: SAILFIN_TEST_SCRATCH or /tmp, keyed by tag.
+fn _report_path(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    return base + "/sfn-ir-layout-" + tag + "-build.json";
+}
+
+// Materialize the fixture (idempotent). `src/mod.sfn` imports a manifest
+// dep (sfn/math) AND a relative sibling (./util) so both routing rules
+// fire; `src/util.sfn` is the relative-import target whose .ll lands under
+// the consumer's tree, NOT the dep tree.
+fn _ensure_fixture() ![io] {
+    let root = _capsule_root();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"demo/widget\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"E2E fixture for the Stage C2b2 per-capsule .ll layout\"\n\n"
+        + "[dependencies]\n"
+        + "\"sfn/math\" = \"0.1.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "kind = \"library\"\n"
+        + "entry = \"src/mod.sfn\"\n");
+    fs.writeFile(root + "/src/mod.sfn", "import { abs } from \"sfn/math\";\n"
+        + "import { double } from \"./util\";\n\n"
+        + "fn widget_compute(n: number) -> number {\n"
+        + "    return double(abs(n));\n"
+        + "}\n");
+    fs.writeFile(root + "/src/util.sfn", "fn double(n: number) -> number {\n"
+        + "    return n * 2;\n"
+        + "}\n");
+}
+
+// Run `sfn build -p <root> --json -o <report>`, drain stderr, return exit.
+fn _run_build_json(report: string) -> int ![io] {
+    _ensure_fixture();
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", _capsule_root(), "--json"], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit == 0 { fs.writeFile(report, out); }
+    return exit;
+}
+
+// Extract the entries of a JSON string-array field nested under an object,
+// here always `deps.ll_paths`. The report is flat enough that we can find
+// the `"ll_paths":[` marker and read string literals up to the closing
+// `]`. Returns the list of unescaped string entries (paths have no escapes).
+fn _ll_paths(json: string) -> string[] {
+    let mut out: string[] = [];
+    let marker = "\"ll_paths\":[";
+    let mstart = find(json, marker, 0);
+    if mstart < 0 { return out; }
+    let mut pos = mstart + marker.length;
+    loop {
+        if pos >= json.length { break; }
+        let ch = json[pos];
+        if ch == "]" { break; }
+        if ch == "\"" {
+            let val_start = pos + 1;
+            let mut val_end = val_start;
+            loop {
+                if val_end >= json.length { break; }
+                if json[val_end] == "\"" { break; }
+                val_end += 1;
+            }
+            out.push(substring(json, val_start, val_end));
+            pos = val_end + 1;
+        } else { pos += 1; }
+    }
+    return out;
+}
+
+// Find the `slug` recorded for a given `ir_path` in the sidecar
+// `modules[]` array. Each entry is a flat object
+// `{"slug":"...","ir_path":"...","cache_key":"..."}`. Returns the slug, or
+// "" if no entry references that ir_path. Also returns the match count via
+// the out-of-band sentinel: callers verify uniqueness with _count_modules.
+fn _slug_for_ir_path(json: string, ir_path: string) -> string {
+    let needle = "\"ir_path\":\"" + ir_path + "\"";
+    let ip = find(json, needle, 0);
+    if ip < 0 { return ""; }
+    // The slug field precedes ir_path within the same object. Search
+    // backward from `ip` for the nearest `"slug":"`.
+    let slug_marker = "\"slug\":\"";
+    let mut search_from = 0;
+    let mut last_slug = -1;
+    loop {
+        let hit = find(json, slug_marker, search_from);
+        if hit < 0 || hit > ip { break; }
+        last_slug = hit;
+        search_from = hit + slug_marker.length;
+    }
+    if last_slug < 0 { return ""; }
+    let val_start = last_slug + slug_marker.length;
+    let mut val_end = val_start;
+    loop {
+        if val_end >= json.length { break; }
+        if json[val_end] == "\"" { break; }
+        val_end += 1;
+    }
+    return substring(json, val_start, val_end);
+}
+
+// Count how many `modules[]` entries carry the given ir_path.
+fn _count_modules_with_ir_path(json: string, ir_path: string) -> int {
+    let needle = "\"ir_path\":\"" + ir_path + "\"";
+    let mut count = 0;
+    let mut pos = find(json, needle, 0);
+    loop {
+        if pos < 0 { break; }
+        count += 1;
+        pos = find(json, needle, pos + needle.length);
+    }
+    return count;
+}
+
+// ---- Test 1: sfn build -p succeeds with --json ----
+test "ir layout: sfn build -p succeeds with --json" ![io] {
+    let report = _report_path("build");
+    let exit = _run_build_json(report);
+    assert exit == 0;
+    assert fs.exists(report);
+    let json = fs.readFile(report);
+    // Minimal sanity that --json produced a JSON object.
+    assert starts_with(json, "{");
+}
+
+// ---- Test 2: manifest dep .ll lives under the dep's tree ----
+test "ir layout: manifest dep .ll lands at build/capsules/sfn/math/ir/mod.ll" ![io] {
+    let report = _report_path("dep");
+    assert _run_build_json(report) == 0;
+    assert fs.exists("build/capsules/sfn/math/ir/mod.ll");
+}
+
+// ---- Test 3: relative-import .ll lives under the consumer's tree ----
+test "ir layout: relative-import .ll lands at build/capsules/demo/widget/ir/src/util.ll" ![io] {
+    let report = _report_path("rel");
+    assert _run_build_json(report) == 0;
+    assert fs.exists("build/capsules/demo/widget/ir/src/util.ll");
+}
+
+// ---- Test 4: legacy mangled paths are NOT written for manifest deps ----
+test "ir layout: legacy build/sailfin/capsules/sfn__math__mod.ll is not written" ![io] {
+    let report = _report_path("nolegacydep");
+    assert _run_build_json(report) == 0;
+    assert ! fs.exists("build/sailfin/capsules/sfn__math__mod.ll");
+}
+
+// ---- Test 5: legacy mangled paths are NOT written for relative imports ----
+test "ir layout: no legacy build/sailfin/capsules/...util.ll is written" ![io] {
+    let report = _report_path("nolegacyrel");
+    assert _run_build_json(report) == 0;
+    assert ! fs.exists("build/sailfin/capsules/src__util.ll");
+    assert ! fs.exists("build/sailfin/capsules/util.ll");
+}
+
+// ---- Test 6: build report deps.ll_paths reflects per-capsule tree ----
+test "ir layout: build report deps.ll_paths covers both dep + relative tree" ![io] {
+    let report = _report_path("reportpaths");
+    assert _run_build_json(report) == 0;
+    let json = fs.readFile(report);
+    let paths = _ll_paths(json);
+    assert paths.length >= 2;
+
+    let mut found_dep = false;
+    let mut found_rel = false;
+    let mut i = 0;
+    loop {
+        if i >= paths.length { break; }
+        let p = paths[i];
+        // Every reported dep .ll must exist on disk (CWD-relative).
+        assert fs.exists(p);
+        if starts_with(p, "build/capsules/sfn/math/ir/") && ends_with(p, ".ll") {
+            found_dep = true;
+        }
+        if starts_with(p, "build/capsules/demo/widget/ir/") && ends_with(p, ".ll") {
+            found_rel = true;
+        }
+        i += 1;
+    }
+    assert found_dep;
+    assert found_rel;
+}
+
+// ---- Test 7: sidecar deps.ll_paths reflects per-capsule tree ----
+test "ir layout: sidecar deps.ll_paths covers both dep + relative tree" ![io] {
+    let report = _report_path("sidecarpaths");
+    assert _run_build_json(report) == 0;
+    assert fs.exists(_sidecar());
+    let json = fs.readFile(_sidecar());
+    let paths = _ll_paths(json);
+    assert paths.length >= 2;
+
+    let mut found_dep = false;
+    let mut found_rel = false;
+    let mut i = 0;
+    loop {
+        if i >= paths.length { break; }
+        let p = paths[i];
+        assert fs.exists(p);
+        if starts_with(p, "build/capsules/sfn/math/ir/") && ends_with(p, ".ll") {
+            found_dep = true;
+        }
+        if starts_with(p, "build/capsules/demo/widget/ir/") && ends_with(p, ".ll") {
+            found_rel = true;
+        }
+        i += 1;
+    }
+    assert found_dep;
+    assert found_rel;
+}
+
+// ---- Test 8: modules[] entries align slug + ir_path for both routings ----
+// Every routed `.ll` (from deps.ll_paths) should also appear as exactly
+// one per-module entry whose slug aligns with the routing category:
+//   - dep tree   → slug is the spec form sfn/math or sfn/math/...
+//   - consumer   → slug's tail equals the ir_path tail (after the
+//                  consumer ir prefix, minus `.ll`).
+test "ir layout: modules[] entries align slug + ir_path for dep + relative routing" ![io] {
+    let report = _report_path("modroute");
+    assert _run_build_json(report) == 0;
+    let sidecar = fs.readFile(_sidecar());
+    let report_json = fs.readFile(report);
+    let paths = _ll_paths(report_json);
+    assert paths.length >= 2;
+
+    let consumer_prefix = "build/capsules/demo/widget/ir/";
+    let mut found_dep = false;
+    let mut found_rel = false;
+    let mut i = 0;
+    loop {
+        if i >= paths.length { break; }
+        let ir_path = paths[i];
+        // Exactly one modules[] entry per ir_path.
+        assert _count_modules_with_ir_path(sidecar, ir_path) == 1;
+        let slug = _slug_for_ir_path(sidecar, ir_path);
+        assert slug.length > 0;
+
+        if starts_with(ir_path, "build/capsules/sfn/math/ir/") {
+            found_dep = true;
+            assert slug == "sfn/math" || starts_with(slug, "sfn/math/");
+        } else if starts_with(ir_path, consumer_prefix) {
+            found_rel = true;
+            // Tail of the ir_path after the consumer prefix, minus `.ll`.
+            let tail_with_ext = substring(ir_path, consumer_prefix.length, ir_path.length);
+            let tail = substring(tail_with_ext, 0, tail_with_ext.length - 3);
+            // The slug ends with the same project-relative tail.
+            assert ends_with(slug, tail);
+        }
+        i += 1;
+    }
+    assert found_dep;
+    assert found_rel;
+}
+
+// ---- Test 9: relative-import modules[] entry has slug + ir_path locked ----
+// The relative `./util` source must produce a {slug, ir_path} pair where
+// ir_path lives under the consumer's tree and the slug is the
+// project-relative path-shaped form ending in `src/util` (the CWD-prefix
+// is carried because the runner builds `-p <root>`, not `-p .`).
+test "ir layout: modules[] surfaces relative-import entry with slug ending src/util + consumer-tree ir_path" ![io] {
+    let report = _report_path("modrel");
+    assert _run_build_json(report) == 0;
+    let sidecar = fs.readFile(_sidecar());
+    let ir_path = "build/capsules/demo/widget/ir/src/util.ll";
+    assert _count_modules_with_ir_path(sidecar, ir_path) == 1;
+    let slug = _slug_for_ir_path(sidecar, ir_path);
+    assert slug.length > 0;
+    assert ends_with(slug, "src/util");
+}

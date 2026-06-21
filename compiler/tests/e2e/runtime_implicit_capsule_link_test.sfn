@@ -68,11 +68,19 @@ fn _scratch_dir() -> string ![io] {
 fn _write_prog() -> string ![io] {
     let dir = _scratch_dir();
     let prog = dir + "/implicit_link_prog.sfn";
+    // Write the fs probe marker under the per-invocation scratch dir (an
+    // absolute path) rather than a CWD-relative "./" path — the runner runs
+    // the built binary from the repo root, so a relative marker would
+    // pollute the working tree. The assertion below keys off the binary's
+    // stdout, not this file; the write only exists to link fs.writeFile.
+    let marker = dir + "/_sfn_implicit_marker.txt";
     fs.writeFile(prog, "fn fetch(url: string) -> string ![net] {\n"
         + "    return http.get_body(url);\n"
         + "}\n\n"
         + "fn main() -> int ![io, net, clock] {\n"
-        + "    let path = \"./_sfn_implicit_marker.txt\";\n"
+        + "    let path = \""
+        + marker
+        + "\";\n"
         + "    fs.writeFile(path, \"implicit-capsule-ok\");\n"
         + "    let contents = fs.readFile(path);\n"
         + "    sleep(1);\n"

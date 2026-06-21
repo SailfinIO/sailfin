@@ -1,0 +1,137 @@
+// End-to-end test for by-name capsule import link parity (issue #873).
+//
+// Native replacement for the former `test_capsule_byname_import_link.sh`
+// (test-infra Phase 3, epic #842; `.claude/rules/no-bash-e2e.md`).
+//
+// A program that imports a workspace capsule *by name*
+// (`import { f } from "sfn/crypto"`) must link: the importer-side mangled
+// symbol must match the symbol the compiled capsule object actually
+// defines. The original bug (#873, observed during #816) had the call
+// site resolve the callee via the `[capsule].name`-based slug
+// (`sfn/crypto/mod`) while the capsule source was compiled under a
+// different slug (`capsules/sfn/crypto/src/mod`), so the link failed with
+// `undefined reference`. Capsule *tests* dodge this by using relative
+// imports; this test deliberately exercises the by-name path.
+//
+// Fixture: build/sfn-byname-link-test/ (in-tree so discover_workspace_root
+// finds the repo's workspace.toml, which registers the in-tree capsules/
+// tree; no symlinks required). Content is deterministic so concurrent
+// parallel runs are safe.
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
+// `![io]` test. (#842.)
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build spawns a nested clang + linker, so the child needs PATH.
+// SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
+// so the parallel pool does not collide on build/sailfin.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// The fixture lives at build/sfn-byname-link-test/ (CWD-relative = repo
+// root) so the resolver's workspace discovery finds the in-tree
+// sfn/crypto capsule.
+fn _capsule_root() -> string { return "build/sfn-byname-link-test"; }
+
+// Known-answer: SHA-256 of the ASCII string "abc".
+fn _expected_digest() -> string {
+    return "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+}
+
+// Materialize the in-tree fixture (idempotent). The program imports the
+// crypto capsule *by name* (not by relative path) — the path #873 reported
+// broken — and prints the well-known sha256("abc") digest so the run can
+// assert correctness, not just a non-crashing run.
+fn _ensure_fixture() ![io] {
+    let root = _capsule_root();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"byname-link-test\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"E2E regression for #873 by-name capsule import linking\"\n\n"
+        + "[dependencies]\n"
+        + "\"sfn/crypto\" = \"0.3.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n");
+    fs.writeFile(root + "/src/main.sfn", "import { sha256_hex } from \"sfn/crypto\";\n\n"
+        + "fn main() -> int ![io] {\n"
+        + "    print.info(sha256_hex(\"abc\"));\n"
+        + "    return 0;\n"
+        + "}\n");
+}
+
+// Per-test binary output: SAILFIN_TEST_SCRATCH or /tmp, keyed by tag.
+fn _bin_path(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    return base + "/sfn-byname-link-" + tag + "-prog";
+}
+
+// ---- Test 1: by-name import builds with no undefined reference ----
+// Guard the exact #873 symptom: a slug mismatch surfaces as an
+// `undefined reference` from the linker even when the compile itself
+// "succeeds" up to the link step.
+test "byname link: by-name capsule import builds with no undefined reference" ![io] {
+    _ensure_fixture();
+    let out_bin = _bin_path("build");
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", _capsule_root(), "-o", out_bin], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    assert exit == 0;
+    assert ! contains(out + err, "undefined reference");
+}
+
+// ---- Test 2: the linked binary runs and prints the right digest ----
+test "byname link: by-name capsule binary links and runs the capsule symbol" ![io] {
+    _ensure_fixture();
+    let out_bin = _bin_path("run");
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", _capsule_root(), "-o", out_bin], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+    assert fs.exists(out_bin);
+
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert contains(run_out + run_err, _expected_digest());
+}
+
+// ---- Test 3: capsule staged + compiled under the spec slug ----
+// Both the importer's call-site slug and the capsule-source compile slug
+// must agree on `sfn/crypto/mod`; the staged artifacts living under that
+// spec-shaped path (not a `capsules/sfn/crypto/src/...` path slug) is the
+// structural witness that the two resolution paths reconciled. These
+// artifacts are written CWD-relative (repo root) by `sfn build -p`.
+test "byname link: capsule staged + compiled under the spec slug (sfn/crypto/mod)" ![io] {
+    _ensure_fixture();
+    let out_bin = _bin_path("slug");
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", _capsule_root(), "-o", out_bin], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+
+    assert fs.exists("build/native/import-context/sfn/crypto/mod.sfn-asm");
+    assert fs.exists("build/capsules/sfn/crypto/ir/mod.ll");
+}

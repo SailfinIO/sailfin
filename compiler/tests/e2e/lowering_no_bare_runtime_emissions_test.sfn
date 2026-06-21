@@ -1,0 +1,308 @@
+// Source-audit for issue #727 — pin the hardcoded `@sailfin_runtime_*`
+// call-site emissions under the LLVM lowering directories against an
+// explicit allowlist.
+//
+// Native (no-bash) replacement for the former
+// `test_lowering_no_bare_runtime_emissions.sh` (test-infra Phase 3,
+// epic #842; `.claude/rules/no-bash-e2e.md`).
+//
+// Why this exists: the runtime helper descriptor registry in
+// `compiler/src/llvm/runtime_helpers.sfn` is the single source of truth
+// for runtime call symbols. A descriptor flip migrates every call site
+// in lockstep. Hardcoded `@sailfin_runtime_*` strings pushed straight
+// into the emitted IR (via `lines.push(...)`) bypass that resolution and
+// linked against the old symbol when M2.4a/M2.6/M2.8 flipped descriptors.
+//
+// This test mechanises the guard: every match against the audit grep
+// must appear in the allowlist (with the exact line number), and every
+// allowlist entry must be matched by an actual line. It additionally
+// enforces the bypass-comment invariant: every allowlisted call site
+// carries a `// Registry bypass:` justification within the 10 lines
+// immediately above it.
+//
+// This is a pure source-audit — no compiler binary is invoked. The bash
+// original took a `<compiler-binary>` argument purely for harness
+// uniformity and never used it.
+//
+// NOTE: assert with `sfn/strings` predicates — the `sfn/test` `expect_*`
+// matchers are `![pure]` and cannot be called from an `![io]` test (#842).
+import {
+    find,
+    split,
+    contains,
+    starts_with,
+    trim
+} from "sfn/strings";
+
+fn _allowlist_path() -> string {
+    return "compiler/tests/e2e/fixtures/runtime_emission_allowlist.txt";
+}
+
+// Recursively collect `.sfn` files under a directory (the bash `grep -r`
+// walked `compiler/src/llvm/lowering/` and
+// `compiler/src/llvm/expression_lowering/native/`). fs.listDirectory is
+// non-recursive and there is no usable `isDirectory` in the test-compile
+// context, so we descend by re-listing: a path whose listing has entries
+// is a directory, a zero-entry listing is a regular file (the trees here
+// stage no empty directories). Files are selected by the `.sfn` suffix.
+fn _collect_sfn(dir: string, acc: string[]) -> string[] ![io] {
+    let mut out = acc;
+    if !fs.exists(dir) { return out; }
+    let entries = fs.listDirectory(dir);
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        i = i + 1;
+        if name == "." || name == ".." { continue; }
+        let full = dir + "/" + name;
+        let sub = fs.listDirectory(full);
+        if sub.length > 0 { out = _collect_sfn(full, out); } else if ends_with_sfn(name) {
+            out.push(full);
+        }
+    }
+    return out;
+}
+
+fn ends_with_sfn(name: string) -> boolean {
+    if name.length < 4 { return false; }
+    let tail = name.length - 4;
+    let mut s = "";
+    let mut i = tail;
+    loop {
+        if i >= name.length { break; }
+        s = s + name[i];
+        i = i + 1;
+    }
+    return s == ".sfn";
+}
+
+// Build the verbatim `grep -nE 'call [^"]*@sailfin_runtime_'` output
+// (`<repo-rel path>:<line>:<source line>`), dropping pure `// ...`
+// comment lines (matching the bash `grep -vE ':[[:space:]]*//'`).
+fn _audit_actual() -> string[] ![io] {
+    let mut roots: string[] = [];
+    roots.push("compiler/src/llvm/lowering");
+    roots.push("compiler/src/llvm/expression_lowering/native");
+
+    let mut files: string[] = [];
+    let mut ri = 0;
+    loop {
+        if ri >= roots.length { break; }
+        files = _collect_sfn(roots[ri], files);
+        ri = ri + 1;
+    }
+
+    let mut matches: string[] = [];
+    let mut fi = 0;
+    loop {
+        if fi >= files.length { break; }
+        let path = files[fi];
+        fi = fi + 1;
+        let body = fs.readFile(path);
+        let lines = split(body, "\n");
+        let mut li = 0;
+        loop {
+            if li >= lines.length { break; }
+            let line = lines[li];
+            let line_no = li + 1;
+            li = li + 1;
+            // Audit pattern: `call` ... `@sailfin_runtime_` on one line,
+            // with no `"` between `call` and `@` (keeps the match within a
+            // single emitted IR token). We approximate `call [^"]*@` by
+            // requiring a `call ` ... `@sailfin_runtime_` occurrence whose
+            // intervening span has no `"`.
+            if !_call_to_runtime(line) { continue; }
+            // Drop lines whose first non-space char starts a comment
+            // (bash `grep -vE ':[[:space:]]*//'` — but applied to the
+            // source-line content, i.e. the trimmed line begins with //).
+            if starts_with(trim(line), "//") { continue; }
+            matches.push(path + ":" + int_to_string(line_no) + ":" + line);
+        }
+    }
+    return _sorted(matches);
+}
+
+// Does the line contain `call <no-quote>* @sailfin_runtime_`?
+fn _call_to_runtime(line: string) -> boolean {
+    let mut pos = find(line, "call ", 0);
+    loop {
+        if pos < 0 { break; }
+        let after = pos + 5;
+        let at = find(line, "@sailfin_runtime_", after);
+        if at >= 0 {
+            // Reject if a `"` appears between `call ` and the `@`.
+            let between = _slice(line, after, at);
+            if find(between, "\"", 0) < 0 { return true; }
+        }
+        pos = find(line, "call ", after);
+    }
+    return false;
+}
+
+fn _slice(s: string, start: int, end: int) -> string {
+    let mut out = "";
+    let mut i = start;
+    loop {
+        if i >= end { break; }
+        if i >= s.length { break; }
+        out = out + s[i];
+        i = i + 1;
+    }
+    return out;
+}
+
+fn int_to_string(n: int) -> string {
+    if n == 0 { return "0"; }
+    let mut v = n;
+    let mut neg = false;
+    if v < 0 {
+        neg = true;
+        v = 0 - v;
+    }
+    let digits = "0123456789";
+    let mut s = "";
+    loop {
+        if v == 0 { break; }
+        let d = v % 10;
+        s = digits[d] + s;
+        v = v / 10;
+    }
+    if neg { s = "-" + s; }
+    return s;
+}
+
+// The expected set: non-comment, non-blank allowlist lines.
+fn _allowlist_expected() -> string[] ![io] {
+    let body = fs.readFile(_allowlist_path());
+    let lines = split(body, "\n");
+    let mut out: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i = i + 1;
+        let t = trim(line);
+        if t.length == 0 { continue; }
+        if starts_with(t, "#") { continue; }
+        out.push(line);
+    }
+    return _sorted(out);
+}
+
+// Ascending insertion sort (the audit and allowlist sets are tiny).
+fn _sorted(items: string[]) -> string[] {
+    let mut out = items;
+    let mut i = 1;
+    loop {
+        if i >= out.length { break; }
+        let mut k = i;
+        loop {
+            if k <= 0 { break; }
+            if !_less(out[k], out[k - 1]) { break; }
+            let tmp = out[k - 1];
+            out[k - 1] = out[k];
+            out[k] = tmp;
+            k = k - 1;
+        }
+        i = i + 1;
+    }
+    return out;
+}
+
+// Lexicographic `a < b` over byte values.
+fn _less(a: string, b: string) -> boolean {
+    let mut i = 0;
+    loop {
+        if i >= a.length && i >= b.length { return false; }
+        if i >= a.length { return true; }
+        if i >= b.length { return false; }
+        let ca = _ord(a[i]);
+        let cb = _ord(b[i]);
+        if ca < cb { return true; }
+        if ca > cb { return false; }
+        i = i + 1;
+    }
+}
+
+// Byte ordinal of a 1-char string via a lookup over the printable ASCII
+// range that appears in source/path text (sufficient for ordering paths,
+// digits, and IR tokens deterministically).
+fn _ord(ch: string) -> int {
+    let table = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+    let idx = find(table, ch, 0);
+    if idx < 0 { return 999; }
+    return idx + 32;
+}
+
+test "lowering runtime emission audit matches the allowlist exactly (#727)" ![io] {
+    let actual = _audit_actual();
+    let expected = _allowlist_expected();
+
+    // Same cardinality and element-wise equality after sorting (the bash
+    // `[ "$ACTUAL" != "$EXPECTED" ]` string comparison of the two sorted
+    // newline-joined sets).
+    assert actual.length == expected.length;
+    let mut i = 0;
+    loop {
+        if i >= actual.length { break; }
+        assert actual[i] == expected[i];
+        i = i + 1;
+    }
+    // At least one allowlisted emission must be present (the fixture pins
+    // two; a vacuous match would mean the audit grep silently broke).
+    assert actual.length >= 1;
+}
+
+test "every allowlist entry carries a Registry bypass comment within 10 lines above (#727)" ![io] {
+    let expected = _allowlist_expected();
+    let mut i = 0;
+    loop {
+        if i >= expected.length { break; }
+        let entry = expected[i];
+        i = i + 1;
+
+        // entry = `<path>:<line_no>:<source>`. Split on the first two ':'.
+        let first = find(entry, ":", 0);
+        assert first > 0;
+        let file = _slice(entry, 0, first);
+        let rest = _slice(entry, first + 1, entry.length);
+        let second = find(rest, ":", 0);
+        assert second > 0;
+        let line_no = _parse_int(_slice(rest, 0, second));
+        assert line_no >= 1;
+
+        // The bypass comment must appear in lines [line_no-10, line_no-1].
+        let body = fs.readFile(file);
+        let lines = split(body, "\n");
+        let mut start = line_no - 10;
+        if start < 1 { start = 1; }
+        let end = line_no - 1;
+        let mut found = false;
+        let mut ln = start;
+        loop {
+            if ln > end { break; }
+            // lines is 0-indexed.
+            let idx = ln - 1;
+            if idx >= 0 && idx < lines.length {
+                if contains(lines[idx], "// Registry bypass:") { found = true; }
+            }
+            ln = ln + 1;
+        }
+        assert found;
+    }
+}
+
+fn _parse_int(s: string) -> int {
+    let mut v = 0;
+    let mut i = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = s[i];
+        let d = find("0123456789", ch, 0);
+        if d < 0 { return -1; }
+        v = v * 10 + d;
+        i = i + 1;
+    }
+    return v;
+}

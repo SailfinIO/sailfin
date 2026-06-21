@@ -1,0 +1,262 @@
+// End-to-end test for M2.7b frame-based try/catch compiler emission
+// (issue #404, epic #389). Pins both the inline IR shape and the runtime
+// catch behavior — the latter guards the silent-no-op failure mode that
+// IR pinning alone cannot detect (see the file-header "Setjmp/longjmp
+// safety" note in `runtime/sfn/exception.sfn`).
+//
+// Native (no-bash) replacement for the former `test_try_catch_frames.sh`
+// (test-infra Phase 3, epic #842; `.claude/rules/no-bash-e2e.md`).
+//
+// What the M2.7b PR ships, end-to-end:
+//
+//   1. inline IR shape — the compiler-emitted `@sailfin_user_main`
+//      function body, for a `try { ... } catch (e) { ... }`, contains:
+//        (a) `call void @sfn_exception_push_frame(i8* %tN)` at try entry
+//        (b) `call i32 @setjmp(i8* %tN)` immediately after, whose return
+//            value is branched on (0 → try body, non-zero → catch)
+//        (c) NO `call i32 @sfn_try_enter(...)` — calling that as a regular
+//            function is C11 UB (glibc silently no-ops the longjmp). The
+//            runtime symbol stays exported for ABI completeness; only
+//            compiler-emitted try sites are constrained.
+//      push_frame must precede setjmp with no intervening `call`.
+//      The catch handler reads the message via `@sfn_take_exception(frame)`.
+//
+//   2. runtime catch behavior — `try { throw "boom"; } catch (e) { print(e); }`
+//      compiles, links, runs, prints `boom`, exits 0; the try/catch/finally
+//      and try/finally(no-catch) guarantees run finally too.
+//
+// IR assertions use `sfn/strings` predicates — the `sfn/test` `expect_*`
+// matchers are `![pure]` and cannot be called from an `![io]` test (#842).
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. `emit` does not link, but `build` spawns
+// clang + the linker (needs PATH), and SAILFIN_TEST_SCRATCH routes the
+// build-cache per invocation for parallel-pool isolation (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-try-catch-frames";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Count non-overlapping occurrences of `needle` in `haystack`.
+fn _count(haystack: string, needle: string) -> int {
+    if needle.length == 0 { return 0; }
+    let mut n: int = 0;
+    let mut pos: int = 0;
+    loop {
+        let idx = find(haystack, needle, pos);
+        if idx < 0 { break; }
+        n += 1;
+        pos = idx + needle.length;
+    }
+    return n;
+}
+
+// Body text of the function whose `define` line contains `anchor` (e.g.
+// "@sailfin_user_main"), from the start of its `define` line through its
+// closing `}`. Empty string when the anchor is absent. Scopes IR
+// assertions to the user function so the `@main` wrapper (which also
+// emits push_frame/setjmp) cannot satisfy them.
+fn _fn_body(ll: string, anchor: string) -> string {
+    let idx = find(ll, anchor, 0);
+    if idx < 0 { return ""; }
+    let mut start = idx;
+    loop {
+        if start <= 0 { break; }
+        if substring(ll, start - 1, start) == "\n" { break; }
+        start -= 1;
+    }
+    let close = find(ll, "\n}", idx);
+    let mut end = close;
+    if end < 0 { end = ll.length; } else { end = close + 2; }
+    return substring(ll, start, end);
+}
+
+// Text of `body` between the first occurrence of `from` and the next
+// occurrence of `to` (exclusive of both); to end-of-text if `to` absent.
+fn _between(body: string, from: string, to: string) -> string {
+    let fi = find(body, from, 0);
+    if fi < 0 { return ""; }
+    let start = fi + from.length;
+    let ti = find(body, to, start);
+    let mut end = ti;
+    if end < 0 { end = body.length; }
+    return substring(body, start, end);
+}
+
+// A `try { throw "boom"; } catch (e) { print(e); }` fixture. Used by both
+// the IR-shape pins and the runtime test.
+fn _runtime_fixture() -> string ![io] {
+    let dir = _scratch_dir();
+    let path = dir + "/try_catch_runtime.sfn";
+    fs.writeFile(path, "fn main() ![io] {\n" + "    try {\n"
+        + "        throw \"boom\";\n"
+        + "    } catch (e) {\n"
+        + "        print(e);\n"
+        + "    }\n"
+        + "}\n");
+    return path;
+}
+
+// Emit LLVM IR for `src_path` to `out_path` and read it back; "" on a
+// non-zero exit or missing output.
+fn _emit_ir(tag: string, src_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let out_path = dir + "/" + tag + ".ll";
+    if fs.exists(out_path) { fs.deleteFile(out_path); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_path, "llvm", src_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(out_path) { return ""; }
+    return fs.readFile(out_path);
+}
+
+// The user-function body for the runtime fixture, scoped to
+// `@sailfin_user_main`.
+fn _user_main_body(tag: string) -> string ![io] {
+    let ll = _emit_ir(tag, _runtime_fixture());
+    if ll.length == 0 { return ""; }
+    return _fn_body(ll, "@sailfin_user_main");
+}
+
+test "try-catch: push_frame fires at try entry inside the user function" ![io] {
+    let body = _user_main_body("push");
+    assert body.length > 0;
+    assert _count(body, "call void @sfn_exception_push_frame(i8* %t") == 1;
+}
+
+test "try-catch: setjmp inline in user function, branched on its result" ![io] {
+    let body = _user_main_body("setjmp");
+    assert body.length > 0;
+    assert _count(body, "call i32 @setjmp(i8* %t") == 1;
+    // The result feeds an icmp eq 0 + br to (try, catch).
+    assert contains(body, "icmp eq i32 %t");
+    assert contains(body, ", 0");
+    assert contains(body, "br i1 %t");
+    assert contains(body, ", label %try");
+    assert contains(body, ", label %catch");
+}
+
+test "try-catch: push_frame precedes setjmp with no intervening call" ![io] {
+    let body = _user_main_body("order");
+    assert body.length > 0;
+    let push_idx = find(body, "call void @sfn_exception_push_frame", 0);
+    let setjmp_idx = find(body, "call i32 @setjmp", 0);
+    assert push_idx >= 0;
+    assert setjmp_idx >= 0;
+    assert push_idx < setjmp_idx;
+    // No side-effecting `call` instruction is spliced between push_frame
+    // and setjmp — the setjmp must land directly after the chain
+    // mutation. The current emission inserts only operand-prep
+    // (non-call) lines, so the text between the two carries no "call ".
+    let between = substring(body, push_idx, setjmp_idx);
+    // Only one "call " in [push, setjmp): the push_frame itself.
+    assert _count(between, "call ") == 1;
+}
+
+test "try-catch: no compiler-emitted call to @sfn_try_enter" ![io] {
+    let body = _user_main_body("notryenter");
+    assert body.length > 0;
+    assert _count(body, "call i32 @sfn_try_enter(") == 0;
+}
+
+test "try-catch: catch handler reads message via @sfn_take_exception(frame)" ![io] {
+    let body = _user_main_body("take");
+    assert body.length > 0;
+    let catch_body = _between(body, "catch", "merge");
+    assert contains(catch_body, "call i8* @sfn_take_exception(i8* %t");
+}
+
+test "try-catch: throw boom is caught, prints boom, exits 0" ![io] {
+    let src = _runtime_fixture();
+    let dir = _scratch_dir();
+    let out_bin = dir + "/runtime.out";
+    if fs.exists(out_bin) { fs.deleteFile(out_bin); }
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", out_bin, src], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+    assert fs.exists(out_bin);
+
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert contains(run_out + run_err, "boom");
+}
+
+test "try-catch-finally: finally runs after the catch handler" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/try_catch_finally.sfn";
+    fs.writeFile(src, "fn main() ![io] {\n" + "    try {\n"
+        + "        throw \"boom\";\n"
+        + "    } catch (e) {\n"
+        + "        print(\"caught: \" + e);\n"
+        + "    } finally {\n"
+        + "        print(\"cleanup\");\n"
+        + "    }\n"
+        + "}\n");
+    let out_bin = dir + "/try_catch_finally.out";
+    if fs.exists(out_bin) { fs.deleteFile(out_bin); }
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", out_bin, src], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    let combined = run_out + run_err;
+    assert run_exit == 0;
+    assert contains(combined, "caught: boom");
+    assert contains(combined, "cleanup");
+}
+
+test "try-finally (no catch): finally runs before the uncaught throw propagates" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/try_finally_no_catch.sfn";
+    fs.writeFile(src, "fn main() ![io] {\n" + "    try {\n"
+        + "        throw \"boom\";\n"
+        + "    } finally {\n"
+        + "        print(\"cleanup ran\");\n"
+        + "    }\n"
+        + "}\n");
+    let out_bin = dir + "/try_finally_no_catch.out";
+    if fs.exists(out_bin) { fs.deleteFile(out_bin); }
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", out_bin, src], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    let combined = run_out + run_err;
+    // finally must run before the unhandled throw aborts the process,
+    // which surfaces as a non-zero exit on Linux.
+    assert contains(combined, "cleanup ran");
+    assert run_exit != 0;
+}
