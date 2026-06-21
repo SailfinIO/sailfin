@@ -5,7 +5,7 @@
 // `bounds_check`, and `free`. Sub-issue of #390 (tracker #821),
 // grouped with the arena mark/rewind pair in
 // `runtime/sfn/memory/arena.sfn`. Each body reproduces the C
-// original in `runtime/native/src/sailfin_runtime.c` exactly; the
+// original in the retired C runtime exactly; the
 // runtime-helper descriptors in
 // `compiler/src/llvm/runtime_helpers.sfn` flip their `symbol` /
 // `native_signature` to the `sfn_mem_*` names so call-site emission
@@ -44,12 +44,12 @@ extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
 extern fn abort() -> void;
 
 // arena-mode probe (C `sfn_arena_enabled`, exported from
-// `runtime/native/src/sailfin_arena.c`). Backs the `sfn_mem_free`
+// the retired C runtime). Backs the `sfn_mem_free`
 // arena-mode no-op guard below and the `sfn_alloc_struct` routing.
 extern fn sfn_arena_enabled() -> bool;
 
 // process-global arena handle + bump allocator, both exported from
-// `runtime/native/src/sailfin_arena.c`. Back the arena path of
+// the retired C runtime. Back the arena path of
 // `sfn_alloc_struct`. `sfn_arena_alloc(arena, size, align)` returns an
 // **uninitialised** slice of the current page (see `sailfin_arena.c:144`),
 // so the port zero-fills via `memset` to match `_rt_calloc`'s contract.

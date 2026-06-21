@@ -10,7 +10,7 @@
 //      runtime-retirement epic (#1308, issue #1310) these are **real
 //      native bodies** that write directly to fd 1 / fd 2 via the
 //      `write(2)` syscall — no longer C trampolines. The prior C
-//      definitions in `runtime/native/src/sailfin_runtime.c`
+//      definitions in the retired C runtime
 //      (`sfn_print*`, the SfnString-by-value trampolines) are removed
 //      in the same change; this module's TU is now the sole definition
 //      site for these symbols.
@@ -63,7 +63,7 @@
 //      removed; the C `sailfin_runtime_{getenv,home_dir}` trampolines retire
 //      with #822.
 //
-// Linkage: this file is listed in `runtime/native/capsule.toml`'s
+// Linkage: this file is listed in `runtime/capsule.toml`'s
 // `sfn-sources` array; `_compile_runtime_sfn_sources` in
 // `compiler/src/cli_main.sfn` compiles it to a `.o` (via
 // `_emit_runtime_sfn_to_obj`, `mangle_symbols=false`) and threads it
@@ -108,7 +108,7 @@ extern fn sfn_str_from_codepoint(cp: i64) -> * u8;
 // capture). `popen`/`pclose`/`fread` are provided by glibc on
 // Linux/macOS and by mingw's msvcrt on Windows, so this body links on
 // every target io.sfn is compiled for (it is in both
-// `runtime/native/capsule.toml` and the cross-windows RUNTIME_MODS).
+// `runtime/capsule.toml` and the cross-windows RUNTIME_MODS).
 extern fn malloc(size: usize) -> * u8;
 
 extern fn free(ptr: * u8) -> void;
@@ -140,7 +140,7 @@ fn sfn_write_fd(fd: i32, buf: * u8, count: usize) -> i64 ![io] {
 // `0` which the C printers no-op) or the codepoint shifted into the
 // upper 32 bits (`cp << 32`, so the low 32 bits are zero and the value
 // is non-zero). Mirrors the C `_is_immediate_codepoint_string`
-// classification (`runtime/native/src/sailfin_runtime.c`). A real
+// classification (the retired C runtime). A real
 // string pointer is `> 0x7f` with a non-zero low word, so it never
 // matches. Pointer math only — no syscall, no `errno` (which keeps this
 // module free of the glibc-only `__errno_location` that does not link

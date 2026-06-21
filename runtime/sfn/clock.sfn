@@ -2,7 +2,7 @@
 //
 // Sailfin-native definition of `@sfn_sleep`. PR 2 of the sleep
 // migration (issue #397, part of M2 epic #389) replaces the
-// pre-existing C trampoline in `runtime/native/src/sailfin_runtime.c`
+// pre-existing C trampoline in the retired C runtime
 // with a direct `nanosleep` call from
 // `runtime/sfn/platform/posix.sfn`. The C entrypoint
 // `sailfin_runtime_sleep` and its `platform/libc.sfn` declaration
@@ -15,7 +15,7 @@
 // `docs/runtime_architecture.md` §2.7.4. Issue #307 is the unit
 // audit that locked this in across all four layers.
 //
-// Linkage: this file is listed in `runtime/native/capsule.toml`'s
+// Linkage: this file is listed in `runtime/capsule.toml`'s
 // `sfn-sources` array; `_compile_runtime_sfn_sources` in
 // `compiler/src/cli_main.sfn` compiles it to a `.o` and threads it
 // into the final link. The `@sfn_sleep` symbol becomes the sole

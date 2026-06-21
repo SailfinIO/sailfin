@@ -1,8 +1,8 @@
 // runtime/sfn/assert.sfn
 //
 // Assertion-failure handler (#822 / #1308). Ports `sailfin_assert_fail`
-// and the `runtime_assert_fail_fn` trampoline out of the deleted
-// `runtime/native/src/sailfin_runtime.c`.
+// and the `runtime_assert_fail_fn` trampoline out of the retired
+// C runtime (formerly `sailfin_runtime.c`).
 //
 // The compiler emits `call @runtime_assert_fail_fn(file, line, col, msg)`
 // for every `assert` it cannot prove true at compile time
@@ -26,7 +26,7 @@
 // Excluded from the cross-windows RUNTIME_MODS (its `fopen`/`fwrite`
 // sink + the SFAF protocol are Linux/macOS test-harness plumbing);
 // Windows resolves `@runtime_assert_fail_fn` / `@sailfin_assert_fail`
-// from the abort stubs in `runtime/native/ir/windows_stubs.ll`. Sync
+// from the abort stubs in `runtime/ir/windows_stubs.ll`. Sync
 // pinned by `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.
 extern fn malloc(size: usize) -> * u8;
 

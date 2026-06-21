@@ -1,11 +1,11 @@
 // runtime/sfn/runtime_globals.sfn
 //
 // Sailfin-owned definitions of the process-wide runtime globals that the
-// hand-written `runtime/native/ir/*.ll` link-glue used to provide. This is
+// hand-written `runtime/ir/*.ll` link-glue used to provide. This is
 // the Sailfin replacement for the `@runtime` slot in
-// `runtime/native/ir/runtime_globals.ll` — part of epic #1308 / the
-// unfinished tail of #822 (whose acceptance, `find runtime/native -name
-// '*.ll'` empty, is the keystone for deleting `runtime/native/` entirely).
+// `runtime/ir/runtime_globals.ll` — part of epic #1308 / the
+// unfinished tail of #822 (whose acceptance, the former `runtime/native/ir/`
+// `.ll` glue retired, was the keystone for deleting `runtime/native/`).
 //
 // `@runtime` (#1436) — the process runtime-context slot. Every emitted
 // module declares it `@runtime = external global i8**` and member-access
@@ -24,7 +24,7 @@
 // (#1445, `lowering_phase_render.sfn` / `lowering_core.sfn`), so this module
 // emits the definition alone and every other module keeps the reference.
 //
-// Universality: this module is listed in `runtime/native/capsule.toml`'s
+// Universality: this module is listed in `runtime/capsule.toml`'s
 // `sfn-sources`, so its object is linked into every Sailfin program
 // alongside the rest of the native runtime — the same unconditional reach
 // the `.ll` had. No Sailfin code references the `runtime` binding (the

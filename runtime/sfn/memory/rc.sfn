@@ -41,7 +41,7 @@
 // Naming: every export uses the `sfn_rc_sfn_*` infix so the
 // Sailfin module coexists with the C runtime's existing
 // `sfn_rc_release` no-op stub in
-// `runtime/native/src/sailfin_runtime.c:1885` (M1.5.2 placeholder
+// the retired C runtime (formerly `sailfin_runtime.c:1885`, M1.5.2 placeholder
 // from #326) without a link-time collision. Mirrors the
 // `sfn_arena_sfn_*` infix in `runtime/sfn/memory/arena.sfn` and
 // the same rationale documented there. When M3 retires the C

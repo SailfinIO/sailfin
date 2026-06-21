@@ -3,7 +3,7 @@
 // First-wave Sailfin-native HTTP/1.1 client adapter (M3, #818 —
 // epic #390 / tracker #321). Replaces the curl-subprocess HTTP
 // path (`sailfin_runtime_http_get` / `_post_json` / `_download`
-// in `runtime/native/src/sailfin_runtime.c`, which shell out to
+// in the retired C runtime, which shell out to
 // `curl -sfS`) with a pure-Sailfin socket client built on the
 // BSD-sockets surface declared in `runtime/sfn/platform/net.sfn`.
 // Mirrors the migration shape of `runtime/sfn/adapters/filesystem.sfn`

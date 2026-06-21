@@ -6,23 +6,23 @@
 // element type, replacing both the legacy `SailfinPtrArray` (with the
 // hidden 2-word header that backed `_recent_array_*` ring-buffer
 // tracking and the canary slots in
-// `runtime/native/src/sailfin_runtime.c`) and the byte-addressed array
+// the retired C runtime) and the byte-addressed array
 // header.
 //
 // Status (#1316, C6 of epic #1308): the array *core* —
 // `sfn_array_concat` / `sfn_array_push_string` / `sfn_array_push_slot`
 // — is **bare-defined here** (link-ownership flipped off the C
 // runtime, mirroring the #1309 arena flip). Their C definitions in
-// `runtime/native/src/sailfin_runtime.c` are retired; emission's
+// the retired C runtime are retired; emission's
 // `@sfn_array_*` calls resolve to these Sailfin bodies at link because
-// this module is listed in `runtime/native/capsule.toml::sfn-sources`
-// and linked into every binary alongside the C runtime.
+// this module is listed in `runtime/capsule.toml::sfn-sources`
+// and linked into every binary.
 //
 // Status (#1308 residual): the `sailfin_runtime_*_v2` trio the core
 // wrappers delegate to — `concat_v2` / `append_string_v2` /
 // `array_push_slot_v2` — is **now also bare-defined here** in Sailfin
 // (link-ownership flip, mechanism 1). The C bodies in
-// `runtime/native/src/sailfin_runtime.c` are `static`-ified and the
+// the retired C runtime are `static`-ified and the
 // header prototypes dropped; emission's `@sfn_array_*` wrappers and the
 // `runtime/sfn/adapters/filesystem.sfn` C-ABI externs resolve to these
 // Sailfin definitions at link. The `SfnArray` container layout
@@ -71,7 +71,7 @@
 // `runtime/sfn/memory/arena.sfn`) when the process arena is enabled, and
 // fall through to libc `calloc` / `realloc` otherwise — exactly the
 // dual-mode `_rt_calloc` / `_rt_realloc` contract the retired C bodies
-// used (`runtime/native/src/sailfin_runtime.c`). `memcpy` / `memset`
+// used (the retired C runtime). `memcpy` / `memset`
 // move and zero the element storage.
 extern fn calloc(count: usize, size: usize) -> * u8;
 
@@ -363,7 +363,7 @@ fn sailfin_runtime_array_push_slot_v2(data_ptr: * * u8, len_ptr: * i64, cap_ptr:
 // of element storage from the arena.
 //
 // Status: stub returning `null`. Matches the C stub
-// (`sfn_array_create` in `runtime/native/src/sailfin_runtime.c`) so
+// (`sfn_array_create` in the retired C runtime) so
 // accidental callers fail fast at the next push/concat with a
 // consistent surface across both the Sailfin and C definitions. The
 // first compiler-emitted callers land in M2.7 when array-literal
@@ -395,10 +395,10 @@ fn sfn_array_sfn_push(arr: * u8, elem_ptr: * u8, elem_size: i64, arena: * u8) ->
 // that `compiler/src/llvm/runtime_helpers.sfn` (`concat` descriptor)
 // and the direct emission sites in
 // `compiler/src/llvm/expression_lowering/arrays.sfn` emit `@sfn_array_concat`
-// against — the C definition in `runtime/native/src/sailfin_runtime.c`
+// against — the C definition in the retired C runtime
 // is retired and emission now binds here at link (`runtime/sfn/array.sfn`
-// is in `runtime/native/capsule.toml::sfn-sources`, linked into every
-// binary alongside the C runtime).
+// is in `runtime/capsule.toml::sfn-sources`, linked into every
+// binary).
 //
 // ABI: **2-arg** `(a, b)` to match the descriptor's emitted shape
 // (`parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"]`).
@@ -421,7 +421,7 @@ fn sfn_array_concat(a: * u8, b: * u8) -> * u8 {
     // input's buffer); the element slots are **shallow**-copied, so for
     // `char*` elements the result's element pointers still alias the same
     // string bytes as the inputs (`sailfin_runtime_concat_v2`,
-    // `runtime/native/src/sailfin_runtime.c:8736-8751`) — `unsafe` here is
+    // `sailfin_runtime.c:8736-8751` in the retired C runtime) — `unsafe` here is
     // bounded by container ownership, not element-content uniqueness.
     // Deep element-content ownership lands with the arena-backed body
     // (M3 per §2.1.1).
@@ -439,7 +439,7 @@ fn sfn_array_sfn_slice(arr: * u8, start: i64, end: i64) -> * u8 { return arr; }
 
 // Compiler-emission helpers under the `_sfn_` infix. The C
 // trampolines (`sfn_array_push_string`, `sfn_array_push_slot` in
-// `runtime/native/src/sailfin_runtime.c`) carry the bare names that
+// the retired C runtime) carry the bare names that
 // `compiler/src/llvm/expression_lowering/arrays.sfn` emits against;
 // these proof-of-life Sailfin exports preserve the same ABIs so the
 // migration to arena-backed bodies stays a single PR — rename
