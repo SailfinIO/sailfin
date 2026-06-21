@@ -244,6 +244,7 @@ fn render_check_json_envelope(events: CheckJsonEvent[], summary: CheckJsonSummar
 //   E05xx        -> parse
 //   E06xx        -> reexport (module-structure)
 //   W00xx        -> load
+//   W02xx        -> lint (soft-deprecations, e.g. W0210 bare assert)
 // Anything else falls back to "unknown" so a future code range
 // shows up as an obvious-to-track default rather than silently
 // claiming the wrong producer.
@@ -255,6 +256,7 @@ fn render_check_json_envelope(events: CheckJsonEvent[], summary: CheckJsonSummar
 fn classify_producer(code: string) -> string {
     if _starts_with(code, "E04") { return "effect"; }
     if _starts_with(code, "W00") { return "load"; }
+    if _starts_with(code, "W02") { return "lint"; }
     if _starts_with(code, "E05") { return "parse"; }
     if _starts_with(code, "E06") { return "reexport"; }
     if _starts_with(code, "E00") { return "typecheck"; }

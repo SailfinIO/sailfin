@@ -21,7 +21,7 @@
 //
 // See docs/proposals/check-architecture.md for the broader design.
 import { Statement } from "../ast";
-import { Token } from "../token";
+import { Token, TokenKind } from "../token";
 import { typecheck_diagnostics_with_import_symbols_prelude } from "../typecheck";
 import { number_to_string } from "../num_format";
 import { parse_program } from "../parser/mod";
@@ -31,7 +31,8 @@ import { validate_capsule_capabilities, validate_effects_with_imports } from "..
 import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
 import { collect_reexport_violations } from "../reexport_check";
 import { load_prelude_global_names } from "../prelude_globals";
-import { Diagnostic } from "../typecheck_types";
+import { Diagnostic, FixSuggestion } from "../typecheck_types";
+import { collect_bare_assert_findings } from "../bare_assert_check";
 import {
     render_diagnostic,
     split_source_lines,
@@ -104,7 +105,7 @@ fn _parse_diagnostic_for_unknown(stmt: Statement, file_path: string) -> Diagnost
 fn check_source(source: string, file_path: string) -> CheckResult ![io] {
     let no_interfaces: Statement[] = [];
     let no_caps: string[] = [];
-    return check_source_with_imports(source, file_path, no_interfaces, empty_import_symbols(), no_caps);
+    return check_source_with_imports(source, file_path, no_interfaces, empty_import_symbols(), no_caps, false);
 }
 
 // Cross-module-aware variant: `imported_interfaces` carries
@@ -133,7 +134,7 @@ fn check_source(source: string, file_path: string) -> CheckResult ![io] {
 // the manifest-allowed set. Empty list = no manifest in scope =
 // skip the cross-check (standalone .sfn files outside any capsule
 // keep working unchanged).
-fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[], function_effects: ImportSymbolTable, capabilities_required: string[]) -> CheckResult ![io] {
+fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[], function_effects: ImportSymbolTable, capabilities_required: string[], allow_bare_assert: boolean) -> CheckResult ![io] {
     let program = parse_program(source);
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let type_diags = typecheck_diagnostics_with_import_symbols_prelude(program, imported_interfaces, function_effects, prelude_globals);
@@ -201,6 +202,48 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         rendered.push(render_diagnostic(rxdiag, source_lines, "reexport"));
         errors += 1;
         rxi += 1;
+    }
+
+    // W0210 (#1173): soft-deprecate a bare `assert` inside a `test`
+    // block in favor of `expect()` matchers, which carry a descriptive
+    // failure message instead of just the expression text. Detection
+    // runs over the parser's desugared assert shape (see
+    // bare_assert_check.sfn); only statements lexically inside a test
+    // body are visited, so an `assert` in ordinary code never warns.
+    // Always a `warning`, never an error, so the compiler's own
+    // bare-assert-heavy suite stays green; `--allow-bare-assert`
+    // suppresses it entirely. Code family W02xx = lint; see
+    // diagnostics_json.sfn classify_producer.
+    if !allow_bare_assert {
+        let bare_asserts = collect_bare_assert_findings(program);
+        let mut bai: int = 0;
+        loop {
+            if bai >= bare_asserts.length { break; }
+            let finding = bare_asserts[bai];
+            let assert_token = Token {
+                kind: TokenKind.Identifier(),
+                lexeme: "assert",
+                line: finding.line,
+                column: finding.column
+            };
+            let fix = FixSuggestion {
+                message: "replace the bare `assert` with an `expect()` matcher, e.g. `assert expect_eq_int(actual, expected).ok;`",
+                edits: []
+            };
+            let badiag = Diagnostic {
+                code: "W0210",
+                severity: "warning",
+                message: "prefer expect() over a bare assert inside a test block\nuse an sfn/test matcher (expect_eq_*, expect_contains_str, ...) for a descriptive failure; pass --allow-bare-assert to suppress",
+                file_path: file_path,
+                primary: assert_token,
+                suggestion: fix
+            };
+            combined.push(badiag);
+            producers.push("lint");
+            rendered.push(render_diagnostic(badiag, source_lines, "lint"));
+            warnings += 1;
+            bai += 1;
+        }
     }
 
     // Stamp the originating module path onto each typecheck diagnostic
