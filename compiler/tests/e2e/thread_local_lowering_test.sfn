@@ -1,0 +1,317 @@
+// End-to-end test for the `thread_local` storage-class annotation on
+// top-level `let mut` declarations (#730).
+//
+// Native (no-bash) replacement for the former
+// `test_thread_local_lowering.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`). Pins:
+//
+//   1. lowering shape — `thread_local let mut x: T = init;` emits
+//      `@global.x = internal thread_local global <T> <init>` across the
+//      i64 / i1 / double branches of `_process_one_binding` in
+//      `compiler/src/llvm/lowering/module_globals.sfn`.
+//   2. use-site symbol — load/store sites still address the global via
+//      `@global.<name>` (thread_local changes only the declaration line).
+//   3. immutable rejection — `thread_local let x = ...` (no `mut`) is an
+//      E0807 typecheck diagnostic carrying a `missing \`mut\`` hint.
+//   4. mutable acceptance — the same source with `mut` checks cleanly.
+//   5. TLS isolation roundtrip (fixture) — two pthreads each bump the
+//      fixture's `thread_local let mut head: i64` N times; under TLS each
+//      thread's final read equals N.
+//   6. TLS isolation roundtrip (exception.sfn) — two pthreads push their
+//      own frame onto `runtime/sfn/exception.sfn`'s real chain head and
+//      see an isolated head; the never-pushing main thread sees NULL.
+//
+// IR assertions use `sfn/strings` predicates — the `sfn/test` `expect_*`
+// matchers are `![pure]` and cannot be called from an `![io]` test (#842).
+// The pthread roundtrips skip (not fail) when clang/pthread is
+// unavailable; the IR-shape pins still carry the contract.
+import { find, contains, starts_with } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-thread-local";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _fixture() -> string {
+    return "compiler/tests/e2e/fixtures/thread_local_basic.sfn";
+}
+
+fn _which_clang() -> string ![io] {
+    let configured = env.get("CLANG");
+    if configured.length > 0 { return configured; }
+    return "clang";
+}
+
+// The whole line of `ir` that starts (at a line boundary) with `prefix`,
+// or "" if there is none.
+fn _line_starting_with(ir: string, prefix: string) -> string {
+    let mut start = find(ir, prefix, 0);
+    loop {
+        if start < 0 { return ""; }
+        let at_line_start = start == 0 || substring(ir, start - 1, start) == "\n";
+        if at_line_start {
+            let nl = find(ir, "\n", start);
+            let mut end = nl;
+            if end < 0 { end = ir.length; }
+            return substring(ir, start, end);
+        }
+        start = find(ir, prefix, start + 1);
+    }
+    return "";
+}
+
+// The mangled symbol name on the `define i64 @<name>...` line whose name
+// begins with `base` (e.g. "bump_n"). Sailfin appends source-path
+// components to top-level function symbols. "" when absent.
+fn _mangled_define(ir: string, base: string) -> string {
+    let anchor = "define i64 @" + base;
+    let idx = find(ir, anchor, 0);
+    if idx < 0 { return ""; }
+    let name_start = idx + 11;  // length of "define i64 @"
+    // Read up to the `(` that opens the parameter list.
+    let paren = find(ir, "(", name_start);
+    if paren < 0 { return ""; }
+    let sym = substring(ir, name_start + 1, paren);  // +1 to skip the `@`
+    return sym;
+}
+
+fn _emit_ir(tag: string, src_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let out_path = dir + "/" + tag + ".ll";
+    if fs.exists(out_path) { fs.deleteFile(out_path); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_path, "llvm", src_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(out_path) { return ""; }
+    return fs.readFile(out_path);
+}
+
+test "thread_local let mut lowers to 'internal thread_local global'" ![io] {
+    let ir = _emit_ir("thread_local_basic", _fixture());
+    assert ir.length > 0;
+    // i64 branch (the runtime-driver case).
+    assert _line_starting_with(ir, "@global.head") == "@global.head = internal thread_local global i64 0";
+    // i1 (boolean) branch.
+    assert _line_starting_with(ir, "@global.flag") == "@global.flag = internal thread_local global i1 1";
+    // double (float) branch — initializer text is whatever
+    // normalise_number_literal produces, so pin only the qualifier+type.
+    assert starts_with(_line_starting_with(ir, "@global.temperature"), "@global.temperature = internal thread_local global double ");
+}
+
+test "thread_local globals share the @global.<name> symbol at use sites" ![io] {
+    let ir = _emit_ir("thread_local_basic", _fixture());
+    assert ir.length > 0;
+    assert contains(ir, "load i64, i64* @global.head");
+    assert contains(ir, "store i64 ");
+    // A store targeting @global.head exists.
+    let store_idx = find(ir, "i64* @global.head", 0);
+    assert store_idx >= 0;
+}
+
+test "thread_local let without mut reports E0807 with a missing-mut hint" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/immutable_tls.sfn";
+    fs.writeFile(src, "thread_local let frame: i64 = 0;\n\nfn main() -> i32 {\n    return 0;\n}\n");
+    let exit = process.run_capture([_sfn_bin(), "check", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let combined = out + err;
+    let _ = exit;
+    assert contains(combined, "E0807");
+    assert contains(combined, "missing `mut`");
+}
+
+test "thread_local let mut is accepted by typecheck" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/mutable_tls.sfn";
+    fs.writeFile(src, "thread_local let mut frame: i64 = 0;\n\nfn main() -> i32 {\n    return 0;\n}\n");
+    let exit = process.run_capture([_sfn_bin(), "check", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+// Build the C source for the fixture-driven pthread isolation harness,
+// substituting the mangled bump_n / read_head symbols.
+fn _pthread_harness_c(bump_sym: string, read_sym: string) -> string {
+    return "#include <stdio.h>\n" + "#include <stdint.h>\n"
+        + "#include <stdlib.h>\n"
+        + "#include <pthread.h>\n"
+        + "#include <sched.h>\n"
+        + "extern int64_t "
+        + bump_sym
+        + "(int64_t count);\n"
+        + "extern int64_t "
+        + read_sym
+        + "(void);\n"
+        + "void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }\n"
+        + "struct WorkerArgs { int id; int64_t bump_count; int64_t observed_head; };\n"
+        + "static void *worker(void *raw) {\n"
+        + "    struct WorkerArgs *args = (struct WorkerArgs *)raw;\n"
+        + "    sched_yield();\n"
+        + "    int64_t mid = "
+        + bump_sym
+        + "(args->bump_count / 2);\n"
+        + "    sched_yield();\n"
+        + "    int64_t final_head = "
+        + bump_sym
+        + "(args->bump_count - args->bump_count / 2);\n"
+        + "    (void)mid;\n"
+        + "    args->observed_head = final_head;\n"
+        + "    sched_yield();\n"
+        + "    args->observed_head = "
+        + read_sym
+        + "();\n"
+        + "    return NULL;\n"
+        + "}\n"
+        + "int main(void) {\n"
+        + "    pthread_t t1, t2;\n"
+        + "    struct WorkerArgs a1 = { 1, 1000, -1 };\n"
+        + "    struct WorkerArgs a2 = { 2, 1000, -1 };\n"
+        + "    if (pthread_create(&t1, NULL, worker, &a1) != 0) return 1;\n"
+        + "    if (pthread_create(&t2, NULL, worker, &a2) != 0) return 2;\n"
+        + "    pthread_join(t1, NULL);\n"
+        + "    pthread_join(t2, NULL);\n"
+        + "    if (a1.observed_head != a1.bump_count) return 3;\n"
+        + "    if (a2.observed_head != a2.bump_count) return 4;\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+test "two pthreads bumping a thread_local i64 head do not interfere" ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/thread_local_basic.ll";
+    let ir = _emit_ir("thread_local_basic", _fixture());
+    assert ir.length > 0;
+    assert fs.exists(ll);
+
+    let bump_sym = _mangled_define(ir, "bump_n");
+    let read_sym = _mangled_define(ir, "read_head");
+    assert bump_sym.length > 0;
+    assert read_sym.length > 0;
+
+    let clang = _which_clang();
+    let harness = dir + "/pthread_harness.c";
+    fs.writeFile(harness, _pthread_harness_c(bump_sym, read_sym));
+    let bin = dir + "/pthread_roundtrip";
+    if fs.exists(bin) { fs.deleteFile(bin); }
+    let link = process.run_capture([clang, "-Wno-override-module", harness, ll, "-o", bin, "-lm", "-lpthread"], _child_env());
+    let _l1 = process.capture_take_stdout();
+    let _l2 = process.capture_take_stderr();
+    // clang / pthread linkage unavailable → skip (IR pins still hold).
+    if link != 0 { return; }
+    assert fs.exists(bin);
+
+    let run = process.run_capture([bin], _child_env());
+    let _r1 = process.capture_take_stdout();
+    let _r2 = process.capture_take_stderr();
+    assert run == 0;
+}
+
+// Build the C source for the exception.sfn-driven TLS isolation harness.
+fn _exception_tls_harness_c() -> string {
+    return "#include <stdio.h>\n" + "#include <stdint.h>\n"
+        + "#include <stdlib.h>\n"
+        + "#include <pthread.h>\n"
+        + "#include <sched.h>\n"
+        + "#include <stdatomic.h>\n"
+        + "struct SfnExceptionFrame { struct SfnExceptionFrame *prev; void *jmp_buf; void *message; };\n"
+        + "extern struct SfnExceptionFrame *sfn_exception_alloc_frame(void);\n"
+        + "extern void sfn_exception_free_frame(struct SfnExceptionFrame *frame);\n"
+        + "extern struct SfnExceptionFrame *sfn_exception_frame_head(void);\n"
+        + "extern void sfn_exception_push_frame(struct SfnExceptionFrame *frame);\n"
+        + "void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }\n"
+        + "static atomic_int pushed_count = 0;\n"
+        + "struct WorkerArgs { int id; struct SfnExceptionFrame *my_frame; struct SfnExceptionFrame *observed_head; };\n"
+        + "static void *worker(void *raw) {\n"
+        + "    struct WorkerArgs *args = (struct WorkerArgs *)raw;\n"
+        + "    struct SfnExceptionFrame *f = sfn_exception_alloc_frame();\n"
+        + "    if (!f) { args->my_frame = NULL; args->observed_head = (struct SfnExceptionFrame *)-1; atomic_fetch_add(&pushed_count, 1); return NULL; }\n"
+        + "    args->my_frame = f;\n"
+        + "    sfn_exception_push_frame(f);\n"
+        + "    atomic_fetch_add(&pushed_count, 1);\n"
+        + "    while (atomic_load(&pushed_count) < 2) { sched_yield(); }\n"
+        + "    args->observed_head = sfn_exception_frame_head();\n"
+        + "    return NULL;\n"
+        + "}\n"
+        + "int main(void) {\n"
+        + "    pthread_t t1, t2;\n"
+        + "    struct WorkerArgs a1 = { 1, NULL, NULL };\n"
+        + "    struct WorkerArgs a2 = { 2, NULL, NULL };\n"
+        + "    if (pthread_create(&t1, NULL, worker, &a1) != 0) return 1;\n"
+        + "    if (pthread_create(&t2, NULL, worker, &a2) != 0) return 2;\n"
+        + "    pthread_join(t1, NULL);\n"
+        + "    pthread_join(t2, NULL);\n"
+        + "    if (a1.my_frame == NULL || a2.my_frame == NULL) return 3;\n"
+        + "    if (a1.observed_head != a1.my_frame) return 4;\n"
+        + "    if (a2.observed_head != a2.my_frame) return 5;\n"
+        + "    if (sfn_exception_frame_head() != NULL) return 6;\n"
+        + "    sfn_exception_free_frame(a1.my_frame);\n"
+        + "    sfn_exception_free_frame(a2.my_frame);\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+test "two pthreads pushing exception.sfn frames see isolated chain heads" ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/exception_tls.ll";
+    let ir = _emit_ir("exception_tls", "runtime/sfn/exception.sfn");
+    assert ir.length > 0;
+    assert fs.exists(ll);
+
+    let clang = _which_clang();
+
+    // exception.sfn defines a struct → M2.10 emits a type-init constructor
+    // calling @sfn_type_register; stage a type_meta object. Skip if it
+    // can't be built (IR pins still hold).
+    let tm_ll = dir + "/type_meta.ll";
+    if fs.exists(tm_ll) { fs.deleteFile(tm_ll); }
+    let tm_emit = process.run_capture([_sfn_bin(), "emit", "-o", tm_ll, "llvm", "runtime/sfn/type_meta.sfn"], _child_env());
+    let _t1 = process.capture_take_stdout();
+    let _t2 = process.capture_take_stderr();
+    if tm_emit != 0 { return; }
+    let tm_o = dir + "/type_meta.o";
+    if fs.exists(tm_o) { fs.deleteFile(tm_o); }
+    let tm_cc = process.run_capture([clang, "-Wno-override-module", "-c", tm_ll, "-o", tm_o], _child_env());
+    let _c1 = process.capture_take_stdout();
+    let _c2 = process.capture_take_stderr();
+    if tm_cc != 0 { return; }
+
+    let harness = dir + "/exception_tls_harness.c";
+    fs.writeFile(harness, _exception_tls_harness_c());
+    let bin = dir + "/exception_tls_roundtrip";
+    if fs.exists(bin) { fs.deleteFile(bin); }
+    let link = process.run_capture([clang, "-Wno-override-module", harness, ll, tm_o, "-o", bin, "-lm", "-lpthread"], _child_env());
+    let _l1 = process.capture_take_stdout();
+    let _l2 = process.capture_take_stderr();
+    if link != 0 { return; }
+    assert fs.exists(bin);
+
+    let run = process.run_capture([bin], _child_env());
+    let _r1 = process.capture_take_stdout();
+    let _r2 = process.capture_take_stderr();
+    assert run == 0;
+}

@@ -1,0 +1,282 @@
+// End-to-end test for runtime/sfn/memory/rc.sfn — the Sailfin-defined
+// atomic reference counting primitive shipped into the compiler binary
+// (issue #395, epic #389 M2.3).
+//
+// Native (no-bash) replacement for the former
+// `test_runtime_memory_rc.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`). Pins, end-to-end:
+//   1. typecheck   — `sfn check runtime/sfn/memory/rc.sfn` reports `ok`.
+//   2. fmt         — `sfn fmt --check runtime/sfn/memory/rc.sfn` canonical.
+//   3. emit shape  — emitted IR carries a `define` (full pinned
+//                    signature) for each of the three `sfn_rc_sfn_*`
+//                    exports.
+//   4. libc declares — `malloc` / `free` each produce a `declare`.
+//   5. atomicrmw   — `sfn_rc_sfn_retain` carries exactly one
+//                    `atomicrmw add ptr ... seq_cst, align 8`, and
+//                    `sfn_rc_sfn_release` carries exactly one
+//                    `atomicrmw sub ptr ... seq_cst, align 8` plus the
+//                    `icmp eq i64 ..., 1` post-decrement guard and the
+//                    `call void @free(` on the zero-refcount branch.
+//                    Counts are scoped to the enclosing function body.
+//   6. coexistence — the module does NOT emit a bare `sfn_rc_*` define
+//                    (those names belong to the C runtime's no-op stub).
+//   7. roundtrip   — alloc → retain → release → release frees exactly
+//                    once, verified by linking the `.ll` against a C
+//                    harness that counts `free` calls.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test. For subprocess/IR-output
+// assertions use `sfn/strings`, as the runtime_string_basic exemplar does.
+import {
+    find,
+    split,
+    starts_with,
+    contains
+} from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. The roundtrip leg spawns `clang` (and a
+// nested `emit` for type_meta), which resolve through PATH.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-runtime-rc";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _emit_module(tag: string, module_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let outpath = dir + "/" + tag + ".ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(outpath);
+}
+
+// `^define ... <signature>` — pinned full-signature define line.
+fn _has_define_line(ir: string, signature: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, signature) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn _has_declare(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "declare ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn _has_define_named(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// Extract the body of the function whose `define` line contains
+// `define_marker`, from that `define` line through the closing `}`
+// (matches the original's `sed -n '/^define .../,/^}/p'` range). Returns
+// the joined block, or "" if the function is not found.
+fn _function_block(ir: string, define_marker: string) -> string {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    let mut in_block = false;
+    let mut block = "";
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if !in_block {
+            if starts_with(line, "define ") && contains(line, define_marker) {
+                in_block = true;
+                block = line;
+            }
+        } else {
+            block = block + "\n" + line;
+            if starts_with(line, "}") { break; }
+        }
+        i = i + 1;
+    }
+    return block;
+}
+
+// Count non-overlapping occurrences of `needle` in `haystack`.
+fn _count_occurrences(haystack: string, needle: string) -> int {
+    if needle.length == 0 { return 0; }
+    let mut count = 0;
+    let mut pos = find(haystack, needle, 0);
+    loop {
+        if pos < 0 { break; }
+        count = count + 1;
+        pos = find(haystack, needle, pos + needle.length);
+    }
+    return count;
+}
+
+test "runtime/sfn/memory/rc.sfn typechecks cleanly" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", "runtime/sfn/memory/rc.sfn"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "ok", 0) >= 0;
+}
+
+test "runtime/sfn/memory/rc.sfn is fmt-canonical" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "runtime/sfn/memory/rc.sfn"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+test "rc emit: define with pinned signature for every sfn_rc_sfn_* export" ![io] {
+    let ir = _emit_module("rc", "runtime/sfn/memory/rc.sfn");
+    assert ir != "EMIT_FAILED";
+    assert _has_define_line(ir, "@sfn_rc_sfn_alloc(i64 %size, i8* %drop_fn)");
+    assert _has_define_line(ir, "@sfn_rc_sfn_retain(i8* %payload)");
+    assert _has_define_line(ir, "@sfn_rc_sfn_release(i8* %payload)");
+}
+
+test "rc emit: declares the libc malloc/free trampolines" ![io] {
+    let ir = _emit_module("rc", "runtime/sfn/memory/rc.sfn");
+    assert _has_declare(ir, "malloc");
+    assert _has_declare(ir, "free");
+}
+
+test "rc emit: pins atomicrmw add/sub seq_cst shape in retain/release" ![io] {
+    let ir = _emit_module("rc", "runtime/sfn/memory/rc.sfn");
+    // Scope each assertion to its enclosing function so a stray
+    // `atomicrmw` elsewhere can't satisfy it. Count is asserted as
+    // exactly one per function — an accidental double-decrement would
+    // slip past a presence-only check.
+    let retain_block = _function_block(ir, "@sfn_rc_sfn_retain(");
+    let retain_add = _count_occurrences(retain_block, "atomicrmw add ptr ");
+    // Pin the trailing `, i64 1 seq_cst, align 8` shape too.
+    let retain_full = _count_occurrences(retain_block, "i64 1 seq_cst, align 8");
+    assert retain_add == 1;
+    assert retain_full == 1;
+
+    let release_block = _function_block(ir, "@sfn_rc_sfn_release(");
+    let release_sub = _count_occurrences(release_block, "atomicrmw sub ptr ");
+    let release_full = _count_occurrences(release_block, "i64 1 seq_cst, align 8");
+    assert release_sub == 1;
+    assert release_full == 1;
+    // The release body must branch on `prev == 1` before freeing, and
+    // must call free on the zero-refcount branch.
+    assert find(release_block, "icmp eq i64 ", 0) >= 0;
+    assert find(release_block, "call void @free(", 0) >= 0;
+}
+
+test "rc emit: does not collide with C sfn_rc_release stub" ![io] {
+    let ir = _emit_module("rc", "runtime/sfn/memory/rc.sfn");
+    // The bare `sfn_rc_*` names belong to the C runtime's no-op stub; a
+    // `define` collision would fail `make compile` at link.
+    assert ! _has_define_named(ir, "sfn_rc_alloc");
+    assert ! _has_define_named(ir, "sfn_rc_retain");
+    assert ! _has_define_named(ir, "sfn_rc_release");
+}
+
+// C harness counting libc free() via link-time interposition; runs
+// alloc → retain → release → release and asserts free fires exactly once.
+fn _rc_harness_c() -> string {
+    return "#include <stddef.h>\n" + "#include <stdio.h>\n"
+        + "#include <stdint.h>\n"
+        + "#include <stdlib.h>\n"
+        + "static long free_count = 0;\n"
+        + "void free(void *ptr) { if (ptr) { free_count++; } }\n"
+        + "extern void *sfn_rc_sfn_alloc(int64_t size, void *drop_fn);\n"
+        + "extern void sfn_rc_sfn_retain(void *payload);\n"
+        + "extern void sfn_rc_sfn_release(void *payload);\n"
+        + "void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }\n"
+        + "int main(void) {\n"
+        + "    void *payload = sfn_rc_sfn_alloc(32, NULL);\n"
+        + "    if (!payload) { fprintf(stderr, \"alloc NULL\\n\"); return 1; }\n"
+        + "    sfn_rc_sfn_retain(payload);\n"
+        + "    sfn_rc_sfn_release(payload);\n"
+        + "    if (free_count != 0) { fprintf(stderr, \"early free %ld\\n\", free_count); return 2; }\n"
+        + "    sfn_rc_sfn_release(payload);\n"
+        + "    if (free_count != 1) { fprintf(stderr, \"free count %ld\\n\", free_count); return 3; }\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// Functional roundtrip. rc.sfn defines `RcHeader`, so the emitted module
+// carries an `@__sfn_module_type_init__*` constructor whose
+// `@sfn_type_register` call must resolve at link — emit type_meta.sfn on
+// the fly and link its object alongside (mirrors the original #941 path).
+// (No sanitizer leg in the original — nothing omitted here.)
+test "rc roundtrip: alloc -> retain -> release -> release frees exactly once" ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/rc.ll";
+    let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", "runtime/sfn/memory/rc.sfn"], _child_env());
+    let _eo = process.capture_take_stdout();
+    let _ee = process.capture_take_stderr();
+    assert emit_exit == 0;
+
+    let tm_ll = dir + "/type_meta.ll";
+    let tm_o = dir + "/type_meta.o";
+    let tm_emit = process.run_capture([_sfn_bin(), "emit", "-o", tm_ll, "llvm", "runtime/sfn/type_meta.sfn"], _child_env());
+    let _to = process.capture_take_stdout();
+    let _te = process.capture_take_stderr();
+    assert tm_emit == 0;
+    let tm_cc = process.run_capture(["clang", "-Wno-override-module", "-c", tm_ll, "-o", tm_o], _child_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    assert tm_cc == 0;
+
+    let harness = dir + "/harness.c";
+    fs.writeFile(harness, _rc_harness_c());
+    let bin = dir + "/roundtrip";
+    let link_exit = process.run_capture(["clang", "-Wno-override-module", harness, ll, tm_o, "-o", bin, "-lm"], _child_env());
+    let _lo = process.capture_take_stdout();
+    let lerr = process.capture_take_stderr();
+    assert find(lerr, "doesn't exist", 0) < 0;
+    assert link_exit == 0;
+
+    let run_exit = process.run_capture([bin], _child_env());
+    let _ro = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    assert run_exit == 0;
+}

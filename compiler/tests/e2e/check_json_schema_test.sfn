@@ -1,0 +1,252 @@
+// End-to-end schema-lock test for `sfn check --json`.
+//
+// Native replacement for the former `test_check_json_schema.sh`
+// (test-infra Phase 3, epic #842). `docs/reference/check-json-schema.md`
+// is the human-readable spec; this test is the machine-checkable
+// enforcement of the `sailfin-check/1` envelope.
+//
+// `sfn check --json` takes file paths directly and resolves the
+// frontend without a cwd dependency, so each fixture is written under
+// the runner's scratch dir and passed by absolute path (the runner has
+// no cwd lever).
+//
+// NOTE: assert on captured stdout/stderr with `sfn/strings` predicates
+// (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test). Because we cannot pull in a JSON parser, the
+// "exact field set" greps of the original become presence checks on the
+// documented keys — the intent (catch schema field drift) is preserved.
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Pure-frontend `sfn check` needs no clang, but thread PATH/HOME so a
+// constrained CI shell still resolves anything the frontend touches.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    return e;
+}
+
+struct CheckRun {
+    exit: int,
+    out: string,
+    err: string
+}
+
+// Scratch base for fixtures, keyed by tag so the parallel pool never
+// collides. Materializes the capsule/workspace context + the three
+// fixtures (clean / leak / garbage) under it.
+fn _fixture_dir(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-check-json-" + tag;
+    fs.createDirectory(root + "/src", true);
+
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = []\n");
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"check-json-schema-test\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"E2E schema lock for sfn check --json\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "entry = \"src/clean.sfn\"\n");
+
+    // Clean file (no diagnostics) — exercises the empty-events path.
+    fs.writeFile(root + "/src/clean.sfn", "fn add(a: number, b: number) -> number {\n"
+        + "    return a + b;\n"
+        + "}\n\n"
+        + "fn main() {\n"
+        + "    let _ = add(1, 2);\n"
+        + "}\n\n"
+        + "export { add };\n");
+
+    // A file that triggers exactly one E0400 effect violation. The
+    // `print` call is the B1 caret; the missing-effect suggestion edit
+    // anchors at the function body's opening brace.
+    fs.writeFile(root + "/src/leak.sfn", "fn noisy_helper(x: number) -> number {\n"
+        + "    let mut total: number = 0;\n"
+        + "    total = total + x;\n"
+        + "    print.info(\"recording\");\n"
+        + "    return total;\n"
+        + "}\n\n"
+        + "fn main() ![io] {\n"
+        + "    let _ = noisy_helper(1);\n"
+        + "}\n\n"
+        + "export { noisy_helper };\n");
+
+    // Unrecognized top-level syntax → parser lowers to a
+    // `Statement.Unknown` surfaced as an E0500 parse diagnostic (#974).
+    fs.writeFile(root + "/src/garbage.sfn", "@@@ !!!\n");
+    return root;
+}
+
+fn _check(path: string) -> CheckRun ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", "--json", path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return CheckRun { exit: exit, out: out, err: err };
+}
+
+// ---- Test 1: clean file emits empty events + clean summary ----
+test "check json: clean run emits empty events + clean summary" ![io] {
+    let root = _fixture_dir("clean");
+    let r = _check(root + "/src/clean.sfn");
+    assert r.out.length > 0;
+    assert contains(r.out, "\"schema_version\":\"sailfin-check/1\"");
+    assert contains(r.out, "\"exit_code\":0");
+    assert contains(r.out, "\"errors\":0");
+    assert contains(r.out, "\"events\":[]");
+    assert r.exit == 0;
+}
+
+// ---- Test 2: top-level field set (documented keys present) ----
+test "check json: top-level field set matches schema" ![io] {
+    let root = _fixture_dir("toplevel");
+    let r = _check(root + "/src/leak.sfn");
+    assert contains(r.out, "\"command\":");
+    assert contains(r.out, "\"events\":");
+    assert contains(r.out, "\"exit_code\":");
+    assert contains(r.out, "\"schema_version\":");
+    assert contains(r.out, "\"summary\":");
+}
+
+// ---- Test 3: summary field set ----
+test "check json: summary field set matches schema" ![io] {
+    let root = _fixture_dir("summary");
+    let r = _check(root + "/src/leak.sfn");
+    assert contains(r.out, "\"duration_ms\":");
+    assert contains(r.out, "\"errors\":");
+    assert contains(r.out, "\"files_checked\":");
+    assert contains(r.out, "\"warnings\":");
+}
+
+// ---- Test 4: event field set ----
+test "check json: event field set matches schema" ![io] {
+    let root = _fixture_dir("event");
+    let r = _check(root + "/src/leak.sfn");
+    assert contains(r.out, "\"code\":");
+    assert contains(r.out, "\"file_path\":");
+    assert contains(r.out, "\"kind\":");
+    assert contains(r.out, "\"message\":");
+    assert contains(r.out, "\"primary\":");
+    assert contains(r.out, "\"producer\":");
+    assert contains(r.out, "\"secondary\":");
+    assert contains(r.out, "\"severity\":");
+    assert contains(r.out, "\"suggestion\":");
+}
+
+// ---- Test 5: primary token field set ----
+test "check json: primary token field set matches schema" ![io] {
+    let root = _fixture_dir("primary");
+    let r = _check(root + "/src/leak.sfn");
+    assert contains(r.out, "\"line\":");
+    assert contains(r.out, "\"column\":");
+    assert contains(r.out, "\"lexeme\":");
+    assert contains(r.out, "\"label\":");
+}
+
+// ---- Test 6: severity value comes from the locked enum ----
+test "check json: severity within locked enum" ![io] {
+    let root = _fixture_dir("severity");
+    let r = _check(root + "/src/leak.sfn");
+    // The leak fixture's single event is an error.
+    assert contains(r.out, "\"severity\":\"error\"");
+}
+
+// ---- Test 7: producer value comes from the locked classifier ----
+test "check json: producer within locked enum" ![io] {
+    let root = _fixture_dir("producer");
+    let r = _check(root + "/src/leak.sfn");
+    assert contains(r.out, "\"producer\":\"effect\"");
+}
+
+// ---- Test 8: kind discriminator from the locked enum ----
+test "check json: kind within locked enum" ![io] {
+    let root = _fixture_dir("kind");
+    let r = _check(root + "/src/leak.sfn");
+    assert contains(r.out, "\"kind\":\"diagnostic\"");
+}
+
+// ---- Test 9: summary.errors agrees with the error event ----
+test "check json: summary.errors agrees with event count" ![io] {
+    let root = _fixture_dir("errcount");
+    let r = _check(root + "/src/leak.sfn");
+    // One error in the summary; one error-severity event.
+    assert contains(r.out, "\"errors\":1");
+    assert contains(r.out, "\"severity\":\"error\"");
+}
+
+// ---- Test 10: leak fixture → E0400 effect event with B1 call-site caret ----
+test "check json: leak emits E0400 with B1 call-site caret" ![io] {
+    let root = _fixture_dir("e0400");
+    let r = _check(root + "/src/leak.sfn");
+    assert contains(r.out, "\"code\":\"E0400\"");
+    assert contains(r.out, "\"producer\":\"effect\"");
+    assert contains(r.out, "\"line\":4");
+    assert contains(r.out, "\"lexeme\":\"print\"");
+}
+
+// ---- Test 11: --json suppresses stderr human output ----
+test "check json: --json suppresses stderr" ![io] {
+    let root = _fixture_dir("quiet");
+    let r = _check(root + "/src/leak.sfn");
+    assert r.err.length == 0;
+}
+
+// ---- Test 12: reserved fields present (secondary stub pre-B5) ----
+test "check json: reserved fields present" ![io] {
+    let root = _fixture_dir("reserved");
+    let r = _check(root + "/src/leak.sfn");
+    assert contains(r.out, "\"suggestion\":");
+    // secondary is still an empty array pre-B5.
+    assert contains(r.out, "\"secondary\":[]");
+}
+
+// ---- Test 13 (B3): structured FixSuggestion shape on E0400 ----
+test "check json: E0400 carries structured FixSuggestion" ![io] {
+    let root = _fixture_dir("b3shape");
+    let r = _check(root + "/src/leak.sfn");
+    // suggestion.message mentions the missing effect.
+    assert contains(r.out, "add ![io] to the function signature");
+    // suggestion.edits[0] field set.
+    assert contains(r.out, "\"start_line\":");
+    assert contains(r.out, "\"start_column\":");
+    assert contains(r.out, "\"end_line\":");
+    assert contains(r.out, "\"end_column\":");
+    assert contains(r.out, "\"replacement\":");
+    // replacement contains the effect name.
+    assert contains(r.out, "\"replacement\":\"![io] \"");
+}
+
+// ---- Test 14 (B3): suggestion edit anchored at the function body's '{' ----
+// The fixture's function signature line is
+//   `fn noisy_helper(x: number) -> number {`
+// whose `{` sits at column 38, and the suggestion's insertion is a
+// zero-width edit (start == end) at that brace.
+test "check json: suggestion edit anchored at the '{'" ![io] {
+    let root = _fixture_dir("b3anchor");
+    let r = _check(root + "/src/leak.sfn");
+    assert contains(r.out, "\"start_line\":1,\"start_column\":38,\"end_line\":1,\"end_column\":38");
+}
+
+// ---- Test 15 (#974): parse error surfaces as an E0500 parse event ----
+test "check json: parse error surfaces as E0500" ![io] {
+    let root = _fixture_dir("parse");
+    let r = _check(root + "/src/garbage.sfn");
+    assert r.out.length > 0;
+    assert contains(r.out, "\"exit_code\":1");
+    assert contains(r.out, "\"code\":\"E0500\"");
+    assert contains(r.out, "\"producer\":\"parse\"");
+    assert contains(r.out, "\"severity\":\"error\"");
+    assert contains(r.out, "\"kind\":\"diagnostic\"");
+    // Non-null primary token on the parse event.
+    assert find(r.out, "\"primary\":null", 0) < 0;
+}

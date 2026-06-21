@@ -1,0 +1,210 @@
+// End-to-end test for `routine { }` structured-concurrency nursery
+// semantics — issue #1181, epic #965 (M4).
+//
+// Native (no-bash) replacement for the former `test_routine_nursery.sh`
+// (test-infra Phase 3, epic #842; `.claude/rules/no-bash-e2e.md`).
+//
+// Background. `routine { }` used to lower to a v0 transparent-scope shim
+// (`.routine`/`.endroutine` → always-true `.if 1 > 0`/`.endif`) that
+// provided no structured-concurrency guarantee. This issue replaces the
+// shim with a real nursery: the lowering emits `sfn_nursery_enter` at scope
+// entry and `sfn_nursery_exit` (a structured-join barrier) at exit, and
+// `sfn_spawn` registers every task it creates against the per-thread
+// current nursery.
+//
+// Pins, end-to-end:
+//   1. typecheck   — `sfn check runtime/sfn/concurrency/nursery.sfn` is ok.
+//   2. fmt         — `sfn fmt --check` is canonical.
+//   3. emit shape  — defines `@sfn_nursery_{enter,register,exit,current}`
+//                    plus a `thread_local` `_sfn_g_current_nursery` global.
+//   4. routine lowering — `routine { spawn ... }` brackets its body with
+//                    `@sfn_nursery_enter()` / `@sfn_nursery_exit(i64 ` and a
+//                    `@sfn_spawn_task(` inside, ordered enter < spawn < exit.
+//   5. fail-closed — a non-local exit (`return`) out of a `routine` is
+//                    rejected at lowering with the #1181 diagnostic.
+//
+// OMITTED leg (documented): the original script's `test_behavioral_join`
+// linked the real scheduler/future/nursery modules against a bespoke C
+// driver (`clang ... -lpthread`) and observed the executing structured
+// join. That requires emitting a multi-file C harness and a clang link, so
+// it is not expressible with `sfn/test` building blocks; the deterministic
+// emit-shape + lowering + fail-closed invariants below still pin the
+// contract on every platform (the emitted .ll is target-independent).
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test. Assert on captured output / IR
+// with `sfn/strings` predicates instead. (#842.)
+import {
+    find,
+    split,
+    contains,
+    starts_with
+} from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _nursery_path() -> string { return "runtime/sfn/concurrency/nursery.sfn"; }
+
+// `process.run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. `emit` / `check` neither link nor spawn
+// clang, but route the build cache under SAILFIN_TEST_SCRATCH so a parallel
+// run does not collide on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-routine-nursery-");
+}
+
+// Emit LLVM IR for `module_path` to a unique scratch `.ll` and return the IR
+// text (or "EMIT_FAILED" on a non-zero exit). `tag` keys the output path.
+fn _emit_ir(tag: string, module_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/" + tag + ".ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", module_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    if !fs.exists(ll) { return "EMIT_FAILED"; }
+    return fs.readFile(ll);
+}
+
+// `^define .* @sym(` — a line that begins the symbol's definition.
+fn _has_define(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// The 0-based index of the first line containing `needle`, or -1 if absent.
+fn _first_line_with(ir: string, needle: string) -> int {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], needle) { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// ---- 1. typecheck ----
+test "nursery: sfn check passes cleanly" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", _nursery_path()], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "ok", 0) >= 0;
+}
+
+// ---- 2. fmt ----
+test "nursery: sfn fmt --check is canonical" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", _nursery_path()], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+// ---- 3. emit shape: sfn_nursery_* surface + TLS register ----
+test "nursery: emit produces the sfn_nursery_* surface + thread_local register" ![io] {
+    let ir = _emit_ir("nursery", _nursery_path());
+    assert ir != "EMIT_FAILED";
+    assert _has_define(ir, "sfn_nursery_enter");
+    assert _has_define(ir, "sfn_nursery_register");
+    assert _has_define(ir, "sfn_nursery_exit");
+    assert _has_define(ir, "sfn_nursery_current");
+    // The current-nursery register must be a genuine per-thread TLS global,
+    // not a process-global (two threads in routines must not clobber it).
+    let g = _first_line_with(ir, "@global._sfn_g_current_nursery = ");
+    assert g >= 0;
+    let lines = split(ir, "\n");
+    assert contains(lines[g], "thread_local");
+}
+
+// ---- 4. routine lowers to a nursery scope bracketing its spawns ----
+test "nursery: routine lowers to a nursery scope bracketing its spawns (#1181)" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/routine_spawn.sfn";
+    fs.writeFile(src, "fn work() -> int { return 1; }\n\n"
+        + "fn main() -> void ![io] {\n"
+        + "    routine {\n"
+        + "        let f = spawn work();\n"
+        + "    }\n"
+        + "}\n");
+    let ir = _emit_ir_for_src("routine_spawn", src);
+    assert ir != "EMIT_FAILED";
+    // The nursery surface is called and the routine brackets its body.
+    assert contains(ir, "call i64 @sfn_nursery_enter()");
+    assert contains(ir, "call i64 @sfn_nursery_exit(i64 ");
+    assert contains(ir, "call i8* @sfn_spawn_task(");
+    // Structured ordering: enter < spawn < exit (the spawn is bracketed).
+    let enter_ln = _first_line_with(ir, "call i64 @sfn_nursery_enter()");
+    let spawn_ln = _first_line_with(ir, "call i8* @sfn_spawn_task(");
+    let exit_ln = _first_line_with(ir, "call i64 @sfn_nursery_exit(i64 ");
+    assert enter_ln >= 0;
+    assert spawn_ln >= 0;
+    assert exit_ln >= 0;
+    assert enter_ln < spawn_ln;
+    assert spawn_ln < exit_ln;
+}
+
+// ---- 5. non-local exit out of a routine is rejected (fail-closed) ----
+test "nursery: non-local exit out of a routine is rejected fail-closed (#1181)" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/routine_return.sfn";
+    fs.writeFile(src, "fn pick() -> int ![io] {\n" + "    routine {\n"
+        + "        return 1;\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n\n"
+        + "fn main() -> void ![io] {\n"
+        + "    print.info(number_to_string(pick()));\n"
+        + "}\n");
+    let outdir = _scratch_dir();
+    let ll = outdir + "/routine_return.ll";
+    // Must FAIL (a `return` crossing the routine boundary would skip the join).
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    let combined = out + err;
+    assert find(combined, "non-local exit", 0) >= 0 || find(combined, "issue #1181", 0) >= 0;
+}
+
+// Emit LLVM IR for a source file at `src_path` (already on disk) to a unique
+// scratch `.ll`, returning the IR text (or "EMIT_FAILED").
+fn _emit_ir_for_src(tag: string, src_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/" + tag + ".ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    if !fs.exists(ll) { return "EMIT_FAILED"; }
+    return fs.readFile(ll);
+}

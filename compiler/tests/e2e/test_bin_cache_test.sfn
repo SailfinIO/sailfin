@@ -1,0 +1,183 @@
+// End-to-end test for the per-test binary cache (#1230, Lever 2 of
+// docs/proposals/ci-test-speed.md).
+//
+// Native (no-bash) replacement for the former `test_test_bin_cache.sh`
+// (test-infra Phase 3, epic #842; `.claude/rules/no-bash-e2e.md`).
+//
+// Proves the cross-invocation behaviors the native unit/integration tests
+// cannot observe (those cover the cache-key correctness hinge and the JSON
+// shape in-process). Here we run the `sfn test` binary multiple times and
+// inspect the `cache.test_bin_*` fields in the `--json` summary line:
+//
+//   1. Cold run  -> every test misses (hit_rate 0.0000); the binary cache
+//      is populated.
+//   2. Warm rerun (no source change) -> every test hits (hit_rate 1.0000);
+//      lower+link is skipped for each unchanged test.
+//   3. `--no-test-cache` -> both counters zero (hit_rate 0.0000); the
+//      cache is neither read nor written.
+//   4. Editing the test source -> the next run misses again (a changed
+//      source content-busts the key, so a stale binary is never served).
+//
+// The `--json` summary is a single line of the form
+//   {"event":"summary",...,"cache":{"test_bin_hits":H,"test_bin_misses":M,
+//    "test_bin_hit_rate":R.RRRR}}
+// so the exact `"test_bin_hits":0` / `"test_bin_misses":0` /
+// `"test_bin_hit_rate":1.0000` substrings are asserted directly with
+// `sfn/strings::find` (the `sfn/test` `expect_*` matchers are `![pure]`
+// and cannot be called from an `![io]` test, #842).
+//
+// Cache state is isolated under a FRESH per-invocation
+// `SAILFIN_BUILD_CACHE_DIR` minted with `fs.mkdtemp`: a fixed reused path
+// would already be warm on a rerun under the same SAILFIN_TEST_SCRATCH and
+// break the cold-miss assertions. The cache root therefore never pollutes
+// the repo cache.
+//
+// OMITTED leg vs. the bash original: the bash "cross-commit stability"
+// test (#1233) overwrote the repo's `build/native/.build-stamp` to
+// simulate a different commit. That mutates process-global shared repo
+// state (unsound under the parallel runner, which the no-bash rules
+// forbid) and only guards a `+dev.<hash>` stripping detail — not the core
+// cache contract. The four legs below fully cover the hit/miss/store/bust
+// behavior.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child env for the nested `sfn test`: PATH (clang/linker for any lower),
+// HOME, TMPDIR, the inherited SAILFIN_TEST_SCRATCH, plus the dedicated
+// per-invocation shared cache root. The runtime root is resolved relative
+// to the runner's cwd (repo root), so no --runtime-root is threaded.
+fn _suite_env(cache_dir: string) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
+    return e;
+}
+
+// Run `sfn test <dir> --json [extra]` under the isolated cache root and
+// return the `--json` summary line (combined stdout+stderr). A single test
+// file keeps the runner on the in-process leaf path (test_files.length == 1,
+// no per-file subprocess fan-out) so the cache read/write and the `cache`
+// summary object are exercised directly.
+fn _run_suite(test_dir: string, cache_dir: string, extra: string[]) -> string ![io] {
+    let mut argv: string[] = [_sfn_bin(), "test", test_dir, "--json"];
+    let mut i = 0;
+    loop {
+        if i >= extra.length { break; }
+        argv.push(extra[i]);
+        i += 1;
+    }
+    let _exit = process.run_capture(argv, _suite_env(cache_dir));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return out + err;
+}
+
+// A kernel-unique per-invocation root (mirrors the bash `mktemp -d`). A
+// fresh root every run is REQUIRED: the binary cache must be genuinely cold
+// for the cold-miss assertion, so a fixed reused path (warm on a second run
+// under the same SAILFIN_TEST_SCRATCH) is unsound.
+fn _root(tag: string) -> string ![io] {
+    return fs.mkdtemp("sfn-test-bin-cache-" + tag + "-");
+}
+
+// Materialize a standalone single-file test directory (no capsule, no
+// imports). Returns the test directory path.
+fn _write_fixture(root: string, body: string) -> string ![io] {
+    let dir = root + "/tests";
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/cache_fixture_test.sfn", body);
+    return dir;
+}
+
+fn _truth_one() -> string {
+    return "test \"trivial truth\" {\n    assert 1 == 1;\n}\n";
+}
+
+fn _truth_two() -> string {
+    return "test \"trivial truth\" {\n    assert 2 == 2;\n}\n";
+}
+
+// ---- Test 1: cold run misses, hit_rate 0.0000 ----
+test "cold run: every test misses, hit_rate 0.0000" ![io] {
+    let root = _root("cold");
+    let cache = root + "/cache";
+    let dir = _write_fixture(root, _truth_one());
+
+    let log = _run_suite(dir, cache, []);
+
+    // The summary line must carry the cache object.
+    assert find(log, "\"cache\":", 0) >= 0;
+    // Cold: zero hits, at least one miss (the summary is NOT misses=0).
+    assert find(log, "\"test_bin_hits\":0", 0) >= 0;
+    assert find(log, "\"test_bin_misses\":0", 0) < 0;
+    assert find(log, "\"test_bin_hit_rate\":0.0000", 0) >= 0;
+    // A populated cache must still serve a runnable binary: the test passes.
+    assert find(log, "\"passed\":1", 0) >= 0;
+    assert find(log, "\"failed\":0", 0) >= 0;
+}
+
+// ---- Test 2: warm rerun hits, hit_rate 1.0000 ----
+test "warm rerun: every test hits, hit_rate 1.0000" ![io] {
+    let root = _root("warm");
+    let cache = root + "/cache";
+    let dir = _write_fixture(root, _truth_one());
+
+    // First run warms the binary cache.
+    let _cold = _run_suite(dir, cache, []);
+    // Second run with no source change -> every test hits.
+    let log = _run_suite(dir, cache, []);
+
+    assert find(log, "\"test_bin_hits\":0", 0) < 0;
+    assert find(log, "\"test_bin_misses\":0", 0) >= 0;
+    assert find(log, "\"test_bin_hit_rate\":1.0000", 0) >= 0;
+    // The cached binary is still RUN -> the test still passes.
+    assert find(log, "\"passed\":1", 0) >= 0;
+}
+
+// ---- Test 3: --no-test-cache bypasses read + write, hit_rate 0.0000 ----
+test "--no-test-cache: no read or write, hit_rate 0.0000" ![io] {
+    let root = _root("nocache");
+    let cache = root + "/cache";
+    let dir = _write_fixture(root, _truth_one());
+
+    let log = _run_suite(dir, cache, ["--no-test-cache"]);
+
+    // Neither counter advances: hits=0 AND misses=0.
+    assert find(log, "\"test_bin_hits\":0", 0) >= 0;
+    assert find(log, "\"test_bin_misses\":0", 0) >= 0;
+    assert find(log, "\"test_bin_hit_rate\":0.0000", 0) >= 0;
+    // Even with the cache bypassed the test compiles and passes.
+    assert find(log, "\"passed\":1", 0) >= 0;
+}
+
+// ---- Test 4: editing the source content-busts the key (miss again) ----
+test "edited source content-busts the key (miss, no stale hit)" ![io] {
+    let root = _root("bust");
+    let cache = root + "/cache";
+    let dir = _write_fixture(root, _truth_one());
+
+    // Warm the cache with the original source.
+    let _warm = _run_suite(dir, cache, []);
+
+    // Change the source bytes: a changed source -> changed key -> miss
+    // (never a stale-binary hit).
+    fs.writeFile(dir + "/cache_fixture_test.sfn", _truth_two());
+    let log = _run_suite(dir, cache, []);
+
+    assert find(log, "\"test_bin_hits\":0", 0) >= 0;
+    assert find(log, "\"test_bin_misses\":0", 0) < 0;
+    // The rebuilt binary still passes (the edited assertion holds).
+    assert find(log, "\"passed\":1", 0) >= 0;
+}

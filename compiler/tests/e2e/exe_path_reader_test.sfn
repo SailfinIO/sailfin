@@ -1,0 +1,140 @@
+// End-to-end test for the Sailfin-native exe_path() reader (#968, epic #390).
+//
+// Native replacement for the former `test_exe_path_reader.sh` (test-infra
+// Phase 3, epic #842). `runtime/sfn/platform/exec.sfn` defines
+// `exe_path() -> string ![io]` as a host-portable reader: it calls the
+// `sailfin_intrinsic_exe_path` registry sentinel (#967), which folds into
+// the host's concrete primitive at emit time (`@readlink` Linux /
+// `@_NSGetExecutablePath` Darwin / `@GetModuleFileNameA` Windows-mingw),
+// then canonicalizes with `@realpath`. The sentinel itself must never be
+// emitted as a real `call`/`declare`.
+//
+// This pins that shape against the real shipped module. It is
+// host-independent: each platform leg is forced via a `uname` shim on
+// PATH (Linux/Darwin) and the `SAILFIN_TARGET_OS` cross-compile override
+// (Windows), so it asserts the same thing whether CI runs on Linux or
+// macOS hardware. Emitted IR is plain text (no NUL bytes), so reading it
+// with `fs.readFile` and asserting via `sfn/strings::contains` is sound.
+//
+// NOTE: assert with `sfn/strings` predicates — the `sfn/test` `expect_*`
+// matchers are `![pure]` and cannot be used from an `![io]` test (#842).
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _exec_sfn() -> string { return "runtime/sfn/platform/exec.sfn"; }
+
+fn _scratch_base() -> string ![io] {
+    let s = env.get("SAILFIN_TEST_SCRATCH");
+    if s.length > 0 { return s; }
+    return "/tmp";
+}
+
+// Base env for the spawned compiler with PATH threaded. An empty env
+// array is the *empty* environment, not "inherit".
+fn _base_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Write a `uname` shim that reports `os` for `-s` and delegates every
+// other invocation to the real binary. Returns the shim directory.
+fn _make_uname_shim(os: string) -> string ![io] {
+    let dir = _scratch_base() + "/sfn-exe-path-reader/shim-" + os;
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/uname", "#!/bin/sh\n"
+        + "if [ \"$1\" = \"-s\" ]; then echo \""
+        + os
+        + "\"; exit 0; fi\n"
+        + "exec /usr/bin/uname \"$@\"\n");
+    fs.set_perms(dir + "/uname", 493);  // 0o755
+    return dir;
+}
+
+// Emit LLVM IR for exec.sfn with `uname -s` forced to `os` via a PATH
+// shim. Returns the emitted .ll text.
+fn _emit_for_os(os: string, tag: string) -> string ![io] {
+    let shimdir = _make_uname_shim(os);
+    let out = _scratch_base() + "/sfn-exe-path-reader/exec-" + tag + ".ll";
+    let mut e: string[] = ["PATH=" + shimdir + ":" + env.get("PATH")];
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", _exec_sfn()], e);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+    return fs.readFile(out);
+}
+
+// Emit with the cross-compile target override SAILFIN_TARGET_OS set.
+fn _emit_for_target_os(target_os: string, tag: string) -> string ![io] {
+    let out = _scratch_base() + "/sfn-exe-path-reader/exec-" + tag + ".ll";
+    let mut e = _base_env();
+    e.push("SAILFIN_TARGET_OS=" + target_os);
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", _exec_sfn()], e);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+    return fs.readFile(out);
+}
+
+// ---- Typecheck: sfn check passes on the real exec.sfn ----
+test "exe-path-reader: sfn check passes on exec.sfn" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", _exec_sfn()], _base_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+// ---- Linux leg: readlink + interned /proc/self/exe + realpath ----
+test "exe-path-reader: Linux leg shape" ![io] {
+    let ll = _emit_for_os("Linux", "linux");
+    assert contains(ll, "call i64 @readlink(");
+    assert contains(ll, "c\"/proc/self/exe");
+    assert contains(ll, "call i8* @realpath(");
+    // No other platform's primitive leaks onto the Linux leg.
+    assert ! contains(ll, "@_NSGetExecutablePath(");
+    assert ! contains(ll, "@GetModuleFileNameA(");
+    // The sentinel must fold away entirely.
+    assert ! contains(ll, "@sailfin_intrinsic_exe_path");
+}
+
+// ---- Darwin leg: _NSGetExecutablePath + strlen (+declare) + realpath ----
+test "exe-path-reader: Darwin leg shape" ![io] {
+    let ll = _emit_for_os("Darwin", "darwin");
+    assert contains(ll, "call i32 @_NSGetExecutablePath(");
+    assert contains(ll, "call i64 @strlen(");
+    // exec.sfn inlines its externs, so the call must be backed by a
+    // matching declare in the same module (clang rejects it otherwise).
+    assert contains(ll, "declare i64 @strlen(");
+    assert contains(ll, "call i8* @realpath(");
+    assert ! contains(ll, "@readlink(");
+    assert ! contains(ll, "@GetModuleFileNameA(");
+    assert ! contains(ll, "@sailfin_intrinsic_exe_path");
+}
+
+// ---- Windows-target leg (cross-compile override): GetModuleFileNameA + realpath ----
+test "exe-path-reader: Windows-target leg shape" ![io] {
+    let ll = _emit_for_target_os("Windows", "windows");
+    assert contains(ll, "call i32 @GetModuleFileNameA(");
+    assert contains(ll, "call i8* @realpath(");
+    assert ! contains(ll, "@readlink(");
+    assert ! contains(ll, "@_NSGetExecutablePath(");
+    assert ! contains(ll, "@sailfin_intrinsic_exe_path");
+}

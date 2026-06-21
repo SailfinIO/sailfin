@@ -1,0 +1,265 @@
+// End-to-end test for runtime/sfn/memory/mem.sfn — the Sailfin-defined
+// narrow memory primitives (`sfn_mem_get_field` / `_copy_bytes` /
+// `_bounds_check` / `_free`) shipped into the compiler binary alongside
+// the C runtime (issue #927, sub-issue of #390, tracker #821).
+//
+// Native (no-bash) replacement for the former
+// `test_runtime_memory_mem.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`). Pins, end-to-end:
+//   1. typecheck   — `sfn check runtime/sfn/memory/mem.sfn` reports `ok`.
+//   2. fmt         — `sfn fmt --check runtime/sfn/memory/mem.sfn` canonical.
+//   3. emit shape  — emitted IR carries a `define` for each of the four
+//                    `sfn_mem_*` exports, with the full pinned parameter
+//                    list so a width/pointer regression surfaces here.
+//   4. libc declares — the inlined libc/runtime externs the bodies route
+//                    through each produce a `declare` line.
+//   5. coexistence — the module does NOT emit any legacy C name
+//                    (`sailfin_runtime_*`) so a future accidental rename
+//                    surfaces here, not at link.
+//   6. roundtrip   — link the emitted `.ll` against a C harness that
+//                    exercises copy_bytes / get_field / free /
+//                    bounds_check (incl. the forked abort path) and
+//                    sfn_alloc_struct's OOM re-entrancy guard (#1405).
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test. For subprocess/IR-output
+// assertions use `sfn/strings`, as the runtime_string_basic exemplar does.
+import {
+    find,
+    split,
+    starts_with,
+    contains
+} from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. `emit` / `check` neither link nor spawn
+// clang, but the roundtrip leg invokes `clang` (and its linker) which
+// resolve through PATH, so include it.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A unique scratch dir for this test (under the runner's per-file scratch
+// when present, else /tmp).
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-runtime-mem";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit LLVM IR for the module at `module_path` and return it (or
+// "EMIT_FAILED" on a non-zero exit).
+fn _emit_module(tag: string, module_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let outpath = dir + "/" + tag + ".ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(outpath);
+}
+
+// `^define ... <signature>` — a line that starts the symbol's definition
+// with the exact pinned text (a `call` site never begins with `define`).
+fn _has_define_line(ir: string, signature: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, signature) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// `^declare ... @sym(` — the module declares the libc/runtime trampoline.
+fn _has_declare(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "declare ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// `^define ... @sym(` — does the module emit a `define` under this name?
+fn _has_define_named(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+test "runtime/sfn/memory/mem.sfn typechecks cleanly" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", "runtime/sfn/memory/mem.sfn"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "ok", 0) >= 0;
+}
+
+test "runtime/sfn/memory/mem.sfn is fmt-canonical" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "runtime/sfn/memory/mem.sfn"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+test "mem emit: define with pinned signature for every sfn_mem_* export" ![io] {
+    let ir = _emit_module("mem", "runtime/sfn/memory/mem.sfn");
+    assert ir != "EMIT_FAILED";
+    // Full parameter lists pinned so a regression that flips a width
+    // (i64→i32) or retypes a pointer surfaces here, not at link.
+    assert _has_define_line(ir, "@sfn_mem_get_field(i8* %base, i8* %field)");
+    assert _has_define_line(ir, "@sfn_mem_copy_bytes(i8* %dest, i8* %src, i64 %length)");
+    assert _has_define_line(ir, "@sfn_mem_bounds_check(i64 %index, i64 %length)");
+    assert _has_define_line(ir, "@sfn_mem_free(i8* %ptr)");
+}
+
+test "mem emit: declares the libc / runtime trampolines" ![io] {
+    let ir = _emit_module("mem", "runtime/sfn/memory/mem.sfn");
+    assert _has_declare(ir, "malloc");
+    assert _has_declare(ir, "memcpy");
+    assert _has_declare(ir, "free");
+    assert _has_declare(ir, "write");
+    assert _has_declare(ir, "abort");
+    assert _has_declare(ir, "sfn_arena_enabled");
+}
+
+test "mem emit: does not collide with legacy C runtime names" ![io] {
+    let ir = _emit_module("mem", "runtime/sfn/memory/mem.sfn");
+    // Those bodies still live in the C runtime; a `define` collision
+    // would fail `make compile` at link.
+    assert ! _has_define_named(ir, "sailfin_runtime_get_field");
+    assert ! _has_define_named(ir, "sailfin_runtime_copy_bytes");
+    assert ! _has_define_named(ir, "sailfin_runtime_bounds_check");
+    assert ! _has_define_named(ir, "sailfin_runtime_free");
+}
+
+// C harness exercising every primitive's contract. `sfn_mem_free`'s
+// arena-mode guard reads the C `sfn_arena_enabled()`; the harness stubs
+// it to return 0 (arena off) so free forwards to a counting shim.
+// bounds_check's abort path and sfn_alloc_struct's OOM path are verified
+// out-of-process via fork so the abort doesn't kill the harness.
+fn _mem_harness_c() -> string {
+    return "#include <stddef.h>\n" + "#include <stdio.h>\n"
+        + "#include <stdint.h>\n"
+        + "#include <stdlib.h>\n"
+        + "#include <string.h>\n"
+        + "#include <sys/wait.h>\n"
+        + "#include <unistd.h>\n"
+        + "#include <signal.h>\n"
+        + "static long free_count = 0;\n"
+        + "void free(void *ptr) { if (ptr) free_count++; }\n"
+        + "static int oom_mode = 0;\n"
+        + "int sfn_arena_enabled(void) { return oom_mode; }\n"
+        + "void *sfn_arena_global(void) { return oom_mode ? (void *)0x1 : NULL; }\n"
+        + "void *sfn_arena_alloc(void *arena, size_t size, size_t align) {\n"
+        + "    (void)arena; (void)align;\n"
+        + "    if (oom_mode) return NULL;\n"
+        + "    return calloc(1, size);\n"
+        + "}\n"
+        + "extern char *sfn_mem_get_field(char *base, char *field);\n"
+        + "extern void  sfn_mem_copy_bytes(char *dest, char *src, int64_t length);\n"
+        + "extern void  sfn_mem_bounds_check(int64_t index, int64_t length);\n"
+        + "extern void  sfn_mem_free(void *ptr);\n"
+        + "extern void *sfn_alloc_struct(int64_t size);\n"
+        + "int main(void) {\n"
+        + "    char src[8] = {1, 2, 3, 4, 5, 6, 7, 8};\n"
+        + "    char dst[8] = {0};\n"
+        + "    sfn_mem_copy_bytes(dst, src, 8);\n"
+        + "    if (memcmp(src, dst, 8) != 0) { fprintf(stderr, \"copy_bytes\\n\"); return 1; }\n"
+        + "    char guard[4] = {9, 9, 9, 9};\n"
+        + "    sfn_mem_copy_bytes(guard, NULL, 4);\n"
+        + "    sfn_mem_copy_bytes(NULL, src, 4);\n"
+        + "    sfn_mem_copy_bytes(guard, src, 0);\n"
+        + "    sfn_mem_copy_bytes(guard, src, -1);\n"
+        + "    if (guard[0] != 9 || guard[3] != 9) { fprintf(stderr, \"copy noop\\n\"); return 2; }\n"
+        + "    char *gf1 = sfn_mem_get_field((char *)0x1234, (char *)0x5678);\n"
+        + "    char *gf2 = sfn_mem_get_field(NULL, NULL);\n"
+        + "    if (!gf1 || !gf2) { fprintf(stderr, \"get_field null\\n\"); return 3; }\n"
+        + "    if (gf1 != gf2) { fprintf(stderr, \"get_field unstable\\n\"); return 4; }\n"
+        + "    for (int i = 0; i < 16; i++) { if (gf1[i] != 0) { fprintf(stderr, \"not zeroed\\n\"); return 5; } }\n"
+        + "    sfn_mem_free(NULL);\n"
+        + "    if (free_count != 0) { fprintf(stderr, \"free(NULL)\\n\"); return 6; }\n"
+        + "    sfn_mem_free(gf1);\n"
+        + "    if (free_count != 1) { fprintf(stderr, \"free count %ld\\n\", free_count); return 7; }\n"
+        + "    sfn_mem_bounds_check(0, 4);\n"
+        + "    sfn_mem_bounds_check(3, 4);\n"
+        + "    pid_t pid = fork();\n"
+        + "    if (pid == 0) { freopen(\"/dev/null\", \"w\", stderr); sfn_mem_bounds_check(4, 4); _exit(0); }\n"
+        + "    else if (pid > 0) { int status = 0; waitpid(pid, &status, 0);\n"
+        + "        if (!WIFSIGNALED(status)) { fprintf(stderr, \"bounds no abort\\n\"); return 8; } }\n"
+        + "    else { fprintf(stderr, \"fork\\n\"); return 9; }\n"
+        + "    pid_t opid = fork();\n"
+        + "    if (opid == 0) { freopen(\"/dev/null\", \"w\", stderr); oom_mode = 1; sfn_alloc_struct(64); _exit(0); }\n"
+        + "    else if (opid > 0) { int ostatus = 0; waitpid(opid, &ostatus, 0);\n"
+        + "        if (!WIFSIGNALED(ostatus)) { fprintf(stderr, \"oom no abort\\n\"); return 10; }\n"
+        + "        if (WTERMSIG(ostatus) != SIGABRT) { fprintf(stderr, \"oom sig %d\\n\", WTERMSIG(ostatus)); return 11; } }\n"
+        + "    else { fprintf(stderr, \"fork oom\\n\"); return 12; }\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// Functional roundtrip: link the emitted `.ll` against the C harness and
+// run it. The harness binds only the symbols the contract exercises;
+// `clang` and its linker resolve through PATH (threaded via _child_env).
+// (No sanitizer leg in the original — nothing omitted here.)
+test "mem roundtrip: copy_bytes/get_field/free/bounds_check per C contract" ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/mem.ll";
+    let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", "runtime/sfn/memory/mem.sfn"], _child_env());
+    let _eo = process.capture_take_stdout();
+    let _ee = process.capture_take_stderr();
+    assert emit_exit == 0;
+
+    let harness = dir + "/harness.c";
+    fs.writeFile(harness, _mem_harness_c());
+    let bin = dir + "/roundtrip";
+    // `-Wno-override-module` for the emitted target-triple mismatch;
+    // `-lm` because the seed lowers integer literals through libm.
+    let link_exit = process.run_capture(["clang", "-Wno-override-module", harness, ll, "-o", bin, "-lm"], _child_env());
+    let _lo = process.capture_take_stdout();
+    let lerr = process.capture_take_stderr();
+    assert find(lerr, "doesn't exist", 0) < 0;
+    assert link_exit == 0;
+
+    let run_exit = process.run_capture([bin], _child_env());
+    let _ro = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    assert run_exit == 0;
+}

@@ -1,0 +1,122 @@
+// End-to-end test for the implicit runtime-capsule link path — issue
+// #940 (Ra of #939, Phase R of #513).
+//
+// Native (no-bash) replacement for the former
+// `test_runtime_implicit_capsule_link.sh` (test-infra Phase 3, epic
+// #842; `.claude/rules/no-bash-e2e.md`). After Ra, `sfn build` of a
+// binary program with NO `[dependencies]` resolves
+// `runtime/native/capsule.toml` as an *implicit* runtime dependency and
+// links via the declarative capsule path (c-sources + ll-sources +
+// sfn-sources + prelude-entry).
+//
+// This test builds + runs a scratch program that references three
+// Sailfin-native runtime modules — fs.writeFile/fs.readFile
+// (filesystem.sfn), sleep (clock.sfn), and http.get_body (http.sfn) —
+// and asserts the build links and the binary prints the marker. The
+// http call is guarded behind a runtime-false branch so the symbol is
+// linked but the socket call never fires (no network needed); clang
+// cannot prove the branch dead, so the @sfn_http_get reference survives
+// to the link.
+//
+// DIVERGENCE FROM THE .sh: the original moved aside the
+// Makefile-staged `build/native/obj/runtime` directory to force the
+// implicit path. That mutates shared, repo-global state and is unsound
+// under the parallel `int-e2e-caps` pool (`sailfin test --jobs N`) where
+// concurrent builds would observe a half-hidden staging dir. We instead
+// rely on the implicit capsule being the resolution path for a
+// dependency-free program (its self-sufficiency is what #940 shipped)
+// and assert end-to-end link+run, without the destructive global mv.
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from
+// an `![io]` test. (#842.)
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build spawns a nested clang + linker, so the child needs PATH.
+// SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
+// so the parallel pool does not collide on build/sailfin.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-implicit-cap";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// The scratch program touches filesystem.sfn (fs.*), clock.sfn (sleep),
+// and http.sfn (http.*); the http path is behind a runtime-false branch
+// clang cannot fold, so @sfn_http_get links but never fires.
+fn _write_prog() -> string ![io] {
+    let dir = _scratch_dir();
+    let prog = dir + "/implicit_link_prog.sfn";
+    // Write the fs probe marker under the per-invocation scratch dir (an
+    // absolute path) rather than a CWD-relative "./" path — the runner runs
+    // the built binary from the repo root, so a relative marker would
+    // pollute the working tree. The assertion below keys off the binary's
+    // stdout, not this file; the write only exists to link fs.writeFile.
+    let marker = dir + "/_sfn_implicit_marker.txt";
+    fs.writeFile(prog, "fn fetch(url: string) -> string ![net] {\n"
+        + "    return http.get_body(url);\n"
+        + "}\n\n"
+        + "fn main() -> int ![io, net, clock] {\n"
+        + "    let path = \""
+        + marker
+        + "\";\n"
+        + "    fs.writeFile(path, \"implicit-capsule-ok\");\n"
+        + "    let contents = fs.readFile(path);\n"
+        + "    sleep(1);\n"
+        + "    if contents == \"this-string-never-equals-the-marker\" {\n"
+        + "        let body = fetch(\"http://127.0.0.1:9/\");\n"
+        + "        print(body);\n"
+        + "    }\n"
+        + "    print(contents);\n"
+        + "    return 0;\n"
+        + "}\n");
+    return prog;
+}
+
+test "implicit capsule: build links via the implicit runtime capsule" ![io] {
+    let prog = _write_prog();
+    let exe = _scratch_dir() + "/implicit_link_prog";
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", exe, prog], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    // `sfn build` has no seed fallback, so a real link failure is fatal.
+    assert exit == 0;
+    assert fs.exists(exe);
+}
+
+test "implicit capsule: built binary runs and prints the marker" ![io] {
+    let prog = _write_prog();
+    let exe = _scratch_dir() + "/implicit_link_prog";
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-o", exe, prog], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+    assert fs.exists(exe);
+
+    let run_exit = process.run_capture([exe], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert contains(run_out + run_err, "implicit-capsule-ok");
+}

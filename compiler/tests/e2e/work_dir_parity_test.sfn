@@ -1,0 +1,185 @@
+// End-to-end parity test for `sfn build -p compiler --work-dir <DIR>`.
+//
+// Native replacement for the former `test_work_dir_parity.sh` (test-infra
+// Phase 3, epic #842). Locks in the #379 invariant that two driver runs
+// into different `--work-dir` roots produce equivalent compiler binaries
+// and the same set of staged import-context artifacts — surfacing a
+// `--work-dir` path leak at e2e-test time instead of buried in
+// `make check`'s 30-min fixed-point comparison.
+//
+// Two ACs from #379:
+//   1. The two compiler binaries are byte-identical (Linux ELF). This is
+//      proven via the driver's own `--check-determinism`, which builds
+//      `-p compiler` twice into sibling work-dirs and compares the binary
+//      sha256 internally (NUL-safe — `fs.readFile` truncates binaries at
+//      the first NUL, so a Sailfin-level `==` cannot prove byte identity).
+//   2. The set of staged filenames under `<DIR>/native/import-context/`
+//      is identical between two `--work-dir` roots (we compare the full
+//      recursive filename set — strictly stronger than `.ll`-only).
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
+// `![io]` test (#842).
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The self-host build spawns nested clang + linker, so the child needs
+// PATH (+ HOME, TMPDIR). SAILFIN_TEST_SCRATCH routes the program.ll
+// build-cache per invocation so the parallel pool does not collide.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_base() -> string ![io] {
+    let s = env.get("SAILFIN_TEST_SCRATCH");
+    if s.length > 0 { return s; }
+    return "/tmp";
+}
+
+// Host-OS probe (via `uname -s`). Byte-identity is a Linux ELF guarantee;
+// macOS arm64 Mach-O builds embed non-reproducible data (LC_UUID, codesign),
+// so `--check-determinism` legitimately reports a mismatch there. Used to
+// gate the byte-identity AC to Linux.
+fn _host_is_darwin() -> boolean ![io] {
+    let _exit = process.run_capture(["uname", "-s"], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return contains(out, "Darwin");
+}
+
+// Build `-p compiler` into `work_dir` (idempotent: skips if the binary is
+// already present so re-runs within the pool don't rebuild). Returns the
+// build exit code (0 when the binary already exists).
+fn _build_compiler_into(work_dir: string) -> int ![io] {
+    if fs.exists(work_dir + "/native/sailfin") { return 0; }
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", "compiler", "--work-dir", work_dir], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit;
+}
+
+// Recursively collect every file path under `dir`, relative to `dir`,
+// into `acc`. fs.listDirectory is non-recursive, so we descend manually.
+// Directories are detected by re-listing: a path that listDirectory
+// returns entries for (or that is not a regular readable file) is treated
+// as a directory. We use fs.exists + a child-listing probe.
+fn _collect_files(root: string, rel: string, acc: string[]) -> string[] ![io] {
+    let dir = root + "/" + rel;
+    let entries = fs.listDirectory(dir);
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        i += 1;
+        if name == "." { continue; }
+        if name == ".." { continue; }
+        let child_rel = rel + "/" + name;
+        let child_abs = root + "/" + child_rel;
+        // Probe: a directory lists its entries; a regular file lists
+        // empty. import-context never stages empty directories, so a
+        // zero-entry listing means we reached a leaf file.
+        let sub = fs.listDirectory(child_abs);
+        if sub.length > 0 { acc = _collect_files(root, child_rel, acc); } else {
+            // Zero entries: could be an empty dir or a file. Record as a
+            // file (import-context never stages empty dirs).
+            acc.push(child_rel);
+        }
+    }
+    return acc;
+}
+
+fn _ic_file_set(work_dir: string) -> string[] ![io] {
+    let ic = work_dir + "/native/import-context";
+    let mut acc: string[] = [];
+    if !fs.exists(ic) { return acc; }
+    return _collect_files(ic, ".", acc);
+}
+
+// True if every element of `a` is present in `b` (membership, order- and
+// duplicate-insensitive).
+fn _subset(a: string[], b: string[]) -> boolean {
+    let mut i = 0;
+    loop {
+        if i >= a.length { break; }
+        let needle = a[i];
+        i += 1;
+        let mut found = false;
+        let mut j = 0;
+        loop {
+            if j >= b.length { break; }
+            if b[j] == needle {
+                found = true;
+                break;
+            }
+            j += 1;
+        }
+        if !found { return false; }
+    }
+    return true;
+}
+
+// ---- Test 1: binary equivalence across two work-dir roots ----
+// Headline #379 AC. `--check-determinism -p compiler` builds the compiler
+// twice into sibling work-dirs and compares the binary sha256 internally
+// (NUL-safe). A divergence means the work-dir absolute path leaked into
+// the compiled binary (e.g. via __FILE__ metadata or debug-info prefixes).
+test "work-dir-parity: two --work-dir builds produce equivalent compilers" ![io] {
+    if _host_is_darwin() {
+        // The byte-identity AC does not hold on macOS arm64 (Mach-O
+        // non-reproducible data). Assert only that the --work-dir compiler
+        // build path works there; the byte-identity AC is pinned on Linux
+        // below, and the staged-artifact parity AC (next test) runs on both.
+        let work = _scratch_base() + "/sfn-work-dir-parity-darwin";
+        let r = _build_compiler_into(work);
+        assert r == 0;
+        assert fs.exists(work + "/native/sailfin");
+    } else {
+        let exit = process.run_capture([_sfn_bin(), "build", "-p", "compiler", "--check-determinism"], _child_env());
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        assert exit == 0;
+        assert contains(out + err, "[determinism] match:");
+    }
+}
+
+// ---- Test 2: import-context filename sets are identical ----
+// Compares the full recursive filename set under
+// `<DIR>/native/import-context/` between two distinct work-dir roots.
+// Module names and relative paths there don't depend on link-time UUIDs,
+// so the sets must be exactly equal.
+test "work-dir-parity: import-context filename set matches across roots" ![io] {
+    let work_a = _scratch_base() + "/sfn-work-dir-parity-a";
+    let work_b = _scratch_base() + "/sfn-work-dir-parity-b";
+
+    let ra = _build_compiler_into(work_a);
+    assert ra == 0;
+    assert fs.exists(work_a + "/native/sailfin");
+
+    let rb = _build_compiler_into(work_b);
+    assert rb == 0;
+    assert fs.exists(work_b + "/native/sailfin");
+
+    let set_a = _ic_file_set(work_a);
+    let set_b = _ic_file_set(work_b);
+
+    // Non-trivial staging actually happened.
+    assert set_a.length > 0;
+    assert set_b.length > 0;
+    // Mutual subset == set equality (order/dup insensitive).
+    assert _subset(set_a, set_b);
+    assert _subset(set_b, set_a);
+}

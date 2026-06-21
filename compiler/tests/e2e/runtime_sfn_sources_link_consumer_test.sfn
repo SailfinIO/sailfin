@@ -1,0 +1,295 @@
+// Issue #308: regression test for `_compile_runtime_sfn_sources` in
+// `compiler/src/cli_main.sfn`. Pins that the link-time consumer of
+// `RuntimeCapsuleArtifacts.sfn_sources` fires when a manifest declares
+// the field, produces a cached `.o` (content-keyed), and threads it into
+// the final link.
+//
+// Native (no-bash) replacement for the former
+// `test_runtime_sfn_sources_link_consumer.sh` (test-infra Phase 3,
+// epic #842; `.claude/rules/no-bash-e2e.md`). Mirrors the structure of
+// `runtime_sfn_sources_struct_import_test.sfn` (synthetic runtime+app
+// workspace, `--work-dir` substitution for the bash `cd "$ws"` since
+// `run_capture` has no cwd lever, `fs.readFile`/`writeFile` copies in
+// place of symlinks).
+//
+// The test:
+//   1. Builds a scratch workspace with a runtime-native capsule whose
+//      `sfn-sources` leads with a synthetic `test_marker.sfn` (plus the
+//      real runtime modules the prelude/link require) and a binary
+//      `test-app` depending on it.
+//   2. Runs `sfn build -p <ws>/capsules/sfn/test-app --work-dir <ws>/build`.
+//   3. Asserts the build succeeded and the consumer produced the expected
+//      content-keyed `.o`/`.ll` under `<ws>/build/sailfin/`.
+//   4. Asserts SAILFIN_DISABLE_RUNTIME_SFN_SOURCES=1 short-circuits the
+//      consumer (no `.o` produced; build fails on an undefined sfn_* ref).
+//   5. Asserts a source edit busts the content-key object cache (#969).
+//
+// OMITTED leg: the bash "self-path resolution works through binary
+// symlink (macOS-safe surface)" test invoked the compiler through a
+// freshly-created symlink from a cwd. Sailfin's `fs` surface has no
+// symlink primitive and `run_capture` has no cwd lever, so that exact
+// argv[0]-through-symlink path cannot be reproduced natively. The
+// positive build test below still exercises self-path resolution from an
+// absolute binary path, which is the same `binary_dir`-from-argv[0]
+// plumbing minus the Mach-O symlink wrinkle.
+//
+// NOTE: assert on captured output / file contents with `sfn/strings`
+// predicates — the `sfn/test` `expect_*` matchers are `![pure]` and
+// cannot be called from an `![io]` test (#842).
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build spawns a nested clang + linker, so the child needs PATH (an
+// empty `run_capture` env is the *empty* environment, not "inherit").
+// SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
+// under the parallel pool. Each test threads its OWN dedicated
+// SAILFIN_BUILD_CACHE_DIR (`cache_dir`) so the shared content-addressed
+// runtime-object cache is genuinely cold per test: a warm shared cache
+// would serve the marker `.o` from a prior run and SKIP re-emitting its
+// staged `.ll`, breaking the positive test's `.ll`-exists assertion (the
+// bash original got a fresh `mktemp` workspace each run). `extra` appends
+// per-test env (the disable gate).
+fn _child_env_with(cache_dir: string, extra: string[]) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
+    let mut i = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i = i + 1;
+    }
+    return e;
+}
+
+// A kernel-unique per-invocation workspace root (mirrors the bash
+// `mktemp -d`). A fresh root every run keeps each build cold and
+// deterministic under the parallel pool and on warm-scratch reruns
+// (`fs.removeDirectory` is non-recursive, so a fixed reused path could
+// not be reliably wiped). `fs.mkdtemp` allocates under TMPDIR.
+fn _new_ws(tag: string) -> string ![io] {
+    return fs.mkdtemp("sfn-rtsrc-link-" + tag + "-");
+}
+
+// Copy a repo file to `dst` (the `.sfn` runtime modules are text, so
+// `fs.readFile`/`fs.writeFile` round-trips faithfully — the bash symlink
+// trick has no Sailfin fs surface).
+fn _copy(repo_rel: string, dst: string) ![io] {
+    fs.writeFile(dst, fs.readFile(repo_rel));
+}
+
+// Write the synthetic test_marker.sfn (a real file, not a copy — the
+// cache-bust test rewrites it). `variant` selects the one- or two-fn body.
+fn _write_marker(ws: string, second_fn: boolean) ![io] {
+    let mut body = "// Synthetic runtime sfn-source for the link-consumer e2e test.\n"
+        + "// Picked up by `_compile_runtime_sfn_sources` to produce a cached .o.\n"
+        + "fn rt_test_marker() -> i64 ![io] {\n"
+        + "    return 42;\n"
+        + "}\n";
+    if second_fn {
+        body = body + "\nfn rt_test_marker_v2() -> i64 ![io] {\n"
+            + "    return 43;\n"
+            + "}\n";
+    }
+    fs.writeFile(ws + "/runtime/sfn/test_marker.sfn", body);
+}
+
+// Build the synthetic workspace at `ws`. Mirrors the bash setup_workspace:
+// a runtime-native capsule whose `sfn-sources` leads with the synthetic
+// marker, plus the real runtime modules the prelude/link require, and a
+// binary `test-app`.
+fn _setup_workspace(ws: string, marker_second_fn: boolean) ![io] {
+    fs.createDirectory(ws + "/runtime/native", true);
+    fs.createDirectory(ws + "/runtime/sfn/platform", true);
+    fs.createDirectory(ws + "/runtime/sfn/memory", true);
+    fs.createDirectory(ws + "/capsules/sfn/test-app/src", true);
+
+    fs.writeFile(ws + "/workspace.toml", "[workspace]\n"
+        + "members = [\"runtime/native\", \"capsules/sfn/test-app\"]\n");
+
+    // Runtime capsule manifest. The marker leads sfn-sources so the
+    // "consumer fires" assertions point at it; the real runtime modules
+    // are required for the prelude/link (same shape as the struct-import
+    // exemplar and the real runtime/capsule.toml).
+    fs.writeFile(ws + "/runtime/native/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/runtime-native\"\n"
+        + "version = \"0.0.1\"\n\n"
+        + "[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "kind = \"runtime\"\n"
+        + "c-sources = []\n"
+        + "ll-sources = []\n"
+        + "sfn-sources = [\"../sfn/test_marker.sfn\", \"../sfn/clock.sfn\", "
+        + "\"../sfn/exception.sfn\", \"../sfn/type_meta.sfn\", \"../sfn/io.sfn\", "
+        + "\"../sfn/memory/arena.sfn\", \"../sfn/memory/ownedbuf.sfn\", "
+        + "\"../sfn/string.sfn\", \"../sfn/array.sfn\", \"../sfn/memory/mem.sfn\"]\n"
+        + "include-dirs = []\n"
+        + "link-libs = [\"-lm\"]\n"
+        + "prelude-entry = \"../prelude.sfn\"\n");
+
+    // Mirror the real runtime modules the manifest references.
+    _copy("runtime/prelude.sfn", ws + "/runtime/prelude.sfn");
+    _copy("runtime/sfn/clock.sfn", ws + "/runtime/sfn/clock.sfn");
+    _copy("runtime/sfn/exception.sfn", ws + "/runtime/sfn/exception.sfn");
+    _copy("runtime/sfn/type_meta.sfn", ws + "/runtime/sfn/type_meta.sfn");
+    _copy("runtime/sfn/io.sfn", ws + "/runtime/sfn/io.sfn");
+    _copy("runtime/sfn/string.sfn", ws + "/runtime/sfn/string.sfn");
+    _copy("runtime/sfn/array.sfn", ws + "/runtime/sfn/array.sfn");
+    _copy("runtime/sfn/memory/mem.sfn", ws + "/runtime/sfn/memory/mem.sfn");
+    _copy("runtime/sfn/memory/arena.sfn", ws + "/runtime/sfn/memory/arena.sfn");
+    _copy("runtime/sfn/memory/ownedbuf.sfn", ws
+        + "/runtime/sfn/memory/ownedbuf.sfn");
+    _copy("runtime/sfn/platform/posix.sfn", ws
+        + "/runtime/sfn/platform/posix.sfn");
+    _copy("runtime/sfn/platform/libc.sfn", ws + "/runtime/sfn/platform/libc.sfn");
+
+    _write_marker(ws, marker_second_fn);
+
+    fs.writeFile(ws + "/capsules/sfn/test-app/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/test-app\"\n"
+        + "version = \"0.0.1\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"src/main.sfn\"\n\n"
+        + "[dependencies]\n"
+        + "\"sfn/runtime-native\" = \"*\"\n");
+
+    fs.writeFile(ws + "/capsules/sfn/test-app/src/main.sfn", "fn main() ![io] {\n"
+        + "    print.info(\"test-app\");\n"
+        + "}\n");
+}
+
+// The content-keyed marker object path under the build cache dir
+// (`<work_dir>/sailfin`): capsule prefix + basename + opt_flag.
+fn _marker_obj(build_dir: string) -> string {
+    return build_dir + "/sailfin/sfn__runtime-native__test_marker.sfn-O2.o";
+}
+
+fn _marker_ll(build_dir: string) -> string {
+    return build_dir + "/sailfin/sfn__runtime-native__test_marker.sfn-O2.ll";
+}
+
+fn _clock_obj(build_dir: string) -> string {
+    return build_dir + "/sailfin/sfn__runtime-native__clock.sfn-O2.o";
+}
+
+// nm <binary> | grep ' [Tt] _?sym' — true if `sym` is a defined text
+// symbol (optional `_` prefix for macOS Mach-O).
+fn _nm_has_defined(obj: string, sym: string) -> boolean ![io] {
+    let no_extra: string[] = [];
+    let exit = process.run_capture(["nm", obj], _child_env_with("", no_extra));
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return false; }
+    return contains(out, " " + sym) || contains(out, "_" + sym);
+}
+
+// ---- Test 1: consumer fires for sfn-sources and produces cached .o ----
+test "runtime sfn-source consumer fires and produces a cached .o/.ll (#308)" ![io] {
+    let ws = _new_ws("positive");
+    _setup_workspace(ws, false);
+    let build_dir = ws + "/build";
+    let cache = ws + "/shared-cache";
+
+    let no_extra: string[] = [];
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", ws
+        + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, no_extra));
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+
+    // `_compile_runtime_sfn_sources` materialized the content-keyed
+    // marker .ll and .o under the build cache dir.
+    assert fs.exists(_marker_ll(build_dir));
+    assert fs.exists(_marker_obj(build_dir));
+}
+
+// ---- Test 2: the disable gate short-circuits the consumer ----
+test "SAILFIN_DISABLE_RUNTIME_SFN_SOURCES skips the consumer (no .o produced) (#308)" ![io] {
+    let ws = _new_ws("disabled");
+    _setup_workspace(ws, false);
+    let build_dir = ws + "/build";
+    let cache = ws + "/shared-cache";
+
+    // Post-#397 the prelude's `sleep` wrapper emits `@sfn_sleep`, defined
+    // only by the Sailfin clock.sfn module via this same consumer. With
+    // the gate set the consumer is skipped, so the link surfaces an
+    // undefined runtime sfn_* symbol (which one depends on dead-code
+    // stripping — assert on any undefined sfn_* reference).
+    let extra: string[] = ["SAILFIN_DISABLE_RUNTIME_SFN_SOURCES=1"];
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", ws
+        + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, extra));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+
+    // The gated build is expected to fail at link.
+    assert exit != 0;
+    // Failure must be for the expected sfn_* reason (linker wording varies
+    // across GNU ld / lld / mold / ld64; all mention an sfn_ symbol).
+    let saw_sfn_undef = contains(log, "undefined reference to `sfn_")
+        || contains(log, "undefined reference to 'sfn_")
+        || contains(log, "undefined symbol: sfn_")
+        || contains(log, "undefined symbol: _sfn_")
+        || (contains(log, "_sfn_")
+        && contains(log, "referenced from"));
+    assert saw_sfn_undef;
+
+    // The gate dropped every runtime sfn-source object → no marker/clock .o.
+    assert ! fs.exists(_marker_obj(build_dir));
+    assert ! fs.exists(_clock_obj(build_dir));
+}
+
+// ---- Test 3: a source edit busts the runtime sfn-source object cache ----
+test "source edit busts the runtime sfn-source object cache (#969)" ![io] {
+    let ws = _new_ws("cachebust");
+    _setup_workspace(ws, false);
+    let build_dir = ws + "/build";
+    let cache = ws + "/shared-cache";
+    let marker_o = _marker_obj(build_dir);
+
+    let no_extra: string[] = [];
+    let exit1 = process.run_capture([_sfn_bin(), "build", "-p", ws
+        + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, no_extra));
+    let _o1 = process.capture_take_stdout();
+    let _e1 = process.capture_take_stderr();
+    assert exit1 == 0;
+    assert fs.exists(marker_o);
+
+    // Sanity: the new symbol must NOT exist before the edit.
+    assert ! _nm_has_defined(marker_o, "rt_test_marker_v2");
+
+    // Rewrite the marker source to add a second function. The content
+    // change must change the cache key and force a re-emit (sharing the
+    // same cache dir as the first build so the content-key path is the
+    // thing under test, not a cold miss).
+    _write_marker(ws, true);
+
+    let exit2 = process.run_capture([_sfn_bin(), "build", "-p", ws
+        + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(cache, no_extra));
+    let _o2 = process.capture_take_stdout();
+    let _e2 = process.capture_take_stderr();
+    assert exit2 == 0;
+
+    // With the old existence-only cache the .o would be stale and this
+    // symbol would be absent.
+    assert _nm_has_defined(marker_o, "rt_test_marker_v2");
+
+    // The content-key sidecar must exist (proves the keyed path ran).
+    assert fs.exists(marker_o + ".key");
+}

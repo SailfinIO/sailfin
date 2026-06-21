@@ -1,0 +1,431 @@
+// End-to-end test for runtime/sfn/adapters/filesystem.sfn — the
+// Sailfin-native filesystem adapter (M3.1a #814 + M3.1b #815, epic #390).
+//
+// Native (no-bash) replacement for the former
+// `test_runtime_adapter_filesystem.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`). Pins, end-to-end:
+//   1. typecheck   — `sfn check` reports `ok` for filesystem.sfn and
+//                    libc.sfn.
+//   2. fmt         — both touched modules are fmt-canonical.
+//   3. libc externs — libc.sfn declares the dir/stat externs the adapter
+//                    routes through (stat/opendir/readdir/closedir/
+//                    unlink/mkdir/rmdir).
+//   4. emit shape  — the adapter emits a `define` for every sfn_fs_*
+//                    export (read/write/append + delete/mkdir/list/
+//                    read_bytes).
+//   5. flip probes — compiled probes route fs.{readFile,writeFile,
+//                    appendFile} (M3.1a) and fs.{listDirectory,deleteFile,
+//                    createDirectory} (M3.1b) through @sfn_fs_*, and emit
+//                    NO `call ... @sailfin_adapter_fs_*` legacy call site.
+//   6. exports     — the compiler binary carries the defined sfn_fs_*
+//                    text symbols.
+//   7. manifest    — runtime/capsule.toml sfn-sources lists the adapter.
+//   8. round-trips — write/read/append (incl. a multi-MB grow path) and
+//                    createDirectory/listDirectory/deleteFile, exercised
+//                    through the real `sfn run` link path.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test. For subprocess/IR-output
+// assertions use `sfn/strings`, as the runtime_string_basic exemplar does.
+import {
+    find,
+    split,
+    starts_with,
+    contains,
+    ends_with,
+    char_at_index
+} from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. The `sfn run` round-trips spawn a full
+// build (clang + linker resolve through PATH) and route the program.ll
+// build cache under SAILFIN_TEST_SCRATCH (#1333) — both are mandatory
+// under the parallel pool. The `nm` export check also resolves nm via PATH.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-runtime-fs";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _emit_module(tag: string, module_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let outpath = dir + "/" + tag + ".ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(outpath);
+}
+
+fn _check_ok(module_path: string) -> boolean ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", module_path], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 { return false; }
+    return find(out + err, "ok", 0) >= 0;
+}
+
+fn _fmt_ok(module_path: string) -> boolean ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", module_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit == 0;
+}
+
+fn _has_define_named(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn _is_word_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let word = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    return find(word, ch, 0) >= 0;
+}
+
+// `@sym\b` — does the IR reference the bare symbol at a word boundary?
+// (matches the original's portable `@sym([^A-Za-z0-9_]|$)` delimiter.)
+fn _references(ir: string, sym: string) -> boolean {
+    let needle = "@" + sym;
+    let mut pos = find(ir, needle, 0);
+    loop {
+        if pos < 0 { break; }
+        let after = pos + needle.length;
+        if after >= ir.length { return true; }
+        let ch = char_at_index(ir, after);
+        if !_is_word_char(ch) { return true; }
+        pos = find(ir, needle, after);
+    }
+    return false;
+}
+
+// `call ... @sym(` on any line — a legacy C call site (declares are
+// tolerated; only call sites are forbidden by the original).
+fn _has_call_site(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    let needle = "@" + sym + "(";
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if find(line, "call ", 0) >= 0 && contains(line, needle) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// `^extern fn sym(` in the source text.
+fn _source_declares_extern(source: string, sym: string) -> boolean {
+    let lines = split(source, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if starts_with(lines[i], "extern fn " + sym + "(") { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// `<space>T<space>_?sym` at end of an `nm` line (optional `_` for macOS).
+fn _nm_has_defined(binary: string, sym: string) -> boolean ![io] {
+    let exit = process.run_capture(["nm", binary], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return false; }
+    let lines = split(out, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let is_text = contains(line, " T ") || contains(line, " t ");
+        if is_text && (ends_with(line, " " + sym) || ends_with(line, "_" + sym)) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// A line in `\n`-joined `lines` equals `want` exactly (mirrors `grep -qx`).
+fn _has_exact_line(text: string, want: string) -> boolean {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if lines[i] == want { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+test "runtime/sfn/adapters/filesystem.sfn typechecks cleanly" ![io] {
+    assert _check_ok("runtime/sfn/adapters/filesystem.sfn");
+}
+
+test "runtime/sfn/platform/libc.sfn typechecks cleanly with dir/stat externs" ![io] {
+    assert _check_ok("runtime/sfn/platform/libc.sfn");
+}
+
+test "filesystem.sfn and libc.sfn are fmt-canonical" ![io] {
+    assert _fmt_ok("runtime/sfn/adapters/filesystem.sfn");
+    assert _fmt_ok("runtime/sfn/platform/libc.sfn");
+}
+
+test "libc.sfn declares stat/opendir/readdir/closedir/unlink/mkdir/rmdir" ![io] {
+    let source = fs.readFile("runtime/sfn/platform/libc.sfn");
+    assert _source_declares_extern(source, "stat");
+    assert _source_declares_extern(source, "opendir");
+    assert _source_declares_extern(source, "readdir");
+    assert _source_declares_extern(source, "closedir");
+    assert _source_declares_extern(source, "unlink");
+    assert _source_declares_extern(source, "mkdir");
+    assert _source_declares_extern(source, "rmdir");
+}
+
+test "filesystem emit: define for every sfn_fs_* export" ![io] {
+    let ir = _emit_module("filesystem", "runtime/sfn/adapters/filesystem.sfn");
+    assert ir != "EMIT_FAILED";
+    assert _has_define_named(ir, "sfn_fs_read_file");
+    assert _has_define_named(ir, "sfn_fs_write_file");
+    assert _has_define_named(ir, "sfn_fs_append_file");
+    assert _has_define_named(ir, "sfn_fs_delete");
+    assert _has_define_named(ir, "sfn_fs_mkdir");
+    assert _has_define_named(ir, "sfn_fs_list_dir");
+    assert _has_define_named(ir, "sfn_fs_read_bytes");
+}
+
+test "probe routes fs.{readFile,writeFile,appendFile} through @sfn_fs_*" ![io] {
+    let dir = _scratch_dir();
+    let probe = dir + "/fs_probe.sfn";
+    fs.writeFile(probe, "fn main() -> int ![io] {\n"
+        + "    fs.writeFile(\"/tmp/sfn_fs_probe.txt\", \"hello world\");\n"
+        + "    let content = fs.readFile(\"/tmp/sfn_fs_probe.txt\");\n"
+        + "    fs.appendFile(\"/tmp/sfn_fs_probe.txt\", \" again\");\n"
+        + "    return 0;\n"
+        + "}\n");
+    let ir = _emit_module("fs_probe", probe);
+    assert ir != "EMIT_FAILED";
+    assert _references(ir, "sfn_fs_read_file");
+    assert _references(ir, "sfn_fs_write_file");
+    assert _references(ir, "sfn_fs_append_file");
+    // Legacy C call sites must be gone (declares tolerated).
+    assert ! _has_call_site(ir, "sailfin_adapter_fs_read_file");
+    assert ! _has_call_site(ir, "sailfin_adapter_fs_write_file");
+    assert ! _has_call_site(ir, "sailfin_adapter_fs_append_file");
+}
+
+test "probe routes fs.{listDirectory,deleteFile,createDirectory} through @sfn_fs_*" ![io] {
+    let dir = _scratch_dir();
+    let probe = dir + "/fs_probe_m31b.sfn";
+    fs.writeFile(probe, "fn main() -> int ![io] {\n"
+        + "    fs.createDirectory(\"/tmp/sfn_fs_probe_m31b/a/b\", true);\n"
+        + "    fs.writeFile(\"/tmp/sfn_fs_probe_m31b/note.txt\", \"x\");\n"
+        + "    let entries = fs.listDirectory(\"/tmp/sfn_fs_probe_m31b\");\n"
+        + "    fs.deleteFile(\"/tmp/sfn_fs_probe_m31b/note.txt\");\n"
+        + "    return entries.length;\n"
+        + "}\n");
+    let ir = _emit_module("fs_probe_m31b", probe);
+    assert ir != "EMIT_FAILED";
+    assert _references(ir, "sfn_fs_list_dir");
+    assert _references(ir, "sfn_fs_delete");
+    assert _references(ir, "sfn_fs_mkdir");
+    assert ! _has_call_site(ir, "sailfin_adapter_fs_list_directory_v2");
+    assert ! _has_call_site(ir, "sailfin_adapter_fs_delete_file");
+    assert ! _has_call_site(ir, "sailfin_adapter_fs_create_directory");
+}
+
+test "compiler binary exports the defined sfn_fs_* family" ![io] {
+    let bin = _sfn_bin();
+    assert _nm_has_defined(bin, "sfn_fs_read_file");
+    assert _nm_has_defined(bin, "sfn_fs_write_file");
+    assert _nm_has_defined(bin, "sfn_fs_append_file");
+    assert _nm_has_defined(bin, "sfn_fs_delete");
+    assert _nm_has_defined(bin, "sfn_fs_mkdir");
+    assert _nm_has_defined(bin, "sfn_fs_list_dir");
+    assert _nm_has_defined(bin, "sfn_fs_read_bytes");
+}
+
+test "runtime/capsule.toml sfn-sources lists the filesystem adapter" ![io] {
+    let manifest = fs.readFile("runtime/capsule.toml");
+    let lines = split(manifest, "\n");
+    let mut found = false;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "sfn-sources = [") && contains(line, "\"sfn/adapters/filesystem.sfn\"") {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert found;
+}
+
+test "fs.writeFile / readFile / appendFile round-trip end-to-end" ![io] {
+    let dir = _scratch_dir();
+    let scratch_file = dir + "/round_trip.txt";
+    let probe = dir + "/round_trip_probe.sfn";
+    fs.writeFile(probe, "fn main() -> int ![io] {\n" + "    let path = \""
+        + scratch_file
+        + "\";\n"
+        + "    fs.writeFile(path, \"first chunk\");\n"
+        + "    let after_write = fs.readFile(path);\n"
+        + "    print(after_write);\n"
+        + "    fs.appendFile(path, \" plus appended\");\n"
+        + "    let after_append = fs.readFile(path);\n"
+        + "    print(after_append);\n"
+        + "    return 0;\n"
+        + "}\n");
+    // `sfn run` spawns a full build; thread PATH + SAILFIN_TEST_SCRATCH
+    // (via _child_env) so the linker resolves and program.ll stays
+    // per-invocation under the parallel pool.
+    let run_exit = process.run_capture([_sfn_bin(), "run", probe], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert run_exit == 0;
+    // stdout: each print adds a trailing newline.
+    assert _has_exact_line(out, "first chunk");
+    assert _has_exact_line(out, "first chunk plus appended");
+    // Final on-disk contents match the second read.
+    let on_disk = fs.readFile(scratch_file);
+    assert on_disk == "first chunk plus appended";
+}
+
+test "fs.createDirectory / listDirectory / deleteFile round-trip end-to-end" ![io] {
+    let dir = _scratch_dir();
+    let base = dir + "/m31b";
+    let listing = dir + "/listing.txt";
+    let listing2 = dir + "/listing2.txt";
+    let probe = dir + "/m31b_probe.sfn";
+    fs.writeFile(probe, "fn main() -> int ![io] {\n"
+        + "    fs.createDirectory(\""
+        + base
+        + "/x/y/z\", true);\n"
+        + "    fs.writeFile(\""
+        + base
+        + "/alpha.txt\", \"a\");\n"
+        + "    fs.writeFile(\""
+        + base
+        + "/beta.txt\", \"b\");\n"
+        + "    let entries = fs.listDirectory(\""
+        + base
+        + "\");\n"
+        + "    let mut i = 0;\n"
+        + "    loop {\n"
+        + "        if i >= entries.length { break; }\n"
+        + "        fs.appendFile(\""
+        + listing
+        + "\", entries[i]);\n"
+        + "        fs.appendFile(\""
+        + listing
+        + "\", \"\\n\");\n"
+        + "        i = i + 1;\n"
+        + "    }\n"
+        + "    fs.deleteFile(\""
+        + base
+        + "/alpha.txt\");\n"
+        + "    let after = fs.listDirectory(\""
+        + base
+        + "\");\n"
+        + "    let mut j = 0;\n"
+        + "    loop {\n"
+        + "        if j >= after.length { break; }\n"
+        + "        fs.appendFile(\""
+        + listing2
+        + "\", after[j]);\n"
+        + "        fs.appendFile(\""
+        + listing2
+        + "\", \"\\n\");\n"
+        + "        j = j + 1;\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n");
+    let run_exit = process.run_capture([_sfn_bin(), "run", probe], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert run_exit == 0;
+    // Recursive mkdir materialized every parent component.
+    assert fs.exists(base + "/x/y/z");
+    // First enumeration sees both files plus the nested dir 'x'.
+    let first = fs.readFile(listing);
+    assert _has_exact_line(first, "alpha.txt");
+    assert _has_exact_line(first, "beta.txt");
+    assert _has_exact_line(first, "x");
+    // delete removed alpha.txt from disk.
+    assert ! fs.exists(base + "/alpha.txt");
+    // Second enumeration drops alpha.txt but keeps beta.txt and x.
+    let second = fs.readFile(listing2);
+    assert ! _has_exact_line(second, "alpha.txt");
+    assert _has_exact_line(second, "beta.txt");
+    assert _has_exact_line(second, "x");
+}
+
+test "large-file round-trip exercises the chunked-read grow path" ![io] {
+    let dir = _scratch_dir();
+    let scratch_file = dir + "/large.bin";
+    let expected_path = scratch_file + ".expected";
+    // 512 lines x 64 bytes (incl. newline) = 32768 bytes — 8 realloc
+    // passes from the 4 KiB initial capacity of sfn_fs_read_file.
+    let line = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde";
+    let mut payload = "";
+    let mut k = 0;
+    loop {
+        if k >= 512 { break; }
+        payload = payload + line + "\n";
+        k = k + 1;
+    }
+    fs.writeFile(expected_path, payload);
+
+    let probe = dir + "/large_probe.sfn";
+    fs.writeFile(probe, "fn main() -> int ![io] {\n" + "    let src = \""
+        + expected_path
+        + "\";\n"
+        + "    let dst = \""
+        + scratch_file
+        + "\";\n"
+        + "    let payload = fs.readFile(src);\n"
+        + "    fs.writeFile(dst, payload);\n"
+        + "    let round_tripped = fs.readFile(dst);\n"
+        + "    print(round_tripped);\n"
+        + "    return 0;\n"
+        + "}\n");
+    let run_exit = process.run_capture([_sfn_bin(), "run", probe], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert run_exit == 0;
+    // `print` appends one trailing newline; payload already ends with one.
+    assert out == payload + "\n";
+    // On-disk write mirrors the payload byte-for-byte.
+    let on_disk = fs.readFile(scratch_file);
+    assert on_disk == payload;
+}

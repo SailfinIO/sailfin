@@ -1,0 +1,169 @@
+// Regression coverage for #892 — residual non-deterministic heap
+// corruption in the runtime-helper collection → `declare` emission path
+// (a residual of #740, surfaced by PR #890).
+//
+// Native (no-bash) replacement for the former
+// `test_runtime_helper_declare_integrity.sh` (test-infra Phase 3,
+// epic #842; `.claude/rules/no-bash-e2e.md`).
+//
+// Root cause: string `==` lowered to `call i1 @sfn_str_eq` without
+// bumping `_runtime_call_seq`, so the concat-reuse optimizer's in-place
+// reuse window survived across the declare-line builder's equality scans
+// and a later concat could stomp a buffer a live `string[]` declare-target
+// element still pointed at — clobbering the `@` byte of an UNRELATED
+// helper's declare.
+//
+// Two invariants on the emitted IR:
+//   1. declare integrity — EVERY emitted `declare` line carries a
+//      well-formed `@<identifier>(` function name. The clobber replaces
+//      the `@` (or first name byte) with a non-identifier byte, so a strict
+//      check over the declare block catches the exact corruption signature
+//      regardless of WHICH helper got hit.
+//   2. determinism under sweep — N back-to-back `emit llvm` runs on a
+//      helper-declare-heavy module produce byte-identical IR. The bug is
+//      heap-layout/timing dependent, so a multi-sweep byte-compare is the
+//      load-independent proxy.
+//
+// Modules chosen to maximize the runtime-helper declare block AND the
+// equality-scan interleaving: `lowering_helpers.sfn` is the declare-loop
+// consumer itself (~280 declares) and `parser/expressions.sfn` is a heavy
+// expression module (the existing #399 emit-sweep target).
+//
+// NOTE: assert on emitted IR with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
+// an `![io]` test (#842).
+import { find, split, starts_with } from "sfn/strings";
+
+// Sweeps: the bash used 30, but each `emit llvm` of these heavy compiler
+// modules costs ~6.5s, so 30 sweeps (~400s) overruns the per-test budget
+// of the parallel e2e shard. The byte-compare is the load-independent proxy
+// for the heap-layout/timing bug, so the count is a lever on detection
+// odds, not correctness — 6 keeps detection meaningful while staying
+// well within the shard's per-test budget.
+fn _sweeps() -> int { return 6; }
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `emit llvm` neither links nor spawns clang, so no PATH is required; thread
+// SAILFIN_TEST_SCRATCH so any per-invocation scratch the compiler keeps does
+// not collide under the parallel pool.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-helper-declare";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit LLVM IR for `src` to `<scratch>/<tag>.ll` and return its contents
+// (or "EMIT_FAILED" on a non-zero exit).
+fn _emit_one(tag: string, src: string) -> string ![io] {
+    let out = _scratch_dir() + "/" + tag + ".ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(out);
+}
+
+// Is `ch` an LLVM-identifier-start char (`[A-Za-z_]`)?
+fn _is_ident_start(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let alpha = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+    return find(alpha, ch, 0) >= 0;
+}
+
+// Every `declare` line carries a well-formed ` @<identifier-start>` name
+// token. A clobbered `@` byte (`declare i1 <E7>sailfin_runtime_is_void(...)`)
+// fails this because the `@` is gone or the following byte is not an
+// identifier-start. Returns false (malformed) if any declare line fails, OR
+// if there are zero declare lines (the module is expected to emit runtime
+// helpers).
+fn _declares_wellformed(ir: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut total = 0;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i = i + 1;
+        if !starts_with(line, "declare ") { continue; }
+        total = total + 1;
+        // Locate the ` @` name marker.
+        let at = find(line, " @", 0);
+        if at < 0 { return false; }
+        // Char immediately after ` @` must be an identifier-start byte.
+        let name_start = at + 2;
+        if name_start >= line.length { return false; }
+        let ch = line[name_start];
+        if !_is_ident_start(ch) { return false; }
+    }
+    if total == 0 { return false; }
+    return true;
+}
+
+test "declare-loop consumer module emits only well-formed declares" ![io] {
+    let ir = _emit_one("consumer", "compiler/src/llvm/lowering/lowering_helpers.sfn");
+    assert ir != "EMIT_FAILED";
+    assert _declares_wellformed(ir);
+}
+
+test "heavy expression module emits only well-formed declares" ![io] {
+    let ir = _emit_one("heavy", "compiler/src/parser/expressions.sfn");
+    assert ir != "EMIT_FAILED";
+    assert _declares_wellformed(ir);
+}
+
+test "repeated declare-consumer emit-sweep is byte-identical with clean declares" ![io] {
+    let src = "compiler/src/llvm/lowering/lowering_helpers.sfn";
+    let base = _emit_one("consumer_base", src);
+    assert base != "EMIT_FAILED";
+    assert _declares_wellformed(base);
+    let n = _sweeps();
+    let mut i = 0;
+    loop {
+        if i >= n { break; }
+        let next = _emit_one("consumer_sweep", src);
+        assert next != "EMIT_FAILED";
+        assert _declares_wellformed(next);
+        // Byte-identical to the baseline (the .ll is text, so a Sailfin
+        // string `==` is a faithful byte-compare — any in-place stomp
+        // perturbs the bytes).
+        assert next == base;
+        i = i + 1;
+    }
+}
+
+test "repeated heavy-module emit-sweep is byte-identical with clean declares" ![io] {
+    let src = "compiler/src/parser/expressions.sfn";
+    let base = _emit_one("heavy_base", src);
+    assert base != "EMIT_FAILED";
+    assert _declares_wellformed(base);
+    let n = _sweeps();
+    let mut i = 0;
+    loop {
+        if i >= n { break; }
+        let next = _emit_one("heavy_sweep", src);
+        assert next != "EMIT_FAILED";
+        assert _declares_wellformed(next);
+        assert next == base;
+        i = i + 1;
+    }
+}
