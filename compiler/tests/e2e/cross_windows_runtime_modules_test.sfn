@@ -1,0 +1,99 @@
+// Guard test (#941, Risk R4): the `ci-cross-windows` Make target emits +
+// links a hardcoded list of runtime Sailfin modules (`RUNTIME_MODS`). That
+// list is a copy of `runtime/capsule.toml`'s `sfn-sources` array plus its
+// `prelude-entry`, MINUS `process.sfn`, the pthread-dependent
+// `concurrency/*` modules, `platform/rlimit.sfn`, and `assert.sfn`, PLUS the
+// Windows-only `platform/process_windows.sfn` (which is intentionally NOT in
+// the manifest). If the manifest and the Makefile drift, the Windows bridge
+// would silently drop or double-link a runtime module; these static checks
+// fail the moment they diverge.
+//
+// Native (no-bash) replacement for `test_cross_windows_runtime_modules.sh`
+// (test-infra Phase 3, epic #842; `.claude/rules/no-bash-e2e.md`). Pure
+// source-consistency check: reads the manifest, the Makefile, and the Windows
+// stub IR with `fs.readFile` and asserts on their contents with
+// `sfn/strings::contains` — no compiler invocation. (The `sfn/test` `expect_*`
+// matchers are `![pure]` and unusable from an `![io]` test, #842.)
+//
+// IMPLEMENTATION NOTE — these assertions search the WHOLE file text with
+// `contains` rather than parsing the `RUNTIME_MODS=` / `sfn-sources` lines
+// into string arrays and diffing them. Two reasons:
+//
+//   1. Every module path is unique enough that a whole-file substring search
+//      is an exact membership test. The excluded paths
+//      (`runtime/sfn/process.sfn`, `runtime/sfn/concurrency/`) appear NOWHERE
+//      else in the Makefile (not even in comments), and the manifest entries
+//      (`"sfn/process.sfn"` etc.) appear only in the `sfn-sources` array; the
+//      Windows-only `process_windows` token appears only where expected. So
+//      `contains` / `!contains` pins each per-module drift contract exactly.
+//   2. The array-parsing form (an `_expected_runtime_mods` /
+//      `_makefile_runtime_mods` pair that builds `string[]` via `out.push`
+//      in a loop, with a per-line `line[0:prefix.length]` slice to locate the
+//      source lines, then a set-equality compare) reproducibly miscompiles
+//      from an `![io]` test in this repo: depending on module composition and
+//      test count, the slice loop / array-growth returns an empty result, so
+//      `actual.length > 0` fails even though the same code is correct in a
+//      smaller module. The whole-file `contains` form avoids string slicing
+//      and in-loop array growth entirely, so it is stable. The pure
+//      set-equality diff is therefore expressed as the conjunction of the
+//      membership contracts below.
+import { contains } from "sfn/strings";
+
+// ---- Per-module RUNTIME_MODS <-> manifest drift contracts ----
+test "cross-windows RUNTIME_MODS / manifest per-module contracts" ![io] {
+    let manifest = fs.readFile("runtime/capsule.toml");
+    let makefile = fs.readFile("Makefile");
+
+    // process.sfn: in the manifest sfn-sources (posix_spawnp body for
+    // Linux/macOS), excluded from RUNTIME_MODS (mingw cannot resolve
+    // posix_spawnp/waitpid). `runtime/sfn/process.sfn` is not a substring of
+    // the `process_windows.sfn` path and appears nowhere in the Makefile, so
+    // the exclusion check is exact.
+    assert contains(manifest, "\"sfn/process.sfn\"");
+    assert ! contains(makefile, "runtime/sfn/process.sfn");
+
+    // process_windows.sfn: the inverse — owns the Windows @sfn_process_*
+    // family, so it is in RUNTIME_MODS but NOT in the manifest.
+    assert contains(makefile, "runtime/sfn/platform/process_windows.sfn");
+    assert ! contains(manifest, "process_windows");
+
+    // rlimit.sfn: in the manifest, excluded from RUNTIME_MODS.
+    assert contains(manifest, "\"sfn/platform/rlimit.sfn\"");
+    assert ! contains(makefile, "runtime/sfn/platform/rlimit.sfn");
+
+    // assert.sfn: in the manifest, excluded from RUNTIME_MODS.
+    assert contains(manifest, "\"sfn/assert.sfn\"");
+    assert ! contains(makefile, "runtime/sfn/assert.sfn");
+
+    // serve.sfn (concurrency/): in the manifest, excluded from RUNTIME_MODS.
+    assert contains(manifest, "\"sfn/concurrency/serve.sfn\"");
+    assert ! contains(makefile, "runtime/sfn/concurrency/serve.sfn");
+
+    // The whole concurrency/* family is excluded from RUNTIME_MODS.
+    assert ! contains(makefile, "runtime/sfn/concurrency/");
+
+    // The prelude entry IS linked by the cross-windows bridge.
+    assert contains(makefile, "runtime/prelude.sfn");
+}
+
+// ---- The Windows stub IR that backs the excluded / retired symbols ----
+test "cross-windows windows_stubs.ll defines the required Windows stubs" ![io] {
+    let stubs = fs.readFile("runtime/ir/windows_stubs.ll");
+    let manifest = fs.readFile("runtime/capsule.toml");
+    let makefile = fs.readFile("Makefile");
+
+    // Strong stubs Windows resolves in place of the excluded modules / the
+    // deleted sailfin_runtime.c (#1308, #822).
+    assert contains(stubs, "define i32 @apply_default_mem_limit");
+    assert contains(stubs, "define void @sailfin_runtime_serve");
+    assert contains(stubs, "@realpath");
+    assert contains(stubs, "@runtime_assert_fail_fn");
+    assert contains(stubs, "@sailfin_assert_fail");
+
+    // windows_stubs.ll is a cross-windows-only object: NOT in the manifest
+    // (its `ll-sources` is empty — adding windows_stubs would duplicate the
+    // strong defs on Linux/macOS), but wired into the Makefile cross-windows
+    // link. `windows_stubs` appears nowhere in the manifest.
+    assert ! contains(manifest, "windows_stubs");
+    assert contains(makefile, "windows_stubs.ll");
+}

@@ -1,0 +1,302 @@
+// End-to-end test for runtime/sfn/concurrency/scheduler.sfn — the v0 fixed
+// thread pool, the shared MPMC task queue (#1087), the worker pool (#1088),
+// and the task-invocation lifecycle (#1089).
+//
+// Native (no-bash) replacement for the former
+// `test_runtime_scheduler_skeleton.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`).
+//
+// The module pins the struct byte layouts for the v0 fixed thread pool (see
+// `docs/runtime_architecture.md` §2.6.1) — `Scheduler`, `Task`, `TaskQueue`,
+// and the opaque `PthreadMutex`/`PthreadCond` byte-storage types — and
+// implements the MPMC ring queue + the fixed worker pool. The spawn/await
+// surface that imports this module lands in a follow-up M4 issue, so
+// `make compile`/`make test` would not otherwise exercise it; this test
+// keeps it from bitrotting.
+//
+// Pins, end-to-end (all target-independent emit-shape invariants):
+//   1. typecheck — `sfn check` is ok.
+//   2. fmt       — `sfn fmt --check` is canonical.
+//   3. queue shape — `%TaskQueue` embeds the mutex + two conds by value
+//                    (not boxed pointers); the five `sfn_taskqueue_*` entry
+//                    points are defined; ring slots use `seq_cst` atomics;
+//                    mutex/cond init + blocking wait + signal are emitted.
+//   4. blocking dequeue — the `@sfn_taskqueue_dequeue` body blocks on
+//                    `pthread_cond_wait` and signals `pthread_cond_signal`.
+//   5. worker pool (#1088) — the `sfn_scheduler_*` surface is defined; the
+//                    worker entry materializes as a real code pointer
+//                    (`bitcast ... @sfn_scheduler_worker ... to i8*`, #1146 —
+//                    not a silent null); `pthread_create`/`join`/
+//                    `cond_broadcast`/`sysconf` + the atomic shutdown publish
+//                    (`store atomic i64 1`) are emitted; `@sfn_scheduler_create`
+//                    does NOT `store i8* null` (the #1146 regression).
+//   6. task lifecycle (#1089) — the `sfn_task_*` surface is defined; the
+//                    `@sfn_task_run` body invokes the body through a PLAIN
+//                    C-ABI fn pointer (typed bitcast + env-less indirect call,
+//                    NOT the closure-pair `extractvalue {i8*, i8*}` path),
+//                    publishes the done flag atomically + signals; the
+//                    `@sfn_task_join` body polls the done flag with a
+//                    `seq_cst` atomic load and blocks on `pthread_cond_wait`.
+//
+// OMITTED legs (documented): the original script's `test_roundtrip_fifo` and
+// `test_pool_roundtrip` linked the emitted `.ll` against bespoke C harnesses
+// (`clang ... -lpthread`) and executed FIFO/wraparound and a multi-threaded
+// pool drain. Those require emitting a C driver and a clang link, which is
+// not expressible with `sfn/test` building blocks, and the executing legs
+// are also Linux-x86_64-only (the embedded pthread handle storage is sized
+// for glibc; §2.9 Q7). The emit-shape assertions below pin the same ABI
+// contract on every platform (the emitted .ll is target-independent).
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test. Assert on the captured IR with
+// `sfn/strings` predicates instead. (#842.)
+import {
+    find,
+    split,
+    contains,
+    starts_with
+} from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _scheduler_path() -> string {
+    return "runtime/sfn/concurrency/scheduler.sfn";
+}
+
+// `process.run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. `emit` / `check` neither link nor spawn
+// clang, but route the build cache under SAILFIN_TEST_SCRATCH so a parallel
+// run does not collide on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-scheduler-skeleton-");
+}
+
+// Emit LLVM IR for the scheduler module to a unique scratch `.ll` and return
+// the IR text (or "EMIT_FAILED" on a non-zero exit).
+fn _emit_scheduler_ir() -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/scheduler.ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _scheduler_path()], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    if !fs.exists(ll) { return "EMIT_FAILED"; }
+    return fs.readFile(ll);
+}
+
+// `^define .* @sym(` — a line that begins the symbol's definition.
+fn _has_define(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// The first line containing `needle`, or "" if absent.
+fn _line_with(ir: string, needle: string) -> string {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], needle) { return lines[i]; }
+        i = i + 1;
+    }
+    return "";
+}
+
+// Is there a single line containing BOTH `a` and `b`? (The bash equivalent
+// of a `grep -E 'a.*b'` over a one-line construct, where the two tokens may
+// not be in `a`-before-`b` order on the line — both orders count.)
+fn _has_line_with2(ir: string, a: string, b: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if contains(line, a) && contains(line, b) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// Extract the body of `@sym` (from its `define` line through the closing
+// `}` line) as a single newline-joined string. Mirrors the bash
+// `awk '/^define .* @sym(/,/^}/'` slice. Returns "" if not found.
+fn _define_body(ir: string, sym: string) -> string {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    let mut in_body = false;
+    let mut body = "";
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if !in_body {
+            if starts_with(line, "define ") && contains(line, "@" + sym + "(") {
+                in_body = true;
+                body = line;
+            }
+        } else {
+            body = body + "\n" + line;
+            if line == "}" { break; }
+        }
+        i = i + 1;
+    }
+    return body;
+}
+
+// ---- 1. typecheck ----
+test "scheduler: sfn check passes cleanly" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", _scheduler_path()], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "ok", 0) >= 0;
+}
+
+// ---- 2. fmt ----
+test "scheduler: sfn fmt --check is canonical" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", _scheduler_path()], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+// ---- 3. taskqueue emit shape (#1087) ----
+test "scheduler: emit produces the sfn_taskqueue_* surface over an inline TaskQueue" ![io] {
+    let ir = _emit_scheduler_ir();
+    assert ir != "EMIT_FAILED";
+
+    // %TaskQueue embeds the mutex/cond handles by value — the aggregate must
+    // list %PthreadMutex / %PthreadCond inline, not as pointers. A boxed
+    // layout (%PthreadMutex*) would mean the handles were never allocated and
+    // pthread_*_init writes into garbage.
+    let tq = _line_with(ir, "%TaskQueue = type");
+    assert tq.length > 0;
+    assert ! contains(tq, "%PthreadMutex*");
+    assert ! contains(tq, "%PthreadCond*");
+    // mutex + two conds, inline and in order.
+    assert contains(tq, "%PthreadMutex");
+    assert contains(tq, "%PthreadCond");
+
+    // The five queue entry points are defined.
+    assert _has_define(ir, "sfn_taskqueue_create");
+    assert _has_define(ir, "sfn_taskqueue_enqueue");
+    assert _has_define(ir, "sfn_taskqueue_dequeue");
+    assert _has_define(ir, "sfn_taskqueue_destroy");
+    assert _has_define(ir, "sfn_taskqueue_count");
+
+    // Ring slots are written/read through the atomic builtins.
+    assert _line_with(ir, "store atomic i64 ").length > 0;
+    assert contains(ir, "seq_cst");
+    assert _line_with(ir, "load atomic i64, i64* ").length > 0;
+
+    // Mutex + cond pairing: init on create, blocking wait + signal.
+    assert contains(ir, "call i32 @pthread_mutex_init(%PthreadMutex*");
+    assert contains(ir, "call i32 @pthread_cond_wait(%PthreadCond*");
+    assert contains(ir, "call i32 @pthread_cond_signal(%PthreadCond*");
+}
+
+// ---- 4. blocking dequeue waits on a condition under the mutex ----
+test "scheduler: blocking dequeue waits on a condition under the mutex" ![io] {
+    let ir = _emit_scheduler_ir();
+    assert ir != "EMIT_FAILED";
+    // Scope to the @sfn_taskqueue_dequeue body: the empty-ring wait must
+    // lower to a pthread_cond_wait *inside* dequeue, not merely elsewhere.
+    let body = _define_body(ir, "sfn_taskqueue_dequeue");
+    assert body.length > 0;
+    assert contains(body, "call i32 @pthread_cond_wait(");
+    // And it signals the producer side (not_full) after consuming.
+    assert contains(body, "call i32 @pthread_cond_signal(");
+}
+
+// ---- 5. worker-pool emit shape (#1088) ----
+test "scheduler: emit produces the worker-pool surface (#1088)" ![io] {
+    let ir = _emit_scheduler_ir();
+    assert ir != "EMIT_FAILED";
+
+    assert _has_define(ir, "sfn_scheduler_create");
+    assert _has_define(ir, "sfn_scheduler_shutdown");
+    assert _has_define(ir, "sfn_scheduler_destroy");
+    assert _has_define(ir, "sfn_scheduler_worker");
+    assert _has_define(ir, "sfn_scheduler_next_task");
+    assert _has_define(ir, "sfn_scheduler_thread_count");
+    assert _has_define(ir, "sfn_scheduler_processed");
+    assert _has_define(ir, "sfn_scheduler_resolve_thread_count");
+
+    // The worker entry's address materializes as a real code pointer (the
+    // #1146 fn-reference → address lowering), NOT the silent null the
+    // frontend emitted before #1146.
+    assert _has_line_with2(ir, "bitcast", "@sfn_scheduler_worker");
+    assert _has_line_with2(ir, "@sfn_scheduler_worker", "to i8*");
+
+    // The start_routine slot handed to pthread_create must NOT be a null —
+    // the #1146 regression — inside @sfn_scheduler_create.
+    let create_body = _define_body(ir, "sfn_scheduler_create");
+    assert create_body.length > 0;
+    assert ! contains(create_body, "store i8* null");
+
+    // pthread lifecycle + sysconf sizing + the atomic shutdown publish.
+    assert contains(ir, "call i32 @pthread_create(");
+    assert contains(ir, "call i32 @pthread_join(");
+    assert contains(ir, "call i32 @pthread_cond_broadcast(");
+    assert contains(ir, "call i64 @sysconf(");
+    assert contains(ir, "store atomic i64 1,");
+}
+
+// ---- 6. task-invocation emit shape (#1089) ----
+test "scheduler: emit produces the task-invocation surface (#1089)" ![io] {
+    let ir = _emit_scheduler_ir();
+    assert ir != "EMIT_FAILED";
+
+    assert _has_define(ir, "sfn_task_create");
+    assert _has_define(ir, "sfn_task_destroy");
+    assert _has_define(ir, "sfn_task_run");
+    assert _has_define(ir, "sfn_task_join");
+
+    // The worker invokes the task through a PLAIN C-ABI function pointer: a
+    // typed fn-pointer bitcast + an env-less indirect call — and crucially
+    // NOT the closure-pair path (no `extractvalue {i8*, i8*}` env unpack).
+    let run_body = _define_body(ir, "sfn_task_run");
+    assert run_body.length > 0;
+    assert contains(run_body, "to i8* (i8*)*");
+    assert contains(run_body, "call i8* %");
+    assert ! contains(run_body, "extractvalue {i8*, i8*}");
+    // done flag set atomically (seq_cst), cond signalled.
+    assert contains(run_body, "store atomic i64 1, i64* ");
+    assert contains(run_body, "seq_cst");
+    assert contains(run_body, "call i32 @pthread_cond_signal(");
+
+    // join blocks on the done flag under the mutex: an atomic load of the
+    // done flag plus a pthread_cond_wait inside the join body.
+    let join_body = _define_body(ir, "sfn_task_join");
+    assert join_body.length > 0;
+    assert contains(join_body, "load atomic i64, i64* ");
+    assert contains(join_body, "call i32 @pthread_cond_wait(");
+}

@@ -1,0 +1,158 @@
+// E2E runtime round-trip test for the Sailfin-native channel runtime
+// (issue #1266, epic #965 M4).
+//
+// Native (no-bash) replacement for the former
+// `test_channel_runtime_roundtrip.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`).
+//
+// Unlike channel_producer_consumer_ir_test.sfn (which only inspects the
+// emitted IR), this test actually RUNS producer/consumer programs via
+// `sailfin run`, so it proves the emitted channel ABI links against
+// `runtime/sfn/concurrency/channel.sfn` (no `undefined symbol:
+// sfn_channel_recv` at link) and that payloads survive the round trip:
+//   1. int payloads — two sends, two typed receives, arithmetic.
+//   2. string payloads — through the by-pointer element contract.
+//   3. struct payloads — through a producer/consumer function pair.
+//   4. bool payloads — exercise the narrow-int widen/trunc path.
+//   5. closed-channel drain — receive() on a closed+empty channel returns
+//      the null-guarded default instead of crashing.
+//
+// Everything is single-threaded: the buffered channel does not block while
+// count < capacity, so a send-then-receive sequence on one thread is
+// deterministic and cannot deadlock.
+//
+// NOTE on the fixtures: the verifiable output is built with string
+// concatenation + `number_to_string`, NOT `{{ }}` interpolation. A `{{ }}`
+// in a fixture string literal would be interpolated by *this* test's own
+// compiler (the host interpolation syntax is still `{{ }}`), corrupting the
+// fixture before it is written. Concatenation produces the identical
+// observable stdout while staying inert in the host source.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test. Assert on captured stdout with
+// `sfn/strings` predicates instead. (#842.)
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `process.run_capture`'s empty array is the *empty* environment, not
+// "inherit". `sfn run` spawns a nested clang + linker, so the child needs
+// PATH (else the linker is not found). SAILFIN_TEST_SCRATCH routes the
+// program.ll build-cache per invocation so the parallel pool does not
+// collide on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A unique per-invocation scratch root (the native `mktemp -d`) so the
+// fixture source paths never collide under the parallel pool.
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-channel-roundtrip-");
+}
+
+// Compile + run a source snippet via `sailfin run` and return its combined
+// stdout+stderr (or "RUN_FAILED" on a non-zero exit). The fixture is
+// written under an absolute scratch path so the program (run from repo
+// root) never writes into the tree.
+fn _run_and_capture(label: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 { return "RUN_FAILED:" + out + err; }
+    return out + err;
+}
+
+// ── (1) int payloads round-trip through the channel buffer ───────────
+test "channel runtime: int payloads round-trip via sailfin run (#1266)" ![io] {
+    let out = _run_and_capture("int_roundtrip", "fn main() ![io] {\n"
+        + "    let ch = channel(4);\n"
+        + "    ch.send(41);\n"
+        + "    ch.send(1);\n"
+        + "    let a: int = ch.receive();\n"
+        + "    let b: int = ch.receive();\n"
+        + "    let sum: int = a + b;\n"
+        + "    print.info(\"int sum: \" + number_to_string(sum));\n"
+        + "    ch.close();\n"
+        + "}");
+    assert contains(out, "int sum: 42");
+}
+
+// ── (2a) string payloads survive the by-pointer element contract ─────
+test "channel runtime: string payload survives the by-pointer contract (#1266)" ![io] {
+    let out = _run_and_capture("string_roundtrip", "fn main() ![io] {\n"
+        + "    let ch = channel(2);\n"
+        + "    ch.send(\"hello channel\");\n"
+        + "    let got: string = ch.receive();\n"
+        + "    print.info(\"str got: \" + got);\n"
+        + "    ch.close();\n"
+        + "}");
+    assert contains(out, "str got: hello channel");
+}
+
+// ── (2b) struct payloads through a producer/consumer function pair ───
+test "channel runtime: struct payload round-trips across producer/consumer fns (#1266)" ![io] {
+    let out = _run_and_capture("struct_roundtrip", "struct Payload {\n"
+        + "    x: int;\n"
+        + "    y: int;\n"
+        + "}\n\n"
+        + "fn produce(ch: channel) ![io] {\n"
+        + "    let p = Payload { x: 6, y: 7 };\n"
+        + "    ch.send(p);\n"
+        + "}\n\n"
+        + "fn consume(ch: channel) -> int ![io] {\n"
+        + "    let got: Payload = ch.receive();\n"
+        + "    return got.x * got.y;\n"
+        + "}\n\n"
+        + "fn main() ![io] {\n"
+        + "    let ch = channel(2);\n"
+        + "    produce(ch);\n"
+        + "    let prod: int = consume(ch);\n"
+        + "    print.info(\"struct prod: \" + number_to_string(prod));\n"
+        + "    ch.close();\n"
+        + "}");
+    assert contains(out, "struct prod: 42");
+}
+
+// ── (2c) bool payloads exercise the narrow-int widen/trunc path ──────
+// Send zext-widens i1 to the 8-byte slot; receive loads the i64 slot and
+// truncates back to the annotated i1 (#1269 review hardening).
+test "channel runtime: bool payload round-trips via the narrow-int path (#1266)" ![io] {
+    let out = _run_and_capture("bool_roundtrip", "fn main() ![io] {\n"
+        + "    let ch = channel(2);\n"
+        + "    ch.send(true);\n"
+        + "    let b: bool = ch.receive();\n"
+        + "    if b { print.info(\"bool ok\"); } else { print.info(\"bool wrong\"); }\n"
+        + "    ch.close();\n"
+        + "}");
+    assert contains(out, "bool ok");
+}
+
+// ── (3) closed + drained channel yields the null-guarded default ─────
+test "channel runtime: receive on a closed+empty channel returns the default (#1266)" ![io] {
+    let out = _run_and_capture("closed_drain", "fn main() ![io] {\n"
+        + "    let ch = channel(2);\n"
+        + "    ch.close();\n"
+        + "    let after: int = ch.receive();\n"
+        + "    print.info(\"after close: \" + number_to_string(after));\n"
+        + "}");
+    assert contains(out, "after close: 0");
+}

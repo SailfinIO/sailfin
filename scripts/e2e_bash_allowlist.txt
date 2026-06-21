@@ -16,22 +16,14 @@
 #
 # Format: one bare script basename per line; '#' comments and blank lines ignored.
 
-test_channel_runtime_roundtrip.sh
 test_check_compiler_src.sh
 test_check_phase_ledger.sh
-test_cross_windows_runtime_modules.sh
 test_escape_promotion_boundaries.sh
-test_fn_reference_pthread.sh
 test_llms_txt_sync.sh
 test_lock.sh
 test_make_report_contract.sh
 test_make_result_contract.sh
 test_mem_limit_selfcap.sh
-test_owned_buf_grow_determinism.sh
 test_publish.sh
-test_routine_nursery.sh
 test_runtime_memory_arena.sh
-test_runtime_scheduler_skeleton.sh
-test_runtime_serve.sh
 test_sfn_package.sh
-test_test_bin_cache.sh
