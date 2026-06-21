@@ -316,6 +316,7 @@ import {
     future_pointer_type_for_return_type,
     await_symbol_for_future_pointer_type,
     spawn_symbol_for_kind,
+    spawn_ctx_symbol_for_kind,
     llvm_return_type_for_spawn_kind,
     future_type_for_spawn_kind,
     map_parameter_type
@@ -1154,6 +1155,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             }
         }
         let spawn_sym = spawn_symbol_for_kind(spawn_kind);
+        let spawn_ctx_sym = spawn_ctx_symbol_for_kind(spawn_kind);
         let future_type = future_type_for_spawn_kind(spawn_kind);
         let fn_ret_llvm = llvm_return_type_for_spawn_kind(spawn_kind);
         let fn_ptr_type = fn_ret_llvm + " ()*";
@@ -1161,7 +1163,9 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         let mut spawn_temp: int = temp_index;
         let mut spawn_diag: string[] = diagnostics;
         let empty_spawn_constants: StringConstant[] = [];
-        let mut fn_ptr_value: string = "";
+        let mut have_operand: boolean = false;
+        let mut op_llvm_type: string = "";
+        let mut op_value: string = "";
         if spawn_operand_text.length > 0 {
             let lowered_op = lower_expression(spawn_operand_text, bindings, locals, spawn_temp, spawn_lines, functions, context, "");
             spawn_diag = extend_string_array(spawn_diag, lowered_op.diagnostics);
@@ -1169,21 +1173,12 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             spawn_temp = lowered_op.temp_index;
             if lowered_op.operand != null {
                 let raw_op = lowered_op.operand;
-                if raw_op.llvm_type == fn_ptr_type {
-                    fn_ptr_value = raw_op.value;
-                } else {
-                    let cast_t = format_temp_name(spawn_temp);
-                    spawn_temp += 1;
-                    spawn_lines.push("  " + cast_t + " = bitcast " + raw_op.llvm_type
-                        + " "
-                        + raw_op.value
-                        + " to "
-                        + fn_ptr_type);
-                    fn_ptr_value = cast_t;
-                }
+                op_llvm_type = raw_op.llvm_type;
+                op_value = raw_op.value;
+                have_operand = true;
             }
         }
-        if fn_ptr_value.length == 0 {
+        if !have_operand {
             spawn_diag.push("llvm lowering: spawn:<kind>: could not lower operand for `"
                 + stripped
                 + "`");
@@ -1195,20 +1190,61 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 string_constants: empty_spawn_constants
             };
         }
-        // Bitcast typed fn_ptr to i8* — sfn_spawn_* accepts i8* (#1090).
-        let fn_ptr_cast_t = format_temp_name(spawn_temp);
-        spawn_temp += 1;
-        spawn_lines.push("  " + fn_ptr_cast_t + " = bitcast " + fn_ptr_type
-            + " "
-            + fn_ptr_value
-            + " to i8*");
-        // Call sfn_spawn_*(i8*) → i8* raw handle.
-        let spawn_raw_t = format_temp_name(spawn_temp);
-        spawn_temp += 1;
-        spawn_lines.push("  " + spawn_raw_t + " = call i8* @" + spawn_sym
-            + "(i8* "
-            + fn_ptr_cast_t
-            + ")");
+        // The spawned task lowers to one of two operand shapes:
+        //   1. A lifted-lambda closure pair `{i8*, i8*}` = {fn_ptr, env}
+        //      (issue #686). The lifted worker is `fn(i8* env) -> <ret>` —
+        //      exactly the shape the runtime's `_ctx` trampoline calls — so
+        //      extract the fn_ptr + env and route through
+        //      `sfn_spawn_<kind>_ctx(fn_ptr, env)`. Non-capturing lambdas
+        //      carry a null env; capturing lambdas (follow-up) carry a heap
+        //      env. This is the path the surface `spawn fn() -> T { ... }`
+        //      takes, and it makes the task actually run on the pool (the
+        //      former `bitcast {i8*,i8*} to <ret> ()*` was invalid IR — an
+        //      aggregate cannot be bitcast to a function pointer — so the
+        //      task was never spawned).
+        //   2. A bare function reference (`i8*` or a typed `<ret> ()*`),
+        //      i.e. a zero-argument worker. Coerce to i8* and use the no-ctx
+        //      `sfn_spawn_<kind>(fn_ptr)` variant.
+        let mut spawn_raw_t: string = "";
+        if op_llvm_type == "{i8*, i8*}" {
+            let cp_fn_t = format_temp_name(spawn_temp);
+            spawn_temp += 1;
+            spawn_lines.push("  " + cp_fn_t + " = extractvalue {i8*, i8*} "
+                + op_value
+                + ", 0");
+            let cp_env_t = format_temp_name(spawn_temp);
+            spawn_temp += 1;
+            spawn_lines.push("  " + cp_env_t + " = extractvalue {i8*, i8*} "
+                + op_value
+                + ", 1");
+            spawn_raw_t = format_temp_name(spawn_temp);
+            spawn_temp += 1;
+            spawn_lines.push("  " + spawn_raw_t + " = call i8* @"
+                + spawn_ctx_sym
+                + "(i8* "
+                + cp_fn_t
+                + ", i8* "
+                + cp_env_t
+                + ")");
+        } else {
+            let mut fn_ptr_i8: string = op_value;
+            if op_llvm_type != "i8*" {
+                let fn_ptr_cast_t = format_temp_name(spawn_temp);
+                spawn_temp += 1;
+                spawn_lines.push("  " + fn_ptr_cast_t + " = bitcast "
+                    + op_llvm_type
+                    + " "
+                    + op_value
+                    + " to i8*");
+                fn_ptr_i8 = fn_ptr_cast_t;
+            }
+            spawn_raw_t = format_temp_name(spawn_temp);
+            spawn_temp += 1;
+            spawn_lines.push("  " + spawn_raw_t + " = call i8* @" + spawn_sym
+                + "(i8* "
+                + fn_ptr_i8
+                + ")");
+        }
         // Bitcast raw i8* result back to typed future pointer for
         // downstream IR type tracking (e.g. the await dispatch).
         let spawn_result_t = format_temp_name(spawn_temp);
