@@ -579,6 +579,18 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "nursery_exit", symbol: "sfn_nursery_exit", return_type: "i64", parameter_types: ["i64"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
+    // Structured fan-out/join (#1474). `parallel [<task>, ...]` lowers to a
+    // single `sfn_parallel(fn_ptrs, ctxs, count)` call — the pure
+    // fan-out/join combinator defined in
+    // runtime/sfn/concurrency/parallel.sfn that spawns every task onto the
+    // shared scheduler pool, awaits them all, and returns an i64 results
+    // array in input order. Registered as an async-runtime target so its
+    // forward `declare` is emitted into calling modules and skipped in the
+    // module that defines it.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "parallel_join", symbol: "sfn_parallel", return_type: "i8*", parameter_types: ["i8*", "i8*", "i64"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_log_execution_fn", symbol: "sfn_log_execution", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_log_execution", c_abi_return_type: null
     });
@@ -1434,5 +1446,6 @@ fn is_async_runtime_target(target: string) -> boolean {
     if target == "nursery_enter" { return true; }
     if target == "nursery_register" { return true; }
     if target == "nursery_exit" { return true; }
+    if target == "parallel_join" { return true; }
     return false;
 }

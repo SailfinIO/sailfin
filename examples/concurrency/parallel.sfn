@@ -1,18 +1,29 @@
 // examples/concurrency/parallel.sfn
+//
+// `parallel [...]` fans every task out onto the runtime thread pool, runs
+// them concurrently, then joins them ALL before returning (issue #1474).
+// Each task is a non-capturing lambda; here each records its result into a
+// shared slot via a top-level worker, and `main` reads the joined totals
+// after the fan-out returns (the join establishes happens-before).
+//
+// Run: build/native/sailfin run examples/concurrency/parallel.sfn
+let mut g_results: int[] = [0, 0];
 
 fn computeTask1() -> int {
+    g_results[0] = 21;
     return 21;
 }
 
 fn computeTask2() -> int {
+    g_results[1] = 21;
     return 21;
 }
 
 fn main() ![io] {
-    let results = parallel [
-        fn() -> int { return computeTask1(); },
-        fn() -> int { return computeTask2(); },
-    ];
+    let _joined = parallel[fn () -> int { return computeTask1(); }, fn () -> int {
+        return computeTask2();
+    },];
 
-    print("Results: {{results}}");
+    let total: int = g_results[0] + g_results[1];
+    print.info("Total: " + number_to_string(total));
 }

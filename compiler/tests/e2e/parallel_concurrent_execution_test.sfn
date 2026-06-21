@@ -1,0 +1,97 @@
+// E2E: `parallel [<task>, ...]` actually EXECUTES every task on the
+// runtime thread pool (issue #1474, epic #965/#1209).
+//
+// Before #1474, `parallel [...]` lowered each task to a `sfn_spawn_task`
+// call — a stub that allocated a Task but NEVER enqueued it on the
+// scheduler — and returned the last handle with no join. Net effect: the
+// task bodies never ran. The fix unpacks each lifted-lambda closure pair
+// `{i8*, i8*}` = {fn_ptr, env} and hands the (fn_ptr, ctx) pairs to the
+// runtime's `sfn_parallel(fn_ptrs, ctxs, count)` combinator
+// (runtime/sfn/concurrency/parallel.sfn): it spawns ALL tasks onto the
+// shared pool first, then joins them, returning their results in input
+// order.
+//
+// This test fans out FOUR tasks that each write a distinct sentinel into a
+// distinct slot of a module-level array (via a top-level worker function —
+// the non-capturing-lambda + top-level-call shape proven in #1477). The
+// join inside `sfn_parallel` establishes happens-before, so after the
+// `parallel` returns, main reads every slot. If any task did not run (the
+// pre-#1474 no-op), its slot stays 0 and the sum is wrong — so asserting
+// the slots proves real execution on the pool. The four slots are written
+// by four different worker invocations, which can only have happened if
+// the tasks were dispatched (not silently dropped).
+//
+// Fixtures use string concatenation + `number_to_string` (NOT `{{ }}`
+// interpolation) so the host compiler does not interpolate the fixture
+// before it is written.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Empty `run_capture` env is the EMPTY environment, not "inherit"; a
+// nested `sailfin run` spawns clang + linker (needs PATH) and routes its
+// program.ll build-cache under SAILFIN_TEST_SCRATCH so the parallel pool
+// does not collide on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-parallel-exec-");
+}
+
+fn _run_and_capture(label: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 { return "RUN_FAILED:" + out + err; }
+    return out + err;
+}
+
+// ── four parallel tasks run on the pool and each leaves a side effect ──
+test "parallel: every task executes on the pool (#1474)" ![io] {
+    let out = _run_and_capture("fanout", "let mut g_slots: int[] = [0, 0, 0, 0];\n"
+        + "fn set0() -> int { g_slots[0] = 11; return 0; }\n"
+        + "fn set1() -> int { g_slots[1] = 22; return 0; }\n"
+        + "fn set2() -> int { g_slots[2] = 33; return 0; }\n"
+        + "fn set3() -> int { g_slots[3] = 44; return 0; }\n"
+        + "fn main() ![io] {\n"
+        + "    let _h = parallel [\n"
+        + "        fn() -> int { return set0(); },\n"
+        + "        fn() -> int { return set1(); },\n"
+        + "        fn() -> int { return set2(); },\n"
+        + "        fn() -> int { return set3(); },\n"
+        + "    ];\n"
+        + "    let sum: int = g_slots[0] + g_slots[1] + g_slots[2] + g_slots[3];\n"
+        + "    print.info(\"sum: \" + number_to_string(sum));\n"
+        + "    if g_slots[0] == 11 { print.info(\"S0-OK\"); }\n"
+        + "    if g_slots[1] == 22 { print.info(\"S1-OK\"); }\n"
+        + "    if g_slots[2] == 33 { print.info(\"S2-OK\"); }\n"
+        + "    if g_slots[3] == 44 { print.info(\"S3-OK\"); }\n"
+        + "}");
+    // 11 + 22 + 33 + 44 = 110 — every task ran and wrote its slot.
+    assert contains(out, "sum: 110");
+    assert contains(out, "S0-OK");
+    assert contains(out, "S1-OK");
+    assert contains(out, "S2-OK");
+    assert contains(out, "S3-OK");
+}
