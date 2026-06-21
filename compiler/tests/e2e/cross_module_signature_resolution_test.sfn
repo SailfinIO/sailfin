@@ -1,0 +1,114 @@
+// End-to-end regression for #999: a `-p` sibling that imports a
+// VALUE-RETURNING fn from the walk-excluded entry must resolve the
+// callee's return-type signature during its own per-module lowering,
+// emit cleanly, link, and run.
+//
+// Native replacement for the former `test_cross_module_signature_resolution.sh`
+// (test-infra Phase 3, epic #842; ratchet #1327). Drives the real
+// resolver via `sfn build -p <dir>` on a synthetic binary capsule, then
+// runs the linked binary and asserts the cross-module value resolves.
+//
+// Root cause (pre-#999): the sibling's per-module emit re-derived import
+// context from its own embedded `import` directives only — never seeing
+// the walk-excluded entry's body — so a call to the entry's exported fn
+// could not resolve its return type and hit the `cannot resolve return
+// type for call` `[fatal]`. #999 threads the staged bodies into a
+// context-carrying lowering writer that unions them with the
+// embedded-import context. Unlike the orphan-sibling effect-gate test,
+// `main()` here CALLS the sibling, so the sibling is linked and the
+// produced binary is run — a clean emit must also produce correct output.
+//
+// NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
+// (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test). (#842.)
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build spawns a nested `clang` + linker, so the child needs `PATH`
+// (an empty `run_capture` env is the *empty* environment, not "inherit").
+// `SAILFIN_TEST_SCRATCH` routes the `program.ll` build-cache dir per
+// invocation so the parallel pool does not collide on `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A fresh capsule root under the runner's scratch dir (or /tmp), keyed by
+// `tag` so concurrent tests in the parallel pool never collide.
+fn _make_capsule(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-xmod-sig-" + tag;
+    fs.createDirectory(root + "/src/util", true);
+
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"xmod-sig-test\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"src/main.sfn\"\n");
+
+    // Sibling: imports the value-returning `answer` from the entry and
+    // returns a value derived from it. Correctly annotated (no effects).
+    fs.writeFile(root + "/src/util/sib.sfn", "import { answer } from \"../main\";\n\n"
+        + "fn compute() -> number {\n"
+        + "    return answer() + 1;\n"
+        + "}\n\n"
+        + "export { compute };\n");
+
+    // Entry: exports a VALUE-RETURNING fn (`answer`) and imports
+    // `compute` from the sibling so the linked binary is runnable.
+    fs.writeFile(root + "/src/main.sfn", "import { compute } from \"./util/sib\";\n\n"
+        + "fn answer() -> number {\n"
+        + "    return 42;\n"
+        + "}\n\n"
+        + "fn main() ![io] {\n"
+        + "    let v = compute();\n"
+        + "    print.info(\"xmod-result=\" + number_to_string(v));\n"
+        + "}\n\n"
+        + "export { answer };\n");
+
+    return root;
+}
+
+// ---- Test 1: build emits cleanly (no unresolved-callee fatal) + runs ----
+// Pin the SPECIFIC imported callees (`answer`, `compute`) rather than the
+// generic "cannot resolve return type" phrase, then assert the build
+// exits 0 (the authoritative #999 signal), then run the linked binary and
+// assert the cross-module value resolved: answer() == 42, compute() == 43.
+test "cross-module value-returning sibling emits, links, runs (#999)" ![io] {
+    let root = _make_capsule("link");
+    let out_bin = root + "/prog";
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+
+    assert ! contains(log, "cannot resolve return type for call to `answer`");
+    assert ! contains(log, "cannot resolve return type for call to `compute`");
+    assert exit == 0;
+
+    // The linked binary runs and prints the resolved value. `print.info`
+    // prefixes with `[info] `, so the fixed prefix rules out an incidental
+    // `143`/`430` substring match.
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert find(run_out + run_err, "[info] xmod-result=43", 0) >= 0;
+}

@@ -1,0 +1,145 @@
+// End-to-end test for `sfn check` cross-module interface conformance.
+//
+// Native replacement for the former `test_check_cross_module_conformance.sh`
+// (test-infra Phase 3, epic #842). Verifies that A2 (Track A in
+// docs/proposals/check-architecture.md) wires `sfn check` through the
+// unified resolver: an interface declared in module A and consumed by an
+// `implements` clause in module B is conformance-checked end-to-end, with
+// E0301 fired when a required member is missing from the implementing struct.
+//
+// NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
+// (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test). (#842.)
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// For sfn check on cross-module code: no capsule deps, so the fixture can
+// live in /tmp. We add workspace.toml to stop discover_workspace_root from
+// walking up into the live repo tree.
+fn _make_fixture(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-check-conformance-" + tag;
+    fs.createDirectory(root + "/src", true);
+
+    // Empty workspace.toml stops discover_workspace_root from walking
+    // up into the live repo tree.
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = []\n");
+
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"check-cross-module-test\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"E2E test for sfn check cross-module conformance\"\n\n"
+        + "[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "entry = \"src/triangle.sfn\"\n");
+
+    fs.writeFile(root + "/src/shape.sfn", "interface Shape {\n"
+        + "    fn area(self) -> number;\n"
+        + "    fn perimeter(self) -> number;\n"
+        + "}\n\n"
+        + "export { Shape };\n");
+
+    // triangle.sfn implements Shape but is missing perimeter() — A2 must
+    // surface this as E0301.
+    fs.writeFile(root + "/src/triangle.sfn", "import { Shape } from \"./shape\";\n\n"
+        + "struct Triangle implements Shape {\n"
+        + "    a: number;\n"
+        + "    b: number;\n"
+        + "    c: number;\n\n"
+        + "    fn area(self) -> number { return 0; }\n"
+        + "}\n\n"
+        + "fn main() {\n"
+        + "    let _t = Triangle { a: 1, b: 1, c: 1 };\n"
+        + "}\n\n"
+        + "export { Triangle };\n");
+
+    return root;
+}
+
+// ---- Test 1: sfn check fires E0301 on the cross-module conformance gap ----
+test "check cross-module conformance: E0301 fires on missing method" ![io] {
+    let root = _make_fixture("e0301");
+    let triangle = root + "/src/triangle.sfn";
+
+    let exit = process.run_capture([_sfn_bin(), "check", triangle], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+
+    // sfn check exits 1 when diagnostics are found.
+    assert exit == 1;
+    assert contains(log, "E0301");
+    assert contains(log, "perimeter");
+}
+
+// ---- Test 2: stderr contains a [check] file header ----
+test "check cross-module conformance: [check] file header in output" ![io] {
+    let root = _make_fixture("header");
+    let triangle = root + "/src/triangle.sfn";
+
+    let _exit = process.run_capture([_sfn_bin(), "check", triangle], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+
+    // The [check] header may show the relative or absolute path; we just
+    // check that a [check] line mentioning "triangle" is present.
+    assert contains(log, "[check]");
+    assert contains(log, "triangle");
+}
+
+// ---- Test 3: import-context was staged (resolver ran) ----
+test "check cross-module conformance: resolver staged import-context" ![io] {
+    let root = _make_fixture("ctx");
+    let triangle = root + "/src/triangle.sfn";
+
+    let _exit = process.run_capture([_sfn_bin(), "check", triangle], []);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    // The staged .sfn-asm for shape.sfn lands at:
+    //   build/native/import-context/<root_without_leading_slash>/src/shape.sfn-asm
+    // Strip the leading "/" from root to build the subdir path.
+    let mut root_rel = root;
+    if find(root, "/", 0) == 0 {
+        root_rel = substring(root, 1, root.length);
+    }
+    let shape_asm = "build/native/import-context/" + root_rel
+        + "/src/shape.sfn-asm";
+    assert fs.exists(shape_asm);
+}
+
+// ---- Test 4: negative control — adding the missing method clears E0301 ----
+test "check cross-module conformance: complete impl produces no E0301" ![io] {
+    let root = _make_fixture("neg");
+    let triangle = root + "/src/triangle.sfn";
+
+    // Overwrite triangle.sfn with a complete implementation.
+    fs.writeFile(triangle, "import { Shape } from \"./shape\";\n\n"
+        + "struct Triangle implements Shape {\n"
+        + "    a: number;\n"
+        + "    b: number;\n"
+        + "    c: number;\n\n"
+        + "    fn area(self) -> number { return 0; }\n"
+        + "    fn perimeter(self) -> number { return 0; }\n"
+        + "}\n\n"
+        + "fn main() {\n"
+        + "    let _t = Triangle { a: 1, b: 1, c: 1 };\n"
+        + "}\n\n"
+        + "export { Triangle };\n");
+
+    let exit = process.run_capture([_sfn_bin(), "check", triangle], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+
+    assert exit == 0;
+    assert ! contains(log, "E0301");
+}

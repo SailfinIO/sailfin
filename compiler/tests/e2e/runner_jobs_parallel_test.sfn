@@ -1,0 +1,197 @@
+// End-to-end tests for `sfn test <dir> --jobs N` — parallel multi-file
+// runner (#1236).
+//
+// Native replacement for `test_runner_jobs_parallel.sh` (test-infra
+// Phase 3, epic #842). The multi-file runner's per-file children run
+// concurrently through a bounded worker pool when `--jobs N` (N > 1)
+// is passed; `--jobs 1` (the default) keeps the serial path byte-
+// identical to the pre-#1236 runner. This test pins the equivalence
+// contract from the issue's acceptance criteria:
+//
+//   1. `--jobs 4` yields the SAME pass/fail tally and the same coherent
+//      single-frame `--json` document as `--jobs 1` (one `start`, one
+//      `summary`, valid jsonl throughout).
+//   2. Human-mode banners agree between `--jobs 1` and `--jobs 4`.
+//   3. A failing file still propagates non-zero exit under `--jobs 2`,
+//      stays single-frame, and records the failure in the aggregate.
+//   4. Invalid `--jobs` values (0, garbage, missing) are usage errors
+//      (exit 2), not silent serial fallbacks.
+//
+// NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
+// used from an `![io]` test; output is asserted with `sfn/strings` predicates.
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Create a scratch directory with four passing test files (6 tests total).
+fn _make_pass_dir(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-runner-jobs-pass-" + tag;
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/alpha_test.sfn", "test \"alpha: one\" { assert 1 + 1 == 2; }\n"
+        + "test \"alpha: two\" { assert 2 * 3 == 6; }\n");
+    fs.writeFile(dir + "/beta_test.sfn", "test \"beta: one\" { assert 4 - 1 == 3; }\n");
+    fs.writeFile(dir + "/gamma_test.sfn", "test \"gamma: one\" { assert 10 / 2 == 5; }\n"
+        + "test \"gamma: two\" { assert 7 - 7 == 0; }\n");
+    fs.writeFile(dir + "/delta_test.sfn", "test \"delta: one\" { assert 9 == 9; }\n");
+    return dir;
+}
+
+// Create a directory with one passing and one failing test file.
+fn _make_fail_dir(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-runner-jobs-fail-" + tag;
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/ok_test.sfn", "test \"ok: passes\" { assert 1 == 1; }\n");
+    fs.writeFile(dir + "/bad_test.sfn", "test \"bad: fails\" { assert 1 == 2; }\n");
+    fs.writeFile(dir + "/also_ok_test.sfn", "test \"also-ok: passes\" { assert 2 == 2; }\n");
+    return dir;
+}
+
+// Count occurrences of `needle` in `haystack`.
+fn _count_occurrences(haystack: string, needle: string) -> int {
+    let mut count = 0;
+    let mut start = 0;
+    loop {
+        let pos = find(haystack, needle, start);
+        if pos < 0 { break; }
+        count += 1;
+        start = pos + 1;
+    }
+    return count;
+}
+
+// ---- Test 1: human mode — --jobs 4 banner tally matches --jobs 1 ----
+// Both runs must exit 0 and produce the same suite banner line.
+test "human mode: --jobs 4 banner tally matches --jobs 1 (#1236)" ![io] {
+    let dir = _make_pass_dir("t1");
+
+    let serial_exit = process.run_capture([_sfn_bin(), "test", dir], _child_env());
+    let serial_out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    let pool_exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "4"], _child_env());
+    let pool_out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    assert serial_exit == 0;
+    assert pool_exit == 0;
+
+    // Both outputs must contain the suite banner with the aggregate pass count.
+    // Banner format: "═══ pass: N/N passed, 0 failed ═══"
+    // N counts test FILES (4 files: alpha, beta, gamma, delta), not individual tests.
+    assert find(serial_out, "passed", 0) >= 0;
+    assert find(pool_out, "passed", 0) >= 0;
+    // Both must report 4 files passed (the fixture has 4 test files).
+    assert find(serial_out, "4/4 passed", 0) >= 0;
+    assert find(pool_out, "4/4 passed", 0) >= 0;
+}
+
+// ---- Test 2: --json equivalence between --jobs 1 and --jobs 4 ----
+// Single-frame contract holds under the pool: exactly one start + one
+// summary. Aggregate totals (total, passed, failed) agree between modes.
+test "--json: --jobs 4 aggregates match --jobs 1 (single frame) (#1236)" ![io] {
+    let dir = _make_pass_dir("t2");
+
+    let serial_exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], _child_env());
+    let serial_out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    let pool_exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "4", "--json"], _child_env());
+    let pool_out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    assert serial_exit == 0;
+    assert pool_exit == 0;
+
+    // Both outputs are valid single-frame jsonl.
+    assert _count_occurrences(serial_out, "\"event\":\"start\"") == 1;
+    assert _count_occurrences(serial_out, "\"event\":\"summary\"") == 1;
+    assert _count_occurrences(pool_out, "\"event\":\"start\"") == 1;
+    assert _count_occurrences(pool_out, "\"event\":\"summary\"") == 1;
+
+    // Both report 6 total tests, 6 passed, 0 failed.
+    assert find(serial_out, "\"total\":6", 0) >= 0;
+    assert find(pool_out, "\"total\":6", 0) >= 0;
+    assert find(serial_out, "\"passed\":6", 0) >= 0;
+    assert find(pool_out, "\"passed\":6", 0) >= 0;
+    assert find(serial_out, "\"failed\":0", 0) >= 0;
+    assert find(pool_out, "\"failed\":0", 0) >= 0;
+
+    // Both emit 6 test events.
+    assert _count_occurrences(serial_out, "\"event\":\"test\"") == 6;
+    assert _count_occurrences(pool_out, "\"event\":\"test\"") == 6;
+}
+
+// ---- Test 3: failing file propagates non-zero under --jobs 2 ----
+test "--jobs 2: failing file propagates non-zero, single frame (#1236)" ![io] {
+    let dir = _make_fail_dir("t3");
+
+    let exit = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "2", "--json"], _child_env());
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    // Must exit non-zero.
+    assert exit != 0;
+    // Stream must be well-formed.
+    assert find(out, "\"event\":\"start\"", 0) >= 0;
+    assert find(out, "\"event\":\"summary\"", 0) >= 0;
+    // Single-frame contract holds even when a file fails.
+    assert _count_occurrences(out, "\"event\":\"start\"") == 1;
+    assert _count_occurrences(out, "\"event\":\"summary\"") == 1;
+    // Aggregate summary records at least 1 failure.
+    assert find(out, "\"failed\":0", 0) < 0;
+    assert find(out, "\"status\":\"fail\"", 0) >= 0;
+}
+
+// ---- Test 4: invalid --jobs values are usage errors (exit 2) ----
+test "invalid --jobs values are usage errors (exit 2) (#1236)" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-runner-jobs-inv";
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/dummy_test.sfn", "test \"dummy\" { assert 1 == 1; }\n");
+
+    // 0 is out of range [1, 256].
+    let rc0 = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "0"], _child_env());
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert rc0 == 2;
+
+    // Garbage string.
+    let rcg = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "garbage"], _child_env());
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert rcg == 2;
+
+    // 257 is out of range [1, 256].
+    let rc257 = process.run_capture([_sfn_bin(), "test", dir, "--jobs", "257"], _child_env());
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert rc257 == 2;
+
+    // Missing value after --jobs.
+    let rcm = process.run_capture([_sfn_bin(), "test", dir, "--jobs"], _child_env());
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert rcm == 2;
+}

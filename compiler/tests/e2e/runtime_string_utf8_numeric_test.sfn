@@ -1,0 +1,223 @@
+// End-to-end test for runtime/sfn/string.sfn wave 2 — UTF-8 grapheme
+// operations and numeric formatting (issue #403, epic #389 M2.5).
+// Native replacement for `test_runtime_string_utf8_numeric.sh`
+// (test-infra Phase 3, epic #842).
+//
+// NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
+// (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test). (#842.)
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _scratch(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-str-utf8-" + tag;
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _repo_root() -> string ![io] {
+    let configured = env.get("SAILFIN_REPO_ROOT");
+    if configured.length > 0 { return configured; }
+    return ".";
+}
+
+// ---- Test 1: source modules typecheck cleanly ----
+test "runtime/sfn/string.sfn + libc.sfn typecheck cleanly" ![io] {
+    let string_mod = _repo_root() + "/runtime/sfn/string.sfn";
+    let libc_mod = _repo_root() + "/runtime/sfn/platform/libc.sfn";
+
+    let exit1 = process.run_capture([_sfn_bin(), "check", string_mod], _env());
+    let out1 = process.capture_take_stdout();
+    let err1 = process.capture_take_stderr();
+    assert exit1 == 0;
+    assert find(out1 + err1, "ok", 0) >= 0;
+
+    let exit2 = process.run_capture([_sfn_bin(), "check", libc_mod], _env());
+    let out2 = process.capture_take_stdout();
+    let err2 = process.capture_take_stderr();
+    assert exit2 == 0;
+}
+
+// ---- Test 2: source modules are fmt-canonical ----
+test "runtime/sfn/string.sfn + libc.sfn are fmt-canonical" ![io] {
+    let string_mod = _repo_root() + "/runtime/sfn/string.sfn";
+    let libc_mod = _repo_root() + "/runtime/sfn/platform/libc.sfn";
+
+    let exit1 = process.run_capture([_sfn_bin(), "fmt", "--check", string_mod], _env());
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit1 == 0;
+
+    let exit2 = process.run_capture([_sfn_bin(), "fmt", "--check", libc_mod], _env());
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit2 == 0;
+}
+
+// ---- Test 3: emitted IR carries a define for each wave-2 export ----
+test "sfn emit llvm defines wave-2 sfn_str_* grapheme/numeric exports" ![io] {
+    let dir = _scratch("emit");
+    let module = _repo_root() + "/runtime/sfn/string.sfn";
+    let out_ll = dir + "/string.ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", module], _env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    let ir = fs.readFile(out_ll);
+
+    // Still-facade _sfn_ infix exports
+    assert contains(ir, "@sfn_str_sfn_from_codepoint(");
+
+    // #1315 + #1372: bare canonical Sailfin-defined accessors + len/eq/to_number/slice etc.
+    assert contains(ir, "@sfn_str_grapheme_count(");
+    assert contains(ir, "@sfn_str_grapheme_at(");
+    assert contains(ir, "@sfn_str_byte_at(");
+    assert contains(ir, "@sfn_str_find_byte(");
+    assert contains(ir, "@sfn_str_codepoint(");
+    assert contains(ir, "@sfn_str_len(");
+    assert contains(ir, "@sfn_str_eq(");
+    assert contains(ir, "@sfn_str_slice(");
+    assert contains(ir, "@sfn_str_to_number(");
+    assert contains(ir, "@sfn_str_from_codepoint(");
+    assert contains(ir, "@sfn_str_decode_owned(");
+    assert contains(ir, "@sfn_str_immediate_codepoint(");
+    assert contains(ir, "@sfn_str_from_byte(");
+}
+
+// ---- Test 4: read_byte / grapheme_byte are bare Sailfin defines (#1308) ----
+test "sfn emit llvm bare-defines read_byte / grapheme_byte (#1308)" ![io] {
+    let dir = _scratch("emit");
+    let out_ll = dir + "/string.ll";
+    // Re-emit if not present
+    if !fs.exists(out_ll) {
+        let module = _repo_root() + "/runtime/sfn/string.sfn";
+        let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", module], _env());
+        let _ = process.capture_take_stdout();
+        let _ = process.capture_take_stderr();
+        assert exit == 0;
+    }
+    let ir = fs.readFile(out_ll);
+    assert contains(ir, "@sfn_str_read_byte(");
+    assert contains(ir, "@sfn_str_grapheme_byte(");
+}
+
+// ---- Test 5: emitted IR declares strtod ----
+test "sfn emit llvm declares strtod in string.sfn" ![io] {
+    let dir = _scratch("emit");
+    let out_ll = dir + "/string.ll";
+    if !fs.exists(out_ll) {
+        let module = _repo_root() + "/runtime/sfn/string.sfn";
+        let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", module], _env());
+        let _ = process.capture_take_stdout();
+        let _ = process.capture_take_stderr();
+        assert exit == 0;
+    }
+    let ir = fs.readFile(out_ll);
+    assert contains(ir, "declare ");
+    assert contains(ir, "@strtod(");
+}
+
+// ---- Test 6: hello-world emission no longer references legacy C symbols (#403 AC#1) ----
+test "user emission does not call legacy sailfin_runtime_grapheme_* C symbols" ![io] {
+    let dir = _scratch("hello");
+    let hello = _repo_root() + "/examples/basics/hello-world.sfn";
+    let out_ll = dir + "/hello.ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", hello], _env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    let ir = fs.readFile(out_ll);
+    assert ! contains(ir, "@sailfin_runtime_grapheme_count");
+    assert ! contains(ir, "@sailfin_runtime_grapheme_at");
+    assert ! contains(ir, "@sailfin_runtime_byte_at");
+    assert ! contains(ir, "@sailfin_runtime_find_byte_index");
+    assert ! contains(ir, "@sailfin_runtime_char_code");
+    assert ! contains(ir, "@sailfin_runtime_string_to_number");
+    assert ! contains(ir, "@sailfin_runtime_number_to_string");
+}
+
+// ---- Test 7: compiler binary exports defined wave-2 symbols ----
+test "compiler binary exports sfn_str_* wave-2 symbols" ![io] {
+    let binary = _sfn_bin();
+    let exit = process.run_capture(["nm", binary], _env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 {
+        // nm not available or binary stripped — treat as pass
+        let _ = out;
+        let _ = err;
+        assert true;
+    } else {
+        let nm_output = out + err;
+        assert contains(nm_output, "sfn_str_grapheme_count");
+        assert contains(nm_output, "sfn_str_grapheme_at");
+        assert contains(nm_output, "sfn_str_byte_at");
+        assert contains(nm_output, "sfn_str_find_byte");
+        assert contains(nm_output, "sfn_str_codepoint");
+        assert contains(nm_output, "sfn_str_len");
+        assert contains(nm_output, "sfn_str_eq");
+        assert contains(nm_output, "sfn_str_slice");
+        assert contains(nm_output, "sfn_str_to_number");
+        assert contains(nm_output, "sfn_str_from_codepoint");
+        assert contains(nm_output, "sfn_str_from_byte");
+        assert contains(nm_output, "sfn_number_to_str");
+        assert contains(nm_output, "sfn_int_to_str");
+    }
+}
+
+// ---- Test 8: number_to_string round-trips via @sfn_number_to_str ----
+test "number_to_string round-trips: 42, 0, -7, 3.14" ![io] {
+    let dir = _scratch("roundtrip");
+    let prog = dir + "/roundtrip.sfn";
+    fs.writeFile(prog, "fn main() ![io] {\n"
+        + "    print.info(\"42:\" + number_to_string(42));\n"
+        + "    print.info(\"0:\" + number_to_string(0));\n"
+        + "    print.info(\"neg:\" + number_to_string(-7));\n"
+        + "    print.info(\"frac:\" + number_to_string(3.14));\n"
+        + "}\n");
+    let exit = process.run_capture([_sfn_bin(), "run", prog], _env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    let combined = out + err;
+    assert find(combined, "42:42", 0) >= 0;
+    assert find(combined, "0:0", 0) >= 0;
+    assert find(combined, "neg:-7", 0) >= 0;
+    assert find(combined, "frac:3.14", 0) >= 0;
+}
+
+// ---- Test 9: immediate-codepoint hack no longer reachable from user IR ----
+test "user IR does not reference legacy immediate-codepoint entrypoints" ![io] {
+    let dir = _scratch("hello");
+    let out_ll = dir + "/hello.ll";
+    if !fs.exists(out_ll) {
+        let hello = _repo_root() + "/examples/basics/hello-world.sfn";
+        let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", hello], _env());
+        let _ = process.capture_take_stdout();
+        let _ = process.capture_take_stderr();
+        assert exit == 0;
+    }
+    let ir = fs.readFile(out_ll);
+    assert ! contains(ir, "@sailfin_runtime_grapheme_at");
+    assert ! contains(ir, "@sailfin_runtime_char_code");
+}

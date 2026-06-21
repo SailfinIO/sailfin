@@ -1,0 +1,169 @@
+// End-to-end test for the Stage D PR3 binary-capsule src/ walker.
+//
+// Native replacement for the former `test_binary_capsule_walker.sh`
+// (test-infra Phase 3, epic #842). Verifies that `sfn build -p <project>`
+// on a `kind = "binary"` capsule enumerates ALL source files under src/
+// (including files NOT reachable from the entry via relative imports), and
+// that a positional `sfn build <file>` does NOT trigger the same walk.
+//
+// The test uses a synthetic binary capsule: `main.sfn` (self-contained,
+// imports nothing) plus `src/util/orphan.sfn` (never imported by main).
+// The binary-capsule walker is what surfaces orphan.sfn so it gets compiled;
+// the legacy entry-driven relative-import walker alone would miss it.
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
+// `![io]` test (#842).
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build spawns a nested clang + linker, so the child needs PATH.
+// SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
+// so the parallel pool does not collide on build/sailfin.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Scratch root for capsule .ll placement: SAILFIN_TEST_SCRATCH if set,
+// else "build/sailfin" (relative to CWD of the test runner, i.e. the
+// repo root). Mirrors _cr_scratch_root() in capsule_resolver.sfn.
+fn _scratch_root() -> string ![io] {
+    let s = env.get("SAILFIN_TEST_SCRATCH");
+    if s.length > 0 { return s; }
+    return "build/sailfin";
+}
+
+// A fresh capsule root under the runner's scratch dir (or /tmp), keyed by
+// `tag` so concurrent tests in the parallel pool never collide.
+fn _make_capsule(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-bin-walker-" + tag;
+    fs.createDirectory(root + "/src/util", true);
+
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"binary-walker-test\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"E2E test for the Stage D PR3 binary-capsule src/ walker\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"src/main.sfn\"\n");
+
+    // Entry: intentionally self-contained (imports nothing) so the
+    // relative-import walker cannot reach the orphan sibling.
+    fs.writeFile(root + "/src/main.sfn", "fn main() ![io] {\n"
+        + "    print(\"walker-fixture-ok\");\n"
+        + "}\n");
+
+    // Orphan: never imported from main.sfn. The binary-capsule walker
+    // is the only path that surfaces it for compilation.
+    fs.writeFile(root + "/src/util/orphan.sfn", "export { orphan_helper };\n\n"
+        + "fn orphan_helper() -> string {\n"
+        + "    return \"orphan-from-walker\";\n"
+        + "}\n");
+
+    return root;
+}
+
+// ---- Test 1: sfn build -p succeeds on a binary capsule fixture ----
+test "binary-capsule walker: sfn build -p completes" ![io] {
+    let root = _make_capsule("build");
+    let out_bin = root + "/prog";
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+// ---- Test 2: the produced binary runs and emits the expected greeting ----
+// Use -o <abs_path> so the binary goes to a per-test location regardless
+// of the runner's CWD.
+test "binary-capsule walker: binary links and runs" ![io] {
+    let root = _make_capsule("run");
+    let out_bin = root + "/prog";
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+    assert fs.exists(out_bin);
+
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert contains(run_out + run_err, "walker-fixture-ok");
+}
+
+// ---- Test 3: walker picked up the orphaned sibling ----
+// The orphan's .ll is written to the scratch capsules dir (under
+// SAILFIN_TEST_SCRATCH/capsules/ when set, else build/sailfin/capsules/).
+// The mangled slug ends with `src__util__orphan.ll` so we search for that
+// suffix, which remains stable across mktemp directory names.
+test "binary-capsule walker: orphan sibling is compiled" ![io] {
+    let root = _make_capsule("orphan");
+    let out_bin = root + "/prog";
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+
+    let caps_dir = _scratch_root() + "/capsules";
+    assert fs.exists(caps_dir);
+    let files = fs.listDirectory(caps_dir);
+    let mut found = false;
+    let mut i = 0;
+    loop {
+        if i >= files.length { break; }
+        if find(files[i], "src__util__orphan.ll", 0) >= 0 { found = true; }
+        i += 1;
+    }
+    assert found;
+}
+
+// ---- Test 4: positional build does NOT trigger the binary-capsule walker ----
+// The walker is opt-in through -p builds of kind="binary" capsules. A
+// positional `sfn build <file> -o <out>` must NOT enumerate the orphan.
+test "binary-capsule walker: positional build does not trigger walker" ![io] {
+    let root = _make_capsule("pos");
+    let main_sfn = root + "/src/main.sfn";
+    let out_bin = root + "/positional-prog";
+    let caps_dir = _scratch_root() + "/capsules";
+
+    // Run positional build; ignore exit code.
+    let _exit = process.run_capture([_sfn_bin(), "build", "-o", out_bin, main_sfn], _child_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+
+    // The walker must not have fired: no orphan .ll tagged with this run ("pos")
+    // should appear. We look for the mangled path fragment that would only be
+    // present if the walker enumerated src/util/orphan.sfn under root.
+    let mut orphan_found = false;
+    if fs.exists(caps_dir) {
+        let files = fs.listDirectory(caps_dir);
+        let mut i = 0;
+        loop {
+            if i >= files.length { break; }
+            if find(files[i], "sfn-bin-walker-pos", 0) >= 0 {
+                if find(files[i], "orphan", 0) >= 0 { orphan_found = true; }
+            }
+            i += 1;
+        }
+    }
+    assert ! orphan_found;
+}

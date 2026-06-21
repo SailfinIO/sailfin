@@ -1,0 +1,273 @@
+// Memory-bound regression test for #1247: the resolver's relative-import
+// scan memo.
+//
+// Native replacement for the former `test_check_resolver_scan_memo.sh`
+// (test-infra Phase 3, epic #842). Pins that the arena page count
+// grows sub-linearly as the entry count increases from 5 to 40 over
+// the same shared 10-module import chain.
+//
+// Background: before #1247, each per-entry walk re-read every source in
+// the entry's import closure through the allocation-heavy
+// `collect_relative_import_specs` state machine (O(entries x closure)
+// full-source scans). #1247 memoizes per-unique-file scan results so the
+// closure is scanned only once per run. The threshold (24 pages = 96MB)
+// sits well above the post-fix delta (~0 pages) and well below the
+// pre-fix measured delta (~61 pages for 35 extra entries on the 600-line
+// padded chain).
+//
+// Fixture structure (created per invocation under SAILFIN_TEST_SCRATCH):
+//   src/common_00.sfn -> src/common_01.sfn -> ... -> src/common_09.sfn
+//   src/entry_00.sfn ... src/entry_39.sfn   (each imports common_00)
+//
+// NOTE: assert on captured stderr with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from
+// an `![io]` test. (#842.)
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env_base() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Child env with arena stats enabled.
+fn _arena_env() -> string[] ![io] {
+    let mut e = _child_env_base();
+    e.push("SAILFIN_USE_ARENA=1");
+    e.push("SAILFIN_DUMP_ARENA_STATS=1");
+    return e;
+}
+
+// Scratch root under SAILFIN_TEST_SCRATCH or /tmp.
+fn _scratch_root() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    return base + "/sfn-scan-memo";
+}
+
+// Pad string: 60 comment lines of ~80 chars each (~4.8 KB per module).
+// Enough for the arena scanner to show measurable growth pre-fix while
+// keeping fixture generation fast in Sailfin.
+fn _make_padding() -> string {
+    let mut pad = "";
+    let mut i = 0;
+    loop {
+        if i >= 60 { break; }
+        pad = pad
+            + "// padding line: abcdefghijklmnopqrstuvwxyz0123456789 padding padding padding\n";
+        i += 1;
+    }
+    return pad;
+}
+
+// Zero-pad a single-digit number to two digits (0..9 -> "00".."09").
+fn _two_digit(n: int) -> string {
+    if n < 10 { return "0" + number_to_string(n as float); }
+    return number_to_string(n as float);
+}
+
+// Create the synthetic capsule fixture under scratch_root.
+fn _make_fixture(root: string) -> string ![io] {
+    // Create directory structure.
+    fs.createDirectory(root + "/src", true);
+
+    // workspace.toml stops discover_workspace_root from walking into the
+    // live repo tree.
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = []\n");
+
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"check-scan-memo-test\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"E2E memory-bound test for the resolver scan memo (#1247)\"\n\n"
+        + "[capabilities]\nrequired = []\n\n"
+        + "[build]\nentry = \"src/entry_00.sfn\"\n");
+
+    let pad = _make_padding();
+
+    // Chain: common_00 -> common_01 -> ... -> common_09.
+    let mut chain_idx = 0;
+    loop {
+        if chain_idx > 9 { break; }
+        let idx = _two_digit(chain_idx);
+        let f = root + "/src/common_" + idx + ".sfn";
+        let mut content = "";
+        if chain_idx < 9 {
+            let next = _two_digit(chain_idx + 1);
+            content = "import { chain_" + next + " } from \"./common_" + next
+                + "\";\n\n"
+                + "fn chain_"
+                + idx
+                + "() -> number { return chain_"
+                + next
+                + "() + 1; }\n\n"
+                + "export { chain_"
+                + idx
+                + " };\n"
+                + pad;
+        } else {
+            content = "fn chain_" + idx + "() -> number { return 9; }\n\n"
+                + "export { chain_"
+                + idx
+                + " };\n"
+                + pad;
+        }
+        fs.writeFile(f, content);
+        chain_idx += 1;
+    }
+
+    // 40 tiny entries, each importing the head of the chain.
+    let mut entry_idx = 0;
+    loop {
+        if entry_idx > 39 { break; }
+        let idx = _two_digit(entry_idx);
+        let f = root + "/src/entry_" + idx + ".sfn";
+        let content = "import { chain_00 } from \"./common_00\";\n\n"
+            + "fn use_"
+            + idx
+            + "() -> number { return chain_00(); }\n\n"
+            + "export { use_"
+            + idx
+            + " };\n";
+        fs.writeFile(f, content);
+        entry_idx += 1;
+    }
+
+    return root;
+}
+
+// Build the arg list: [_sfn_bin(), "check", entry_00, entry_01, ...]
+// for entries 0..count-1.
+fn _entry_args(root: string, count: int) -> string[] ![io] {
+    let mut args: string[] = [_sfn_bin(), "check"];
+    let mut i = 0;
+    loop {
+        if i >= count { break; }
+        args.push(root + "/src/entry_" + _two_digit(i) + ".sfn");
+        i += 1;
+    }
+    return args;
+}
+
+// Parse a non-negative integer from `text` starting at `start`.
+// Stops at the first non-digit. Returns 0 if no digits are present.
+fn _parse_int_at(text: string, start: int) -> int {
+    let mut i = start;
+    let mut value = 0;
+    loop {
+        if i >= text.length { break; }
+        let code = char_code(text[i]) - 48;
+        if code < 0 || code > 9 { break; }
+        value = value * 10 + code;
+        i += 1;
+    }
+    return value;
+}
+
+// Run sfn check and return the arena page count from SAILFIN_DUMP_ARENA_STATS
+// stderr output. Returns -1 if the run failed or no stats line was found.
+fn _measure_pages(args: string[]) -> int ![io] {
+    let exit = process.run_capture(args, _arena_env());
+    let _out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 { return -1; }
+    // Parse: "[sailfin-arena] ... pages=N ..."
+    let marker = "pages=";
+    let pos = find(err, marker, 0);
+    if pos < 0 { return -1; }
+    let num_start = pos + marker.length;
+    // Must have at least one digit.
+    if num_start >= err.length { return -1; }
+    let first_code = char_code(err[num_start]) - 48;
+    if first_code < 0 || first_code > 9 { return -1; }
+    return _parse_int_at(err, num_start);
+}
+
+// ---- Test 1: prime run stages the import-context (sanity check) ----
+test "scan memo: prime run checks cleanly" ![io] {
+    let root = _make_fixture(_scratch_root());
+
+    let args = [_sfn_bin(), "check", root + "/src/entry_00.sfn"];
+    let exit = process.run_capture(args, _child_env_base());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out + err, "checked 1 files: ok");
+}
+
+// ---- Test 2: 5-entry check reports "checked 5 files: ok" ----
+test "scan memo: 5-entry check reports ok" ![io] {
+    let root = _make_fixture(_scratch_root());
+
+    // Prime first.
+    let prime_args = [_sfn_bin(), "check", root + "/src/entry_00.sfn"];
+    let _p = process.run_capture(prime_args, _child_env_base());
+    let _po = process.capture_take_stdout();
+    let _pe = process.capture_take_stderr();
+
+    let args = _entry_args(root, 5);
+    let exit = process.run_capture(args, _child_env_base());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out + err, "checked 5 files: ok");
+}
+
+// ---- Test 3: 40-entry check reports "checked 40 files: ok" ----
+test "scan memo: 40-entry check reports ok" ![io] {
+    let root = _make_fixture(_scratch_root());
+
+    // Prime first.
+    let prime_args = [_sfn_bin(), "check", root + "/src/entry_00.sfn"];
+    let _p = process.run_capture(prime_args, _child_env_base());
+    let _po = process.capture_take_stdout();
+    let _pe = process.capture_take_stderr();
+
+    let args = _entry_args(root, 40);
+    let exit = process.run_capture(args, _child_env_base());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out + err, "checked 40 files: ok");
+}
+
+// ---- Test 4: arena pages grow sub-linearly from 5 to 40 entries (#1247) ----
+// Pre-#1247: delta was ~61 pages (each of 35 extra entries re-scanned the
+// 10-module chain). Post-#1247: delta is ~0 pages (chain scanned once per run).
+// The threshold 24 (= 96 MB) sits between those bounds.
+// With 60-line padding (vs 600-line in the bash version), measured deltas
+// scale proportionally — the bound remains 24 pages.
+test "scan memo: warm check arena pages grow sub-linearly with entry count (#1247)" ![io] {
+    let root = _make_fixture(_scratch_root());
+
+    // Prime: stage the chain's import-context so both measured runs are warm.
+    let prime_args = [_sfn_bin(), "check", root + "/src/entry_00.sfn"];
+    let prime_exit = process.run_capture(prime_args, _child_env_base());
+    let _po = process.capture_take_stdout();
+    let _pe = process.capture_take_stderr();
+    assert prime_exit == 0;
+
+    // Measure 5-entry run.
+    let pages_small = _measure_pages(_entry_args(root, 5));
+    assert pages_small >= 0;
+
+    // Measure 40-entry run.
+    let pages_large = _measure_pages(_entry_args(root, 40));
+    assert pages_large >= 0;
+
+    // Delta must not exceed 24 pages (= 96 MB).
+    let delta = pages_large - pages_small;
+    assert delta <= 24;
+}
