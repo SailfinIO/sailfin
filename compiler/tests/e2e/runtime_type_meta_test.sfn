@@ -1,0 +1,254 @@
+// End-to-end test for runtime/sfn/type_meta.sfn — minimum-viable type
+// metadata (`SfnTypeDescriptor { id, name_ptr, kind }`, registry,
+// `sfn_resolve_type` / `sfn_instance_of`) per issue #402 / epic #389 M2.10.
+//
+// Native (no-bash) replacement for the former `test_runtime_type_meta.sh`
+// (test-infra Phase 3, epic #842; `.claude/rules/no-bash-e2e.md`). Mirrors
+// `runtime_string_basic_test.sfn` and pins, end-to-end:
+//   1. typecheck   — `sfn check runtime/sfn/type_meta.sfn` reports `ok`.
+//   2. fmt         — `sfn fmt --check runtime/sfn/type_meta.sfn` is canonical.
+//   3. emit shape  — a `define` for every public `sfn_*` export plus the
+//                    inlined libc declares (malloc/free/realloc/strcmp).
+//   4. user descriptors — a struct-bearing module emits `@__sfn_type_desc.*`
+//                    + name globals wired through `@llvm.global_ctors`.
+//   5. prelude flip — prelude emission routes through `@sfn_resolve_type` /
+//                    `@sfn_instance_of`, not the legacy C stubs.
+//   6. exports     — the compiler binary carries the defined `sfn_*` symbols.
+//   7. manifest    — runtime/capsule.toml `sfn-sources` lists the module.
+import {
+    find,
+    split,
+    starts_with,
+    contains,
+    ends_with,
+    char_at_index
+} from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. PATH is required for the `nm`
+// symbol-export check (resolved through PATH).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-runtime-type-meta";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit LLVM IR for the module at `module_path` (or "EMIT_FAILED").
+fn _emit_module(tag: string, module_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let outpath = dir + "/" + tag + ".ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(outpath);
+}
+
+// Write `source` to a scratch file and emit its LLVM IR (or "EMIT_FAILED").
+fn _emit_source(tag: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let srcpath = dir + "/" + tag + ".sfn";
+    fs.writeFile(srcpath, source);
+    return _emit_module(tag, srcpath);
+}
+
+// Any line that starts with `prefix` and contains `needle`.
+fn _line_match(ir: string, prefix: string, needle: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, prefix) && contains(line, needle) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// Any line that starts with `prefix`.
+fn _has_line_prefix(ir: string, prefix: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if starts_with(lines[i], prefix) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// `^define .* @sym(` — the symbol's definition line.
+fn _has_define(ir: string, sym: string) -> boolean {
+    return _line_match(ir, "define ", "@" + sym + "(");
+}
+
+// `^declare .* @sym(` — the libc/runtime trampoline declaration.
+fn _has_declare(ir: string, sym: string) -> boolean {
+    return _line_match(ir, "declare ", "@" + sym + "(");
+}
+
+fn _is_word_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let word = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    return find(word, ch, 0) >= 0;
+}
+
+// `@sym\b` — does the IR reference the bare symbol at a word boundary?
+fn _references(ir: string, sym: string) -> boolean {
+    let needle = "@" + sym;
+    let mut pos = find(ir, needle, 0);
+    loop {
+        if pos < 0 { break; }
+        let after = pos + needle.length;
+        if after >= ir.length { return true; }
+        let ch = char_at_index(ir, after);
+        if !_is_word_char(ch) { return true; }
+        pos = find(ir, needle, after);
+    }
+    return false;
+}
+
+// `[[:space:]][Tt][[:space:]]_?sym$` — a defined text symbol in `nm` output
+// (optional `_` prefix accommodates macOS Mach-O).
+fn _nm_has_defined(binary: string, sym: string) -> boolean ![io] {
+    let exit = process.run_capture(["nm", binary], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return false; }
+    let lines = split(out, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let is_text = contains(line, " T ") || contains(line, " t ");
+        if is_text && (ends_with(line, " " + sym) || ends_with(line, "_" + sym)) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+test "runtime/sfn/type_meta.sfn typechecks cleanly" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", "runtime/sfn/type_meta.sfn"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "ok", 0) >= 0;
+}
+
+test "runtime/sfn/type_meta.sfn is fmt-canonical" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "runtime/sfn/type_meta.sfn"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+test "type_meta emit: define for every public sfn_* export" ![io] {
+    let ir = _emit_module("type_meta", "runtime/sfn/type_meta.sfn");
+    assert _has_define(ir, "sfn_type_register");
+    assert _has_define(ir, "sfn_resolve_type");
+    assert _has_define(ir, "sfn_instance_of");
+    assert _has_define(ir, "sfn_type_of");
+    assert _has_define(ir, "sfn_is_string");
+    assert _has_define(ir, "sfn_is_number");
+    assert _has_define(ir, "sfn_is_boolean");
+    assert _has_define(ir, "sfn_is_callable");
+    assert _has_define(ir, "sfn_is_array");
+}
+
+test "type_meta emit: declares the malloc / free / realloc / strcmp libc trampolines" ![io] {
+    let ir = _emit_module("type_meta", "runtime/sfn/type_meta.sfn");
+    assert _has_declare(ir, "malloc");
+    assert _has_declare(ir, "free");
+    assert _has_declare(ir, "realloc");
+    assert _has_declare(ir, "strcmp");
+}
+
+test "user module emission carries @__sfn_type_desc.* + name globals" ![io] {
+    let source = "struct M2_10_A {\n    x: i64;\n}\n\nstruct M2_10_B {\n    y: i64;\n}\n\nfn main() -> int { return 0; }\n";
+    let ir = _emit_source("has_types", source);
+    assert ir != "EMIT_FAILED";
+    // Architect §2.5.1 wire shape: `{ i64, i64, i32 }`, `linkonce_odr`.
+    assert _has_line_prefix(ir, "@__sfn_type_desc.M2_10_A = linkonce_odr constant { i64, i64, i32 }");
+    assert _has_line_prefix(ir, "@__sfn_type_desc.M2_10_B = linkonce_odr constant { i64, i64, i32 }");
+    assert _has_line_prefix(ir, "@__sfn_type_desc_name.M2_10_A = linkonce_odr unnamed_addr constant");
+    assert _has_line_prefix(ir, "@__sfn_type_desc_name.M2_10_B = linkonce_odr unnamed_addr constant");
+}
+
+test "user module emission wires @__sfn_module_type_init__* via @llvm.global_ctors" ![io] {
+    let source = "struct M2_10_A {\n    x: i64;\n}\n\nstruct M2_10_B {\n    y: i64;\n}\n\nfn main() -> int { return 0; }\n";
+    let ir = _emit_source("has_types", source);
+    assert ir != "EMIT_FAILED";
+    assert _has_line_prefix(ir, "define internal void @__sfn_module_type_init__");
+    assert _has_line_prefix(ir, "@llvm.global_ctors = appending global");
+    // The init ctor registers each descriptor (substring, line is indented).
+    assert contains(ir, "call void @sfn_type_register(i8* bitcast ({ i64, i64, i32 }* @__sfn_type_desc.");
+    assert _has_line_prefix(ir, "declare void @sfn_type_register(i8*)");
+}
+
+test "prelude emission routes type-meta calls through the sfn_* symbols" ![io] {
+    let ir = _emit_module("prelude", "runtime/prelude.sfn");
+    assert ir != "EMIT_FAILED";
+    // The flipped C stubs are unreferenced in fresh prelude emission.
+    assert ! _references(ir, "sailfin_runtime_is_string");
+    assert ! _references(ir, "sailfin_runtime_is_number");
+    assert ! _references(ir, "sailfin_runtime_is_boolean");
+    assert ! _references(ir, "sailfin_runtime_is_array");
+    assert ! _references(ir, "sailfin_runtime_is_callable");
+    assert ! _references(ir, "sailfin_runtime_resolve_type");
+    assert ! _references(ir, "sailfin_runtime_instance_of");
+    // ...and the replacements show up.
+    assert _references(ir, "sfn_resolve_type");
+    assert _references(ir, "sfn_instance_of");
+}
+
+test "compiler binary exports the defined sfn_* type-meta symbols" ![io] {
+    let bin = _sfn_bin();
+    assert _nm_has_defined(bin, "sfn_type_register");
+    assert _nm_has_defined(bin, "sfn_resolve_type");
+    assert _nm_has_defined(bin, "sfn_instance_of");
+    assert _nm_has_defined(bin, "sfn_type_of");
+    assert _nm_has_defined(bin, "sfn_is_string");
+    assert _nm_has_defined(bin, "sfn_is_number");
+    assert _nm_has_defined(bin, "sfn_is_boolean");
+    assert _nm_has_defined(bin, "sfn_is_callable");
+    assert _nm_has_defined(bin, "sfn_is_array");
+}
+
+test "runtime/capsule.toml sfn-sources lists the type_meta module" ![io] {
+    let manifest = fs.readFile("runtime/capsule.toml");
+    let lines = split(manifest, "\n");
+    let mut found = false;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "sfn-sources = [") && contains(line, "\"sfn/type_meta.sfn\"") {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert found;
+}

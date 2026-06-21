@@ -70,9 +70,7 @@ test_runtime_sfn_sources_active.sh
 test_runtime_sfn_sources_link_consumer.sh
 test_runtime_sfn_sources_struct_import.sh
 test_runtime_string_allocating.sh
-test_runtime_string_basic.sh
 test_runtime_string_utf8_numeric.sh
-test_runtime_type_meta.sh
 test_sfn_package.sh
 test_sleep_eintr_resume.sh
 test_subprocess_emit_clean_env.sh
