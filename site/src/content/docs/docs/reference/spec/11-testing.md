@@ -20,6 +20,29 @@ test "name" ![effects] {
 
 ---
 
+## `expect()` is preferred over a bare `assert` (W0210)
+
+A bare `assert` inside a `test` block is **soft-deprecated**: `sfn check`
+emits the warning `W0210: prefer expect() over a bare assert inside a test
+block`, pointing at the `assert` keyword. A bare assert only reports the
+expression text on failure, whereas the `sfn/test` matchers
+(`expect_eq_int`, `expect_eq_str`, `expect_contains_str`, …) carry a
+descriptive `actual` vs `expected` message:
+
+```sfn
+test "addition" ![pure] {
+    assert 2 + 2 == 4;                 // W0210 — works, but a thin failure
+    assert expect_eq_int(2 + 2, 4).ok; // preferred — descriptive on failure
+}
+```
+
+W0210 is a **warning only** — it never fails a build or changes an exit
+code — and fires solely inside `test` blocks; an `assert` in ordinary code
+is unaffected. Pass `sfn check --allow-bare-assert` to suppress it. Removal
+of the bare `assert` form is a post-1.0 consideration, not a current plan.
+
+---
+
 ## Filtering which tests run
 
 Two flags narrow a `sfn test` run to a subset of the discovered tests.

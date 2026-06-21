@@ -178,6 +178,7 @@ fn _find_group(groups: CheckGroup[], key: string) -> int {
 fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
     let mut quiet: boolean = false;
     let mut json: boolean = false;
+    let mut allow_bare_assert: boolean = false;
     let mut paths: string[] = [];
 
     let mut argi: int = 1;
@@ -192,11 +193,15 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
             // is accepted but `--quiet` becomes a no-op (the JSON
             // envelope IS the structured output, not noise).
             json = true;
+        } else if strings_equal(arg, "--allow-bare-assert") {
+            // #1173: opt out of the W0210 soft-deprecation warning for
+            // a bare `assert` inside a `test` block.
+            allow_bare_assert = true;
         } else if strings_equal(arg, "-h") {
-            print("usage: sfn check [--quiet] [--json] [path...]");
+            print("usage: sfn check [--quiet] [--json] [--allow-bare-assert] [path...]");
             return 0;
         } else if strings_equal(arg, "--help") {
-            print("usage: sfn check [--quiet] [--json] [path...]");
+            print("usage: sfn check [--quiet] [--json] [--allow-bare-assert] [path...]");
             return 0;
         } else { paths.push(arg); }
         argi += 1;
@@ -370,7 +375,7 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         let path = files[fi];
         let group_idx = file_group_index[fi];
         let source = fs.readFile(path);
-        let result = check_source_with_imports(source, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required);
+        let result = check_source_with_imports(source, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required, allow_bare_assert);
         // Emit any diagnostic — error or warning — so contributors
         // running `sfn check` under Phase B (warning default) actually
         // see the effect-violation output. The summary line keys on

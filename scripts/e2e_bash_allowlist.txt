@@ -20,7 +20,6 @@ test_check_compiler_src.sh
 test_check_phase_ledger.sh
 test_escape_promotion_boundaries.sh
 test_llms_txt_sync.sh
-test_lock.sh
 test_make_report_contract.sh
 test_make_result_contract.sh
 test_mem_limit_selfcap.sh

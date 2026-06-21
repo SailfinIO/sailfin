@@ -1,0 +1,164 @@
+// End-to-end tests for `sfn lock` (#1070).
+//
+// Native replacement for the former `test_lock.sh` (test-infra Phase 3,
+// epic #842; ratchet #1327). `sfn lock` materializes `workspace.lock` at the
+// workspace root: a `# workspace.lock` banner followed by one `[packages]`
+// entry per member. Each test builds a throwaway fixture workspace under a
+// fresh `with_tmp_dir`, so the repo tree is untouched.
+//
+// The migration blocker the legacy script hid: it drove `lock` with
+// `( cd "$root" && "$BINARY" lock )`. `sfn/test` has no `with_cwd` fixture —
+// process-global `chdir` is unsound under the parallel runner pool (see
+// `capsules/sfn/test/src/fixtures.sfn` and `.claude/rules/no-bash-e2e.md`).
+// The fix is the `lock` command's `--work-dir DIR` flag (the same
+// per-invocation lever `sfn build` uses): it sets the directory `lock` walks
+// up from to discover the workspace root, so the test points `lock` at the
+// fixture without `cd`.
+//
+// `with_tmp_dir`'s body returns an `int`; assertions run on that return value
+// (and on out-of-tree marker files that survive the temp-dir teardown) after
+// the closure returns — the `sfn/test` idiom (see
+// `compiler/tests/e2e/sailfin_main_entry_test.sfn`).
+import { with_tmp_dir } from "sfn/test";
+import { find } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// A fresh marker-file path under the runner's scratch dir (or `/tmp`), with
+// any stale value removed so each run starts clean. Lives outside the
+// `with_tmp_dir` tree so it survives teardown.
+fn _marker(name: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-lock-" + name + ".out";
+    if fs.exists(path) { fs.deleteFile(path); }
+    return path;
+}
+
+// Build a fixture workspace with two members ("alpha", "beta") under `root`.
+fn _make_workspace(root: string) -> void ![io] {
+    fs.createDirectory(root + "/alpha", true);
+    fs.createDirectory(root + "/beta", true);
+    fs.writeFile(root + "/workspace.toml", "[workspace]\nmembers = [\"alpha\", \"beta\"]\n");
+    fs.writeFile(root + "/alpha/capsule.toml", "[capsule]\nname = \"fixture/alpha\"\nversion = \"1.2.3\"\n");
+    fs.writeFile(root + "/beta/capsule.toml", "[capsule]\nname = \"fixture/beta\"\nversion = \"4.5.6\"\n");
+}
+
+// Run `sfn lock --work-dir <start>`, discarding captured output. Returns the
+// command's exit code.
+fn _run_lock(start: string) -> int ![io] {
+    let exit = process.run_capture([_sfn_bin(), "lock", "--work-dir", start], []);
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    return exit;
+}
+
+// ---- Test 1: lock in a workspace writes workspace.lock ----
+test "lock: writes workspace.lock with banner + entries" ![io] {
+    let content_marker = _marker("t1-content");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _make_workspace(dir);
+        let rc = _run_lock(dir);
+        let lock_path = dir + "/workspace.lock";
+        if fs.exists(lock_path) {
+            fs.writeFile(content_marker, fs.readFile(lock_path));
+        }
+        return rc;
+    });
+    assert exit == 0;
+    assert fs.exists(content_marker);
+    let lock = fs.readFile(content_marker);
+    fs.deleteFile(content_marker);
+    // Banner on the first line.
+    assert find(lock, "# workspace.lock", 0) == 0;
+    // `[packages]` section and one entry per member.
+    assert find(lock, "[packages]", 0) >= 0;
+    assert find(lock, "\"fixture/alpha\" = \"1.2.3\"", 0) >= 0;
+    assert find(lock, "\"fixture/beta\" = \"4.5.6\"", 0) >= 0;
+}
+
+// ---- Test 2: re-running is idempotent (stable output) ----
+test "lock: is idempotent across re-runs" ![io] {
+    let first_marker = _marker("t2-first");
+    let second_marker = _marker("t2-second");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _make_workspace(dir);
+        let lock_path = dir + "/workspace.lock";
+        let rc1 = _run_lock(dir);
+        if rc1 != 0 { return rc1; }
+        fs.writeFile(first_marker, fs.readFile(lock_path));
+        let rc2 = _run_lock(dir);
+        if rc2 != 0 { return rc2; }
+        fs.writeFile(second_marker, fs.readFile(lock_path));
+        return 0;
+    });
+    assert exit == 0;
+    let first = fs.readFile(first_marker);
+    let second = fs.readFile(second_marker);
+    fs.deleteFile(first_marker);
+    fs.deleteFile(second_marker);
+    assert first == second;
+}
+
+// ---- Test 3: lock from a nested member dir finds the workspace root ----
+test "lock: from a member dir writes at the workspace root" ![io] {
+    let root_marker = _marker("t3-root");
+    let member_marker = _marker("t3-member");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        _make_workspace(dir);
+        // Start discovery from the member dir, not the root.
+        let rc = _run_lock(dir + "/alpha");
+        // Record which of the two candidate lock paths exists.
+        fs.writeFile(root_marker, bool_to_marker(fs.exists(dir
+            + "/workspace.lock")));
+        fs.writeFile(member_marker, bool_to_marker(fs.exists(dir
+            + "/alpha/workspace.lock")));
+        return rc;
+    });
+    assert exit == 0;
+    let at_root = fs.readFile(root_marker);
+    let at_member = fs.readFile(member_marker);
+    fs.deleteFile(root_marker);
+    fs.deleteFile(member_marker);
+    // Written at the workspace root, never inside the member dir.
+    assert at_root == "yes";
+    assert at_member == "no";
+}
+
+// ---- Test 4: outside a workspace errors cleanly (non-zero) ----
+test "lock: outside a workspace errors cleanly" ![io] {
+    let err_marker = _marker("t4-err");
+    let lockfile_marker = _marker("t4-lockfile");
+    let exit = with_tmp_dir(fn (dir: string) -> int {
+        // No workspace.toml anywhere under `dir`.
+        let rc = process.run_capture([_sfn_bin(), "lock", "--work-dir", dir], []);
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        fs.writeFile(err_marker, out + err);
+        fs.writeFile(lockfile_marker, bool_to_marker(fs.exists(dir
+            + "/workspace.lock")));
+        return rc;
+    });
+    // Non-zero exit, an error message mentioning the workspace, and no
+    // lockfile left behind.
+    assert exit != 0;
+    let message = fs.readFile(err_marker);
+    let lockfile = fs.readFile(lockfile_marker);
+    fs.deleteFile(err_marker);
+    fs.deleteFile(lockfile_marker);
+    assert find(message, "workspace", 0) >= 0;
+    assert lockfile == "no";
+}
+
+fn bool_to_marker(value: boolean) -> string {
+    if value { return "yes"; }
+    return "no";
+}
