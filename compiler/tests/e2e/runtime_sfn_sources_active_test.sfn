@@ -1,0 +1,131 @@
+// End-to-end test for issue #394 (M2.1+M2.2): the
+// `runtime/sfn/memory/arena.sfn` Sailfin module's `sfn_arena_sfn_*`
+// exports actually link into the compiler binary built by
+// `make compile`.
+//
+// Native (no-bash) replacement for the former
+// `test_runtime_sfn_sources_active.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`). Pins the production link path: when
+// `runtime/capsule.toml` declares `sfn-sources = ["sfn/memory/arena.sfn"]`,
+// the resulting `build/native/sailfin` binary exports five
+// `sfn_arena_sfn_*` symbols sourced from Sailfin emission, plus the bare
+// arena-core exports #1309 moved into Sailfin
+// (`sfn_arena_create`/`alloc`/`global`/`enabled`), and the surviving bare
+// arena forwarders (`realloc`/`print_stats`). The remaining-C assertion
+// guards the "C arena still links for the not-yet-ported entry points"
+// invariant — a patch that drops them before #822 trips it.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test. For subprocess/manifest
+// assertions use `sfn/strings` (`find` / `split` / `starts_with` /
+// `contains` / `ends_with`), as the runtime_string_basic exemplar does.
+import {
+    find,
+    split,
+    starts_with,
+    contains,
+    ends_with
+} from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. The `nm` symbol-export check resolves
+// `nm` through PATH, so include it.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// `[[:space:]][Tt][[:space:]]_?sym$` — a defined text symbol on a line of
+// `nm` output (optional `_` prefix accommodates macOS Mach-O). Anchored on
+// symbol-end so a substring collision (`sfn_arena_sfn_create_helper`) does
+// not satisfy the check, and gated on a defined-text marker (` T `/` t `)
+// so an undefined-reference line (`U sfn_arena_sfn_create`) does not falsely
+// report the binary as exporting the symbol.
+fn _nm_has_defined(binary: string, sym: string) -> boolean ![io] {
+    let exit = process.run_capture(["nm", binary], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return false; }
+    let lines = split(out, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let is_text = contains(line, " T ") || contains(line, " t ");
+        if is_text && (ends_with(line, " " + sym) || ends_with(line, "_" + sym)) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// The literal acceptance check from issue #394: `nm | grep sfn_arena_alloc`
+// matches at least one symbol in the compiler binary (substring, any kind).
+fn _nm_references(binary: string, sym: string) -> boolean ![io] {
+    let exit = process.run_capture(["nm", binary], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return false; }
+    return find(out, sym, 0) >= 0;
+}
+
+test "runtime/capsule.toml sfn-sources lists the arena module" ![io] {
+    let manifest = fs.readFile("runtime/capsule.toml");
+    let lines = split(manifest, "\n");
+    let mut found = false;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "sfn-sources = [") && contains(line, "\"sfn/memory/arena.sfn\"") {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert found;
+}
+
+test "compiler binary exports five sfn_arena_sfn_* Sailfin symbols" ![io] {
+    let bin = _sfn_bin();
+    assert _nm_has_defined(bin, "sfn_arena_sfn_create");
+    assert _nm_has_defined(bin, "sfn_arena_sfn_alloc");
+    assert _nm_has_defined(bin, "sfn_arena_sfn_reset");
+    assert _nm_has_defined(bin, "sfn_arena_sfn_destroy");
+    assert _nm_has_defined(bin, "sfn_arena_sfn_realloc");
+}
+
+test "compiler binary exports bare arena-core (create/alloc/global/enabled) from Sailfin (#1309)" ![io] {
+    let bin = _sfn_bin();
+    assert _nm_has_defined(bin, "sfn_arena_create");
+    assert _nm_has_defined(bin, "sfn_arena_alloc");
+    assert _nm_has_defined(bin, "sfn_arena_global");
+    assert _nm_has_defined(bin, "sfn_arena_enabled");
+}
+
+test "compiler binary exports surviving bare arena forwarders (realloc/print_stats)" ![io] {
+    let bin = _sfn_bin();
+    assert _nm_has_defined(bin, "sfn_arena_realloc");
+    assert _nm_has_defined(bin, "sfn_arena_print_stats");
+}
+
+test "nm | grep sfn_arena_alloc matches at least one symbol (#394 spec)" ![io] {
+    assert _nm_references(_sfn_bin(), "sfn_arena_alloc");
+}

@@ -1,0 +1,225 @@
+// End-to-end test for runtime/sfn/adapters/http.sfn — the
+// Sailfin-native HTTP/1.1 socket client adapter (M3 #818, epic #390).
+//
+// Native (no-bash) replacement for the former
+// `test_runtime_adapter_http.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`). Pins, end-to-end:
+//   1. typecheck   — `sfn check runtime/sfn/adapters/http.sfn` is ok.
+//   2. fmt         — the module is fmt-canonical.
+//   3. emit shape  — the module emits a `define` for every sfn_http_*
+//                    export and `declare`s the BSD-sockets libc surface
+//                    (socket/connect/send/recv/close).
+//   4. routing     — `http.get_body` lowers to `@sfn_http_get` and NOT
+//                    the legacy curl `@sailfin_runtime_http_get` call.
+//   5. member-call — `http.get(url)` lowers to a `@sfn_http_get` call
+//                    and `http.post(url, body)` to `@sfn_http_post2`,
+//                    with no residual `@sailfin_intrinsic_http_*` call
+//                    (the #912 member-call flip).
+//
+// OMITTED: the original script's behavioral GET+POST round-trip leg
+// (test_get_round_trip) drove a real socket request against a localhost
+// Python listener. A live network server / Python client cannot run as
+// an `![io]` `sfn/test` leg per `.claude/rules/no-bash-e2e.md`, so it is
+// dropped here; the emit-shape + routing + reference-absence checks
+// cover the registry-flip behavior without a network.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test. For subprocess/IR-output
+// assertions use `sfn/strings` (`find` / `split` / `starts_with` /
+// `contains` / `char_at_index`), as the runtime_string_basic exemplar does.
+import {
+    find,
+    split,
+    starts_with,
+    contains,
+    char_at_index
+} from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. `emit` / `check` neither link nor spawn
+// clang (no PATH required), but keep the standard set for portability.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A unique scratch dir for this test (under the runner's per-file scratch
+// when present, else /tmp).
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-runtime-http";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit LLVM IR for the module at `module_path` and return it (or
+// "EMIT_FAILED" on a non-zero exit).
+fn _emit_module(tag: string, module_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let outpath = dir + "/" + tag + ".ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(outpath);
+}
+
+// Emit LLVM IR for source written to a scratch `.sfn` file, then read it
+// back (or "EMIT_FAILED" on a non-zero exit).
+fn _emit_source(tag: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let srcpath = dir + "/" + tag + ".sfn";
+    fs.writeFile(srcpath, source);
+    return _emit_module(tag, srcpath);
+}
+
+// `^define .* @sym(` — a line that starts the symbol's definition.
+fn _has_define(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// `^declare .* @sym(` — the module declares the libc trampoline.
+fn _has_declare(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "declare ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn _is_word_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let word = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    return find(word, ch, 0) >= 0;
+}
+
+// `@sym\b` — does the IR reference the bare symbol at a word boundary?
+fn _references(ir: string, sym: string) -> boolean {
+    let needle = "@" + sym;
+    let mut pos = find(ir, needle, 0);
+    loop {
+        if pos < 0 { break; }
+        let after = pos + needle.length;
+        if after >= ir.length { return true; }
+        let ch = char_at_index(ir, after);
+        if !_is_word_char(ch) { return true; }
+        pos = find(ir, needle, after);
+    }
+    return false;
+}
+
+// Does any `call`/`invoke` line target `@sym(`? (A `declare` of `@sym`
+// is tolerated for seed compat; only call sites are load-bearing here.)
+fn _calls(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let is_call = contains(line, "call ") || contains(line, "invoke ");
+        if is_call && contains(line, "@" + sym + "(") { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+test "runtime/sfn/adapters/http.sfn typechecks cleanly" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", "runtime/sfn/adapters/http.sfn"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "ok", 0) >= 0;
+}
+
+test "runtime/sfn/adapters/http.sfn is fmt-canonical" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "runtime/sfn/adapters/http.sfn"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+test "http emit: define for every sfn_http_* export" ![io] {
+    let ir = _emit_module("http", "runtime/sfn/adapters/http.sfn");
+    assert ir != "EMIT_FAILED";
+    assert _has_define(ir, "sfn_http_get");
+    assert _has_define(ir, "sfn_http_post");
+    assert _has_define(ir, "sfn_http_post2");
+    assert _has_define(ir, "sfn_http_download");
+}
+
+test "http emit: declares the BSD-sockets libc surface" ![io] {
+    let ir = _emit_module("http", "runtime/sfn/adapters/http.sfn");
+    assert ir != "EMIT_FAILED";
+    assert _has_declare(ir, "socket");
+    assert _has_declare(ir, "connect");
+    assert _has_declare(ir, "send");
+    assert _has_declare(ir, "recv");
+    assert _has_declare(ir, "close");
+}
+
+test "http.get_body lowers to @sfn_http_get, not the curl path" ![io] {
+    let source = "fn fetch(url: string) -> string ![net] {\n"
+        + "    return http.get_body(url);\n"
+        + "}\n\n"
+        + "fn main() -> int ![net, io] {\n"
+        + "    let body = fetch(\"http://127.0.0.1:9/\");\n"
+        + "    print(body);\n"
+        + "    return 0;\n"
+        + "}\n";
+    let ir = _emit_source("http_probe", source);
+    assert ir != "EMIT_FAILED";
+    // The flipped registry row routes through @sfn_http_get.
+    assert _references(ir, "sfn_http_get");
+    // The legacy curl entrypoint must not be CALLED (declares tolerated).
+    assert ! _calls(ir, "sailfin_runtime_http_get");
+}
+
+test "http.get/http.post member calls flip to @sfn_http_get/@sfn_http_post2 (#912)" ![io] {
+    let source = "fn main() -> int ![net, io] {\n"
+        + "    let got = http.get(\"http://127.0.0.1:9/\");\n"
+        + "    print(got);\n"
+        + "    let posted = http.post(\"http://127.0.0.1:9/\", \"{}\");\n"
+        + "    print(posted);\n"
+        + "    return 0;\n"
+        + "}\n";
+    let ir = _emit_source("http_member_probe", source);
+    assert ir != "EMIT_FAILED";
+    assert _calls(ir, "sfn_http_get");
+    assert _calls(ir, "sfn_http_post2");
+    // The old member-call intrinsics must not be CALLED anymore.
+    assert ! _calls(ir, "sailfin_intrinsic_http_get");
+    assert ! _calls(ir, "sailfin_intrinsic_http_post");
+}

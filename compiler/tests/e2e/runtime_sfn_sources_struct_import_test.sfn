@@ -1,0 +1,268 @@
+// Issue #1288 (Gap 1 of #1283): regression test for cross-module
+// struct-returning calls between runtime sfn-sources.
+//
+// Native (no-bash) replacement for the former
+// `test_runtime_sfn_sources_struct_import.sh` (test-infra Phase 3,
+// epic #842; `.claude/rules/no-bash-e2e.md`).
+//
+// `_compile_runtime_sfn_sources` (compiler/src/cli_main.sfn) emits each
+// `sfn-sources` entry in an isolated child `sfn emit`. Before #1288 no
+// sibling sfn-source's `.sfn-asm` was staged into the import-context tree,
+// so a runtime module importing a struct-returning fn from a sibling died
+// during LLVM lowering with "cannot resolve return type for call to ...".
+// #1288 stages every sfn-source's `.sfn-asm` under a PRIVATE root
+// (`<cache-dir>/rt-import-context/<slug>.sfn-asm`), writes per-module
+// `.import-deps` sidecars for sibling imports, and threads the root into
+// each child emit via `--import-context`, so sibling signatures resolve
+// without publishing into the shared cwd `build/native/import-context/`
+// tree (publishing there regresses the prelude's lowering).
+//
+// The test:
+//   1. Builds a scratch workspace whose runtime capsule declares two
+//      synthetic sfn-sources: `structlib.sfn` (struct Pair +
+//      struct-returning pair_new/pair_shift) and `structuse.sfn`
+//      (imports them across the module boundary, wraps the result in an
+//      i64 probe fn).
+//   2. Runs `sfn build -p <ws>/capsules/sfn/test-app --work-dir <ws>/build`.
+//      The `--work-dir` rebases the cache dir to `<ws>/build/sailfin` and
+//      the default binary to `<ws>/build/native/sailfin` — giving the same
+//      predictable artifact paths the bash test got from `cd "$ws"`
+//      without a cwd lever (`run_capture` has none).
+//   3. Asserts the build succeeds (fails with the lowering fatal pre-#1288).
+//   4. Asserts the staged import-context artifacts exist + are private.
+//   5. Asserts the consumer module's .ll resolved the imports as `%Pair`.
+//   6. Runs the produced binary and asserts the probe value round-tripped.
+//   7. Asserts SAILFIN_DISABLE_RUNTIME_SFN_SOURCES=1 stages nothing.
+//
+// NOTE: assert on captured stdout+stderr / file contents with
+// `sfn/strings` predicates — the `sfn/test` `expect_*` matchers are
+// `![pure]` and cannot be called from an `![io]` test (#842).
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build spawns a nested clang + linker, so the child needs PATH (an
+// empty `run_capture` env is the *empty* environment, not "inherit").
+// SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
+// under the parallel pool. `extra` appends per-test env (the disable gate).
+fn _child_env_with(extra: string[]) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    let mut i = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i = i + 1;
+    }
+    return e;
+}
+
+fn _scratch_base() -> string ![io] {
+    let s = env.get("SAILFIN_TEST_SCRATCH");
+    if s.length > 0 { return s; }
+    return "/tmp";
+}
+
+// Copy a repo file to `dst` (the `.sfn` runtime modules are text, so
+// `fs.readFile`/`fs.writeFile` round-trips faithfully — there is no
+// `fs.copyFile` builtin, and the bash symlink trick has no Sailfin fs
+// surface).
+fn _copy(repo_rel: string, dst: string) ![io] {
+    fs.writeFile(dst, fs.readFile(repo_rel));
+}
+
+// Build the synthetic workspace at `ws`. Mirrors the bash setup_workspace:
+// a runtime-native capsule whose `sfn-sources` declares the two synthetic
+// modules plus the real runtime modules the prelude/link require, and a
+// binary `test-app` that reaches the probe via a plain i64 extern.
+fn _setup_workspace(ws: string) ![io] {
+    fs.createDirectory(ws + "/runtime/native", true);
+    fs.createDirectory(ws + "/runtime/sfn/platform", true);
+    fs.createDirectory(ws + "/runtime/sfn/memory", true);
+    fs.createDirectory(ws + "/capsules/sfn/test-app/src", true);
+
+    fs.writeFile(ws + "/workspace.toml", "[workspace]\n"
+        + "members = [\"runtime/native\", \"capsules/sfn/test-app\"]\n");
+
+    // Runtime capsule manifest. structlib must be listed so its definitions
+    // link; structuse is the importing consumer whose emit exercises the
+    // staged sibling context. The real runtime modules are required for the
+    // prelude/link (same shape as the link-consumer test).
+    fs.writeFile(ws + "/runtime/native/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/runtime-native\"\n"
+        + "version = \"0.0.1\"\n\n"
+        + "[capabilities]\n"
+        + "required = []\n\n"
+        + "[build]\n"
+        + "kind = \"runtime\"\n"
+        + "c-sources = []\n"
+        + "ll-sources = []\n"
+        + "sfn-sources = [\"../sfn/structlib.sfn\", \"../sfn/structuse.sfn\", "
+        + "\"../sfn/clock.sfn\", \"../sfn/exception.sfn\", \"../sfn/type_meta.sfn\", "
+        + "\"../sfn/io.sfn\", \"../sfn/memory/arena.sfn\", \"../sfn/memory/ownedbuf.sfn\", "
+        + "\"../sfn/string.sfn\", \"../sfn/array.sfn\", \"../sfn/memory/mem.sfn\"]\n"
+        + "include-dirs = []\n"
+        + "link-libs = [\"-lm\"]\n"
+        + "prelude-entry = \"../prelude.sfn\"\n");
+
+    // Mirror the real runtime modules the manifest references (copies, since
+    // there is no Sailfin fs symlink surface).
+    _copy("runtime/prelude.sfn", ws + "/runtime/prelude.sfn");
+    _copy("runtime/sfn/clock.sfn", ws + "/runtime/sfn/clock.sfn");
+    _copy("runtime/sfn/exception.sfn", ws + "/runtime/sfn/exception.sfn");
+    _copy("runtime/sfn/type_meta.sfn", ws + "/runtime/sfn/type_meta.sfn");
+    _copy("runtime/sfn/io.sfn", ws + "/runtime/sfn/io.sfn");
+    _copy("runtime/sfn/string.sfn", ws + "/runtime/sfn/string.sfn");
+    _copy("runtime/sfn/array.sfn", ws + "/runtime/sfn/array.sfn");
+    _copy("runtime/sfn/memory/mem.sfn", ws + "/runtime/sfn/memory/mem.sfn");
+    _copy("runtime/sfn/memory/arena.sfn", ws + "/runtime/sfn/memory/arena.sfn");
+    _copy("runtime/sfn/memory/ownedbuf.sfn", ws
+        + "/runtime/sfn/memory/ownedbuf.sfn");
+    _copy("runtime/sfn/platform/posix.sfn", ws
+        + "/runtime/sfn/platform/posix.sfn");
+    _copy("runtime/sfn/platform/libc.sfn", ws + "/runtime/sfn/platform/libc.sfn");
+
+    // The struct-defining sibling. Returned by value across the module
+    // boundary — the case an inline `extern fn` cannot express (E0805).
+    fs.writeFile(ws + "/runtime/sfn/structlib.sfn", "struct Pair {\n"
+        + "    a: i64;\n"
+        + "    b: i64;\n"
+        + "}\n\n"
+        + "fn pair_new(a: i64, b: i64) -> Pair {\n"
+        + "    return Pair { a: a, b: b };\n"
+        + "}\n\n"
+        + "fn pair_shift(p: Pair, d: i64) -> Pair {\n"
+        + "    return Pair { a: p.a + d, b: p.b + d };\n"
+        + "}\n");
+
+    // The importing consumer. Before #1288 its llvm emit dies with
+    // "cannot resolve return type for call to `pair_new`".
+    fs.writeFile(ws + "/runtime/sfn/structuse.sfn", "import { Pair, pair_new, pair_shift } from \"./structlib\";\n\n"
+        + "fn rt_struct_probe() -> i64 {\n"
+        + "    let p = pair_new(40, 2);\n"
+        + "    let q = pair_shift(p, 1);\n"
+        + "    return q.a * 100 + q.b;\n"
+        + "}\n");
+
+    fs.writeFile(ws + "/capsules/sfn/test-app/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/test-app\"\n"
+        + "version = \"0.0.1\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"src/main.sfn\"\n\n"
+        + "[dependencies]\n"
+        + "\"sfn/runtime-native\" = \"*\"\n");
+
+    // pair_new(40,2) shifted by 1 → {41,3} → 41*100+3 = 4103.
+    fs.writeFile(ws + "/capsules/sfn/test-app/src/main.sfn", "extern fn rt_struct_probe() -> i64;\n\n"
+        + "fn main() ![io] {\n"
+        + "    let probe = rt_struct_probe();\n"
+        + "    if probe == 4103 {\n"
+        + "        print.info(\"struct-roundtrip-ok\");\n"
+        + "    } else {\n"
+        + "        print.info(\"struct-roundtrip-bad\");\n"
+        + "    }\n"
+        + "}\n");
+}
+
+// ---- Test 1: build, stage private context, resolve %Pair, round-trip ----
+test "runtime sfn-source struct import builds, stages context, and round-trips (#1288)" ![io] {
+    let ws = _scratch_base() + "/sfn-rtsrc-struct-positive";
+    _setup_workspace(ws);
+    let build_dir = ws + "/build";
+    let bin = build_dir + "/native/sailfin-app";
+
+    let no_extra: string[] = [];
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", ws
+        + "/capsules/sfn/test-app", "--work-dir", build_dir, "-o", bin], _child_env_with(no_extra));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+
+    // The pre-#1288 lowering fatal must not appear, and the build must
+    // exit 0 (the authoritative signal).
+    assert ! contains(log, "cannot resolve return type for call to `pair_new`");
+    assert ! contains(log, "cannot resolve return type for call to `pair_shift`");
+    assert exit == 0;
+
+    // Staged PRIVATE import-context artifacts (under the cache dir, NOT the
+    // shared cwd-relative tree). `--work-dir <build_dir>` → cache dir
+    // `<build_dir>/sailfin`.
+    let ctx = build_dir + "/sailfin/rt-import-context/runtime/sfn";
+    assert fs.exists(ctx + "/structlib.sfn-asm");
+    assert fs.exists(ctx + "/structuse.sfn-asm");
+    assert fs.exists(ctx + "/structuse.import-deps");
+
+    // The consumer's deps sidecar must point at the staged sibling asm.
+    let deps = fs.readFile(ctx + "/structuse.import-deps");
+    assert contains(deps, "rt-import-context/runtime/sfn/structlib.sfn-asm");
+
+    // The defining module has no sibling imports → no deps sidecar.
+    assert ! fs.exists(ctx + "/structlib.import-deps");
+
+    // Nothing may leak into the SHARED cwd-relative import-context tree
+    // (the prelude-regression vector). With --work-dir the shared tree
+    // would be `<build_dir>/native/import-context`; assert no runtime
+    // sfn-source asm leaked there.
+    let shared = build_dir + "/native/import-context/runtime/sfn";
+    assert ! fs.exists(shared + "/structlib.sfn-asm");
+    assert ! fs.exists(shared + "/structuse.sfn-asm");
+
+    // The consumer's emitted IR must resolve the imported callees with the
+    // real %Pair signature (a defaulted signature would be i8*). The build
+    // retains only the consumer's object file, not its `.ll`, so assert the
+    // `.o` was produced (the consumer compiled) and then re-emit the
+    // consumer's LLVM IR against the staged private import-context to inspect
+    // the resolved call signature.
+    let use_obj = build_dir + "/sailfin/sfn__runtime-native__structuse.sfn-O2.o";
+    assert fs.exists(use_obj);
+    let ctx = build_dir + "/sailfin/rt-import-context";
+    let use_ll = build_dir + "/sailfin/structuse-reemit.ll";
+    let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", use_ll, "--import-context", ctx, "llvm", ws
+        + "/runtime/sfn/structuse.sfn"], _child_env_with(no_extra));
+    let _eo = process.capture_take_stdout();
+    let _ee = process.capture_take_stderr();
+    assert emit_exit == 0;
+    let ir = fs.readFile(use_ll);
+    // `call %Pair @pair_new` or `call %Pair* @pair_new` (sret form).
+    let resolved = contains(ir, "call %Pair @pair_new") || contains(ir, "call %Pair* @pair_new");
+    assert resolved;
+
+    // End-to-end: the values survive the cross-module struct returns.
+    let run_exit = process.run_capture([bin], _child_env_with(no_extra));
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert find(run_out + run_err, "struct-roundtrip-ok", 0) >= 0;
+}
+
+// ---- Test 2: the disable gate short-circuits the staging pass ----
+test "SAILFIN_DISABLE_RUNTIME_SFN_SOURCES skips import-context staging (#1288)" ![io] {
+    let ws = _scratch_base() + "/sfn-rtsrc-struct-disabled";
+    _setup_workspace(ws);
+    let build_dir = ws + "/build";
+
+    // The gated build is expected to fail (post-#397 the prelude needs
+    // sfn-source symbols). This test only pins that the gate also
+    // short-circuits the #1288 staging pass — no rt-import-context tree.
+    let extra: string[] = ["SAILFIN_DISABLE_RUNTIME_SFN_SOURCES=1"];
+    let _exit = process.run_capture([_sfn_bin(), "build", "-p", ws
+        + "/capsules/sfn/test-app", "--work-dir", build_dir], _child_env_with(extra));
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+
+    assert ! fs.exists(build_dir + "/sailfin/rt-import-context");
+}
