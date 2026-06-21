@@ -1,0 +1,227 @@
+// End-to-end test for runtime/sfn/string.sfn — the first wave of
+// Sailfin-defined SfnString operations linked into the compiler binary
+// (issue #396, epic #389 M2.4a).
+//
+// Native (no-bash) replacement for the former
+// `test_runtime_string_basic.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`). Pins, end-to-end:
+//   1. typecheck   — `sfn check runtime/sfn/string.sfn` reports `ok`.
+//   2. fmt         — `sfn fmt --check runtime/sfn/string.sfn` is canonical.
+//   3. emit shape  — the module emits a `define` for every still-façade
+//                    `sfn_str_sfn_*` infix export plus the bare native
+//                    `sfn_str_{len,eq,slice}` / `read_byte` / `grapheme_byte`
+//                    bodies (#1372 / #1308), and `declare`s the libc
+//                    trampolines (`memcmp`, `memchr`) the bodies use.
+//   4. user flip   — compiled hello-world IR no longer references the
+//                    legacy C string entrypoints.
+//   5. exports     — the compiler binary carries the defined `sfn_str_*`
+//                    and `sfn_str_sfn_*` text symbols.
+//   6. manifest    — runtime/capsule.toml `sfn-sources` lists the module.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test. For subprocess/IR-output
+// assertions use `sfn/strings` (`find` / `split` / `starts_with` /
+// `contains` / `ends_with`), as the guillermo exemplar does.
+import {
+    find,
+    split,
+    starts_with,
+    contains,
+    ends_with,
+    char_at_index
+} from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. `emit` / `check` neither link nor spawn
+// clang (no PATH required for those), but the `nm` symbol-export check
+// resolves `nm` through PATH, so include it.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A unique scratch dir for this test (under the runner's per-file scratch
+// when present, else /tmp). `emit` writes IR to `-o` and keeps no
+// `program.ll` build cache, so a per-`tag` path is sufficient isolation
+// under the parallel pool.
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-runtime-string-basic";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Emit LLVM IR for the module at `module_path` and return it (or
+// "EMIT_FAILED" on a non-zero exit).
+fn _emit_module(tag: string, module_path: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let outpath = dir + "/" + tag + ".ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outpath, "llvm", module_path], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(outpath);
+}
+
+// `^define .* @sym(` — a line that starts the symbol's definition (a
+// `call` site never satisfies this since it does not begin with `define`).
+fn _has_define(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// `^declare .* @sym(` — the module declares the libc/runtime trampoline.
+fn _has_declare(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "declare ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn _is_word_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let word = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    return find(word, ch, 0) >= 0;
+}
+
+// `@sym\b` — does the IR reference the bare symbol at a word boundary?
+// (`\b` treats `_` as a word char, so `@substring\b` matches `@substring`
+// but not `@substring_unchecked`.)
+fn _references(ir: string, sym: string) -> boolean {
+    let needle = "@" + sym;
+    let mut pos = find(ir, needle, 0);
+    loop {
+        if pos < 0 { break; }
+        let after = pos + needle.length;
+        if after >= ir.length { return true; }
+        let ch = char_at_index(ir, after);
+        if !_is_word_char(ch) { return true; }
+        pos = find(ir, needle, after);
+    }
+    return false;
+}
+
+// `[[:space:]][Tt][[:space:]]_?sym$` — a defined text symbol on a line of
+// `nm` output (optional `_` prefix accommodates macOS Mach-O).
+fn _nm_has_defined(binary: string, sym: string) -> boolean ![io] {
+    let exit = process.run_capture(["nm", binary], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return false; }
+    let lines = split(out, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let is_text = contains(line, " T ") || contains(line, " t ");
+        if is_text && (ends_with(line, " " + sym) || ends_with(line, "_" + sym)) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+test "runtime/sfn/string.sfn typechecks cleanly" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", "runtime/sfn/string.sfn"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "ok", 0) >= 0;
+}
+
+test "runtime/sfn/string.sfn is fmt-canonical" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "runtime/sfn/string.sfn"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+test "string emit: define for every sfn_str_sfn_* / bare native export" ![io] {
+    let ir = _emit_module("string", "runtime/sfn/string.sfn");
+    // Still-façade `_sfn_` infix exports (bare names remain C-owned).
+    assert _has_define(ir, "sfn_str_sfn_to_cstr");
+    assert _has_define(ir, "sfn_str_sfn_from_cstr");
+    // #1372: len/eq/slice are Sailfin-defined at the BARE name.
+    assert _has_define(ir, "sfn_str_len");
+    assert _has_define(ir, "sfn_str_eq");
+    assert _has_define(ir, "sfn_str_slice");
+    // #1308: read_byte / grapheme_byte flipped to native bare bodies.
+    assert _has_define(ir, "sfn_str_read_byte");
+    assert _has_define(ir, "sfn_str_grapheme_byte");
+}
+
+test "string emit: declares the memcmp / memchr libc trampolines" ![io] {
+    let ir = _emit_module("string", "runtime/sfn/string.sfn");
+    assert _has_declare(ir, "memcmp");
+    assert _has_declare(ir, "memchr");
+}
+
+test "user emission no longer references the legacy C string entrypoints" ![io] {
+    let ir = _emit_module("hello", "examples/basics/hello-world.sfn");
+    assert ir != "EMIT_FAILED";
+    assert ! _references(ir, "sailfin_runtime_string_length");
+    assert ! _references(ir, "substring");
+    assert ! _references(ir, "substring_unchecked");
+    assert ! _references(ir, "strings_equal");
+}
+
+test "compiler binary exports the defined sfn_str_* / sfn_str_sfn_* symbols" ![io] {
+    let bin = _sfn_bin();
+    assert _nm_has_defined(bin, "sfn_str_len");
+    assert _nm_has_defined(bin, "sfn_str_eq");
+    assert _nm_has_defined(bin, "sfn_str_slice");
+    assert _nm_has_defined(bin, "sfn_str_to_cstr");
+    assert _nm_has_defined(bin, "sfn_str_sfn_to_cstr");
+    assert _nm_has_defined(bin, "sfn_str_sfn_from_cstr");
+}
+
+test "runtime/capsule.toml sfn-sources lists the string module" ![io] {
+    let manifest = fs.readFile("runtime/capsule.toml");
+    let lines = split(manifest, "\n");
+    let mut found = false;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "sfn-sources = [") && contains(line, "\"sfn/string.sfn\"") {
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert found;
+}
