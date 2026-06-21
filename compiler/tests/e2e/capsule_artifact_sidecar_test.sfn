@@ -58,8 +58,46 @@ fn _binc_sidecar() -> string {
     return "build/capsules/demo/widgetcli/manifest.json";
 }
 
+// Create the in-tree fixtures (idempotent). They must be materialized at
+// runtime — a fresh CI checkout has no build/ tree — so every build path
+// below ensures them first. Content is deterministic; within-file tests run
+// sequentially and no other test file writes these paths, so concurrent
+// identical writes are safe.
+fn _ensure_fixtures() ![io] {
+    fs.createDirectory(_lib_root() + "/src", true);
+    fs.writeFile(_lib_root() + "/capsule.toml", "[capsule]\n"
+        + "name = \"demo/widget\"\n"
+        + "version = \"0.4.2\"\n"
+        + "description = \"E2E fixture for the per-capsule artifact sidecar\"\n\n"
+        + "[dependencies]\n"
+        + "\"sfn/math\" = \"0.1.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "kind = \"library\"\n"
+        + "entry = \"src/mod.sfn\"\n");
+    fs.writeFile(_lib_root() + "/src/mod.sfn", "import { abs } from \"sfn/math\";\n"
+        + "fn widget_abs(n: number) -> number { return abs(n); }\n"
+        + "export { widget_abs };\n");
+
+    fs.createDirectory(_bin_root() + "/src", true);
+    fs.writeFile(_bin_root() + "/capsule.toml", "[capsule]\n"
+        + "name = \"demo/widgetcli\"\n"
+        + "version = \"0.5.1\"\n"
+        + "description = \"E2E fixture for the binary canonical path\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"src/main.sfn\"\n");
+    fs.writeFile(_bin_root() + "/src/main.sfn", "fn main() ![io] {\n"
+        + "    print(\"widgetcli ok\");\n"
+        + "}\n");
+}
+
 // Run a build, drain stdout/stderr, return exit code.
 fn _run_build(args: string[]) -> int ![io] {
+    _ensure_fixtures();
     let exit = process.run_capture(args, _child_env());
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();

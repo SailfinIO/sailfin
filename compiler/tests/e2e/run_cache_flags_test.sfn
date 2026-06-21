@@ -54,13 +54,18 @@ fn _make_env(test_scratch: string, cache_dir: string) -> string[] ![io] {
     return e;
 }
 
-// Create the fixture capsule under `root`. Returns the absolute path
-// to `src/main.sfn` (the file passed to `sfn run`).
-// Creates a `capsules/sfn` symlink pointing at the repo's in-tree
-// capsules so `sfn/math` resolves locally without network access.
-fn _make_fixture(root: string) -> string ![io] {
+// Materialize the fixture capsule in-tree (idempotent) and return the
+// path to `src/main.sfn` (passed to `sfn run`). The fixture lives under
+// build/ — CWD-relative = repo root — so discover_workspace_root finds the
+// repo's workspace.toml and `sfn/math` resolves through the workspace
+// without a symlink or any hardcoded absolute repo path (the prior
+// `/home/user/...` symlink only existed on one machine and failed in CI).
+// The fixture is read-only and deterministic; per-test cold/warm isolation
+// comes from the per-test SAILFIN_BUILD_CACHE_DIR + SAILFIN_TEST_SCRATCH,
+// not from a fresh fixture dir.
+fn _ensure_fixture() -> string ![io] {
+    let root = "build/sfn-run-cache-flags-test/cap";
     fs.createDirectory(root + "/src", true);
-    fs.createDirectory(root + "/capsules", true);
 
     fs.writeFile(root + "/capsule.toml", "[capsule]\n"
         + "name = \"run-cache-flags-test\"\n"
@@ -76,14 +81,6 @@ fn _make_fixture(root: string) -> string ![io] {
         + "fn main() ![io] {\n"
         + "    if abs(-7) != 7 { print.info(\"FAIL\"); } else { print.info(\"OK\"); }\n"
         + "}\n");
-
-    // Symlink capsules/sfn → repo capsules/sfn.
-    let sfn_link = root + "/capsules/sfn";
-    if !fs.exists(sfn_link) {
-        let _rc = process.run_capture(["ln", "-s", "/home/user/sailfin/capsules/sfn", sfn_link], []);
-        let _ = process.capture_take_stdout();
-        let _ = process.capture_take_stderr();
-    }
 
     return root + "/src/main.sfn";
 }
@@ -114,7 +111,7 @@ test "sfn run <file> still works (no flags)" ![io] {
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";
     fs.createDirectory(test_scratch, true);
-    let main_sfn = _make_fixture(root + "/cap");
+    let main_sfn = _ensure_fixture();
 
     let e = _make_env(test_scratch, cache_dir);
     let exit = process.run_capture([_sfn_bin(), "run", main_sfn], e);
@@ -139,7 +136,7 @@ test "first run prints cold cache summary (misses>=1, stores>=1)" ![io] {
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";
     fs.createDirectory(test_scratch, true);
-    let main_sfn = _make_fixture(root + "/cap");
+    let main_sfn = _ensure_fixture();
 
     let log = _run_with(main_sfn, test_scratch, cache_dir, []);
 
@@ -160,7 +157,7 @@ test "warm run prints warm cache summary (hits>=1, misses=0)" ![io] {
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";
     fs.createDirectory(test_scratch, true);
-    let main_sfn = _make_fixture(root + "/cap");
+    let main_sfn = _ensure_fixture();
 
     // First run to warm both caches.
     let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
@@ -180,7 +177,7 @@ test "sfn run --no-cache prints no '[cache]' summary" ![io] {
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";
     fs.createDirectory(test_scratch, true);
-    let main_sfn = _make_fixture(root + "/cap");
+    let main_sfn = _ensure_fixture();
 
     // Warm the cache first.
     let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
@@ -200,7 +197,7 @@ test "sfn run --cache-trace prints '[cache hit] sfn/math'" ![io] {
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";
     fs.createDirectory(test_scratch, true);
-    let main_sfn = _make_fixture(root + "/cap");
+    let main_sfn = _ensure_fixture();
 
     // Warm the cache first.
     let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
@@ -219,7 +216,7 @@ test "sfn run --clean wipes the cache and rebuilds" ![io] {
     let test_scratch = root + "/scratch";
     let cache_dir = root + "/cache";
     fs.createDirectory(test_scratch, true);
-    let main_sfn = _make_fixture(root + "/cap");
+    let main_sfn = _ensure_fixture();
 
     // Two warm runs to populate the cache.
     let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
