@@ -1,0 +1,127 @@
+// End-to-end test for end-user capsule dependency resolution.
+//
+// Native replacement for the former `test_capsule_build.sh`
+// (test-infra Phase 3, epic #842). Verifies that `sfn build -p`
+// on a project with capsule.toml declaring sfn/math as a dep
+// correctly stages the capsule's import-context, compiles the capsule
+// module, and links everything into a runnable binary — without any
+// text-level inlining.
+//
+// Fixture: build/sfn-capsule-build-test/ (in-tree so that
+// discover_workspace_root finds the repo's workspace.toml, which
+// registers the in-tree capsules/ tree; no symlinks required).
+// Content is deterministic so concurrent parallel runs are safe.
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from
+// an `![io]` test. (#842.)
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build spawns a nested clang + linker, so the child needs PATH.
+// SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
+// so the parallel pool does not collide on build/sailfin.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// The fixture lives at build/sfn-capsule-build-test/ (CWD-relative = repo root).
+// It was created once and is deterministic; concurrent runs read it safely.
+fn _capsule_root() -> string { return "build/sfn-capsule-build-test"; }
+
+// Per-test binary output: SAILFIN_TEST_SCRATCH or /tmp, keyed by tag.
+fn _bin_path(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    return base + "/sfn-capsule-build-" + tag + "-prog";
+}
+
+// ---- Test 1: sfn build -p completes with a capsule dep ----
+test "capsule build: sfn build -p completes with a capsule dep" ![io] {
+    let root = _capsule_root();
+    let out_bin = _bin_path("build");
+
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    assert exit == 0;
+    let _ = out;
+    let _ = err;
+}
+
+// ---- Test 2: binary links and runs using capsule symbols ----
+test "capsule build: binary links and runs using capsule symbols" ![io] {
+    let root = _capsule_root();
+    let out_bin = _bin_path("run");
+
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+    assert fs.exists(out_bin);
+
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert contains(run_out + run_err, "OK");
+}
+
+// ---- Test 3: capsule import-context was staged ----
+// The import context for sfn/math lands at the CWD-relative
+// build/native/import-context/sfn/math/mod.sfn-asm (hardcoded in
+// native_text_path_for_slug; always relative to the runner's CWD = repo root).
+test "capsule build: capsule import-context was staged" ![io] {
+    let root = _capsule_root();
+    let out_bin = _bin_path("ic");
+
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+
+    assert fs.exists("build/native/import-context/sfn/math/mod.sfn-asm");
+}
+
+// ---- Test 4: capsule .ll was produced under the per-capsule tree ----
+// Stage C2b2 routes manifest-declared dep .ll outputs under
+// build/capsules/<scope>/<name>/ir/<rel>.ll.
+test "capsule build: capsule .ll produced under per-capsule tree" ![io] {
+    let root = _capsule_root();
+    let out_bin = _bin_path("ll");
+
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+
+    assert fs.exists("build/capsules/sfn/math/ir/mod.ll");
+}
+
+// ---- Test 5: legacy flat .ll path is no longer used for manifest deps ----
+test "capsule build: legacy flat .ll path is no longer used" ![io] {
+    let root = _capsule_root();
+    let out_bin = _bin_path("legacy");
+
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+
+    assert ! fs.exists("build/sailfin/capsules/sfn__math__mod.ll");
+}

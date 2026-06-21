@@ -1,0 +1,187 @@
+// Pins the LLVM declare/call shape for cross-module `: int` exports (#633).
+//
+// Native replacement for the former `test_cross_module_int_signature.sh`
+// (test-infra Phase 3, epic #842). Uses `sfn emit` to produce `.sfn-asm`
+// and LLVM IR from the fixture files, then asserts on the emitted IR text.
+//
+// Background: a `target == symbol` mirror row in runtime_helpers.sfn
+// (e.g. `number_to_string` with `parameter_types: ["double"]`) used to
+// override the imported function entry in `resolve_call_signature` so the
+// cross-module declare landed as `@sym__<mod>(double)` against an
+// `i64`-typed define — silent ABI mismatch. This test pins BOTH the
+// producer `.sfn-asm` shape AND the importer LLVM IR declare/call shape.
+//
+// Fixtures:
+//   compiler/tests/e2e/fixtures/cross_module_int_signature_shared.sfn (producer)
+//   compiler/tests/e2e/cross_module_int_signature_test.sfn            (importer)
+//
+// The shared fixture's native ASM is staged under the default
+// `build/native/import-context/fixtures/` tree (CWD-relative, repo root)
+// so the importer's LLVM emit can resolve cross-module signatures.
+// Content is deterministic so concurrent parallel runs are safe.
+//
+// NOTE: assert on captured IR text with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
+// `![io]` test. (#842.)
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Paths to the fixture files (relative to the runner's CWD = repo root).
+fn _shared_fixture() -> string {
+    return "compiler/tests/e2e/fixtures/cross_module_int_signature_shared.sfn";
+}
+
+fn _importer_fixture() -> string {
+    return "compiler/tests/e2e/cross_module_int_signature_test.sfn";
+}
+
+// The shared fixture's .sfn-asm must live at
+// build/native/import-context/fixtures/<name>.sfn-asm so the default
+// CWD-relative import-context lookup finds it when emitting the importer.
+// This is the same path `cd $SCRATCH && sfn emit native --module-name
+// fixtures/... -o $SCRATCH/build/native/import-context/fixtures/...` used
+// in the original bash test, but here we write directly into the repo's
+// own build/native/import-context tree (deterministic content is safe
+// under concurrent runs).
+fn _staged_asm_path() -> string {
+    return "build/native/import-context/fixtures/cross_module_int_signature_shared.sfn-asm";
+}
+
+// Per-test LLVM IR output path (under SAILFIN_TEST_SCRATCH or /tmp).
+fn _ll_path(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    return base + "/sfn-xmod-int-sig-" + tag + ".ll";
+}
+
+// Stage the shared fixture's native ASM into build/native/import-context/fixtures/
+// (CWD-relative). Emits only if not already present. Returns the asm path.
+fn _ensure_shared_asm_staged() -> string ![io] {
+    let out = _staged_asm_path();
+    if fs.exists(out) { return out; }
+    // Ensure the directory exists.
+    fs.createDirectory("build/native/import-context/fixtures", true);
+    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "fixtures/cross_module_int_signature_shared", "-o", out, "native", _shared_fixture()], _child_env());
+    let _stdout = process.capture_take_stdout();
+    let _stderr = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return out;
+}
+
+// Emit the importer's LLVM IR. The importer imports from
+// "./fixtures/cross_module_int_signature_shared" so the shared fixture's
+// ASM must already be staged at _staged_asm_path() before this call.
+fn _emit_importer_ll(tag: string) -> string ![io] {
+    let out = _ll_path(tag);
+    if fs.exists(out) { return out; }
+    let exit = process.run_capture([_sfn_bin(), "emit", "--module-name", "cross_module_int_signature_test", "-o", out, "llvm", _importer_fixture()], _child_env());
+    let _stdout = process.capture_take_stdout();
+    let _stderr = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return out;
+}
+
+// ---- Test 1: shared fixture .sfn-asm declares int parameters ----
+// The producer side declares `: int` parameter types for all four exports
+// AND the colliding `number_to_string` (value: int) -> int.
+test "cross-module int signature: shared .sfn-asm declares int params" ![io] {
+    let asm_path = _ensure_shared_asm_staged();
+    assert asm_path.length > 0;
+
+    let asm = fs.readFile(asm_path);
+
+    // At least three .param entries with `type int` (identity + double + nts).
+    let mut int_param_count = 0;
+    let mut pos = 0;
+    loop {
+        let hit = find(asm, ".param value: int", pos);
+        if hit < 0 { break; }
+        int_param_count += 1;
+        pos = hit + 1;
+    }
+    assert int_param_count >= 3;
+
+    // The colliding number_to_string must declare (value: int) -> int.
+    assert contains(asm, ".fn number_to_string(value: int) -> int");
+}
+
+// ---- Test 2: importer IR declares cross-module exports with (i64) params ----
+// Headline #633 assertion: each cross-module declare must carry the exact
+// `(i64...)` parameter list. The module suffix is pinned below; drift in
+// the mangling scheme breaks this test loudly (the right outcome).
+test "cross-module int signature: importer declares (i64) for int exports" ![io] {
+    let _asm = _ensure_shared_asm_staged();
+    assert _asm.length > 0;
+
+    let ll_path = _emit_importer_ll("decl");
+    assert ll_path.length > 0;
+
+    let ll = fs.readFile(ll_path);
+    let suf = "fixtures__cross_module_int_signature_shared";
+
+    // Single-i64 declares.
+    assert contains(ll, "declare i64 @cross_module_int_double__" + suf + "(i64)");
+    assert contains(ll, "declare i64 @cross_module_int_identity__" + suf
+        + "(i64)");
+    assert contains(ll, "declare i64 @number_to_string__" + suf + "(i64)");
+
+    // Two-i64 declare.
+    assert contains(ll, "declare i64 @cross_module_int_sum_pair__" + suf
+        + "(i64, i64)");
+}
+
+// ---- Test 3: importer call sites use (i64) arguments ----
+test "cross-module int signature: call sites use i64 not double" ![io] {
+    let _asm = _ensure_shared_asm_staged();
+    assert _asm.length > 0;
+
+    let ll_path = _emit_importer_ll("call");
+    assert ll_path.length > 0;
+
+    let ll = fs.readFile(ll_path);
+    let suf = "fixtures__cross_module_int_signature_shared";
+
+    // No call site may pass `double` to any of the fixtures.
+    assert ! contains(ll, "@cross_module_int_double__" + suf + "(double");
+    assert ! contains(ll, "@cross_module_int_identity__" + suf + "(double");
+    assert ! contains(ll, "@cross_module_int_sum_pair__" + suf + "(double");
+    assert ! contains(ll, "@number_to_string__" + suf + "(double");
+
+    // The colliding number_to_string call must use (i64 ...).
+    assert contains(ll, "call i64 @number_to_string__" + suf + "(i64 ");
+}
+
+// ---- Test 4: importer does NOT emit the registry-driven (double) declare ----
+// Pre-fix, `render_runtime_helper_declarations` emitted a bare
+// `declare i8* @number_to_string(double)` for the mirror-row. This must
+// NOT appear in the importer's IR.
+test "cross-module int signature: no bare (double) declare for number_to_string" ![io] {
+    let _asm = _ensure_shared_asm_staged();
+    assert _asm.length > 0;
+
+    let ll_path = _emit_importer_ll("nodbl");
+    assert ll_path.length > 0;
+
+    let ll = fs.readFile(ll_path);
+
+    // The stray registry-driven declare must not appear.
+    assert ! contains(ll, "declare i8* @number_to_string(double)");
+}

@@ -1,0 +1,238 @@
+// End-to-end tests for `sfn run` cache flag plumbing (Stage C PR1d).
+//
+// Native replacement for `test_run_cache_flags.sh` (test-infra Phase 3,
+// epic #842). Verifies that `sfn run` honours the same cache contract as
+// `sfn build`:
+//
+//   1. Backwards-compat `sfn run <file>` (no flags) still works.
+//   2. Cold run prints a summary with misses>=1, stores>=1.
+//   3. Warm run prints a summary with hits>=1, misses=0.
+//   4. `--no-cache` suppresses the `[cache]` summary line entirely.
+//   5. `--cache-trace` emits per-module `[cache hit]` lines.
+//   6. `--clean` wipes `<cache_root>/v2/...` before building.
+//
+// The fixture capsule imports `sfn/math` so the module cache has work to
+// do. A symlink `capsules/sfn` is created in the scratch dir via `ln -s`
+// (run as a subprocess) since Sailfin's `fs` surface has no symlink
+// primitive. The compiler resolves capsule deps by walking up from the
+// source file to find `capsule.toml`, then looks for
+// `capsules/<scope>/<name>/` relative to that root.
+//
+// `sfn run` does not support `--work-dir`, so the absolute path to the
+// main sfn file is passed directly; the compiler discovers capsule.toml
+// by walking up the directory tree.
+//
+// Per-test isolation: each test gets its OWN SAILFIN_TEST_SCRATCH
+// (for build artifacts / program.ll) and its OWN SAILFIN_BUILD_CACHE_DIR
+// (for .ll module cache). This prevents cross-test cache contamination and
+// ensures each test's "cold" vs "warm" assertions see only its own runs.
+//
+// NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
+// used from an `![io]` test; output is asserted with `sfn/strings` predicates.
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Build env for sfn run: PATH (clang/linker), HOME, TMPDIR,
+// and per-test SAILFIN_TEST_SCRATCH + SAILFIN_BUILD_CACHE_DIR.
+// Using per-test scratch ensures the runtime .o cache is also cold on
+// the first run (the bash original used a fresh mktemp scratch each time).
+fn _make_env(test_scratch: string, cache_dir: string) -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    e.push("SAILFIN_TEST_SCRATCH=" + test_scratch);
+    e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_dir);
+    return e;
+}
+
+// Create the fixture capsule under `root`. Returns the absolute path
+// to `src/main.sfn` (the file passed to `sfn run`).
+// Creates a `capsules/sfn` symlink pointing at the repo's in-tree
+// capsules so `sfn/math` resolves locally without network access.
+fn _make_fixture(root: string) -> string ![io] {
+    fs.createDirectory(root + "/src", true);
+    fs.createDirectory(root + "/capsules", true);
+
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"run-cache-flags-test\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[dependencies]\n"
+        + "\"sfn/math\" = \"0.1.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n");
+
+    fs.writeFile(root + "/src/main.sfn", "import { abs } from \"sfn/math\";\n"
+        + "fn main() ![io] {\n"
+        + "    if abs(-7) != 7 { print.info(\"FAIL\"); } else { print.info(\"OK\"); }\n"
+        + "}\n");
+
+    // Symlink capsules/sfn → repo capsules/sfn.
+    let sfn_link = root + "/capsules/sfn";
+    if !fs.exists(sfn_link) {
+        let _rc = process.run_capture(["ln", "-s", "/home/user/sailfin/capsules/sfn", sfn_link], []);
+        let _ = process.capture_take_stdout();
+        let _ = process.capture_take_stderr();
+    }
+
+    return root + "/src/main.sfn";
+}
+
+// Run `sfn run [extra_flags...] <main_sfn>` with explicit per-test
+// scratch and cache dirs. Returns the combined stdout+stderr and exit code.
+fn _run_with(main_sfn: string, test_scratch: string, cache_dir: string, extra_flags: string[]) -> string ![io] {
+    let e = _make_env(test_scratch, cache_dir);
+    let mut argv: string[] = [_sfn_bin(), "run"];
+    let mut i = 0;
+    loop {
+        if i >= extra_flags.length { break; }
+        argv.push(extra_flags[i]);
+        i += 1;
+    }
+    argv.push(main_sfn);
+    let _exit = process.run_capture(argv, e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return out + err;
+}
+
+// ---- Test 1: backwards compat — `sfn run <file>` with no flags ----
+test "sfn run <file> still works (no flags)" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-rcf-t1";
+    let test_scratch = root + "/scratch";
+    let cache_dir = root + "/cache";
+    fs.createDirectory(test_scratch, true);
+    let main_sfn = _make_fixture(root + "/cap");
+
+    let e = _make_env(test_scratch, cache_dir);
+    let exit = process.run_capture([_sfn_bin(), "run", main_sfn], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+
+    assert exit == 0;
+    assert find(log, "OK", 0) >= 0;
+}
+
+// ---- Test 2: cold run prints cache summary with misses>=1, stores>=1 ----
+// With a per-test fresh SAILFIN_TEST_SCRATCH, the runtime .o cache is also
+// cold — matching the bash original's mktemp-fresh scratch semantics.
+// The cold summary reports hits=0 for the fresh runtime build, then misses
+// and stores for the sfn/math module. In our fresh per-test scratch, both
+// the .ll module cache and the runtime .o cache start cold.
+test "first run prints cold cache summary (misses>=1, stores>=1)" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-rcf-t2";
+    let test_scratch = root + "/scratch";
+    let cache_dir = root + "/cache";
+    fs.createDirectory(test_scratch, true);
+    let main_sfn = _make_fixture(root + "/cap");
+
+    let log = _run_with(main_sfn, test_scratch, cache_dir, []);
+
+    assert find(log, "OK", 0) >= 0;
+    // Cold run: the [cache] summary line must appear.
+    assert find(log, "[cache]", 0) >= 0;
+    // Cold run: no module was previously cached — misses > 0.
+    assert find(log, "misses=0", 0) < 0;
+    // Cold run: at least one store.
+    assert find(log, "stores=0", 0) < 0;
+}
+
+// ---- Test 3: warm run prints summary with misses=0 ----
+test "warm run prints warm cache summary (hits>=1, misses=0)" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-rcf-t3";
+    let test_scratch = root + "/scratch";
+    let cache_dir = root + "/cache";
+    fs.createDirectory(test_scratch, true);
+    let main_sfn = _make_fixture(root + "/cap");
+
+    // First run to warm both caches.
+    let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
+    // Second run: sfn/math .ll is now cached; runtime .o objects are cached.
+    let log = _run_with(main_sfn, test_scratch, cache_dir, []);
+
+    assert find(log, "OK", 0) >= 0;
+    // Warm run: all modules are now cached → misses=0.
+    assert find(log, "misses=0", 0) >= 0;
+}
+
+// ---- Test 4: --no-cache suppresses the [cache] summary line ----
+test "sfn run --no-cache prints no '[cache]' summary" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-rcf-t4";
+    let test_scratch = root + "/scratch";
+    let cache_dir = root + "/cache";
+    fs.createDirectory(test_scratch, true);
+    let main_sfn = _make_fixture(root + "/cap");
+
+    // Warm the cache first.
+    let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
+    // Run with --no-cache.
+    let log = _run_with(main_sfn, test_scratch, cache_dir, ["--no-cache"]);
+
+    assert find(log, "OK", 0) >= 0;
+    // No [cache] summary line must appear.
+    assert find(log, "[cache]", 0) < 0;
+}
+
+// ---- Test 5: --cache-trace emits per-module [cache hit] lines ----
+test "sfn run --cache-trace prints '[cache hit] sfn/math'" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-rcf-t5";
+    let test_scratch = root + "/scratch";
+    let cache_dir = root + "/cache";
+    fs.createDirectory(test_scratch, true);
+    let main_sfn = _make_fixture(root + "/cap");
+
+    // Warm the cache first.
+    let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
+    // Run with --cache-trace: sfn/math must report a cache hit.
+    let log = _run_with(main_sfn, test_scratch, cache_dir, ["--cache-trace"]);
+
+    assert find(log, "OK", 0) >= 0;
+    assert find(log, "[cache hit] sfn/math", 0) >= 0;
+}
+
+// ---- Test 6: --clean wipes the cache and forces a fresh miss ----
+test "sfn run --clean wipes the cache and rebuilds" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-rcf-t6";
+    let test_scratch = root + "/scratch";
+    let cache_dir = root + "/cache";
+    fs.createDirectory(test_scratch, true);
+    let main_sfn = _make_fixture(root + "/cap");
+
+    // Two warm runs to populate the cache.
+    let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
+    let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
+
+    // Sanity: v2 cache dir must exist.
+    assert fs.exists(cache_dir + "/v2");
+
+    // Run with --clean: wipes the .ll module cache and forces a re-miss.
+    let log = _run_with(main_sfn, test_scratch, cache_dir, ["--clean"]);
+
+    assert find(log, "OK", 0) >= 0;
+    // After --clean the .ll module cache is wiped → at least one miss and store.
+    assert find(log, "[cache]", 0) >= 0;
+    assert find(log, "misses=0", 0) < 0;
+}

@@ -1,0 +1,148 @@
+// End-to-end tests for subprocess env-var isolation in the compiler (#308).
+//
+// Native replacement for `test_subprocess_emit_clean_env.sh` (test-infra
+// Phase 3, epic #842). Post-#308, the debug toggles that were formerly
+// `.build/sailfin/.foo` flag files now live in env vars
+// (`SAILFIN_TRACE_EMIT`, `SAILFIN_SKIP_TYPECHECK`, etc.). The compiler's
+// `_compile_runtime_sfn_sources` wraps child invocations to clear each
+// toggle so the child runs silently. This test pins:
+//
+//   1. SAILFIN_SKIP_TYPECHECK=1 triggers the toggle on `sfn emit llvm`
+//      (the `emit-llvm-file: skipping typecheck` notice appears).
+//   2. The toggle is OFF by default (unset) and when set to "0" or "false".
+//   3. env.get() reads env vars from the process env correctly:
+//      set vars are visible, missing vars return empty string.
+//
+// Note: The original script's test 2 (child env cleared via `sh -c VAR= child`)
+// and test 5 (legacy `build/sailfin/.skip_typecheck` file probe) are not
+// ported: test 2 requires a cwd-relative child binary + env-inheritance
+// semantics through process.run that are not faithfully testable without
+// the `sh -c` shim pattern; test 5 probes a cwd-relative path
+// (`build/sailfin/.skip_typecheck`) that is a global side-effect unsafe
+// for parallel runs and requires no-chdir isolation.
+//
+// NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
+// used from an `![io]` test; output is asserted with `sfn/strings` predicates.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Base child env for sfn emit invocations: PATH so clang is found,
+// SAILFIN_TEST_SCRATCH for per-invocation isolation.
+fn _base_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Write a minimal sfn file that compiles cleanly and return its path.
+fn _write_typed_sfn(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let path = base + "/sfn-emit-env-" + tag + ".sfn";
+    fs.writeFile(path, "fn main() ![io] {\n    print.info(\"typed\");\n}\n");
+    return path;
+}
+
+// ---- Test 1: SAILFIN_SKIP_TYPECHECK=1 triggers the toggle ----
+// The `emit-llvm` pipeline must print the `skipping typecheck` notice when
+// SAILFIN_SKIP_TYPECHECK=1.
+test "SAILFIN_SKIP_TYPECHECK=1 triggers the skip-typecheck toggle (#308)" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let src = _write_typed_sfn("skip_on");
+    let out_ll = base + "/sfn-emit-env-skip_on.ll";
+
+    let mut e = _base_env();
+    e.push("SAILFIN_SKIP_TYPECHECK=1");
+
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", src], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+
+    assert exit == 0;
+    assert find(log, "skipping typecheck", 0) >= 0;
+}
+
+// ---- Test 2: toggle is OFF by default (env var unset) ----
+test "SAILFIN_SKIP_TYPECHECK unset: typecheck is NOT skipped (#308)" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let src = _write_typed_sfn("skip_default");
+    let out_ll = base + "/sfn-emit-env-skip_default.ll";
+
+    // _base_env() does NOT include SAILFIN_SKIP_TYPECHECK — it is absent.
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", src], _base_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+
+    assert exit == 0;
+    assert find(log, "skipping typecheck", 0) < 0;
+}
+
+// ---- Test 3: toggle is OFF when set to "0" ----
+test "SAILFIN_SKIP_TYPECHECK=0: typecheck is NOT skipped (#308)" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let src = _write_typed_sfn("skip_zero");
+    let out_ll = base + "/sfn-emit-env-skip_zero.ll";
+
+    let mut e = _base_env();
+    e.push("SAILFIN_SKIP_TYPECHECK=0");
+
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", src], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+
+    assert exit == 0;
+    assert find(log, "skipping typecheck", 0) < 0;
+}
+
+// ---- Test 4: toggle is OFF when set to "false" ----
+test "SAILFIN_SKIP_TYPECHECK=false: typecheck is NOT skipped (#308)" ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let src = _write_typed_sfn("skip_false");
+    let out_ll = base + "/sfn-emit-env-skip_false.ll";
+
+    let mut e = _base_env();
+    e.push("SAILFIN_SKIP_TYPECHECK=false");
+
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", src], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+
+    assert exit == 0;
+    assert find(log, "skipping typecheck", 0) < 0;
+}
+
+// ---- Test 5: env.get distinguishes set vs absent env vars ----
+// `env.get` returns the value when set and an empty string when absent.
+// This underpins `_env_flag` (cli_commands_utils.sfn) — the read side of
+// the toggle migration.
+test "env.get: set var returns value, absent var returns empty (#308)" ![io] {
+    // The test runner's own env: SAILFIN_TEST_SCRATCH is set when the
+    // runner is invoked with it, HOME is always set.
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    // If SAILFIN_TEST_SCRATCH is set (as expected in CI / our invocation),
+    // it must be non-empty.
+    if scratch.length > 0 { assert find(scratch, "/", 0) >= 0; }
+    // A variable that is never set in any reasonable environment.
+    let absent = env.get("SAILFIN_PROBE_DEFINITELY_ABSENT_XYZ_12345");
+    assert absent.length == 0;
+}

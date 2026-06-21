@@ -1,0 +1,182 @@
+// End-to-end regression for #1121: `sfn test <dir> --json` over a
+// MULTI-FILE directory.
+//
+// Native replacement for `test_runner_json_multifile.sh` (test-infra
+// Phase 3, epic #842). Before the fix, `--json` forced every discovered
+// test file through ONE in-process resolver pass (the
+// `test_files.length > 1 && !json_output` guard in
+// `cli_commands.sfn:handle_test_command` skipped the per-file subprocess
+// isolation whenever `--json` was set). On the real suite that single-
+// process path OOM/segfaulted under the 8 GB cap and hit resolver-union
+// conflicts, so the tee'd jsonl came out empty.
+//
+// The fix routes multi-file `--json` runs through the same per-file
+// subprocess path the human path uses, but the parent aggregates the
+// per-file results back into ONE coherent jsonl document so the
+// documented single-frame contract (one `start`, every per-test event,
+// one `summary`) holds regardless of how many files ran. This test pins:
+//
+//   1. A 2-file `--json` run exits 0 and every stdout line is valid JSON.
+//   2. The stream carries `schema_version`:1 (on the `start` event).
+//   3. Single-frame contract: exactly one `start` and one `summary`.
+//   4. The single `start` total and `summary` passed are run-level
+//      aggregates across all files.
+//   5. A failing test propagates a non-zero exit, stays single-frame
+//      and valid jsonl, and records the failure in the aggregate summary.
+//
+// NOTE: the `sfn/test` `expect_*` matchers are `![pure]` and cannot be
+// used from an `![io]` test; output is asserted with `sfn/strings` predicates.
+// JSON structure is validated by scanning for the known field patterns
+// rather than full jq-style parsing.
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build spawns nested clang + linker, so the child needs PATH.
+// SAILFIN_TEST_SCRATCH routes the program.ll cache per invocation so
+// the parallel pool does not collide on build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Create a scratch directory with two passing test files (alpha: 2 tests,
+// beta: 1 test). Returns the directory path.
+fn _make_pass_dir(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-runner-json-mf-pass-" + tag;
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/alpha_test.sfn", "test \"alpha: one\" { assert 1 + 1 == 2; }\n"
+        + "test \"alpha: two\" { assert 2 * 3 == 6; }\n");
+    fs.writeFile(dir + "/beta_test.sfn", "test \"beta: one\" { assert 4 - 1 == 3; }\n");
+    return dir;
+}
+
+// Create a scratch directory with one passing and one failing test file.
+fn _make_fail_dir(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-runner-json-mf-fail-" + tag;
+    fs.createDirectory(dir, true);
+    fs.writeFile(dir + "/ok_test.sfn", "test \"ok: passes\" { assert 1 == 1; }\n");
+    fs.writeFile(dir + "/bad_test.sfn", "test \"bad: fails\" { assert 1 == 2; }\n");
+    return dir;
+}
+
+// Count occurrences of `needle` in `haystack` using sfn/strings::find.
+fn _count_occurrences(haystack: string, needle: string) -> int {
+    let mut count = 0;
+    let mut start = 0;
+    loop {
+        let pos = find(haystack, needle, start);
+        if pos < 0 { break; }
+        count += 1;
+        start = pos + 1;
+    }
+    return count;
+}
+
+// ---- Test 1: multi-file --json exits 0, stream is valid jsonl ----
+// Every line of stdout must start with `{` (JSON object) — no plain-
+// text crash output, no empty lines, no partial lines.
+test "multi-file 'sfn test <dir> --json' exits 0 with valid jsonl (#1121)" ![io] {
+    let dir = _make_pass_dir("t1");
+    let exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], _child_env());
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    assert exit == 0;
+    // The stream must contain at least the start and summary events.
+    assert find(out, "\"event\":\"start\"", 0) >= 0;
+    assert find(out, "\"event\":\"summary\"", 0) >= 0;
+    // Every non-blank line must look like a JSON object (starts with `{`).
+    let mut line_start: int = 0;
+    loop {
+        let nl = find(out, "\n", line_start);
+        let line_end: int = if nl >= 0 { nl } else { out.length as int };
+        let line_len: int = line_end - line_start;
+        if line_len > 0 {
+            // Slice: check that the character at line_start is `{`
+            let line = out.substring(line_start, line_end);
+            assert find(line, "{", 0) == 0;
+        }
+        if nl < 0 { break; }
+        line_start = nl + 1;
+    }
+}
+
+// ---- Test 2: schema_version 1 is present on the start event ----
+test "stream carries schema_version 1 events (#1121)" ![io] {
+    let dir = _make_pass_dir("t2");
+    let exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], _child_env());
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    assert exit == 0;
+    assert find(out, "\"schema_version\":1", 0) >= 0;
+}
+
+// ---- Test 3: single-frame contract ----
+// A multi-file `--json` invocation must emit ONE coherent document: one
+// `start` and one `summary` for the whole run (not one pair per file).
+test "single-frame: exactly 1 start + 1 summary for multi-file run (#1121)" ![io] {
+    let dir = _make_pass_dir("t3");
+    let exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], _child_env());
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    assert exit == 0;
+    assert _count_occurrences(out, "\"event\":\"start\"") == 1;
+    assert _count_occurrences(out, "\"event\":\"summary\"") == 1;
+}
+
+// ---- Test 4: aggregate totals on the single start/summary ----
+// alpha (2) + beta (1) = 3 tests total, all passing.
+// Check for "total":3 in the start event and "passed":3 in the summary.
+test "single start.total and summary.passed are run-level aggregates (3) (#1121)" ![io] {
+    let dir = _make_pass_dir("t4");
+    let exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], _child_env());
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    assert exit == 0;
+    // The start event contains "total":3.
+    assert find(out, "\"total\":3", 0) >= 0;
+    // The summary event contains "passed":3.
+    assert find(out, "\"passed\":3", 0) >= 0;
+}
+
+// ---- Test 5: a failing test propagates non-zero AND stays valid jsonl ----
+test "failing test: non-zero exit, stream stays valid jsonl (#1121)" ![io] {
+    let dir = _make_fail_dir("t5");
+    let exit = process.run_capture([_sfn_bin(), "test", dir, "--json"], _child_env());
+    let out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+
+    // Must exit non-zero when a test fails.
+    assert exit != 0;
+    // Stream must still be well-formed (not empty/garbled).
+    assert find(out, "\"event\":\"start\"", 0) >= 0;
+    assert find(out, "\"event\":\"summary\"", 0) >= 0;
+    // Still a single frame even when a file fails.
+    assert _count_occurrences(out, "\"event\":\"start\"") == 1;
+    assert _count_occurrences(out, "\"event\":\"summary\"") == 1;
+    // The aggregate summary records at least 1 failure.
+    // "failed":1 or higher (not "failed":0).
+    assert find(out, "\"failed\":0", 0) < 0;
+    // At least one test event has status != "pass".
+    assert find(out, "\"status\":\"fail\"", 0) >= 0;
+}
