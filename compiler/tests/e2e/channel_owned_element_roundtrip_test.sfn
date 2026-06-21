@@ -16,12 +16,13 @@
 // the first word is the regression guard.
 //
 // Scope note (#1466): the by-value struct element ABI is wired through the
-// channel's element KIND, which is carried on the LOCAL binding of a
-// `let ch = channel:<struct>(N)`. A bare `channel` *parameter* does not yet
-// carry that kind (that needs channel element types threaded through the
-// type system — the worker-ctx ABI follow-up), so this test keeps the
-// channel local and its send/receive in one scope. The companion test's
-// cross-function struct case uses the by-POINTER bare-channel contract.
+// channel's element KIND. It is carried on the LOCAL binding of a
+// `let ch = channel:<struct>(N)` AND threaded across a function boundary
+// through a `channel<struct>` / `channel:<struct>` PARAMETER type, so both
+// the inline form and the producer/consumer-function form round-trip the
+// full-width element. (A bare `channel` parameter still uses the
+// pointer-sized / by-POINTER contract — the companion test's cross-function
+// struct case.)
 //
 // Single-threaded: a buffered channel does not block while count < capacity,
 // so send-then-receive on one thread is deterministic.
@@ -96,5 +97,38 @@ test "channel owned element: 32-byte by-value struct round-trips all fields (#14
         + "    ch.close();\n"
         + "}");
     // 1 + 20 + 300 + 4000 = 4321 — every field survived intact.
+    assert contains(out, "packed: 4321");
+}
+
+// ── wide by-value element across a producer/consumer function pair ────
+// The element KIND threads through a `channel<struct>` PARAMETER type, so
+// the by-value full-width element ABI holds across a function boundary —
+// not just inline. Both sides take `ch: channel<OB>`; the caller creates
+// the channel with the matching typed constructor.
+test "channel owned element: by-value struct round-trips across channel<T> fn params (#1466)" ![io] {
+    let out = _run_and_capture("wide_xfn_roundtrip", "struct OB {\n"
+        + "    a: int;\n"
+        + "    b: int;\n"
+        + "    c: int;\n"
+        + "    d: int;\n"
+        + "}\n\n"
+        + "fn mk() -> OB {\n"
+        + "    return OB { a: 1, b: 2, c: 3, d: 4 };\n"
+        + "}\n\n"
+        + "fn produce(ch: channel<OB>) ![io] {\n"
+        + "    let buf: OB = mk();\n"
+        + "    ch.send(buf);\n"
+        + "}\n\n"
+        + "fn consume(ch: channel<OB>) -> int ![io] {\n"
+        + "    let got: OB = ch.receive();\n"
+        + "    return got.a + got.b * 10 + got.c * 100 + got.d * 1000;\n"
+        + "}\n\n"
+        + "fn main() ![io] {\n"
+        + "    let ch = channel:OB(2);\n"
+        + "    produce(ch);\n"
+        + "    let packed: int = consume(ch);\n"
+        + "    print.info(\"packed: \" + number_to_string(packed));\n"
+        + "    ch.close();\n"
+        + "}");
     assert contains(out, "packed: 4321");
 }
