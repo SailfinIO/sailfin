@@ -100,6 +100,7 @@ import {
     is_identifier_char
 } from "./typecheck_types";
 import { render_diagnostic } from "./diagnostics_render";
+import { LocalBinding, analyze_lambda } from "./typecheck_captures";
 
 // One tracked binding. `state` is the lattice: "owned" on entry,
 // "moved" once a move site consumes it, "freed" once a disposer consumes
@@ -432,6 +433,43 @@ fn _consume_call_args(arguments: Expression[], scope: OwnershipScope, extern_cal
             }
             next = _consume_identifier(next, argument.name, argument.span, false);
         } else { next = _scope_after_expression(argument, next); }
+        index += 1;
+    }
+    return next;
+}
+
+// Consume a spawn-family closure's captured owned bindings as moves
+// (issue #1220). A `spawn`/`parallel`/`serve` worker outlives the
+// spawning scope, so an owned value the closure captures genuinely
+// escapes the sender — the sender binding must lose it (`Owned ->
+// Moved`), and any later use on the sender is then use-after-move
+// (`E0901`). This is the static complement to #1094's RC-promote
+// drop-emission: drops reclaim the memory, this proves no live
+// aliased use remains on the sender.
+//
+// The capture set is the lambda's free variables, computed by reusing
+// `analyze_lambda` from `typecheck_captures` (the same proven walk
+// lambda-lowering relies on) with an empty outer scope so `.free`
+// surfaces every name the body references that is not bound inside the
+// lambda (params, body-local `let`s, for-targets, nested-lambda params
+// are all excluded; the list is deduped). Each captured name that
+// resolves to an owned live binding in the parent scope is consumed via
+// `_consume_identifier`; free names that are not owned bindings (a
+// callee function name, a copyable value) resolve to nothing and are
+// harmless no-ops.
+//
+// Crucially this is gated at the spawn site, NOT the `Lambda` arm: an
+// ordinary lambda (e.g. `array.map(() -> buf.len())`) stays isolated
+// and treats captures as reads, preserving lambda-scope isolation. Only
+// spawn-family escapes lift capture-moves back into the parent.
+fn _consume_spawn_captures(scope: OwnershipScope, lambda: Expression, span: SourceSpan?) -> OwnershipScope {
+    let empty: LocalBinding[] = [];
+    let result = analyze_lambda(empty, lambda);
+    let mut next = scope;
+    let mut index: int = 0;
+    loop {
+        if index >= result.free.length { break; }
+        next = _consume_identifier(next, result.free[index], span, false);
         index += 1;
     }
     return next;
@@ -896,7 +934,16 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
         return _scope_after_expression(expression.operand, scope);
     }
     if expression.variant == "Spawn" {
-        return _scope_after_expression(expression.operand, scope);
+        // A spawned closure captures owned values as moves (#1220). A
+        // bare-fn spawn (`spawn foo(buf)`) is an ordinary call whose
+        // bare-identifier args already move via `_consume_call_args`.
+        let operand = expression.operand;
+        if operand != null {
+            if operand.variant == "Lambda" {
+                return _consume_spawn_captures(scope, operand, expression.span);
+            }
+        }
+        return _scope_after_expression(operand, scope);
     }
     if expression.variant == "Await" {
         return _scope_after_expression(expression.operand, scope);
@@ -905,17 +952,29 @@ fn _scope_after_expression(expression: Expression?, scope: OwnershipScope) -> Ow
         return _scope_after_expression(expression.capacity, scope);
     }
     if expression.variant == "Parallel" {
+        // Each task is spawn-family: a directly-supplied closure captures
+        // owned values as moves; a `spawn`-wrapped task routes through the
+        // `Spawn` arm above. Both lift capture-moves into this scope.
         let mut next = scope;
         let mut index: int = 0;
         loop {
             if index >= expression.tasks.length { break; }
-            next = _scope_after_expression(expression.tasks[index], next);
+            let task = expression.tasks[index];
+            if task.variant == "Lambda" {
+                next = _consume_spawn_captures(next, task, expression.span);
+            } else { next = _scope_after_expression(task, next); }
             index += 1;
         }
         return next;
     }
     if expression.variant == "Serve" {
-        let next = _scope_after_expression(expression.handler, scope);
+        // The accept-loop handler is a spawn-family escape: an owned value
+        // it captures crosses into per-connection workers and is moved.
+        let mut next = scope;
+        let handler = expression.handler;
+        if handler.variant == "Lambda" {
+            next = _consume_spawn_captures(next, handler, expression.span);
+        } else { next = _scope_after_expression(handler, next); }
         return _scope_after_expression(expression.port, next);
     }
     return scope;

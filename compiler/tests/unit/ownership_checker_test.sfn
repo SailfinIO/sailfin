@@ -16,15 +16,15 @@
 //   - E5: use-after-move (`E0901`) and second-live-binding (`E0904`)
 //     diagnostics with both spans, plus a clean move-and-consume
 //     negative case
+import { parse_program } from "../../src/parser/mod";
 import {
-    OwnershipBinding,
-    analyze_program_ownership,
     binding_state,
     check_ownership,
+    OwnershipBinding,
     mark_binding_moved,
-    run_ownership_checker
+    run_ownership_checker,
+    analyze_program_ownership
 } from "../../src/ownership_checker";
-import { parse_program } from "../../src/parser/mod";
 
 test "ownership: dormant pass emits no warnings" ![io] {
     let source = "fn main() ![io] {\n    let x = 1;\n    let y = x;\n    print.info(\"hi\");\n}\n";
@@ -429,4 +429,91 @@ test "ownership: unconsumed block-local Linear let emits E0907" ![io] {
     assert warnings.length == 1;
     assert warnings[0].code == "E0907";
     assert warnings[0].binding_name == "w";
+}
+
+// -------------------------------------------------------------------
+// E11 (#1220): channel-send / spawn-family capture as ownership moves.
+// A spawn/parallel/serve worker outlives the spawning scope, so an owned
+// value the closure captures escapes the sender and is moved; a later use
+// on the sender is then use-after-move (E0901). This is the static
+// complement to #1094's RC-promote drop-emission. channel-send of a bare
+// owned identifier already moves via the generic call-argument path; the
+// test below locks that against future refactors.
+// -------------------------------------------------------------------
+test "ownership: spawn-capture of an owned value then reuse emits E0901" ![io] {
+    // `buf` is captured by the spawned closure (a move); the post-spawn
+    // `sink(buf)` is use-after-move.
+    let source = "fn sink(b: OwnedBuf) -> int {\n    return 1;\n}\n\nfn g(buf: OwnedBuf) -> int {\n    let f = spawn fn() -> int { return sink(buf); };\n    return sink(buf);\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0901";
+    assert warnings[0].severity == "error";
+    assert warnings[0].binding_name == "buf";
+}
+
+test "ownership: spawn move-and-receive (no later use) compiles clean" ![io] {
+    // The owned value is captured by the spawn and never touched again on
+    // the sender — the move-and-receive path the issue requires to compile.
+    let source = "fn sink(b: OwnedBuf) -> int {\n    return 1;\n}\n\nfn g(buf: OwnedBuf) -> int {\n    let f = spawn fn() -> int { return sink(buf); };\n    return 0;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 0;
+    assert run_ownership_checker(program) == 0;
+}
+
+test "ownership: non-spawn lambda capture stays a read (no false move)" ![io] {
+    // The capture-move lift is gated at the spawn site, NOT the Lambda arm:
+    // a plain lambda passed to a higher-order call captures `buf` as a read,
+    // so the post-call `sink(buf)` is the FIRST consume and is clean. Guards
+    // the lambda-isolation invariant against the spawn rule over-firing.
+    let source = "fn sink(b: OwnedBuf) -> int {\n    return 1;\n}\n\nfn mapper(f: () -> int) -> int {\n    return f();\n}\n\nfn h(buf: OwnedBuf) -> int {\n    let r = mapper(fn() -> int { return sink(buf); });\n    return sink(buf);\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 0;
+    assert run_ownership_checker(program) == 0;
+}
+
+test "ownership: channel-send of an owned value then reuse emits E0901" ![io] {
+    // `ch.send(buf)` is a generic call whose bare-identifier argument moves;
+    // the later `sink(buf)` is use-after-move. Locks the existing behavior.
+    let source = "fn sink(b: OwnedBuf) -> int {\n    return 1;\n}\n\nfn f(buf: OwnedBuf) -> int {\n    let ch = channel<int>(1);\n    ch.send(buf);\n    return sink(buf);\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0901";
+    assert warnings[0].binding_name == "buf";
+}
+
+test "ownership: double spawn-capture of the same owned value emits E0901" ![io] {
+    // The first spawn moves `buf`; the second captures an already-moved
+    // value — use-after-move.
+    let source = "fn sink(b: OwnedBuf) -> int {\n    return 1;\n}\n\nfn g(buf: OwnedBuf) -> int {\n    let f1 = spawn fn() -> int { return sink(buf); };\n    let f2 = spawn fn() -> int { return sink(buf); };\n    return 0;\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0901";
+    assert warnings[0].binding_name == "buf";
+}
+
+test "ownership: parallel task capture of an owned value then reuse emits E0901" ![io] {
+    // A `parallel` task closure capturing `buf` moves it; the post-parallel
+    // `sink(buf)` is use-after-move.
+    let source = "fn sink(b: OwnedBuf) -> int {\n    return 1;\n}\n\nfn g(buf: OwnedBuf) -> int {\n    let r = parallel [fn() -> int { return sink(buf); }];\n    return sink(buf);\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0901";
+    assert warnings[0].binding_name == "buf";
+}
+
+test "ownership: serve handler capture of an owned value then reuse emits E0901" ![io] {
+    // The `serve` accept-loop handler captures `buf` into per-connection
+    // workers (a move); the post-serve `sink(buf)` is use-after-move.
+    let source = "fn sink(b: OwnedBuf) -> int {\n    return 1;\n}\n\nfn g(buf: OwnedBuf) -> int {\n    let s = serve(fn() -> int { return sink(buf); });\n    return sink(buf);\n}\n";
+    let program = parse_program(source);
+    let warnings = check_ownership(program);
+    assert warnings.length == 1;
+    assert warnings[0].code == "E0901";
+    assert warnings[0].binding_name == "buf";
 }

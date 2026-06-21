@@ -135,6 +135,15 @@ diagnostics actionable).
 Phase U. See [Ownership Enforcement](/docs/reference/preview/ownership-enforcement/)
 for the current per-phase status.
 
+**Crossing a thread boundary is a move.** A `spawn`, `parallel`, or `serve`
+worker outlives the scope that launched it, so an owned value its closure
+captures genuinely escapes the sender — the capture is a move, and using the
+captured value again on the sender is `E0901`. Sending an owned value over a
+channel (`ch.send(buf)`) is likewise a move. This means an owned value cannot be
+left aliased across a thread boundary: the data-race hazard of a shared mutable
+alias is eliminated structurally. An *ordinary* (non-spawn) lambda, by contrast,
+captures by read and does not consume the value.
+
 ## Expansion path (the model is a floor, not a ceiling)
 
 The 1.0 subset is the **first rung of a deliberately extensible model** — Sailfin
