@@ -124,7 +124,7 @@ lexer (lexer.sfn) -> parser (parser.sfn) -> AST (ast.sfn) -> type check (typeche
 | `compiler/src/emit_native.sfn` | `.sfn-asm` emitter |
 | `compiler/src/llvm/lowering/entrypoints.sfn` | LLVM lowering entry |
 | `runtime/prelude.sfn` | Runtime library |
-| `runtime/native/` | C runtime (to be replaced) |
+| `runtime/` | Runtime capsule root (`runtime/capsule.toml`; Sailfin sources under `runtime/sfn/` and `runtime/prelude.sfn`) |
 
 ## Implementation Process
 

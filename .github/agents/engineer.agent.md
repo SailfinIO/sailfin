@@ -66,7 +66,7 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 | `compiler/src/emit_native.sfn` | `.sfn-asm` emitter |
 | `compiler/src/llvm/lowering/entrypoints.sfn` | LLVM lowering entry |
 | `runtime/prelude.sfn` | Runtime library |
-| `runtime/native/` | C runtime (to be replaced) |
+| `runtime/` | Runtime capsule root (`runtime/capsule.toml`; Sailfin sources under `runtime/sfn/` and `runtime/prelude.sfn`) |
 
 ## Orchestration & Handoff
 

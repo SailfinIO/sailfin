@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-06-19. Seed pinned to `0.7.0-alpha.39` (`.seed-version`);
+Updated: 2026-06-21. Seed pinned to `0.7.0-alpha.39` (`.seed-version`);
 the compiler version source of truth is `compiler/capsule.toml`.
 
 This document is the **current-state source of truth**: what ships today,
@@ -177,11 +177,12 @@ Capsules ship under `capsules/sfn/` and are imported by bare name
 ## Runtime (Current)
 
 - The binary's entry point is the Sailfin-emitted `@main` (M5, #451); no C
-  code participates in startup. Remaining C helpers (strings, arrays,
-  exceptions, the C arena, crypto, `sfn_*` trampolines) live under
-  `runtime/native/src/` and are linked into the compiler binary; **M3 ports
-  the ~90 remaining ABI functions into `runtime/sfn/` and then deletes
-  `runtime/native/` — a hard 1.0 prerequisite.**
+  code participates in startup. **`runtime/native/` is deleted (#822).** The
+  runtime capsule root is now `runtime/` (manifest at `runtime/capsule.toml`;
+  `kind = "runtime"`, `name = "sfn/runtime-native"`). All Sailfin runtime
+  sources live under `runtime/sfn/` and `runtime/prelude.sfn`; `ll-sources` is
+  now empty. `runtime/ir/windows_stubs.ll` (moved from `runtime/native/ir/`)
+  is used only by the `ci-cross-windows` Makefile bridge.
 - The native CLI locates a bundled runtime next to the executable
   (`SAILFIN_RUNTIME_ROOT` override). No Python shims remain.
 - String concat chains lower to `string_append` (realloc in-place extend)

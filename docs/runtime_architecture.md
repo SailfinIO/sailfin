@@ -281,11 +281,10 @@
 >   unblocked.
 
 This document is the architectural blueprint for the Sailfin-native runtime that
-will replace the C runtime (`runtime/native/`) before the 1.0 release. It
+replaced the C runtime (`runtime/native/`, deleted 2026-06-21 in #822). It
 describes system structure, subsystem designs, compiler integration requirements,
-a sequenced milestone plan, and open decisions. It is intended to be
-implementation-ready: someone picking up M1 should be able to read this doc and
-know what to build, in what order, and what tests to write.
+a sequenced milestone plan, and open decisions. The runtime capsule root is now
+`runtime/` (manifest at `runtime/capsule.toml`).
 
 **Invariant: zero C source code in the 1.0 toolchain.** The shipped artifact is
 a Sailfin compiler linked against a Sailfin runtime linked against platform
@@ -295,9 +294,10 @@ modules — the compiler emits LLVM `declare` directives, the linker resolves
 them against platform libraries at link time. This is the Rust `std` model:
 extern declarations in the language, not a hand-written C bridge.
 
-The sole exception is the M0.5 arena-in-C (`runtime/native/src/sailfin_arena.c`),
-which is an explicitly disposable temporary deleted at M3. No other C source file
-is created at any phase.
+The M0.5 arena-in-C (`runtime/native/src/sailfin_arena.c`) was the sole
+designed exception — an explicitly disposable temporary deleted at M3 alongside
+the rest of `runtime/native/` (#822). No other C source file was created at any
+phase.
 
 ---
 
@@ -2098,16 +2098,16 @@ typed `Channel<T>`.
 
 **Status:** Shipped. The compiler emits the `@main(i32, i8**)` entry
 point directly; `native_driver.c` and its Windows MinGW cross-compile
-rules have been deleted. The remaining items below (delete
-`runtime_globals.ll`, drop the empty directory) are folded into M3.
+rules have been deleted. `runtime_globals.ll` (comments-only) and the
+`runtime/native/` directory were deleted in #822 (2026-06-21).
 
 **Deliverables:**
 1. Sailfin-native CLI entry point replaces `native_driver.c`. ✅
 2. Subcommand dispatch (`run`, `emit`, `test`, `build`, `init`, etc.) is
    implemented in Sailfin. ✅
 3. Delete `runtime/native/src/native_driver.c`. ✅
-4. Delete `runtime/native/ir/runtime_globals.ll`. (M3)
-5. `runtime/native/` directory is empty or removed entirely. (M3)
+4. Delete `runtime/native/ir/runtime_globals.ll`. ✅ (deleted with `runtime/native/` — comments-only file)
+5. `runtime/native/` directory is empty or removed entirely. ✅ (deleted 2026-06-21, #822)
 
 **Fast-fail criteria:**
 1. `build/native/sailfin run examples/basics/hello-world.sfn` works without
@@ -2291,7 +2291,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 | `sailfin_adapter_fs_read_file` | `sfn_fs_read_file` | M3 — ✓ #911 |
 | `sailfin_adapter_fs_write_file` | `sfn_fs_write_file` | M3 — ✓ #911 |
 | `sailfin_runtime_set/has/clear_exception` | frame-based `sfn_exception_*` path (M2.7b, #404) | M2 — `set/has/clear` descriptor rows retained for the Throw/Try declare lists (seed-compat); C symbols stay exported until M3.9 |
-| `sailfin_runtime_throw/try_enter/try_leave/take_exception` | `sfn_throw`/`sfn_take_exception` (frame-based, M2.7b #404) | M2 — **legacy descriptor rows removed (#918)**: dead since M2.7b (no live call emit site), ABI-mismatched so dropped not flipped. Backing C symbols stay exported in `runtime/native/` for seed-built IR until the M3.9 seed cut. |
+| `sailfin_runtime_throw/try_enter/try_leave/take_exception` | `sfn_throw`/`sfn_take_exception` (frame-based, M2.7b #404) | M2 — **legacy descriptor rows removed (#918)**: dead since M2.7b (no live call emit site), ABI-mismatched so dropped not flipped. Backing C symbols were in `runtime/native/` (now deleted, #822). |
 | `sailfin_runtime_spawn_*` | `sfn_spawn` | M4 |
 | `sailfin_runtime_await_*` | `sfn_await` | M4 |
 | `sailfin_runtime_channel` | `sfn_channel_create` | M4 |
@@ -2353,7 +2353,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 
 ### M5 (Native CLI + Driver) — Shipped 2026-05-25 (#451)
 - `runtime/native/src/native_driver.c` (deleted ✅)
-- `runtime/native/ir/runtime_globals.ll` (deferred to M3)
+- `runtime/native/ir/runtime_globals.ll` (deleted ✅ with `runtime/native/`, #822)
 - `compiler/src/cli_main.sfn` (now the true entrypoint via the Sailfin-emitted `@main`)
 - `compiler/src/cli_main.sfn` C-driver compile step (removed ✅)
 
@@ -2382,7 +2382,7 @@ sole exception is the M0.5 arena in C, which is explicitly disposable.
 | CLI / driver (M5) | No | Pure Sailfin; argv is handed in as `SfnArray<SfnString>` |
 | Crypto (SHA-256, base64) | No | Pure Sailfin in `runtime/sfn/crypto.sfn` |
 
-**Temporary exceptions (deleted by M3 / M5):**
+**Temporary exceptions — all deleted:**
 
 | File | Purpose | Deleted at |
 |---|---|---|
@@ -2392,12 +2392,12 @@ sole exception is the M0.5 arena in C, which is explicitly disposable.
 | `runtime/native/src/sailfin_base64.c` | Base64 helper | M3 (moved to `runtime/sfn/crypto.sfn`) |
 | `runtime/native/include/sailfin_runtime.h` | Current C runtime header | M3 |
 | `runtime/native/src/native_driver.c` | CLI entrypoint | **Deleted 2026-05-25 in M5 (#451)** |
-| `runtime/native/ir/runtime_globals.ll` | LLVM stub | M3 |
+| `runtime/native/ir/runtime_globals.ll` | LLVM stub (comments-only) | **Deleted 2026-06-21 (#822)** |
 
 The Sailfin-emitted `@main` (M5) replaced `native_driver.c`. The
-remaining helpers above port to Sailfin during M3; at end-of-M3,
-`runtime/native/` is empty and removed and every line of Sailfin
-toolchain source is `.sfn`.
+`runtime/native/` directory is now **fully deleted (#822, 2026-06-21)**.
+The runtime capsule root is `runtime/` (manifest at `runtime/capsule.toml`).
+Every line of Sailfin toolchain source is `.sfn`.
 
 ---
 
