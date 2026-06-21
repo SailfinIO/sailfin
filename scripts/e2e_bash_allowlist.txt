@@ -32,7 +32,6 @@ test_escape_promotion_boundaries.sh
 test_exe_path_reader.sh
 test_fn_reference_pthread.sh
 test_llms_txt_sync.sh
-test_lock.sh
 test_lowering_no_bare_runtime_emissions.sh
 test_make_report_contract.sh
 test_make_result_contract.sh

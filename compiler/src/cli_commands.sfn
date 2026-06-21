@@ -3565,18 +3565,41 @@ fn handle_add_command(args: string[]) -> int ![io] {
 }
 
 // `sfn lock`: materialize `workspace.lock` at the workspace root. Walks up
-// from the current directory for `workspace.toml`, resolves the member graph
+// from the start directory for `workspace.toml`, resolves the member graph
 // into the flat lock-entry set (#1069), serializes it with the
 // `# workspace.lock` banner (#1068), and writes the file. Explicit-only —
 // nothing on the `sfn build` path regenerates it (keeps the self-host path
 // predictable). Output is deterministic, so re-running is idempotent.
+//
+// The start directory defaults to `$PWD` (the current directory), but
+// `--work-dir DIR` overrides it. The flag is the per-invocation lever that
+// lets a caller drive `lock` against an arbitrary workspace without
+// `cd`-ing into it — the same `--work-dir` convention `sfn build` uses, and
+// the only way to exercise `lock` from an `sfn/test` e2e (no `with_cwd`
+// fixture exists; process-global `chdir` is unsound under the parallel pool).
 fn handle_lock_command(args: string[]) -> int ![io] {
-    if args.length != 1 {
-        print("usage: sfn lock");
-        return 2;
+    let mut work_dir: string = "";
+    let mut ai = 1;
+    loop {
+        if ai >= args.length { break; }
+        let arg = args[ai];
+        if strings_equal(arg, "--work-dir") {
+            if ai + 1 >= args.length {
+                print("sfn lock: --work-dir requires a directory argument");
+                return 2;
+            }
+            work_dir = args[ai + 1];
+            ai += 2;
+        } else {
+            print("usage: sfn lock [--work-dir DIR]");
+            return 2;
+        }
     }
-    let mut start_dir = _get_env_cmd("PWD");
-    if start_dir.length == 0 { start_dir = "."; }
+    let mut start_dir = work_dir;
+    if start_dir.length == 0 {
+        start_dir = _get_env_cmd("PWD");
+        if start_dir.length == 0 { start_dir = "."; }
+    }
     let workspace_root = discover_workspace_root(start_dir);
     if workspace_root.length == 0 {
         print("sfn lock: no workspace.toml found (run inside a workspace)");
