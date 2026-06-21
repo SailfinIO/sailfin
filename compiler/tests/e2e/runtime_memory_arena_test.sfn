@@ -34,11 +34,12 @@
 //                    probe and run it under several SAILFIN_USE_ARENA env
 //                    settings: unset→1, =1→1, =yes→1, =(empty)→0, =0→0,
 //                    =false→0. A crash (nonzero exit) is a failure.
-//  10. ASAN no-corruption — best-effort memory-cleanliness leg under
-//                    AddressSanitizer. SKIP unless ASAN can actually run
-//                    (the runner self-caps memory, so the ASAN shadow
-//                    reservation usually aborts at startup); only a real
-//                    `ERROR: AddressSanitizer` report fails the test.
+//
+// (An ASAN no-corruption leg lived in the original `.sh`; it is omitted
+// here — its purpose was catching *cross-runtime* layout corruption, moot
+// since the C arena was deleted (#822). The static 24-byte-handle gate and
+// the plain lifecycle roundtrip pin the contract. A reproducible
+// arena-ASAN gate is tracked as a follow-up — #1473.)
 //
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
 // they cannot be called from an `![io]` test. For subprocess/IR-output
@@ -504,121 +505,5 @@ test "SAILFIN_USE_ARENA env semantics + probe recursion guard (C harness via cla
         assert run_exit == 0;
         assert find(out, expected[i], 0) >= 0;
         i = i + 1;
-    }
-}
-
-// ASAN no-corruption harness. Copied verbatim from the .sh asan_harness
-// CHARNESS body — a C driver exercises the bare Sailfin arena entry
-// points (create/alloc/realloc/print_stats, all in arena.ll) under ASAN.
-fn _asan_harness_c() -> string {
-    return "#include <stddef.h>\n" + "#include <stdint.h>\n"
-        + "#include <stdio.h>\n"
-        + "#include <stdlib.h>\n"
-        + "#include <string.h>\n"
-        + "\n"
-        + "/* All Sailfin-defined (arena.ll). */\n"
-        + "extern void *sfn_arena_create(size_t default_page_size);\n"
-        + "extern void *sfn_arena_alloc(void *arena, size_t size, size_t align);\n"
-        + "extern void *sfn_arena_realloc(void *arena, void *ptr, size_t old_size,\n"
-        + "                               size_t new_size, size_t align);\n"
-        + "extern void sfn_arena_print_stats(void *arena);\n"
-        + "\n"
-        + "void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }\n"
-        + "void sfn_type_register(void *desc) { (void)desc; }\n"
-        + "void *sfn_alloc_struct(long size_bytes) { return calloc(1, (size_t)size_bytes); }\n"
-        + "\n"
-        + "int main(void) {\n"
-        + "    void *arena = sfn_arena_create(4096);\n"
-        + "    if (!arena) {\n"
-        + "        fprintf(stderr, \"create returned NULL\\n\");\n"
-        + "        return 1;\n"
-        + "    }\n"
-        + "\n"
-        + "    uint8_t *p = (uint8_t *)sfn_arena_alloc(arena, 128, 8);\n"
-        + "    if (!p) {\n"
-        + "        fprintf(stderr, \"alloc(128) returned NULL\\n\");\n"
-        + "        return 2;\n"
-        + "    }\n"
-        + "    memset(p, 0xAB, 128);\n"
-        + "\n"
-        + "    uint8_t *p2 = (uint8_t *)sfn_arena_realloc(arena, p, 128, 256, 8);\n"
-        + "    if (!p2) {\n"
-        + "        fprintf(stderr, \"realloc returned NULL\\n\");\n"
-        + "        return 3;\n"
-        + "    }\n"
-        + "    for (size_t i = 0; i < 128; i++) {\n"
-        + "        if (p2[i] != 0xAB) {\n"
-        + "            fprintf(stderr, \"realloc lost bytes at %zu\\n\", i);\n"
-        + "            return 4;\n"
-        + "        }\n"
-        + "    }\n"
-        + "\n"
-        + "    uint8_t *q = (uint8_t *)sfn_arena_alloc(arena, 64, 8);\n"
-        + "    if (!q) { return 5; }\n"
-        + "    uint8_t *p3 = (uint8_t *)sfn_arena_realloc(arena, p2, 256, 8192, 8);\n"
-        + "    if (!p3) { return 6; }\n"
-        + "\n"
-        + "    sfn_arena_print_stats(arena);\n"
-        + "\n"
-        + "    return 0;\n"
-        + "}\n";
-}
-
-fn _asan_child_env() -> string[] ![io] {
-    let mut e = _child_env();
-    e.push("SAILFIN_MEM_LIMIT=unlimited");
-    e.push("ASAN_OPTIONS=detect_leaks=0");
-    return e;
-}
-
-// ---- Phase 10: ASAN no-corruption (best-effort) ----
-test "ASAN: C realloc/print_stats on a Sailfin-created handle is corruption-free (best-effort)" ![io] {
-    let dir = _scratch_dir();
-    let ll = _emit_arena_ll();
-
-    let harness = dir + "/asan_harness.c";
-    fs.writeFile(harness, _asan_harness_c());
-
-    let bin = dir + "/asan_roundtrip";
-    // Compile the Sailfin arena IR to a PLAIN object first — NO ASAN pass
-    // over machine-generated IR. The arena is a bump allocator that
-    // sub-allocates within its own malloc'd pages, so instrumenting it makes
-    // ASAN false-positive on perfectly valid intra-page writes. The deciding
-    // accesses under test are the instrumented C driver's reads of the
-    // arena-returned buffers (ASAN interposes malloc globally, so those reads
-    // are still checked against the page redzones). Build failure (clang /
-    // compiler-rt missing) → skip; the static IR-shape gates still pin it.
-    let arena_obj = dir + "/asan_arena_ll.o";
-    let cc_exit = process.run_capture(["clang", "-Wno-override-module", "-c", ll, "-o", arena_obj], _child_env());
-    let _co = process.capture_take_stdout();
-    let _ce = process.capture_take_stderr();
-    if cc_exit != 0 {
-        assert true;
-        return;
-    }
-    // ASAN-instrument ONLY the C driver; link the plain arena object.
-    let build_exit = process.run_capture(["clang", "-fsanitize=address", "-Wno-override-module", harness, arena_obj, "-o", bin, "-lm"], _child_env());
-    let _bo = process.capture_take_stdout();
-    let _be = process.capture_take_stderr();
-    if build_exit != 0 {
-        assert true;
-        return;
-    }
-
-    // The runner self-caps memory, so the ASAN shadow reservation usually
-    // aborts at startup. Treat a startup/abort (nonzero exit WITHOUT an
-    // `ERROR: AddressSanitizer` line) as a SKIP. Only a genuine
-    // AddressSanitizer report may fail the test.
-    let run_exit = process.run_capture([bin], _asan_child_env());
-    let run_out = process.capture_take_stdout();
-    let run_err = process.capture_take_stderr();
-    let report = run_out + run_err;
-    if find(report, "ERROR: AddressSanitizer", 0) >= 0 {
-        // A real heap violation in the arena roundtrip.
-        assert false;
-    } else {
-        // Either a clean run (exit 0) or a startup abort under the
-        // memory cap — both are acceptable; the static gate still holds.
-        assert true;
     }
 }
