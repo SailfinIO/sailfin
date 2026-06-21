@@ -1,0 +1,59 @@
+[capsule]
+name = "sfn/runtime-native"
+version = "0.5.10-alpha.3"
+description = "Sailfin-native runtime (runtime/sfn + prelude) linked into every Sailfin compiler binary"
+
+[capabilities]
+# The runtime modules carry no Sailfin-effect surface that gates the
+# link. Effects are a language feature; they don't gate clang/llvm-as
+# invocations.
+required = []
+
+[build]
+kind = "runtime"
+
+# Stage D PR1 schema (docs/proposals/build-architecture.md §Part 5):
+# `kind = "runtime"` capsules ship declarative source lists rather
+# than walking `src/**/*.sfn` like a `kind = "library"` capsule. The
+# driver compiles each `c-sources` entry with clang, assembles each
+# `ll-sources` entry with clang, propagates `include-dirs` to
+# downstream C compiles, and appends `link-libs` to the final link.
+#
+# All paths below are relative to this manifest's directory
+# (`runtime/`). With the C runtime retired (#822) and `runtime/native/`
+# deleted (#823 tail), this manifest moved up from `runtime/native/` to
+# the runtime root, so the entries are now plain `sfn/*` / `prelude.sfn`
+# rather than the old `../sfn/*` / `../prelude.sfn`.
+# All array values below are SINGLE-LINE intentionally — the
+# current TOML parser (`compiler/src/toml_parser.sfn`) only
+# recognises arrays whose `[...]` is on one line. Multi-line
+# array support is a future parser extension; until that lands,
+# reformatting here would silently make every getter return `[]`
+# and the resolver would surface zero artifacts. A regression test
+# against this exact manifest text guards the format.
+c-sources = []
+ll-sources = []
+# `sfn-sources` lists the Sailfin runtime modules compiled and linked
+# into every Sailfin binary. With the C runtime gone these are the sole
+# runtime definitions (arena, strings, arrays, io, exceptions, the
+# type-meta surface, the platform shims, and the concurrency runtime).
+#
+# One consumer honors this list:
+#   `_compile_runtime_sfn_sources` in `compiler/src/cli_main.sfn` —
+#   the Stage D PR2 link path used by `sfn build` against a project
+#   that declares `[dependencies] "sfn/runtime-native"`. The
+#   regression test lives at
+#   `compiler/tests/e2e/test_runtime_sfn_sources_link_consumer.sh`.
+#
+# Single-line array per the parser limitation noted above.
+sfn-sources = ["sfn/runtime_globals.sfn", "sfn/memory/arena.sfn", "sfn/memory/rc.sfn", "sfn/memory/mem.sfn", "sfn/memory/ownedbuf.sfn", "sfn/string.sfn", "sfn/array.sfn", "sfn/clock.sfn", "sfn/process.sfn", "sfn/io.sfn", "sfn/exception.sfn", "sfn/assert.sfn", "sfn/type_meta.sfn", "sfn/platform/exec.sfn", "sfn/platform/rlimit.sfn", "sfn/adapters/filesystem.sfn", "sfn/adapters/http.sfn", "sfn/concurrency/scheduler.sfn", "sfn/concurrency/nursery.sfn", "sfn/concurrency/future.sfn", "sfn/concurrency/channel.sfn", "sfn/concurrency/parallel.sfn", "sfn/concurrency/serve.sfn"]
+include-dirs = []
+link-libs = ["-lm", "-lpthread"]
+
+# The prelude (`runtime/prelude.sfn`) is emitted from source on the same
+# child-compiler path as `sfn-sources` and linked into every compiler
+# build. Declaring it here gives the driver a single source of truth for
+# the runtime `.sfn` surface. Once `sfn/prelude` becomes a real
+# workspace library (Stage F) this field retires in favour of the
+# workspace-implicit resolver path.
+prelude-entry = "prelude.sfn"

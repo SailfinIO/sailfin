@@ -8,8 +8,8 @@
 # `test_runtime_sfn_sources_link_consumer.sh`, which exercises
 # `_compile_runtime_sfn_sources` against a synthetic workspace.
 # This test instead pins the production link path: when
-# `runtime/native/capsule.toml` declares
-# `sfn-sources = ["../sfn/memory/arena.sfn"]`, the resulting
+# `runtime/capsule.toml` declares
+# `sfn-sources = ["sfn/memory/arena.sfn"]`, the resulting
 # `build/native/sailfin` binary exports five `sfn_arena_sfn_*`
 # symbols sourced from Sailfin emission — coexisting with the C
 # arena's matching `sfn_arena_*` exports.
@@ -52,13 +52,13 @@ run_test() {
 
 # ---- Test: the manifest declares the Sailfin arena module ----
 test_manifest_lists_arena() {
-    local manifest="$REPO_ROOT/runtime/native/capsule.toml"
+    local manifest="$REPO_ROOT/runtime/capsule.toml"
     if [ ! -f "$manifest" ]; then
         echo "[test]   missing manifest: $manifest"
         return 1
     fi
-    if ! grep -qE '^sfn-sources = \[.*"\.\./sfn/memory/arena\.sfn".*\]' "$manifest"; then
-        echo "[test]   sfn-sources does not list ../sfn/memory/arena.sfn:"
+    if ! grep -qE '^sfn-sources = \[.*"sfn/memory/arena\.sfn".*\]' "$manifest"; then
+        echo "[test]   sfn-sources does not list sfn/memory/arena.sfn:"
         grep -nE 'sfn-sources' "$manifest" || true
         return 1
     fi
@@ -159,7 +159,7 @@ test_nm_grep_sfn_arena_spec_names() {
     return 0
 }
 
-run_test "runtime/native/capsule.toml sfn-sources lists the arena module" test_manifest_lists_arena
+run_test "runtime/capsule.toml sfn-sources lists the arena module" test_manifest_lists_arena
 run_test "compiler binary exports five sfn_arena_sfn_* Sailfin symbols" test_compiler_binary_exports_sfn_arena_sfn
 run_test "compiler binary exports bare arena-core (create/alloc/global/enabled) from Sailfin" test_compiler_binary_exports_bare_arena_core
 run_test "compiler binary exports surviving bare arena forwarders (realloc/print_stats)" test_compiler_binary_keeps_c_arena_exports

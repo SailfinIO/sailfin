@@ -100,18 +100,18 @@ kind = "runtime"
 # the cross-module struct-returning call, arena.sfn so ownedbuf's
 # `sfn_arena_sfn_*` externs resolve at link.
 c-sources = []
-ll-sources = ["ir/runtime_globals.ll"]
+# #823: runtime_globals.ll deleted; ll-sources empty (matches the real
+# runtime/capsule.toml). Runtime symbols come from sfn-sources.
+ll-sources = []
 sfn-sources = ["../sfn/structlib.sfn", "../sfn/structuse.sfn", "../sfn/clock.sfn", "../sfn/exception.sfn", "../sfn/type_meta.sfn", "../sfn/io.sfn", "../sfn/memory/arena.sfn", "../sfn/memory/ownedbuf.sfn", "../sfn/string.sfn", "../sfn/array.sfn", "../sfn/memory/mem.sfn"]
 include-dirs = []
 link-libs = ["-lm"]
 prelude-entry = "../prelude.sfn"
 EOF
 
-    # Mirror the repo's runtime/native tree + the real runtime
-    # modules the manifest references (symlinks, no copies).
-    # (#822: `src/` and `include/` are deleted from the repo; only
-    # `ir/` carries the linkable `runtime_globals.ll`.)
-    ln -s "$REPO_ROOT/runtime/native/ir" "$ws/runtime/native/ir"
+    # Mirror the real runtime modules the manifest references (symlinks,
+    # no copies). (#823: runtime/native/ is deleted and ll-sources is
+    # empty, so there is no ir/ tree to mirror.)
     ln -s "$REPO_ROOT/runtime/prelude.sfn" "$ws/runtime/prelude.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/clock.sfn" "$ws/runtime/sfn/clock.sfn"
     ln -s "$REPO_ROOT/runtime/sfn/exception.sfn" "$ws/runtime/sfn/exception.sfn"

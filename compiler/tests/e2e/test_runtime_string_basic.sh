@@ -213,9 +213,9 @@ test_compiler_binary_exports_sfn_str() {
 
 # ---- Test: capsule.toml lists the new module ----
 test_manifest_lists_string() {
-    local manifest="$REPO_ROOT/runtime/native/capsule.toml"
-    if ! grep -qE '^sfn-sources = \[.*"\.\./sfn/string\.sfn".*\]' "$manifest"; then
-        echo "[test]   sfn-sources does not list ../sfn/string.sfn:"
+    local manifest="$REPO_ROOT/runtime/capsule.toml"
+    if ! grep -qE '^sfn-sources = \[.*"sfn/string\.sfn".*\]' "$manifest"; then
+        echo "[test]   sfn-sources does not list sfn/string.sfn:"
         grep -nE 'sfn-sources' "$manifest" || true
         return 1
     fi
@@ -235,7 +235,7 @@ run_test "sfn emit llvm bare-defines native read_byte / grapheme_byte (#1308)" t
 run_test "sfn emit llvm declares memcmp and memchr trampolines" test_emit_libc_declares
 run_test "user emission no longer calls @sailfin_runtime_string_length / @substring / @substring_unchecked / @strings_equal" test_user_emission_is_flipped
 run_test "compiler binary exports defined sfn_str_* and sfn_str_sfn_* symbols" test_compiler_binary_exports_sfn_str
-run_test "runtime/native/capsule.toml sfn-sources lists the string module" test_manifest_lists_string
+run_test "runtime/capsule.toml sfn-sources lists the string module" test_manifest_lists_string
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

@@ -58,7 +58,7 @@ run_test() {
 setup_workspace() {
     local ws="$1"
     rm -rf "$ws"
-    mkdir -p "$ws/runtime/native/ir"
+    mkdir -p "$ws/runtime/native"
     mkdir -p "$ws/runtime/sfn"
     mkdir -p "$ws/capsules/sfn/test-app/src"
 
@@ -86,7 +86,10 @@ kind = "runtime"
 # links against now come from the sfn-sources below (the same shape the
 # real runtime/native/capsule.toml carries).
 c-sources = []
-ll-sources = ["ir/runtime_globals.ll"]
+# #823: runtime_globals.ll is definition-less and deleted; ll-sources is
+# empty, matching the real runtime/capsule.toml. The runtime helper
+# symbols the consumer links against come from the sfn-sources below.
+ll-sources = []
 # PR 2 of the sleep migration (issue 397) deleted the C
 # `sfn_sleep` trampoline, so `clock.sfn` is now required at link
 # time: the prelude always emits a call to `@sfn_sleep` via the
@@ -125,12 +128,9 @@ link-libs = ["-lm"]
 prelude-entry = "../prelude.sfn"
 EOF
 
-    # Mirror the repo's runtime/native tree into the scratch
-    # workspace so the ll-sources resolve. Cheap symlinks keep
-    # this tiny — no copies. (#822: `src/` and `include/` are deleted
-    # from the repo; only `ir/` carries the linkable `runtime_globals.ll`.)
-    rm -rf "$ws/runtime/native/ir"
-    ln -s "$REPO_ROOT/runtime/native/ir" "$ws/runtime/native/ir"
+    # #823: ll-sources is empty (runtime_globals.ll deleted) and
+    # runtime/native/ no longer exists, so there is no ir/ tree to
+    # mirror — the runtime symbols all come from the sfn-sources below.
 
     # Mirror prelude.sfn (the runtime capsule's prelude-entry).
     ln -s "$REPO_ROOT/runtime/prelude.sfn" "$ws/runtime/prelude.sfn"

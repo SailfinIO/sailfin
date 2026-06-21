@@ -134,20 +134,22 @@ runs:
     # (empty) test-bin the module-IR save carries. Cross-commit hits work
     # because the test-bin cache identity is the commit-STABLE capsule
     # version (#1233): a baseline at one commit warms a PR at another.
-    # The hashFiles set includes `runtime/native/**` (C sources, headers,
-    # `.ll`, the runtime capsule manifest) on top of the `.sfn` trees,
-    # because those inputs change the linked runtime objects baked into a
-    # cached test binary. `actions/cache/save` is a no-op when a key
-    # already exists, so omitting them would pin PRs to a stale baseline
-    # after a runtime-native edit (and the baseline job could never publish
-    # a fresh entry). They are also folded into the per-test cache key by
-    # content (`runtime_link_inputs_identity`), so this is belt-and-braces.
+    # The hashFiles set includes the runtime capsule manifest
+    # (`runtime/capsule.toml`) and `runtime/ir/**` (the cross-windows
+    # link stub) on top of the `.sfn` trees, because those inputs change
+    # the linked runtime objects baked into a cached test binary.
+    # (`runtime/native/**` retired in #823 when that directory was
+    # deleted.) `actions/cache/save` is a no-op when a key already exists,
+    # so omitting them would pin PRs to a stale baseline after a runtime
+    # edit (and the baseline job could never publish a fresh entry). They
+    # are also folded into the per-test cache key by content
+    # (`runtime_link_inputs_identity`), so this is belt-and-braces.
     - name: Restore test-bin cache (per-test linked binaries)
       if: ${{ inputs.mode != 'build-only' && inputs.mode != 'build-package' }}
       uses: actions/cache@v4
       with:
         path: build/cache/test-bin
-        key: sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'runtime/native/**', 'compiler/capsule.toml', '.seed-version') }}
+        key: sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', '.seed-version') }}
         restore-keys: |
           sailfin-testbin-${{ inputs.target }}-${{ inputs.seed_version }}-
           sailfin-testbin-${{ inputs.target }}-

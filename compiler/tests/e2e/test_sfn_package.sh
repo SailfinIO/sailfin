@@ -303,20 +303,24 @@ test_installer_tarball_no_version_in_name() {
 run_test "installer tarball name omits version (matches tools/package.sh)" test_installer_tarball_no_version_in_name
 
 test_installer_tarball_contents() {
-    # Installer contents must include bin/{sailfin,sfn} and
-    # runtime/native/. Tar layout uses `-C <staging> .` so contents
-    # appear at the tarball top level (no wrapping root dir).
-    # Some tar implementations (notably BSD `tar` on macOS) omit
-    # the leading `./` from `tar -tzf` output even when the
-    # archive was created with `-C <dir> .`; accept both forms.
+    # Installer contents must include bin/{sailfin,sfn} and the runtime
+    # bundle. Since #823 deleted runtime/native/, the runtime anchor is
+    # the manifest at runtime/capsule.toml (plus runtime/prelude.sfn and
+    # runtime/sfn/). Tar layout uses `-C <staging> .` so contents appear
+    # at the tarball top level (no wrapping root dir). Some tar
+    # implementations (notably BSD `tar` on macOS) omit the leading `./`
+    # from `tar -tzf` output even when the archive was created with
+    # `-C <dir> .`; accept both forms.
     local listing
     listing="$(tar -tzf "$INSTALLER_TARBALL")"
     grep -qE "^(\\./)?bin/sailfin\$" <<< "$listing" || return 1
     grep -qE "^(\\./)?bin/sfn\$" <<< "$listing" || return 1
-    # Runtime tree present (any file under runtime/native/).
-    grep -qE "^(\\./)?runtime/native/" <<< "$listing" || return 1
+    # Runtime bundle present (manifest + prelude + sfn sources).
+    grep -qE "^(\\./)?runtime/capsule\\.toml\$" <<< "$listing" || return 1
+    grep -qE "^(\\./)?runtime/prelude\\.sfn\$" <<< "$listing" || return 1
+    grep -qE "^(\\./)?runtime/sfn/" <<< "$listing" || return 1
 }
-run_test "installer tarball contains bin/sailfin + bin/sfn + runtime/native/" test_installer_tarball_contents
+run_test "installer tarball contains bin/sailfin + bin/sfn + runtime bundle" test_installer_tarball_contents
 
 test_installer_manifest_kind() {
     [ "$(jq -r .kind "$INSTALLER_MANIFEST")" = "installer" ] || return 1

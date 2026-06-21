@@ -260,9 +260,9 @@ test_compiler_binary_exports_type_meta() {
 
 # ---- Test: capsule.toml lists the new module ----
 test_manifest_lists_type_meta() {
-    local manifest="$REPO_ROOT/runtime/native/capsule.toml"
-    if ! grep -qE '^sfn-sources = \[.*"\.\./sfn/type_meta\.sfn".*\]' "$manifest"; then
-        echo "[test]   sfn-sources does not list ../sfn/type_meta.sfn:"
+    local manifest="$REPO_ROOT/runtime/capsule.toml"
+    if ! grep -qE '^sfn-sources = \[.*"sfn/type_meta\.sfn".*\]' "$manifest"; then
+        echo "[test]   sfn-sources does not list sfn/type_meta.sfn:"
         grep -nE 'sfn-sources' "$manifest" || true
         return 1
     fi
@@ -277,7 +277,7 @@ run_test "user module emission carries @__sfn_type_desc.* + name globals" test_d
 run_test "user module emission wires @__sfn_module_type_init__* via @llvm.global_ctors" test_module_init_ctor_wired
 run_test "prelude emission routes type-meta calls through @sfn_resolve_type / @sfn_instance_of" test_prelude_emission_flipped
 run_test "compiler binary exports defined sfn_* type-meta symbols and registered descriptors" test_compiler_binary_exports_type_meta
-run_test "runtime/native/capsule.toml sfn-sources lists the type_meta module" test_manifest_lists_type_meta
+run_test "runtime/capsule.toml sfn-sources lists the type_meta module" test_manifest_lists_type_meta
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

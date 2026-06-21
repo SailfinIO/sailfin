@@ -336,7 +336,7 @@ fn enumerate_runtime_capsule_artifacts(workspace_root: string, dep_specs: string
     return out;
 }
 
-// Resolve the well-known runtime capsule (`<runtime_root>/native/
+// Resolve the well-known runtime capsule (`<runtime_root>/
 // capsule.toml`) as an *implicit* dependency, independent of any
 // `workspace.toml` membership. This is the implicit runtime-capsule
 // link path for an end-user `sfn build` / `sfn run` / `sfn test` of a
@@ -351,10 +351,10 @@ fn enumerate_runtime_capsule_artifacts(workspace_root: string, dep_specs: string
 // retires in favour of the workspace-implicit resolver path.
 //
 // Path model mirrors a one-member `enumerate_runtime_capsule_artifacts`
-// walk: `workspace_root = runtime_root`, `member_path = "native"`, so
-// `manifest_dir` resolves to `<runtime_root>/native` and the
-// manifest's relative entries normalize against it (e.g.
-// `../sfn/io.sfn` → `<runtime_root>/sfn/io.sfn`, `../prelude.sfn` →
+// walk: `workspace_root = runtime_root`, `member_path = ""`, so
+// `manifest_dir` resolves to `<runtime_root>` and the manifest's
+// relative entries normalize against it (e.g. `sfn/io.sfn` →
+// `<runtime_root>/sfn/io.sfn`, `prelude.sfn` →
 // `<runtime_root>/prelude.sfn`).
 //
 // Returns `[]` when the manifest is absent (caller surfaces a loud
@@ -364,10 +364,10 @@ fn enumerate_runtime_capsule_artifacts(workspace_root: string, dep_specs: string
 fn runtime_capsule_from_root(runtime_root: string) -> RuntimeCapsuleArtifacts[] ![io] {
     let mut out: RuntimeCapsuleArtifacts[] = [];
     if runtime_root.length == 0 { return out; }
-    let manifest = _rcr_path_join(runtime_root, "native/capsule.toml");
+    let manifest = _rcr_path_join(runtime_root, "capsule.toml");
     if !fs.exists(manifest) { return out; }
     let manifest_text = fs.readFile(manifest);
-    let artifacts = _rcr_artifacts_from_manifest(runtime_root, "native", manifest_text);
+    let artifacts = _rcr_artifacts_from_manifest(runtime_root, "", manifest_text);
     if artifacts.capsule_name.length == 0 { return out; }
     out.push(artifacts);
     return out;
