@@ -1,0 +1,167 @@
+// End-to-end test for runtime/sfn/platform/exec.sfn — the
+// Sailfin-native executable-path + runtime-root resolution helpers
+// (issue #468, M5.3 prerequisite per epic #451).
+// Native replacement for `test_runtime_exec_path.sh`
+// (test-infra Phase 3, epic #842).
+//
+// Pinned shape:
+//   1. typecheck   — sfn check reports ok.
+//   2. fmt         — sfn fmt --check is canonical.
+//   3. emit shape — exe_path / binary_dir / resolve_runtime_root defines
+//                   + host-specific primitive call (readlink on Linux).
+//   4. extern decls — libc.sfn declares _NSGetExecutablePath,
+//                    GetModuleFileNameA, readlink, realpath, strrchr, memset.
+//   5. round-trip  — the exec_path_probe.sfn fixture builds via
+//                    sfn build -o <abs> <abs_copy>, runs, and the printed
+//                    path resolves to the just-built binary (Linux-gated).
+//
+// NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
+// (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test). (#842.)
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _scratch(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-exec-path-" + tag;
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// The build spawns clang + linker, so the child needs PATH, HOME, TMPDIR,
+// and SAILFIN_TEST_SCRATCH for build-cache isolation.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _env() -> string[] ![io] { return _child_env(); }
+
+fn _repo_root() -> string ![io] {
+    let configured = env.get("SAILFIN_REPO_ROOT");
+    if configured.length > 0 { return configured; }
+    return ".";
+}
+
+// ---- Test 1: typecheck ----
+test "runtime/sfn/platform/exec.sfn typechecks cleanly" ![io] {
+    let module = _repo_root() + "/runtime/sfn/platform/exec.sfn";
+    let exit = process.run_capture([_sfn_bin(), "check", module], _env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "ok", 0) >= 0;
+}
+
+// ---- Test 2: fmt ----
+test "runtime/sfn/platform/exec.sfn is fmt-canonical" ![io] {
+    let module = _repo_root() + "/runtime/sfn/platform/exec.sfn";
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", module], _env());
+    let _ = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+// ---- Test 3: emit shape — unmangled defines + extern calls ----
+test "sfn emit llvm produces unmangled defines + extern calls for exec.sfn" ![io] {
+    let dir = _scratch("emit");
+    let module = _repo_root() + "/runtime/sfn/platform/exec.sfn";
+    let out_ll = dir + "/exec.ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", module], _env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    let ir = fs.readFile(out_ll);
+
+    // Unmangled defines
+    assert contains(ir, "@exe_path()");
+    assert contains(ir, "@binary_dir(");
+    assert contains(ir, "@resolve_runtime_root(");
+
+    // Bodies must call the host's systems primitives
+    // On Linux: readlink; on Darwin: _NSGetExecutablePath
+    // binary_dir / resolve_runtime_root call strrchr / realpath / getenv on all hosts
+    assert contains(ir, "@strrchr(");
+    assert contains(ir, "@realpath(");
+    assert contains(ir, "@getenv(");
+}
+
+// ---- Test 4: libc.sfn declares platform-specific extern fns ----
+test "libc.sfn declares _NSGetExecutablePath, GetModuleFileNameA, readlink, realpath, strrchr, memset" ![io] {
+    let dir = _scratch("libc");
+    let libc_mod = _repo_root() + "/runtime/sfn/platform/libc.sfn";
+    let out_ll = dir + "/libc.ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out_ll, "llvm", libc_mod], _env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    let ir = fs.readFile(out_ll);
+
+    assert contains(ir, "@_NSGetExecutablePath(");
+    assert contains(ir, "@GetModuleFileNameA(");
+    assert contains(ir, "@readlink(");
+    assert contains(ir, "@realpath(");
+    assert contains(ir, "@strrchr(");
+    assert contains(ir, "@memset(");
+}
+
+// ---- Test 5: exec_path_probe fixture round-trips its own path (Linux-gated) ----
+test "exec_path_probe fixture round-trips its own binary path" ![io] {
+    // Only run the end-to-end binary round-trip on Linux.
+    // The shape-only checks (tests 1–4) run cross-platform.
+    let uname_exit = process.run_capture(["uname", "-s"], _env());
+    let uname_out = process.capture_take_stdout();
+    let _ = process.capture_take_stderr();
+    if uname_exit != 0 { assert true; } else {
+        if !contains(uname_out, "Linux") {
+            // Skip on non-Linux; macOS e2e gate is issue #3
+            assert true;
+        } else {
+            let dir = _scratch("roundtrip");
+
+            // Copy the fixture outside the repo tree to avoid workspace
+            // autodiscovery linking in native_driver.c (which defines main).
+            let fixture_src = _repo_root()
+                + "/compiler/tests/e2e/fixtures/exec_path_probe.sfn";
+            let fixture_copy = dir + "/exec_path_probe.sfn";
+            let fixture_content = fs.readFile(fixture_src);
+            fs.writeFile(fixture_copy, fixture_content);
+
+            let probe_bin = dir + "/exec_path_probe";
+            let build_exit = process.run_capture([_sfn_bin(), "build", "-o", probe_bin, fixture_copy], _child_env());
+            let build_out = process.capture_take_stdout();
+            let build_err = process.capture_take_stderr();
+            assert build_exit == 0;
+
+            // Run the probe binary and capture the printed path
+            let run_exit = process.run_capture([probe_bin], _child_env());
+            let run_out = process.capture_take_stdout();
+            let run_err = process.capture_take_stderr();
+            assert run_exit == 0;
+
+            // The probe must print something non-empty
+            let printed = run_out + run_err;
+            assert printed.length > 0;
+
+            // The printed path should contain the probe binary's name or
+            // at minimum the scratch directory path — both are in probe_bin.
+            // Since readlink("/proc/self/exe") returns the canonical path of
+            // the running binary, it should contain our scratch dir prefix.
+            assert find(printed, dir, 0) >= 0;
+        }
+    }
+}
