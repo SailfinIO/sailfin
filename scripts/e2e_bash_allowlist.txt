@@ -31,7 +31,6 @@ test_check_phase_ledger.sh
 test_check_resolver_scan_memo.sh
 test_compiler_debug_toggle_env_vars.sh
 test_cross_module_int_signature.sh
-test_cross_module_signature_resolution.sh
 test_cross_windows_runtime_modules.sh
 test_effect_gate_build_path.sh
 test_effect_gate_build_path_entry.sh
