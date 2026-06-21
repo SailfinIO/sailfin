@@ -161,6 +161,20 @@ TEST_BIN_CACHE_FLAGS ?=
 TEST_JOBS ?= 1
 TEST_JOBS_FLAG = --jobs $(TEST_JOBS)
 
+# Test parallelism for `make check` specifically. `make check` runs the full
+# suite TWICE (once on the first-pass binary as an early gate, once on the
+# seedcheck binary), so a serial `TEST_JOBS=1` doubles down on the slowest part
+# of the gate. Unlike a bare `make test`, `make check` already pins peak build
+# concurrency via the RAM-budgeted `BUILD_JOBS` auto-detect, so it can safely
+# reuse that same per-job budget for its suite runs. An explicit `TEST_JOBS=N`
+# (command line or environment) always wins — set it to dial the suite down on
+# a tighter RAM budget, or to 1 to restore the old serial behaviour.
+ifeq ($(filter command line environment,$(origin TEST_JOBS)),)
+CHECK_TEST_JOBS ?= $(BUILD_JOBS)
+else
+CHECK_TEST_JOBS ?= $(TEST_JOBS)
+endif
+
 help:
 	@echo "Common Sailfin tasks"
 	@echo ""
@@ -554,8 +568,8 @@ check-impl:
 		echo "[check][error] missing $$seed (run: make compile)"; \
 		exit 1; \
 	fi
-	@echo "[check] running test suite on first-pass binary (early gate)..."
-	@$(MAKE) test NATIVE_BIN=build/native/sailfin TEST_BIN_CACHE_FLAGS=--no-test-cache
+	@echo "[check] running test suite on first-pass binary (early gate, jobs=$(CHECK_TEST_JOBS))..."
+	@$(MAKE) test NATIVE_BIN=build/native/sailfin TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 	@echo "[check] first-pass tests passed — proceeding to seedcheck build..."
 	@echo "[check] verifying seed selfhost (stage2)..."
 	@# Stage2 routes through `sfn build -p compiler --work-dir <DIR>`
@@ -597,8 +611,8 @@ check-impl:
 		exit 1; \
 	fi; \
 	echo "[check] seedcheck binary runs hello-world.sfn OK"
-	@echo "[check] running test suite with seedcheck binary (no fallbacks)..."
-	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache
+	@echo "[check] running test suite with seedcheck binary (no fallbacks, jobs=$(CHECK_TEST_JOBS))..."
+	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
 	@echo ""
 	@echo "[check] stage2 tests passed — building stage3 for fixed-point comparison..."
 	@# Same shape as stage2 — driver `--work-dir` with
