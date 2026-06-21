@@ -50,6 +50,17 @@ fn _scratch_base() -> string ![io] {
     return "/tmp";
 }
 
+// Host-OS probe (via `uname -s`). Byte-identity is a Linux ELF guarantee;
+// macOS arm64 Mach-O builds embed non-reproducible data (LC_UUID, codesign),
+// so `--check-determinism` legitimately reports a mismatch there. Used to
+// gate the byte-identity AC to Linux.
+fn _host_is_darwin() -> boolean ![io] {
+    let _exit = process.run_capture(["uname", "-s"], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return contains(out, "Darwin");
+}
+
 // Build `-p compiler` into `work_dir` (idempotent: skips if the binary is
 // already present so re-runs within the pool don't rebuild). Returns the
 // build exit code (0 when the binary already exists).
@@ -127,11 +138,22 @@ fn _subset(a: string[], b: string[]) -> boolean {
 // (NUL-safe). A divergence means the work-dir absolute path leaked into
 // the compiled binary (e.g. via __FILE__ metadata or debug-info prefixes).
 test "work-dir-parity: two --work-dir builds produce equivalent compilers" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "build", "-p", "compiler", "--check-determinism"], _child_env());
-    let out = process.capture_take_stdout();
-    let err = process.capture_take_stderr();
-    assert exit == 0;
-    assert contains(out + err, "[determinism] match:");
+    if _host_is_darwin() {
+        // The byte-identity AC does not hold on macOS arm64 (Mach-O
+        // non-reproducible data). Assert only that the --work-dir compiler
+        // build path works there; the byte-identity AC is pinned on Linux
+        // below, and the staged-artifact parity AC (next test) runs on both.
+        let work = _scratch_base() + "/sfn-work-dir-parity-darwin";
+        let r = _build_compiler_into(work);
+        assert r == 0;
+        assert fs.exists(work + "/native/sailfin");
+    } else {
+        let exit = process.run_capture([_sfn_bin(), "build", "-p", "compiler", "--check-determinism"], _child_env());
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        assert exit == 0;
+        assert contains(out + err, "[determinism] match:");
+    }
 }
 
 // ---- Test 2: import-context filename sets are identical ----

@@ -142,9 +142,11 @@ test "sleep emit: EINTR-resume loop reads errno after a non-zero return (#693)" 
     assert ir != "EMIT_FAILED";
     // The bounded retry loop re-checks errno on a non-zero nanosleep
     // return and resumes only on EINTR. The errno-location locator
-    // trampoline (#887) lowers to libc @__errno_location(); a single,
-    // errno-unaware nanosleep body would never read errno at all.
-    assert _calls(ir, "__errno_location");
+    // trampoline (#887) lowers to the host libc errno accessor —
+    // @__errno_location() on Linux/glibc, @__error() on Darwin/macOS — so
+    // accept either; a single, errno-unaware nanosleep body would never
+    // read errno at all.
+    assert _calls(ir, "__errno_location") || _calls(ir, "__error");
     // The re-check compares the read errno against the EINTR sentinel.
     assert contains(ir, "@global.EINTR");
 }
