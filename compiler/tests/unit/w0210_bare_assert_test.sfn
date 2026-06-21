@@ -1,0 +1,60 @@
+// Regression coverage for W0210 bare-assert soft-deprecation
+// (compiler/src/bare_assert_check.sfn, issue #1173, epic #842 Phase 3).
+//
+// `collect_bare_assert_findings` walks every top-level `test { ... }`
+// block and returns one finding per bare `assert` in its body
+// (recursively through nested blocks). The parser desugars `assert cond;`
+// into an `IfStatement` calling `runtime_assert_fail_fn`, so the collector
+// recognizes that desugared shape. `assert` outside a `test` block is
+// never visited.
+import { parse_program } from "../../src/parser/mod";
+import { collect_bare_assert_findings } from "../../src/bare_assert_check";
+
+test "w0210: flags a bare assert inside a test block" ![io] {
+    let program = parse_program("test \"t\" { assert 1 == 1; }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 1;
+}
+
+test "w0210: recovers the assert source location" ![io] {
+    let program = parse_program("test \"t\" {\n    assert 1 == 1;\n}");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 1;
+    assert findings[0].line == 2;
+}
+
+test "w0210: flags multiple bare asserts in one test block" ![io] {
+    let program = parse_program("test \"t\" { assert 1 == 1; assert 2 == 2; }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 2;
+}
+
+test "w0210: assert outside a test block is never flagged" ![io] {
+    let program = parse_program("fn f() { assert 1 == 1; }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 0;
+}
+
+test "w0210: a test block with no asserts produces no findings" ![io] {
+    let program = parse_program("test \"t\" { let x = 1; }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 0;
+}
+
+test "w0210: flags a bare assert nested inside an if in a test block" ![io] {
+    let program = parse_program("test \"t\" { if true { assert 1 == 1; } }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 1;
+}
+
+test "w0210: flags a bare assert nested inside a loop in a test block" ![io] {
+    let program = parse_program("test \"t\" { loop { assert 1 == 1; break; } }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 1;
+}
+
+test "w0210: counts only test-block asserts when fn asserts coexist" ![io] {
+    let program = parse_program("fn f() { assert 9 == 9; } test \"t\" { assert 1 == 1; }");
+    let findings = collect_bare_assert_findings(program);
+    assert findings.length == 1;
+}

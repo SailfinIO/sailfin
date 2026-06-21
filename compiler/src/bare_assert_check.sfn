@@ -1,0 +1,199 @@
+// compiler/src/bare_assert_check.sfn
+//
+// W0210 soft-deprecation: a bare `assert` statement used inside a `test`
+// block. Pure AST analysis, consumed by the `sfn check` fast path
+// (`tools/check.sfn`) — mirrors the leaf-module shape of
+// `reexport_check.sfn` so the emit-free check graph never reaches the
+// emitter.
+//
+// Why a post-parse walk and not the effect/type checker: `assert cond;`
+// is desugared at parse time (`parser/statements.sfn:parse_assert_statement`)
+// into an `IfStatement` whose `else` branch calls `runtime_assert_fail_fn`,
+// so no dedicated `assert` node ever reaches a later pass, and neither the
+// effect checker nor the type checker tracks "currently inside a test
+// block". This walker recognizes the desugared shape and recovers the
+// assert's source location from the `line` / `col` numeric-literal
+// arguments the desugarer embeds in the fail call.
+//
+// Scope: only statements lexically inside a `test { ... }` body are
+// visited, so an `assert` in ordinary function code never warns. Every
+// bare `assert` in a test body is flagged (including the stop-gap
+// `assert expect_*(...).ok;` form) — the whole `assert` statement form is
+// being soft-deprecated in tests in favor of `expect()` matchers; the
+// `--allow-bare-assert` flag is the escape hatch for code that still
+// relies on it.
+//
+// See issue #1173 (epic #842 Phase 3, sub-issue 3.3) and §11 Testing.
+import { Program, Statement, Block } from "./ast";
+
+export { BareAssertFinding, collect_bare_assert_findings };
+
+// One flagged bare `assert`, with the 1-based source location recovered
+// from the desugared fail call.
+struct BareAssertFinding {
+    line: int;
+    column: int;
+}
+
+fn _append_finding(values: BareAssertFinding[], value: BareAssertFinding) -> BareAssertFinding[] {
+    let mut out = values;
+    if out == null { out = []; }
+    out.push(value);
+    return out;
+}
+
+// Decimal parser for the `line` / `col` numeric-literal arguments the
+// assert desugarer embeds (always non-negative integers). Any non-digit
+// falls back to 0 rather than aborting — a malformed literal yields a
+// location-less finding, never a crash.
+fn _decimal_to_int(text: string) -> int {
+    if text.length == 0 { return 0; }
+    let mut value: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if ch == "0" { value = value * 10; } else if ch == "1" {
+            value = value * 10 + 1;
+        } else if ch == "2" { value = value * 10 + 2; } else if ch == "3" {
+            value = value * 10 + 3;
+        } else if ch == "4" { value = value * 10 + 4; } else if ch == "5" {
+            value = value * 10 + 5;
+        } else if ch == "6" { value = value * 10 + 6; } else if ch == "7" {
+            value = value * 10 + 7;
+        } else if ch == "8" { value = value * 10 + 8; } else if ch == "9" {
+            value = value * 10 + 9;
+        } else { break; }
+        index += 1;
+    }
+    return value;
+}
+
+// Recognize the parser's desugared `assert cond;` shape:
+//   IfStatement {
+//     then_block: <empty>,
+//     else_branch: { body: { statements: [ExpressionStatement {
+//       Call { callee: Identifier "runtime_assert_fail_fn", args: [..] } }] } }
+//   }
+// The synthesized callee name is the discriminator — user code cannot
+// produce a call to `runtime_assert_fail_fn`.
+fn _is_desugared_assert(statement: Statement) -> boolean {
+    if statement.variant != "IfStatement" { return false; }
+    if statement.then_block.statements.length != 0 { return false; }
+    let else_branch = statement.else_branch;
+    if else_branch == null { return false; }
+    let else_body = else_branch.body;
+    if else_body == null { return false; }
+    if else_body.statements.length != 1 { return false; }
+    let inner = else_body.statements[0];
+    if inner.variant != "ExpressionStatement" { return false; }
+    let call = inner.expression;
+    if call.variant != "Call" { return false; }
+    if call.callee.variant != "Identifier" { return false; }
+    return call.callee.name == "runtime_assert_fail_fn";
+}
+
+// Recover the assert's 1-based location from the fail call's embedded
+// arguments: [StringLiteral file, NumberLiteral line, NumberLiteral col,
+// StringLiteral msg]. Falls back to 0:0 when the shape is unexpected.
+fn _finding_for_assert(statement: Statement) -> BareAssertFinding {
+    let mut line: int = 0;
+    let mut column: int = 0;
+    let call = statement.else_branch.body.statements[0].expression;
+    if call.arguments.length >= 3 {
+        let line_arg = call.arguments[1];
+        let col_arg = call.arguments[2];
+        if line_arg.variant == "NumberLiteral" {
+            line = _decimal_to_int(line_arg.value);
+        }
+        if col_arg.variant == "NumberLiteral" {
+            column = _decimal_to_int(col_arg.value);
+        }
+    }
+    return BareAssertFinding { line: line, column: column };
+}
+
+fn _scan_block(block: Block?, findings: BareAssertFinding[]) -> BareAssertFinding[] {
+    let mut out = findings;
+    if block == null { return out; }
+    let mut index: int = 0;
+    loop {
+        if index >= block.statements.length { break; }
+        out = _scan_statement(block.statements[index], out);
+        index += 1;
+    }
+    return out;
+}
+
+// Visit one statement: flag it if it is a desugared assert (and do NOT
+// descend into its synthesized fail branch), otherwise recurse into any
+// block-bearing children so asserts nested in if/for/loop/match/try/etc.
+// are still found.
+fn _scan_statement(statement: Statement, findings: BareAssertFinding[]) -> BareAssertFinding[] {
+    let mut out = findings;
+    if _is_desugared_assert(statement) {
+        out = _append_finding(out, _finding_for_assert(statement));
+        return out;
+    }
+
+    let variant = statement.variant;
+    if variant == "IfStatement" {
+        out = _scan_block(statement.then_block, out);
+        let else_branch = statement.else_branch;
+        if else_branch != null {
+            out = _scan_block(else_branch.body, out);
+            if else_branch.statement != null {
+                out = _scan_statement(else_branch.statement, out);
+            }
+        }
+        return out;
+    }
+    if variant == "ForStatement" {
+        return _scan_block(statement.body, out);
+    }
+    if variant == "LoopStatement" {
+        return _scan_block(statement.body, out);
+    }
+    if variant == "BlockStatement" {
+        return _scan_block(statement.body, out);
+    }
+    if variant == "WithStatement" {
+        return _scan_block(statement.body, out);
+    }
+    if variant == "RoutineStatement" {
+        return _scan_block(statement.body, out);
+    }
+    if variant == "TryStatement" {
+        out = _scan_block(statement.try_block, out);
+        out = _scan_block(statement.catch_block, out);
+        out = _scan_block(statement.finally_block, out);
+        return out;
+    }
+    if variant == "MatchStatement" {
+        let mut ci: int = 0;
+        loop {
+            if ci >= statement.cases.length { break; }
+            out = _scan_block(statement.cases[ci].body, out);
+            ci += 1;
+        }
+        return out;
+    }
+    return out;
+}
+
+// Walk every top-level `test { ... }` block and return one finding per
+// bare `assert` in its body (recursively). Statements outside test
+// blocks are never visited.
+fn collect_bare_assert_findings(program: Program) -> BareAssertFinding[] {
+    let mut findings: BareAssertFinding[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "TestDeclaration" {
+            findings = _scan_block(statement.body, findings);
+        }
+        index += 1;
+    }
+    return findings;
+}
