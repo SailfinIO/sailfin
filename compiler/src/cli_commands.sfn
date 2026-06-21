@@ -164,7 +164,7 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         di += 1;
     }
     // Issue #940: resolve the implicit runtime capsule
-    // (`<runtime_root>/native/capsule.toml`) and assemble its objects
+    // (`<runtime_root>/capsule.toml`) and assemble its objects
     // on the SAME path as `sfn build` / `sfn run` — c-sources +
     // ll-sources + sfn-sources + prelude-entry. This replaces the
     // retired probe ladder over `build/.../obj/runtime/*.o` plus the
@@ -187,7 +187,7 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
     if runtime_caps.length == 0 {
         print.err("sfn test: runtime bundle/manifest missing — expected "
             + runtime_root
-            + "/native/capsule.toml (kind = \"runtime\")");
+            + "/capsule.toml (kind = \"runtime\")");
         return 1;
     }
     _ensure_dir_cmd(rt_cache_dir);
@@ -2952,8 +2952,8 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> i
 // Tarball contents (under top-level `<root>/`, no wrapping dir
 // — `tar -czf <out> -C <staging> .` mirrors the original):
 //   - bin/sailfin, bin/sfn               — the compiler
-//   - runtime/native/                    — the full C runtime tree
-//   - runtime/native/obj/prelude.o       — pre-built prelude (if available)
+//   - runtime/capsule.toml               — runtime capsule manifest
+//   - runtime/prelude.sfn, runtime/sfn/  — the Sailfin runtime sources
 //   - import-context/                    — staged .sfn-asm tree (if available)
 //
 // Prelude + import-context are conditionally included: the
@@ -3004,16 +3004,20 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         return 1;
     }
 
-    // Full runtime tree. `cp -R src dest` copies the directory
-    // ITSELF into dest — so this lands at staging/runtime/native/.
-    if !fs.exists("runtime/native") {
-        print("sfn package: missing runtime/native (was the build run from the repo root?)");
+    // Runtime capsule manifest. With `runtime/native/` deleted (#823)
+    // the manifest now lives at the runtime root (`runtime/capsule.toml`)
+    // and is the implicit-resolver's bundle anchor; it lands at
+    // staging/runtime/capsule.toml alongside the prelude + sfn sources
+    // copied below.
+    if !fs.exists("runtime/capsule.toml") {
+        print("sfn package: missing runtime/capsule.toml (was the build run from the repo root?)");
         process.run(["rm", "-rf", staging]);
         return 1;
     }
-    let cp_runtime = process.run(["cp", "-R", "runtime/native", staging_runtime]);
+    let cp_runtime = process.run(["cp", "-f", "runtime/capsule.toml", staging_runtime
+        + "/capsule.toml"]);
     if cp_runtime != 0 {
-        print("sfn package: failed to copy runtime/native");
+        print("sfn package: failed to copy runtime/capsule.toml");
         process.run(["rm", "-rf", staging]);
         return 1;
     }
@@ -3024,7 +3028,7 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
     // `assemble_runtime_capsule_link_inputs` in cli_main.sfn). Those
     // sources resolve to `<root>/runtime/prelude.sfn` and
     // `<root>/runtime/sfn/**` relative to the bundled
-    // `runtime/native/capsule.toml`, so without them a fresh install
+    // `runtime/capsule.toml`, so without them a fresh install
     // cannot link any program that touches the runtime (every program
     // pulls in the arena via prelude). They are REQUIRED, not optional
     // — a failed copy is a hard error. This replaces the former

@@ -91,7 +91,7 @@ fn _members() -> _Member[] {
         name: "sfn/compiler", member_path: "compiler", src_dir: "compiler/src"
     });
     out.push(_Member {
-        name: "sfn/runtime-native", member_path: "runtime/native", src_dir: "runtime/native/src"
+        name: "sfn/runtime-native", member_path: "runtime", src_dir: "runtime/src"
     });
     return out;
 }

@@ -412,14 +412,15 @@ jobs:
       # `sailfin-testbin-...` key exactly; if it already exists (no source
       # change since the last main run) the save is a no-op.
       # Key matches the PR action's `sailfin-testbin-...` key exactly,
-      # including `runtime/native/**` (C sources, headers, `.ll`, manifest)
-      # so a runtime-native edit rolls the key and the baseline can publish
-      # a fresh entry (an existing key makes `cache/save` a no-op).
+      # including `runtime/capsule.toml` + `runtime/ir/**` (manifest and
+      # cross-windows link stub) so a runtime edit rolls the key and the
+      # baseline can publish a fresh entry (an existing key makes
+      # `cache/save` a no-op). (`runtime/native/**` retired in #823.)
       - name: Save test-bin cache for PR CI
         uses: actions/cache/save@v5
         with:
           path: build/cache/test-bin
-          key: sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'runtime/native/**', 'compiler/capsule.toml', '.seed-version') }}
+          key: sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', '.seed-version') }}
 
   # Failure-mode job (issue #782). Runs only when `build-quality` fails.
   # Elevated permissions are scoped to this job alone so the gate job

@@ -317,9 +317,9 @@ test_compiler_binary_exports() {
 
 # ---- Test: capsule.toml lists the adapter ----
 test_manifest_lists_filesystem() {
-    local manifest="$REPO_ROOT/runtime/native/capsule.toml"
-    if ! grep -qE '^sfn-sources = \[.*"\.\./sfn/adapters/filesystem\.sfn".*\]' "$manifest"; then
-        echo "[test]   sfn-sources does not list ../sfn/adapters/filesystem.sfn:"
+    local manifest="$REPO_ROOT/runtime/capsule.toml"
+    if ! grep -qE '^sfn-sources = \[.*"sfn/adapters/filesystem\.sfn".*\]' "$manifest"; then
+        echo "[test]   sfn-sources does not list sfn/adapters/filesystem.sfn:"
         grep -nE 'sfn-sources' "$manifest" || true
         return 1
     fi
@@ -458,7 +458,7 @@ run_test "sfn emit llvm produces define for every sfn_fs_* export" test_emit_def
 run_test "probe binary routes fs.{readFile,writeFile,appendFile} through @sfn_fs_*" test_probe_flipped
 run_test "probe binary routes fs.{listDirectory,deleteFile,createDirectory} through @sfn_fs_*" test_probe_flipped_m31b
 run_test "compiler binary exports defined sfn_fs_* family (read/write/append + list/delete/mkdir/read_bytes)" test_compiler_binary_exports
-run_test "runtime/native/capsule.toml sfn-sources lists the adapter" test_manifest_lists_filesystem
+run_test "runtime/capsule.toml sfn-sources lists the adapter" test_manifest_lists_filesystem
 run_test "fs.writeFile / readFile / appendFile round-trip end-to-end" test_round_trip_file
 run_test "large-file round-trip exercises chunked-read grow path" test_round_trip_large_file
 run_test "fs.createDirectory / listDirectory / deleteFile round-trip end-to-end" test_round_trip_list_delete_mkdir

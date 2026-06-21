@@ -77,7 +77,7 @@ rand, clock]`), ownership types, and AI-native constructs.
 | --------------------- | ------------------------------------ |
 | `compiler/src/`       | Compiler source (Sailfin)            |
 | `compiler/tests/`     | Test suites (unit, integration, e2e) |
-| `runtime/native/`     | C runtime                            |
+| `runtime/`            | Runtime capsule (Sailfin, `runtime/sfn/` + `runtime/prelude.sfn`) |
 | `runtime/prelude.sfn` | Prelude library                      |
 | `capsules/`           | Standard library capsules            |
 | `docs/`               | Specification, status, roadmap       |

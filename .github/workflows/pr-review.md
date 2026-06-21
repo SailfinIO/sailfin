@@ -163,9 +163,9 @@ Audit for security vulnerabilities and capability boundary enforcement.
 - `&T` and `&mut T` borrows must not overlap unsafely
 - LLVM lowering must respect ownership metadata
 
-### C Runtime (`runtime/native/`)
-- Check for buffer overflows, integer overflow, null pointer dereferences
-- Verify bounds checking on memory operations
+### Sailfin Runtime (`runtime/sfn/`)
+- The C runtime (`runtime/native/`) is deleted (#822); all runtime sources are now under `runtime/sfn/`
+- Verify bounds checking and memory safety in arena/RC/string/array implementations
 
 ### LLVM Lowering (`compiler/src/llvm/`)
 - Generated IR must not introduce undefined behavior

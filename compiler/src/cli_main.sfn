@@ -721,19 +721,18 @@ fn _do_determinism_check(pass1_out: string, is_library: boolean, cap_capsule_nam
 }
 
 // Issue #940: validate the declarative runtime bundle by the
-// presence of `<root>/native/capsule.toml` (the manifest the implicit
+// presence of `<root>/capsule.toml` (the manifest the implicit
 // runtime-capsule resolver reads). Previously this probed for a
 // Makefile-staged `prelude.o` via `_runtime_prelude_path`; with the
 // prelude now emitted from source via the capsule's `prelude-entry`,
 // the manifest is the load-bearing artifact, and `_runtime_prelude_path`
-// is gone. #822: the C runtime source (`native/src/sailfin_runtime.c`)
-// and the include root (`native/include/`) are deleted, so the manifest
-// is the sole bundle anchor — the `ll-sources` it lists
-// (`native/ir/runtime_globals.ll`) are resolved by the runtime-capsule
-// resolver from the manifest, not probed here.
+// is gone. #822 deleted the C runtime source; #823 deleted the
+// `runtime/native/` directory and moved the manifest up to the runtime
+// root, so the manifest is the sole bundle anchor (`ll-sources` is now
+// empty — there is no `.ll` to probe).
 fn _runtime_bundle_exists(root: string) -> boolean ![io] {
     if root.length == 0 { return false; }
-    let manifest = _path_join(root, "native/capsule.toml");
+    let manifest = _path_join(root, "capsule.toml");
     return fs.exists(manifest);
 }
 
@@ -1659,7 +1658,7 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
 
     // Issue #940 (Ra of #939): the runtime link always takes the
     // declarative runtime-capsule path. `sfn build` / `sfn run` /
-    // `sfn test` inject the implicit `runtime/native/capsule.toml` as
+    // `sfn test` inject the implicit `runtime/capsule.toml` as
     // a fallback when the resolver surfaced no `[dependencies]`, and
     // `-p` / declared-dep builds (including the compiler's own
     // self-host, whose `capsule.toml` declares the runtime dep) carry
@@ -1675,7 +1674,7 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         if root_display.length == 0 { root_display = "<runtime-root>"; }
         print("sfn: runtime bundle/manifest missing — no runtime capsule resolved");
         print("     expected " + root_display
-            + "/native/capsule.toml (kind = \"runtime\")");
+            + "/capsule.toml (kind = \"runtime\")");
         print("     hint: ensure the runtime bundle ships alongside the compiler binary");
         return _failed_link_result();
     }
@@ -2577,7 +2576,7 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
         // `-p` / declared-dep build (incl. self-host) already carries
         // `runtime_capsules`, so this is a no-op there; an end-user
         // `sfn build <file>` with no deps now links via the implicit
-        // `runtime/native/capsule.toml` instead of the retired probe.
+        // `runtime/capsule.toml` instead of the retired probe.
         let mut build_runtime_caps = capsule_result.runtime_capsules;
         if build_runtime_caps.length == 0 {
             build_runtime_caps = runtime_capsule_from_root(runtime_root);

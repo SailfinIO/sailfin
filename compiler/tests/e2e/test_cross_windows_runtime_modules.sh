@@ -22,7 +22,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-MANIFEST="$REPO_ROOT/runtime/native/capsule.toml"
+MANIFEST="$REPO_ROOT/runtime/capsule.toml"
 MAKEFILE="$REPO_ROOT/Makefile"
 PASS=0
 FAIL=0
@@ -39,9 +39,11 @@ fail() {
 [ -f "$MANIFEST" ] || { echo "[test] missing $MANIFEST" >&2; exit 1; }
 [ -f "$MAKEFILE" ] || { echo "[test] missing $MAKEFILE" >&2; exit 1; }
 
-# Normalize a manifest-relative path (`../sfn/...`, relative to
-# runtime/native/) to a repo-root-relative path (`runtime/sfn/...`).
-norm() { sed -E 's#^\.\./#runtime/#'; }
+# Normalize a manifest-relative path (`sfn/...` / `prelude.sfn`,
+# relative to runtime/) to a repo-root-relative path
+# (`runtime/sfn/...`). #823 moved the manifest up from runtime/native/
+# to runtime/, so entries no longer carry a leading `../`.
+norm() { sed -E 's#^(.+)$#runtime/\1#'; }
 
 # --- Manifest: sfn-sources (single-line array) + prelude-entry ---
 sfn_line="$(grep -E '^sfn-sources[[:space:]]*=' "$MANIFEST" | head -n1 || true)"
@@ -61,14 +63,14 @@ prelude_val="$(echo "$prelude_line" \
 # minus process.sfn, the pthread-dependent concurrency/* modules, and
 # platform/rlimit.sfn (its getrlimit/setrlimit libc externs do not
 # exist under mingw; Windows resolves @apply_default_mem_limit from
-# the strong no-op stub in runtime/native/ir/windows_stubs.ll, which
+# the strong no-op stub in runtime/ir/windows_stubs.ll, which
 # only the cross-windows link consumes), PLUS process_windows.sfn — the
 # Windows-only module (#822/#1308) that replaces the excluded process.sfn
 # and owns the @sfn_process_* family (it is intentionally NOT in the
 # manifest, the inverse of process.sfn). Normalized to repo-relative
 # paths.
 expected="$( { echo "$prelude_val"; echo "$sfn_vals"; \
-      echo "runtime/sfn/platform/process_windows.sfn"; } \
+      echo "sfn/platform/process_windows.sfn"; } \
     | norm \
     | grep -v '^runtime/sfn/process\.sfn$' \
     | grep -v '^runtime/sfn/concurrency/' \
@@ -144,7 +146,7 @@ if echo "$actual" | grep -q '^runtime/sfn/platform/rlimit\.sfn$'; then
 else
     ok "rlimit.sfn excluded from cross-windows RUNTIME_MODS"
 fi
-if grep -q 'define i32 @apply_default_mem_limit' "$REPO_ROOT/runtime/native/ir/windows_stubs.ll"; then
+if grep -q 'define i32 @apply_default_mem_limit' "$REPO_ROOT/runtime/ir/windows_stubs.ll"; then
     ok "strong @apply_default_mem_limit stub present in windows_stubs.ll"
 else
     fail "missing @apply_default_mem_limit stub in windows_stubs.ll — Windows link would break"
@@ -180,7 +182,7 @@ if echo "$actual" | grep -q '^runtime/sfn/concurrency/serve\.sfn$'; then
 else
     ok "serve.sfn excluded from cross-windows RUNTIME_MODS"
 fi
-if grep -q 'define void @sailfin_runtime_serve' "$REPO_ROOT/runtime/native/ir/windows_stubs.ll"; then
+if grep -q 'define void @sailfin_runtime_serve' "$REPO_ROOT/runtime/ir/windows_stubs.ll"; then
     ok "strong @sailfin_runtime_serve stub present in windows_stubs.ll"
 else
     fail "missing @sailfin_runtime_serve stub in windows_stubs.ll — Windows link would break (#1308)"
@@ -191,7 +193,7 @@ fi
 # (`runtime_assert_fail_fn`/`sailfin_assert_fail`, which the standalone
 # cross-windows module emit does not produce) from windows_stubs.ll.
 for sym in realpath runtime_assert_fail_fn sailfin_assert_fail; do
-    if grep -qE "define [^@]*@$sym\\b" "$REPO_ROOT/runtime/native/ir/windows_stubs.ll"; then
+    if grep -qE "define [^@]*@$sym\\b" "$REPO_ROOT/runtime/ir/windows_stubs.ll"; then
         ok "strong @$sym stub present in windows_stubs.ll (#822)"
     else
         fail "missing @$sym stub in windows_stubs.ll — Windows link would break after sailfin_runtime.c deletion (#822)"

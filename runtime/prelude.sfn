@@ -6,55 +6,50 @@
 //
 // M2.12a (#407) added explicit imports of the seven `runtime/sfn/*.sfn`
 // modules and flipped `runtime_sleep_fn` onto `sfn_sleep`. M2.12b (#408)
-// extends the flip to the M2.10 type-meta cluster (`runtime_is_*_fn`,
+// extended the flip to the M2.10 type-meta cluster (`runtime_is_*_fn`,
 // `runtime_resolve_runtime_type_fn`, `runtime_instance_of_fn` — see the
-// per-cluster comment near each binding). Every other `let runtime_X_fn =
-// runtime.X` delegate stays as-is until M3:
-//   * `runtime_is_void_fn` — `runtime/sfn/type_meta.sfn` does not yet
-//     export `sfn_is_void`.
-//   * `runtime_raise_value_error_fn` — the TLS-based C entrypoint is
-//     semantically distinct from `sfn_throw`'s setjmp/longjmp path; M3
-//     unifies the two exception APIs.
-//   * `runtime_monotonic_millis_fn`, `runtime_log_execution_fn`,
-//     `runtime_to_debug_string_fn`, `runtime_assert_fail_fn`,
-//     `runtime_serve_fn` — no `sfn_*` definition yet (M3 ports them
-//     alongside the rest of the C runtime).
+// per-cluster comment near each binding).
+//
+// M4.8 (#823) — the C runtime is now deleted (#822): there is no
+// `runtime/native/src/sailfin_runtime.c` left. Every `runtime.X` member
+// these delegates reach now lowers (via the descriptor registry in
+// `compiler/src/llvm/runtime_helpers.sfn`) to a Sailfin body under
+// `runtime/sfn/**`, so the dead namespace-handle bindings (`console`,
+// `fs`, `http`, `websocket`) and the unused `runtime_assert_fail_fn`
+// delegate — none of which were read in this module; dotted call sites
+// like `console.log` / `fs.exists` resolve through the descriptor
+// registry independently of the binding — were dropped here.
+//
+// The remaining `let runtime_X_fn = runtime.X` delegates below stay as
+// `runtime.X` magic-namespace accesses rather than direct imports
+// because the backing Sailfin bodies take raw C-ABI types (`* u8`,
+// `f64`, `i64`) and rely on the descriptor registry's
+// `native_signature` / `c_abi_return_type` rows to insert the
+// `string ↔ * u8` / `int ↔ float` boundary casts at each call site. A
+// direct `import` would bypass that bridging and is the follow-up the
+// #823 audit-only `In:` list explicitly defers:
+//   * `runtime_raise_value_error_fn` → `sfn_raise_value_error`
+//     (`runtime/sfn/exception.sfn`).
+//   * `runtime_monotonic_millis_fn` → `sfn_clock_millis`
+//     (`runtime/sfn/clock.sfn`).
+//   * `runtime_serve_fn` → `sailfin_runtime_serve`
+//     (`runtime/sfn/concurrency/serve.sfn`, a no-op stub).
 //   * `runtime_array_map_fn`, `runtime_array_filter_fn`,
-//     `runtime_array_reduce_fn` — `runtime/sfn/array.sfn` already
-//     exports stub `sfn_array_sfn_map/filter/reduce` (placeholders
-//     returning the input), but the helper registry's descriptors
-//     still have `native_signature: null` and emit calls to the
-//     legacy `sailfin_runtime_array_*` C bodies. The flip is gated
-//     on closures-with-capture (M3 prerequisite) before the stubs
-//     can be replaced with real implementations.
+//     `runtime_array_reduce_fn` → `sfn_array_sfn_map/filter/reduce`
+//     (`runtime/sfn/array.sfn`, placeholders returning the input;
+//     real bodies gated on closures-with-capture).
 //   * `runtime_char_code_fn`, `runtime_grapheme_count_fn`,
-//     `runtime_grapheme_at_fn` — the helper registry's
-//     `native_signature` already routes the emitted IR call to the
-//     `sfn_str_*` symbol name, but those symbols are still C
-//     trampolines in `runtime/native/src/sailfin_runtime.c` (the
-//     Sailfin module exports `sfn_str_sfn_*` with the `_sfn_`
-//     infix; M3 retires the C trampolines and renames the Sailfin
-//     exports to the bare form). The prelude-side flip also needs
-//     a follow-up boundary cast (string ↔ `* u8`, int ↔ `float`)
-//     deferred per the issue's audit-only `In:` list.
-//   * `console`, `fs`, `http`, `websocket` — runtime namespace handles
-//     with no Sailfin-native definitions today; M3 ships them alongside
-//     the filesystem / HTTP adapter rewrites.
-// With M2.12b shipped, the audit invariant "every M2-replaced symbol's
-// emitted call lands on the canonical `sfn_*` symbol name" holds via
-// either direct sfn import (the type-meta cluster) or the helper
-// registry's `native_signature` routing (`sleep` / `process.run` /
-// `print*` / `sfn_str_codepoint` / `sfn_str_grapheme_*`). Several of
-// those `sfn_*` symbols are still C trampolines in
-// `runtime/native/src/sailfin_runtime.c` and stay live until M3 lifts
-// each body into a Sailfin module (`runtime/sfn/io.sfn` for print,
-// `runtime/sfn/string.sfn` for the str helpers, …). The
-// `sailfin_runtime_*` legacy bodies (e.g.
-// `sailfin_runtime_print_raw`, `sailfin_runtime_string_concat`) are
-// the truly dead-after-M2 portion — they're still linked for seed
-// compat but no fresh user emission references them. See
-// `docs/runtime_audit.md`'s "M2 closed" status delta for the complete
-// per-symbol table.
+//     `runtime_grapheme_at_fn` → `sfn_str_codepoint` /
+//     `sfn_str_grapheme_count` / `sfn_str_grapheme_at`
+//     (`runtime/sfn/string.sfn`).
+//
+// Retiring the `runtime.X` magic namespace wholesale (and with it the
+// now-permanently-`null` `@runtime` global in
+// `runtime/sfn/runtime_globals.sfn` — the keystone for deleting
+// `runtime/native/` entirely) is seed-gated: the pinned seed still
+// emits `@runtime = external global` in every module it compiles, so
+// the definition must survive until a post-flip seed is cut. See
+// `docs/runtime_audit.md` for the full per-symbol table.
 import { sfn_print_sfn, sfn_log_execution } from "./sfn/io";
 import { sfn_array_sfn_map } from "./sfn/array";
 import { sfn_sleep } from "./sfn/clock";
@@ -72,17 +67,11 @@ import {
     sfn_resolve_type
 } from "./sfn/type_meta";
 
-let console = runtime.console;
-let fs = runtime.fs;
-let http = runtime.http;
-let websocket = runtime.websocket;
-
 let runtime_sleep_fn = sfn_sleep;
 let runtime_monotonic_millis_fn = runtime.monotonic_millis;
 let runtime_log_execution_fn = sfn_log_execution;
 let runtime_to_debug_string_fn = sfn_to_debug_string;
 let runtime_raise_value_error_fn = runtime.raise_value_error;
-let runtime_assert_fail_fn = runtime.assert_fail;
 // M2.12b (#408): type-meta predicates point at their Sailfin-native
 // definitions in `runtime/sfn/type_meta.sfn`. The compiler's helper
 // registry still carries each descriptor's `native_signature: "sfn_*"`
@@ -624,13 +613,10 @@ fn substring(text: string, start: int, end: int) -> string {
     // Use the O(N) runtime intrinsic. The prior Sailfin-level loop did
     // `result = result + grapheme_at(text, i)` per index, which is O(N^2)
     // memory under the zero-GC runtime. grapheme_at is byte-indexed in the
-    // bootstrap runtime (sailfin_runtime.c:4822), so byte-range memcpy
-    // produces the same byte sequence as the old loop. Removes ~8M of ~9M
-    // string_concat calls per module compile.
+    // runtime, so byte-range memcpy produces the same byte sequence as the
+    // old loop. Removes ~8M of ~9M string_concat calls per module compile.
     // alias-coverage: runtime helper double-ABI seam — `substring_unchecked`
-    // takes `double` start/end at the C-ABI boundary (the trampoline at
-    // `runtime/native/src/sailfin_runtime.c:6598` forwards to the int64
-    // sailfin_runtime_substring_unchecked). Cast explicitly so the
+    // takes `double` start/end at the C-ABI boundary. Cast explicitly so the
     // post-#556 symmetric int↔float refusal stays clean.
     return substring_unchecked(text, normalized_start as float, normalized_end as float);
 }

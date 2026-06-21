@@ -913,7 +913,7 @@ rebuild-impl:
 		done; \
 	fi
 	@# Runtime-object staging removed (#941). Post-#940 the freshly-built
-	@# compiler resolves the runtime via runtime/native/capsule.toml (the
+	@# compiler resolves the runtime via runtime/capsule.toml (the
 	@# declarative runtime capsule), emitting prelude + each sfn-source from
 	@# source on demand and caching the .o under the per-work-dir build cache.
 	@# No link path reads the old build/native/obj/runtime/*.o, so the per-module
@@ -1075,7 +1075,7 @@ ci-cross-windows:
 	: "#941: the runtime IR this target consumes is now emitted by"; \
 	: "ci-cross-windows itself (was staged by 'make rebuild', deleted"; \
 	: "in #941). RUNTIME_MODS is this bridge's copy of"; \
-	: "runtime/native/capsule.toml's sfn-sources (+ the prelude-entry),"; \
+	: "runtime/capsule.toml's sfn-sources (+ the prelude-entry),"; \
 	: "MINUS process.sfn (its posix_spawnp/waitpid libc externs do not"; \
 	: "exist under mingw) PLUS process_windows.sfn in its place — the"; \
 	: "module split (#822/#1308) that owns the Windows @sfn_process_*"; \
@@ -1083,7 +1083,7 @@ ci-cross-windows:
 	: "_WIN32 C wrapper in sailfin_runtime.c is DELETED — and MINUS"; \
 	: "platform/rlimit.sfn, whose getrlimit/setrlimit libc externs do"; \
 	: "not exist under mingw; Windows resolves @apply_default_mem_limit"; \
-	: "from the strong no-op stub in runtime/native/ir/windows_stubs.ll"; \
+	: "from the strong no-op stub in runtime/ir/windows_stubs.ll"; \
 	: "instead. A guard test"; \
 	: "(compiler/tests/e2e/test_cross_windows_runtime_modules.sh) asserts"; \
 	: "this list stays in sync with the manifest (Risk R4). clock is"; \
@@ -1126,18 +1126,18 @@ ci-cross-windows:
 		RUNTIME_OBJS="$$RUNTIME_OBJS $$obj"; \
 	done; \
 	\
-	echo "[cross-windows] compiling runtime globals (last non-Sailfin object)..."; \
+	echo "[cross-windows] compiling Windows link stubs..."; \
 	: "#822 / #1308: sailfin_runtime.c is DELETED — the runtime is fully"; \
 	: "Sailfin-owned. The Windows @sfn_process_* family now comes from"; \
 	: "process_windows.sfn (in RUNTIME_MODS above); shell_capture from io.sfn."; \
-	: "@runtime (#1436) now comes from runtime_globals.sfn (in RUNTIME_MODS);"; \
-	: "runtime_globals.ll is now just the @sfn_default_arena data object."; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/native/ir/runtime_globals.ll \
-		-o "$$WIN_OBJ/runtime_globals.o"; \
-	: "Windows-only strong stubs for symbols whose Sailfin modules are"; \
-	: "excluded from RUNTIME_MODS (see runtime/native/ir/windows_stubs.ll"; \
-	: "for the per-symbol rationale and the weak-vs-strong COFF note)."; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/native/ir/windows_stubs.ll \
+	: "@runtime (#1436) now comes from runtime_globals.sfn (in RUNTIME_MODS)."; \
+	: "#823: runtime/native/ deleted; runtime_globals.ll (definition-less"; \
+	: "after @runtime/@sfn_default_arena retired) is gone, and windows_stubs.ll"; \
+	: "moved up to runtime/ir/. Windows-only strong stubs for symbols whose"; \
+	: "Sailfin modules are excluded from RUNTIME_MODS (see"; \
+	: "runtime/ir/windows_stubs.ll for the per-symbol rationale and the"; \
+	: "weak-vs-strong COFF note)."; \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -c runtime/ir/windows_stubs.ll \
 		-o "$$WIN_OBJ/windows_stubs.o"; \
 	\
 	echo "[cross-windows] compiling cross-module shim (if present)..."; \
@@ -1151,7 +1151,6 @@ ci-cross-windows:
 	\
 	echo "[cross-windows] linking sailfin.exe..."; \
 	$(MINGW_CC) -static -o "$$WIN_OUT" \
-		"$$WIN_OBJ/runtime_globals.o" \
 		"$$WIN_OBJ/windows_stubs.o" \
 		"$$WIN_OBJ/native.linked.o" \
 		$$RUNTIME_OBJS \
@@ -1169,7 +1168,7 @@ ci-cross-windows:
 	cp -f "$$WIN_OUT" "$$INSTALLER_DIR/bin/sailfin.exe"; \
 	cp -f "$$WIN_OUT" "$$INSTALLER_DIR/bin/sfn.exe"; \
 	mkdir -p "$$INSTALLER_DIR/runtime"; \
-	cp -R runtime/native "$$INSTALLER_DIR/runtime/native"; \
+	cp -f runtime/capsule.toml "$$INSTALLER_DIR/runtime/capsule.toml"; \
 	: "#941: bundle the runtime Sailfin sources. A fresh Windows install"; \
 	: "relinks user programs against the runtime via the capsule"; \
 	: "emit-from-source path (assemble_runtime_capsule_link_inputs in"; \

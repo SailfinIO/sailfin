@@ -8,7 +8,7 @@ Sailfin is a compiled systems language with effect type annotations for capabili
 
 > Note: the codebase may still contain historical `stage2` names in some internal paths; prefer "native compiler" terminology in new code and docs.
 
-The runtime currently ships as C under `runtime/native/` and is planned to move into Sailfin before the 1.0 release.
+The runtime is fully Sailfin-owned: `runtime/native/` is deleted (#822); the runtime capsule root is `runtime/` (manifest at `runtime/capsule.toml`), with Sailfin sources under `runtime/sfn/` and `runtime/prelude.sfn`.
 
 Key language features:
 
@@ -28,7 +28,7 @@ Deferred features (parsed but not enforced, post-1.0):
 |---|---|
 | `compiler/src/` | Self-hosted native compiler sources (`.sfn`) |
 | `compiler/tests/` | Unit, integration, and e2e test suites |
-| `runtime/native/` | C runtime implementation |
+| `runtime/` | Runtime capsule root (manifest: `runtime/capsule.toml`; Sailfin sources: `runtime/sfn/`, `runtime/prelude.sfn`) |
 | `runtime/prelude.sfn` | Sailfin-native runtime (collections, strings, type checks) |
 | `docs/` | Spec, status matrix, roadmap, grammar, keyword references |
 | `docs/proposals/` | Future-facing designs (leave here until status page marks them shipped) |

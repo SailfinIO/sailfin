@@ -8,6 +8,16 @@
 > **Status delta since 2026-04-15** (keep this list short; once an item is
 > fully shipped fold it into the body and remove the bullet here):
 >
+> - **`runtime/native/` deleted (2026-06-21, #822).** The directory is gone.
+>   The runtime capsule manifest moved to `runtime/capsule.toml`
+>   (`kind = "runtime"`, `name = "sfn/runtime-native"` unchanged). Path
+>   entries in `sfn-sources` / `prelude-entry` are now relative to `runtime/`
+>   (e.g. `sfn/io.sfn`, `prelude.sfn`). `ll-sources` is now empty (`[]`).
+>   `runtime/native/ir/runtime_globals.ll` (comments-only) is deleted;
+>   `windows_stubs.ll` moved to `runtime/ir/windows_stubs.ll` (used only by
+>   the `ci-cross-windows` Makefile bridge). `workspace.toml` member is now
+>   `"runtime"` (was `"runtime/native"`). No seed cut was required.
+>
 > - **Arena-cluster flips (2026-06-19, #1425 + mark_persistent, epic #1308).**
 >   (#1425 — serve): the legacy untyped `serve(handler, config?)` prelude
 >   target `sailfin_runtime_serve` (always a no-op C stub; distinct from the
@@ -158,8 +168,8 @@
 >   `runtime/sfn/platform/libc.sfn`, its per-symbol descriptor in
 >   `compiler/src/llvm/runtime_helpers.sfn`, and the matching helper-
 >   preamble entry in `compiler/src/llvm/lowering/lowering_helpers.sfn`.
->   `runtime/native/capsule.toml`'s `sfn-sources` now lists
->   `../sfn/clock.sfn`, so the runtime-capsule link path picks it up.
+>   `runtime/capsule.toml`'s `sfn-sources` lists `sfn/clock.sfn`, so the
+>   runtime-capsule link path picks it up.
 >   (#941: the legacy `make rebuild` `build/native/obj/runtime/*.o`
 >   staging was deleted — post-#940 every link path emits the runtime
 >   from source via the capsule path, so the pre-built objects were no
@@ -220,9 +230,9 @@
 > - **`kind = "runtime"` capsules' `sfn-sources` schema is now
 >   live (M2.1 issue #394 2026-05-07; M2.2 real page-chain bump
 >   allocator issue #477 2026-05-25).** The active
->   `runtime/native/capsule.toml` populates `sfn-sources =
->   ["../sfn/memory/arena.sfn", …]` — the first proof-of-life
->   entry. `_compile_runtime_sfn_sources` (the consumer shipped
+>   `runtime/capsule.toml` (formerly `runtime/native/capsule.toml`)
+>   populates `sfn-sources = ["sfn/memory/arena.sfn", …]` — the
+>   first proof-of-life entry. `_compile_runtime_sfn_sources` (the consumer shipped
 >   dormant in #308) fires on every `sfn build -p compiler`
 >   invocation, producing
 >   `build/sailfin/sfn__runtime-native__arena.sfn-O2.o` and
@@ -797,15 +807,18 @@ prerequisites ship should confirm or reject it.
 
 ## Pre-1.0 Removal Inventory
 
-Entrypoints that are C-based today and must be gone by 1.0:
+**`runtime/native/` is fully deleted (#822, 2026-06-21).** All C files and
+LLVM stubs that lived under it are gone. The runtime capsule root is now
+`runtime/` (manifest at `runtime/capsule.toml`). Remaining pre-1.0 removal
+items:
 
-- `runtime/native/src/sailfin_runtime.c` (~9,000 lines)
-- `runtime/native/src/sailfin_arena.c` (M0.5 disposable C arena — deleted at M3 once the Sailfin `runtime/sfn/memory/arena.sfn` subsumes every caller)
-- `runtime/native/include/sailfin_runtime.h`
-- `runtime/native/src/native_driver.c` — **REMOVED 2026-05-25 in M5 (#451)**. The binary's entry point is now the Sailfin-emitted `@main`.
-- `runtime/native/src/sailfin_sha256.c` + `.h`
-- `runtime/native/src/sailfin_base64.c` + `.h`
-- `runtime/native/ir/runtime_globals.ll` (small LLVM stub file)
+- `runtime/native/src/sailfin_runtime.c` — **DELETED** (with `runtime/native/`, #822)
+- `runtime/native/src/sailfin_arena.c` — **DELETED** (with `runtime/native/`, #822)
+- `runtime/native/include/sailfin_runtime.h` — **DELETED** (with `runtime/native/`, #822)
+- `runtime/native/src/native_driver.c` — **DELETED 2026-05-25 in M5 (#451)**. The binary's entry point is now the Sailfin-emitted `@main`.
+- `runtime/native/src/sailfin_sha256.c` + `.h` — **DELETED** (with `runtime/native/`, #822)
+- `runtime/native/src/sailfin_base64.c` + `.h` — **DELETED** (with `runtime/native/`, #822)
+- `runtime/native/ir/runtime_globals.ll` — **DELETED** (comments-only; `windows_stubs.ll` moved to `runtime/ir/windows_stubs.ll`, #822)
 - `compiler/build/**` (legacy Python-generated artifacts; emergency recovery
   only, never built by the current toolchain)
 
@@ -872,9 +885,9 @@ Reordered from the previous audit to reflect the April 2026 reality.
   language features.
 - **M5 — Native CLI and driver.** **Shipped 2026-05-25 (#451).** Replaced
   `native_driver.c` with a Sailfin-native `@main` entry point emitted
-  directly by the compiler. Removing `runtime/native/` entirely is folded
-  into M3 once the remaining C support helpers (`sailfin_runtime.c`,
-  crypto, includes) port to Sailfin.
+  directly by the compiler. `runtime/native/` is now **fully deleted
+  (#822, 2026-06-21)**; the runtime capsule root is `runtime/` with the
+  manifest at `runtime/capsule.toml`.
 
 Decoupling M0 from M1-M5 is intentional: M0 is language-level work that has
 value even if the runtime rewrite slips. Everything downstream compounds on
