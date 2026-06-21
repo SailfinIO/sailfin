@@ -632,7 +632,14 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                     // means a refactor bypassed it — fail loud instead of
                                     // emitting a value-where-pointer-expected miscompile.
                                     let mut _pre_is_channel_method: boolean = false;
+                                    let mut _pre_is_channel_base: boolean = false;
                                     if _pre_struct == "channel" {
+                                        _pre_is_channel_base = true;
+                                    }
+                                    if starts_with(_pre_struct, "channel:") {
+                                        _pre_is_channel_base = true;
+                                    }
+                                    if _pre_is_channel_base {
                                         if _pre_field == "send" {
                                             _pre_is_channel_method = true;
                                         }
@@ -1071,7 +1078,14 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         // Route them to the corresponding sfn_channel_* helpers
                         // instead of failing closed (#1091).
                         let mut _g_is_channel_method: boolean = false;
+                        let mut _g_is_channel_base: boolean = false;
                         if _g_annotation == "channel" {
+                            _g_is_channel_base = true;
+                        }
+                        if starts_with(_g_annotation, "channel:") {
+                            _g_is_channel_base = true;
+                        }
+                        if _g_is_channel_base {
                             if method_parse.field == "send" {
                                 _g_is_channel_method = true;
                             }

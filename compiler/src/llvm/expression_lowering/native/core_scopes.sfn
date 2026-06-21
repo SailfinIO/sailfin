@@ -424,7 +424,11 @@ fn _channel_send_arguments_text(trimmed: string, locals: LocalBinding[], binding
         let parameter = bindings_find_parameter_binding(bindings, base);
         if parameter != null { base_annotation = parameter.type_annotation; }
     }
-    if base_annotation != "channel" { return ""; }
+    // Bare "channel" or kinded "channel:<kind>" (#1466).
+    let mut _is_channel_base: boolean = false;
+    if base_annotation == "channel" { _is_channel_base = true; }
+    if starts_with(base_annotation, "channel:") { _is_channel_base = true; }
+    if !_is_channel_base { return ""; }
     return substring(trimmed, call_index + 1, trimmed.length - 1);
 }
 

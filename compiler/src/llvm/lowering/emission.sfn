@@ -188,6 +188,30 @@ fn _emit_make_parameter_binding(name: string, llvm_name: string, llvm_type: stri
     };
 }
 
+// Canonicalize a channel parameter's type annotation so the bespoke
+// channel send/receive lowering recognizes it across a function boundary
+// (#1466). A channel crosses as an opaque `i8*` handle, but the ELEMENT
+// kind must thread through so a `channel<OwnedBuf>` / `channel:OwnedBuf`
+// parameter drives the by-value struct element ABI in the callee — a bare
+// `channel` parameter would otherwise lose the kind and truncate the
+// element. Returns the canonical annotation ("channel" or "channel:<kind>")
+// or "" when the type is not a channel. Mirrors the binding-side inference
+// in `instructions_let.sfn` so the local-let and parameter forms agree.
+fn _canonical_channel_param_annotation(param_type: string) -> string {
+    let trimmed = trim_text(param_type);
+    if trimmed == "channel" { return "channel"; }
+    if starts_with(trimmed, "channel:") { return trimmed; }
+    if starts_with(trimmed, "channel<") {
+        let close = index_of(trimmed, ">");
+        if close > 8 {
+            let kind = trim_text(substring(trimmed, 8, close));
+            if kind.length > 0 { return "channel:" + kind; }
+        }
+        return "channel";
+    }
+    return "";
+}
+
 // Build ParameterPreparation from the NativeFunction's parameter list.
 fn prepare_parameters_from_function(function: NativeFunction, context: TypeContext) -> ParameterPreparation {
     let mut signature: string[] = [];
@@ -213,6 +237,14 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
         if llvm_type == "void" { llvm_type = ""; }
         // Default empty types to i8* so LLVM IR is parseable.
         if llvm_type.length == 0 { llvm_type = "i8*"; }
+        // A channel parameter crosses as the opaque `i8*` handle; canonicalize
+        // its annotation so the element kind threads into the callee (#1466).
+        let mut binding_annotation: string = param_type;
+        let _chan_anno = _canonical_channel_param_annotation(param_type);
+        if _chan_anno.length > 0 {
+            binding_annotation = _chan_anno;
+            llvm_type = "i8*";
+        }
         if param_type.length == 0 {
             let param_diag = "llvm lowering: parameter `" + param_name
                 + "` missing type annotation; defaulting to `"
@@ -232,7 +264,7 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
         }
         seen_names.push(llvm_name);
         signature.push(llvm_type + " " + llvm_name);
-        bindings = append_parameter_binding(bindings, _emit_make_parameter_binding(param_name, llvm_name, llvm_type, param_type));
+        bindings = append_parameter_binding(bindings, _emit_make_parameter_binding(param_name, llvm_name, llvm_type, binding_annotation));
         index += 1;
     }
     return ParameterPreparation {
