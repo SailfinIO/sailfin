@@ -385,12 +385,10 @@ jobs:
 
       # Run the full `.sfn` suite with the test-bin cache ENABLED (no
       # `--no-test-cache`), populating `build/cache/test-bin/v<schema>`.
-      # Loop the `.sfn` shard names from scripts/test_shards.sh (the
-      # single source of truth) and skip the e2e-sh `.sh` shards — those
-      # scripts compile their own throwaway programs and don't exercise
-      # the per-test binary cache. Retry-once mirrors the PR action's #892
-      # flake mitigation so one non-deterministic codegen flake doesn't
-      # skip the save (a persistent failure still fails → no save).
+      # Loop the shard names from scripts/test_shards.sh (the single
+      # source of truth). Retry-once mirrors the PR action's #892 flake
+      # mitigation so one non-deterministic codegen flake doesn't skip
+      # the save (a persistent failure still fails → no save).
       - name: Warm test-bin cache (run .sfn shards, cache enabled)
         shell: bash
         run: |

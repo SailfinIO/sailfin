@@ -53,15 +53,6 @@ jobs:
       - name: Assert shard map covers the full test surface
         shell: bash
         run: make test-shard-cover
-      # Warn-first anti-regrowth ratchet for e2e bash scripts (#1327,
-      # test-infra Phase 3 / #842). Flags any compiler/tests/e2e/test_*.sh
-      # not on scripts/e2e_bash_allowlist.txt as a GitHub annotation; does
-      # NOT fail the build yet (RATCHET_MODE defaults to warn). Flip to
-      # `RATCHET_MODE: fail` once the #842 batch ports drain the allowlist
-      # down to the permanent hold-outs.
-      - name: Lint — no new e2e bash scripts (warn-first)
-        shell: bash
-        run: scripts/lint_no_new_e2e_bash.sh
 
   # Fast static-analysis pre-flight: run `sfn check` over the whole
   # compiler tree using the *pinned seed* binary (no self-host build
@@ -370,10 +361,9 @@ jobs:
   # job) so each OS's legs gate only on their own compiler build — see
   # the build-compiler-* comment above.
   #
-  # e2e-sh is split 4 ways: the 94 legacy .sh scripts (~18s each on
-  # macOS) were the critical path (~31 min) when run as one shard.
-  # Keep in sync with E2E_SH_SHARDS in scripts/test_shards.sh; the
-  # shard-cover job fails if they drift.
+  # The suite is sharded across `*_test.sfn` slices only (the legacy
+  # e2e-sh `.sh` shards were retired when the bash e2e suite was fully
+  # migrated — epic #840). The shard-cover job fails if the map drifts.
   build-linux:
     name: Build + Test [linux-x86_64 / ${{ matrix.shard }}]
     needs: build-compiler-linux
@@ -382,7 +372,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [unit-a, unit-b, int-e2e-caps, e2e-sh-1, e2e-sh-2, e2e-sh-3, e2e-sh-4]
+        shard: [unit-a, unit-b, int-e2e-caps]
         include:
           # Primary leg: runs the one-shot non-test steps + packaging.
           - shard: unit-a
@@ -689,15 +679,15 @@ jobs:
     needs: build-compiler-macos
     # macos-26: adopted from the nightly-selfhost canary now that the
     # `macos-latest` migration (2026-06-15) has made macos-15 runners
-    # scarce. The shard suite (int-e2e-caps runs serially; e2e-sh-* run
-    # the bash scripts) is green on macOS 26 with the #1409 dirent-offset
-    # and #1410 child-env-linking fixes landed in this PR.
+    # scarce. The shard suite (int-e2e-caps runs serially) is green on
+    # macOS 26 with the #1409 dirent-offset and #1410 child-env-linking
+    # fixes landed in this PR.
     runs-on: macos-26
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        shard: [unit-a, unit-b, int-e2e-caps, e2e-sh-1, e2e-sh-2, e2e-sh-3, e2e-sh-4]
+        shard: [unit-a, unit-b, int-e2e-caps]
         include:
           # Primary leg: runs the one-shot non-test steps + packaging.
           - shard: unit-a

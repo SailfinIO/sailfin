@@ -1,0 +1,191 @@
+// E2E test pinning the self-applied compiler memory budget contract
+// (`runtime/sfn/platform/rlimit.sfn`, called from `fn main` in
+// `compiler/src/cli_main.sfn`).
+//
+// Native (no-bash) replacement for the former
+// `test_mem_limit_selfcap.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`).
+//
+// The compiler driver self-applies an 8 GiB RLIMIT_AS on Linux at
+// startup, replacing the historical caller-side `ulimit -v 8388608`
+// prefix ritual. Contracts pinned here, all observed via the
+// `SAILFIN_TRACE_MEM_LIMIT=1` stderr trace (deterministic token, no RSS
+// measurement):
+//
+//   1. Inherited cap wins: under an external `ulimit -v`, the driver
+//      leaves the limit alone ("inherited RLIMIT_AS cap left in place").
+//   2. Explicit override: `SAILFIN_MEM_LIMIT=<bytes>` applies even when
+//      an external cap exists ("RLIMIT_AS set from SAILFIN_MEM_LIMIT").
+//   3. Disable: `SAILFIN_MEM_LIMIT=unlimited` skips the self-cap
+//      ("self-cap disabled via SAILFIN_MEM_LIMIT").
+//   4. Invalid values (< 1 MiB or suffixed like "4G", which strtoll
+//      truncates) are rejected with a trace and the run proceeds on the
+//      default ("invalid SAILFIN_MEM_LIMIT") — never an 8-byte budget
+//      that kills the process.
+//   5. Default-apply: in an uncapped shell, the 8 GiB default lands
+//      ("set to the 8 GiB default"). Since we cannot read `ulimit -v`
+//      from sfn, this leg accepts EITHER the default token OR the
+//      inherited-cap token (a CI leg may carry a step-level cap).
+//
+// `process.run_capture(argv, env)` cannot set `ulimit -v` / RLIMIT_AS,
+// so the cases that need an inherited external cap spawn through bash as
+// the vehicle:
+//   bash -c 'ulimit -v 4194304; exec "$0" version' <sfn-bin>
+// with the SAILFIN_* trace/limit vars threaded in the env array.
+//
+// Non-Linux: RLIMIT_AS is not honored (Darwin) — the driver no-ops via
+// its /proc probe, so every test skips when /proc/self/status is absent.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test. Assert on the captured
+// stderr with `sfn/strings` predicates instead. (#842.)
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. The bash-c cases additionally rely on
+// PATH so the runner-cwd-relative `build/native/sailfin` (passed as the
+// bash `$0`) and the shell itself resolve. Per-case SAILFIN_* trace/limit
+// vars are appended by the caller.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// True on Linux (where RLIMIT_AS is honored and the trace is meaningful).
+// On Darwin /proc/self/status is absent and the self-cap no-ops, so the
+// caller skips the body.
+fn _is_linux() -> boolean ![io] { return fs.exists("/proc/self/status"); }
+
+// Spawn the compiler directly (no shell) with the given SAILFIN_* trace
+// vars appended, and return captured stderr. `extra` is a list of
+// `KEY=value` strings appended to the base child env.
+fn _run_direct(extra: string[]) -> string ![io] {
+    let mut e = _child_env();
+    let mut i = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i += 1;
+    }
+    let _exit = process.run_capture([_sfn_bin(), "version"], e);
+    let _o = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return err;
+}
+
+// Spawn through bash with an inherited `ulimit -v 4194304` (4 GiB) cap in
+// effect, then `exec "$0" version` so the compiler inherits the cap. The
+// SAILFIN_* trace vars are threaded via the env array. `$0` is the sfn
+// binary path (runner-cwd-relative `build/native/sailfin` resolves
+// because PATH and the runner cwd are honored). Returns captured stderr.
+fn _run_under_cap(extra: string[]) -> string ![io] {
+    let mut e = _child_env();
+    let mut i = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i += 1;
+    }
+    let argv = ["bash", "-c", "ulimit -v 4194304; exec \"$0\" version", _sfn_bin()];
+    let _exit = process.run_capture(argv, e);
+    let _o = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return err;
+}
+
+// 1. Inherited external cap (4 GiB ulimit) is left in place: the driver
+//    refuses to loosen or re-apply over an inherited cap.
+test "mem-limit: inherited external RLIMIT_AS cap left in place" ![io] {
+    if !_is_linux() {
+        assert true;
+        return;
+    }
+    let err = _run_under_cap(["SAILFIN_TRACE_MEM_LIMIT=1", "SAILFIN_MEM_LIMIT="]);
+    assert contains(err, "[mem-limit] inherited RLIMIT_AS cap left in place");
+}
+
+// 2. Explicit override applies even under an external cap (1 GiB, below
+//    the 4 GiB hard cap so the setrlimit raise path cannot fail).
+test "mem-limit: explicit SAILFIN_MEM_LIMIT override applies under a cap" ![io] {
+    if !_is_linux() {
+        assert true;
+        return;
+    }
+    let err = _run_under_cap(["SAILFIN_TRACE_MEM_LIMIT=1", "SAILFIN_MEM_LIMIT=1073741824"]);
+    assert contains(err, "[mem-limit] RLIMIT_AS set from SAILFIN_MEM_LIMIT");
+}
+
+// 3. `unlimited` disables the self-cap (no inherited cap needed).
+test "mem-limit: SAILFIN_MEM_LIMIT=unlimited disables the self-cap" ![io] {
+    if !_is_linux() {
+        assert true;
+        return;
+    }
+    let err = _run_direct(["SAILFIN_TRACE_MEM_LIMIT=1", "SAILFIN_MEM_LIMIT=unlimited"]);
+    assert contains(err, "[mem-limit] self-cap disabled via SAILFIN_MEM_LIMIT");
+}
+
+// 4. Suffixed values (strtoll truncates "4G" -> 4) are rejected with a
+//    trace; the run proceeds on the default rather than an 8-byte budget.
+//    Run under a cap so the trace path is exercised in the same shape the
+//    .sh original pinned.
+test "mem-limit: suffixed SAILFIN_MEM_LIMIT value rejected as invalid" ![io] {
+    if !_is_linux() {
+        assert true;
+        return;
+    }
+    let err = _run_under_cap(["SAILFIN_TRACE_MEM_LIMIT=1", "SAILFIN_MEM_LIMIT=4G"]);
+    assert contains(err, "[mem-limit] invalid SAILFIN_MEM_LIMIT");
+}
+
+// 4b. An invalid value must NOT abort the invocation itself — `sfn
+//     version` still exits 0.
+test "mem-limit: invalid SAILFIN_MEM_LIMIT does not block the run" ![io] {
+    if !_is_linux() {
+        assert true;
+        return;
+    }
+    let mut e = _child_env();
+    e.push("SAILFIN_MEM_LIMIT=4G");
+    let exit = process.run_capture([_sfn_bin(), "version"], e);
+    let _o = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+// 5. Default-apply. We cannot read `ulimit -v` from sfn to know whether
+//    the harness shell is capped, so spawn a plain (no-cap) `version`
+//    with an empty SAILFIN_MEM_LIMIT and accept EITHER the 8 GiB-default
+//    token (uncapped shell) OR the inherited-cap token (a CI leg may
+//    carry a step-level `ulimit -v`). One of the two must appear.
+test "mem-limit: 8 GiB default applies (or inherited cap wins)" ![io] {
+    if !_is_linux() {
+        assert true;
+        return;
+    }
+    let err = _run_direct(["SAILFIN_TRACE_MEM_LIMIT=1", "SAILFIN_MEM_LIMIT="]);
+    let default_applied = contains(err, "[mem-limit] RLIMIT_AS set to the 8 GiB default");
+    let cap_inherited = contains(err, "[mem-limit] inherited RLIMIT_AS cap left in place");
+    assert default_applied || cap_inherited;
+}

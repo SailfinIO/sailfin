@@ -1,0 +1,284 @@
+// E2E regression test for channel-send escape promotion at cross-thread
+// boundaries (issue #1094, M4 follow-up to M1.5.5 / #329).
+//
+// Native (no-bash) replacement for the former
+// `test_escape_promotion_boundaries.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`).
+//
+// Drop emission promotes owned heap locals to "rc" only at function-return
+// boundaries (M1.5.5). Channel-send moves owned data ACROSS threads; without
+// escape promotion at that boundary the sender's scope-exit drop would free
+// data the receiver still reads — a cross-thread use-after-free.
+//
+// Three tests:
+//   1. IR: a heap string sent on a channel from inside a closing loop-body
+//      scope must NOT be released at the sender's scope exit — the emitted
+//      module contains `sfn_channel_send` but no `call ... @sfn_rc_release(`
+//      line (a bare `declare ... @sfn_rc_release` is the unconditional
+//      helper preamble and is allowed).
+//   2. IR: the same shape routed through a `channel`-typed *parameter* base
+//      (`fn producer(ch: channel)`), the second base form #1091 accepts.
+//   3. runtime: a producer running on a REAL pthread sends a heap struct
+//      across the channel boundary; the consumer dereferences it after the
+//      producer's frame (and its drop sites) are gone. Linked with a C
+//      pthread harness (single-slot mailbox stub, sfn_rc_release = free).
+//      Plain run must succeed; the ASAN leg is best-effort (a startup abort
+//      under the runner's self-cap is a skip, not a failure — only an actual
+//      `ERROR: AddressSanitizer:` report fails the test).
+//
+// The per-rule unit coverage (promotion + consumption + drop suppression,
+// spawn-capture text forms, hygiene cases) lives in
+// compiler/tests/unit/escape_promotion_boundaries_test.sfn.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test. Assert on captured stdout/IR with
+// `sfn/strings` predicates instead. (#842.)
+import { find, contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment, not "inherit".
+// Thread the variables the toolchain needs: the roundtrip leg spawns clang
+// and its linker, which resolve through PATH; SAILFIN_TEST_SCRATCH routes
+// the build-cache per invocation so the parallel pool does not collide.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    base = base + "/sfn-escape-channel-send";
+    fs.createDirectory(base, true);
+    return base;
+}
+
+// Emit LLVM IR for a source snippet; returns the IR text, or "EMIT_FAILED".
+fn _emit_llvm(tag: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + tag + ".sfn";
+    let out = dir + "/" + tag + ".ll";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(out);
+}
+
+// True iff some line of `ir` is a `call ... @<sym>(`. A bare
+// `declare ... @<sym>` (the unconditional helper preamble) is NOT a call and
+// is allowed — only a `call` is forbidden.
+fn _has_forbidden_call(ir: string, sym: string) -> boolean {
+    let needle = "@" + sym + "(";
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if contains(line, "call ") && contains(line, needle) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// ── (1) IR: send from a closing scope — no sender-side release ────────
+//
+// `msg` is a heap string built inside the loop body; the loop-body scope
+// closes (running its drop site) before `ch.receive()`. The escaped value
+// must not be released there.
+test "IR: channel send from closing scope emits no sender-side rc_release call (#1094)" ![io] {
+    let ir = _emit_llvm("send_scope_exit", "fn main() ![io] {\n"
+        + "    let ch = channel(4);\n"
+        + "    let mut i: int = 0;\n"
+        + "    loop {\n"
+        + "        if i >= 1 { break; }\n"
+        + "        let msg = \"hello\" + \" world\";\n"
+        + "        ch.send(msg);\n"
+        + "        i += 1;\n"
+        + "    }\n"
+        + "    let got = ch.receive();\n"
+        + "}");
+    assert ir != "EMIT_FAILED";
+    // Proves the boundary actually lowered.
+    assert contains(ir, "sfn_channel_send");
+    // The suppressed sender-side release must not be called.
+    assert ! _has_forbidden_call(ir, "sfn_rc_release");
+}
+
+// ── (2) IR: channel-typed parameter base — same suppression ──────────
+test "IR: channel-typed parameter base also suppresses the sender drop (#1094)" ![io] {
+    let ir = _emit_llvm("send_param_base", "fn producer(ch: channel) ![io] {\n"
+        + "    let msg = \"hello\" + \" world\";\n"
+        + "    ch.send(msg);\n"
+        + "}\n"
+        + "fn main() ![io] {\n"
+        + "    let ch = channel(4);\n"
+        + "    producer(ch);\n"
+        + "    let got = ch.receive();\n"
+        + "}");
+    assert ir != "EMIT_FAILED";
+    assert contains(ir, "sfn_channel_send");
+    assert ! _has_forbidden_call(ir, "sfn_rc_release");
+}
+
+// The cross-thread no-UAF harness (issue #1094). The producer runs on a real
+// pthread: it heap-allocates a Payload (via the sfn_alloc_struct stub) and
+// sends it across the channel boundary; its frame — and every sender-side
+// drop site — is gone by the time the main thread consumes. If drop emission
+// ever releases the escaped value at the producer's scope exit, sfn_rc_release
+// (stubbed as free) frees the block and the consumer's dereference becomes a
+// heap-use-after-free that ASAN reports.
+//
+// The single-slot mailbox stands in for the real channel runtime so
+// sfn_rc_release can be interposed as free; it follows the by-pointer ABI
+// (#1266): send gets a pointer to the element bytes, recv returns a pointer
+// to the stored bytes. Channel semantics are not under test — sender-side
+// drops are.
+fn _escape_harness_c() -> string {
+    return "#include <pthread.h>\n" + "#include <stdio.h>\n"
+        + "#include <stdlib.h>\n"
+        + "\n"
+        + "extern void produce__escape_payload(void *ch);\n"
+        + "extern long consume__escape_payload(void *ch);\n"
+        + "\n"
+        + "void sfn_type_register(void *desc) { (void)desc; }\n"
+        + "void sailfin_runtime_mark_persistent(void *ptr) { (void)ptr; }\n"
+        + "void *sfn_alloc_struct(long n) { return calloc(1, (size_t)n); }\n"
+        + "void sfn_rc_release(void *p) { free(p); }\n"
+        + "\n"
+        + "static void *slot = NULL;\n"
+        + "long sfn_channel_send(void *ch, void *elem) { (void)ch; slot = *(void **)elem; return 1; }\n"
+        + "void *sfn_channel_recv(void *ch) { (void)ch; return &slot; }\n"
+        + "\n"
+        + "static void *producer_thread(void *ch) {\n"
+        + "    produce__escape_payload(ch);\n"
+        + "    return NULL;\n"
+        + "}\n"
+        + "\n"
+        + "int main(void) {\n"
+        + "    void *ch = (void *)0x1;\n"
+        + "    pthread_t t;\n"
+        + "    if (pthread_create(&t, NULL, producer_thread, ch) != 0) return 90;\n"
+        + "    if (pthread_join(t, NULL) != 0) return 91;\n"
+        + "    long got = consume__escape_payload(ch);\n"
+        + "    if (got != 42) {\n"
+        + "        fprintf(stderr, \"consumer read %ld, want 42 (payload corrupted or freed)\\n\", got);\n"
+        + "        return 1;\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// The fixture sent across the thread boundary. Emitted to
+// `<scratch>/escape_payload.sfn` so the module suffix is `escape_payload`,
+// matching the `produce__escape_payload` / `consume__escape_payload` symbol
+// names the harness binds to.
+fn _escape_payload_sfn() -> string {
+    return "struct Payload {\n" + "    x: int;\n" + "    y: int;\n" + "}\n"
+        + "\n"
+        + "fn produce(ch: channel) ![io] {\n"
+        + "    let p = Payload { x: 6, y: 7 };\n"
+        + "    ch.send(p);\n"
+        + "}\n"
+        + "\n"
+        + "fn consume(ch: channel) -> int ![io] {\n"
+        + "    let got: Payload = ch.receive();\n"
+        + "    return got.x * got.y;\n"
+        + "}\n";
+}
+
+// The ASAN run's child env, with SAILFIN_MEM_LIMIT=unlimited so the
+// instrumented binary's own self-cap does not abort the ~16 TB shadow
+// reservation at startup.
+fn _asan_env() -> string[] ![io] {
+    let mut e = _child_env();
+    e.push("SAILFIN_MEM_LIMIT=unlimited");
+    return e;
+}
+
+// ── (3) Runtime: cross-thread round trip (plain + best-effort ASAN) ───
+test "runtime: payload survives the producer thread's scope exit (clang + pthread) (#1094)" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/escape_payload.sfn";
+    let ll = dir + "/escape_payload.ll";
+    fs.writeFile(src, _escape_payload_sfn());
+
+    // Emit LLVM. The module suffix derives from the path's basename-stem;
+    // both relative and absolute paths yield stem `escape_payload`.
+    let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _eo = process.capture_take_stdout();
+    let _ee = process.capture_take_stderr();
+    assert emit_exit == 0;
+    let ir = fs.readFile(ll);
+    // Verify the module-suffixed symbol names the harness binds to are
+    // present; if not, the harness cannot link — skip gracefully.
+    if !contains(ir, "produce__escape_payload") {
+        assert true;
+        return;
+    }
+
+    let harness = dir + "/harness.c";
+    fs.writeFile(harness, _escape_harness_c());
+
+    // Plain link + run — must always work when clang is available.
+    let bin = dir + "/roundtrip";
+    let link_exit = process.run_capture(["clang", "-Wno-override-module", harness, ll, "-o", bin, "-lpthread"], _child_env());
+    let _lo = process.capture_take_stdout();
+    let lerr = process.capture_take_stderr();
+    if link_exit != 0 {
+        // clang unavailable or link failed — skip (the IR assertions above
+        // still pin the contract).
+        assert true;
+        return;
+    }
+
+    let run_exit = process.run_capture([bin], _child_env());
+    let _ro = process.capture_take_stdout();
+    let _re = process.capture_take_stderr();
+    assert run_exit == 0;
+
+    // ASAN link + run — best effort. ASAN reserves ~16 TB of virtual address
+    // space for shadow memory at startup, which the runner's self-cap aborts
+    // before main() runs. Only an actual `ERROR: AddressSanitizer:` report is
+    // a real FAIL (the sender-side-release regression signal); a startup abort
+    // without that line is a skip.
+    let bin_asan = dir + "/roundtrip_asan";
+    let asan_link = process.run_capture(["clang", "-fsanitize=address", "-Wno-override-module", harness, ll, "-o", bin_asan, "-lpthread"], _child_env());
+    let _alo = process.capture_take_stdout();
+    let _ale = process.capture_take_stderr();
+    if asan_link != 0 {
+        // ASAN runtime not available on this host — plain roundtrip passed.
+        assert true;
+        return;
+    }
+
+    let asan_exit = process.run_capture([bin_asan], _asan_env());
+    let asan_out = process.capture_take_stdout();
+    let asan_err = process.capture_take_stderr();
+    if asan_exit == 0 {
+        // ASAN roundtrip clean.
+        assert true;
+    } else if find(asan_out + asan_err, "ERROR: AddressSanitizer:", 0) >= 0 {
+        // A genuine sanitizer report — sender-side release of the escaped
+        // payload regressed.
+        assert false;
+    } else {
+        // Startup/environment failure (shadow mapping under the self-cap,
+        // missing runtime, etc.) — not a verdict on the escape rule. Skip.
+        assert true;
+    }
+}

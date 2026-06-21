@@ -42,22 +42,26 @@ e2e-sh-1, before being diagnosed).
 
 Tests that want a sanitizer leg must therefore:
 
-- **Gate the sanitizer run on `ulimit -v` reporting `unlimited`** and skip
-  (not fail) otherwise — the plain, uninstrumented run still provides
-  coverage. Reference pattern in
-  `compiler/tests/e2e/test_escape_promotion_boundaries.sh`:
+- **Skip the sanitizer leg unless ASAN actually starts** — the plain,
+  uninstrumented run still provides coverage. The native e2e tests are
+  `*_test.sfn` and cannot read `ulimit -v`, so the pattern (see
+  `compiler/tests/e2e/runtime_memory_arena_test.sfn` and
+  `escape_promotion_channel_send_test.sfn`) is: build with
+  `-fsanitize=address`; if the build fails → skip; run with
+  `SAILFIN_MEM_LIMIT=unlimited` and `ASAN_OPTIONS=detect_leaks=0` in the
+  child env; if the run exits non-zero **with** an `ERROR: AddressSanitizer:`
+  line → fail; any other non-zero exit (the shadow reservation aborting at
+  startup under a vmem cap, or a missing compiler-rt runtime) → skip.
 
-  ```bash
-  vmem_cap="$(ulimit -v 2>/dev/null || echo unlimited)"
-  if [ "$vmem_cap" != "unlimited" ]; then
-      echo "[test]   virtual-memory cap active (ulimit -v ${vmem_cap}) — ASAN shadow reservation cannot run; plain roundtrip still passed"
-      return 0
-  fi
+  ```sfn
+  let exit = process.run_capture([asan_bin], _asan_env());  // SAILFIN_MEM_LIMIT=unlimited
+  let out = process.capture_take_stdout();
+  let err = process.capture_take_stderr();
+  if exit != 0 && contains(out + err, "ERROR: AddressSanitizer:") {
+      assert false;  // a genuine sanitizer finding
+  }
+  // otherwise: clean run or a startup/abort skip — both pass.
   ```
-
-  (Sanitizer legs should also export `SAILFIN_MEM_LIMIT=unlimited` so the
-  instrumented binary's own self-cap does not abort the shadow
-  reservation.)
 
 - **Only a genuine `ERROR: AddressSanitizer:` report may fail the test.**
   A failure to start the sanitizer runtime (missing compiler-rt archives,
