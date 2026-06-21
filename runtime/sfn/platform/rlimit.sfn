@@ -49,7 +49,7 @@
 // getrlimit/setrlimit, so the externs cannot resolve in a static
 // link — the process.sfn exclusion precedent). The Windows binary
 // resolves `apply_default_mem_limit` from the strong no-op stub in
-// `runtime/native/ir/windows_stubs.ll`, which only the
+// `runtime/ir/windows_stubs.ll`, which only the
 // cross-windows link consumes — Linux/macOS link this module's
 // definition and never see the stub. Sync pinned by
 // `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.

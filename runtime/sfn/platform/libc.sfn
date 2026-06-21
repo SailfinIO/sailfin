@@ -6,8 +6,8 @@
 // Extern Declarations").
 //
 // Status: typecheck smoke test. Not imported anywhere yet; the
-// runtime continues to reach libc through `runtime/native/src/
-// sailfin_runtime.c` until the Sailfin-native runtime lands at M2
+// runtime continues to reach libc through the retired C runtime
+// (formerly `sailfin_runtime.c`) until the Sailfin-native runtime lands at M2
 // (per the milestone plan in `docs/runtime_architecture.md` §4).
 // Once `int`/`float` numeric types and `Result<T, E>` ship, this
 // file becomes the seed for `runtime/sfn/memory.sfn`,

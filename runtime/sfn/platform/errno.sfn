@@ -34,7 +34,7 @@
 // runtime function is supported in the link path — see Linkage below.
 //
 // Linkage (#893 decision): this file stays OUT of
-// `runtime/native/capsule.toml` `sfn-sources`. `sfn-sources`
+// `runtime/capsule.toml` `sfn-sources`. `sfn-sources`
 // registration forces a standalone link on every target for a module
 // with no entry point of its own; nothing requires that yet. The
 // natural DRY consumer, `clock.sfn::sfn_sleep`, therefore keeps

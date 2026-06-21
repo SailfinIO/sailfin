@@ -29,7 +29,7 @@
 // mirrors that selection so the canonical home stays accurate.
 //
 // Linkage (mirrors the #893 decision for `runtime/sfn/platform/
-// errno.sfn`): this file stays OUT of `runtime/native/capsule.toml`
+// errno.sfn`): this file stays OUT of `runtime/capsule.toml`
 // `sfn-sources`. `sfn-sources` registration forces a standalone link
 // on every target for a module with no entry point of its own, and
 // nothing imports it yet: the runtime `sfn-source` emit path

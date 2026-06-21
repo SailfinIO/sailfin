@@ -3,33 +3,30 @@
 // First wave of Sailfin-native `SfnString` operations (M2.4a, #396).
 // The module pins the future shape of the five non-allocating
 // `sfn_str_*` helpers — `len`, `eq`, `slice`, `to_cstr`,
-// `from_cstr` — and ships into the compiler binary alongside the
-// C runtime so the migration footprint is visible at link time.
+// `from_cstr` — and ships into the compiler binary as the live
+// Sailfin bodies (the retired C runtime is deleted).
 //
-// Status: trampoline bodies. The architect plan in
+// Status: real Sailfin bodies. The architect plan in
 // `docs/runtime_architecture.md` §2.2 specifies these helpers
 // against the SfnString aggregate (`{i8*, i64}` by value) so
 // `sfn_str_len` is a single field load and `sfn_str_eq` is a length
-// compare + `memcmp`. Today's Sailfin frontend lowers `string` to
-// `i8*` for parameters/locals (M1.A only locked the literal/aggregate
-// shape, not the type-mapping flip slated for M1.A.2), so these
-// bodies still bridge through the legacy NUL-terminated C
-// entrypoints. The function *names* are the migration unit — once
-// M1.A.2 lands the bodies can be rewritten in-place over the
-// aggregate shape without touching any caller.
+// compare + `memcmp`. The M1.A.2 type-mapping flip has landed —
+// the Sailfin frontend now lowers `string` to the `{i8*, i64}`
+// aggregate (`compiler/src/llvm/type_mapping.sfn`) — but these
+// bodies still take their payloads as NUL-terminated `* u8` by the
+// registry ABI and bridge through libc, so the body rewrite over
+// the aggregate field-read shape is still future work. The function
+// *names* are the migration unit — that rewrite can land in-place
+// over the aggregate shape without touching any caller.
 //
-// Naming: every export uses the `sfn_str_sfn_*` infix so the
-// Sailfin module coexists with the C runtime's matching
-// `sfn_str_*` exports without a link-time collision (mirrors the
-// arena module's `sfn_arena_sfn_*` infix; see
-// `runtime/sfn/memory/arena.sfn` for the same rationale). The
-// canonical user-facing names — the ones the new compiler emits
-// `call`s against — are `sfn_str_*` (no infix), provided by the C
-// trampolines in `runtime/native/src/sailfin_runtime.c`. This
-// module's exports are presence-only proof of life today and the
-// migration unit for M2.4b: when the aggregate-typed parameter
-// flip lands, the C trampolines retire and these `_sfn_` names
-// rename to the bare canonical form in a single rollback-safe PR.
+// Naming: the `sfn_str_sfn_*` infix originally let the Sailfin
+// module coexist with the retired C runtime's matching `sfn_str_*`
+// exports without a link-time collision (mirrors the arena module's
+// `sfn_arena_sfn_*` infix; see `runtime/sfn/memory/arena.sfn` for
+// the same rationale). With the C trampolines deleted, the
+// canonical user-facing names — the ones the compiler emits
+// `call`s against — are the bare `sfn_str_*` Sailfin bodies here;
+// the `_sfn_` infix migration is complete.
 //
 // Effects: none. String primitives live below the I/O layer (same
 // discipline as `runtime/sfn/memory/arena.sfn`). The `![io]`
@@ -47,7 +44,7 @@
 // modules' `.sfn-asm` into the import-context the lowering consults, so the
 // call now resolves; with a seed containing #1288 pinned, this consumer
 // collapses the duplication. `ownedbuf.sfn` and `arena.sfn` are linked
-// alongside this module via `runtime/native/capsule.toml`'s `sfn-sources`.
+// alongside this module via `runtime/capsule.toml`'s `sfn-sources`.
 //
 // #1318 retired the OwnedBuf-returning `sfn_str_sfn_concat` / `_append`
 // proof-of-life wrappers; the real `sfn_str_concat` / `sfn_str_append` bodies
@@ -93,11 +90,6 @@ extern fn strtod(nptr: * u8, endptr: * * u8) -> f64;
 // Sailfin demand on the legacy concat — `resolve_runtime_root` in exec.sfn —
 // was retargeted to the native `+` path). The C definitions are now purely
 // C-internal and retire with the C runtime at #822.
-// `sailfin_runtime_string_to_number` is the still-C `strtod` boundary
-// `to_number` delegates to (allocating-op family — retires in #1318/#822).
-// Returns `double` (System V x86_64 `%xmm0`), matched exactly here.
-extern fn sailfin_runtime_string_to_number(s: * u8) -> f64;
-
 // #1315 (C4 of epic #1308): the accessor family — `byte_at`/`find_byte`/
 // `codepoint`/`grapheme_at`/`grapheme_count` — are now real Sailfin
 // bodies below (bare-named emission targets; the C defs are `static`).

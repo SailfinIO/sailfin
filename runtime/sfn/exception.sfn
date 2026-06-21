@@ -6,8 +6,8 @@
 // migration: primitives only. The compiler-emission migration
 // in `compiler/src/llvm/lowering/instructions_try.sfn` lands at
 // M2.7b; the legacy TLS-polling path (`sailfin_runtime_set/
-// has/clear/take_exception` in `runtime/native/src/
-// sailfin_runtime.c`) stays operational during the transition,
+// has/clear/take_exception` in the retired C runtime,
+// formerly `sailfin_runtime.c`) stays operational during the transition,
 // and M2.7c deletes it once every emission site has cut over.
 //
 // Status: pure-Sailfin frame management with direct
@@ -61,7 +61,7 @@
 // because the C runtime exposes no `sfn_try_*` / `sfn_throw`
 // / `sfn_take_exception` symbols today (it uses the
 // `sailfin_runtime_*` family — see
-// `runtime/native/src/sailfin_runtime.c:223-296`). The
+// `sailfin_runtime.c:223-296` in the retired C runtime). The
 // `sfn_exception_*` helpers carry the longer prefix so a future
 // `sfn_alloc_frame` user-facing helper does not collide with the
 // runtime namespace. The coexistence-regression assertion in
@@ -386,7 +386,7 @@ fn sfn_take_exception(frame: * SfnExceptionFrame) -> * u8 {
 // The trio (`sfn_set_exception` / `sfn_clear_exception` /
 // `sfn_has_exception`) plus `sfn_raise_value_error` port the C runtime's
 // live TLS-polling exception path (`sailfin_runtime_*` set/clear/has and
-// the value-error raiser in `runtime/native/src/sailfin_runtime.c`) into
+// the value-error raiser in the retired C runtime) into
 // Sailfin. This is a SEPARATE surface from the setjmp/frame API above:
 // the frame API (`sfn_throw` / `sfn_try_enter` / `sfn_take_exception`)
 // backs `try`/`throw` lowering, while this message-slot API backs the
@@ -402,7 +402,7 @@ fn sfn_take_exception(frame: * SfnExceptionFrame) -> * u8 {
 // this module do (see the file-header "Frame layout" and "TLS" notes).
 // The flip to `thread_local let mut` lands with the same post-seed
 // follow-up that upgrades the chain head. The legacy C symbols stay
-// exported in `runtime/native/` for seed-built IR until the M3 seed cut
+// exported in the retired C runtime for seed-built IR until the M3 seed cut
 // retires them.
 let mut sfn_exception_message_addr: i64 = 0;
 

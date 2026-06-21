@@ -1,7 +1,7 @@
 // runtime/sfn/platform/process_windows.sfn
 //
 // Windows (mingw-w64) process family — the module split that lets the
-// last C runtime file (`runtime/native/src/sailfin_runtime.c`) be
+// last C runtime file (the retired C runtime, formerly `sailfin_runtime.c`) be
 // deleted (#822 / epic #1308).
 //
 // WHY A SEPARATE MODULE. Sailfin has no source-level platform
@@ -11,7 +11,7 @@
 // Win32 `CreateProcessA` body — the unused extern family would leave
 // undefined references on each target. Instead:
 //   - `runtime/sfn/process.sfn` keeps the POSIX bodies (posix_spawnp /
-//     waitpid). It is in `runtime/native/capsule.toml` (native builds)
+//     waitpid). It is in `runtime/capsule.toml` (native builds)
 //     and is DELIBERATELY EXCLUDED from the cross-windows RUNTIME_MODS.
 //   - this module provides the same `@sfn_process_*` symbols for Windows.
 //     It is in the cross-windows RUNTIME_MODS ONLY and is NOT in

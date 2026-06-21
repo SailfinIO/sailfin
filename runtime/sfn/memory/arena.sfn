@@ -2,8 +2,9 @@
 //
 // Sailfin-native bump allocator backed by a linked list of pages.
 // First fully-implemented runtime module in the M2 rewrite — ships
-// alongside the C arena (`runtime/native/src/sailfin_arena.c`) so
-// downstream callers stay on the production allocator until M3
+// alongside the C arena (the retired C runtime, formerly
+// `sailfin_arena.c`) so downstream callers stay on the production
+// allocator until M3
 // flips the C namesakes to `static` and retires the C source. M2.2
 // per `docs/runtime_architecture.md` §2.1.1 and issue #477 (epic
 // #389 M2 — Core Runtime in Sailfin).
@@ -176,7 +177,7 @@ struct Arena {
 // and bitwise NOT (both unverified in the seed compiler at the time
 // this module was written). For `align == 8` and `value == 0` this
 // returns `0`; for `value == 9` it returns `16`. Behavior matches the
-// C arena's `_align_up` (`runtime/native/src/sailfin_arena.c:19`)
+// C arena's `_align_up` (the retired C runtime, formerly `sailfin_arena.c:19`)
 // bit-for-bit on every power-of-two `align`.
 fn _sfn_arena_align_up(value: i64, align: i64) -> i64 {
     let stepped: i64 = (value + align - 1) / align;
@@ -207,8 +208,8 @@ fn _sfn_arena_page_create(capacity: i64) -> * u8 {
 
 // `_sfn_arena_page_destroy(page_addr)` releases a single page (its
 // backing buffer and its header). Null-safe: a `0` address is a
-// no-op. The C arena's matching helper sits at
-// `runtime/native/src/sailfin_arena.c:44`.
+// no-op. The C arena's matching helper sat at
+// `sailfin_arena.c:44` in the retired C runtime.
 fn _sfn_arena_page_destroy(page_addr: i64) -> void {
     if page_addr == 0 { return; }
     let page: * ArenaPage = page_addr as * ArenaPage;
@@ -563,7 +564,7 @@ fn sfn_arena_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, a
 // #390). Port of the double-encoding wrappers
 // `sailfin_intrinsic_runtime_arena_mark` /
 // `sailfin_intrinsic_runtime_arena_rewind`
-// (`runtime/native/src/sailfin_runtime.c:7811,7834`), NOT the
+// (the retired C runtime, formerly `sailfin_runtime.c:7811,7834`), NOT the
 // low-level struct-returning `sfn_arena_mark` /  `sfn_arena_rewind`
 // (`sailfin_arena.c:94,104`). The runtime-helper descriptors flip
 // `sailfin_intrinsic_runtime_arena_mark` →

@@ -23,7 +23,7 @@
 // sentinel. The body allocates a `(len + 1) * 8`-byte buffer
 // via libc `malloc`, copies each `sfn_str_to_cstr(argv[i])`
 // pointer (no-op on today's NUL-terminated strings — see
-// `runtime/native/src/sailfin_runtime.c:2075` for the identity-
+// `sailfin_runtime.c:2075` in the retired C runtime for the identity-
 // bridge rationale that this Sailfin module preserves at the
 // API boundary), and writes a NULL terminator past the last
 // element. `atomic_store` is the seed-supported pointer-slot
@@ -60,7 +60,7 @@
 // `environ` is referenced directly via `extern var` (#1313) and
 // loaded by the Sailfin `get_environ` accessor below — the former
 // C bridge `sailfin_runtime_get_environ` in
-// `runtime/native/src/sailfin_runtime.c` is no longer called.
+// the retired C runtime is no longer called.
 // Passing literal NULL instead gave the child
 // an empty environment on Linux glibc and broke env-inheritance
 // callers (caught by
@@ -123,7 +123,7 @@ extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
 
 extern fn strlen(s: * u8) -> usize;
 
-// String-array append (`runtime/native/src/sailfin_runtime.c:
+// String-array append (the retired C runtime's `sailfin_runtime.c:
 // sfn_array_push_string` → `sailfin_runtime_append_string_v2`).
 // Stores the `char*` by pointer (no copy) and returns the SfnArray,
 // or the null pointer on OOM. Consumed by `sfn_process_environ`,
@@ -240,7 +240,7 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
 // Ports `sailfin_runtime_process_{exit,run_capture,
 // capture_take_stdout,capture_take_stderr,handle_write,
 // handle_close_stdin,handle_read_stdout,handle_read_stderr,
-// handle_wait}` from `runtime/native/src/sailfin_runtime.c` to
+// handle_wait}` from the retired C runtime to
 // Sailfin-native bodies. `process_spawn_with_env` stays C (M4) and
 // remains the sole producer of the handle the `handle_*` family
 // consumes — see the `SailfinProcessHandle` note below.
@@ -1066,7 +1066,7 @@ fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] {
 //
 // On Windows the cross-windows Makefile path skips this module and
 // the `#if defined(_WIN32)` shim in
-// `runtime/native/src/sailfin_runtime.c` resolves the symbol with an
+// the retired C runtime's `_WIN32` shim resolves the symbol with an
 // empty array instead (same shim strategy as `sfn_process_run` /
 // `sfn_process_spawn_with_env` — see the lesson from PR #1240).
 //

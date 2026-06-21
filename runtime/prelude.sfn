@@ -45,8 +45,7 @@
 //
 // Retiring the `runtime.X` magic namespace wholesale (and with it the
 // now-permanently-`null` `@runtime` global in
-// `runtime/sfn/runtime_globals.sfn` — the keystone for deleting
-// `runtime/native/` entirely) is seed-gated: the pinned seed still
+// `runtime/sfn/runtime_globals.sfn`) is seed-gated: the pinned seed still
 // emits `@runtime = external global` in every module it compiles, so
 // the definition must survive until a post-flip seed is cut. See
 // `docs/runtime_audit.md` for the full per-symbol table.

@@ -54,7 +54,7 @@
 //     (neither extern is in `libc.sfn`) without the seek/tell pair.
 //
 // Out (deferred to M3.9):
-//   - Deleting `runtime/native/src/sailfin_runtime.c`'s
+//   - Deleting the retired C runtime's
 //     `sailfin_adapter_fs_*` bodies. They stay exported during the
 //     M3 window so seed-built compiler IR (which still calls them
 //     by their legacy names) continues to link. M3.9 retires
