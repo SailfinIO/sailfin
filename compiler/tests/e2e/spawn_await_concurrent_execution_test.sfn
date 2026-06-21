@@ -1,0 +1,89 @@
+// E2E: `spawn` / `await` of a non-capturing lambda actually EXECUTES the
+// task on the runtime thread pool and returns the correct typed value
+// (issue #1474, epic #965/#1209).
+//
+// Before #1474, `spawn fn() -> T { ... }` mis-lowered: the lifted-lambda
+// closure pair `{i8*, i8*}` was `bitcast` straight to a function pointer
+// (`bitcast {i8*,i8*} to <ret> ()*`) — invalid IR for any spawned task
+// that reached the pool, and the bare-`spawn`/`parallel` forms routed to
+// the `sfn_spawn_task` stub that never enqueues. Net effect: spawned task
+// bodies never ran. The fix extracts the `{fn_ptr, env}` slots from the
+// closure pair and routes through the runtime's `sfn_spawn_<kind>_ctx`
+// family, whose `_ctx` trampoline calls `fn(i8* env) -> T` — exactly the
+// lifted worker's shape — so the task runs on a worker thread and its
+// typed result round-trips through `await`.
+//
+// This test fans out THREE tasks (all spawned before any await), then
+// joins them. A correct value coming back through `await` can ONLY have
+// been produced by a worker thread pulling the task off the shared queue
+// and running it (the await result field is written by the worker), so
+// asserting the values proves real execution on the pool — not inline
+// evaluation.
+//
+// Fixtures use string concatenation + `number_to_string` (NOT `{{ }}`
+// interpolation) so the host compiler does not interpolate the fixture
+// before it is written.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Empty `run_capture` env is the EMPTY environment, not "inherit"; a
+// nested `sailfin run` spawns clang + linker (needs PATH) and routes its
+// program.ll build-cache under SAILFIN_TEST_SCRATCH so the parallel pool
+// does not collide on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-spawn-exec-");
+}
+
+fn _run_and_capture(label: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 { return "RUN_FAILED:" + out + err; }
+    return out + err;
+}
+
+// ── three spawned int tasks run on the pool and round-trip via await ──
+test "spawn/await: non-capturing int tasks execute on the pool (#1474)" ![io] {
+    let out = _run_and_capture("int_fanout", "fn main() ![io] {\n"
+        + "    let a = spawn fn() -> int { return 6 * 7; };\n"
+        + "    let b = spawn fn() -> int { return 100 + 23; };\n"
+        + "    let c = spawn fn() -> int { return 9 * 9; };\n"
+        + "    let va: int = await a;\n"
+        + "    let vb: int = await b;\n"
+        + "    let vc: int = await c;\n"
+        + "    let sum: int = va + vb + vc;\n"
+        + "    print.info(\"sum: \" + number_to_string(sum));\n"
+        + "    if va == 42 { print.info(\"A-OK\"); }\n"
+        + "    if vb == 123 { print.info(\"B-OK\"); }\n"
+        + "    if vc == 81 { print.info(\"C-OK\"); }\n"
+        + "}");
+    // 42 + 123 + 81 = 246 — every task ran and its typed result survived.
+    assert contains(out, "sum: 246");
+    assert contains(out, "A-OK");
+    assert contains(out, "B-OK");
+    assert contains(out, "C-OK");
+}
