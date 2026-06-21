@@ -1,0 +1,161 @@
+// End-to-end test for #312: the migrated internal compiler-diagnostic
+// toggles (`SAILFIN_TRACE_LOWERING`, `SAILFIN_TRACE_CALL_LOWERING`,
+// `SAILFIN_SKIP_MODULE_GLOBALS`, `SAILFIN_TRACE_ARGV`) read env vars
+// instead of `fs.exists("build/sailfin/.X")` flag files.
+//
+// Native replacement for the former `test_compiler_debug_toggle_env_vars.sh`
+// (test-infra Phase 3, epic #842). It pins two end-to-end contracts for
+// every migrated flag:
+//
+//   1. Each `SAILFIN_*` env var triggers the same stderr signal the
+//      legacy file probe did (passed via the `run_capture` env array;
+//      an empty array is the *empty* environment, not "inherit").
+//   2. Each toggle is OFF when unset, "0", or "false" (per `_env_flag`:
+//      a toggle is on when set to anything other than "", "0", "false").
+//
+// Two cases from the bash original are intentionally NOT ported:
+//   - The legacy `touch build/sailfin/.X` file-probe back-compat cases:
+//     they require mutating the shared repo-root `build/sailfin` tree
+//     (process-global, unsafe under the parallel runner) and exist only
+//     for the one-release shim window — drop targets, not durable
+//     contracts.
+//   - The `no remaining fs.exists flag-file probes` acceptance grep over
+//     `compiler/src/`: that is a source-tree lint invariant, not a
+//     subprocess contract, and does not belong in an e2e `.sfn` test.
+//
+// Lowering-side flags are exercised via `emit ... llvm` (stops at the
+// textual `.ll`, no clang/linker, so the empty child env suffices); the
+// cold-path argv flag via `--version`.
+//
+// NOTE: assert on captured stderr with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
+// an `![io]` test. (#842.)
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// A trivial program exercising both the lowering trace path (function
+// body, calls) and module-globals lowering (a module-level binding emits
+// a global init). Materialized once per tag under the runner's scratch.
+fn _probe(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-debug-toggle-" + tag;
+    fs.createDirectory(dir, true);
+    let src = dir + "/probe.sfn";
+    fs.writeFile(src, "let greeting: string = \"hi\";\n\n"
+        + "fn main() ![io] {\n"
+        + "    print(greeting);\n"
+        + "}\n");
+    return src;
+}
+
+// Run `sfn emit ... llvm` on the probe with `extra_env` threaded to the
+// child, returning combined stdout+stderr. The `-o` output goes under the
+// per-tag scratch dir so the parallel pool never collides.
+fn _emit_llvm(tag: string, extra_env: string[]) -> string ![io] {
+    let src = _probe(tag);
+    let outll = src + ".ll";
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", outll, "llvm", src], extra_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let _ = exit;
+    return out + err;
+}
+
+// Run `sfn --version` with `extra_env` threaded, returning stdout+stderr.
+fn _version(extra_env: string[]) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "--version"], extra_env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let _ = exit;
+    return out + err;
+}
+
+// ── 1. SAILFIN_TRACE_LOWERING ──────────────────────────────────────
+test "debug toggle: SAILFIN_TRACE_LOWERING=1 fires" ![io] {
+    let out = _emit_llvm("tl_on", ["SAILFIN_TRACE_LOWERING=1"]);
+    assert find(out, "emit-llvm: phase=start", 0) >= 0;
+}
+
+test "debug toggle: SAILFIN_TRACE_LOWERING off (unset)" ![io] {
+    let out = _emit_llvm("tl_unset", []);
+    assert find(out, "emit-llvm: phase=start", 0) < 0;
+}
+
+test "debug toggle: SAILFIN_TRACE_LOWERING off (0)" ![io] {
+    let out = _emit_llvm("tl_zero", ["SAILFIN_TRACE_LOWERING=0"]);
+    assert find(out, "emit-llvm: phase=start", 0) < 0;
+}
+
+test "debug toggle: SAILFIN_TRACE_LOWERING off (false)" ![io] {
+    let out = _emit_llvm("tl_false", ["SAILFIN_TRACE_LOWERING=false"]);
+    assert find(out, "emit-llvm: phase=start", 0) < 0;
+}
+
+// ── 2. SAILFIN_TRACE_CALL_LOWERING ─────────────────────────────────
+test "debug toggle: SAILFIN_TRACE_CALL_LOWERING=1 fires" ![io] {
+    let out = _emit_llvm("cl_on", ["SAILFIN_TRACE_CALL_LOWERING=1"]);
+    assert find(out, "call_lowering: target=", 0) >= 0;
+}
+
+test "debug toggle: SAILFIN_TRACE_CALL_LOWERING off (unset)" ![io] {
+    let out = _emit_llvm("cl_unset", []);
+    assert find(out, "call_lowering: target=", 0) < 0;
+}
+
+test "debug toggle: SAILFIN_TRACE_CALL_LOWERING off (0)" ![io] {
+    let out = _emit_llvm("cl_zero", ["SAILFIN_TRACE_CALL_LOWERING=0"]);
+    assert find(out, "call_lowering: target=", 0) < 0;
+}
+
+test "debug toggle: SAILFIN_TRACE_CALL_LOWERING off (false)" ![io] {
+    let out = _emit_llvm("cl_false", ["SAILFIN_TRACE_CALL_LOWERING=false"]);
+    assert find(out, "call_lowering: target=", 0) < 0;
+}
+
+// ── 3. SAILFIN_SKIP_MODULE_GLOBALS (diagnostic gated on TRACE_LOWERING) ──
+test "debug toggle: SAILFIN_SKIP_MODULE_GLOBALS=1 fires" ![io] {
+    let out = _emit_llvm("smg_on", ["SAILFIN_SKIP_MODULE_GLOBALS=1", "SAILFIN_TRACE_LOWERING=1"]);
+    assert find(out, "skipping module globals", 0) >= 0;
+}
+
+test "debug toggle: SAILFIN_SKIP_MODULE_GLOBALS off (unset)" ![io] {
+    let out = _emit_llvm("smg_unset", ["SAILFIN_TRACE_LOWERING=1"]);
+    assert find(out, "skipping module globals", 0) < 0;
+}
+
+test "debug toggle: SAILFIN_SKIP_MODULE_GLOBALS off (0)" ![io] {
+    let out = _emit_llvm("smg_zero", ["SAILFIN_SKIP_MODULE_GLOBALS=0", "SAILFIN_TRACE_LOWERING=1"]);
+    assert find(out, "skipping module globals", 0) < 0;
+}
+
+test "debug toggle: SAILFIN_SKIP_MODULE_GLOBALS off (false)" ![io] {
+    let out = _emit_llvm("smg_false", ["SAILFIN_SKIP_MODULE_GLOBALS=false", "SAILFIN_TRACE_LOWERING=1"]);
+    assert find(out, "skipping module globals", 0) < 0;
+}
+
+// ── 4. SAILFIN_TRACE_ARGV (cold-path direct _env_flag read at CLI entry) ──
+test "debug toggle: SAILFIN_TRACE_ARGV=1 fires" ![io] {
+    let out = _version(["SAILFIN_TRACE_ARGV=1"]);
+    assert find(out, "cli: argv.len=", 0) >= 0;
+}
+
+test "debug toggle: SAILFIN_TRACE_ARGV off (unset)" ![io] {
+    let out = _version([]);
+    assert find(out, "cli: argv.len=", 0) < 0;
+}
+
+test "debug toggle: SAILFIN_TRACE_ARGV off (0)" ![io] {
+    let out = _version(["SAILFIN_TRACE_ARGV=0"]);
+    assert find(out, "cli: argv.len=", 0) < 0;
+}
+
+test "debug toggle: SAILFIN_TRACE_ARGV off (false)" ![io] {
+    let out = _version(["SAILFIN_TRACE_ARGV=false"]);
+    assert find(out, "cli: argv.len=", 0) < 0;
+}

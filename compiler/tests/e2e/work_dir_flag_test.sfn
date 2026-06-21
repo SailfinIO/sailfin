@@ -1,0 +1,111 @@
+// End-to-end test for `sfn build --work-dir <DIR>`.
+//
+// Native replacement for the former `test_work_dir_flag.sh` (test-infra
+// Phase 3, epic #842). Verifies that the driver virtualizes its build
+// artifacts under the caller-specified root (`<DIR>/native/sailfin` and
+// `<DIR>/sailfin/`) and that two runs are reproducible.
+//
+// CWD note: the test runner always runs from the repo root and
+// `run_capture` has no cwd parameter, so the original script's
+// "no ./build/ leakage into CWD" assertion is not expressible here (the
+// repo root's own `build/` always exists). The migrated test keeps the
+// observable invariants: the flag is advertised, the work-dir layout is
+// materialized, builds reproduce byte-for-byte (via the driver's own
+// NUL-safe `--check-determinism`, since `fs.readFile` truncates binaries
+// at the first NUL), and an explicit `-o` build lands its binary.
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from
+// an `![io]` test (#842).
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build spawns a nested clang + linker, so the child needs PATH
+// (+ HOME, TMPDIR). SAILFIN_TEST_SCRATCH routes the program.ll
+// build-cache per invocation so the parallel pool does not collide on
+// build/sailfin.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_base() -> string ![io] {
+    let s = env.get("SAILFIN_TEST_SCRATCH");
+    if s.length > 0 { return s; }
+    return "/tmp";
+}
+
+// Materialize a minimal positional project (no capsule deps) under a
+// scratch dir keyed by `tag`. Returns the absolute path to hello.sfn so
+// CWD never matters for input resolution.
+fn _make_proj(tag: string) -> string ![io] {
+    let root = _scratch_base() + "/sfn-work-dir-flag-" + tag;
+    fs.createDirectory(root, true);
+    let src = root + "/hello.sfn";
+    fs.writeFile(src, "fn main() ![io] {\n    print(\"OK\");\n}\n");
+    return src;
+}
+
+// ---- Test 1: --help lists --work-dir ----
+test "work-dir-flag: sfn build --help lists --work-dir" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "--help"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let _ = exit;
+    assert find(out + err, "--work-dir", 0) >= 0;
+}
+
+// ---- Test 2: --work-dir creates the virtualized layout ----
+test "work-dir-flag: --work-dir writes default-binary + sailfin/" ![io] {
+    let src = _make_proj("layout");
+    let work = _scratch_base() + "/sfn-work-dir-flag-layout/wd1";
+
+    let exit = process.run_capture([_sfn_bin(), "build", "--work-dir", work, src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+    // With -o omitted the default binary lands under <DIR>/native/, and
+    // the virtualized module tree under <DIR>/sailfin/.
+    assert fs.exists(work + "/native/sailfin");
+    assert fs.exists(work + "/sailfin");
+}
+
+// ---- Test 3: two --work-dir runs produce byte-identical binaries ----
+// Reproducibility AC from the issue. The driver's own
+// `--check-determinism` builds twice into sibling work-dirs and compares
+// the binary sha256 internally (NUL-safe), which is exactly the
+// guarantee this test pins; it reports `[determinism] match:` and exits
+// 0 when the two binaries are byte-identical.
+test "work-dir-flag: two builds produce byte-identical binaries" ![io] {
+    let src = _make_proj("repro");
+    let exit = process.run_capture([_sfn_bin(), "build", "--check-determinism", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert contains(out + err, "[determinism] match:");
+}
+
+// ---- Test 4: explicit -o build lands the binary ----
+test "work-dir-flag: explicit -o build produces the binary" ![io] {
+    let src = _make_proj("default");
+    let out_bin = _scratch_base() + "/sfn-work-dir-flag-default/program";
+
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", out_bin, src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+    assert fs.exists(out_bin);
+}

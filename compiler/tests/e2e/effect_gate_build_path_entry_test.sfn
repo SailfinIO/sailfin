@@ -1,0 +1,161 @@
+// End-to-end test for #984: on `-p` (`walk_project_src`) builds the entry
+// module is staged but excluded from `resolved.sources`, so a sibling
+// that imports an `![io]` function FROM THE ENTRY must still get the
+// entry's `.sfn-asm` listed in its `.import-deps` sidecar and have
+// `sibling→entry` effects enforced on the build path (E0402) — the same
+// enforcement `sailfin check` already performs.
+//
+// Native replacement for the former `test_effect_gate_build_path_entry.sh`
+// (test-infra Phase 3, epic #842). The original `cd`'d into a throwaway
+// capsule and ran `sfn build -p .`; here we drive `sfn build -p <abs>`
+// from the runner's repo-root cwd. The per-module sidecar lands at the
+// repo-root-relative
+// `build/native/import-context/<fixture-abs-path>/src/util/sib.import-deps`
+// (slug derived from the source's absolute path, which is unique per
+// test tag so concurrent runs in the parallel pool never collide).
+//
+// Before #984, `_cr_stage_import_deps` resolved import slugs against
+// `resolved.sources` ONLY, which excludes the `-p` entry; an import of
+// the entry resolved to no slug, the sidecar omitted the entry's
+// `.sfn-asm`, and an under-declared `sibling→entry` call slipped past
+// `make check`. #984 threads the staged entry into the slug-resolution
+// universe so the sidecar lists the entry and the gate fires. #991
+// surfaced the orphan module's emit failure to a non-zero build exit;
+// #999 threads the staged bodies into lowering so the good cross-module
+// sibling resolves the entry callee signature and links.
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be used from an
+// `![io]` test. (#842.)
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `sfn build -p` spawns a nested clang + linker, so the child needs PATH.
+// SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation
+// so the parallel pool does not collide on build/sailfin.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A private capsule root under the runner's scratch (or /tmp), keyed by
+// `tag`. Returns the absolute capsule root.
+fn _capsule_root(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-effect-entry-" + tag;
+    fs.createDirectory(root + "/src/util", true);
+    return root;
+}
+
+// Write the capsule.toml + entry. The entry exports an `![io]` helper
+// that siblings import; the `-p` walker excludes it from
+// `resolved.sources`, so #984 re-adds it to the slug-resolution universe.
+fn _write_capsule(root: string) ![io] {
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"effect-entry-test\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"E2E test for #984 sibling->entry build-path effect enforcement\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"src/main.sfn\"\n");
+    fs.writeFile(root + "/src/main.sfn", "fn do_io() ![io] {\n"
+        + "    print.info(\"entry side effect\");\n"
+        + "}\n\n"
+        + "fn main() ![io] {\n"
+        + "    print.info(\"entry-fixture-ok\");\n"
+        + "}\n\n"
+        + "export { do_io };\n");
+}
+
+// Write the sibling with the given effect annotation on the function that
+// calls the entry-exported `![io]` helper (" ![io]" for the good case, ""
+// for the under-declared bad case).
+fn _write_sib(root: string, effect_annot: string) ![io] {
+    fs.writeFile(root + "/src/util/sib.sfn", "import { do_io } from \"../main\";\n\n"
+        + "fn use_dep()"
+        + effect_annot
+        + " {\n"
+        + "    do_io();\n"
+        + "}\n\n"
+        + "export { use_dep };\n");
+}
+
+struct BuildRun {
+    exit: int,
+    out: string
+}
+
+fn _build(root: string) -> BuildRun ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", root], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return BuildRun { exit: exit, out: out + err };
+}
+
+// The slug for the sibling sidecar is derived from the source's absolute
+// path: `build/native/import-context/<root-without-leading-slash>/src/util/sib.import-deps`.
+fn _sidecar_path(root: string) -> string {
+    // Strip the leading "/" from the absolute root.
+    let rel = substring(root, 1, root.length);
+    return "build/native/import-context/" + rel + "/src/util/sib.import-deps";
+}
+
+// ---- Test 1: good sibling — its sidecar lists the entry's .sfn-asm ----
+// Direct regression for the staging fix: before #984 the entry import
+// resolved to no slug, leaving the sidecar without the entry reference.
+test "effect gate entry: sibling .import-deps lists the -p entry's .sfn-asm" ![io] {
+    let root = _capsule_root("sidecar");
+    _write_capsule(root);
+    _write_sib(root, " ![io]");
+    let _ = _build(root);
+
+    let sidecar = _sidecar_path(root);
+    assert fs.exists(sidecar);
+    let body = fs.readFile(sidecar);
+    assert find(body, "main.sfn-asm", 0) >= 0;
+}
+
+// ---- Test 2: under-declared sibling triggers E0402 + non-zero exit ----
+test "effect gate entry: build path emits E0402 + exits non-zero for orphan sibling->entry ![io]" ![io] {
+    let root = _capsule_root("bad");
+    _write_capsule(root);
+    _write_sib(root, "");  // use_dep() calls do_io() without declaring ![io]
+    let r = _build(root);
+    assert find(r.out, "E0402", 0) >= 0;
+    // #991: the orphan sibling's emit failure must propagate to a
+    // non-zero build exit (pre-#991 the failing module was silently
+    // dropped from the link and the build reported exit 0).
+    assert r.exit != 0;
+}
+
+// ---- Test 3: cross-module good sibling emits + links, exits 0 (#999) ----
+// A correctly-annotated `-p` sibling importing an entry-exported fn from
+// the walk-excluded entry must resolve the entry's signature during its
+// own per-module lowering and emit cleanly, so the build links + exits 0.
+test "effect gate entry: cross-module good sibling resolves entry signature + exits 0 (#999)" ![io] {
+    let root = _capsule_root("good");
+    _write_capsule(root);
+    _write_sib(root, " ![io]");
+    let r = _build(root);
+    // Pin the SPECIFIC #999 callee (`do_io`) — lowering the imported
+    // io-void body can surface a non-blocking diagnostic while the build
+    // still links and exits 0, which is the authoritative signal here.
+    assert find(r.out, "cannot resolve return type for call to `do_io`", 0) < 0;
+    assert r.exit == 0;
+}

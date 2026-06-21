@@ -1,0 +1,217 @@
+// End-to-end test for `sfn build --json` schema (Stage C PR1f).
+//
+// Native replacement for the former `test_build_json_schema.sh`
+// (test-infra Phase 3, epic #842). Verifies that `--json` emits a
+// single line of valid JSON with the locked schema_version "1", the
+// top-level fields MCP / LSP / CI consumers depend on, and that cache
+// stats reflect actual build behaviour (cold → warm → --no-cache).
+//
+// The original cd'd into a scratch project; here we build via
+// `-p <capsule-path>` (resolves capsule.toml relative to the path, no
+// cwd lever needed) and route the program.ll cache per-invocation via
+// SAILFIN_TEST_SCRATCH. Each test uses its own SAILFIN_BUILD_CACHE_DIR
+// (keyed by tag) so the cold/warm distinction is independent under the
+// parallel pool.
+//
+// NOTE: assert on captured stdout/stderr with `sfn/strings` predicates
+// (the `sfn/test` `expect_*` matchers are `![pure]`, unusable from an
+// `![io]` test). No JSON parser — the original jq field reads become
+// substring checks against the emitted JSON, which is what the schema
+// lock cares about.
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build spawns a nested clang + linker, so the child needs PATH.
+//
+// cache_dir threads SAILFIN_BUILD_CACHE_DIR (the `.ll`-module cache) and
+// scratch threads SAILFIN_TEST_SCRATCH (where the program.ll build-cache
+// AND the runtime-object cache land, per #915/#1333). BOTH must be
+// per-test-fresh for the cold/warm distinction: a shared scratch keeps
+// the runtime objects warm, so a "cold" build would report 24 hits.
+fn _child_env(cache_dir: string, scratch: string) -> string[] ![io] {
+    let mut e: string[] = ["SAILFIN_BUILD_CACHE_DIR=" + cache_dir, "SAILFIN_TEST_SCRATCH="
+        + scratch];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    return e;
+}
+
+// Materialize a capsule fixture, keyed by tag so concurrent tests never
+// collide. The capsule declares sfn/math as a dep (one .ll module) and
+// an ![io] entry that calls abs.
+//
+// The fixture lives IN-TREE under build/ (CWD-relative = repo root, the
+// dir the runner starts from) — exactly like capsule_build_test.sfn —
+// so discover_workspace_root finds the repo's workspace.toml, which
+// registers the in-tree capsules/ tree and lets sfn/math resolve. A
+// fixture placed under /tmp is outside the workspace and the resolver
+// cannot find sfn/math.
+fn _fixture(tag: string) -> string ![io] {
+    let root = "build/sfn-build-json-" + tag;
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"build-json-test\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"E2E test for sfn build --json\"\n\n"
+        + "[dependencies]\n"
+        + "\"sfn/math\" = \"0.1.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n");
+    fs.writeFile(root + "/src/main.sfn", "import { abs } from \"sfn/math\";\n"
+        + "fn main() ![io] { print(\"abs=\" + number_to_string(abs(-7.0))); }\n");
+    return root;
+}
+
+struct BuildRun {
+    exit: int,
+    out: string,
+    err: string
+}
+
+// A fresh, guaranteed-empty isolation context per call (cache dir +
+// scratch dir, both mkdtemp under the system temp). A fresh pair is what
+// makes a build "cold": reusing either keeps part of the cache warm and
+// breaks the cold/warm assertions non-deterministically.
+struct Iso {
+    cache: string,
+    scratch: string
+}
+
+fn _fresh_iso() -> Iso ![io] {
+    return Iso {
+        cache: fs.mkdtemp("sfn-build-json-cache-"),
+        scratch: fs.mkdtemp("sfn-build-json-scratch-")
+    };
+}
+
+// Run `sfn build --json [extra...] -o <bin> -p <root>` with the cache +
+// scratch dirs threaded, returning exit + captured streams.
+fn _build(root: string, iso: Iso, tag: string, extra: string[]) -> BuildRun ![io] {
+    let out_bin = root + "/build/" + tag;
+    let mut argv: string[] = [_sfn_bin(), "build", "--json"];
+    let mut i = 0;
+    loop {
+        if i >= extra.length { break; }
+        argv.push(extra[i]);
+        i += 1;
+    }
+    argv.push("-o");
+    argv.push(out_bin);
+    argv.push("-p");
+    argv.push(root);
+    let exit = process.run_capture(argv, _child_env(iso.cache, iso.scratch));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return BuildRun { exit: exit, out: out, err: err };
+}
+
+// ---- Test 1: cold build emits JSON with the locked schema fields ----
+test "build json: cold build emits valid JSON envelope" ![io] {
+    let root = _fixture("emit");
+    let r = _build(root, _fresh_iso(), "prog", []);
+    assert r.exit == 0;
+    assert r.out.length > 0;
+    assert contains(r.out, "\"schema_version\":\"1\"");
+}
+
+// ---- Test 2: top-level fields present ----
+test "build json: top-level fields present" ![io] {
+    let root = _fixture("toplevel");
+    let r = _build(root, _fresh_iso(), "prog", []);
+    assert r.exit == 0;
+    assert contains(r.out, "\"command\":\"build\"");
+    assert contains(r.out, "\"kind\":\"binary\"");
+    assert contains(r.out, "\"exit_code\":0");
+    assert contains(r.out, "src/main.sfn");
+    assert contains(r.out, "\"compiler_version\":");
+}
+
+// ---- Test 3: cold build cache stats (hits=0, miss/store > 0) ----
+test "build json: cold cache stats hits=0 miss/store>0 enabled=true" ![io] {
+    let root = _fixture("coldcache");
+    let r = _build(root, _fresh_iso(), "prog", []);
+    assert r.exit == 0;
+    assert contains(r.out, "\"hits\":0");
+    assert contains(r.out, "\"enabled\":true");
+    assert contains(r.out, "\"root\":");
+    // Cold build is not fully saturated: there are misses and stores,
+    // so the all-zero shape must NOT appear.
+    assert find(r.out, "\"misses\":0", 0) < 0;
+    assert find(r.out, "\"stores\":0", 0) < 0;
+}
+
+// ---- Test 4: cold build hit_rate is numeric 0.0 ----
+test "build json: cold hit_rate is 0.0" ![io] {
+    let root = _fixture("coldrate");
+    let r = _build(root, _fresh_iso(), "prog", []);
+    assert r.exit == 0;
+    assert contains(r.out, "\"hit_rate\":0.0000");
+}
+
+// ---- Test 5: deps shape — count and ll_paths present, ends in .ll ----
+test "build json: deps.count and ll_paths present" ![io] {
+    let root = _fixture("deps");
+    let r = _build(root, _fresh_iso(), "prog", []);
+    assert r.exit == 0;
+    assert contains(r.out, "\"deps\":");
+    assert contains(r.out, "\"count\":1");
+    assert contains(r.out, "\"ll_paths\":[");
+    assert contains(r.out, ".ll\"");
+}
+
+// ---- Test 6: diagnostics is an empty array (reserved slot) ----
+test "build json: diagnostics array is empty" ![io] {
+    let root = _fixture("diag");
+    let r = _build(root, _fresh_iso(), "prog", []);
+    assert r.exit == 0;
+    assert contains(r.out, "\"diagnostics\":[]");
+}
+
+// ---- Test 7: no human '[cache]' / 'built:' lines leak into JSON stdout ----
+test "build json: no human output leaks into JSON stdout" ![io] {
+    let root = _fixture("human");
+    let r = _build(root, _fresh_iso(), "prog", []);
+    assert r.exit == 0;
+    assert find(r.out, "[cache]", 0) < 0;
+    assert find(r.out, "built:", 0) < 0;
+}
+
+// ---- Test 8: warm build reflects a fully-saturated cache ----
+test "build json: warm build hits>0 misses=0 hit_rate=1.0" ![io] {
+    let root = _fixture("warm");
+    let iso = _fresh_iso();
+    // Cold prime.
+    let cold = _build(root, iso, "cold", []);
+    assert cold.exit == 0;
+    // Warm reuse on the same cache dir.
+    let warm = _build(root, iso, "warm", []);
+    assert warm.exit == 0;
+    assert contains(warm.out, "\"misses\":0");
+    assert contains(warm.out, "\"stores\":0");
+    assert contains(warm.out, "\"hit_rate\":1.0000");
+    // hits > 0: the all-cold "hits":0 shape must not appear.
+    assert find(warm.out, "\"hits\":0", 0) < 0;
+}
+
+// ---- Test 9: --no-cache + --json composes: all counters zero ----
+test "build json: --no-cache counters all zero, enabled=false" ![io] {
+    let root = _fixture("nocache");
+    let r = _build(root, _fresh_iso(), "prog", ["--no-cache"]);
+    assert r.exit == 0;
+    assert contains(r.out, "\"hits\":0");
+    assert contains(r.out, "\"misses\":0");
+    assert contains(r.out, "\"stores\":0");
+    assert contains(r.out, "\"enabled\":false");
+    assert contains(r.out, "\"hit_rate\":0.0000");
+}

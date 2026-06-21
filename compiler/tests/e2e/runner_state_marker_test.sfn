@@ -1,0 +1,153 @@
+// Issue #311: the test-runner marker that used to live at
+// `build/sailfin/.test_runner_active` was migrated to in-process state
+// (`compiler/src/test_runner_state.sfn`). This is the native replacement
+// for the former `test_runner_state_marker.sh` (test-infra Phase 3, epic
+// #842). It pins three contracts of that migration:
+//
+//   1. `sfn test` no longer writes the legacy `.test_runner_active`
+//      file marker.
+//   2. `SAILFIN_TRACE_TEST_RUNNER=1 sfn test ...` still produces the
+//      orchestrator + LLVM-lowering trace prints (the observable
+//      behaviour the file probes used to gate).
+//   3. `sfn emit llvm` from a clean shell keeps is_test_module=false:
+//      the mangling pass observes the import (import_subs >= 1) and the
+//      test-runner timing prints stay off.
+//
+// Each spawned compile gets its own fresh SAILFIN_TEST_SCRATCH so the
+// program.ll / runtime caches never collide under the parallel pool.
+//
+// NOTE: assert on captured stdout/stderr with `sfn/strings` predicates
+// (the `sfn/test` `expect_*` matchers are `![pure]`, unusable from an
+// `![io]` test). The original grepped the combined log; we do the same
+// over captured stdout+stderr.
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child env: PATH/HOME/TMPDIR (the nested compile runs clang + linker),
+// a fresh per-invocation SAILFIN_TEST_SCRATCH, plus any extra entries
+// (e.g. a trace flag). An empty array is the *empty* environment, not
+// "inherit", so everything the child needs is threaded explicitly.
+fn _child_env(scratch: string, extra: string[]) -> string[] ![io] {
+    let mut e: string[] = ["SAILFIN_TEST_SCRATCH=" + scratch];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let mut i = 0;
+    loop {
+        if i >= extra.length { break; }
+        e.push(extra[i]);
+        i += 1;
+    }
+    return e;
+}
+
+// A fresh project dir (mkdtemp under the system temp), unique per call.
+fn _fresh_dir() -> string ![io] { return fs.mkdtemp("sfn-runner-state-"); }
+
+struct Run {
+    exit: int,
+    log: string
+}
+
+fn _run(argv: string[], scratch: string, extra: string[]) -> Run ![io] {
+    let exit = process.run_capture(argv, _child_env(scratch, extra));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return Run { exit: exit, log: out + err };
+}
+
+// ---- Contract 1: `sfn test` does not create a `.test_runner_active` ----
+// Pre-#311 the orchestrator wrote this marker on entry; post-#311 it is
+// process-local memory. The runner runs from repo root, so a regressed
+// file write would land at the cwd-relative build/sailfin/.test_runner_active.
+test "runner state: sfn test does not create .test_runner_active marker" ![io] {
+    let proj = _fresh_dir();
+    // Embed the unique proj path in the test name so the content-keyed
+    // test-bin cache never collides with a concurrent run in the pool.
+    fs.writeFile(proj + "/smoke_test.sfn", "test \"marker e2e smoke " + proj
+        + "\" {\n"
+        + "    assert 1 + 1 == 2;\n"
+        + "}\n");
+    let scratch = _fresh_dir();
+
+    let r = _run([_sfn_bin(), "test", proj], scratch, []);
+    assert r.exit == 0;
+    // The test ran successfully.
+    assert find(r.log, "PASS", 0) >= 0;
+    // No legacy marker file appeared where a regression would write it.
+    assert ! fs.exists("build/sailfin/.test_runner_active");
+    assert ! fs.exists(proj + "/build/sailfin/.test_runner_active");
+}
+
+// ---- Contract 2: SAILFIN_TRACE_TEST_RUNNER=1 propagates to lowering ----
+// The trace flag is read once by the orchestrator and threaded through
+// `enter_test_runner_mode(trace)`; both the orchestrator and the LLVM
+// lowering hot path read the same in-process boolean. A regression where
+// `test_runner_trace()` returned false would swallow the lowering trace.
+test "runner state: SAILFIN_TRACE_TEST_RUNNER=1 propagates to lowering" ![io] {
+    let proj = _fresh_dir();
+    // Unique test name (via the proj path) forces a COLD test-bin
+    // compile: a content-keyed cache hit would skip LLVM lowering, and
+    // then the lowering-side trace lines we assert on would never fire.
+    fs.writeFile(proj + "/smoke_test.sfn", "test \"trace e2e smoke " + proj
+        + "\" {\n"
+        + "    assert 2 + 2 == 4;\n"
+        + "}\n");
+    let scratch = _fresh_dir();
+
+    let r = _run([_sfn_bin(), "test", proj], scratch, ["SAILFIN_TRACE_TEST_RUNNER=1"]);
+    assert r.exit == 0;
+    // Orchestrator-side trace (cli_commands.sfn).
+    assert find(r.log, "test runner: compile start", 0) >= 0;
+    // LLVM-lowering-side trace (lowering_core.sfn): proves the in-process
+    // flag set by the orchestrator was observed on the lowering hot path.
+    assert find(r.log, "test llvm:", 0) >= 0;
+}
+
+// ---- Contract 3: outside `sfn test`, in-process flag stays false ----
+// The flag gates `is_test_module`, whose effect is `safe_imports = []`
+// (stripping cross-module mangling). Emitting a non-test source that
+// imports a sibling helper, we assert the mangling pass observed the
+// import (`import_subs >= 1`) — if the flag had defaulted to true,
+// safe_imports would be cleared and import_subs would be 0. We also
+// assert the test-runner timing prints (`test llvm: phase=`) stay off.
+//
+// `sfn emit llvm` is allowed to exit non-zero here: the standalone-emit
+// path doesn't pre-stage imported function signatures, so #306's fatal
+// diagnostic can fire on the call to `add_one`. That's expected and
+// orthogonal — the trace lines we assert on are emitted first.
+test "runner state: in-process flag defaults to false outside sfn test" ![io] {
+    let proj = _fresh_dir();
+    fs.createDirectory(proj + "/sub", true);
+    fs.writeFile(proj + "/sub/helper.sfn", "fn add_one(x: number) -> number {\n"
+        + "    return x + 1;\n"
+        + "}\n");
+    fs.writeFile(proj + "/main.sfn", "import { add_one } from \"./sub/helper\";\n\n"
+        + "fn main() ![io] {\n"
+        + "    let result = add_one(41);\n"
+        + "    print.info(number_to_string(result));\n"
+        + "}\n");
+    let scratch = _fresh_dir();
+
+    let r = _run([_sfn_bin(), "emit", "-o", proj + "/main.ll", "llvm", proj
+        + "/main.sfn"], scratch, ["SAILFIN_TRACE_LOWERING=1"]);
+    let _ = r.exit;
+
+    // Load-bearing assertion: the mangling pass saw the import. If
+    // is_test_module had silently defaulted to true, safe_imports would
+    // have been cleared and import_subs would be 0.
+    assert find(r.log, "mangle import_subs=", 0) >= 0;
+    assert find(r.log, "mangle import_subs=0", 0) < 0;
+
+    // Belt-and-suspenders: the test-runner-active timing prints (gated on
+    // the in-process flag, not on SAILFIN_TRACE_LOWERING) stay quiet.
+    assert find(r.log, "test llvm: phase=", 0) < 0;
+}

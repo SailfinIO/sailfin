@@ -1,0 +1,131 @@
+// End-to-end test for #957: cross-module effect transitivity (E0402)
+// enforced on the BUILD PATH (`sailfin emit ... llvm`), not just under
+// `sailfin check`.
+//
+// Native replacement for the former `test_effect_gate_build_path.sh`
+// (test-infra Phase 3, epic #842). The original `cd`'d into a throwaway
+// dir and staged the import-context at the default cwd-relative layout;
+// here we stage at an absolute dir under the runner's scratch and thread
+// it to the emit subprocess via the explicit `--import-context DIR` flag,
+// so no cwd change is needed (the runner always starts from repo root).
+//
+// Before #957 the emit subprocess ran the effect gate with an empty
+// import table, so a module function calling an imported `![io]` helper
+// without declaring `![io]` compiled clean during `make compile`. #957
+// adds `--import-context`: the emit subprocess loads the staged
+// `.sfn-asm` effect table and enforces the same E0402 the resolver-driven
+// `sailfin check` already catches.
+//
+// NOTE: assert on captured stdout+stderr with `sfn/strings` predicates —
+// the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test. (#842.)
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// A private scratch dir under the runner's scratch (or /tmp), keyed by
+// `tag` so concurrent tests in the parallel pool never collide.
+fn _scratch(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let dir = base + "/sfn-effect-build-path-" + tag;
+    fs.createDirectory(dir + "/import-context", true);
+    return dir;
+}
+
+struct EmitRun {
+    exit: int,
+    out: string
+}
+
+// Run `sfn emit ...` with the toggles/flags supplied as argv. The emit
+// stops at the textual `.ll` output (no clang/linker), so the empty child
+// env is sufficient.
+fn _emit(args: string[]) -> EmitRun ![io] {
+    let mut argv: string[] = [_sfn_bin()];
+    let mut i = 0;
+    loop {
+        if i >= args.length { break; }
+        argv.push(args[i]);
+        i += 1;
+    }
+    let exit = process.run_capture(argv, []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return EmitRun { exit: exit, out: out + err };
+}
+
+// Materialize the dep + caller fixtures under `dir` and stage the dep's
+// `.sfn-asm` into the import-context (mirroring `stage_capsule_imports`),
+// plus the per-module `.import-deps` sidecar the emit subprocess reads.
+fn _stage(dir: string) -> int ![io] {
+    let ctx = dir + "/import-context";
+    fs.writeFile(dir + "/dep.sfn", "fn do_io() ![io] {\n"
+        + "    print.info(\"side effect\");\n"
+        + "}\n\n"
+        + "export { do_io };\n");
+    fs.writeFile(dir + "/caller_bad.sfn", "import { do_io } from \"./dep\";\n\n"
+        + "fn run() {\n"
+        + "    do_io();\n"
+        + "}\n\n"
+        + "export { run };\n");
+    fs.writeFile(dir + "/caller_good.sfn", "import { do_io } from \"./dep\";\n\n"
+        + "fn run() ![io] {\n"
+        + "    do_io();\n"
+        + "}\n\n"
+        + "export { run };\n");
+
+    let stage = _emit(["emit", "--module-name", "dep", "-o", ctx
+        + "/dep.sfn-asm", "native", dir
+        + "/dep.sfn"]);
+    fs.writeFile(ctx + "/caller.import-deps", ctx + "/dep.sfn-asm\n");
+    return stage.exit;
+}
+
+// ---- Setup precondition: staging the dep's effect table succeeds ----
+test "effect gate build path: stage dep.sfn-asm into import-context" ![io] {
+    let dir = _scratch("stage");
+    let rc = _stage(dir);
+    assert rc == 0;
+    assert fs.exists(dir + "/import-context/dep.sfn-asm");
+}
+
+// ---- Under-declared caller fails WITH --import-context (E0402) ----
+test "effect gate build path: rejects under-declared ![io] with --import-context" ![io] {
+    let dir = _scratch("bad_ctx");
+    let _ = _stage(dir);
+    let ctx = dir + "/import-context";
+    let r = _emit(["emit", "--module-name", "caller", "--import-context", ctx, "-o", dir
+        + "/bad.ll", "llvm", dir
+        + "/caller_bad.sfn"]);
+    assert r.exit != 0;
+    assert find(r.out, "E0402", 0) >= 0;
+}
+
+// ---- Negative control: WITHOUT --import-context the cross-module effect
+//      gate stays in-module-only — no E0402 fires. This proves the flag
+//      is what activates cross-module enforcement. ----
+test "effect gate build path: stays in-module-only without --import-context" ![io] {
+    let dir = _scratch("bad_noctx");
+    let _ = _stage(dir);
+    let r = _emit(["emit", "--module-name", "caller", "-o", dir
+        + "/bad_nocxt.ll", "llvm", dir
+        + "/caller_bad.sfn"]);
+    assert find(r.out, "E0402", 0) < 0;
+}
+
+// ---- Positive control: correctly-declared caller compiles clean. ----
+test "effect gate build path: accepts correctly-declared ![io] with --import-context" ![io] {
+    let dir = _scratch("good_ctx");
+    let _ = _stage(dir);
+    let ctx = dir + "/import-context";
+    let r = _emit(["emit", "--module-name", "caller", "--import-context", ctx, "-o", dir
+        + "/good.ll", "llvm", dir
+        + "/caller_good.sfn"]);
+    assert r.exit == 0;
+    assert find(r.out, "E0402", 0) < 0;
+}
