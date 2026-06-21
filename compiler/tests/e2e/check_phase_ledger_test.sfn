@@ -1,0 +1,263 @@
+// End-to-end test for the seven-phase `make check` ledger (#1124, epic
+// #1056 Phase 2). Locks the `phases[]` array that
+// scripts/agent_report.sh composes into build/agent-report.check.json
+// when `make check` runs under the report gate (JSON=1 /
+// SAILFIN_AGENT_REPORT=1).
+//
+// Native (no-bash) replacement for the former
+// `test_check_phase_ledger.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`). Rather than run the real ~20-min
+// `make check`, it drives agent_report.sh directly with a stub command
+// that echoes the human phase banners check-impl prints, then asserts the
+// derived ledger. The composer keys off exactly those banners (the same
+// marker set detect_check_phase uses), so a stub that prints them
+// exercises the real derivation deterministically in milliseconds.
+//
+// Cases:
+//   - green: all seven banners + fixed-point match, exit 0 -> seven
+//            phases in order, top-level status "pass".
+//   - fail:  banners through seedcheck-tests then a test-failure, exit 1
+//            -> top-level status "fail", phase "seedcheck-tests", failure
+//            "test-failure".
+//   - warn:  all banners but `stage2 != stage3`, exit 0 -> top-level
+//            status "warn", failure "nondeterminism".
+//
+// Schema: docs/reference/make-result-schema.md (`sailfin-make/1`, phases[]).
+//
+// PLUMBING. agent_report.sh writes its report relative to cwd, and
+// `process.run_capture` cannot cd. The faithful path (matching the bash
+// `( cd "$sub"; env -u SAILFIN_INNER SAILFIN_AGENT_REPORT=1 bash WRAPPER
+// ... )`) is therefore a single `bash -c` vehicle that does the cd + the
+// env -u itself, since this case is inherently shell-composer plumbing.
+// PATH/HOME are threaded so bash and the wrapper's tools resolve.
+//
+// On matchers: per the jq-less path the bash test already supports, the
+// names-in-order check is an ORDERED-substring `contains` walk over the
+// seven `"name":"<phase>"` markers, and the top-level status/phase/failure
+// are read by FIRST-occurrence string matching (write_report_file emits
+// every top-level field before phases[], so first-occurrence is the
+// top-level value). Per-phase status asserts (jq-gated in the bash) are
+// intentionally not reproduced — the top-level + ordered-names path is the
+// jq-less contract the original falls back to. The `sfn/test` `expect_*`
+// matchers are `![pure]` and cannot be called from this `![io]` test.
+// (#842.)
+import { find, contains, split } from "sfn/strings";
+
+// Absolute repo root. The vehicle `cd`s into the per-run subdir before
+// invoking the wrapper, so a relative `./scripts/agent_report.sh` would not
+// resolve — the wrapper path (and the scratch subdir) must be absolute.
+fn _repo_root() -> string ![io] {
+    let root = env.get("SAILFIN_REPO_ROOT");
+    if root.length > 0 && substring(root, 0, 1) == "/" { return root; }
+    let exit = process.run_capture(["pwd"], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit == 0 {
+        let lines = split(out, "\n");
+        if lines.length > 0 && lines[0].length > 0 { return lines[0]; }
+    }
+    if root.length > 0 { return root; }
+    return ".";
+}
+
+fn _wrapper() -> string ![io] {
+    return _repo_root() + "/scripts/agent_report.sh";
+}
+
+// Child env for the `bash -c` vehicle. SAILFIN_INNER / SAILFIN_AGENT_REPORT
+// are deliberately omitted here AND cleared inside the vehicle via
+// `env -u` (the wrapper sets SAILFIN_AGENT_REPORT=1 itself for the run).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_base() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-check-ledger";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Banner fragments matching check-impl's human output (Makefile
+// check-impl), copied verbatim from the .sh.
+fn _b_fptests() -> string {
+    return "echo \"[check] running test suite on first-pass binary (early gate)...\"";
+}
+
+fn _b_scbuild() -> string {
+    return "echo \"[check] first-pass tests passed — proceeding to seedcheck build...\"";
+}
+
+fn _b_scsmoke() -> string {
+    return "echo \"[check] validating seedcheck binary can run programs...\"";
+}
+
+fn _b_sctests() -> string {
+    return "echo \"[check] running test suite with seedcheck binary (no fallbacks)...\"";
+}
+
+fn _b_s3build() -> string {
+    return "echo \"[check] stage2 tests passed — building stage3 for fixed-point comparison...\"";
+}
+
+fn _b_fixed() -> string {
+    return "echo \"[check] comparing stage2 vs stage3 LLVM IR (fixed-point check)...\"";
+}
+
+// Run agent_report.sh for `--target check` over a stub that prints the
+// `banners` script and exits with `rc`. Creates a fresh per-test subdir,
+// runs the wrapper inside it via a single `bash -c` vehicle (cd + env -u),
+// reads and returns the composed report file's contents (or "").
+fn _run_check_stub(tag: string, banners: string, rc: int) -> string ![io] {
+    let mut sub = _scratch_base() + "/run-" + tag;
+    // The vehicle `cd`s into `sub`, so it must be absolute (the runner-managed
+    // SAILFIN_TEST_SCRATCH can be the relative `build/sailfin/...`).
+    if sub.length > 0 && substring(sub, 0, 1) != "/" {
+        sub = _repo_root() + "/" + sub;
+    }
+    // Fresh subdir each run.
+    fs.createDirectory(sub, true);
+    let report = sub + "/build/agent-report.check.json";
+    if fs.exists(report) { fs.deleteFile(report); }
+
+    // The inner command the wrapper runs: `bash -c "<banners>\nexit <rc>"`.
+    // The wrapper claims the verdict (SAILFIN_AGENT_REPORT=1 turns the
+    // report-file gate on; SAILFIN_INNER is cleared so it is the outer
+    // target). The whole thing is composed as a single `bash -c` so the cd
+    // + env -u happen in-shell, faithful to the original.
+    let inner = banners + "\nexit " + int_to_string(rc);
+    let vehicle = "cd '" + sub
+        + "' && env -u SAILFIN_INNER SAILFIN_AGENT_REPORT=1 "
+        + "bash '"
+        + _wrapper()
+        + "' --target check -- bash -c '"
+        + inner
+        + "' >/dev/null 2>&1 || true";
+
+    let _exit = process.run_capture(["bash", "-c", vehicle], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+
+    if !fs.exists(report) { return ""; }
+    return fs.readFile(report);
+}
+
+// Local int->decimal-string (no runtime builtin; mirrors the helper in
+// lowering_no_bare_runtime_emissions_test.sfn).
+fn int_to_string(n: int) -> string {
+    if n == 0 { return "0"; }
+    let mut v = n;
+    let mut neg = false;
+    if v < 0 {
+        neg = true;
+        v = 0 - v;
+    }
+    let digits = "0123456789";
+    let mut s = "";
+    loop {
+        if v == 0 { break; }
+        let d = v % 10;
+        s = digits[d] + s;
+        v = v / 10;
+    }
+    if neg { s = "-" + s; }
+    return s;
+}
+
+// jq-less first-occurrence read of `"field":"value"` -> value, or "".
+fn _json_str_field(json: string, field: string) -> string {
+    let key = "\"" + field + "\":\"";
+    let at = find(json, key, 0);
+    if at < 0 { return ""; }
+    let value_start = at + key.length;
+    let close = find(json, "\"", value_start);
+    if close < 0 { return ""; }
+    return substring(json, value_start, close);
+}
+
+// Ordered-substring walk: each marker must appear after the previous one.
+// Mirrors the bash `grep -Eq '"name":"compile".*..."name":"fixed-point"'`.
+fn _names_in_order(json: string) -> boolean {
+    let names = ["compile", "first-pass-tests", "seedcheck-build", "seedcheck-smoke", "seedcheck-tests", "stage3-build", "fixed-point"];
+    let mut pos = 0;
+    let mut i = 0;
+    loop {
+        if i >= names.length { break; }
+        let marker = "\"name\":\"" + names[i] + "\"";
+        let at = find(json, marker, pos);
+        if at < 0 { return false; }
+        pos = at + marker.length;
+        i = i + 1;
+    }
+    return true;
+}
+
+// Green banner sequence: all seven banners + the fixed-point match line.
+fn _green_banners() -> string {
+    return _b_fptests() + "\n" + _b_scbuild() + "\n" + _b_scsmoke() + "\n"
+        + _b_sctests()
+        + "\n"
+        + _b_s3build()
+        + "\n"
+        + _b_fixed()
+        + "\n"
+        + "echo \"[check] stage2 == stage3: compiler is a fixed point\"";
+}
+
+// Fail banner sequence: through seedcheck-tests start, then a
+// test-failure marker; the seedcheck-smoke ok line sits before the
+// seedcheck-tests banner exactly as in the .sh.
+fn _fail_banners() -> string {
+    return _b_fptests() + "\n" + _b_scbuild() + "\n" + _b_scsmoke() + "\n"
+        + "echo \"[check] seedcheck binary runs hello-world.sfn OK\""
+        + "\n"
+        + _b_sctests()
+        + "\n"
+        + "echo \"═══ unit: 3/4 passed, 1 failed ═══\"";
+}
+
+// Warn banner sequence: all banners but the fixed-point WARN line.
+fn _warn_banners() -> string {
+    return _b_fptests() + "\n" + _b_scbuild() + "\n" + _b_scsmoke() + "\n"
+        + _b_sctests()
+        + "\n"
+        + _b_s3build()
+        + "\n"
+        + _b_fixed()
+        + "\n"
+        + "echo \"[check][WARN] stage2 != stage3: compiler output is not yet a fixed point\"";
+}
+
+test "check ledger green: seven phases in order, top-level status=pass" ![io] {
+    let report = _run_check_stub("green", _green_banners(), 0);
+    assert report.length > 0;
+    assert _names_in_order(report);
+    assert _json_str_field(report, "status") == "pass";
+}
+
+test "check ledger fail: seedcheck-tests fail, top-level fail/phase/failure" ![io] {
+    let report = _run_check_stub("fail", _fail_banners(), 1);
+    assert report.length > 0;
+    assert _names_in_order(report);
+    assert _json_str_field(report, "status") == "fail";
+    assert _json_str_field(report, "phase") == "seedcheck-tests";
+    assert _json_str_field(report, "failure") == "test-failure";
+}
+
+test "check ledger warn: nondeterminism, top-level warn/failure, exit 0" ![io] {
+    let report = _run_check_stub("warn", _warn_banners(), 0);
+    assert report.length > 0;
+    assert _names_in_order(report);
+    assert _json_str_field(report, "status") == "warn";
+    assert _json_str_field(report, "failure") == "nondeterminism";
+}

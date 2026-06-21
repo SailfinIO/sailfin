@@ -1,0 +1,479 @@
+// E2E test for `sfn package` (Stage C4): compiler mode, user-capsule mode
+// (-p), installer mode, and the error cases. Locks the artifact schema and
+// the tarball structure so a drift in `dist_manifest.sfn` /
+// `handle_package_command` is caught before the release workflow consumes a
+// misshapen artifact.
+//
+// Native replacement for the former `test_sfn_package.sh` (test-infra
+// Phase 3, epic #842). It inspected tarballs with `tar -tzf` and manifest
+// JSON with `jq`; here we shell out to `tar` / `jq` / `sha256sum` via
+// `process.run_capture` and parse the single-line stdout. Tests that need
+// `tar` or `jq` skip (assert true) if a `--version` probe fails, mirroring
+// the .sh's `command -v` SKIP guards.
+//
+// Run semantics: `run_capture` cannot chdir. The .sh ran compiler/installer
+// mode from the repo root (to find `compiler/capsule.toml`); the test runner
+// already starts at the repo root, so the spawned compile inherits that cwd.
+// All `--out` / `--compiler-bin` / `-p` paths are passed absolute.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on captured
+// stdout / parsed `jq` output with `sfn/strings` predicates instead. (#842.)
+import { find, contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Absolute path to the compiler binary (needed for --compiler-bin, which the
+// .sh resolved via realpath). If _sfn_bin() is already absolute, return it;
+// otherwise join it onto cwd via `pwd`.
+fn _sfn_bin_abs() -> string ![io] {
+    let bin = _sfn_bin();
+    if bin.length > 0 && bin[0] == "/" { return bin; }
+    let exit = process.run_capture(["pwd"], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return bin; }
+    let root = _first_line(out);
+    return root + "/" + bin;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _test_root(tag: string) -> string ![io] {
+    let root = _scratch_dir() + "/sfnpkg-" + tag;
+    fs.createDirectory(root, true);
+    return root;
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// First line of a captured stdout, trailing newline dropped.
+fn _first_line(text: string) -> string {
+    let lines = split(text, "\n");
+    if lines.length == 0 { return text; }
+    return lines[0];
+}
+
+// True when an external tool (`tar`, `jq`) is available — runs `<tool>
+// --version` and checks the exit code, mirroring the .sh `command -v` guard.
+fn _tool_present(tool: string) -> bool ![io] {
+    let exit = process.run_capture([tool, "--version"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit == 0;
+}
+
+// `jq -r .<field> <file>` -> first line of stdout (trimmed). Empty on error.
+fn _jq(field: string, file: string) -> string ![io] {
+    let exit = process.run_capture(["jq", "-r", "." + field, file], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return _first_line(out);
+}
+
+// `tar -tzf <tarball>` -> full listing text.
+fn _tar_list(tarball: string) -> string ![io] {
+    let exit = process.run_capture(["tar", "-tzf", tarball], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return out;
+}
+
+// A listing line ends with `suffix` (anchors the `tar -tzf ... grep -qE
+// "<suffix>$"` checks).
+fn _listing_has_suffix(listing: string, suffix: string) -> bool {
+    let lines = split(listing, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if line.length >= suffix.length {
+            let tail = substring(line, line.length - suffix.length, line.length);
+            if tail == suffix { return true; }
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// A listing line contains `needle` (for the `runtime/sfn/` prefix check).
+fn _listing_contains(listing: string, needle: string) -> bool {
+    return contains(listing, needle);
+}
+
+// `sha256sum <file>` -> the 64-char hex (first whitespace-delimited field).
+fn _sha256_hex(file: string) -> string ![io] {
+    let exit = process.run_capture(["sha256sum", file], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    let line = _first_line(out);
+    let parts = split(line, " ");
+    if parts.length == 0 { return ""; }
+    return parts[0];
+}
+
+// First line of the `.sha256` sidecar file (the bare hex digest + newline).
+fn _sidecar_hex(sha_file: string) -> string ![io] {
+    if !fs.exists(sha_file) { return ""; }
+    return _first_line(fs.readFile(sha_file));
+}
+
+// 64 lowercase-hex chars exactly (the sidecar contract).
+fn _is_hex64(s: string) -> bool {
+    if s.length != 64 { return false; }
+    let mut i = 0;
+    loop {
+        if i >= s.length { break; }
+        let code = char_code(substring(s, i, i + 1));
+        let is_hex = (code >= 48 && code <= 57) || (code >= 97 && code <= 102);
+        if !is_hex { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Coarse ISO-8601 UTC check: YYYY-MM-DDTHH:MM:SSZ — contains 'T' and 'Z',
+// 20 chars, leading 4 digits. Mirrors the .sh's `grep -qE` shape loosely.
+fn _is_iso8601_utc(bd: string) -> bool {
+    if bd.length != 20 { return false; }
+    if !contains(bd, "T") { return false; }
+    let last = substring(bd, bd.length - 1, bd.length);
+    if last != "Z" { return false; }
+    return true;
+}
+
+// Read `version = "..."` from compiler/capsule.toml.
+fn _compiler_version() -> string ![io] {
+    let toml = fs.readFile("compiler/capsule.toml");
+    let lines = split(toml, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        let at = find(line, "version", 0);
+        if at == 0 {
+            let q1 = find(line, "\"", 0);
+            if q1 >= 0 {
+                let q2 = find(line, "\"", q1 + 1);
+                if q2 > q1 { return substring(line, q1 + 1, q2); }
+            }
+        }
+        i += 1;
+    }
+    return "";
+}
+
+// Discover the single tarball under `dir` whose name starts with `prefix`
+// and ends with `.tar.gz`. Returns the absolute path or "".
+fn _find_tarball(dir: string, prefix: string) -> string ![io] {
+    if !fs.exists(dir) { return ""; }
+    let entries = fs.listDirectory(dir);
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        let starts = name.length >= prefix.length && substring(name, 0, prefix.length) == prefix;
+        let ends = name.length >= 7 && substring(name, name.length - 7, name.length) == ".tar.gz";
+        if starts && ends { return dir + "/" + name; }
+        i += 1;
+    }
+    return "";
+}
+
+// The basename stem of a tarball path (strip dir + `.tar.gz`).
+fn _tarball_stem(tarball: string) -> string {
+    let parts = split(tarball, "/");
+    let mut base = tarball;
+    if parts.length > 0 { base = parts[parts.length - 1]; }
+    if base.length >= 7 { return substring(base, 0, base.length - 7); }
+    return base;
+}
+
+// =====================================================================
+// Compiler mode
+// =====================================================================
+test "sfn package (compiler mode): full artifact + manifest contract" ![io] {
+    if !_tool_present("tar") {
+        assert true;
+        return;
+    }
+    if !_tool_present("jq") {
+        assert true;
+        return;
+    }
+
+    let root = _test_root("compiler");
+    let dist = root + "/dist-compiler";
+    let bin = _sfn_bin_abs();
+    let version = _compiler_version();
+    assert version.length > 0;
+
+    // Run from repo root (the runner's cwd) so compiler/capsule.toml is found.
+    let exit = process.run_capture([_sfn_bin(), "package", "--out", dist, "--compiler-bin", bin], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+
+    // Discover tarball `sailfin-native-*-<version>.tar.gz`.
+    let tarball = _find_tarball(dist, "sailfin-native-");
+    assert tarball.length > 0;
+    // Stem must carry the version (the .sh globbed `*-<version>.tar.gz`).
+    let stem = _tarball_stem(tarball);
+    assert contains(stem, version);
+
+    let sha_file = tarball + ".sha256";
+    let manifest = dist + "/" + stem + ".manifest.json";
+    assert fs.exists(tarball);
+    assert fs.exists(sha_file);
+    assert fs.exists(manifest);
+
+    // Tarball lists bin/sailfin + bin/sfn.
+    let listing = _tar_list(tarball);
+    assert _listing_has_suffix(listing, "/bin/sailfin");
+    assert _listing_has_suffix(listing, "/bin/sfn");
+
+    // .sha256 sidecar is 64 hex and matches a fresh sha256sum of the tarball.
+    let sidecar = _sidecar_hex(sha_file);
+    assert _is_hex64(sidecar);
+    let actual = _sha256_hex(tarball);
+    assert sidecar == actual;
+
+    // Manifest schema + compiler-mode fields.
+    assert _jq("schema_version", manifest) == "1";
+    assert _jq("name", manifest) == "sailfin-native";
+    assert _jq("kind", manifest) == "compiler";
+    assert _jq("capsule", manifest) == "sailfin";
+    assert _jq("version", manifest) == version;
+
+    // Sizes are positive numbers.
+    let bin_size = _jq("binary_size", manifest);
+    let tar_size = _jq("tarball_size", manifest);
+    assert bin_size.length > 0 && bin_size != "0";
+    assert tar_size.length > 0 && tar_size != "0";
+
+    // target non-empty / non-null.
+    let target = _jq("target", manifest);
+    assert target.length > 0 && target != "null";
+
+    // Manifest sha256 round-trips against the sidecar.
+    assert _jq("sha256", manifest) == sidecar;
+
+    // build_date is ISO-8601 UTC.
+    assert _is_iso8601_utc(_jq("build_date", manifest));
+}
+
+// =====================================================================
+// User-capsule mode (-p)
+// =====================================================================
+test "sfn package -p (user capsule): build then package, library manifest" ![io] {
+    if !_tool_present("tar") {
+        assert true;
+        return;
+    }
+    if !_tool_present("jq") {
+        assert true;
+        return;
+    }
+
+    // Per-run unique root (mkdtemp) so the `capsules` symlink and the dist
+    // artifacts never collide with a prior invocation's leftovers — the .sh
+    // got a fresh mktemp dir each run; a fixed /tmp path is not idempotent.
+    // The root MUST be absolute: this test `cd`s into the fixture to run
+    // `package`, so a relative `--out` (the runner-managed SAILFIN_TEST_SCRATCH
+    // can be the relative `build/sailfin/...`) would resolve against the
+    // fixture cwd while `_find_tarball` resolves against the repo root.
+    let repo_root = _first_line_pwd();
+    let mut root = fs.mkdtemp(_scratch_dir() + "/sfnpkg-widget-");
+    if root.length > 0 && substring(root, 0, 1) != "/" {
+        root = repo_root + "/" + root;
+    }
+    let widget = root + "/widget-fixture";
+    fs.createDirectory(widget + "/src", true);
+
+    // The .sh symlinked `capsules` into the fixture so `sfn/math` resolves;
+    // reproduce that with `ln -sfn <repo_root>/capsules <widget>/capsules`
+    // (`-f`/`-n` make it idempotent if a stale link is present).
+    let link_exit = process.run_capture(["ln", "-sfn", repo_root + "/capsules", widget
+        + "/capsules"], _child_env());
+    let _lo = process.capture_take_stdout();
+    let _le = process.capture_take_stderr();
+    assert link_exit == 0;
+
+    fs.writeFile(widget + "/capsule.toml", "[capsule]\nname = \"demo/widget\"\nversion = \"0.1.0\"\ndescription = \"E2E fixture for sfn package\"\n\n[dependencies]\n\"sfn/math\" = \"0.1.0\"\n\n[capabilities]\nrequired = [\"io\"]\n\n[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\n");
+    fs.writeFile(widget + "/src/mod.sfn", "import { abs } from \"sfn/math\";\nfn widget_abs(n: number) -> number { return abs(n); }\n");
+
+    // Precondition: build the capsule so the C2c sidecar exists. The .sh ran
+    // `build -p .` / `package -p .` from INSIDE the fixture dir, so the build
+    // cache + sidecar and the package lookup share one cwd. `run_capture`
+    // cannot chdir, so reproduce that with a `cd <widget> && ...` bash vehicle
+    // and an absolute compiler path.
+    let sfn_abs = _sfn_bin_abs();
+    let build_exit = process.run_capture(["bash", "-c", "cd \"" + widget
+        + "\" && \""
+        + sfn_abs
+        + "\" build -p ."], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    let userdist = root + "/dist-widget";
+    let pkg_exit = process.run_capture(["bash", "-c", "cd \"" + widget
+        + "\" && \""
+        + sfn_abs
+        + "\" package -p . --out \""
+        + userdist
+        + "\""], _child_env());
+    let _po = process.capture_take_stdout();
+    let _pe = process.capture_take_stderr();
+    assert pkg_exit == 0;
+
+    let tarball = _find_tarball(userdist, "demo-widget-");
+    assert tarball.length > 0;
+    let stem = _tarball_stem(tarball);
+    let manifest = userdist + "/" + stem + ".manifest.json";
+    assert fs.exists(tarball);
+    assert fs.exists(tarball + ".sha256");
+    assert fs.exists(manifest);
+
+    // Library-kind tarball: obj/mod.o + manifest.json + capsule.toml.
+    let listing = _tar_list(tarball);
+    assert _listing_has_suffix(listing, "/obj/mod.o");
+    assert _listing_has_suffix(listing, "/manifest.json");
+    assert _listing_has_suffix(listing, "/capsule.toml");
+
+    assert _jq("kind", manifest) == "library";
+    assert _jq("capsule", manifest) == "demo/widget";
+    assert _jq("name", manifest) == "demo-widget";
+}
+
+// pwd helper colocated near its only caller (the link setup).
+fn _first_line_pwd() -> string ![io] {
+    let exit = process.run_capture(["pwd"], _child_env());
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "."; }
+    return _first_line(out);
+}
+
+// =====================================================================
+// Installer mode
+// =====================================================================
+test "sfn package --installer: bundle + manifest contract" ![io] {
+    if !_tool_present("tar") {
+        assert true;
+        return;
+    }
+    if !_tool_present("jq") {
+        assert true;
+        return;
+    }
+
+    let root = _test_root("installer");
+    let inst = root + "/dist-installer";
+    let bin = _sfn_bin_abs();
+    let version = _compiler_version();
+    assert version.length > 0;
+
+    let exit = process.run_capture([_sfn_bin(), "package", "--installer", "--out", inst, "--compiler-bin", bin], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+
+    // Tarball `installer-*.tar.gz` (NO version in the stem).
+    let tarball = _find_tarball(inst, "installer-");
+    assert tarball.length > 0;
+    let stem = _tarball_stem(tarball);
+    assert ! contains(stem, version);
+
+    let sha_file = tarball + ".sha256";
+    let manifest = inst + "/" + stem + ".manifest.json";
+    assert fs.exists(tarball);
+    assert fs.exists(sha_file);
+    assert fs.exists(manifest);
+
+    // Contents: bin/{sailfin,sfn} + runtime bundle. Accept an optional
+    // leading `./` the way the .sh did (BSD vs GNU tar): the suffix-anchored
+    // check matches both `bin/sailfin` and `./bin/sailfin`.
+    let listing = _tar_list(tarball);
+    assert _listing_has_suffix(listing, "bin/sailfin");
+    assert _listing_has_suffix(listing, "bin/sfn");
+    assert _listing_has_suffix(listing, "runtime/capsule.toml");
+    assert _listing_has_suffix(listing, "runtime/prelude.sfn");
+    assert _listing_contains(listing, "runtime/sfn/");
+
+    // Manifest invariants.
+    assert _jq("kind", manifest) == "installer";
+    assert _jq("capsule", manifest) == "sailfin";
+    assert _jq("version", manifest) == version;
+    assert _jq("schema_version", manifest) == "1";
+
+    // sha256 matches across manifest, sidecar, and a fresh digest.
+    let sidecar = _sidecar_hex(sha_file);
+    assert _is_hex64(sidecar);
+    assert _jq("sha256", manifest) == sidecar;
+    assert _sha256_hex(tarball) == sidecar;
+}
+
+test "sfn package --installer -p errors (mutual exclusion)" ![io] {
+    let root = _test_root("installer-p");
+    let bad = root + "/dist-bad";
+    // `--installer` and `-p` are mutually exclusive.
+    let exit = process.run_capture([_sfn_bin(), "package", "--installer", "-p", ".", "--out", bad], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "incompatible");
+}
+
+// =====================================================================
+// Error cases
+// =====================================================================
+test "sfn package: missing --compiler-bin errors" ![io] {
+    let root = _test_root("missing-bin");
+    let dist = root + "/dist-missing";
+    let missing = root + "/does-not-exist";
+    let exit = process.run_capture([_sfn_bin(), "package", "--out", dist, "--compiler-bin", missing], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "compiler binary not found");
+}
+
+test "sfn package -p without prior build errors (no sidecar)" ![io] {
+    let root = _test_root("no-sidecar");
+    let fresh = root + "/widget-no-build";
+    fs.createDirectory(fresh + "/src", true);
+    // Same fixture shape, but `sfn build` is never run -> no sidecar.
+    fs.writeFile(fresh + "/capsule.toml", "[capsule]\nname = \"demo/widget\"\nversion = \"0.1.0\"\ndescription = \"E2E fixture for sfn package\"\n\n[dependencies]\n\"sfn/math\" = \"0.1.0\"\n\n[capabilities]\nrequired = [\"io\"]\n\n[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\n");
+    fs.writeFile(fresh + "/src/mod.sfn", "import { abs } from \"sfn/math\";\nfn widget_abs(n: number) -> number { return abs(n); }\n");
+
+    let dist = root + "/dist-nobuild";
+    let exit = process.run_capture([_sfn_bin(), "package", "-p", fresh, "--out", dist], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit != 0;
+    assert contains(out + err, "no sidecar");
+}

@@ -1,10 +1,17 @@
-New end-to-end tests are written in Sailfin (`*_test.sfn`) using the
-`sfn/test` capsule — **not** as bash scripts. The `compiler/tests/e2e/*.sh`
-surface grew 38 → 122 because dropping a new `.sh` in that directory "just
-works"; that era is closing (test-infra Phase 3, epic #842). A warn-first
-CI lint (`scripts/lint_no_new_e2e_bash.sh`, allowlist
-`scripts/e2e_bash_allowlist.txt`) flags any new off-allowlist script, and
-will become a hard failure once the migration backlog is drained.
+End-to-end tests are written in Sailfin (`*_test.sfn`) using the
+`sfn/test` capsule — **never** as bash scripts. The
+`compiler/tests/e2e/*.sh` surface grew 38 → 122 because dropping a new
+`.sh` in that directory "just works"; that era is **closed** (test-infra
+Phase 3, epic #842 / #840 — complete). Every legacy `test_*.sh` was
+migrated to a `*_test.sfn` peer and deleted, and the machinery that ran
+them is gone: there is no `compiler/tests/e2e/*.sh` surface, no
+`make test-e2e-sh` target, no `e2e-sh-*` CI shards, and no allowlist or
+ratchet lint. **Do not add a new `compiler/tests/e2e/*.sh` script** —
+there is no allowlist that would make one acceptable. Everything the old
+hold-outs needed bash for (HTTP/registry mock via a PATH-injected `curl`
+shim, tar/jq archive inspection, `ulimit`/`cwd` control) is reachable from
+an `![io]` `*_test.sfn` that drives the subprocess — see "Driving shells
+and external tools" below.
 
 ## Write e2e tests like this
 
@@ -121,17 +128,32 @@ only lever for the latter two, which have no `--work-dir`). For a caller
 *outside* the test runner (no `SAILFIN_TEST_SCRATCH`), `sfn build
 --work-dir <dir>` is the equivalent explicit per-invocation isolation.
 
-## When bash is still allowed
+## Driving shells and external tools from a `*_test.sfn`
 
-Only for the named hold-outs in `scripts/e2e_bash_allowlist.txt` that
-genuinely cannot be `sfn/test` pre-1.0 (HTTP-server registry mock, tar
-archive inspection, docs-sync CI invariants). If you believe a new test
-needs bash, add it to the allowlist **with a justification in the PR** so a
-reviewer signs off — do not silence the lint without one.
+There is no separate "bash is allowed" carve-out — an `![io]` test can do
+everything the old hold-out scripts did by spawning the tool via
+`process.run_capture`. Established patterns (all in-tree as of the #840
+migration):
 
-## On pickup of a #842 batch port
-
-Each migrated script: write the `*_test.sfn`, delete the `.sh`, and remove
-its line from `scripts/e2e_bash_allowlist.txt` (the lint warns on stale
-entries). Drop the Makefile `find -name 'test_*.sh'` branch only when the
-directory is empty of non-hold-out scripts.
+- **External tools** (`tar`, `jq`, `sha256sum`, `readlink`, `ln`, `clang`):
+  call them as the subprocess argv and parse the captured stdout with
+  `sfn/strings` — e.g. `sfn_package_test.sfn` shells `tar -tzf` / `jq -r`,
+  `llms_txt_sync_test.sfn` shells `readlink -f`. Guard with a `--version`
+  probe and *skip* (`assert true`) when the tool is absent, mirroring the
+  old `command -v` SKIP.
+- **Shell shims** (fake `curl`/`uname` on `PATH`): write the shim with
+  `fs.writeFile`, `chmod +x` it via `run_capture(["chmod","+x",path], env)`,
+  then prepend its dir to the child's `PATH` entry — see `publish_test.sfn`
+  (curl shim) and `clock_monotonic_id_sentinel_test.sfn` (uname shim).
+- **C harnesses** (link against emitted `.ll`, fork/pthread, ASAN):
+  `fs.writeFile` the `.c`, `run_capture(["clang", ...])`, run the binary —
+  see `runtime_memory_arena_test.sfn` and `escape_promotion_channel_send_test.sfn`.
+- **`cwd` / `ulimit` control** (`run_capture` cannot `chdir` or set an
+  rlimit): use a `bash -c "cd <dir> && ..."` / `bash -c "ulimit -v N; exec ..."`
+  vehicle as the spawned argv — see `sfn_package_test.sfn` (cd into the
+  fixture) and `mem_limit_selfcap_test.sfn` (inherited-cap leg). When you
+  build paths for a `cd` vehicle, make them **absolute** (the runner-managed
+  `SAILFIN_TEST_SCRATCH` can be the relative `build/sailfin/...`, which a
+  post-`cd` relative `--out` would resolve against the wrong directory).
+  Native `process` rlimit/`read_link` helpers that would retire the
+  `bash -c` / `readlink` subprocess sidesteps are tracked as follow-ups.

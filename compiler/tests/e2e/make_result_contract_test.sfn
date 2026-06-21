@@ -1,0 +1,234 @@
+// End-to-end test for the make verdict-block contract (#1060, epic #1056
+// Phase 1).
+//
+// Native (no-bash) replacement for the former
+// `test_make_result_contract.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`). Drives `make` targets as subprocesses
+// and asserts on the final
+//
+//   ===SAILFIN-RESULT===
+//   {"schema_version":"sailfin-make/1","target":...,"status":...,...}
+//   ===END-SAILFIN-RESULT===
+//
+// block they emit, so an agent can classify the outcome from a
+// tail-truncated log. Schema: docs/reference/make-result-schema.md.
+//
+// Cases (cheap, deterministic, network-free):
+//   - pass:  `make compile` is up-to-date (the e2e suite runs after the
+//            compiler is built from the same sources) -> status "pass",
+//            failure null.
+//   - fail:  `make check-fast NATIVE_BIN=/nonexistent` trips the guard
+//            before any work -> status "fail", failure "setup-error".
+//   - failed cold rebuild (#1192 regression): a stub seed that answers
+//            `--version` but fails `build`, FORCE=1 -> status "fail",
+//            non-null failure (no stale fallback to status "pass").
+//
+// CRITICAL — recursive-make + env hygiene. The e2e suite runs under a
+// wrapped `make test`, whose agent_report wrapper exports SAILFIN_INNER=1
+// — which would make a nested target run transparently and emit NO
+// sentinel. `process.run_capture(argv, env)` takes the COMPLETE child
+// environment (empty array == empty env), so we reproduce the bash
+// `env -u SAILFIN_INNER` by BUILDING the child env WITHOUT SAILFIN_INNER
+// (and without SAILFIN_AGENT_REPORT). run_capture does not cd, so make is
+// invoked with `-C <repo_root> --no-print-directory`.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test. Assert on the captured
+// output text with `sfn/strings` predicates instead. (#842.)
+import { find, contains, split } from "sfn/strings";
+
+fn _repo_root() -> string ![io] {
+    let root = env.get("SAILFIN_REPO_ROOT");
+    if root.length > 0 { return root; }
+    return ".";
+}
+
+// Build the child environment WITHOUT SAILFIN_INNER and WITHOUT
+// SAILFIN_AGENT_REPORT (the bash `env -u SAILFIN_INNER` restoration of
+// outer-target behavior). Only PATH/HOME/TMPDIR/SAILFIN_TEST_SCRATCH are
+// threaded — the nested make/clang/linker resolve through PATH, and
+// SAILFIN_TEST_SCRATCH keeps the per-invocation build cache isolated.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-make-result";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Index of the LAST line containing `marker`, or -1.
+fn _last_marker_line(lines: string[], marker: string) -> int {
+    let mut idx = -1;
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], marker) { idx = i; }
+        i = i + 1;
+    }
+    return idx;
+}
+
+// True iff the verdict block is the FINAL block: a START/END pair exists,
+// END follows START, and nothing but blank lines or make's own framing
+// (`make[N]: ...`) follows the last END marker. Mirrors the bash
+// assert_final_block.
+fn _is_make_framing(line: string) -> boolean {
+    // Strip-of-whitespace is unnecessary: blank lines are tolerated, and
+    // make framing always begins with "make".
+    let mut i = 0;
+    loop {
+        if i >= line.length { break; }
+        let c = substring(line, i, i + 1);
+        if c != " " && c != "\t" { break; }
+        i = i + 1;
+    }
+    let rest = substring(line, i, line.length);
+    if rest.length == 0 { return true; }
+    // `make: ...` or `make[N]: ...`
+    if rest.length >= 4 && substring(rest, 0, 4) == "make" { return true; }
+    return false;
+}
+
+fn _assert_final_block(output: string) -> boolean {
+    let lines = split(output, "\n");
+    let start = _last_marker_line(lines, "===SAILFIN-RESULT===");
+    let end = _last_marker_line(lines, "===END-SAILFIN-RESULT===");
+    if start < 0 { return false; }
+    if end < 0 { return false; }
+    if end <= start { return false; }
+    // Everything after the last END marker must be blank or make framing.
+    let mut i = end + 1;
+    loop {
+        if i >= lines.length { break; }
+        if !_is_make_framing(lines[i]) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+// The verdict JSON line: the single line after the LAST START marker.
+fn _verdict_json(output: string) -> string {
+    let lines = split(output, "\n");
+    let start = _last_marker_line(lines, "===SAILFIN-RESULT===");
+    if start < 0 { return ""; }
+    let next = start + 1;
+    if next >= lines.length { return ""; }
+    return lines[next];
+}
+
+// jq-less string field read: `"field":"value"` -> value, or "" if absent.
+fn _json_str_field(json: string, field: string) -> string {
+    let key = "\"" + field + "\":\"";
+    let at = find(json, key, 0);
+    if at < 0 { return ""; }
+    let value_start = at + key.length;
+    // Read until the closing quote.
+    let close = find(json, "\"", value_start);
+    if close < 0 { return ""; }
+    return substring(json, value_start, close);
+}
+
+// Detect the literal `"field":null`.
+fn _json_is_null(json: string, field: string) -> boolean {
+    let key = "\"" + field + "\":null";
+    return find(json, key, 0) >= 0;
+}
+
+fn _run_make(args: string[]) -> string ![io] {
+    let mut argv: string[] = ["make", "-C", _repo_root(), "--no-print-directory"];
+    let mut i = 0;
+    loop {
+        if i >= args.length { break; }
+        argv.push(args[i]);
+        i = i + 1;
+    }
+    let _exit = process.run_capture(argv, _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    return out + err;
+}
+
+test "make result: passing target verdict is the final block, status=pass" ![io] {
+    let output = _run_make(["compile"]);
+    assert _assert_final_block(output);
+    let json = _verdict_json(output);
+    assert json.length > 0;
+    assert _json_str_field(json, "schema_version") == "sailfin-make/1";
+    assert _json_str_field(json, "target") == "compile";
+    assert _json_str_field(json, "status") == "pass";
+    assert _json_is_null(json, "failure");
+}
+
+test "make result: forced failure verdict is the final block, status=fail" ![io] {
+    // A bad NATIVE_BIN trips check-fast's guard before any work — a
+    // deterministic, network-free failure classified as setup-error.
+    let output = _run_make(["check-fast", "NATIVE_BIN=/nonexistent/sailfin"]);
+    assert _assert_final_block(output);
+    let json = _verdict_json(output);
+    assert json.length > 0;
+    assert _json_str_field(json, "schema_version") == "sailfin-make/1";
+    assert _json_str_field(json, "status") == "fail";
+    assert ! _json_is_null(json, "failure");
+    assert _json_str_field(json, "failure") == "setup-error";
+}
+
+// Minimal seed stub (copied verbatim from the .sh STUB heredoc): viable
+// enough to clear rebuild-impl's `--version` preflight but deliberately
+// fails the actual `build` so the cold rebuild fails. Every other
+// subcommand is a harmless no-op.
+fn _fakeseed_script() -> string {
+    return "#!/usr/bin/env bash\n"
+        + "# Minimal seed stub: viable enough to clear rebuild-impl's `--version`\n"
+        + "# preflight but deliberately fails the actual `build` so the cold rebuild\n"
+        + "# fails. Every other subcommand (e.g. the platform-module `emit`\n"
+        + "# pre-stage) is a harmless no-op.\n"
+        + "case \"${1:-}\" in\n"
+        + "  --version) echo \"sailfin-fakeseed 0.0.0\" ;;\n"
+        + "  build)     echo \"[fakeseed] build deliberately failing for #1192 regression\" >&2; exit 1 ;;\n"
+        + "  *)         exit 0 ;;\n"
+        + "esac\n";
+}
+
+test "make result: failed cold rebuild reports status=fail (no stale fallback)" ![io] {
+    // #1192 regression: a failed cold self-host rebuild must make `make
+    // compile` FAIL (status:"fail"), not silently fall back to the prior
+    // build/native/sailfin and report status:"pass". Force the rebuild
+    // branch (FORCE=1) with a stub seed; FORCE / SEED_NATIVE are read from
+    // the child env by the recipe, not as make-command-line variables.
+    let dir = _scratch_dir();
+    let fakeseed = dir + "/fakeseed";
+    fs.writeFile(fakeseed, _fakeseed_script());
+    let _cm = process.run_capture(["chmod", "+x", fakeseed], _child_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+
+    // Child env: base (no SAILFIN_INNER) + FORCE=1 + SEED_NATIVE=<stub>.
+    let mut e = _child_env();
+    e.push("FORCE=1");
+    e.push("SEED_NATIVE=" + fakeseed);
+
+    let _exit = process.run_capture(["make", "-C", _repo_root(), "--no-print-directory", "compile"], e);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let output = out + err;
+
+    assert _assert_final_block(output);
+    let json = _verdict_json(output);
+    assert json.length > 0;
+    assert _json_str_field(json, "target") == "compile";
+    assert _json_str_field(json, "status") == "fail";
+    assert ! _json_is_null(json, "failure");
+}

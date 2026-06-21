@@ -1,0 +1,148 @@
+// End-to-end test for `sfn check` over the full compiler/src/ tree.
+//
+// Native (no-bash) replacement for the former
+// `test_check_compiler_src.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`).
+//
+// This is the headline test for Phase 5a
+// (`docs/proposals/phase-5a-arena-reset.md`) — the runtime arena
+// mark/rewind primitive plus the path-normalization fix in
+// `_collect_sfn_files_cmd` make the in-process multi-module loop
+// reclaimable. Pre-Phase-5a, `sfn check compiler/src/` SIGSEGVed at
+// ~120s on the 132-file tree: each `check_source_with_imports` call
+// accumulated arena allocations (strings, AST nodes, typecheck tables)
+// that never got freed, and the seed eventually walked off the
+// allocator's edge.
+//
+// Acceptance:
+//   - Exits 0 (clean) or 1 (diagnostics found). Never 139 (SIGSEGV).
+//   - Emits a `checked <N> files` summary line.
+//   - The directory walk visits every .sfn file under compiler/src/:
+//     N equals the count of `.sfn` files under compiler/src (recursive).
+//
+// Cost discipline: a single `sfn check compiler/src` invocation runs
+// the full ~132-file analysis loop (~130s local, ~2-3 min CI). The test
+// runs the canonical scenario exactly ONCE and reuses the captured exit
+// code + summary line for every assertion. The trailing-slash
+// regression is covered cheaply by the unit test in
+// `compiler/tests/unit/cli_path_normalization_test.sfn` — do not
+// re-introduce a second full-tree invocation.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test. Assert on the captured
+// output with `sfn/strings` predicates and `==` instead. (#842.)
+import {
+    find,
+    split,
+    contains,
+    ends_with
+} from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Recursively count `.sfn` files under `dir`. fs.listDirectory is
+// non-recursive: a path whose listing has entries is a directory, a
+// zero-entry listing is a regular file (the compiler/src tree stages no
+// empty directories).
+fn _count_sfn_files(dir: string) -> int ![io] {
+    if !fs.exists(dir) { return 0; }
+    let entries = fs.listDirectory(dir);
+    let mut count = 0;
+    let mut i = 0;
+    loop {
+        if i >= entries.length { break; }
+        let name = entries[i];
+        i += 1;
+        if name == "." { continue; }
+        if name == ".." { continue; }
+        let full = dir + "/" + name;
+        let sub = fs.listDirectory(full);
+        if sub.length > 0 { count += _count_sfn_files(full); } else {
+            if ends_with(name, ".sfn") { count += 1; }
+        }
+    }
+    return count;
+}
+
+// Extract the integer N from the first `checked <N> files` line in the
+// captured output, or -1 if no such summary line is present.
+fn _reported_file_count(text: string) -> int {
+    let lines = split(text, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        i += 1;
+        if !contains(line, "checked ") { continue; }
+        if !contains(line, " files") { continue; }
+        // Parse the digits between "checked " and " files".
+        let start = find(line, "checked ", 0);
+        if start < 0 { continue; }
+        let mut j = start + 8;
+        let mut num = 0;
+        let mut saw_digit = false;
+        let zero = char_code("0");
+        let nine = char_code("9");
+        loop {
+            if j >= line.length { break; }
+            let c = substring(line, j, j + 1);
+            let code = char_code(c);
+            if code >= zero && code <= nine {
+                num = num * 10 + (code - zero);
+                saw_digit = true;
+                j += 1;
+            } else { break; }
+        }
+        if saw_digit { return num; }
+    }
+    return -1;
+}
+
+// Single canonical run, reused by every assertion in this file. The
+// closure-free way to share one expensive invocation across tests is to
+// run it inside each `test` block, but cost discipline forbids that here
+// (the full-tree check is ~2-3 min). The .sh original kept this to ONE
+// invocation; we honor that by folding all assertions into one test.
+test "sfn check compiler/src: completes (no SIGSEGV) and walks every file" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", "compiler/src"], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let combined = out + err;
+
+    // (a) Never 139 (SIGSEGV — the Phase 5a arena regression). Exit is
+    //     0 (clean) or 1 (diagnostics found); any other code is a fault.
+    assert exit != 139;
+    assert exit == 0 || exit == 1;
+
+    // (b) The process emitted a `checked <N> files` summary line, proving
+    //     it completed the multi-module loop cleanly.
+    let reported = _reported_file_count(combined);
+    assert reported >= 0;
+
+    // (c) The directory walk visited every .sfn file under compiler/src.
+    //     Compare the reported N against a recursive count; if the
+    //     recursive listing yields nothing (defensive — should not happen
+    //     in-tree), fall back to the documented floor (the tree is ~132
+    //     files, always > 100).
+    let actual = _count_sfn_files("compiler/src");
+    if actual > 0 { assert reported == actual; } else { assert reported > 100; }
+}

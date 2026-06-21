@@ -218,9 +218,9 @@ endif
 # tallies per-suite, and emits the per-suite `═══ <name>: N/M ═══`
 # banners directly. `test-unit` / `test-integration` / `test-e2e` /
 # `test-capsules` keep their names as aliases over the same runner
-# with different paths. The legacy e2e `test_*.sh` scripts still
-# run from `make test` / `make test-e2e` via `test-e2e-sh` — Phase
-# 3.1 migrates them and retires the .sh branch.
+# with different paths. The legacy e2e `test_*.sh` scripts were
+# fully migrated to `*_test.sfn` peers (Phase 3.1, epic #840), so the
+# bash branch and its allowlist/ratchet are gone.
 test:
 	@$(AGENT_REPORT) --target test -- $(MAKE) test-impl
 
@@ -229,14 +229,9 @@ test-impl:
 		echo "[test] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@# Run the unified runner, then the legacy e2e .sh scripts, and
-	@# surface a non-zero status if *either* failed. The `.sh` scripts
-	@# must still run even when a `.sfn` suite fails — matches the
-	@# pre-#848 `test-e2e` loop, which ran its `.sh` branch after the
-	@# `.sfn` branch regardless of `.sfn` failures.
-	@# JSON=1 gate (#1121): only the `.sfn` runner gets `--json` + tee; the
-	@# `.sh` branch (test-e2e-sh) has no JSON surface. The `rc` aggregation
-	@# is preserved so a failure in either branch still propagates.
+	@# JSON=1 gate (#1121): the `.sfn` runner gets `--json` + tee for the
+	@# report composer; pipefail preserves the runner's real exit code
+	@# across the tee. (The legacy `.sh` e2e branch is gone — epic #840.)
 	@rc=0; \
 	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
@@ -245,7 +240,6 @@ test-impl:
 	else \
 		$(NATIVE_BIN) test compiler/tests/unit compiler/tests/integration compiler/tests/e2e capsules $(TEST_BIN_CACHE_FLAGS) $(TEST_JOBS_FLAG) || rc=$$?; \
 	fi; \
-	$(MAKE) test-e2e-sh || rc=$$?; \
 	exit $$rc
 
 # =============================================================================
@@ -338,11 +332,9 @@ test-integration-impl:
 		$(NATIVE_BIN) test compiler/tests/integration $(TEST_JOBS_FLAG); \
 	fi
 
-# The legacy e2e `test_*.sh` scripts still run alongside the `.sfn`
-# tests until Phase 3.1 migrates them (see
-# `docs/proposals/test-infra-epic/02-phases.md` Phase 3.1). Until
-# then `test-e2e-sh` keeps the bash-driven scripts on the same
-# `make test-e2e` / `make test` paths they were on before #848.
+# The e2e suite is now entirely `*_test.sfn` (the legacy `test_*.sh`
+# scripts were migrated and deleted — Phase 3.1, epic #840), so this
+# is a plain alias over the unified runner on `compiler/tests/e2e`.
 test-e2e:
 	@$(AGENT_REPORT) --target test-e2e -- $(MAKE) test-e2e-impl
 
@@ -351,19 +343,15 @@ test-e2e-impl:
 		echo "[test-e2e] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@# JSON=1 gate (#1121): only the `.sfn` runner gets `--json` + tee; the
-	@# `.sh` branch (test-e2e-sh) has no JSON surface. The `rc` aggregation
-	@# is preserved so a failure in either branch still propagates.
-	@rc=0; \
-	if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
+	@# JSON=1 gate (#1121): append `--json` + tee for the report composer;
+	@# pipefail preserves the runner's real exit code across the tee.
+	@if [ "$${SAILFIN_AGENT_REPORT:-}" = "1" ]; then \
 		mkdir -p build; \
 		set -o pipefail; \
-		$(NATIVE_BIN) test compiler/tests/e2e $(TEST_JOBS_FLAG) --json | tee build/agent-test.test-e2e.jsonl || rc=$$?; \
+		$(NATIVE_BIN) test compiler/tests/e2e $(TEST_JOBS_FLAG) --json | tee build/agent-test.test-e2e.jsonl; \
 	else \
-		$(NATIVE_BIN) test compiler/tests/e2e $(TEST_JOBS_FLAG) || rc=$$?; \
-	fi; \
-	$(MAKE) test-e2e-sh || rc=$$?; \
-	exit $$rc
+		$(NATIVE_BIN) test compiler/tests/e2e $(TEST_JOBS_FLAG); \
+	fi
 
 # Per-capsule tests live alongside each capsule under
 # `capsules/<scope>/<name>/tests/*_test.sfn`. The unified runner's
@@ -393,74 +381,27 @@ test-capsules-impl:
 # concurrent CI legs. `scripts/test_shards.sh` owns the shard -> file
 # mapping (single source of truth); `test-shard-cover` asserts the union
 # of all shards equals `make test`'s surface so a rebalance can never
-# silently drop coverage. Shard names: unit-a unit-b int-e2e-caps e2e-sh.
+# silently drop coverage. Shard names: unit-a unit-b int-e2e-caps.
 #   make test-shard SHARD=unit-a
 .PHONY: test-shard test-shard-cover
 SHARD ?=
 test-shard:
 	@if [ -z "$(SHARD)" ]; then \
-		echo "[test-shard] SHARD required: unit-a|unit-b|int-e2e-caps|e2e-sh" >&2; \
+		echo "[test-shard] SHARD required: unit-a|unit-b|int-e2e-caps" >&2; \
 		exit 1; \
 	fi
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-shard] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@# e2e-sh-* shards run their strided subset of the legacy .sh scripts
-	@# through test-e2e-sh (one banner format); every other shard is a
-	@# disjoint slice of the unified `*_test.sfn` runner.
-	@case "$(SHARD)" in \
-		e2e-sh-*) \
-			$(MAKE) test-e2e-sh \
-				E2E_SH_FILES="$$(bash scripts/test_shards.sh list "$(SHARD)" | tr '\n' ' ')" ;; \
-		*) \
-			bash scripts/test_shards.sh run "$(SHARD)" "$(NATIVE_BIN)" ;; \
-	esac
+	@# Every shard is a disjoint slice of the unified `*_test.sfn` runner
+	@# (the legacy e2e `.sh` shards were retired with the bash suite — #840).
+	@bash scripts/test_shards.sh run "$(SHARD)" "$(NATIVE_BIN)"
 
 # Coverage guard: fail if the shard map drops or double-counts any test
 # file relative to `make test`. Needs no compiler — pure file-tree check.
 test-shard-cover:
 	@bash scripts/test_shards.sh cover
-
-# Internal: the legacy e2e `.sh` script loop. Phase 3.1 (parent
-# epic #840) ports each `test_*.sh` to a `_test.sfn` peer and
-# deletes both this target and the source scripts. Until then it
-# emits a `═══ e2e-sh: N/M passed ═══` banner shaped like the
-# runner's own per-suite banners so log scrubbers see one format
-# across the suite.
-# E2E_SH_FILES: optional newline/space-separated subset of test_*.sh to
-# run (used by `make test-shard SHARD=e2e-sh-N`, computed by
-# scripts/test_shards.sh). Empty = discover and run the full set.
-E2E_SH_FILES ?=
-.PHONY: test-e2e-sh
-test-e2e-sh:
-	@pass=0; fail=0; failed_files=""; \
-	files="$(E2E_SH_FILES)"; \
-	if [ -z "$$files" ]; then \
-		files=$$(find compiler/tests/e2e -name 'test_*.sh' -print | sort); \
-	fi; \
-	if [ -z "$$files" ]; then \
-		echo "[test-e2e-sh] no test_*.sh scripts found under compiler/tests/e2e"; \
-		echo ""; \
-		echo "═══ e2e-sh: 0/0 passed, 0 failed ═══"; \
-		exit 0; \
-	fi; \
-	for f in $$files; do \
-		if bash "$$f" $(NATIVE_BIN); then \
-			pass=$$((pass + 1)); \
-		else \
-			fail=$$((fail + 1)); \
-			failed_files="$$failed_files  $$(basename $$f)\n"; \
-		fi; \
-	done; \
-	total=$$((pass + fail)); \
-	echo ""; \
-	echo "═══ e2e-sh: $$pass/$$total passed, $$fail failed ═══"; \
-	if [ $$fail -gt 0 ]; then \
-		echo ""; \
-		printf '%b' "$$failed_files"; \
-		exit 1; \
-	fi
 
 # Run the full Sailfin-native test suite using the *self-hosted* compiler.
 # This ensures tests cover the same binary we intend to ship for 1.0.

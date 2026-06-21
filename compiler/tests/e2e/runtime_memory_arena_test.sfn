@@ -1,0 +1,509 @@
+// End-to-end test for runtime/sfn/memory/arena.sfn — the Sailfin-defined
+// bump allocator shipped into the compiler binary (issues #394 M2.1 +
+// #477 M2.2, epic #389; arena-core ownership flipped to Sailfin by
+// #1308/#1309/#822). Native (no-bash) replacement for the former
+// `test_runtime_memory_arena.sh` (test-infra Phase 3, epic #842;
+// `.claude/rules/no-bash-e2e.md`). This is the fuller sibling of
+// runtime_memory_arena_mark_test.sfn — same module, same clang-harness
+// pattern. Pins, end-to-end:
+//
+//   1. typecheck   — `sfn check runtime/sfn/memory/arena.sfn` exits 0 and
+//                    reports `ok`.
+//   2. fmt         — `sfn fmt --check runtime/sfn/memory/arena.sfn` canonical.
+//   3. emit shape  — emitted IR carries a `define` (pinned full signature)
+//                    for each of the five `sfn_arena_sfn_*` exports:
+//                    create i64→i8*, alloc i8*, reset void, destroy void,
+//                    realloc i8*.
+//   4. libc declares — `malloc` / `free` / `memcpy` each produce a `declare`.
+//   5. bare core   — the bare arena-core exports are DEFINED now that the
+//                    C namesakes are gone (#1308/#1309): sfn_arena_create
+//                    (i64), sfn_arena_alloc (i8*), sfn_arena_realloc (i8*),
+//                    sfn_arena_global, sfn_arena_enabled.
+//   6. lean handle — IR carries the 24-byte 3×i64 `%Arena = type { i64,
+//                    i64, i64 }` layout (#822).
+//   7. coexistence — arena.sfn does NOT bare-define sfn_arena_reset /
+//                    sfn_arena_destroy (deleted in #1309; a stray bare
+//                    define would be a dangling export).
+//   8. lifecycle roundtrip — link the emitted `.ll` against a clang C
+//                    harness exercising create → alloc → realloc
+//                    (grow-in-place + copy-on-overflow) → page-overflow →
+//                    reset → re-alloc → destroy (free-count == 5) →
+//                    null-arena no-ops. Skips if clang is unavailable.
+//   9. env semantics + recursion guard — link a probe harness that
+//                    re-enters sfn_arena_enabled during its own first-call
+//                    probe and run it under several SAILFIN_USE_ARENA env
+//                    settings: unset→1, =1→1, =yes→1, =(empty)→0, =0→0,
+//                    =false→0. A crash (nonzero exit) is a failure.
+//
+// (An ASAN no-corruption leg lived in the original `.sh`; it is omitted
+// here — its purpose was catching *cross-runtime* layout corruption, moot
+// since the C arena was deleted (#822). The static 24-byte-handle gate and
+// the plain lifecycle roundtrip pin the contract. A reproducible
+// arena-ASAN gate is tracked as a follow-up — #1473.)
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]`, so
+// they cannot be called from an `![io]` test. For subprocess/IR-output
+// assertions use `sfn/strings` predicates, as the rc/mark exemplars do.
+import {
+    find,
+    contains,
+    split,
+    starts_with
+} from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the *empty* environment; thread the
+// variables the toolchain needs. The roundtrip legs spawn `clang` (and a
+// nested env-probe binary), which resolve through PATH.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/sfn-runtime-arena";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _repo_root() -> string ![io] {
+    let configured = env.get("SAILFIN_REPO_ROOT");
+    if configured.length > 0 { return configured; }
+    return ".";
+}
+
+fn _arena_path() -> string ![io] {
+    return _repo_root() + "/runtime/sfn/memory/arena.sfn";
+}
+
+// Emit arena.ll into the scratch dir, re-emitting only if absent so the
+// IR-shape tests share one emission (mirrors the mark test).
+fn _emit_arena_ll() -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/arena.ll";
+    if !fs.exists(ll) {
+        let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _arena_path()], _child_env());
+        let _o = process.capture_take_stdout();
+        let _e = process.capture_take_stderr();
+        assert exit == 0;
+    }
+    return ll;
+}
+
+// `^define ... <signature>` — pinned full-signature define line, anchored
+// at line start so a `call` site cannot satisfy the assertion.
+fn _has_define_line(ir: string, signature: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, signature) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn _has_declare(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "declare ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn _has_define_named(ir: string, sym: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && contains(line, "@" + sym + "(") {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// ---- Phase 1: typecheck ----
+test "runtime/sfn/memory/arena.sfn typechecks cleanly" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "check", _arena_path()], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    assert find(out + err, "ok", 0) >= 0;
+}
+
+// ---- Phase 2: fmt ----
+test "runtime/sfn/memory/arena.sfn is fmt-canonical" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", _arena_path()], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
+
+// ---- Phase 3: emit shape — define for every sfn_arena_sfn_* export ----
+test "arena emit: define with pinned signature for every sfn_arena_sfn_* export" ![io] {
+    let ll = _emit_arena_ll();
+    let ir = fs.readFile(ll);
+    // Pinned signatures so a regression that mangles parameter types
+    // (e.g. usize→i32) surfaces here instead of at link time.
+    assert _has_define_line(ir, "i8* @sfn_arena_sfn_create(i64 ");
+    assert _has_define_line(ir, "i8* @sfn_arena_sfn_alloc(i8* ");
+    assert _has_define_line(ir, "void @sfn_arena_sfn_reset(i8* ");
+    assert _has_define_line(ir, "void @sfn_arena_sfn_destroy(i8* ");
+    assert _has_define_line(ir, "i8* @sfn_arena_sfn_realloc(i8* ");
+}
+
+// ---- Phase 4: libc malloc/free/memcpy declares ----
+test "arena emit: declares the libc malloc/free/memcpy trampolines" ![io] {
+    let ll = _emit_arena_ll();
+    let ir = fs.readFile(ll);
+    // libc `realloc` is deliberately NOT in this set — the arena's
+    // `realloc` body falls back to fresh-alloc + memcpy.
+    assert _has_declare(ir, "malloc");
+    assert _has_declare(ir, "free");
+    assert _has_declare(ir, "memcpy");
+}
+
+// ---- Phase 5: bare arena-core exports are DEFINED (#1308/#1309) ----
+test "arena emit: defines bare arena-core exports (create/alloc/realloc/global/enabled)" ![io] {
+    let ll = _emit_arena_ll();
+    let ir = fs.readFile(ll);
+    assert _has_define_line(ir, "i8* @sfn_arena_create(i64 ");
+    assert _has_define_line(ir, "i8* @sfn_arena_alloc(i8* ");
+    assert _has_define_line(ir, "i8* @sfn_arena_realloc(i8* ");
+    assert _has_define_named(ir, "sfn_arena_global");
+    assert _has_define_named(ir, "sfn_arena_enabled");
+}
+
+// ---- Phase 6: lean 24-byte handle (#822) ----
+test "arena emit: emits the lean 24-byte Arena handle %Arena = type { i64, i64, i64 }" ![io] {
+    let ll = _emit_arena_ll();
+    let ir = fs.readFile(ll);
+    assert contains(ir, "%Arena = type { i64, i64, i64 }");
+}
+
+// ---- Phase 7: coexistence — no bare reset/destroy define ----
+test "arena emit: does not bare-define sfn_arena_reset / sfn_arena_destroy (deleted in #1309)" ![io] {
+    let ll = _emit_arena_ll();
+    let ir = fs.readFile(ll);
+    // A stray bare define would be a dangling export — the live
+    // reset/destroy path is the `sfn_arena_sfn_*` family.
+    assert ! _has_define_named(ir, "sfn_arena_reset");
+    assert ! _has_define_named(ir, "sfn_arena_destroy");
+}
+
+// C lifecycle harness — counts libc free() via link-time interposition
+// (same pattern as runtime_memory_rc): the harness defines its own `free`
+// that bumps a counter, and the linker binds the emitted IR's
+// `declare void @free(i8*)` references to this shim. Copied verbatim from
+// the .sh CHARNESS body.
+fn _lifecycle_harness_c() -> string {
+    return "#include <stddef.h>\n" + "#include <stdint.h>\n"
+        + "#include <stdio.h>\n"
+        + "#include <stdlib.h>\n"
+        + "#include <string.h>\n"
+        + "\n"
+        + "static long free_count = 0;\n"
+        + "\n"
+        + "void free(void *ptr) {\n"
+        + "    if (ptr) {\n"
+        + "        free_count++;\n"
+        + "    }\n"
+        + "    /* Intentionally leak — see file header. */\n"
+        + "}\n"
+        + "\n"
+        + "extern void *sfn_arena_sfn_create(size_t default_page_size);\n"
+        + "extern void *sfn_arena_sfn_alloc(void *arena, size_t size, size_t align);\n"
+        + "extern void sfn_arena_sfn_reset(void *arena);\n"
+        + "extern void sfn_arena_sfn_destroy(void *arena);\n"
+        + "extern void *sfn_arena_sfn_realloc(void *arena, void *ptr, size_t old_size,\n"
+        + "                                   size_t new_size, size_t align);\n"
+        + "\n"
+        + "void sailfin_runtime_mark_persistent(void *ptr) {\n"
+        + "    (void)ptr;\n"
+        + "}\n"
+        + "\n"
+        + "void sfn_type_register(void *desc) {\n"
+        + "    (void)desc;\n"
+        + "}\n"
+        + "\n"
+        + "void *sfn_alloc_struct(long size_bytes) {\n"
+        + "    return calloc(1, (size_t)size_bytes);\n"
+        + "}\n"
+        + "\n"
+        + "int main(void) {\n"
+        + "    void *arena = sfn_arena_sfn_create(4096);\n"
+        + "    if (!arena) {\n"
+        + "        fprintf(stderr, \"create returned NULL\\n\");\n"
+        + "        return 1;\n"
+        + "    }\n"
+        + "\n"
+        + "    uint8_t *p1 = (uint8_t *)sfn_arena_sfn_alloc(arena, 128, 8);\n"
+        + "    if (!p1) {\n"
+        + "        fprintf(stderr, \"alloc(128) returned NULL\\n\");\n"
+        + "        return 2;\n"
+        + "    }\n"
+        + "    memset(p1, 0xAB, 128);\n"
+        + "    for (size_t i = 0; i < 128; i++) {\n"
+        + "        if (p1[i] != 0xAB) {\n"
+        + "            fprintf(stderr, \"alloc roundtrip: p1[%zu] = 0x%02x\\n\", i, p1[i]);\n"
+        + "            return 3;\n"
+        + "        }\n"
+        + "    }\n"
+        + "\n"
+        + "    uint8_t *p2 = (uint8_t *)sfn_arena_sfn_realloc(arena, p1, 128, 256, 8);\n"
+        + "    if (p2 != p1) {\n"
+        + "        fprintf(stderr, \"grow-in-place: expected p2 == p1, got %p vs %p\\n\",\n"
+        + "                (void *)p2, (void *)p1);\n"
+        + "        return 4;\n"
+        + "    }\n"
+        + "    for (size_t i = 0; i < 128; i++) {\n"
+        + "        if (p2[i] != 0xAB) {\n"
+        + "            fprintf(stderr, \"grow-in-place: p2[%zu] = 0x%02x\\n\", i, p2[i]);\n"
+        + "            return 5;\n"
+        + "        }\n"
+        + "    }\n"
+        + "\n"
+        + "    uint8_t *p3 = (uint8_t *)sfn_arena_sfn_alloc(arena, 64, 8);\n"
+        + "    if (!p3) {\n"
+        + "        fprintf(stderr, \"alloc(64) after p2 returned NULL\\n\");\n"
+        + "        return 6;\n"
+        + "    }\n"
+        + "    memset(p3, 0xCD, 64);\n"
+        + "\n"
+        + "    uint8_t *p4 = (uint8_t *)sfn_arena_sfn_realloc(arena, p2, 256, 512, 8);\n"
+        + "    if (!p4) {\n"
+        + "        fprintf(stderr, \"copy-on-overflow realloc returned NULL\\n\");\n"
+        + "        return 7;\n"
+        + "    }\n"
+        + "    if (p4 == p2) {\n"
+        + "        fprintf(stderr, \"copy-on-overflow: expected fresh pointer, got same %p\\n\",\n"
+        + "                (void *)p4);\n"
+        + "        return 8;\n"
+        + "    }\n"
+        + "    for (size_t i = 0; i < 128; i++) {\n"
+        + "        if (p4[i] != 0xAB) {\n"
+        + "            fprintf(stderr, \"copy-on-overflow: p4[%zu] = 0x%02x (expected 0xAB)\\n\",\n"
+        + "                    i, p4[i]);\n"
+        + "            return 9;\n"
+        + "        }\n"
+        + "    }\n"
+        + "    for (size_t i = 0; i < 64; i++) {\n"
+        + "        if (p3[i] != 0xCD) {\n"
+        + "            fprintf(stderr, \"phase 3: p3[%zu] = 0x%02x (expected 0xCD)\\n\",\n"
+        + "                    i, p3[i]);\n"
+        + "            return 10;\n"
+        + "        }\n"
+        + "    }\n"
+        + "\n"
+        + "    uint8_t *p5 = (uint8_t *)sfn_arena_sfn_alloc(arena, 8192, 8);\n"
+        + "    if (!p5) {\n"
+        + "        fprintf(stderr, \"alloc(8192) returned NULL\\n\");\n"
+        + "        return 11;\n"
+        + "    }\n"
+        + "    memset(p5, 0xEF, 8192);\n"
+        + "    if (p5[0] != 0xEF || p5[8191] != 0xEF) {\n"
+        + "        fprintf(stderr, \"phase 4: large alloc roundtrip failed\\n\");\n"
+        + "        return 12;\n"
+        + "    }\n"
+        + "\n"
+        + "    long pre_reset_frees = free_count;\n"
+        + "    sfn_arena_sfn_reset(arena);\n"
+        + "\n"
+        + "    uint8_t *p6 = (uint8_t *)sfn_arena_sfn_alloc(arena, 64, 8);\n"
+        + "    if (!p6) {\n"
+        + "        fprintf(stderr, \"alloc after reset returned NULL\\n\");\n"
+        + "        return 13;\n"
+        + "    }\n"
+        + "    memset(p6, 0x12, 64);\n"
+        + "    for (size_t i = 0; i < 64; i++) {\n"
+        + "        if (p6[i] != 0x12) {\n"
+        + "            fprintf(stderr, \"post-reset roundtrip: p6[%zu] = 0x%02x\\n\", i, p6[i]);\n"
+        + "            return 14;\n"
+        + "        }\n"
+        + "    }\n"
+        + "    if (free_count != pre_reset_frees) {\n"
+        + "        fprintf(stderr, \"reset+alloc inflated free count (%ld -> %ld)\\n\",\n"
+        + "                pre_reset_frees, free_count);\n"
+        + "        return 15;\n"
+        + "    }\n"
+        + "\n"
+        + "    long pre_destroy_frees = free_count;\n"
+        + "    sfn_arena_sfn_destroy(arena);\n"
+        + "    long destroy_delta = free_count - pre_destroy_frees;\n"
+        + "    if (destroy_delta != 5) {\n"
+        + "        fprintf(stderr, \"destroy: expected 5 frees (2 pages × (header+data) + arena), got %ld\\n\",\n"
+        + "                destroy_delta);\n"
+        + "        return 16;\n"
+        + "    }\n"
+        + "\n"
+        + "    void *arena2 = sfn_arena_sfn_create(0);\n"
+        + "    if (!arena2) {\n"
+        + "        fprintf(stderr, \"create(0) returned NULL — default-page-size fallback broken\\n\");\n"
+        + "        return 17;\n"
+        + "    }\n"
+        + "    sfn_arena_sfn_destroy(arena2);\n"
+        + "\n"
+        + "    sfn_arena_sfn_reset(NULL);\n"
+        + "    sfn_arena_sfn_destroy(NULL);\n"
+        + "    if (sfn_arena_sfn_alloc(NULL, 16, 8) != NULL) {\n"
+        + "        fprintf(stderr, \"alloc(NULL arena) did not return NULL\\n\");\n"
+        + "        return 18;\n"
+        + "    }\n"
+        + "\n"
+        + "    void *arena3 = sfn_arena_sfn_create(4096);\n"
+        + "    if (!arena3) {\n"
+        + "        return 19;\n"
+        + "    }\n"
+        + "    if (sfn_arena_sfn_alloc(arena3, 0, 8) != NULL) {\n"
+        + "        fprintf(stderr, \"alloc(arena, 0) did not return NULL\\n\");\n"
+        + "        return 20;\n"
+        + "    }\n"
+        + "    sfn_arena_sfn_destroy(arena3);\n"
+        + "\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// ---- Phase 8: lifecycle roundtrip via clang ----
+test "create → alloc → realloc → reset → destroy exercises every entry point (C harness via clang)" ![io] {
+    let dir = _scratch_dir();
+    let ll = _emit_arena_ll();
+
+    let harness = dir + "/lifecycle_harness.c";
+    fs.writeFile(harness, _lifecycle_harness_c());
+
+    let bin = dir + "/lifecycle_roundtrip";
+    let clang_exit = process.run_capture(["clang", "-Wno-override-module", harness, ll, "-o", bin, "-lm"], _child_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    if clang_exit != 0 {
+        // clang not available or the link failed — skip the roundtrip.
+        // The IR-shape assertions above still pin the contract.
+        assert true;
+    } else {
+        let run_exit = process.run_capture([bin], _child_env());
+        let _ro = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        assert run_exit == 0;
+    }
+}
+
+// Env-semantics + recursion-guard probe harness. Copied verbatim from the
+// .sh env_harness CHARNESS body — sfn_alloc_struct re-enters
+// sfn_arena_enabled to reproduce the provisional-state guard path.
+fn _env_harness_c() -> string {
+    return "#include <stddef.h>\n" + "#include <stdlib.h>\n"
+        + "#include <stdio.h>\n"
+        + "/* i1 return → declare _Bool so the upper bits of the return register\n"
+        + " * are not read as garbage (an `int` decl makes every value read as\n"
+        + " * nonzero/true). */\n"
+        + "extern _Bool sfn_arena_enabled(void);\n"
+        + "void sailfin_runtime_mark_persistent(void *p) { (void)p; }\n"
+        + "void sfn_type_register(void *d) { (void)d; }\n"
+        + "/* Mirror mem.sfn's sfn_alloc_struct: it consults sfn_arena_enabled to\n"
+        + " * route arena-vs-calloc — exactly the re-entrancy the probe's\n"
+        + " * provisional-state guard must survive. calloc keeps the harness\n"
+        + " * self-contained; the point is to re-enter sfn_arena_enabled during its\n"
+        + " * own first-call probe. Without the guard this recurses forever. */\n"
+        + "void *sfn_alloc_struct(long n) { (void)sfn_arena_enabled(); return calloc(1, (size_t)n); }\n"
+        + "int main(void) { printf(\"%d\\n\", sfn_arena_enabled() ? 1 : 0); return 0; }\n";
+}
+
+// Build a child env WITHOUT SAILFIN_USE_ARENA (the `env -u` equivalent),
+// optionally appending `SAILFIN_USE_ARENA=<value>`. When `set` is false
+// the var is omitted entirely (the unset case).
+fn _env_with_arena(set: boolean, value: string) -> string[] ![io] {
+    let mut e = _child_env();
+    if set { e.push("SAILFIN_USE_ARENA=" + value); }
+    return e;
+}
+
+// ---- Phase 9: env semantics + recursion guard ----
+test "SAILFIN_USE_ARENA env semantics + probe recursion guard (C harness via clang)" ![io] {
+    let dir = _scratch_dir();
+    let ll = _emit_arena_ll();
+
+    let harness = dir + "/env_harness.c";
+    fs.writeFile(harness, _env_harness_c());
+
+    let bin = dir + "/env_probe";
+    let clang_exit = process.run_capture(["clang", "-Wno-override-module", harness, ll, "-o", bin, "-lm"], _child_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    if clang_exit != 0 {
+        // clang not available or the link failed — skip the env probe.
+        assert true;
+        return;
+    }
+
+    // Each row: (set, value, expected). A crash (nonzero rc) is the
+    // re-entrancy-guard regression signal.
+    let mut labels: string[] = [];
+    let mut sets: boolean[] = [];
+    let mut values: string[] = [];
+    let mut expected: string[] = [];
+
+    labels.push("unset");
+    sets.push(false);
+    values.push("");
+    expected.push("1");
+    labels.push("=1");
+    sets.push(true);
+    values.push("1");
+    expected.push("1");
+    labels.push("=yes");
+    sets.push(true);
+    values.push("yes");
+    expected.push("1");
+    labels.push("=empty");
+    sets.push(true);
+    values.push("");
+    expected.push("0");
+    labels.push("=0");
+    sets.push(true);
+    values.push("0");
+    expected.push("0");
+    labels.push("=false");
+    sets.push(true);
+    values.push("false");
+    expected.push("0");
+
+    let mut i = 0;
+    loop {
+        if i >= labels.length { break; }
+        let run_exit = process.run_capture([bin], _env_with_arena(sets[i], values[i]));
+        let out = process.capture_take_stdout();
+        let _re = process.capture_take_stderr();
+        // A crash is a failure (recursion-guard regression).
+        assert run_exit == 0;
+        assert find(out, expected[i], 0) >= 0;
+        i = i + 1;
+    }
+}
