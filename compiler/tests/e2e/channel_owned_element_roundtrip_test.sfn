@@ -1,0 +1,100 @@
+// E2E runtime round-trip for WIDE by-value channel elements — the
+// OwnedBuf element ABI (issue #1466, E11, epic #1209).
+//
+// Companion to channel_runtime_roundtrip_test.sfn, which covers the
+// pointer-sized monomorphized kinds (int/string/bool/boxed-struct) through
+// a bare `channel(N)` whose `elem_size` is the historical 8. This test
+// covers an element that crosses the channel BY VALUE and is wider than a
+// machine word — an `OwnedBuf`-shaped 32-byte struct (`{ i64,i64,i64,i64 }`)
+// — via a typed `channel:<struct>(N)`. Such an element only round-trips if:
+//   1. the channel is created with the matching `elem_size` (the GEP-sizeof
+//      of the struct, derived from the `channel:<kind>` element kind), and
+//   2. `receive()` loads the element at its full aggregate width instead of
+//      pulling the first 8 bytes as an `i8*` and deref-coercing them.
+// With the pre-#1466 `elem_size = 8` + `i8*` receive load, only the first
+// field survived and the rest deref-corrupted — so asserting on fields PAST
+// the first word is the regression guard.
+//
+// Scope note (#1466): the by-value struct element ABI is wired through the
+// channel's element KIND, which is carried on the LOCAL binding of a
+// `let ch = channel:<struct>(N)`. A bare `channel` *parameter* does not yet
+// carry that kind (that needs channel element types threaded through the
+// type system — the worker-ctx ABI follow-up), so this test keeps the
+// channel local and its send/receive in one scope. The companion test's
+// cross-function struct case uses the by-POINTER bare-channel contract.
+//
+// Single-threaded: a buffered channel does not block while count < capacity,
+// so send-then-receive on one thread is deterministic.
+//
+// Fixtures use string concatenation + `number_to_string` (NOT `{{ }}`
+// interpolation) so the host compiler does not interpolate the fixture
+// before it is written — same discipline as the companion test.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Empty `run_capture` env is the EMPTY environment, not "inherit"; a nested
+// `sailfin run` spawns clang + linker (needs PATH) and routes its program.ll
+// build-cache under SAILFIN_TEST_SCRATCH so the parallel pool does not
+// collide on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-channel-owned-");
+}
+
+fn _run_and_capture(label: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 { return "RUN_FAILED:" + out + err; }
+    return out + err;
+}
+
+// ── wide by-value element survives the full-width element ABI ─────────
+// A 32-byte struct sent through a `channel:<struct>(N)` round-trips ALL
+// four fields. `b`/`c`/`d` live past the first word, so a truncated
+// `elem_size = 8` or an `i8*` receive load would lose or corrupt them.
+test "channel owned element: 32-byte by-value struct round-trips all fields (#1466)" ![io] {
+    let out = _run_and_capture("wide_roundtrip", "struct OB {\n"
+        + "    a: int;\n"
+        + "    b: int;\n"
+        + "    c: int;\n"
+        + "    d: int;\n"
+        + "}\n\n"
+        + "fn mk() -> OB {\n"
+        + "    return OB { a: 1, b: 2, c: 3, d: 4 };\n"
+        + "}\n\n"
+        + "fn main() ![io] {\n"
+        + "    let ch = channel:OB(2);\n"
+        + "    let buf: OB = mk();\n"
+        + "    ch.send(buf);\n"
+        + "    let got: OB = ch.receive();\n"
+        + "    let packed: int = got.a + got.b * 10 + got.c * 100 + got.d * 1000;\n"
+        + "    print.info(\"packed: \" + number_to_string(packed));\n"
+        + "    ch.close();\n"
+        + "}");
+    // 1 + 20 + 300 + 4000 = 4321 — every field survived intact.
+    assert contains(out, "packed: 4321");
+}

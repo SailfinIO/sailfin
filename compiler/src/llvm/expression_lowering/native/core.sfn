@@ -755,17 +755,24 @@ fn resolve_borrow_base(target: string, locals: LocalBinding[]) -> string {
 // runtime expects a POINTER to the element bytes (and vice versa on
 // receive), so `send` / `receive` on a `channel`-annotated base lower
 // bespoke here instead:
-//   - send spills the 8-byte element value to a stack slot and passes
-//     the slot pointer (the runtime memcpy's it into the buffer);
+//   - send spills the element VALUE to a stack slot and passes the slot
+//     pointer (the runtime memcpy's `elem_size` bytes into the buffer);
 //   - receive calls `sfn_channel_recv`, null-checks the returned copy
 //     (null = closed + drained), and loads the element value out of it.
-// v0 channels are monomorphized to pointer-sized elements (elem_size 8),
-// matching the `i64 8` operand `channel(N)` create lowering passes. The
-// element LOAD type on receive is driven by the caller's expected LLVM
-// type: `i64` / `double` load the primitive directly; everything else
-// (strings, structs, unannotated) loads the stored `i8*` and defers to
-// the normal coercion paths. The malloc'd copy `sfn_channel_recv`
-// returns is leaked in v0 (no consumer-side drop seam yet).
+// The pointer-sized monomorphized kinds (int/number/bool/string/ptr) use
+// the historical `elem_size = 8` that bare `channel(N)` passes. A
+// `channel:<kind>(N)` whose kind is a STRUCT carries the element BY VALUE
+// at its full aggregate width: the create lowering passes the GEP-sizeof
+// of the struct as `elem_size`, the send spill is a full `alloca %T`, and
+// receive loads the whole `%T` aggregate (#1466). The element LOAD type on
+// receive is driven by the caller's expected LLVM type: `i64` / `double`
+// load the primitive directly; a struct/aggregate `%T` / `{...}` loads the
+// full element; everything else loads the stored `i8*` and defers to the
+// normal coercion paths. The malloc'd copy `sfn_channel_recv` returns is
+// leaked in v0 (no consumer-side drop seam yet); a `channel:<struct>` whose
+// elements own heap buffers relies on the receiver's move/drop to reclaim
+// them, and abandoned-in-ring elements at close leak (no destroy-drain
+// seam yet — tracked with the worker-ctx ABI follow-up).
 // Returns null when the call is not a channel send/receive so the
 // caller falls through to the normal resolution pipeline.
 fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult? ![io] {
@@ -784,7 +791,20 @@ fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries:
             base_annotation = base_parameter.type_annotation;
         }
     }
-    if base_annotation != "channel" { return null; }
+    // A channel base is bare "channel" (pointer-sized/by-pointer elements)
+    // or "channel:<kind>" (#1466 — the kind disambiguates a by-VALUE struct
+    // element from the monomorphized pointer-sized set on receive).
+    let mut _is_channel_base: boolean = false;
+    if base_annotation == "channel" { _is_channel_base = true; }
+    if starts_with(base_annotation, "channel:") { _is_channel_base = true; }
+    if !_is_channel_base { return null; }
+    // The element kind carried by a typed `channel:<kind>` base ("" for a
+    // bare channel). Only used to opt receive into the full-width aggregate
+    // load for a struct element.
+    let mut channel_elem_kind: string = "";
+    if starts_with(base_annotation, "channel:") {
+        channel_elem_kind = trim_text(substring(base_annotation, 8, base_annotation.length));
+    }
     if field == "send" {
         if argument_entries.length != 1 { return null; }
     }
@@ -845,9 +865,12 @@ fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries:
                 string_constants: ch_constants
             };
         }
-        // Normalize the element to an 8-byte first-class value so the
-        // stack slot matches the channel's elem_size (8). String
-        // aggregates pass their data pointer; narrow integers widen.
+        // Normalize the element to match the channel's elem_size. The
+        // pointer-sized kinds collapse to an 8-byte first-class value:
+        // string `{i8*, i64}` aggregates pass their data pointer and narrow
+        // integers widen. A struct element is NOT collapsed — it falls
+        // through to the generic spill below as a full `alloca %T`, matching
+        // the GEP-sizeof `elem_size` the create lowering passed (#1466).
         let mut elem_type: string = value_lowered.operand.llvm_type;
         let mut elem_value: string = value_lowered.operand.value;
         if elem_type == "{i8*, i64}" {
@@ -928,6 +951,28 @@ fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries:
     if expected_type == "double" {
         load_type = "double";
         null_default = "0.0";
+    }
+    // By-VALUE struct element (#1466): a typed `channel:<struct>` stores
+    // the whole aggregate, so load it at its real width directly instead
+    // of pulling the first 8 bytes as an `i8*` and deref-coercing them
+    // (which reads a garbage pointer for any element wider than a word).
+    // Gated on the channel's element KIND naming a struct — NOT on
+    // `expected_type` alone: a bare `channel` carrying a boxed struct (the
+    // by-pointer contract) also has a `%T` expected type but must stay on
+    // the i8* path, and a `string` element is the `{i8*, i64}` by-pointer
+    // aggregate. `zeroinitializer` is the valid aggregate phi default on
+    // the closed+drained (null) edge.
+    let mut _recv_aggregate: boolean = false;
+    if channel_elem_kind.length > 0 {
+        if starts_with(expected_type, "%") {
+            if resolve_struct_info_for_literal(context, channel_elem_kind) != null {
+                _recv_aggregate = true;
+            }
+        }
+    }
+    if _recv_aggregate {
+        load_type = expected_type;
+        null_default = "zeroinitializer";
     }
     let mut _recv_narrow: boolean = false;
     if expected_type == "i1" { _recv_narrow = true; }
@@ -1329,12 +1374,45 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 }
             }
         }
+        // Element stride. The kind sits between "channel:" (8 chars) and
+        // "(". A struct element crosses the channel BY VALUE (#1466), so its
+        // ring slot must be the full LLVM width of the aggregate, computed
+        // with the well-defined `getelementptr null, i32 1` sizeof idiom —
+        // the same one the boxed-struct alloc uses, so the create stride and
+        // the send-side `alloca %T` spill agree by construction. Scalar /
+        // pointer-sized kinds keep the historical 8-byte monomorphized
+        // stride. A divergence over-writes or under-reads the ring slot
+        // (an #1205-class heap hazard under concurrent producers/consumers).
+        let mut typed_elem_size_llvm: string = "i64 8";
+        if paren_pos > 8 {
+            let kind_text = trim_text(substring(stripped, 8, paren_pos));
+            let kind_struct = resolve_struct_info_for_literal(context, kind_text);
+            if kind_struct != null {
+                let esz_ptr = format_temp_name(chantyped_temp);
+                chantyped_temp += 1;
+                chantyped_lines.push("  " + esz_ptr + " = getelementptr "
+                    + kind_struct.llvm_name
+                    + ", "
+                    + kind_struct.llvm_name
+                    + "* null, i32 1");
+                let esz_val = format_temp_name(chantyped_temp);
+                chantyped_temp += 1;
+                chantyped_lines.push("  " + esz_val + " = ptrtoint "
+                    + kind_struct.llvm_name
+                    + "* "
+                    + esz_ptr
+                    + " to i64");
+                typed_elem_size_llvm = "i64 " + esz_val;
+            }
+        }
         let chantyped_result = format_temp_name(chantyped_temp);
         chantyped_temp += 1;
         chantyped_lines.push("  " + chantyped_result
             + " = call i8* @sfn_channel_create("
             + typed_cap_llvm
-            + ", i64 8)");
+            + ", "
+            + typed_elem_size_llvm
+            + ")");
         let chantyped_operand = LLVMOperand {
             llvm_type: "i8*",
             value: chantyped_result
