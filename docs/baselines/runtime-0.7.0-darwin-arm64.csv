@@ -1,0 +1,9 @@
+workload,inner_ms_min,inner_ms_median,peak_kb,ops,ops_per_ms,status,seed_version,platform
+arena_alloc,336,336,707664,30000000,89285.7,ok,sfn 0.7.0-alpha.47+dev.64ed8a6d,Darwin arm64
+arena_reset_churn,331,331,781968,60000000,181268.9,ok,sfn 0.7.0-alpha.47+dev.64ed8a6d,Darwin arm64
+array_growth,87,88,262000,12000000,136363.6,ok,sfn 0.7.0-alpha.47+dev.64ed8a6d,Darwin arm64
+array_map_filter,75,78,323632,8000000,102564.1,ok,sfn 0.7.0-alpha.47+dev.64ed8a6d,Darwin arm64
+exception_throw,196,197,2944,600000,3045.7,ok,sfn 0.7.0-alpha.47+dev.64ed8a6d,Darwin arm64
+io_throughput,418,423,3520,20000,47.3,ok,sfn 0.7.0-alpha.47+dev.64ed8a6d,Darwin arm64
+string_concat,101,101,162816,2005000,19851.5,ok,sfn 0.7.0-alpha.47+dev.64ed8a6d,Darwin arm64
+string_find_format,441,442,201904,220000,497.7,ok,sfn 0.7.0-alpha.47+dev.64ed8a6d,Darwin arm64

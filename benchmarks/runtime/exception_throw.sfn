@@ -1,0 +1,31 @@
+// benchmarks/runtime/exception_throw.sfn
+//
+// Runtime-execution benchmark: exception frames (throw / catch).
+//
+// Each iteration calls a function that throws on a fraction of inputs;
+// the throw is caught in a per-iteration try/catch. Stresses the
+// exception setup/throw/catch path in `runtime/sfn/exception.sfn`.
+//
+// Fixed work: ITERATIONS is a compile-time constant; roughly one in four
+// iterations throws.
+fn risky(n: int) -> int {
+    if n % 4 == 0 { throw "boom"; }
+    return n;
+}
+
+fn main() ![io, clock] {
+    let iterations = 600000;
+    let start = monotonic_millis();
+    let mut caught = 0;
+    let mut ok = 0;
+    let mut k = 0;
+    loop {
+        if k >= iterations { break; }
+        try { ok = ok + risky(k); } catch (e) { caught = caught + 1; }
+        k = k + 1;
+    }
+    let end = monotonic_millis();
+    if caught < 0 || ok < 0 { return; }
+    let dur = end - start;
+    print("RESULT exception_throw {{dur}} {{iterations}}");
+}
