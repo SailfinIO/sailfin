@@ -981,3 +981,61 @@ jobs:
           name: ci-installer-macos-arm64
           path: dist/installer-macos-arm64.tar.gz
           if-no-files-found: error
+
+  # Native Windows smoke test. The Windows .exe is cross-compiled on
+  # ubuntu (build-compiler-linux) and was, until now, shipped without
+  # ever being executed (#DOA: it segfaulted at startup on a native-TLS
+  # access — fixed by -femulated-tls in `make ci-cross-windows`). This
+  # job runs the cross-built binary on a real windows-latest runner so
+  # that regression can never ship again.
+  smoke-windows:
+    name: Smoke test [windows-x86_64]
+    needs: build-compiler-linux
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.0
+
+      - name: Download Windows installer archive
+        uses: actions/download-artifact@v8
+        with:
+          name: ci-installer-windows-x86_64
+          path: dist
+
+      - name: Extract installer bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p win-bundle
+          tar -xzf dist/installer-windows-x86_64.tar.gz -C win-bundle
+          EXE="$(find "$PWD/win-bundle" -name sailfin.exe | head -1)"
+          if [ -z "$EXE" ]; then
+            echo "sailfin.exe not found in installer bundle" >&2
+            exit 1
+          fi
+          echo "SAILFIN_EXE=$EXE" >> "$GITHUB_ENV"
+          echo "found: $EXE"
+
+      # Regression guard for the native-TLS startup segfault. Before the
+      # -femulated-tls fix this exited with 0xC0000005 before printing
+      # anything; --version exiting 0 with a version string proves the
+      # binary boots and TLS is initialized.
+      - name: Smoke - version (boots without segfault)
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$("$SAILFIN_EXE" --version)"
+          echo "version: $out"
+          case "$out" in
+            "sfn "*) echo "ok: binary boots and prints version" ;;
+            *) echo "FAIL: unexpected --version output: $out" >&2; exit 1 ;;
+          esac
+
+      # Frontend smoke (lex + parse + typecheck + effect-check). Run from
+      # the repo root so the runtime bundle (runtime/) resolves via CWD.
+      - name: Smoke - frontend check
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$SAILFIN_EXE" check examples/basics/hello-world.sfn
