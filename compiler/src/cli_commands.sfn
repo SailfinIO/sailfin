@@ -3614,63 +3614,6 @@ fn handle_lock_command(args: string[]) -> int ![io] {
     return 0;
 }
 
-fn handle_login_command(args: string[]) -> int ![io] {
-    if args.length > 2 {
-        print("usage: sfn login [token]");
-        return 2;
-    }
-
-    let mut token: string = "";
-    if args.length == 2 { token = _toml_trim_cmd(args[1]); } else {
-        print("enter your registry token:");
-        let tmp = _shell_read_cmd("mktemp /tmp/.sfn_login_XXXXXX");
-        if tmp.length == 0 {
-            print("error: failed to create secure temp file");
-            return 1;
-        }
-        let read_rc = process.run(["sh", "-c", "head -1 > " + tmp]);
-        if read_rc != 0 {
-            process.run(["rm", "-f", tmp]);
-            print("error: failed to read token");
-            return 1;
-        }
-        if fs.exists(tmp) { token = _toml_trim_cmd(fs.readFile(tmp)); }
-        process.run(["rm", "-f", tmp]);
-    }
-
-    if token.length == 0 {
-        print("error: empty token");
-        return 1;
-    }
-
-    let home = _get_home_cmd();
-    if home.length == 0 {
-        print("could not determine home directory");
-        return 1;
-    }
-
-    let sfn_dir = home + "/.sfn";
-    _ensure_dir_recursive_cmd(sfn_dir);
-    process.run(["chmod", "700", sfn_dir]);
-
-    let cred_path = sfn_dir + "/credentials";
-    fs.writeFile(cred_path, token);
-    process.run(["chmod", "600", cred_path]);
-
-    if !fs.exists(cred_path) {
-        print("error: failed to write credentials to " + cred_path);
-        return 1;
-    }
-    let saved = fs.readFile(cred_path);
-    if !strings_equal(_toml_trim_cmd(saved), token) {
-        print("error: failed to write credentials to " + cred_path);
-        return 1;
-    }
-
-    print("credentials saved to " + cred_path);
-    return 0;
-}
-
 // ═══════════════════════════════════════════════════════════════════
 // sfn fmt — canonical formatter
 // ═══════════════════════════════════════════════════════════════════
@@ -3763,6 +3706,5 @@ export {
     handle_add_command,
     handle_config_command,
     handle_lock_command,
-    handle_login_command,
     handle_fmt_command
 };
