@@ -158,6 +158,60 @@ extern fn posix_spawn_file_actions_adddup2(fa: * u8, fd: i32, newfd: i32) -> i32
 // `4` is used directly.
 let SFN_EINTR: i32 = 4;
 
+// ── metered-capture support (#1520) ────────────────────────────────
+// `wait4` is `waitpid` plus a `struct rusage` out-param the kernel
+// fills with the reaped child's resource usage. A NULL `rusage` makes
+// it behave exactly like `waitpid(pid, status, 0)`, so the shared
+// capture impl always calls `wait4` and the non-metered wrapper passes
+// NULL. Declared with a `* u8` rusage buffer read back via address
+// arithmetic + the pointer-read intrinsic — the same struct-free style
+// the handle/pollfd overlays use, sidestepping a `struct rusage`
+// binding (44 fields, platform-divergent) we never need whole.
+extern fn wait4(pid: i32, status: * i32, options: i32, rusage: * u8) -> i32;
+
+// `clock_gettime` for the metered wall-clock bracket. Declared with the
+// same `* Timespec` shape `runtime/sfn/clock.sfn` uses so the emitted
+// `declare` matches across the two runtime objects; redeclared locally
+// (rather than imported) for the #306 reason the file header documents
+// — the runtime sfn-source emit path resolves imported externs but not
+// imported *defined* fns, and inlining keeps this module self-contained.
+struct Timespec {
+    tv_sec: i64;
+    tv_nsec: i64;
+}
+
+extern fn clock_gettime(clk_id: i32, ts: * Timespec) -> i32;
+
+// `struct rusage` byte offset of `ru_maxrss` (the peak resident set
+// size): two 16-byte `timeval`s (`ru_utime`, `ru_stime`) precede it on
+// both Linux x86_64 and macOS arm64, so it sits at offset 32 as a
+// `long`. UNITS DIVERGE BY PLATFORM: KiB on Linux (the value returned
+// as-is — the load-bearing platform for the bench memory budget, see
+// `.claude/rules/compiler-safety.md`), BYTES on Darwin. Darwin
+// normalization is a deferred follow-up under epic #1503; the bench
+// memory leg is Linux/WSL-only today, and metered callers gate any
+// macOS RSS assertion accordingly.
+let SFN_RUSAGE_MAXRSS_OFFSET: i64 = 32;
+
+// Local monotonic-clock reader for the wall-clock bracket. A near-
+// verbatim copy of `clock.sfn::sfn_clock_monotonic_nanos` (kept local
+// for the #306 cross-module-defined-fn limitation above): stack-alloc a
+// `Timespec`, hand the kernel its address, then read `tv_sec` (offset 0)
+// and `tv_nsec` (the next `i64`) back through the pointer-read intrinsic
+// *after* the call. `sailfin_intrinsic_clock_monotonic_id()` folds to
+// the right `CLOCK_MONOTONIC` id per target at emit time (#908).
+fn _monotonic_nanos() -> i64 ![clock] {
+    let mut ts: Timespec = Timespec { tv_sec: 0, tv_nsec: 0 };
+    let ts_ptr: * Timespec = & ts;
+    let ret: i32 = clock_gettime(sailfin_intrinsic_clock_monotonic_id(), ts_ptr);
+    if ret != 0 { return 0; }
+    let sec_ptr: * i64 = ts_ptr as * i64;
+    let nsec_ptr: * i64 = sec_ptr + 1;
+    let sec: i64 = sailfin_intrinsic_pointer_read_i64(sec_ptr);
+    let nsec: i64 = sailfin_intrinsic_pointer_read_i64(nsec_ptr);
+    return sec * 1000000000 + nsec;
+}
+
 fn sfn_process_run(argv: string[]) -> float ![io] {
     let len: i64 = argv.length;
     if len <= 0 { return 127.0; }
@@ -266,6 +320,16 @@ fn sfn_process_run(argv: string[]) -> float ![io] {
 let mut sfn_capture_stdout_addr: i64 = 0;
 
 let mut sfn_capture_stderr_addr: i64 = 0;
+
+// Metered-capture stash (#1520): wall-clock duration (ms) and peak
+// resident set size (KiB on Linux — see `SFN_RUSAGE_MAXRSS_OFFSET`) of
+// the most recent `run_capture_metered`, retrieved by the matching
+// `capture_take_wall_ms` / `capture_take_peak_rss_kb`. `0` means "no
+// metered capture pending". Stored as `i64` for the same seed
+// module-mutable-global reason as the stdout/stderr addresses above.
+let mut sfn_capture_wall_ms: i64 = 0;
+
+let mut sfn_capture_peak_rss_kb: i64 = 0;
 
 // Growable byte buffer: `{ addr, len, cap }`, all `i64`. `addr` is
 // the malloc/realloc'd data pointer (cast to `i64`); `0` means
@@ -489,14 +553,20 @@ fn sfn_process_exit(code: float) -> void ![io] {
     exit(c as i32);
 }
 
-// ── process.run_capture ────────────────────────────────────────
+// ── process.run_capture (shared impl) ──────────────────────────
 // Port of `sailfin_runtime_process_run_capture`. Runs the child to
 // completion with stdout/stderr piped, stashes both captured streams
 // in the module globals for `capture_take_*`, and returns the exit
 // code (0..255), `128 + signal` for signal death, or `-1` on any
 // setup/spawn/wait failure. `env_flat` is a flat `string[]` of
 // `"KEY=VALUE"` entries; an empty array means the empty environment.
-fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
+//
+// `rusage_buf` (#1520): when non-NULL, the reaping `wait4` fills it with
+// the child's `struct rusage` so the metered wrapper can read `ru_maxrss`.
+// NULL makes `wait4` behave exactly like the former `waitpid` — the plain
+// `run_capture` wrapper passes NULL, so its behaviour is byte-for-byte
+// unchanged.
+fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8) -> i64 ![io] {
     if sfn_capture_stdout_addr != 0 {
         free(sfn_capture_stdout_addr as * u8);
         sfn_capture_stdout_addr = 0;
@@ -636,7 +706,7 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
 
     let mut status: i32 = 0;
     let status_ptr: * i32 = & status;
-    let wait_err: i32 = waitpid(pid, status_ptr, 0);
+    let wait_err: i32 = wait4(pid, status_ptr, 0, rusage_buf);
 
     let out_cstr: * u8 = _growbuf_take(gb_out);
     let err_cstr: * u8 = _growbuf_take(gb_err);
@@ -663,6 +733,69 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
         return signaled as i64;
     }
     return -1;
+}
+
+// Plain `process.run_capture`: the unmetered wrapper. Passes a NULL
+// `rusage` so `wait4` degrades to `waitpid` — behaviour-preserving.
+fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
+    return _run_capture_impl(argv, env_flat, 0 as * u8);
+}
+
+// ── process.run_capture_metered ────────────────────────────────
+// #1520: `run_capture` plus a wall-clock + peak-RSS bracket, the
+// measurement primitive the native `sfn bench` driver (epic #1503)
+// uses instead of shelling to GNU `/usr/bin/time -v`. Brackets the
+// child run with the monotonic clock for `wall_ms`, and threads a
+// `struct rusage` buffer through `wait4` so `ru_maxrss` records the
+// child's peak RSS. Both results are stashed in module globals for the
+// matching `capture_take_wall_ms` / `capture_take_peak_rss_kb`; the
+// stdout/stderr streams are taken exactly as for `run_capture`. Returns
+// the same exit code / `-1` contract as `run_capture`.
+//
+// Effect: `![io, clock]` — the subprocess drive is `io`, the wall-clock
+// read is `clock` (same gate `monotonic_millis` carries).
+fn sfn_process_run_capture_metered(argv: string[], env_flat: string[]) -> i64 ![io, clock] {
+    sfn_capture_wall_ms = 0;
+    sfn_capture_peak_rss_kb = 0;
+
+    // Zeroed rusage buffer (256 bytes ≫ the ~144-byte `struct rusage`
+    // on both targets). A NULL buffer (OOM) simply leaves peak RSS at 0.
+    let rusage_buf: * u8 = malloc(256 as usize);
+    if rusage_buf as i64 != 0 { memset(rusage_buf, 0, 256 as usize); }
+
+    let start: i64 = _monotonic_nanos();
+    let rc: i64 = _run_capture_impl(argv, env_flat, rusage_buf);
+    let end: i64 = _monotonic_nanos();
+
+    let mut elapsed: i64 = end - start;
+    if elapsed < 0 { elapsed = 0; }
+    sfn_capture_wall_ms = elapsed / 1000000;
+
+    if rusage_buf as i64 != 0 {
+        let maxrss_ptr: * i64 = ((rusage_buf as i64) + SFN_RUSAGE_MAXRSS_OFFSET) as * i64;
+        let maxrss: i64 = sailfin_intrinsic_pointer_read_i64(maxrss_ptr);
+        if maxrss > 0 { sfn_capture_peak_rss_kb = maxrss; }
+        free(rusage_buf);
+    }
+
+    return rc;
+}
+
+// ── process.capture_take_wall_ms / _peak_rss_kb ────────────────
+// Hand off the metered measurements stashed by the preceding
+// `run_capture_metered`, clearing each global so a second take yields
+// 0. `wall_ms` is whole milliseconds; `peak_rss_kb` is KiB on Linux
+// (see `SFN_RUSAGE_MAXRSS_OFFSET` for the Darwin unit caveat).
+fn sfn_process_capture_take_wall_ms() -> i64 ![io] {
+    let v: i64 = sfn_capture_wall_ms;
+    sfn_capture_wall_ms = 0;
+    return v;
+}
+
+fn sfn_process_capture_take_peak_rss_kb() -> i64 ![io] {
+    let v: i64 = sfn_capture_peak_rss_kb;
+    sfn_capture_peak_rss_kb = 0;
+    return v;
 }
 
 // ── process.capture_take_stdout / _stderr ──────────────────────

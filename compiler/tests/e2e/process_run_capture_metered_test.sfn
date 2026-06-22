@@ -1,0 +1,74 @@
+// compiler/tests/e2e/process_run_capture_metered_test.sfn
+//
+// #1520: metered subprocess capture. `process.run_capture_metered`
+// runs a child exactly like `process.run_capture` but also brackets it
+// with a wall-clock + peak-RSS measurement (`wait4` / `ru_maxrss`) —
+// the primitive the native `sfn bench` driver (epic #1503) uses instead
+// of shelling to GNU `/usr/bin/time -v`. The metered values are taken
+// with `process.capture_take_wall_ms` / `_peak_rss_kb`, mirroring the
+// `capture_take_stdout` / `_stderr` handoff.
+//
+// These tests drive real children (`sh` / `uname`, resolved on the
+// parent PATH; the empty env array is the empty child environment, per
+// the no-bash-e2e contract) and assert the metering is sane: exit code
+// preserved, stdout still captured, wall_ms >= 0, and — on Linux, where
+// `ru_maxrss` is KiB — peak_rss_kb > 0. On Darwin `ru_maxrss` is bytes
+// (normalization deferred under #1503), so the strong RSS assertion is
+// gated to Linux, matching the issue's acceptance criteria.
+import { find } from "sfn/strings";
+
+// Host OS via `uname -s`, captured through the plain (unmetered)
+// run_capture so the metered RSS assertion can gate on the platform.
+// Plain run_capture does not touch the metered wall/RSS stash.
+fn _is_linux() -> boolean ![io] {
+    let exit = process.run_capture(["uname", "-s"], []);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return false; }
+    return find(out, "Linux", 0) >= 0;
+}
+
+test "run_capture_metered: exit code is preserved" ![io, clock] {
+    let exit = process.run_capture_metered(["sh", "-c", "exit 7"], []);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    let _wall = process.capture_take_wall_ms();
+    let _rss = process.capture_take_peak_rss_kb();
+    assert exit == 7;
+}
+
+test "run_capture_metered: stdout still captured alongside metering" ![io, clock] {
+    let exit = process.run_capture_metered(["sh", "-c", "printf hello"], []);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    let _wall = process.capture_take_wall_ms();
+    let _rss = process.capture_take_peak_rss_kb();
+    assert exit == 0;
+    assert find(out, "hello", 0) >= 0;
+}
+
+test "run_capture_metered: wall_ms is non-negative" ![io, clock] {
+    let _exit = process.run_capture_metered(["sh", "-c", "sleep 0.05"], []);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    let wall = process.capture_take_wall_ms();
+    let _rss = process.capture_take_peak_rss_kb();
+    assert wall >= 0;
+}
+
+test "run_capture_metered: peak RSS is captured (Linux)" ![io, clock] {
+    let linux = _is_linux();
+    let _exit = process.run_capture_metered(["sh", "-c", "exit 0"], []);
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    let _wall = process.capture_take_wall_ms();
+    let rss = process.capture_take_peak_rss_kb();
+    if linux {
+        // Linux ru_maxrss is KiB; any reaped child has a non-zero peak.
+        assert rss > 0;
+    } else {
+        // Darwin reports bytes (normalization deferred under #1503) —
+        // assert only that the measurement is non-negative.
+        assert rss >= 0;
+    }
+}
