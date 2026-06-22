@@ -777,6 +777,22 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.capture_take_stderr", symbol: "sfn_process_capture_take_stderr", return_type: "i8*", parameter_types: [], effects: ["io"], native_signature: "sfn_process_capture_take_stderr", c_abi_return_type: null
     });
+    // #1520: metered capture — `run_capture` plus a wall-clock +
+    // peak-RSS bracket (`wait4`/`ru_maxrss`), the measurement primitive
+    // the native `sfn bench` driver (epic #1503) uses instead of GNU
+    // `/usr/bin/time -v`. `run_capture_metered` carries `clock` on top
+    // of `io` (it reads the monotonic clock); the two takes hand back
+    // `i64` measurements (wall ms / peak RSS KiB on Linux). Bodies in
+    // `runtime/sfn/process.sfn`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.run_capture_metered", symbol: "sfn_process_run_capture_metered", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: ["io", "clock"], native_signature: "sfn_process_run_capture_metered", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.capture_take_wall_ms", symbol: "sfn_process_capture_take_wall_ms", return_type: "i64", parameter_types: [], effects: ["io"], native_signature: "sfn_process_capture_take_wall_ms", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.capture_take_peak_rss_kb", symbol: "sfn_process_capture_take_peak_rss_kb", return_type: "i64", parameter_types: [], effects: ["io"], native_signature: "sfn_process_capture_take_peak_rss_kb", c_abi_return_type: null
+    });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.spawn_with_env", symbol: "sfn_process_spawn_with_env", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: "sfn_process_spawn_with_env", c_abi_return_type: null
     });

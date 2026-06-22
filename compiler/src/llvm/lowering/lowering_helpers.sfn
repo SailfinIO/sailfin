@@ -1095,6 +1095,11 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "process.run_capture");
     helpers = append_unique_effect(helpers, "process.capture_take_stdout");
     helpers = append_unique_effect(helpers, "process.capture_take_stderr");
+    // #1520: metered-capture helpers (wall-clock + peak RSS) consumed by
+    // the `sfn bench` driver and the e2e metered-capture test.
+    helpers = append_unique_effect(helpers, "process.run_capture_metered");
+    helpers = append_unique_effect(helpers, "process.capture_take_wall_ms");
+    helpers = append_unique_effect(helpers, "process.capture_take_peak_rss_kb");
     helpers = append_unique_effect(helpers, "process.spawn_with_env");
     helpers = append_unique_effect(helpers, "process.handle_write");
     helpers = append_unique_effect(helpers, "process.handle_close_stdin");
