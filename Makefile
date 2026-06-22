@@ -1037,7 +1037,7 @@ ci-cross-windows:
 		$$LLVM_LINK --opaque-pointers -o "$$WIN_OBJ/sailfin.linked.bc" $$LL_FILES; \
 	\
 	echo "[cross-windows] compiling linked bitcode -> .o"; \
-	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+	$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks -femulated-tls \
 		-c "$$WIN_OBJ/sailfin.linked.bc" -o "$$WIN_OBJ/native.linked.o"; \
 	\
 	echo "[cross-windows] emitting + compiling runtime modules..."; \
@@ -1091,7 +1091,7 @@ ci-cross-windows:
 			$(NATIVE_OUT) emit --attempts 3 --validate -o "$$ll" llvm "$$src" >/dev/null || { \
 				echo "[cross-windows][error] failed to emit valid $$mod IR" >&2; exit 1; }; \
 		fi; \
-		$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks \
+		$(CLANG) -target x86_64-w64-mingw32 $(NATIVE_OPT) -fno-delete-null-pointer-checks -femulated-tls \
 			-c "$$ll" -o "$$obj"; \
 		RUNTIME_OBJS="$$RUNTIME_OBJS $$obj"; \
 	done; \
