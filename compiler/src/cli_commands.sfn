@@ -156,7 +156,11 @@ fn _is_safe_capsule_version_cmd(value: string) -> boolean {
 // `docs/proposals/build-architecture.md` Stage B for the full
 // trail.
 fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[], cache_dir: string, binary_dir: string) -> int ![io] {
-    let mut args: string[] = ["clang", "-O0", "-o", out_path, ll_path];
+    // `-Wno-override-module`: every emitted `.ll` carries its own `target
+    // triple`, which clang's link overrides — matching the suppression on
+    // every other clang invocation in cli_main.sfn so the test path is not
+    // the lone source of `[-Woverride-module]` noise.
+    let mut args: string[] = ["clang", "-O0", "-Wno-override-module", "-o", out_path, ll_path];
     let mut di: int = 0;
     loop {
         if di >= dep_ll_paths.length { break; }
@@ -202,14 +206,27 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         args.push(rt.object_paths[roi]);
         roi += 1;
     }
+    // The runtime capsule's `link-libs` (runtime/capsule.toml) already
+    // carries `-lm` / `-lpthread`. Track which math/thread libs flow
+    // through so the defensive push below does not re-add a lib the
+    // capsule supplied — a duplicate `-lm` makes the macOS linker emit
+    // `ld: warning: ignoring duplicate libraries: '-lm'`.
+    let mut has_lm: boolean = false;
+    let mut has_pthread: boolean = false;
     let mut lli: int = 0;
     loop {
         if lli >= rt.link_libs.length { break; }
-        args.push(rt.link_libs[lli]);
+        let lib = rt.link_libs[lli];
+        if strings_equal(lib, "-lm") { has_lm = true; }
+        if strings_equal(lib, "-lpthread") { has_pthread = true; }
+        if strings_equal(lib, "-pthread") { has_pthread = true; }
+        args.push(lib);
         lli += 1;
     }
-    args.push("-lm");
-    args.push("-pthread");
+    // Fallback for configurations where the runtime capsule did not supply
+    // them (keeps the link complete without double-adding).
+    if !has_lm { args.push("-lm"); }
+    if !has_pthread { args.push("-pthread"); }
     return process.run(args);
 }
 
