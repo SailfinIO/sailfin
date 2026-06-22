@@ -197,7 +197,14 @@ Capsules ship under `capsules/sfn/` and are imported by bare name
   `sfn_nursery_enter/register/exit`, #1181) that `routine { }` lowers to.
   Language-construct lowering: `routine` → nursery scope (#1181); `channel`
   end-to-end (#1085/#1091); `spawn`/`await` value-surface lowering is #1084.
-  Design: `docs/runtime_architecture.md` §2.6.
+  The auto-detected pool floors at **two workers**
+  (`sfn_scheduler_resolve_thread_count`): a producer/consumer pair sharing a
+  bounded channel needs both tasks on their own thread or the fixed pool
+  deadlocks (#1474). This also masks a latent macOS bug — Darwin's
+  `_SC_NPROCESSORS_ONLN` is 58, not the Linux `84` the runtime currently
+  passes to `sysconf`, so core detection fails closed there; the per-target
+  constant (an emit-time intrinsic) is a follow-up. Design:
+  `docs/runtime_architecture.md` §2.6.
 
 ### Runtime Migration (C → Sailfin)
 

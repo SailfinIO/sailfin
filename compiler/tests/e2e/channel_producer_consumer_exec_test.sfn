@@ -24,6 +24,15 @@
 // capture-free way to share one channel across two tasks — the lambda
 // capture-env ABI is carved out to #1475/#1476.
 //
+// This runs on the DEFAULT scheduler pool (no `SAILFIN_THREADS` override),
+// so it also guards the runtime's two-worker pool floor
+// (`sfn_scheduler_resolve_thread_count`, scheduler.sfn): the v0 fixed pool
+// must give the producer and consumer threads to BOTH, or this test
+// deadlocks (it once hung the macOS CI shard for two hours, before the
+// floor, because Darwin's wrong `_SC_NPROCESSORS_ONLN` constant sized the
+// pool to a single worker). If a future regression drops the pool below two
+// workers, this test deadlocks and fails — that is the intended signal.
+//
 // Fixtures use string concatenation + `number_to_string` (NOT `{{ }}`
 // interpolation) so the host compiler does not interpolate the fixture
 // before it is written.
