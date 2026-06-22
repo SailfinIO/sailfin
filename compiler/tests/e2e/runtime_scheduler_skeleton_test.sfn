@@ -104,6 +104,23 @@ fn _emit_scheduler_ir() -> string ![io] {
     return fs.readFile(ll);
 }
 
+// Emit the scheduler module with a forced target OS. The #1480 per-target
+// `_SC_NPROCESSORS_ONLN` intrinsic consults `SAILFIN_TARGET_OS` before the
+// `uname -s` host probe, so forcing the target keeps the per-target
+// assertions host-independent on Linux or macOS CI.
+fn _emit_scheduler_ir_target(target_os: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/scheduler-" + target_os + ".ll";
+    let mut e = _child_env();
+    e.push("SAILFIN_TARGET_OS=" + target_os);
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", _scheduler_path()], e);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    if !fs.exists(ll) { return "EMIT_FAILED"; }
+    return fs.readFile(ll);
+}
+
 // `^define .* @sym(` — a line that begins the symbol's definition.
 fn _has_define(ir: string, sym: string) -> boolean {
     let lines = split(ir, "\n");
@@ -268,6 +285,28 @@ test "scheduler: emit produces the worker-pool surface (#1088)" ![io] {
     assert contains(ir, "call i32 @pthread_cond_broadcast(");
     assert contains(ir, "call i64 @sysconf(");
     assert contains(ir, "store atomic i64 1,");
+}
+
+// ---- 5b. per-target _SC_NPROCESSORS_ONLN fold (#1480) ----
+// The scheduler's core-count probe (`_sfn_scheduler_sc_nprocessors_onln`)
+// routes through the `sailfin_intrinsic_sc_nprocessors_onln` sentinel, which
+// folds to the platform's `_SC_NPROCESSORS_ONLN` `sysconf` request number at
+// emit time — Linux/glibc 84, Darwin/macOS 58. Before #1480 the helper
+// hardcoded `84`, so `sysconf(84)` failed closed to `-1` on macOS and the
+// auto-sized pool collapsed to the two-worker deadlock floor regardless of
+// real core count (#1474 exposure). The target is forced via
+// `SAILFIN_TARGET_OS` so the assertion is host-independent. This pins the
+// *real* consumer; the #1480 PR1 sentinel test used a synthetic fixture.
+test "scheduler: _SC_NPROCESSORS_ONLN request folds per target (#1480)" ![io] {
+    let lin = _define_body(_emit_scheduler_ir_target("Linux"), "_sfn_scheduler_sc_nprocessors_onln");
+    assert lin.length > 0;
+    assert contains(lin, "ret i32 84");
+    assert ! contains(lin, "ret i32 58");
+
+    let dar = _define_body(_emit_scheduler_ir_target("Darwin"), "_sfn_scheduler_sc_nprocessors_onln");
+    assert dar.length > 0;
+    assert contains(dar, "ret i32 58");
+    assert ! contains(dar, "ret i32 84");
 }
 
 // ---- 6. task-invocation emit shape (#1089) ----

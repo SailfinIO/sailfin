@@ -435,12 +435,22 @@ fn sfn_taskqueue_count(queue: * u8) -> i64 {
 // dependency.
 fn _sfn_scheduler_struct_size() -> i64 { return 40; }
 
-// `_SC_NPROCESSORS_ONLN` on Linux glibc (84) — the `sysconf` request for
-// the number of CPUs currently online. This is the build-target's value;
-// the constant is **not** portable: macOS/Darwin spells the same request
-// as 58, so a platform-conditional value is needed once Sailfin grows
-// `cfg`-style conditional compilation (§2.9 Q7).
-fn _sfn_scheduler_sc_nprocessors_onln() -> i32 { return 84; }
+// `_SC_NPROCESSORS_ONLN` — the `sysconf` request for the number of CPUs
+// currently online. POSIX leaves the numeric request implementation-
+// defined and it diverges by platform: Linux/glibc spells it `84`,
+// Darwin/macOS spells it `58`. The `sailfin_intrinsic_sc_nprocessors_onln`
+// sentinel (#1480) folds to the correct bare `i32` immediate per target at
+// emit time (the `SAILFIN_TARGET_OS` override, else the `uname -s` host
+// probe) — the same emit-time intrinsic pattern as
+// `sailfin_intrinsic_clock_monotonic_id` (#908). This replaces the former
+// hardcoded Linux `84`, which made `sysconf(84)` fail closed to `-1` on
+// macOS and the auto-sized pool collapse to the two-worker floor regardless
+// of real core count (#1474 exposure). Requires the intrinsic in the pinned
+// seed (≥ 0.7.0-alpha.47), since this `sfn-source` is seed-compiled during
+// self-host.
+fn _sfn_scheduler_sc_nprocessors_onln() -> i32 {
+    return sailfin_intrinsic_sc_nprocessors_onln();
+}
 
 // Default pool-size ceiling: `min(available_cores, 4)` per §2.6.1.
 fn _sfn_scheduler_default_max() -> i64 { return 4; }
@@ -480,14 +490,15 @@ fn sfn_scheduler_resolve_thread_count() -> i64 {
     // single-worker pool runs the producer, which blocks forever on a full
     // bounded channel because the consumer never gets a thread. Two workers
     // is the minimum that lets a producer/consumer pair make progress on
-    // different threads (#1474 AC2). This floor also covers the platforms
-    // where core detection currently fails closed to `-1`: Darwin spells
-    // `_SC_NPROCESSORS_ONLN` as 58, not the Linux 84 baked into
-    // `_sfn_scheduler_sc_nprocessors_onln`, so `sysconf` returns `-1` on
-    // macOS and the pool would otherwise size to a single deadlocking
-    // worker. The proper per-target constant (an emit-time intrinsic, like
-    // `clock_monotonic_id`) is tracked as a follow-up; this floor is the
-    // correctness guarantee independent of it. Oversubscribing a genuine
+    // different threads (#1474 AC2). The floor remains a correctness
+    // backstop for genuine `sysconf` failure (`-1`) and real single-core
+    // boxes; the per-target `_SC_NPROCESSORS_ONLN` request number is now
+    // resolved correctly at emit time (Linux `84` / Darwin `58`) by
+    // `_sfn_scheduler_sc_nprocessors_onln`'s
+    // `sailfin_intrinsic_sc_nprocessors_onln` intrinsic (#1480), so macOS
+    // no longer fails closed to `-1` and the pool sizes to
+    // `min(realcores, 4)` rather than collapsing to this floor.
+    // Oversubscribing a genuine
     // single-core box with two pool threads is safe — the OS time-slices
     // the blocked worker out. An explicit `SAILFIN_THREADS=1` still wins
     // above: that is the caller's deliberate choice.
