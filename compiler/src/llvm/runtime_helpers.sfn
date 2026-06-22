@@ -301,6 +301,33 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "sailfin_intrinsic_clock_monotonic_id", symbol: "sailfin_intrinsic_clock_monotonic_id", return_type: "i32", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
     });
 
+    // `_SC_NPROCESSORS_ONLN` `sysconf` request-number sentinel (#1480,
+    // epic #763). POSIX leaves the numeric request implementation-defined:
+    // glibc/Linux uses `84`, Darwin/macOS uses `58`. Like the clk_id
+    // sentinel above (and unlike errno, which emits a `call`, or
+    // pointer-read, which emits a `load`), this lowers to a bare `i32`
+    // immediate — no symbol, no runtime call. The call-emission dispatcher
+    // (`coerce_and_emit_call` in `core_call_emission.sfn`) special-cases
+    // this symbol and returns an inline `i32 84`/`i32 58` operand chosen by
+    // `sc_nprocessors_onln_value` at emit time (the `SAILFIN_TARGET_OS`
+    // target override, else the `uname -s` host probe). This is the
+    // seed-gated replacement for the Linux-only `84` that
+    // `runtime/sfn/concurrency/scheduler.sfn` hardcodes today — which makes
+    // `sysconf(84)` fail closed to `-1` on macOS and the worker pool
+    // collapse to the two-worker deadlock floor regardless of real core
+    // count (#1474 exposure). A later PR swaps the scheduler's hardcoded
+    // `84` for this intrinsic once it lands in a cut+pinned seed (the same
+    // intrinsic-then-seed-then-swap sequence the clk_id sentinel above
+    // followed for `clock.sfn`); scheduler.sfn is an `sfn-source` the seed
+    // compiles during self-host, so the swap cannot precede the seed.
+    // Empty effects: selecting a constant is not a capability — the request
+    // feeds the `sysconf` call whose effects live on that call. The declare
+    // loop in `rendering.sfn` skips the sentinel target; since the lowering
+    // emits no call, there is no concrete symbol to declare.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_sc_nprocessors_onln", symbol: "sailfin_intrinsic_sc_nprocessors_onln", return_type: "i32", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
+    });
+
     // executable-path sentinel (#967, epic #390). Resolves the running
     // binary's own absolute path. Unlike errno (a pure symbol swap across
     // three same-shape locators), the per-target primitives differ in arity
