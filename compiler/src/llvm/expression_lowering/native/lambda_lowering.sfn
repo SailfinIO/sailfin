@@ -568,6 +568,30 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
             }
         };
     }
+    // Lift lambdas nested inside each parallel task (#1474). Without this
+    // the task lambdas survive to emit as bare `<lambda>` placeholders and
+    // the `parallel` lowering collects zero tasks (capture analysis already
+    // walks `Parallel.tasks` in typecheck_captures.sfn, so a capture record
+    // exists; only the lift rewrite was missing this descent).
+    if expression.variant == "Parallel" {
+        let mut current_ctx: LiftContext = ctx;
+        let mut new_tasks: Expression[] = [];
+        let mut index: int = 0;
+        loop {
+            if index >= expression.tasks.length { break; }
+            let task = _rewrite_expression(current_ctx, expression.tasks[index]);
+            current_ctx = task.ctx;
+            new_tasks.push(task.expression);
+            index += 1;
+        }
+        return ExpressionRewriteResult {
+            ctx: current_ctx,
+            expression: Expression.Parallel {
+                tasks: new_tasks,
+                span: expression.span
+            }
+        };
+    }
     if expression.variant == "Await" {
         let inner = _rewrite_expression(ctx, expression.operand);
         return ExpressionRewriteResult {

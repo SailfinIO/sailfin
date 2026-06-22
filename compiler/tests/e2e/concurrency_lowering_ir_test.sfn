@@ -86,14 +86,18 @@ test "concurrency-ir: spawn:int lowers to sfn_spawn_int (#1090)" ![io] {
     assert contains(ir, "sfn_spawn_int");
 }
 
-// parallel [spawn task] → one sfn_spawn_task per task (#1091). The symbol is
-// use-driven (only emitted when the construct lowers), so its presence is a
-// meaningful signal, not an unconditional declaration.
-test "concurrency-ir: parallel [task] lowers to sfn_spawn_task (#1091)" ![io] {
-    let source = "fn worker() -> int { return 1; }\nfn main() ![io] {\n    let p = parallel [spawn worker()];\n}\n";
-    let ir = _emit_llvm(source, "parallel_spawn_task");
+// parallel [<lambda>, ...] → a single sfn_parallel fan-out/join call (#1474).
+// Each task's lifted-lambda closure pair `{i8*, i8*}` is unpacked (extractvalue)
+// into an (fn_ptr, ctx) i64 pair and handed to the runtime combinator, which
+// spawns every task onto the shared pool and joins them. This replaced the
+// former per-task `sfn_spawn_task` stub call, which allocated a Task but never
+// enqueued it (the tasks never ran).
+test "concurrency-ir: parallel [tasks] lowers to sfn_parallel (#1474)" ![io] {
+    let source = "fn main() ![io] {\n    let p = parallel [fn() -> int { return 1; }, fn() -> int { return 2; }];\n}\n";
+    let ir = _emit_llvm(source, "parallel_join");
     assert ir.length > 0;
-    assert contains(ir, "sfn_spawn_task");
+    assert contains(ir, "call i8* @sfn_parallel(");
+    assert contains(ir, "extractvalue {i8*, i8*}");
 }
 
 // serve(handler, port) → sfn_serve (Sailfin-native server, #1092).
