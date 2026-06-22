@@ -292,7 +292,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
             body_scan_texts.push(get_instruction_scan_text(function.instructions, _bt_idx));
             _bt_idx += 1;
         }
-        arena_rewind_eligible = loop_body_rewind_eligible(body_result.locals, body_result.mutations, body_scope_id, base_locals, body_scan_texts, context);
+        arena_rewind_eligible = loop_body_rewind_eligible(body_result.locals, body_result.mutations, body_scope_id, base_locals, body_scan_texts, body_result.lines, context);
     }
 
     // Now emit phi nodes in the header for mutated locals

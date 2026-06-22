@@ -12,6 +12,7 @@ import {
     LifetimeRegionMetadata
 } from "../types";
 import {
+    contains_text,
     number_to_string,
     extend_string_array,
     is_identifier_part_char,
@@ -282,11 +283,42 @@ fn _local_is_all_scalar_struct(context: TypeContext, binding: LocalBinding) -> b
     return true;
 }
 
+// True when the body's lowered IR contains a call to anything other than the
+// arena struct allocator. The rewind reclaims `@sfn_alloc_struct` allocations;
+// every OTHER call may allocate-and-escape arena memory or retain a pointer
+// past the iteration — string concatenation, array growth (`arr.push`), an
+// escape-marker like `@sailfin_runtime_mark_persistent`, fs/io, or any callee
+// that stows its argument. This is the decisive, reliable check: the native-IR
+// instruction *text* does not always preserve call syntax (a flattened call
+// becomes an SSA temp the source-text scan can't see — the `handle_check_command`
+// loop that crashed the Windows smoke build), but the lowered IR shows every
+// `call` / `invoke` explicitly.
+fn _body_ir_has_foreign_call(body_lines: string[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= body_lines.length { break; }
+        let line = body_lines[i];
+        i += 1;
+        let mut is_call: boolean = false;
+        if contains_text(line, " call ") { is_call = true; }
+        if contains_text(line, " invoke ") { is_call = true; }
+        if !is_call { continue; }
+        // The sole arena allocator the rewind reclaims is exempt.
+        if contains_text(line, "@sfn_alloc_struct(") { continue; }
+        return true;
+    }
+    return false;
+}
+
 // `body_texts` is the escape-relevant source text of each body instruction
-// (`get_instruction_scan_text`); `ancestor_locals` is the binding set
-// captured before the body was lowered (the loop's enclosing scopes);
-// `context` resolves struct field types for the scalar-field precondition.
-fn loop_body_rewind_eligible(body_locals: LocalBinding[], body_mutations: LocalMutation[], body_scope_id: string, ancestor_locals: LocalBinding[], body_texts: string[], context: TypeContext) -> boolean {
+// (`get_instruction_scan_text`); `body_lines` is the body's lowered LLVM IR;
+// `ancestor_locals` is the binding set captured before the body was lowered
+// (the loop's enclosing scopes); `context` resolves struct field types for the
+// scalar-field precondition.
+fn loop_body_rewind_eligible(body_locals: LocalBinding[], body_mutations: LocalMutation[], body_scope_id: string, ancestor_locals: LocalBinding[], body_texts: string[], body_lines: string[], context: TypeContext) -> boolean {
+    // The body's lowered IR must contain no call except the arena allocator —
+    // the reliable allocation/escape gate (see `_body_ir_has_foreign_call`).
+    if _body_ir_has_foreign_call(body_lines) { return false; }
     // (0) + (1): collect body-scope arena heap locals; bail on any escapee.
     let mut arena_names: string[] = [];
     let mut i: int = 0;
