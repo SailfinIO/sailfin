@@ -498,6 +498,25 @@ fn spawn_ctx_symbol_for_kind(kind: string) -> string {
     return "sfn_spawn_ptr_ctx";
 }
 
+// #1475 (epic #1466): the owned-env spawn-ctx symbol. Identical to
+// `spawn_ctx_symbol_for_kind` but routes to the `_owned_ctx` family, whose
+// trampoline `sfn_env_free`s the captured env after the worker body runs.
+// Used only when the spawn operand is a capturing lambda tagged `owned_env`
+// (its env is `@sfn_env_alloc`'d and nothing else frees it). The plain
+// `_ctx` family stays for non-owned ctx paths (e.g. `async fn` desugaring,
+// whose worker frees its own ctx) so they are never double-freed.
+fn spawn_owned_ctx_symbol_for_kind(kind: string) -> string {
+    let trimmed = trim_text(kind);
+    if trimmed.length == 0 { return "sfn_spawn_void_owned_ctx"; }
+    if trimmed == "void" { return "sfn_spawn_void_owned_ctx"; }
+    if trimmed == "number" { return "sfn_spawn_number_owned_ctx"; }
+    if trimmed == "int" { return "sfn_spawn_int_owned_ctx"; }
+    if trimmed == "bool" { return "sfn_spawn_bool_owned_ctx"; }
+    if trimmed == "boolean" { return "sfn_spawn_bool_owned_ctx"; }
+    if trimmed == "string" { return "sfn_spawn_string_owned_ctx"; }
+    return "sfn_spawn_ptr_owned_ctx";
+}
+
 // Maps a spawn kind string to the LLVM return type of the spawned function
 // (i.e. the element type of the future). Used to build the typed function
 // pointer argument `<llvm_type> ()* @fn_symbol` for spawn calls.

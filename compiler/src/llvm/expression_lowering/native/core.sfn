@@ -317,6 +317,7 @@ import {
     await_symbol_for_future_pointer_type,
     spawn_symbol_for_kind,
     spawn_ctx_symbol_for_kind,
+    spawn_owned_ctx_symbol_for_kind,
     llvm_return_type_for_spawn_kind,
     future_type_for_spawn_kind,
     map_parameter_type
@@ -543,6 +544,10 @@ fn lower_closure_pair_marker(marker: string, functions: NativeFunction[], contex
 // to wire the closure-pair aggregate's env slot).
 fn _lower_closure_env_alloc(env_var_text: string, target: NativeFunction, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> _ClosurePairLowerResult {
     let mut diagnostics: string[] = [];
+    // `owned_env` (spawn/parallel task lambdas, #1475) is tagged right
+    // after `env_alloc` by the lift pass; route its env through the
+    // malloc-backed `@sfn_env_alloc` so the spawned worker can free it.
+    let owned_env: boolean = starts_with(env_var_text, "env_alloc owned_env ");
     let lambda_id = _parse_marker_int_field(env_var_text, "lambda_id=");
     let captures_text = _parse_marker_string_field(env_var_text, "captures=");
     let captures = decode_captures(captures_text);
@@ -572,7 +577,7 @@ fn _lower_closure_env_alloc(env_var_text: string, target: NativeFunction, bindin
     }
     new_lines = resolved.lines;
     current_temp = resolved.temp_index;
-    let alloc = emit_closure_env_alloc(layout, resolved.operands, current_temp);
+    let alloc = emit_closure_env_alloc(layout, resolved.operands, current_temp, owned_env);
     let mut ai: int = 0;
     loop {
         if ai >= alloc.lines.length { break; }
@@ -1155,7 +1160,15 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             }
         }
         let spawn_sym = spawn_symbol_for_kind(spawn_kind);
-        let spawn_ctx_sym = spawn_ctx_symbol_for_kind(spawn_kind);
+        // #1475: a capturing task lambda's env is `@sfn_env_alloc`'d and only
+        // the worker frees it — route through the `_owned_ctx` family whose
+        // trampoline `sfn_env_free`s it. The `owned_env` tag rides on the
+        // closure-pair operand text (set by the lift pass for spawn targets);
+        // non-capturing (null env) and async ctx paths keep the plain `_ctx`.
+        let mut spawn_ctx_sym = spawn_ctx_symbol_for_kind(spawn_kind);
+        if index_of(spawn_operand_text, "env_alloc owned_env ") >= 0 {
+            spawn_ctx_sym = spawn_owned_ctx_symbol_for_kind(spawn_kind);
+        }
         let future_type = future_type_for_spawn_kind(spawn_kind);
         let fn_ret_llvm = llvm_return_type_for_spawn_kind(spawn_kind);
         let fn_ptr_type = fn_ret_llvm + " ()*";

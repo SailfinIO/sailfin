@@ -204,6 +204,19 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     if find_function_by_name(context_functions, "sfn_mem_free") == null {
         lines.push("declare void @sfn_mem_free(i8*)");
     }
+    // #1475 (epic #1466): the captured-env allocator pair for spawn/parallel
+    // task lambdas. `@sfn_env_alloc` is a malloc-backed, individually-owned
+    // alloc (never arena-routed) that the spawned worker frees with
+    // `@sfn_env_free` after the task body runs — so a moved capture env that
+    // crosses the thread boundary is freed exactly once. `emit_closure_env_alloc`
+    // hand-spells the `@sfn_env_alloc` call for `owned_env` closure pairs, so
+    // these are the sole declares (skipped in the defining module `mem.sfn`).
+    if find_function_by_name(context_functions, "sfn_env_alloc") == null {
+        lines.push("declare noalias i8* @sfn_env_alloc(i64)");
+    }
+    if find_function_by_name(context_functions, "sfn_env_free") == null {
+        lines.push("declare void @sfn_env_free(i8*)");
+    }
     // Scope-exit drop helper (M1.5.2 / issue #326). Always declared so the
     // emit-llvm output exposes the runtime ABI even when the current module
     // has no `allocation_kind == "rc"` locals (today: all of them, since

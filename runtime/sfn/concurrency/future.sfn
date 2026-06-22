@@ -81,6 +81,15 @@ extern fn malloc(size: usize) -> * u8;
 
 extern fn free(ptr: * u8) -> void;
 
+// #1475 (epic #1466): the captured-env free for spawn task lambdas. The
+// worker that runs a capturing task owns the moved heap env behind
+// `user_ctx`; it frees it here, exactly once, after the task body returns.
+// `sfn_env_free` is a null-safe libc free over a malloc-backed env (never
+// arena-routed — see `runtime/sfn/memory/mem.sfn`), so a null `user_ctx`
+// (non-capturing task) is a no-op and a captured env is freed without the
+// arena-pointer-to-libc-free corruption hazard.
+extern fn sfn_env_free(ptr: * u8) -> void;
+
 extern fn sfn_taskqueue_create(capacity: i64) -> * u8;
 
 extern fn sfn_taskqueue_enqueue(queue: * u8, task: * u8) -> void;
@@ -417,3 +426,171 @@ fn sfn_spawn_string_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
 }
 
 fn sfn_await_string(future: * u8) -> * u8 { return sfn_await(future); }
+
+// ────────────────────────────────────────────────────────────────
+// #1475 (epic #1466): owned-env ctx variants.
+//
+// The plain `_ctx` trampolines above are SHARED with paths whose ctx is
+// owned and freed by the worker itself (notably the `async fn` desugaring,
+// whose `*__async_trampoline` `free()`s its own calloc'd ctx). They must
+// therefore NOT free the ctx. A USER capturing `spawn`/`parallel` task, by
+// contrast, allocates its env via `@sfn_env_alloc` and NOTHING else frees
+// it — the worker must. These owned variants are byte-identical to their
+// `_ctx` siblings except they `sfn_env_free(user_ctx)` after the body runs
+// (null-safe). The capturing-spawn emission routes here only when the
+// closure pair carries the `owned_env` tag; `sfn_parallel` routes capturing
+// tasks through `_sfn_trampoline_ptr_owned_ctx`. The async path keeps the
+// plain `_ctx` entry points untouched, so its self-freeing ctx is never
+// double-freed.
+fn _sfn_trampoline_number_owned_ctx(ctx: * u8) -> * u8 {
+    let base: i64 = ctx as i64;
+    let fn_slot: * i64 = base as * i64;
+    let ctx_slot: * i64 = (base + 8) as * i64;
+    let fn_addr: i64 = atomic_load(fn_slot);
+    let user_ctx: i64 = atomic_load(ctx_slot);
+    let entry: * fn (* u8) -> f64 = fn_addr as * fn (* u8) -> f64;
+    let val: f64 = entry(user_ctx as * u8);
+    let packed: i64 = val as i64;
+    sfn_env_free(user_ctx as * u8);
+    free(ctx);
+    return packed as * u8;
+}
+
+fn sfn_spawn_number_owned_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
+    let pair: * u8 = malloc(16 as usize);
+    if pair as i64 == 0 { return null; }
+    let p0: * i64 = pair as * i64;
+    let p1: * i64 = (pair as i64 + 8) as * i64;
+    atomic_store(p0, fn_ptr as i64);
+    atomic_store(p1, ctx as i64);
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_number_owned_ctx as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, pair as i64, 8);
+}
+
+fn _sfn_trampoline_int_owned_ctx(ctx: * u8) -> * u8 {
+    let base: i64 = ctx as i64;
+    let fn_slot: * i64 = base as * i64;
+    let ctx_slot: * i64 = (base + 8) as * i64;
+    let fn_addr: i64 = atomic_load(fn_slot);
+    let user_ctx: i64 = atomic_load(ctx_slot);
+    let entry: * fn (* u8) -> i64 = fn_addr as * fn (* u8) -> i64;
+    let val: i64 = entry(user_ctx as * u8);
+    sfn_env_free(user_ctx as * u8);
+    free(ctx);
+    return val as * u8;
+}
+
+fn sfn_spawn_int_owned_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
+    let pair: * u8 = malloc(16 as usize);
+    if pair as i64 == 0 { return null; }
+    let p0: * i64 = pair as * i64;
+    let p1: * i64 = (pair as i64 + 8) as * i64;
+    atomic_store(p0, fn_ptr as i64);
+    atomic_store(p1, ctx as i64);
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_int_owned_ctx as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, pair as i64, 8);
+}
+
+fn _sfn_trampoline_bool_owned_ctx(ctx: * u8) -> * u8 {
+    let base: i64 = ctx as i64;
+    let fn_slot: * i64 = base as * i64;
+    let ctx_slot: * i64 = (base + 8) as * i64;
+    let fn_addr: i64 = atomic_load(fn_slot);
+    let user_ctx: i64 = atomic_load(ctx_slot);
+    let entry: * fn (* u8) -> bool = fn_addr as * fn (* u8) -> bool;
+    let val: bool = entry(user_ctx as * u8);
+    sfn_env_free(user_ctx as * u8);
+    free(ctx);
+    if val { return 1 as * u8; }
+    return 0 as * u8;
+}
+
+fn sfn_spawn_bool_owned_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
+    let pair: * u8 = malloc(16 as usize);
+    if pair as i64 == 0 { return null; }
+    let p0: * i64 = pair as * i64;
+    let p1: * i64 = (pair as i64 + 8) as * i64;
+    atomic_store(p0, fn_ptr as i64);
+    atomic_store(p1, ctx as i64);
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_bool_owned_ctx as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, pair as i64, 1);
+}
+
+fn _sfn_trampoline_ptr_owned_ctx(ctx: * u8) -> * u8 {
+    let base: i64 = ctx as i64;
+    let fn_slot: * i64 = base as * i64;
+    let ctx_slot: * i64 = (base + 8) as * i64;
+    let fn_addr: i64 = atomic_load(fn_slot);
+    let user_ctx: i64 = atomic_load(ctx_slot);
+    let entry: * fn (* u8) -> * u8 = fn_addr as * fn (* u8) -> * u8;
+    let result: * u8 = entry(user_ctx as * u8);
+    sfn_env_free(user_ctx as * u8);
+    free(ctx);
+    return result;
+}
+
+fn sfn_spawn_ptr_owned_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
+    let pair: * u8 = malloc(16 as usize);
+    if pair as i64 == 0 { return null; }
+    let p0: * i64 = pair as * i64;
+    let p1: * i64 = (pair as i64 + 8) as * i64;
+    atomic_store(p0, fn_ptr as i64);
+    atomic_store(p1, ctx as i64);
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_ptr_owned_ctx as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, pair as i64, 8);
+}
+
+// The owned ptr trampoline address, for `sfn_parallel`'s capturing-task
+// pair-wrap (the single env-free site on the parallel path).
+fn sfn_trampoline_ptr_owned_ctx_addr() -> i64 {
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_ptr_owned_ctx as * fn (* u8) -> * u8;
+    return trampoline as i64;
+}
+
+fn _sfn_trampoline_void_owned_ctx(ctx: * u8) -> * u8 {
+    let base: i64 = ctx as i64;
+    let fn_slot: * i64 = base as * i64;
+    let ctx_slot: * i64 = (base + 8) as * i64;
+    let fn_addr: i64 = atomic_load(fn_slot);
+    let user_ctx: i64 = atomic_load(ctx_slot);
+    let entry: * fn (* u8) -> void = fn_addr as * fn (* u8) -> void;
+    entry(user_ctx as * u8);
+    sfn_env_free(user_ctx as * u8);
+    free(ctx);
+    return null;
+}
+
+fn sfn_spawn_void_owned_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
+    let pair: * u8 = malloc(16 as usize);
+    if pair as i64 == 0 { return null; }
+    let p0: * i64 = pair as * i64;
+    let p1: * i64 = (pair as i64 + 8) as * i64;
+    atomic_store(p0, fn_ptr as i64);
+    atomic_store(p1, ctx as i64);
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_void_owned_ctx as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, pair as i64, 0);
+}
+
+fn _sfn_trampoline_string_owned_ctx(ctx: * u8) -> * u8 {
+    let base: i64 = ctx as i64;
+    let fn_slot: * i64 = base as * i64;
+    let ctx_slot: * i64 = (base + 8) as * i64;
+    let fn_addr: i64 = atomic_load(fn_slot);
+    let user_ctx: i64 = atomic_load(ctx_slot);
+    let entry: * fn (* u8) -> * u8 = fn_addr as * fn (* u8) -> * u8;
+    let result: * u8 = entry(user_ctx as * u8);
+    sfn_env_free(user_ctx as * u8);
+    free(ctx);
+    return result;
+}
+
+fn sfn_spawn_string_owned_ctx(fn_ptr: * u8, ctx: * u8) -> * u8 {
+    let pair: * u8 = malloc(16 as usize);
+    if pair as i64 == 0 { return null; }
+    let p0: * i64 = pair as * i64;
+    let p1: * i64 = (pair as i64 + 8) as * i64;
+    atomic_store(p0, fn_ptr as i64);
+    atomic_store(p1, ctx as i64);
+    let trampoline: * fn (* u8) -> * u8 = _sfn_trampoline_string_owned_ctx as * fn (* u8) -> * u8;
+    return sfn_spawn(trampoline as i64, pair as i64, 8);
+}

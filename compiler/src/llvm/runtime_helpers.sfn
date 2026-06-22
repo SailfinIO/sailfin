@@ -590,6 +590,32 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "await_string", symbol: "sfn_await_string", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
+    // #1475 (epic #1466): owned-env spawn-ctx variants. Identical ABI to the
+    // `_ctx` rows above; the runtime trampoline additionally `sfn_env_free`s
+    // the captured env after the worker body runs. The capturing-`spawn`
+    // emission routes here (via `spawn_owned_ctx_symbol_for_kind`) only when
+    // the closure pair carries the `owned_env` tag, so the env an
+    // `@sfn_env_alloc` allocated is freed exactly once. Defined in future.sfn,
+    // so the declare is emitted into the preamble and skipped there.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "spawn_number_owned_ctx", symbol: "sfn_spawn_number_owned_ctx", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "spawn_int_owned_ctx", symbol: "sfn_spawn_int_owned_ctx", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "spawn_bool_owned_ctx", symbol: "sfn_spawn_bool_owned_ctx", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "spawn_ptr_owned_ctx", symbol: "sfn_spawn_ptr_owned_ctx", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "spawn_void_owned_ctx", symbol: "sfn_spawn_void_owned_ctx", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "spawn_string_owned_ctx", symbol: "sfn_spawn_string_owned_ctx", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
+    });
+
     // Structured-concurrency nursery surface (#1181). The `routine { }`
     // lowering emits `call`s to these; the runtime bodies live in
     // runtime/sfn/concurrency/nursery.sfn. Registered as async-runtime
@@ -1470,6 +1496,14 @@ fn is_async_runtime_target(target: string) -> boolean {
     if target == "spawn_string" { return true; }
     if target == "spawn_string_ctx" { return true; }
     if target == "await_string" { return true; }
+    // #1475 owned-env spawn-ctx variants — declares emitted into the
+    // preamble (and skipped in future.sfn, which defines them).
+    if target == "spawn_number_owned_ctx" { return true; }
+    if target == "spawn_int_owned_ctx" { return true; }
+    if target == "spawn_bool_owned_ctx" { return true; }
+    if target == "spawn_ptr_owned_ctx" { return true; }
+    if target == "spawn_void_owned_ctx" { return true; }
+    if target == "spawn_string_owned_ctx" { return true; }
     if target == "nursery_enter" { return true; }
     if target == "nursery_register" { return true; }
     if target == "nursery_exit" { return true; }

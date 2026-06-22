@@ -422,7 +422,14 @@ fn _field_zero_value(llvm_type: string) -> string {
 // SSA scope. The walk advances this monotonically per emitted
 // instruction, mirroring `emission_async.sfn`'s context-struct
 // build-out.
-fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOperand[], temp_index: int) -> ClosureEnvAllocResult {
+// `owned_env` (true for spawn/parallel task lambdas, #1475) routes the
+// env allocation through the malloc-backed `@sfn_env_alloc` — an
+// individually-owned, freeable block the spawned worker frees with
+// `@sfn_env_free` after the task body runs — instead of the arena-routed
+// `@sfn_alloc_struct` (which has no per-object free and would corrupt the
+// heap if libc-freed). Synchronous capturing lambdas pass false and keep
+// the arena fast-path (status quo: env is arena-reclaimed, never freed).
+fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOperand[], temp_index: int, owned_env: boolean) -> ClosureEnvAllocResult {
     let mut lines: string[] = [];
     let mut current_temp: int = temp_index;
 
@@ -458,7 +465,10 @@ fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOper
 
     let env_raw = format_temp_name(current_temp);
     current_temp += 1;
-    lines.push("  " + env_raw + " = call noalias i8* @sfn_alloc_struct(i64 "
+    let mut env_alloc_sym: string = "sfn_alloc_struct";
+    if owned_env { env_alloc_sym = "sfn_env_alloc"; }
+    lines.push("  " + env_raw + " = call noalias i8* @" + env_alloc_sym
+        + "(i64 "
         + size_i64
         + ")");
 

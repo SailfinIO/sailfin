@@ -60,6 +60,15 @@ extern fn sfn_spawn(fn_ptr: i64, ctx: i64, result_size: i64) -> * u8;
 
 extern fn sfn_await(future: * u8) -> * u8;
 
+// #1475 (epic #1466): the `_sfn_trampoline_ptr_ctx` address. A parallel
+// task lambda with a captured heap env (`ctx != 0`) is routed through the
+// pair+trampoline path (`[fn_ptr][env]` + this trampoline) — the single
+// site that frees the moved env (`sfn_env_free`) after the worker body
+// runs. Non-capturing tasks (`ctx == 0`) keep the bare `sfn_spawn` path
+// (no env, no free). Defined in `future.sfn`; re-declared extern per this
+// file's discipline.
+extern fn sfn_trampoline_ptr_owned_ctx_addr() -> i64;
+
 // Await (and discard) every spawned future in a `count`-element futures
 // array based at `futures_base`. The failure paths use this to honor the
 // structured contract — no spawned task may outlive the `sfn_parallel`
@@ -129,7 +138,30 @@ fn sfn_parallel(fn_ptrs: * u8, ctxs: * u8, count: i64) -> * u8 {
             ctx_val = atomic_load(ctx_slot);
         }
 
-        let future: * u8 = sfn_spawn(fn_addr, ctx_val, 8);
+        // #1475: a non-zero ctx is a moved capture env (`@sfn_env_alloc`'d
+        // by the spawn-target emission). Route it through the pair+trampoline
+        // (`[fn_ptr][env]` + `_sfn_trampoline_ptr_ctx`) so the worker frees
+        // the env exactly once after the body runs. A zero ctx is a
+        // non-capturing task — spawn the worker directly (no env to free).
+        // The fan-out spawns once either way; the join's result reinterpret
+        // is identical (`_sfn_trampoline_ptr_ctx` returns the worker's raw
+        // `* u8`). On pair-alloc OOM, fall back to the direct spawn (the env
+        // then leaks rather than corrupts — the conservative failure).
+        let mut spawn_fn: i64 = fn_addr;
+        let mut spawn_ctx: i64 = ctx_val;
+        if ctx_val != 0 {
+            let pair: * u8 = malloc(16 as usize);
+            if pair as i64 != 0 {
+                let p0: * i64 = pair as * i64;
+                let p1: * i64 = (pair as i64 + 8) as * i64;
+                atomic_store(p0, fn_addr);
+                atomic_store(p1, ctx_val);
+                spawn_fn = sfn_trampoline_ptr_owned_ctx_addr();
+                spawn_ctx = pair as i64;
+            }
+        }
+
+        let future: * u8 = sfn_spawn(spawn_fn, spawn_ctx, 8);
 
         let out_slot: * i64 = (futures_base + i * 8) as * i64;
         atomic_store(out_slot, future as i64);
