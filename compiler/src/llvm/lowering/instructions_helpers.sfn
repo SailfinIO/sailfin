@@ -310,6 +310,27 @@ fn _body_ir_has_foreign_call(body_lines: string[]) -> boolean {
     return false;
 }
 
+// True when the body's lowered IR actually allocates a struct in the arena
+// (`@sfn_alloc_struct`). A heap local's `allocation_kind` defaults to "arena"
+// for ANY pointer binding — including a cast/alias of existing memory
+// (`let p: * ArenaPage = walker as * ArenaPage`), which allocates nothing.
+// Without this gate such a cast counts as a reclaimable allocation, so a loop
+// that allocates nothing is wrapped in mark/rewind. The catastrophic case is
+// the arena's own page-walk loops inside `sfn_arena_sfn_mark` /
+// `sfn_arena_sfn_rewind`: wrapping them inserts calls to those very functions
+// → infinite recursion / arena reentrancy → abort. Requiring a real
+// `@sfn_alloc_struct` ties eligibility to genuine reclaimable allocation and
+// keeps the optimization out of the allocator's own internals.
+fn _body_ir_allocates_struct(body_lines: string[]) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= body_lines.length { break; }
+        if contains_text(body_lines[i], "@sfn_alloc_struct(") { return true; }
+        i += 1;
+    }
+    return false;
+}
+
 // `body_texts` is the escape-relevant source text of each body instruction
 // (`get_instruction_scan_text`); `body_lines` is the body's lowered LLVM IR;
 // `ancestor_locals` is the binding set captured before the body was lowered
@@ -319,6 +340,12 @@ fn loop_body_rewind_eligible(body_locals: LocalBinding[], body_mutations: LocalM
     // The body's lowered IR must contain no call except the arena allocator —
     // the reliable allocation/escape gate (see `_body_ir_has_foreign_call`).
     if _body_ir_has_foreign_call(body_lines) { return false; }
+    // …and it must genuinely allocate a struct in the arena. A cast/alias
+    // binding (`x as * T`) defaults to `allocation_kind == "arena"` but
+    // reclaims nothing; gating on a real `@sfn_alloc_struct` keeps the
+    // optimization off cast-only loops and out of the allocator internals
+    // (e.g. the arena's own `sfn_arena_sfn_mark` page-walk).
+    if !_body_ir_allocates_struct(body_lines) { return false; }
     // (0) + (1): collect body-scope arena heap locals; bail on any escapee.
     let mut arena_names: string[] = [];
     let mut i: int = 0;
