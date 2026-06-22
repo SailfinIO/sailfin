@@ -31,7 +31,6 @@ on:
             - rc
             - beta
         paths-ignore:
-            - CHANGELOG.md
             - compiler/src/version.sfn
             - compiler/capsule.toml
             # The release bump commit also stamps llms.txt's "> Version:"
