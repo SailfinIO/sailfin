@@ -44,6 +44,7 @@ import {
     stat_buf_size_value,
     errno_locator_symbol,
     clock_monotonic_id_value,
+    sc_nprocessors_onln_value,
     stat_st_mode_offset_value
 } from "../../lowering_debug_state";
 import { find_interface_info_by_name } from "../../type_context_queries";
@@ -706,6 +707,30 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                 lines: result_lines,
                 temp_index: result_temp,
                 operand: _cm_operand,
+                diagnostics: result_diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+    }
+
+    // `_SC_NPROCESSORS_ONLN` request-number sentinel (#1480, epic #763):
+    // lower to a bare `i32` immediate — `84` on Linux/glibc, `58` on
+    // Darwin/macOS — chosen at emit time via `sc_nprocessors_onln_value`.
+    // Like the clk_id sentinel above (and unlike the errno `call` and the
+    // pointer-read `load`), this is a pure inline constant: no line is
+    // pushed and `temp_index` is unchanged, so the value flows straight
+    // into the consuming `sysconf` call. No symbol is emitted, so the
+    // declare loop in `rendering.sfn` has nothing to declare.
+    if helper_descriptor != null {
+        if helper_descriptor.symbol == "sailfin_intrinsic_sc_nprocessors_onln" {
+            let _np_operand = LLVMOperand {
+                llvm_type: "i32",
+                value: number_to_string(sc_nprocessors_onln_value())
+            };
+            return ExpressionResult {
+                lines: result_lines,
+                temp_index: result_temp,
+                operand: _np_operand,
                 diagnostics: result_diagnostics,
                 string_constants: collected_string_constants
             };

@@ -66,7 +66,8 @@ export {
     trace_call_lowering,
     skip_module_globals,
     errno_locator_symbol,
-    clock_monotonic_id_value
+    clock_monotonic_id_value,
+    sc_nprocessors_onln_value
 };
 
 // Per-flag cache cells. `_X_initialized` flips from false to true on
@@ -97,6 +98,14 @@ let mut _errno_locator_value: string = "";
 // `clock_monotonic_id_value` below.
 let mut _clock_monotonic_id_initialized: boolean = false;
 let mut _clock_monotonic_id_value: int = 0;
+// Cache for the resolved `_SC_NPROCESSORS_ONLN` `sysconf` request number
+// (#1480, epic #763). `_sc_nprocessors_onln_initialized` flips to true
+// after the one-time resolution (the `SAILFIN_TARGET_OS` override or the
+// `uname -s` host probe); `_sc_nprocessors_onln_value` holds the resolved
+// immediate (`84` on Linux/glibc, `58` on Darwin/macOS). See
+// `sc_nprocessors_onln_value` below.
+let mut _sc_nprocessors_onln_initialized: boolean = false;
+let mut _sc_nprocessors_onln_value: int = 0;
 // Cache for the resolved executable-path leg tag (#967, epic #390).
 // `_exe_path_locator_initialized` flips to true after the one-time
 // resolution (the `SAILFIN_TARGET_OS` override or the `uname -s`
@@ -228,6 +237,40 @@ fn clock_monotonic_id_value() -> int ![io] {
         _clock_monotonic_id_initialized = true;
     }
     return _clock_monotonic_id_value;
+}
+
+// The `_SC_NPROCESSORS_ONLN` `sysconf` request number for the host target
+// (#1480, epic #763). POSIX leaves the numeric request implementation-
+// defined and it diverges by platform — Linux/glibc `84`, Darwin/macOS
+// `58` — so the `sailfin_intrinsic_sc_nprocessors_onln` sentinel's lowering
+// branch (`core_call_emission.sfn`) reads this to emit a bare `i32`
+// immediate (no `call`, no `declare`), letting the same compiler source
+// bake the correct request number on either platform when built natively.
+// The scheduler currently hardcodes the Linux `84`, so `sysconf(84)` fails
+// closed to `-1` on macOS and the pool falls back to the two-worker
+// deadlock floor regardless of real core count; a seed-gated follow-up PR
+// swaps that hardcode for this intrinsic once it lands in a pinned seed.
+//
+// Resolution order matches `clock_monotonic_id_value` above:
+//   1. `SAILFIN_TARGET_OS` env override — the *target* OS, for the
+//      cross-compile path where a bare `uname -s` reports the host.
+//   2. `uname -s` host probe — the native-build path. `Darwin` → 58,
+//      anything else → 84, so the dominant Linux leg is the default and
+//      Windows (no POSIX `sysconf`) harmlessly falls through to the Linux
+//      value.
+//
+// Probed once and cached; mirrors the lazy-init contract of the trace
+// toggles and `clock_monotonic_id_value`.
+fn sc_nprocessors_onln_value() -> int ![io] {
+    if !_sc_nprocessors_onln_initialized {
+        let mut os: string = _get_env_cmd("SAILFIN_TARGET_OS");
+        if os.length == 0 { os = _shell_read_cmd("uname -s"); }
+        if os == "Darwin" { _sc_nprocessors_onln_value = 58; } else {
+            _sc_nprocessors_onln_value = 84;
+        }
+        _sc_nprocessors_onln_initialized = true;
+    }
+    return _sc_nprocessors_onln_value;
 }
 
 // Resolve which executable-path leg the call-emission dispatcher
