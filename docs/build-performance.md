@@ -6,6 +6,35 @@
 
 ---
 
+## 0.7.0 baseline (2026-06-22, post C-runtime deletion)
+
+First per-module compile baseline since the C runtime was deleted and the
+runtime became pure Sailfin. Captured with `make bench` (all 166
+`compiler/src` modules, isolated `emit llvm` per module, Darwin arm64, compiler
+`sfn 0.7.0-alpha.47+dev.64ed8a6d`). Raw CSV:
+`docs/baselines/compile-0.7.0-darwin-arm64.csv`.
+
+| Metric (per-module emit, isolated) | 0.7.0-alpha.47 (Darwin arm64) |
+| --- | --- |
+| Modules | 166 (all `ok`, within budget) |
+| Slowest module | `cli_commands` 22.30s |
+| Next slowest | `cli_main` 19.76s, `llvm__expression_lowering__native__core` 16.71s |
+| Peak RSS (heaviest) | **4389 MB** (`llvm__expression_lowering__native__core`) |
+| Sum of isolated per-module emits | 566.73s (serial; **not** the parallel build wall) |
+
+Note: these are *isolated per-module* emit timings (each module emitted alone
+against `build/native/import-context`), directly comparable to the per-module
+rows below but **not** to the full parallel build wall-time. Peak RSS of
+~4.4 GB on a single module is under the 8 GiB self-cap but is the standout
+regression candidate to watch (the heaviest emitters are the
+`llvm/expression_lowering/native/core*` family and the two CLI modules).
+
+**Runtime execution perf** — the dimension the C-deletion most affects — is now
+tracked separately in **`docs/runtime-performance.md`** with its own
+`make bench-runtime` harness and 0.7.0 baseline.
+
+---
+
 ## Symptom Summary
 
 | Metric                          | April 11            | April 19              | April 24 (0.5.9)          | April 25 AM (post Phase 6) | **Current (April 25 PM, post lowering_core split)** | Target           |

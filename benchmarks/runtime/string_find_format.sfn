@@ -1,0 +1,30 @@
+// benchmarks/runtime/string_find_format.sfn
+//
+// Runtime-execution benchmark: string scan + integer formatting.
+//
+// Each iteration scans a medium-length string for a character (a byte
+// scan via the prelude `find_char`) and formats an integer into a string
+// (`int as string` concatenated with a prefix). Stresses the string scan
+// path and the integer-to-string conversion in `runtime/sfn/string.sfn`.
+//
+// Fixed work: ITERATIONS is a compile-time constant.
+fn main() ![io, clock] {
+    let iterations = 220000;
+    let haystack = "the quick brown fox jumps over the lazy dog while the sun sets slowly over the hills";
+    let start = monotonic_millis();
+    let mut found = 0;
+    let mut acc = 0;
+    let mut i = 0;
+    loop {
+        if i >= iterations { break; }
+        let idx = find_char(haystack, "z", 0);
+        if idx >= 0 { found = found + 1; }
+        let formatted = "n=" + (i as string);
+        acc = acc + formatted.length;
+        i = i + 1;
+    }
+    let end = monotonic_millis();
+    if found < 0 || acc < 0 { return; }
+    let dur = end - start;
+    print("RESULT string_find_format {{dur}} {{iterations}}");
+}

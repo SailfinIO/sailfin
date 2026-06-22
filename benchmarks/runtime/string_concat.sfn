@@ -1,0 +1,41 @@
+// benchmarks/runtime/string_concat.sfn
+//
+// Runtime-execution benchmark: string concatenation and append.
+//
+// Two phases: (1) build one large string by repeatedly appending a chunk
+// (bounded so the quadratic append cost stays in the target window), and
+// (2) perform many independent short concats. Stresses the string concat
+// path in `runtime/sfn/string.sfn`.
+//
+// Fixed work: APPENDS and CONCATS are compile-time constants. The reported
+// ops count is APPENDS + CONCATS.
+fn main() ![io, clock] {
+    let appends = 5000;
+    let concats = 2000000;
+    let start = monotonic_millis();
+
+    // Phase 1: build a large string via repeated append.
+    let mut big = "";
+    let mut i = 0;
+    loop {
+        if i >= appends { break; }
+        big = big + "abcdefgh";
+        i = i + 1;
+    }
+
+    // Phase 2: many independent short concats.
+    let mut sink = 0;
+    let mut j = 0;
+    loop {
+        if j >= concats { break; }
+        let piece = "item-" + "value";
+        sink = sink + piece.length;
+        j = j + 1;
+    }
+
+    let end = monotonic_millis();
+    if sink < 0 || big.length < 0 { return; }
+    let dur = end - start;
+    let ops = appends + concats;
+    print("RESULT string_concat {{dur}} {{ops}}");
+}

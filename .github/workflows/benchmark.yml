@@ -1,0 +1,183 @@
+name: Benchmark
+
+# Manually-triggered benchmarking run. Builds the compiler from the pinned
+# seed, then runs the compile-perf bench (`make bench` → scripts/bench_compile.sh,
+# per-module emit time + peak RSS) and/or the runtime-execution bench
+# (`make bench-runtime` → scripts/bench_runtime.sh, compiled-program run time +
+# peak RSS), uploading the CSVs as artifacts.
+#
+# Use this to capture a fresh baseline (e.g. the Linux x86_64 runtime baseline
+# that the macOS dev host cannot produce — runtime wall/RSS are not
+# cross-platform comparable; see docs/runtime-performance.md). The setup mirrors
+# nightly-selfhost.yml; the pinned seed lives in `.seed-version`.
+#
+# NOTE: workflow_dispatch workflows are only triggerable once the file exists on
+# the default branch (main). Merge it before expecting it in the Actions UI /
+# `gh workflow run benchmark.yml`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed_version:
+        description: "Seed version (blank defaults to `.seed-version` from checkout)"
+        required: false
+        default: ""
+      suite:
+        description: "Which benchmark(s) to run"
+        required: false
+        default: "both"
+        type: choice
+        options:
+          - both
+          - compile
+          - runtime
+      top:
+        description: "Show the N slowest entries (--top)"
+        required: false
+        default: "20"
+      iterations:
+        description: "Timed runs per runtime workload (--iterations)"
+        required: false
+        default: "5"
+      build_jobs:
+        description: "Parallel module builds (BUILD_JOBS). Empty = Makefile auto-detect."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bench:
+    name: benchmark [${{ matrix.package_label }}]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            package_label: linux-x86_64
+            clang: clang-18
+          - os: macos-26
+            package_label: macos-arm64
+            clang: clang
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.0
+
+      - name: Resolve seed version (input override → .seed-version)
+        id: seed
+        shell: bash
+        env:
+          INPUT_SEED_VERSION: ${{ inputs.seed_version }}
+        run: |
+          set -euo pipefail
+          override="$(printf '%s' "$INPUT_SEED_VERSION" | tr -d '[:space:]')"
+          if [ -n "$override" ]; then
+            echo "[seed-pin] using seed $override (workflow_dispatch input override)"
+            pin="$override"
+          else
+            if [ ! -f .seed-version ]; then
+              echo "[seed-pin] .seed-version is missing from checkout" >&2
+              exit 1
+            fi
+            pin="$(tr -d '[:space:]' < .seed-version)"
+            if [ -z "$pin" ]; then
+              echo "[seed-pin] .seed-version is empty" >&2
+              exit 1
+            fi
+            echo "[seed-pin] using seed $pin from .seed-version"
+          fi
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install clang + GNU time (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          # `time` provides /usr/bin/time -v for peak-RSS measurement (distinct
+          # from the bash `time` builtin, which the bench scripts cannot read).
+          sudo apt-get install -y clang-18 llvm-18 jq time
+
+      - name: Install jq + LLVM tools + GNU time (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # gnu-time provides `gtime`, which the bench scripts detect for RSS
+          # (BSD /usr/bin/time has no -v).
+          brew install jq llvm gnu-time
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch released seed compiler
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
+        run: |
+          set -euo pipefail
+          echo "[bench] seed version: $SEED_VERSION"
+          make fetch-seed SEED_VERSION="$SEED_VERSION"
+          build/seed/bin/sailfin version
+
+      - name: Build native compiler (selfhost from released seed)
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLANG: ${{ matrix.clang }}
+        run: |
+          set -euo pipefail
+          # `make rebuild` forces a clean self-host so the bench measures this
+          # commit's compiler, not a cached one. It produces both
+          # build/native/sailfin and build/native/import-context (both required
+          # by the bench scripts).
+          if [ -n "${{ inputs.build_jobs }}" ]; then
+            make rebuild CLANG="${{ inputs.clang }}" SEED_NATIVE="build/seed/bin/sailfin" BUILD_JOBS="${{ inputs.build_jobs }}"
+          else
+            make rebuild CLANG="${{ inputs.clang }}" SEED_NATIVE="build/seed/bin/sailfin"
+          fi
+          build/native/sailfin version
+
+      - name: Prepare output dir
+        shell: bash
+        run: mkdir -p bench-out
+
+      - name: Compile-perf benchmark (make bench)
+        if: ${{ inputs.suite == 'both' || inputs.suite == 'compile' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          make bench BENCH_ARGS="--csv bench-out/compile-${{ matrix.package_label }}.csv --top ${{ inputs.top }}"
+
+      - name: Runtime-execution benchmark (make bench-runtime)
+        if: ${{ inputs.suite == 'both' || inputs.suite == 'runtime' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          make bench-runtime BENCH_RUNTIME_ARGS="--csv bench-out/runtime-${{ matrix.package_label }}.csv --top ${{ inputs.top }} --iterations ${{ inputs.iterations }}"
+
+      - name: Summarize CSVs in run log
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          echo "## Benchmark results — ${{ matrix.package_label }}" >> "$GITHUB_STEP_SUMMARY"
+          for f in bench-out/*.csv; do
+            [ -s "$f" ] || continue
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### $(basename "$f")" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat "$f" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Upload benchmark CSVs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ matrix.package_label }}
+          path: bench-out/*.csv
+          if-no-files-found: warn

@@ -1,0 +1,39 @@
+// benchmarks/runtime/arena_reset_churn.sfn
+//
+// Runtime-execution benchmark: arena page reuse across allocation bursts.
+//
+// Each round allocates a burst of elements into a fresh array that then
+// goes out of scope, so successive rounds re-walk and re-use the page
+// chain rather than growing it without bound. Stresses the page-reuse
+// path in `runtime/sfn/memory/arena.sfn` (the chain stays intact across
+// resets so the next burst reuses pages).
+//
+// Fixed work: ROUNDS x BURST is a compile-time constant.
+fn alloc_burst(n: int) -> int {
+    let mut arr: int[] = [];
+    let mut i = 0;
+    loop {
+        if i >= n { break; }
+        arr.push(i);
+        i = i + 1;
+    }
+    return arr.length;
+}
+
+fn main() ![io, clock] {
+    let rounds = 12000;
+    let burst = 5000;
+    let start = monotonic_millis();
+    let mut total = 0;
+    let mut round = 0;
+    loop {
+        if round >= rounds { break; }
+        total = total + alloc_burst(burst);
+        round = round + 1;
+    }
+    let end = monotonic_millis();
+    if total < 0 { return; }
+    let dur = end - start;
+    let ops = rounds * burst;
+    print("RESULT arena_reset_churn {{dur}} {{ops}}");
+}

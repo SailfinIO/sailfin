@@ -114,7 +114,7 @@ NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
-.PHONY: help install fetch-seed test test-unit test-integration test-e2e test-capsules compile check check-fast package clean bench test-arena
+.PHONY: help install fetch-seed test test-unit test-integration test-e2e test-capsules compile check check-fast package clean bench bench-runtime test-arena
 
 .PHONY: ci-prepare-test-artifacts ci-package ci-package-installer
 
@@ -192,6 +192,7 @@ help:
 	@echo "  make package        # Build + package native artifacts into dist/"
 	@echo "  make fetch-seed     # Download the latest released seed"
 	@echo "  make bench          # Benchmark per-module compile time and memory"
+	@echo "  make bench-runtime  # Benchmark compiled-program runtime execution"
 	@echo "  make mcp-server     # Build the Sailfin MCP server (tools/mcp-server)"
 	@echo "  make clean          # Remove packaged artifacts (dist/)"
 	@echo ""
@@ -429,6 +430,25 @@ bench:
 		--seed "$(NATIVE_BIN)" \
 		--import-context build/native/import-context \
 		$(BENCH_ARGS)
+
+# Benchmark compiled-program runtime execution (the counterpart to `bench`,
+# which measures compile time). Builds each workload under
+# benchmarks/runtime/ once, then times the binary's hot loop.
+# Usage:
+#   make bench-runtime                                           # all workloads
+#   make bench-runtime BENCH_RUNTIME_ARGS="--iterations 10"      # 10 timed runs each
+#   make bench-runtime BENCH_RUNTIME_ARGS="--workload arena_alloc"
+#   make bench-runtime BENCH_RUNTIME_ARGS="--csv build/runtime.csv"
+#   make bench-runtime BENCH_RUNTIME_ARGS="--budget-time 1000 --budget-mem 1048576"
+BENCH_RUNTIME_ARGS ?=
+bench-runtime:
+	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+		echo "[bench-runtime] missing $(NATIVE_BIN); run 'make compile' first"; \
+		exit 1; \
+	fi
+	@bash scripts/bench_runtime.sh \
+		--seed "$(NATIVE_BIN)" \
+		$(BENCH_RUNTIME_ARGS)
 
 # =============================================================================
 # Arena correctness gate (Phase 0 / M0.5 prerequisite)
