@@ -1,0 +1,130 @@
+// compiler/src/cli/commands/login.sfn
+//
+// `login` subcommand (CLI modularization epic #351, Issue 3.2 — proposal
+// §5 Phase 3 item 2, §7). Migrates `sfn login` off the legacy
+// `cli_commands` handler onto the per-command `command_def()`/`run()`
+// pattern established by Issue 2.4 (`version`) and exercised by Issues 3.1
+// (`init`) / 3.3 (`guillermo`).
+//
+// `login` takes a single optional positional `[token]`. When present it is
+// the registry token; when absent, `run` prompts and reads the token from
+// stdin exactly as the legacy handler did. The credential store
+// (`~/.sfn/credentials`), the `chmod 700/600` handling, the write-back
+// verification, and every exit code / message are reproduced byte-for-byte:
+//   - 0 — credentials written and verified.
+//   - 1 — empty token, no home directory, or a failed write.
+// The usage error (2) for extra positionals is enforced by the v2 dispatch
+// in `cli/main.sfn`: a second positional makes the parse non-ok while
+// marking `login` as descended, and the dispatch returns 2 there — the
+// parser owns argument validation, matching the legacy `args.length > 2`
+// guard.
+//
+// `get(matches, "token")` returns the Arg's `default_value` when the
+// positional is absent and "" when it is present-but-empty (`sfn login ""`);
+// the parser records both as a single "token" positional and cannot
+// otherwise tell them apart. The legacy handler split on `args.length`
+// (absent → prompt; any supplied token, even "", → use it directly), so the
+// default is a sentinel no shell-passed argv token can match: a truly absent
+// token routes to the interactive stdin prompt, while an explicit empty
+// token falls through to the "empty token" error WITHOUT reading stdin.
+// (Reading stdin on `sfn login ""` would also hang the parallel test pool,
+// whose pooled children do not see stdin EOF.)
+//
+// Exit codes are integer literals, not the `sfn/cli` `EXIT_*` constants:
+// those are module-level `let` constants with no cross-capsule import value
+// path today (see the `init.sfn` note), so they lower to 0 in the importing
+// module — `login` needs 1, so it uses literals to return it correctly.
+import {
+    get,
+    Command,
+    Matches,
+    command,
+    with_arg,
+    arg_optional
+} from "sfn/cli";
+
+import { CliContext } from "../context";
+import {
+    _get_home_cmd,
+    _toml_trim_cmd,
+    _shell_read_cmd,
+    _ensure_dir_recursive_cmd
+} from "../../cli_commands_utils";
+
+// Sentinel `default_value` for the optional `[token]` positional, returned
+// by `get(matches, "token")` only when no token was supplied on the command
+// line. The control-char wrapping makes it unmatchable by any real argv
+// token, so `run` can tell an absent token (→ prompt) from an explicit empty
+// one (`sfn login ""` → "empty token" error). A function (not a top-level
+// `let`) so the literal is read through a definite value path in both the
+// builder and `run` (see the `init.sfn` note on module-level constants).
+fn _token_absent_sentinel() -> string {
+    return "\t\t__sfn_login_token_absent__\t\t";
+}
+
+// The `sfn/cli` definition for `login`, registered on the v2 root via
+// `with_subcommand`. A single optional `[token]` positional; no flags.
+fn command_def() -> Command {
+    return with_arg(command("login", "Save a registry token to ~/.sfn/credentials"), arg_optional("token", "Registry token (read from stdin when omitted)", _token_absent_sentinel()));
+}
+
+// Save a registry token to `~/.sfn/credentials`. With a `token` positional
+// the value is used directly; without one, prompt and read a single line
+// from stdin. `ctx` is part of the per-command contract but unused here.
+// Byte-identical to the legacy `login` command-handler body.
+fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let token_arg = get(matches, "token");
+    let mut token: string = "";
+    if !strings_equal(token_arg, _token_absent_sentinel()) {
+        // A token was supplied on the command line (possibly empty) — use it
+        // directly, exactly as the legacy `args.length == 2` branch did.
+        token = _toml_trim_cmd(token_arg);
+    } else {
+        print("enter your registry token:");
+        let tmp = _shell_read_cmd("mktemp /tmp/.sfn_login_XXXXXX");
+        if tmp.length == 0 {
+            print("error: failed to create secure temp file");
+            return 1;
+        }
+        let read_rc = process.run(["sh", "-c", "head -1 > " + tmp]);
+        if read_rc != 0 {
+            process.run(["rm", "-f", tmp]);
+            print("error: failed to read token");
+            return 1;
+        }
+        if fs.exists(tmp) { token = _toml_trim_cmd(fs.readFile(tmp)); }
+        process.run(["rm", "-f", tmp]);
+    }
+
+    if token.length == 0 {
+        print("error: empty token");
+        return 1;
+    }
+
+    let home = _get_home_cmd();
+    if home.length == 0 {
+        print("could not determine home directory");
+        return 1;
+    }
+
+    let sfn_dir = home + "/.sfn";
+    _ensure_dir_recursive_cmd(sfn_dir);
+    process.run(["chmod", "700", sfn_dir]);
+
+    let cred_path = sfn_dir + "/credentials";
+    fs.writeFile(cred_path, token);
+    process.run(["chmod", "600", cred_path]);
+
+    if !fs.exists(cred_path) {
+        print("error: failed to write credentials to " + cred_path);
+        return 1;
+    }
+    let saved = fs.readFile(cred_path);
+    if !strings_equal(_toml_trim_cmd(saved), token) {
+        print("error: failed to write credentials to " + cred_path);
+        return 1;
+    }
+
+    print("credentials saved to " + cred_path);
+    return 0;
+}
