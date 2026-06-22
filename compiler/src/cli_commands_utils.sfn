@@ -144,9 +144,18 @@ fn _shell_read_cmd(cmd: string) -> string ![io] {
     return _toml_trim_cmd(captured);
 }
 
-fn _get_env_cmd(name: string) -> string ![io] {
-    return _shell_read_cmd("printf '%s' \"$" + name + "\"");
-}
+// Read an environment variable via the native `env.get` builtin. The
+// prior implementation shelled out to `printf '%s' "$VAR"` — a POSIX-only
+// construct that the Windows shell (`cmd.exe`) cannot honor (`$VAR` is not
+// expanded and there is no `printf`), so every env read returned a wrong
+// value on the native Windows binary. The most visible symptom was
+// `SAILFIN_TRACE_ARGV` reading as *set* even when unset, spewing
+// `cli: argv...` trace noise on every invocation; the same breakage
+// corrupted `SAILFIN_NO_LEGACY_PROBE`, `SAILFIN_LINKER`, `HOME`, and every
+// other flag routed through this helper (#1483). `env.get` is the same
+// builtin `_resolve_sailfin_cache_dir_for_work` (cli_main.sfn) already
+// uses; it returns "" for an unset variable on every platform.
+fn _get_env_cmd(name: string) -> string ![io] { return env.get(name); }
 
 fn _get_home_cmd() -> string ![io] { return _get_env_cmd("HOME"); }
 

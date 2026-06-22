@@ -626,8 +626,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     diagnostics = extend_string_lines_checked(diagnostics, safe_parse_diagnostics, "parse");
 
     // ── Trace/timing setup ──────────────────────────────────────────
+    // Per-phase timing prints are gated on the trace flag
+    // (`SAILFIN_TRACE_TEST_RUNNER`), not merely on being in a test run, so
+    // an ordinary `sfn test` / `make test` stays quiet. Set the trace env
+    // to surface the `test llvm: phase=…` breakdown.
     let trace = test_runner_trace();
-    let timing = test_runner_active();
+    let timing = test_runner_trace();
     let start_ms = monotonic_millis();
 
     if trace {

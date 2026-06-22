@@ -187,7 +187,7 @@ bench_module() {
     peak_kb="${peak_kb:-0}"
 
     if [[ -f "$abs_out_ll" ]] && [[ -s "$abs_out_ll" ]]; then
-        ll_lines="$(wc -l < "$abs_out_ll")"
+        ll_lines="$(wc -l < "$abs_out_ll" | tr -d ' ')"
     else
         status="FAIL"
     fi
@@ -253,7 +253,9 @@ while IFS='|' read -r name t m lines s; do
 
     total_time=$(awk "BEGIN { printf \"%.2f\", $total_time + $t }")
 
-    if [[ "$t_int" -gt "${max_time%.*}" ]]; then
+    # Float-aware comparison: per-module times are now routinely sub-second,
+    # so an integer-truncated `-gt` would never update the slowest module.
+    if awk "BEGIN { exit !(($t) > ($max_time)) }"; then
         max_time="$t"
         max_time_mod="$name"
     fi

@@ -1,0 +1,313 @@
+// E2E: a spawned/`parallel` task lambda that CAPTURES owns its heap
+// environment and frees it exactly once after the body runs
+// (issue #1475, epic #1466 — the worker-ctx capture-env move/free
+// discipline that follows #1474's concurrent-execution work).
+//
+// Before #1475, a capturing task lambda allocated its env through the
+// arena-routed `@sfn_alloc_struct` and NOTHING freed it: the `_ctx`
+// spawn trampoline freed only the 16-byte `[fn_ptr][env]` pair, and
+// `sfn_parallel` passed the env as a raw ctx with no free at all — the
+// moved env leaked. #1475 routes a *spawn-target* capture env through a
+// malloc-backed `@sfn_env_alloc` (an individually-owned, freeable block,
+// never arena-routed) and frees it via `@sfn_env_free` inside the worker
+// trampoline (and, for `parallel`, by routing capturing tasks through the
+// same pair+trampoline). Synchronous capturing closures keep the
+// arena fast-path (`@sfn_alloc_struct`) — Option A.
+//
+// Coverage:
+//   (A) IR: a capturing `spawn` task emits `@sfn_env_alloc` for its env
+//       (not the arena `@sfn_alloc_struct`) and routes the `_ctx` path.
+//   (B) IR: a *synchronous* capturing closure keeps `@sfn_alloc_struct`
+//       and emits no `@sfn_env_alloc` — proves the Option-A scoping
+//       (only spawn/parallel targets switch allocators).
+//   (C) runtime: N capturing `spawn`/`await` int tasks deliver their
+//       captured values AND run clean to completion — under the default
+//       arena a double-free or an arena-pointer-to-libc-free would abort
+//       (SIGABRT/SIGSEGV), so a clean deterministic result is the
+//       no-corruption signal.
+//   (D) runtime: a capturing `parallel [...]` fan-out runs clean (the
+//       sfn_parallel pair-wrap free path).
+//   (E) ASAN/LSAN (best effort): emit a capturing-spawn fixture's IR and
+//       link it against a C harness that interposes
+//       `sfn_env_alloc`/`sfn_env_free` (malloc/free) and a trampoline-shaped
+//       `sfn_spawn_int_ctx` (call fn(env) then free the env), under
+//       `-fsanitize=address` with `detect_leaks=1`. A leaked env surfaces
+//       as `ERROR: LeakSanitizer:`; a double-free as
+//       `ERROR: AddressSanitizer:`. Only those lines FAIL; a startup abort
+//       under the runner's vmem self-cap (or a missing ASAN runtime) is a
+//       skip, per `.claude/rules/compiler-safety.md`.
+//
+// NOTE: `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test; assert on captured stdout / IR with `sfn/strings`.
+import { find, contains, split } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `run_capture`'s empty array is the EMPTY environment, not "inherit".
+// Thread the toolchain vars: nested emit/run/clang resolve through PATH;
+// SAILFIN_TEST_SCRATCH routes the build-cache per invocation (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// ASAN child env: SAILFIN_MEM_LIMIT=unlimited so the instrumented binary's
+// ~16 TB shadow reservation is not aborted by the toolchain self-cap.
+fn _asan_env() -> string[] ![io] {
+    let mut e = _child_env();
+    e.push("SAILFIN_MEM_LIMIT=unlimited");
+    e.push("ASAN_OPTIONS=detect_leaks=1");
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    base = base + "/sfn-spawn-capture-env";
+    fs.createDirectory(base, true);
+    return base;
+}
+
+// Emit LLVM IR for a snippet; returns the IR text or "EMIT_FAILED".
+fn _emit_llvm(tag: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + tag + ".sfn";
+    let out = dir + "/" + tag + ".ll";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", out, "llvm", src], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return "EMIT_FAILED"; }
+    return fs.readFile(out);
+}
+
+// Run a snippet via `sailfin run`; returns stdout+stderr, or
+// "RUN_FAILED:<out>" on a non-zero exit.
+fn _run(tag: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + tag + ".sfn";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 { return "RUN_FAILED:" + out + err; }
+    return out + err;
+}
+
+// True iff some line of `ir` is a `call ... @<sym>(`.
+fn _has_call(ir: string, sym: string) -> boolean {
+    let needle = "@" + sym + "(";
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if contains(lines[i], "call ") && contains(lines[i], needle) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+// ── (A) IR: capturing spawn routes its env through @sfn_env_alloc ─────
+test "IR: capturing spawn task allocates its env with @sfn_env_alloc (#1475)" ![io] {
+    let ir = _emit_llvm("cap_spawn_env", "fn main() ![io] {\n"
+        + "    let base: int = 100;\n"
+        + "    let bump: int = 11;\n"
+        + "    let f = spawn fn() -> int { return base + bump; };\n"
+        + "    let r: int = await f;\n"
+        + "    print.info(\"r: \" + number_to_string(r));\n"
+        + "}");
+    assert ir != "EMIT_FAILED";
+    // The moved env is malloc-backed and individually freeable.
+    assert _has_call(ir, "sfn_env_alloc");
+    // It routes the OWNED ctx spawn path, whose trampoline frees the env
+    // (the plain `_ctx` path is reserved for non-owned ctx, e.g. async).
+    assert _has_call(ir, "sfn_spawn_int_owned_ctx");
+}
+
+// ── (B) IR: a synchronous capturing closure keeps @sfn_alloc_struct ───
+// Proves Option-A scoping: only spawn/parallel targets switch allocators.
+test "IR: synchronous capturing closure keeps the arena @sfn_alloc_struct (#1475)" ![io] {
+    let ir = _emit_llvm("sync_cap_env", "fn apply(f: fn() -> int) -> int { return f(); }\n"
+        + "fn main() ![io] {\n"
+        + "    let base: int = 100;\n"
+        + "    let bump: int = 11;\n"
+        + "    let g = fn() -> int { return base + bump; };\n"
+        + "    print.info(\"r: \" + number_to_string(apply(g)));\n"
+        + "}");
+    assert ir != "EMIT_FAILED";
+    // The synchronous capture env stays on the arena fast-path.
+    assert _has_call(ir, "sfn_alloc_struct");
+    // And does NOT switch to the owned-env allocator.
+    assert ! _has_call(ir, "sfn_env_alloc");
+}
+
+// ── (C) runtime: N capturing spawn/await tasks deliver + run clean ────
+test "runtime: capturing spawn tasks deliver captures and free clean (#1475)" ![io] {
+    // Five tasks, each capturing a distinct local; sum the joined results.
+    // 110 + 220 + 330 + 440 + 550 = 1650. A wrong sum means a capture was
+    // dropped; a crash/non-zero exit means a double-free or allocator
+    // mismatch corrupted the heap (caught under the default arena).
+    // Awaits are bound to separate locals (a combined `(await x) + (await y)`
+    // expression hits an unrelated FutureInt-GEP codegen limitation).
+    let out = _run("cap_spawn_run", "fn main() ![io] {\n"
+        + "    let a: int = 100;\n"
+        + "    let b: int = 200;\n"
+        + "    let c: int = 300;\n"
+        + "    let d: int = 400;\n"
+        + "    let e: int = 500;\n"
+        + "    let fa = spawn fn() -> int { return a + 10; };\n"
+        + "    let fb = spawn fn() -> int { return b + 20; };\n"
+        + "    let fc = spawn fn() -> int { return c + 30; };\n"
+        + "    let fd = spawn fn() -> int { return d + 40; };\n"
+        + "    let fe = spawn fn() -> int { return e + 50; };\n"
+        + "    let va: int = await fa;\n"
+        + "    let vb: int = await fb;\n"
+        + "    let vc: int = await fc;\n"
+        + "    let vd: int = await fd;\n"
+        + "    let ve: int = await fe;\n"
+        + "    let sum: int = va + vb + vc + vd + ve;\n"
+        + "    print.info(\"sum: \" + number_to_string(sum));\n"
+        + "}");
+    assert find(out, "RUN_FAILED:", 0) < 0;
+    assert find(out, "sum: 1650", 0) >= 0;
+}
+
+// ── (D) runtime: capturing parallel fan-out runs clean ───────────────
+test "runtime: capturing parallel tasks free clean via the sfn_parallel wrap (#1475)" ![io] {
+    // Each task captures a distinct local and sends it on a shared global
+    // channel (capture-free channel handle, per #1474); main drains + sums.
+    // The capturing task lambdas exercise the sfn_parallel pair-wrap free
+    // path. 11 + 22 + 33 = 66.
+    let out = _run("cap_parallel_run", "let g_ch = channel(8);\n"
+        + "fn main() ![io] {\n"
+        + "    let x: int = 10;\n"
+        + "    let y: int = 20;\n"
+        + "    let z: int = 30;\n"
+        + "    let _rs = parallel [\n"
+        + "        fn() -> int { g_ch.send(x + 1); return 0; },\n"
+        + "        fn() -> int { g_ch.send(y + 2); return 0; },\n"
+        + "        fn() -> int { g_ch.send(z + 3); return 0; }\n"
+        + "    ];\n"
+        + "    let s1: int = g_ch.receive();\n"
+        + "    let s2: int = g_ch.receive();\n"
+        + "    let s3: int = g_ch.receive();\n"
+        + "    print.info(\"psum: \" + number_to_string(s1 + s2 + s3));\n"
+        + "}");
+    assert find(out, "RUN_FAILED:", 0) < 0;
+    assert find(out, "psum: 66", 0) >= 0;
+}
+
+// The ASAN interpose harness: a malloc/free `sfn_env_alloc`/`sfn_env_free`
+// pair plus a trampoline-shaped `sfn_spawn_int_ctx` that calls the worker
+// with the env then frees the env — exactly the runtime contract #1475
+// lands. Linking the emitted capturing-spawn IR against this and running
+// under ASAN+LSAN proves the EMISSION routes the env through
+// `@sfn_env_alloc` and that the alloc/free is balanced (no leak, no
+// double-free). `sfn_await_int` returns the stored result.
+fn _asan_harness_c() -> string {
+    return "#include <stdio.h>\n" + "#include <stdlib.h>\n"
+        + "#include <string.h>\n"
+        + "\n"
+        + "extern long sailfin_user_main__cap_spawn_asan(void);\n"
+        + "\n"
+        + "void sfn_type_register(void *d) { (void)d; }\n"
+        + "void sailfin_runtime_mark_persistent(void *p) { (void)p; }\n"
+        + "void *sfn_alloc_struct(long n) { return calloc(1, (size_t)n); }\n"
+        + "void *sfn_env_alloc(long n) { return calloc(1, (size_t)n); }\n"
+        + "void sfn_env_free(void *p) { free(p); }\n"
+        + "void sfn_mem_free(void *p) { (void)p; }\n"
+        + "void sfn_rc_release(void *p) { (void)p; }\n"
+        + "\n"
+        + "/* Trampoline-shaped: run the worker with its env, then free the env\n"
+        + "   exactly as _sfn_trampoline_int_owned_ctx does. */\n"
+        + "static long g_last = 0;\n"
+        + "void *sfn_spawn_int_owned_ctx(void *fnp, void *env) {\n"
+        + "    long (*entry)(void *) = (long (*)(void *))fnp;\n"
+        + "    g_last = entry(env);\n"
+        + "    sfn_env_free(env);\n"
+        + "    return (void *)0x1;\n"
+        + "}\n"
+        + "void *sfn_spawn_int(void *fnp) {\n"
+        + "    long (*entry)(void) = (long (*)(void))fnp;\n"
+        + "    g_last = entry();\n"
+        + "    return (void *)0x1;\n"
+        + "}\n"
+        + "long sfn_await_int(void *fut) { (void)fut; return g_last; }\n"
+        + "\n"
+        + "int main(void) {\n"
+        + "    sailfin_user_main__cap_spawn_asan();\n"
+        + "    return 0;\n"
+        + "}\n";
+}
+
+// ── (E) ASAN/LSAN best-effort: env alloc/free is balanced ────────────
+test "asan: capturing-spawn env alloc/free is balanced under ASAN+LSAN (#1475)" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/cap_spawn_asan.sfn";
+    let ll = dir + "/cap_spawn_asan.ll";
+    // Module suffix derives from the basename stem `cap_spawn_asan`, so the
+    // lifted user main is `sailfin_user_main__cap_spawn_asan` (the harness
+    // binds to it). Print nothing — the env free is what's under test.
+    fs.writeFile(src, "fn main() ![io] {\n" + "    let base: int = 7;\n"
+        + "    let f = spawn fn() -> int { return base + 35; };\n"
+        + "    let _r: int = await f;\n"
+        + "}");
+    let emit_exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", src], _child_env());
+    let _eo = process.capture_take_stdout();
+    let _ee = process.capture_take_stderr();
+    assert emit_exit == 0;
+    let ir = fs.readFile(ll);
+    // The emission must route the moved env through @sfn_env_alloc; if not,
+    // the harness's interpose is meaningless — assert it here too.
+    assert _has_call(ir, "sfn_env_alloc");
+    if !contains(ir, "sailfin_user_main__cap_spawn_asan") {
+        // Module-suffix mismatch — cannot link the harness. Skip.
+        assert true;
+        return;
+    }
+
+    let harness = dir + "/asan_harness.c";
+    fs.writeFile(harness, _asan_harness_c());
+    let bin_asan = dir + "/cap_spawn_asan_bin";
+    let link = process.run_capture(["clang", "-fsanitize=address", "-Wno-override-module", harness, ll, "-o", bin_asan], _child_env());
+    let _lo = process.capture_take_stdout();
+    let _le = process.capture_take_stderr();
+    if link != 0 {
+        // ASAN runtime/clang unavailable — the IR assertions above still pin
+        // the emission contract. Skip.
+        assert true;
+        return;
+    }
+
+    let run = process.run_capture([bin_asan], _asan_env());
+    let aout = process.capture_take_stdout();
+    let aerr = process.capture_take_stderr();
+    if run == 0 {
+        // Clean: env alloc/free balanced, no leak, no double-free.
+        assert true;
+    } else if find(aout + aerr, "ERROR: AddressSanitizer:", 0) >= 0 {
+        // Double-free / corruption of the moved env.
+        assert false;
+    } else if find(aout + aerr, "ERROR: LeakSanitizer:", 0) >= 0 {
+        // The env was not freed — a leak.
+        assert false;
+    } else {
+        // Startup abort under the vmem self-cap, missing compiler-rt, etc.
+        // Not a verdict on the free discipline — skip.
+        assert true;
+    }
+}

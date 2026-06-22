@@ -278,3 +278,49 @@ fn sfn_alloc_struct(size_bytes: i64) -> * u8 {
     }
     return result;
 }
+
+// `sfn_env_alloc(size_bytes)` / `sfn_env_free(ptr)` — the captured-env
+// allocator pair for spawn/parallel task lambdas (#1475, epic #1466).
+//
+// A capturing task lambda's heap environment crosses a thread boundary
+// (moved to the spawned worker, which owns and frees it after the task
+// body runs). Unlike `sfn_alloc_struct`, which is **arena-routed under
+// the shipped default** (`sfn_arena_enabled()` above), this pair is
+// *unconditionally* libc `calloc`/`free` — arena bulk-reclaim has no
+// per-object free and no cross-thread ownership story, and handing an
+// arena pointer to libc `free` corrupts glibc chunk metadata (the
+// #1205-class landmine `sfn_mem_free`'s arena guard exists to avoid).
+// Allocating the env outside the arena makes it an individually-owned,
+// freeable block whose alloc/free are symmetric regardless of arena mode.
+//
+// `sfn_env_alloc` mirrors `sfn_alloc_struct`'s `size_bytes <= 0` → NULL
+// guard and OOM-abort discipline (reusing the shared `_sfn_alloc_oom_active`
+// re-entrancy flag — the OOM message itself lowers to `sfn_alloc_struct`).
+// `sfn_env_free` is a null-safe libc `free` with **no arena gate** (the
+// block is never arena-routed, so the gate would be wrong here).
+fn sfn_env_alloc(size_bytes: i64) -> * u8 {
+    if size_bytes <= 0 { return 0 as * u8; }
+    // Raw allocation (#1218 / E9, proposal §5.1): the libc `calloc` is the
+    // author-asserted unsafe region. The block is freshly allocated and
+    // uniquely owned; `calloc` zero-fills for free.
+    let mut result: * u8 = 0 as * u8;
+    unsafe { result = calloc(1 as usize, size_bytes as usize); }
+    if result as i64 == 0 {
+        // #1405 Bug 1 discipline: break the OOM-message recursion cycle.
+        if _sfn_alloc_oom_active != 0 { abort(); }
+        _sfn_alloc_oom_active = 1;
+        let msg: * u8 = "[sailfin-oom] sfn_env_alloc allocation failed\n" as * u8;
+        write(2, msg, 46 as usize);
+        abort();
+    }
+    return result;
+}
+
+fn sfn_env_free(ptr: * u8) -> void {
+    if ptr as i64 == 0 { return; }
+    // Raw disposal (#1218 / E9, proposal §5.1): the libc `free` is the
+    // author-asserted unsafe region. The null guard above and the
+    // calloc-only allocation in `sfn_env_alloc` guarantee a uniquely-owned,
+    // non-arena block reaches libc `free`.
+    unsafe { free(ptr); }
+}

@@ -143,9 +143,18 @@ fn closure_pair_marker(lambda_id: int, env_var: string) -> string {
 // `captures_text` is the encoded `name:type,name:type,...` list
 // produced by `_encode_captures` — the LLVM-side dispatcher rebuilds
 // the `Capture[]` from it before invoking the A2 env helpers.
-fn closure_pair_env_alloc_marker(lambda_id: int, captures_text: string) -> string {
+// `owned_env` (true for spawn/parallel task lambdas, #1475) tags the
+// marker so the lowering routes the env alloc through `@sfn_env_alloc`
+// (a malloc-backed, individually-freeable block the spawned worker owns
+// and frees) instead of the arena-routed `@sfn_alloc_struct`. Synchronous
+// capturing lambdas pass false and keep the arena fast-path (status quo).
+fn closure_pair_env_alloc_marker(lambda_id: int, captures_text: string, owned_env: boolean) -> string {
+    let mut owned_tag: string = "";
+    if owned_env { owned_tag = "owned_env "; }
     return "<closure_pair @sfn_lambda_" + number_to_string(lambda_id)
-        + " env_alloc lambda_id="
+        + " env_alloc "
+        + owned_tag
+        + "lambda_id="
         + number_to_string(lambda_id)
         + " captures="
         + captures_text
@@ -411,7 +420,7 @@ fn _rewrite_block(ctx: LiftContext, block: Block) -> _BlockRewriteResult {
 // program.
 fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRewriteResult {
     if expression.variant == "Lambda" {
-        return _rewrite_lambda(ctx, expression);
+        return _rewrite_lambda(ctx, expression, false);
     }
     if expression.variant == "Unary" {
         let inner = _rewrite_expression(ctx, expression.operand);
@@ -556,9 +565,20 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
             }
         };
     }
-    // Lift lambdas nested inside spawn/await operands (#1090).
+    // Lift lambdas nested inside spawn/await operands (#1090). A lambda
+    // operand is a spawn target — its captured env crosses the thread
+    // boundary and the worker frees it (#1475), so lift it with
+    // `owned_env = true` (routes the env to `@sfn_env_alloc`). Non-lambda
+    // operands (e.g. a bare `spawn foo()` fn ref) have no capture env and
+    // take the ordinary rewrite.
     if expression.variant == "Spawn" {
-        let inner = _rewrite_expression(ctx, expression.operand);
+        let mut inner: ExpressionRewriteResult = ExpressionRewriteResult {
+            ctx: ctx,
+            expression: expression.operand
+        };
+        if expression.operand.variant == "Lambda" {
+            inner = _rewrite_lambda(ctx, expression.operand, true);
+        } else { inner = _rewrite_expression(ctx, expression.operand); }
         return ExpressionRewriteResult {
             ctx: inner.ctx,
             expression: Expression.Spawn {
@@ -579,7 +599,18 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
         let mut index: int = 0;
         loop {
             if index >= expression.tasks.length { break; }
-            let task = _rewrite_expression(current_ctx, expression.tasks[index]);
+            // A lambda task is a spawn target (#1475): its env crosses the
+            // thread boundary and the worker frees it, so lift it with
+            // `owned_env = true`. Non-lambda tasks take the ordinary rewrite.
+            let mut task: ExpressionRewriteResult = ExpressionRewriteResult {
+                ctx: current_ctx,
+                expression: expression.tasks[index]
+            };
+            if expression.tasks[index].variant == "Lambda" {
+                task = _rewrite_lambda(current_ctx, expression.tasks[index], true);
+            } else {
+                task = _rewrite_expression(current_ctx, expression.tasks[index]);
+            }
             current_ctx = task.ctx;
             new_tasks.push(task.expression);
             index += 1;
@@ -606,7 +637,7 @@ fn _rewrite_expression(ctx: LiftContext, expression: Expression) -> ExpressionRe
     return ExpressionRewriteResult { ctx: ctx, expression: expression };
 }
 
-fn _rewrite_lambda(ctx: LiftContext, lambda: Expression) -> ExpressionRewriteResult {
+fn _rewrite_lambda(ctx: LiftContext, lambda: Expression, owned_env: boolean) -> ExpressionRewriteResult {
     let record = _find_capture_record(ctx.records, lambda);
     if record == null {
         // No record means `analyze_lambda_captures` did not see this
@@ -655,7 +686,7 @@ fn _rewrite_lambda(ctx: LiftContext, lambda: Expression) -> ExpressionRewriteRes
         lifted: new_lifted,
         records: ctx.records
     };
-    let marker_text = closure_pair_env_alloc_marker(lambda_id, _encode_captures(record.captures));
+    let marker_text = closure_pair_env_alloc_marker(lambda_id, _encode_captures(record.captures), owned_env);
     return ExpressionRewriteResult {
         ctx: new_ctx,
         expression: Expression.Raw { text: marker_text, span: null }

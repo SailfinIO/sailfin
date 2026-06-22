@@ -58,7 +58,6 @@ import {
     handle_fmt_command,
     handle_lock_command,
     handle_test_command,
-    handle_login_command,
     handle_config_command,
     handle_package_command,
     handle_publish_command
@@ -1958,7 +1957,6 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     let is_package = strings_equal(cmd, "package");
     let is_add = strings_equal(cmd, "add");
     let is_lock = strings_equal(cmd, "lock");
-    let is_login = strings_equal(cmd, "login");
     let is_config = strings_equal(cmd, "config");
     let is_fmt = strings_equal(cmd, "fmt");
     let is_check = strings_equal(cmd, "check");
@@ -2790,8 +2788,8 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
 
     if is_lock { return handle_lock_command(args); }
 
-    if is_login { return handle_login_command(args); }
-
+    // `sfn login` migrated to `sfn/cli` (epic #351, Issue 3.2) — handled
+    // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
     if is_config { return handle_config_command(args); }
 
     if is_fmt { return handle_fmt_command(args); }
