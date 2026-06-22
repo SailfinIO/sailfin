@@ -1,0 +1,29 @@
+// Fixture for compiler/tests/e2e/arena_loop_rewind_test.sfn (#1514).
+//
+// Negative case (allocation side-effect of a call): the value pushed is a
+// SCALAR (`cell.a + cell.b`), so the old "is the pushed value an escaping
+// pointer?" framing would wrongly allow the rewind. But `sums.push(...)` grows
+// the ancestor array `sums`, and that growth allocates a fresh backing buffer
+// IN THE ARENA — which the iteration's rewind would free while `sums` still
+// points at it (use-after-free on the next push / post-loop read). The gate
+// must reject any body containing a call, regardless of the argument's type.
+// This is the exact pattern that segfaulted the compiler's own unit suite.
+struct Cell {
+    a: int;
+    b: int;
+    c: int;
+}
+
+fn main() ![io] {
+    let iterations = 1000;
+    let mut sums: int[] = [];
+    let mut i = 0;
+    loop {
+        if i >= iterations { break; }
+        let cell = Cell { a: i, b: i + 1, c: i + 2 };
+        sums.push(cell.a + cell.b);
+        i = i + 1;
+    }
+    if sums.length < 0 { return; }
+    print("done");
+}

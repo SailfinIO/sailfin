@@ -4,15 +4,29 @@
 // lower_instruction_range occupies position 1 in its module -- within
 // the v0.1.1 seed's per-module streaming emission limit.
 import {
+    TypeContext,
     LocalBinding,
     LocalMutation,
     ScopeDropResult,
     GuardedDropResult,
     LifetimeRegionMetadata
 } from "../types";
-import { number_to_string, extend_string_array } from "../utils";
+import {
+    number_to_string,
+    extend_string_array,
+    is_identifier_part_char,
+    is_identifier_start_char
+} from "../utils";
 import { is_scope_descendant } from "../lifetime";
-import { char_code, substring, grapheme_at } from "../../string_utils";
+import {
+    char_at,
+    char_code,
+    substring,
+    grapheme_at
+} from "../../string_utils";
+import { find_struct_info_by_name, find_struct_info_by_llvm_type } from "../type_context_queries";
+import { find_local_binding } from "../expressions_bindings";
+import { is_heap_type } from "../expression_lowering/native/core_type_mapping";
 
 fn clone_local_bindings(values: LocalBinding[]) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];
@@ -171,6 +185,349 @@ fn emit_scope_drops(locals: LocalBinding[], scope_id: string, temp_index: int) -
         lines = extend_string_array(lines, _emit_rc_release_triplet(binding, suffix));
     }
     return ScopeDropResult { lines: lines, next_temp: current_temp };
+}
+
+// ── #1514: arena mark/rewind eligibility for non-escaping loop bodies ──
+//
+// Decide whether a generic `loop { … }` body may be wrapped in an arena
+// `mark` / `rewind` pair so its per-iteration non-escaping arena allocations
+// are reclaimed each iteration (epic #1513). A rewind frees every arena
+// allocation made since the mark, so reclamation is sound ONLY when nothing
+// allocated during an iteration is still reachable after that iteration
+// closes — any surviving pointer into the rewound region becomes a dangling
+// use-after-free on the next iteration.
+//
+// Four escape channels must all be ruled out:
+//
+//   (0) There is at least one body-scope arena heap local to reclaim — else
+//       the pair is pure overhead and we skip it (keeps the IR footprint of
+//       control-only loops unchanged).
+//   (1) No body-scope heap local was promoted out of the arena: escape
+//       promotion flips a local from "arena" to "rc" at `return` / `spawn` /
+//       channel-send boundaries (and marks it `consumed`). Such a value
+//       physically lives in the arena the rewind resets, so its presence
+//       forbids the rewind.
+//   (2) No loop-carried store: no mutation in the body targets a binding that
+//       lives in an ANCESTOR scope of the loop body and is heap-typed
+//       (`let mut last; loop { last = cell; }`). Escape promotion does not
+//       catch this; rewinding would free a value the next iteration reads
+//       back through the ancestor binding.
+//   (3) The body is ALLOCATION-INERT apart from the reclaimed struct lets.
+//       The rewind frees every arena allocation made in the iteration, so the
+//       body may contain no call (`arr.push(x)` grows an ANCESTOR container's
+//       backing in the arena — the canonical use-after-free), no string / array
+//       / char literal, and no field/index store into an ancestor object. Only
+//       struct-literal lets of the all-primitive body locals plus pure scalar
+//       arithmetic / scalar assignments survive — exactly the reclaimable
+//       shape. A whole-pointer escape of a reclaimed local (`return cell`,
+//       `last = cell`) is rejected by the bare-value scan.
+//
+// Conservative by construction: any signal we cannot prove safe suppresses
+// the rewind. Channels (1) and (3) overlap (both catch a bare `return cell`);
+// that redundancy is intentional defence in depth.
+//
+// Resolve `binding`'s struct type and return true only when EVERY field is a
+// scalar (non-heap) value. This is the precondition that makes a `name.field`
+// read provably safe in channel (3): reading a scalar field copies a value
+// out, but reading a heap-typed (pointer) field copies an arena-aliasing
+// pointer that can outlive the iteration (`results.push(cell.inner)`), which a
+// text scan alone cannot distinguish. A local that is not a resolvable struct
+// (string / array / enum / unknown) is conservatively rejected — its members
+// are not provably scalar.
+//
+// The field test is a strict PRIMITIVE-scalar whitelist, not merely
+// `!is_heap_type`: nested struct fields lower INLINE (`%Outer = type { %Inner,
+// i64 }`), so a `%Inner` field is not pointer-suffixed and `is_heap_type`
+// would call it non-heap even though the inline aggregate may itself embed an
+// arena `i8*` (`%Inner = type { i8* }`). Reading such a field copies that
+// embedded pointer out. Restricting to first-class numeric/boolean primitives
+// guarantees a field read produces a genuine by-value scalar.
+fn _is_primitive_scalar_llvm_type(llvm_type: string) -> boolean {
+    if llvm_type == "i1" { return true; }
+    if llvm_type == "i8" { return true; }
+    if llvm_type == "i16" { return true; }
+    if llvm_type == "i32" { return true; }
+    if llvm_type == "i64" { return true; }
+    if llvm_type == "i128" { return true; }
+    if llvm_type == "half" { return true; }
+    if llvm_type == "float" { return true; }
+    if llvm_type == "double" { return true; }
+    if llvm_type == "fp128" { return true; }
+    return false;
+}
+
+fn _local_is_all_scalar_struct(context: TypeContext, binding: LocalBinding) -> boolean {
+    let mut info = find_struct_info_by_name(context, binding.type_annotation);
+    if info == null {
+        // Fall back to the lowered type name with any trailing pointer `*`
+        // stripped (`%Cell*` → `%Cell`), matching `llvm_name`.
+        let mut lt: string = binding.llvm_type;
+        loop {
+            if lt.length == 0 { break; }
+            if char_at(lt, lt.length - 1) != "*" { break; }
+            lt = substring(lt, 0, lt.length - 1);
+        }
+        info = find_struct_info_by_llvm_type(context, lt);
+    }
+    if info == null { return false; }
+    if info.fields.length == 0 { return false; }
+    let mut f: int = 0;
+    loop {
+        if f >= info.fields.length { break; }
+        if !_is_primitive_scalar_llvm_type(info.fields[f].llvm_type) {
+            return false;
+        }
+        f += 1;
+    }
+    return true;
+}
+
+// `body_texts` is the escape-relevant source text of each body instruction
+// (`get_instruction_scan_text`); `ancestor_locals` is the binding set
+// captured before the body was lowered (the loop's enclosing scopes);
+// `context` resolves struct field types for the scalar-field precondition.
+fn loop_body_rewind_eligible(body_locals: LocalBinding[], body_mutations: LocalMutation[], body_scope_id: string, ancestor_locals: LocalBinding[], body_texts: string[], context: TypeContext) -> boolean {
+    // (0) + (1): collect body-scope arena heap locals; bail on any escapee.
+    let mut arena_names: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= body_locals.length { break; }
+        let binding = body_locals[i];
+        i += 1;
+        if !is_scope_descendant(body_scope_id, binding.scope_id) { continue; }
+        if !is_heap_type(binding.llvm_type) { continue; }
+        // A body-scope heap local promoted out of the arena (rc) or moved
+        // (consumed) still occupies arena memory the rewind would reset.
+        if binding.allocation_kind != "arena" { return false; }
+        if binding.consumed { return false; }
+        // The body-text scan (3) treats `name.field` reads as safe; that is
+        // only true when every field is scalar. A struct with any heap-typed
+        // field could leak an arena pointer through a field read, so reject it.
+        if !_local_is_all_scalar_struct(context, binding) { return false; }
+        arena_names.push(binding.name);
+    }
+    if arena_names.length == 0 { return false; }
+    // (2): no loop-carried store into an ancestor-scope heap binding. A
+    // mutation whose name resolves in `ancestor_locals` targets a binding that
+    // outlives the loop; if it is heap-typed the stored value may alias this
+    // iteration's arena. (Body-local mutations do not resolve here and are
+    // correctly ignored.)
+    let mut m: int = 0;
+    loop {
+        if m >= body_mutations.length { break; }
+        let target = find_local_binding(ancestor_locals, body_mutations[m].name);
+        m += 1;
+        if target == null { continue; }
+        if is_heap_type(target.llvm_type) { return false; }
+    }
+    // (3): the body must be ALLOCATION-INERT apart from the reclaimed struct
+    // lets. The rewind frees EVERY arena allocation made during the iteration,
+    // not just the body locals — so any operation that can allocate arena
+    // memory reachable after the iteration breaks soundness. The decisive case
+    // (PR review + the unit-suite regression) is a call like `results.push(x)`
+    // that grows an ANCESTOR container: the freshly-grown backing buffer is an
+    // arena allocation that `results` keeps pointing at, and the rewind frees
+    // it → use-after-free next access. The same applies to string/array/char
+    // literals and field/index stores into ancestor objects. We therefore
+    // require every body instruction to be free of: a call `(`, an array
+    // literal / index `[`, a string `"` or char `'` literal, and a field/index
+    // store (an assignment whose target is a member access). What remains is
+    // exactly the reclaimable shape: struct-literal lets of the all-primitive
+    // body locals plus pure scalar arithmetic and scalar assignments. The
+    // bare-value scan additionally rejects a whole-pointer escape of a
+    // reclaimed local (`return cell`, `last = cell`).
+    let mut t: int = 0;
+    loop {
+        if t >= body_texts.length { break; }
+        let text = body_texts[t];
+        t += 1;
+        if text.length == 0 { continue; }
+        if _body_text_allocates_or_stores(text) { return false; }
+        let mut a: int = 0;
+        loop {
+            if a >= arena_names.length { break; }
+            if _name_escapes_as_value(text, arena_names[a]) { return false; }
+            a += 1;
+        }
+    }
+    return true;
+}
+
+// True when `text` contains an operation that may allocate arena memory that
+// escapes the iteration, or store into an ancestor object. Conservative: a
+// call `(`, an array literal / index `[`, a string `"` or char `'` literal, or
+// an assignment whose left-hand side is a member access (`obj.f = …`, a field
+// store). Struct-literal braces `{ }`, scalar arithmetic, field READS
+// (`cell.a` on the right of `=`), and assignments to a bare scalar name are
+// allowed — none of them allocate escaping arena memory.
+fn _body_text_allocates_or_stores(text: string) -> boolean {
+    let n = text.length;
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        let ch = char_at(text, i);
+        if ch == "(" { return true; }
+        if ch == "[" { return true; }
+        if ch == "\"" { return true; }
+        if ch == "'" { return true; }
+        i += 1;
+    }
+    // Field/index store: an assignment whose LHS contains a member access `.`.
+    // Find the first assignment operator (a `=` that is not part of a
+    // comparison `==` / `!=` / `<=` / `>=` nor a `=>`); a compound assignment
+    // such as `+=` leaves its arithmetic prefix in the LHS, which is fine for
+    // the `.`-detection. `[`-indexed stores are already rejected above.
+    let mut j: int = 0;
+    loop {
+        if j >= n { break; }
+        if char_at(text, j) == "=" {
+            let mut prev: string = " ";
+            if j > 0 { prev = char_at(text, j - 1); }
+            let mut next: string = " ";
+            if j + 1 < n { next = char_at(text, j + 1); }
+            let mut is_comparison: boolean = false;
+            if next == "=" { is_comparison = true; }
+            if next == ">" { is_comparison = true; }
+            if prev == "=" { is_comparison = true; }
+            if prev == "!" { is_comparison = true; }
+            if prev == "<" { is_comparison = true; }
+            if prev == ">" { is_comparison = true; }
+            if !is_comparison {
+                let lhs = substring(text, 0, j);
+                let mut k: int = 0;
+                loop {
+                    if k >= lhs.length { break; }
+                    if char_at(lhs, k) == "." { return true; }
+                    k += 1;
+                }
+                return false;
+            }
+        }
+        j += 1;
+    }
+    return false;
+}
+
+// True when `name` appears in `text` as a bare value rather than only as the
+// base of a field read. Used by `loop_body_rewind_eligible` channel (3).
+//
+// An occurrence is SAFE iff it is `name.<field>` where `<field>` is not
+// immediately a method call — i.e. a field read that copies a scalar/sub-value
+// out without leaking the receiver's pointer. Every other occurrence (a bare
+// `name`, or `name.method(…)`) is treated as a potential escape. Occurrences
+// inside string literals are ignored, and a token preceded by `.` (a field of
+// some OTHER value, e.g. `other.name`) is not a use of `name` at all.
+fn _name_escapes_as_value(text: string, name: string) -> boolean {
+    let n = text.length;
+    let mut in_double: boolean = false;
+    let mut in_single: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        let ch = char_at(text, i);
+        if in_double {
+            if escape_next { escape_next = false; } else if ch == "\\" {
+                escape_next = true;
+            } else if ch == "\"" { in_double = false; }
+            i += 1;
+            continue;
+        }
+        if in_single {
+            if escape_next { escape_next = false; } else if ch == "\\" {
+                escape_next = true;
+            } else if ch == "'" { in_single = false; }
+            i += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            i += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            i += 1;
+            continue;
+        }
+        if is_identifier_start_char(ch) {
+            let start = i;
+            loop {
+                if i >= n { break; }
+                if !is_identifier_part_char(char_at(text, i)) { break; }
+                i += 1;
+            }
+            let token = substring(text, start, i);
+            if token == name {
+                let mut preceded_by_dot: boolean = false;
+                if start > 0 {
+                    if char_at(text, start - 1) == "." {
+                        preceded_by_dot = true;
+                    }
+                }
+                if !preceded_by_dot {
+                    // Skip whitespace, then inspect the next significant char.
+                    let mut j: int = i;
+                    loop {
+                        if j >= n { break; }
+                        let c2 = char_at(text, j);
+                        if c2 == " " {
+                            j += 1;
+                            continue;
+                        }
+                        if c2 == "\t" {
+                            j += 1;
+                            continue;
+                        }
+                        break;
+                    }
+                    if j >= n { return true; }
+                    if char_at(text, j) != "." { return true; }
+                    // `name.<member>` — a field read is safe, a method call is
+                    // a potential receiver escape. Consume `.<member>` then
+                    // check for a trailing `(`.
+                    let mut k: int = j + 1;
+                    loop {
+                        if k >= n { break; }
+                        let c3 = char_at(text, k);
+                        if c3 == " " {
+                            k += 1;
+                            continue;
+                        }
+                        if c3 == "\t" {
+                            k += 1;
+                            continue;
+                        }
+                        break;
+                    }
+                    loop {
+                        if k >= n { break; }
+                        if !is_identifier_part_char(char_at(text, k)) { break; }
+                        k += 1;
+                    }
+                    loop {
+                        if k >= n { break; }
+                        let c4 = char_at(text, k);
+                        if c4 == " " {
+                            k += 1;
+                            continue;
+                        }
+                        if c4 == "\t" {
+                            k += 1;
+                            continue;
+                        }
+                        break;
+                    }
+                    if k < n {
+                        if char_at(text, k) == "(" { return true; }
+                    }
+                }
+            }
+            continue;
+        }
+        i += 1;
+    }
+    return false;
 }
 
 // Emit guarded drop calls for every owned rc local descended from

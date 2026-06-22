@@ -1,0 +1,27 @@
+// Fixture for compiler/tests/e2e/arena_loop_rewind_test.sfn (#1514).
+//
+// Negative case (heap-typed field read escape): the per-iteration `Record`
+// has a heap-typed (`string`) field, and that field — an arena-aliasing
+// pointer — is pushed into an ancestor array. A field read copies a scalar
+// out safely, but reading a HEAP field copies a pointer that outlives the
+// iteration. The eligibility gate must therefore refuse any local whose
+// struct has a non-scalar field; emitting a rewind here would free the
+// string storage `tags` still references.
+struct Record {
+    tag: string;
+    n: int;
+}
+
+fn main() ![io] {
+    let iterations = 1000;
+    let mut tags: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= iterations { break; }
+        let rec = Record { tag: "item", n: i };
+        tags.push(rec.tag);
+        i = i + 1;
+    }
+    if tags.length < 0 { return; }
+    print("done");
+}

@@ -1,0 +1,154 @@
+// End-to-end test for the arena mark/rewind seam around non-escaping
+// generic-`loop` bodies (#1514, epic #1513).
+//
+// The lowering reclaims a loop body's per-iteration arena allocations by
+// emitting `%m = call double @sfn_arena_sfn_mark()` at body entry and
+// `call void @sfn_arena_sfn_rewind(double %m)` at iteration close — but ONLY
+// when every per-iteration arena allocation is provably non-escaping. This
+// test pins both halves of that contract through the driver:
+//
+//   - Positive: a loop that allocates a `Cell` per iteration and only reads
+//     its fields emits exactly one mark + one rewind.
+//   - Negative (container escape / loop-carried escape): a loop that pushes
+//     the cell into an ancestor array, or stores it into an ancestor
+//     heap-typed mutable, emits NO rewind — proving the soundness gate.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like these. Assert on the captured
+// `.ll` text with `sfn/strings` predicates instead. (#842.)
+import { count } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Child environment for the spawned `sfn emit`. `process.run_capture` treats
+// an empty array as the *empty* environment (not "inherit"), so the relevant
+// variables are threaded explicitly (PATH for any subprocess the compiler
+// shells out to; SAILFIN_TEST_SCRATCH so a parallel `--jobs N>1` run routes
+// its build-cache dir per-invocation rather than colliding on build/sailfin).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Lower `fixture` to a standalone `.ll` via `sfn emit llvm` and return the IR
+// text. Writes to a unique scratch path keyed by `tag` so parallel sub-tests
+// do not collide; returns "" on emit failure so the caller can assert.
+fn _emit_llvm(fixture: string, tag: string) -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let ll = dir + "/sfn-arena-loop-rewind-" + tag + ".ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([_sfn_bin(), "emit", "-o", ll, "llvm", fixture], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+fn _positive() -> string {
+    return "compiler/tests/e2e/fixtures/arena_loop_rewind_positive.sfn";
+}
+
+fn _push_escape() -> string {
+    return "compiler/tests/e2e/fixtures/arena_loop_rewind_push_escape.sfn";
+}
+
+fn _loop_carried() -> string {
+    return "compiler/tests/e2e/fixtures/arena_loop_rewind_loop_carried.sfn";
+}
+
+fn _heap_field() -> string {
+    return "compiler/tests/e2e/fixtures/arena_loop_rewind_heap_field.sfn";
+}
+
+fn _continue() -> string {
+    return "compiler/tests/e2e/fixtures/arena_loop_rewind_continue.sfn";
+}
+
+fn _nested_struct() -> string {
+    return "compiler/tests/e2e/fixtures/arena_loop_rewind_nested_struct.sfn";
+}
+
+fn _scalar_push() -> string {
+    return "compiler/tests/e2e/fixtures/arena_loop_rewind_scalar_push.sfn";
+}
+
+// ---- (1) positive: exactly one mark + one rewind ----
+test "arena-loop-rewind: non-escaping loop emits one mark and one rewind" ![io] {
+    let ir = _emit_llvm(_positive(), "positive");
+    assert ir.length > 0;
+    // Count call sites only — the unconditional `declare` lines start with
+    // `declare`, not `call`, so they are not matched.
+    assert count(ir, "call double @sfn_arena_sfn_mark(") == 1;
+    assert count(ir, "call void @sfn_arena_sfn_rewind(") == 1;
+}
+
+// ---- (2) negative: container (push) escape suppresses the rewind ----
+test "arena-loop-rewind: pushing the cell into an ancestor array suppresses rewind" ![io] {
+    let ir = _emit_llvm(_push_escape(), "push");
+    assert ir.length > 0;
+    assert count(ir, "call void @sfn_arena_sfn_rewind(") == 0;
+    assert count(ir, "call double @sfn_arena_sfn_mark(") == 0;
+}
+
+// ---- (3) negative: loop-carried store into an ancestor heap mutable ----
+test "arena-loop-rewind: storing the cell into an ancestor heap local suppresses rewind" ![io] {
+    let ir = _emit_llvm(_loop_carried(), "carried");
+    assert ir.length > 0;
+    assert count(ir, "call void @sfn_arena_sfn_rewind(") == 0;
+    assert count(ir, "call double @sfn_arena_sfn_mark(") == 0;
+}
+
+// ---- (4) negative: reading a heap-typed field leaks an arena pointer ----
+// A struct with a non-scalar field is rejected wholesale: `rec.tag` copies an
+// arena-aliasing pointer that escapes into `tags`, which a field-read carve-out
+// would wrongly treat as safe. The gate must suppress.
+test "arena-loop-rewind: a heap-typed struct field suppresses rewind" ![io] {
+    let ir = _emit_llvm(_heap_field(), "heapfield");
+    assert ir.length > 0;
+    assert count(ir, "call void @sfn_arena_sfn_rewind(") == 0;
+    assert count(ir, "call double @sfn_arena_sfn_mark(") == 0;
+}
+
+// ---- (4b) negative: inline nested-struct field leaks an arena pointer ----
+test "arena-loop-rewind: an inline nested-struct field suppresses rewind" ![io] {
+    let ir = _emit_llvm(_nested_struct(), "nested");
+    assert ir.length > 0;
+    assert count(ir, "call void @sfn_arena_sfn_rewind(") == 0;
+    assert count(ir, "call double @sfn_arena_sfn_mark(") == 0;
+}
+
+// ---- (4c) negative: pushing even a SCALAR grows an ancestor array in the
+// arena (the call's allocation side-effect), so any call suppresses ----
+test "arena-loop-rewind: a push call (scalar arg) suppresses rewind" ![io] {
+    let ir = _emit_llvm(_scalar_push(), "scalarpush");
+    assert ir.length > 0;
+    assert count(ir, "call void @sfn_arena_sfn_rewind(") == 0;
+    assert count(ir, "call double @sfn_arena_sfn_mark(") == 0;
+}
+
+// ---- (5) positive-with-continue: still one mark + one rewind ----
+// The rewind sits on the fall-through path; the `continue` branch skips it (a
+// safe missed reclamation). The pair count is unchanged and the IR is valid.
+test "arena-loop-rewind: an eligible body with a continue emits one mark and one rewind" ![io] {
+    let ir = _emit_llvm(_continue(), "continue");
+    assert ir.length > 0;
+    assert count(ir, "call double @sfn_arena_sfn_mark(") == 1;
+    assert count(ir, "call void @sfn_arena_sfn_rewind(") == 1;
+}
