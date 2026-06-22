@@ -48,14 +48,14 @@ and is silently skipped when `build/native/sailfin` is missing. Bypass with
 
 ### Notes on Release Automation
 
-`python-semantic-release` updates `compiler/src/version.sfn` and `CHANGELOG.md`. When merging between prerelease branches (e.g., `alpha` → `beta`), those files frequently conflict because both branches bump them independently.
-
-This repo includes a `.gitattributes` rule that resolves those conflicts by keeping the destination branch's copy. To enable it locally, configure the built-in `ours` merge driver:
-
-```bash
-git config --local merge.ours.name "Keep ours during merge"
-git config --local merge.ours.driver true
-```
+Releases are cut by `.github/workflows/release.yml`, which bumps the version
+source of truth (`compiler/capsule.toml`) and stamps the related version files.
+Per-release notes are generated automatically — GitHub's `gh release create
+--generate-notes` writes commit/PR-derived notes onto the tag, and the
+`release-notes` agentic workflow posts a categorized summary as a comment on the
+published release. There is no hand-maintained `CHANGELOG.md`; the merged PR,
+its linked issue, and the [GitHub Releases](https://github.com/SailfinIO/sailfin/releases)
+notes are the per-change record.
 
 ## 3. Documentation Process
 

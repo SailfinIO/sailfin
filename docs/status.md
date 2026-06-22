@@ -8,7 +8,8 @@ what is partial, and what is planned. Consult it before editing docs,
 examples, or making claims about feature availability.
 
 It is **not a changelog.** Per-change narrative lives in the merged PR, the
-linked issue, and `CHANGELOG.md`. When a feature's status changes: flip the
+linked issue, and the [GitHub Releases](https://github.com/SailfinIO/sailfin/releases)
+notes (auto-generated per tag). When a feature's status changes: flip the
 row, update the one-line note, link the PR/issue — do not append prose. If a
 detail matters long-term, it belongs in the spec, a `docs/proposals/*` design
 doc, or `docs/runtime_architecture.md`, not here.
