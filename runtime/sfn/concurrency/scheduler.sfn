@@ -454,9 +454,10 @@ fn _sfn_scheduler_max_thread_count() -> i64 { return 1024; }
 
 // Resolve the worker count. An explicit `SAILFIN_THREADS=N` (N >= 1)
 // wins, clamped to the sanity ceiling; a missing, empty, non-numeric,
-// or non-positive value falls through to `min(online_cores, 4)`. A
+// or non-positive value falls through to `clamp(online_cores, 2, 4)`. A
 // `sysconf` failure (returns -1) or a single-core box both clamp up to
-// at least one worker.
+// the two-worker floor — the minimum a producer/consumer pair needs to
+// avoid the bounded-pool deadlock (see the clamp comment below).
 fn sfn_scheduler_resolve_thread_count() -> i64 {
     let s_env: string = "SAILFIN_THREADS";
     let raw: * u8 = getenv(s_env as * u8);
@@ -473,7 +474,24 @@ fn sfn_scheduler_resolve_thread_count() -> i64 {
 
     let cores: i64 = sysconf(_sfn_scheduler_sc_nprocessors_onln());
     let mut resolved: i64 = cores;
-    if resolved < 1 { resolved = 1; }
+    // Floor the auto-detected pool at TWO workers. A v0 fixed pool
+    // deadlocks when a task blocks waiting on another task that was never
+    // given a thread (the bounded-pool / producer-consumer hazard): a
+    // single-worker pool runs the producer, which blocks forever on a full
+    // bounded channel because the consumer never gets a thread. Two workers
+    // is the minimum that lets a producer/consumer pair make progress on
+    // different threads (#1474 AC2). This floor also covers the platforms
+    // where core detection currently fails closed to `-1`: Darwin spells
+    // `_SC_NPROCESSORS_ONLN` as 58, not the Linux 84 baked into
+    // `_sfn_scheduler_sc_nprocessors_onln`, so `sysconf` returns `-1` on
+    // macOS and the pool would otherwise size to a single deadlocking
+    // worker. The proper per-target constant (an emit-time intrinsic, like
+    // `clock_monotonic_id`) is tracked as a follow-up; this floor is the
+    // correctness guarantee independent of it. Oversubscribing a genuine
+    // single-core box with two pool threads is safe — the OS time-slices
+    // the blocked worker out. An explicit `SAILFIN_THREADS=1` still wins
+    // above: that is the caller's deliberate choice.
+    if resolved < 2 { resolved = 2; }
     if resolved > _sfn_scheduler_default_max() {
         resolved = _sfn_scheduler_default_max();
     }

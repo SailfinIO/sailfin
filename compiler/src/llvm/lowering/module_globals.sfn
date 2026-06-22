@@ -8,7 +8,9 @@ import {
     ModuleGlobalLoweringResult
 } from "../types";
 import {
+    index_of,
     trim_text,
+    starts_with,
     sanitize_symbol,
     number_to_string,
     is_number_literal,
@@ -51,7 +53,9 @@ fn _binding_llvm_type(context: TypeContext, type_annotation: string) -> string {
         llvm_type = "i1";
     } else if type_annotation == "bool" { llvm_type = "i1"; } else if type_annotation == "i64" {
         llvm_type = "i64";
-    } else if type_annotation == "i32" { llvm_type = "i32"; } else if type_annotation.length > 0 {
+    } else if type_annotation == "i32" { llvm_type = "i32"; } else if type_annotation == "channel" {
+        llvm_type = "i8*";
+    } else if starts_with(type_annotation, "channel:") { llvm_type = "i8*"; } else if type_annotation.length > 0 {
         llvm_type = map_local_type(context, type_annotation);
     }
     if llvm_type.length == 0 { llvm_type = "double"; }
@@ -118,6 +122,50 @@ fn _extern_definition_initializer(llvm_type: string, value: string?) -> string {
     return default_return_literal(llvm_type);
 }
 
+// Canonicalize a channel-typed global's annotation to the `channel` /
+// `channel:<kind>` form the bespoke send/receive lowering recognizes
+// (`_try_lower_channel_method` in expression_lowering/native/core.sfn).
+// Mirrors the function-local inference in `instructions_let.sfn` (#1091) so a
+// MODULE-GLOBAL channel routes `.send` / `.receive` to the `sfn_channel_*`
+// runtime helpers exactly as a local does. Without this, a global channel
+// binding carries either an unnormalized `channel<K>` annotation (explicit)
+// or none (inferred from a `channel(N)` initializer), and the method call
+// fails to lower with "callee signature is not known to the compiler".
+// Returns "" when the binding is not a channel. (#1474 AC2: a shared global
+// channel lets two `parallel` tasks produce/consume concurrently without the
+// capture-env ABI, which is carved out to #1475/#1476.)
+fn _channel_global_annotation(explicit: string, init_value: string?) -> string {
+    // Explicit annotation: `channel`, `channel:K`, or the generic `channel<K>`.
+    if explicit == "channel" { return "channel"; }
+    if starts_with(explicit, "channel:") { return explicit; }
+    if starts_with(explicit, "channel<") {
+        let close = index_of(explicit, ">");
+        if close > 8 {
+            let kind = trim_text(substring(explicit, 8, close));
+            if kind.length > 0 { return "channel:" + kind; }
+        }
+        return "channel";
+    }
+    // Inferred binding (no explicit annotation): derive the kind from a
+    // `channel(...)` / `channel:K(...)` initializer expression, matching the
+    // local path's text-prefix inference.
+    if explicit.length == 0 {
+        if init_value != null {
+            let init_expr = trim_text(init_value);
+            if starts_with(init_expr, "channel(") { return "channel"; }
+            if starts_with(init_expr, "channel:") {
+                let paren = index_of(init_expr, "(");
+                if paren > 8 {
+                    let kind = trim_text(substring(init_expr, 8, paren));
+                    if kind.length > 0 { return "channel:" + kind; }
+                }
+                return "channel";
+            }
+        }
+    }
+    return "";
+}
+
 // Process a single module binding and return its lowered preamble lines,
 // a zero-or-one-element locals array, and whether it needs runtime init.
 fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: string) -> BindingLoweringResult {
@@ -142,6 +190,14 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
                 effective_type_annotation = "string";
             }
         }
+    }
+    // Canonicalize a channel global (explicit `channel<K>` or inferred from a
+    // `channel(N)` initializer) so `.send` / `.receive` route to the runtime
+    // helpers — see `_channel_global_annotation` (#1474 AC2).
+    let channel_annotation = _channel_global_annotation(type_annotation, binding.value);
+    if channel_annotation.length > 0 {
+        type_annotation = channel_annotation;
+        effective_type_annotation = channel_annotation;
     }
     if type_annotation.length == 0 { return empty_result; }
     let global_name = module_global_symbol(name);

@@ -1,0 +1,114 @@
+// E2E: a producer and consumer sharing a BOUNDED channel run CONCURRENTLY
+// on the runtime thread pool without deadlocking (issue #1474 AC2, epic
+// #965/#1209).
+//
+// This is the real-execution complement to
+// `channel_producer_consumer_ir_test.sfn` (which only pins the emitted
+// `sfn_channel_*` symbols and explicitly does NOT run threads). Here two
+// `parallel` tasks share a single channel of CAPACITY 2 while the producer
+// sends FIVE items. A sequential / inline execution (the pre-#1474 no-op
+// `parallel`, or any lowering that runs the tasks one-after-another) would
+// fill the channel at 2 and block forever on the 3rd `send` with no
+// consumer draining — i.e. it would DEADLOCK and the test would hang to the
+// runner's per-test timeout. The only way `main` prints the correct total
+// (1+2+3+4+5 = 15) is if the producer and consumer make progress on
+// DIFFERENT threads, the producer blocking on `not_full` and the consumer
+// on `not_empty` as the bounded buffer hands items across. The join inside
+// `sfn_parallel` establishes happens-before, so `main` reads the final
+// `g_sum` after both tasks complete.
+//
+// The shared channel is a MODULE GLOBAL (`let g_ch = channel(2)`): routing
+// `g_ch.send` / `g_ch.receive` to the runtime helpers from a global binding
+// is the enabling fix (a global channel previously failed to lower with
+// "callee signature is not known to the compiler"). A global handle is the
+// capture-free way to share one channel across two tasks — the lambda
+// capture-env ABI is carved out to #1475/#1476.
+//
+// This runs on the DEFAULT scheduler pool (no `SAILFIN_THREADS` override),
+// so it also guards the runtime's two-worker pool floor
+// (`sfn_scheduler_resolve_thread_count`, scheduler.sfn): the v0 fixed pool
+// must give the producer and consumer threads to BOTH, or this test
+// deadlocks (it once hung the macOS CI shard for two hours, before the
+// floor, because Darwin's wrong `_SC_NPROCESSORS_ONLN` constant sized the
+// pool to a single worker). If a future regression drops the pool below two
+// workers, this test deadlocks and fails — that is the intended signal.
+//
+// Fixtures use string concatenation + `number_to_string` (NOT `{{ }}`
+// interpolation) so the host compiler does not interpolate the fixture
+// before it is written.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// Empty `run_capture` env is the EMPTY environment, not "inherit"; a nested
+// `sailfin run` spawns clang + linker (needs PATH) and routes its
+// program.ll build-cache under SAILFIN_TEST_SCRATCH so the parallel pool
+// does not collide on the fixed build/sailfin (#1333).
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-chan-exec-");
+}
+
+fn _run_and_capture(label: string, source: string) -> string ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/" + label + ".sfn";
+    fs.writeFile(src, source);
+    let exit = process.run_capture([_sfn_bin(), "run", src], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if exit != 0 { return "RUN_FAILED:" + out + err; }
+    return out + err;
+}
+
+// ── producer + consumer over a bounded channel, run concurrently ──────
+test "channel: bounded producer/consumer run concurrently (#1474)" ![io] {
+    let out = _run_and_capture("chan_pc", "let g_ch = channel(2);\n"
+        + "let mut g_sum: int = 0;\n"
+        + "fn produce() ![io] {\n"
+        + "    let mut i: int = 1;\n"
+        + "    loop {\n"
+        + "        if i > 5 { break; }\n"
+        + "        g_ch.send(i);\n"
+        + "        i = i + 1;\n"
+        + "    }\n"
+        + "}\n"
+        + "fn consume() ![io] {\n"
+        + "    let mut n: int = 0;\n"
+        + "    loop {\n"
+        + "        if n >= 5 { break; }\n"
+        + "        let v: int = g_ch.receive();\n"
+        + "        g_sum = g_sum + v;\n"
+        + "        n = n + 1;\n"
+        + "    }\n"
+        + "}\n"
+        + "fn main() ![io] {\n"
+        + "    let _h = parallel [\n"
+        + "        fn() -> int ![io] { produce(); return 0; },\n"
+        + "        fn() -> int ![io] { consume(); return 0; },\n"
+        + "    ];\n"
+        + "    print.info(\"sum: \" + number_to_string(g_sum));\n"
+        + "}");
+    // 1 + 2 + 3 + 4 + 5 = 15 — reachable only if the producer and consumer
+    // interleaved across the bounded (capacity-2) channel on separate
+    // threads. A sequential run would deadlock at the 3rd send.
+    assert contains(out, "sum: 15");
+}
