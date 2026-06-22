@@ -308,48 +308,34 @@ fn get_instruction_let_value(instructions: NativeInstruction[], idx: int) -> str
 // any non-field-read use of a loop-body heap local. Returns the value
 // expression for a `Let` (the binding NAME is intentionally excluded — a
 // local's own definition is never an escape of itself), the expression text
-// for `Expression` / `Return` / `Throw`, the condition for `If`, the iterable
-// for `For`, the scrutinee for `Match`, the guard for `Case`, and the raw text
-// for `Unknown`. Control-flow markers carrying no embedded expression yield "".
+// for `Expression` / `Return` / `Match` / `Throw`, the condition for `If`, the
+// iterable for `For`, the guard for `Case`, and the raw text for `Unknown`.
+// Control-flow markers carrying no embedded expression yield "".
+//
+// Dispatch is by `get_instruction_tag` + direct field access (the same shape
+// as `get_instruction_let_value`), NOT a field-binding `match`: a `match`
+// arm that binds and *returns* a variant field lowers to a per-arm alloca
+// that fails to dominate the load at the function's return merge (the LLVM
+// verifier rejects it at `llvm-link` time even though per-module `clang`
+// accepts it). The tag-guarded direct accesses avoid that latent codegen bug.
 fn get_instruction_scan_text(instructions: NativeInstruction[], idx: int) -> string {
+    let tag = get_instruction_tag(instructions, idx);
     let instr = instructions[idx];
-    match instr {
-        NativeInstruction.Return { expression, span } => return expression,
-        NativeInstruction.Expression { expression, span } => return expression,
-        NativeInstruction.Let {
-            name,
-            mutable,
-            is_thread_local,
-            type_annotation,
-            value,
-            span,
-            value_span
-        } => {
-            if value == null { return ""; }
-            return value;
-        },
-        NativeInstruction.If { condition } => return condition,
-        NativeInstruction.Else => return "",
-        NativeInstruction.EndIf => return "",
-        NativeInstruction.For { target, iterable } => return iterable,
-        NativeInstruction.EndFor => return "",
-        NativeInstruction.Loop => return "",
-        NativeInstruction.EndLoop => return "",
-        NativeInstruction.Break => return "",
-        NativeInstruction.Continue => return "",
-        NativeInstruction.Match { expression } => return expression,
-        NativeInstruction.Case { pattern, guard } => return guard,
-        NativeInstruction.EndMatch => return "",
-        NativeInstruction.Try => return "",
-        NativeInstruction.Catch { name } => return "",
-        NativeInstruction.Finally => return "",
-        NativeInstruction.EndTry => return "",
-        NativeInstruction.Throw { expression, span } => return expression,
-        NativeInstruction.Noop => return "",
-        NativeInstruction.Unknown { text } => return text,
-        NativeInstruction.Routine => return "",
-        NativeInstruction.EndRoutine => return ""
+    // Return (0) / Expression (1) / Match (12) / Throw (19) carry `expression`.
+    if tag == 0 { return instr.expression; }
+    if tag == 1 { return instr.expression; }
+    if tag == 12 { return instr.expression; }
+    if tag == 19 { return instr.expression; }
+    if tag == 2 {
+        // Let — scan the value expression; the binding name is excluded.
+        let value = instr.value;
+        if value == null { return ""; }
+        return value;
     }
+    if tag == 3 { return instr.condition; }
+    if tag == 6 { return instr.iterable; }
+    if tag == 13 { return instr.guard; }
+    if tag == 21 { return instr.text; }
     return "";
 }
 
