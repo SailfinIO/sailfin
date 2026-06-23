@@ -1,0 +1,168 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "sailfin",
+  "scopeName": "source.sfn",
+  "fileTypes": ["sfn"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#effects" },
+    { "include": "#decorators" },
+    { "include": "#function-definition" },
+    { "include": "#keywords" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#constants" },
+    { "include": "#function-call" },
+    { "include": "#types" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.documentation.sfn", "match": "///.*$" },
+        { "name": "comment.line.double-slash.sfn", "match": "//.*$" },
+        {
+          "name": "comment.block.sfn",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "effects": {
+      "name": "meta.effect.sfn",
+      "begin": "(!)(\\[)",
+      "beginCaptures": {
+        "1": { "name": "keyword.operator.effect.sfn" },
+        "2": { "name": "punctuation.definition.effect.begin.sfn" }
+      },
+      "end": "\\]",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.effect.end.sfn" }
+      },
+      "patterns": [
+        {
+          "name": "support.type.effect.sfn",
+          "match": "\\b(io|net|model|gpu|rand|clock|fs|sys|time|pure)\\b"
+        },
+        {
+          "name": "variable.other.effect.sfn",
+          "match": "[a-zA-Z_][a-zA-Z0-9_]*"
+        },
+        { "name": "punctuation.separator.effect.sfn", "match": "," }
+      ]
+    },
+    "decorators": {
+      "name": "entity.name.function.decorator.sfn",
+      "match": "@[a-zA-Z_][a-zA-Z0-9_]*"
+    },
+    "function-definition": {
+      "match": "\\b(fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "storage.type.function.sfn" },
+        "2": { "name": "entity.name.function.sfn" }
+      }
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.sfn",
+          "match": "\\b(if|else|for|while|loop|match|try|catch|throw|return|break|continue|in|await|spawn|defer|scope|routine|yield)\\b"
+        },
+        {
+          "name": "keyword.control.import.sfn",
+          "match": "\\b(import|export|from|as)\\b"
+        },
+        {
+          "name": "storage.type.sfn",
+          "match": "\\b(fn|let|const|struct|enum|interface|type|extern|test|module|capsule)\\b"
+        },
+        {
+          "name": "storage.modifier.sfn",
+          "match": "\\b(mut|thread_local|async|unsafe|raw|opaque|pub|implements)\\b"
+        },
+        { "name": "variable.language.self.sfn", "match": "\\bself\\b" }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.sfn",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.sfn" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.sfn" }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.sfn",
+          "match": "\\\\(n|r|t|0|\\\\|\"|'|x[0-9A-Fa-f]{2}|u\\{[0-9A-Fa-f]+\\})"
+        },
+        {
+          "name": "meta.interpolation.sfn",
+          "begin": "\\{\\{",
+          "end": "\\}\\}",
+          "beginCaptures": {
+            "0": { "name": "punctuation.section.interpolation.begin.sfn" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.section.interpolation.end.sfn" }
+          },
+          "patterns": [{ "include": "$self" }]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.sfn",
+          "match": "\\b0[xX][0-9A-Fa-f_]+\\b"
+        },
+        {
+          "name": "constant.numeric.binary.sfn",
+          "match": "\\b0[bB][01_]+\\b"
+        },
+        {
+          "name": "constant.numeric.float.sfn",
+          "match": "\\b[0-9][0-9_]*\\.[0-9_]+([eE][+-]?[0-9_]+)?\\b"
+        },
+        {
+          "name": "constant.numeric.float.sfn",
+          "match": "\\b[0-9][0-9_]*[eE][+-]?[0-9_]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.sfn",
+          "match": "\\b[0-9][0-9_]*\\b"
+        }
+      ]
+    },
+    "constants": {
+      "name": "constant.language.sfn",
+      "match": "\\b(true|false|null)\\b"
+    },
+    "function-call": {
+      "name": "entity.name.function.call.sfn",
+      "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*(?=\\s*\\()"
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.sfn",
+          "match": "\\b(int|float|number|string|bool|void|any|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64)\\b"
+        },
+        {
+          "name": "support.type.wrapper.sfn",
+          "match": "\\b(Affine|Linear|PII|Secret|OwnedBuf|Slice|Result|Option)\\b"
+        },
+        {
+          "name": "entity.name.type.sfn",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "operators": {
+      "name": "keyword.operator.sfn",
+      "match": "(->|=>|==|!=|<=|>=|&&|\\|\\||::|\\?|\\+|-|\\*|/|%|=|<|>|!|&|\\||\\.)"
+    }
+  }
+}
