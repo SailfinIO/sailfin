@@ -55,8 +55,14 @@
 // placeholder behaviour — a regression guard for issue #459's
 // acceptance criterion.
 import { Capture } from "../ast";
-import { trim_text, number_to_string, join_with_separator } from "./utils";
+import {
+    trim_text,
+    starts_with,
+    number_to_string,
+    join_with_separator
+} from "./utils";
 import { map_type_annotation, ends_with_pointer_suffix } from "./type_mapping";
+import { substring } from "../string_utils";
 import { format_temp_name } from "./expressions_helpers";
 
 // Percent-escape every character that doubles as either a marker
@@ -323,6 +329,24 @@ fn closure_field_llvm_type(capture: Capture) -> string {
     // loads it into a scalar. Keeping the env field pointer-sized preserves
     // the closure-env layout contract unchanged across the flip.
     if mapped == "{i8*, i64}" { return "i8*"; }
+    // #1476: a BY-VALUE user-struct capture is stored as the full aggregate
+    // `%T` in the env, not as a `%T*` pointer. `map_type_annotation` returns
+    // `%T*` for a user struct, but the capture-site operand for a by-value
+    // capture is the loaded `%T` aggregate, so a `%T*` field type emitted an
+    // invalid `store %T* %aggval` (operand/field type mismatch, rejected by
+    // llvm-as) — by-value struct capture was broken. Strip the pointer suffix
+    // for `by_value` captures so the env field is the aggregate `%T` and the
+    // store / load / env-load prologue all agree; a moved `OwnedBuf` then
+    // survives the thread boundary by value (the worker-ctx reclaim reads it
+    // at offset 0). A by-reference capture (`by_value == false`, e.g. an
+    // explicit `*T` pointer) keeps its `%T*` field.
+    if capture.by_value {
+        if starts_with(mapped, "%") {
+            if ends_with_pointer_suffix(mapped) {
+                return substring(mapped, 0, mapped.length - 1);
+            }
+        }
+    }
     return mapped;
 }
 
@@ -409,6 +433,9 @@ fn _field_zero_value(llvm_type: string) -> string {
     if ends_with_pointer_suffix(trimmed) { return "null"; }
     if trimmed == "double" { return "0.0"; }
     if trimmed == "float" { return "0.0"; }
+    // #1476: a by-value aggregate field (`%T`, e.g. a captured struct) zeros
+    // with `zeroinitializer`, not the scalar `0`.
+    if starts_with(trimmed, "%") { return "zeroinitializer"; }
     return "0";
 }
 
