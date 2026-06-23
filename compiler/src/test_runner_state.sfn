@@ -9,11 +9,11 @@ import {
 // compiler/src/test_runner_state.sfn
 //
 // In-process test-runner state shared between the orchestrator
-// (`cli_commands.sfn:handle_test_command`) and the LLVM lowering
+// (`cli/commands/test.sfn:run`) and the LLVM lowering
 // pipeline. Replaces two flag files that issue #311 retired:
 //
 //   build/sailfin/.test_runner_active   — was: written by
-//                                          handle_test_command at
+//                                          the `sfn test` runner at
 //                                          entry, deleted on each of
 //                                          the 6 return paths,
 //                                          read in 2 LLVM lowering
@@ -33,10 +33,10 @@ import {
 // Lifetime contract:
 //
 //   `enter_test_runner_mode(trace)` — called once at the top of
-//   `handle_test_command` after the env-flag is resolved.
+//   `cli/commands/test.sfn:run` after the env-flag is resolved.
 //
 //   `exit_test_runner_mode()` — called at every return path of
-//   `handle_test_command`, including early exits on resolver
+//   `cli/commands/test.sfn:run`, including early exits on resolver
 //   failure, compile failure, link failure, and run failure.
 //
 // Probes (`test_runner_active()` / `test_runner_trace()`) are
@@ -56,7 +56,7 @@ fn enter_test_runner_mode(trace: boolean) {
 }
 
 // Clear the markers. Called from every return path of
-// `handle_test_command`. Idempotent: safe to call when the
+// `cli/commands/test.sfn:run`. Idempotent: safe to call when the
 // markers are already cleared (e.g. defensive cleanup in a
 // future refactor).
 fn exit_test_runner_mode() {
@@ -86,7 +86,7 @@ fn test_runner_trace() -> boolean {
 
 // ── Test discovery filters (`-k` / `--tag`, issue #849) ──────────────
 //
-// Process-local filter state set once by `handle_test_command` after
+// Process-local filter state set once by `cli/commands/test.sfn:run` after
 // flag parsing and read on two sites: the file-level pre-filter in
 // `cli_commands.sfn` (drops files with no matching test so no empty
 // harness is ever linked) and the per-test cut in `main.sfn`'s

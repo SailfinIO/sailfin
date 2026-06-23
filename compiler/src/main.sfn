@@ -454,7 +454,7 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
     // Per-test discovery filter (`-k` / `--tag`, issue #849). Drop
     // non-matching `TestDeclaration`s before typecheck/emit so the
     // synthesized harness only calls the surviving `test:` symbols.
-    // The file-level pre-filter in `handle_test_command` guarantees at
+    // The file-level pre-filter in the `sfn test` runner guarantees at
     // least one test survives every file that reaches this point, so
     // the harness is never synthesized empty.
     if test_filters_active() { program = _filter_program_tests(program); }

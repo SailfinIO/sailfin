@@ -1909,7 +1909,7 @@ fn _cr_module_cache_event_failure(slug: string) -> ModuleCacheEvent {
 // without it, a 138-module self-build accumulates ~7+ GB of
 // arena state in a single process and OOMs around the 135th
 // module. Empty `sailfin_exe` falls back to in-process compile so
-// `handle_check_command` / `handle_test_command` callers (which
+// `handle_check_command` / the `sfn test` runner callers (which
 // don't yet have `binary_dir` plumbed) keep their existing path;
 // their typical capsule dep counts are well under the in-process
 // budget.
@@ -4646,7 +4646,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     }
 
     // Stage E PR1: thread `sailfin_exe` to subprocess-stage imports too.
-    // #1405 Bug 2: `handle_test_command` now threads a same-generation
+    // #1405 Bug 2: the `sfn test` runner now threads a same-generation
     // `binary_dir`, so a large-closure test (e.g. one importing the whole
     // compiler via `lower_to_llvm_ir_from_text`) isolates per-module emit
     // in subprocesses (fresh arena per child) instead of accumulating the

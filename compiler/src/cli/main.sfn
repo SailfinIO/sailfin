@@ -41,6 +41,7 @@ import { number_to_string } from "../num_format";
 import { run as add_run, command_def as add_command_def } from "./commands/add";
 import { run as fmt_run, command_def as fmt_command_def } from "./commands/fmt";
 import { run as init_run, command_def as init_command_def } from "./commands/init";
+import { run as test_run, command_def as test_command_def } from "./commands/test";
 import { run as login_run, command_def as login_command_def } from "./commands/login";
 import { run as publish_run, command_def as publish_command_def } from "./commands/publish";
 import { run as version_run, command_def as version_command_def } from "./commands/version";
@@ -85,7 +86,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // resolving it eagerly here would add a filesystem read to every
     // `build` / `run` invocation. `parse()` skips argv[0] (the program
     // name), so a synthetic "sfn" head is prepended before parsing.
-    let root: Command = with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("sfn", "Sailfin compiler"), version_command_def()), guillermo_command_def()), init_command_def()), login_command_def()), add_command_def()), publish_command_def()), fmt_command_def());
+    let root: Command = with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("sfn", "Sailfin compiler"), version_command_def()), guillermo_command_def()), init_command_def()), login_command_def()), add_command_def()), publish_command_def()), fmt_command_def()), test_command_def());
 
     let mut parse_argv: string[] = ["sfn"];
     let mut j: int = 0;
@@ -184,6 +185,25 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if result.ok { return fmt_run(result.matches, ctx); }
         print("usage: sfn fmt [--check] [--write] <path...>");
+        return 2;
+    }
+
+    // `sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots]
+    // [--no-test-cache] [--jobs N] <suite...>` — the registered subcommand
+    // matched. The variadic `<suite...>` accepts zero tokens, so a bare
+    // `sfn test` (and every flag combination) parses ok and dispatches to
+    // `test.run`, which defaults an empty suite list to "." and owns its
+    // own exit codes (0 pass / 1 test or setup failure / 2 jobs range
+    // error). A non-ok parse that still descended into `test` (an
+    // unrecognized flag, a `--jobs` non-integer rejected as `type_error`,
+    // or `--help`) is a usage error (exit 2) — the parser owns flag
+    // validation. The literal `2` mirrors the `init` / `login` / `add` /
+    // `publish` / `fmt` dispatches above (the `sfn/cli` `EXIT_*` constants
+    // lower to 0 here).
+    if strings_equal(subcommand(result.matches), "test") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if result.ok { return test_run(result.matches, ctx); }
+        print("usage: sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots] [--no-test-cache] [--jobs N] <suite...>");
         return 2;
     }
 
