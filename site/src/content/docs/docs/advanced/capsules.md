@@ -15,7 +15,7 @@ Capsules are directories. The presence of a `capsule.toml` manifest file at the 
 A capsule has two responsibilities:
 
 1. **It defines a unit of compilation.** The Sailfin compiler resolves imports at capsule boundaries and uses the manifest to locate dependencies.
-2. **It defines a unit of trust.** The `[capabilities]` section of `capsule.toml` declares which effects the capsule uses. Workspaces and runtime enforcement use this declaration to audit and restrict what each capsule is allowed to do.
+2. **It defines a unit of trust.** The `[capabilities]` section of `capsule.toml` declares which effects the capsule uses. Today the compiler enforces this declaration **at compile time** — a capsule whose code uses an effect outside its declared surface fails the build (`E0403`), and workspaces audit it. *Runtime* capability enforcement (gating effects at the syscall boundary in the running binary) is a pre-1.0 goal, not yet shipped.
 
 A capsule can be one of two things:
 
