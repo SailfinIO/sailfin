@@ -1,0 +1,22 @@
+// Fixture for compiler/tests/e2e/arena_loop_rewind_test.sfn (#1515).
+//
+// Positive case (for-range): a `for i in 0..N { … }` whose only heap
+// allocation is a per-iteration `Cell` struct that never escapes — it is read
+// field-wise into a primitive accumulator and discarded. The for-range
+// lowering must wrap the body in exactly one `@sfn_arena_sfn_mark` / one
+// `@sfn_arena_sfn_rewind` pair, just like the generic `loop` seam (#1514).
+struct Cell {
+    a: number;
+    b: number;
+    c: number;
+}
+
+fn main() ![io] {
+    let mut acc: number = 0.0;
+    for i in 0 .. 1000 {
+        let cell = Cell { a: i, b: i + 1, c: i + 2 };
+        acc = acc + cell.a + cell.b + cell.c;
+    }
+    if acc < 0.0 { return; }
+    print("done");
+}

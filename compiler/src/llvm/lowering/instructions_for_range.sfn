@@ -25,11 +25,13 @@ import {
     emit_scope_drops,
     extend_mutations,
     _parse_int_from_string,
-    extend_lifetime_regions
+    extend_lifetime_regions,
+    loop_body_rewind_eligible
 } from "./instructions_helpers";
 import { find_local_binding } from "../expressions_bindings";
 import { is_number_literal, normalise_number_literal } from "../expressions_literals";
 import { allocate_block_label } from "./instructions_condition";
+import { get_instruction_scan_text } from "./lowering_native_helpers";
 import { lower_expression } from "../expression_lowering/native/core";
 import { parse_range_iterable } from "../expression_lowering/native/core_parse";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
@@ -477,7 +479,6 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         _ci19 += 1;
     }
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
-    current_lines = extend_string_array(current_lines, body_result.lines);
     current_allocas = body_result.allocas;
     current_temp = body_result.temp_index;
     current_block_counter = body_result.block_counter;
@@ -486,6 +487,39 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
     current_next_region = body_result.next_lifetime_region_id;
     collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
     collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
+
+    // #1515: extend #1514's gated per-iteration arena reclamation to
+    // for-range bodies. Reuse `loop_body_rewind_eligible` over the body's
+    // locals / mutations / scan-text / lowered IR; the ancestor set is
+    // `current_locals` (the loop's enclosing scopes — the iteration binding
+    // is body-scope and intentionally excluded). The range increment/header
+    // touches only the `double` iterator alloca, never arena memory, so a
+    // mark at body entry still dominates the rewind at iteration close.
+    let mut arena_rewind_eligible: boolean = false;
+    if !body_result.terminated {
+        let mut body_scan_texts: string[] = [];
+        let mut _bt_idx: int = structure.body_start;
+        loop {
+            if _bt_idx >= structure.body_end { break; }
+            body_scan_texts.push(get_instruction_scan_text(function.instructions, _bt_idx));
+            _bt_idx += 1;
+        }
+        arena_rewind_eligible = loop_body_rewind_eligible(body_result.locals, body_result.mutations, loop_body_scope_id, current_locals, body_scan_texts, body_result.lines, context);
+    }
+
+    // #1514/#1515: mark the arena at body entry when eligible. The matching
+    // rewind at iteration close resets the bump cursor, freeing every arena
+    // allocation made this iteration. Emitted before the body lines so it
+    // dominates the close point.
+    let mut arena_mark_temp: string = "";
+    if arena_rewind_eligible {
+        arena_mark_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + arena_mark_temp
+            + " = call double @sfn_arena_sfn_mark()");
+    }
+
+    current_lines = extend_string_array(current_lines, body_result.lines);
 
     // M1.5.3 (issue #327): drop the for-range body's owned RC locals at
     // end-of-iteration so each iteration starts with fresh refcounts.
@@ -498,6 +532,14 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             _rcd_i += 1;
         }
         current_temp = _range_close_result.next_temp;
+        // #1515: reclaim this iteration's non-escaping arena allocations
+        // before branching to the increment block (mirror of the generic
+        // `loop` close seam in instructions_loops.sfn).
+        if arena_mark_temp.length > 0 {
+            current_lines.push("  call void @sfn_arena_sfn_rewind(double "
+                + arena_mark_temp
+                + ")");
+        }
         current_lines.push("  br label %" + loop_increment_label);
     }
 
