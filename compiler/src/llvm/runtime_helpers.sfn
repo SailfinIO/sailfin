@@ -959,7 +959,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // channel-method lowering in `core.sfn` (`_try_lower_channel_method`)
     // emits the spill/load sequences around these signatures.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "channel_create", symbol: "sfn_channel_create", return_type: "i8*", parameter_types: ["i64", "i64"], effects: [], native_signature: "sfn_channel_create", c_abi_return_type: null
+        target: "channel_create", symbol: "sfn_channel_create", return_type: "i8*", parameter_types: ["i64", "i64", "i64"], effects: [], native_signature: "sfn_channel_create", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "channel_send", symbol: "sfn_channel_send", return_type: "i64", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_channel_send", c_abi_return_type: null

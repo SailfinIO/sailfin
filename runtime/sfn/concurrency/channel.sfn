@@ -9,7 +9,7 @@
 // A `Channel` is a fixed-capacity circular buffer guarded by a mutex
 // with two condition variables (`not_empty` / `not_full`), plus an
 // atomic closed flag.  Operations:
-//   sfn_channel_create(capacity, elem_size) -> * u8
+//   sfn_channel_create(capacity, elem_size, owned) -> * u8
 //   sfn_channel_send(ch, elem) -> bool   blocks if full; false if closed
 //   sfn_channel_recv(ch) -> * u8         blocks if empty; null if closed+empty
 //   sfn_channel_close(ch) -> void
@@ -67,7 +67,11 @@ struct PthreadCond {
 // blocked producers / consumers.
 //
 // Layout (max-sized handles): six i64s (48 B) + PthreadMutex (64 B)
-//   + two PthreadCond (96 B) = 208 bytes, + `closed` i64 = 216 bytes.
+//   + two PthreadCond (96 B) = 208 bytes, + `closed` i64 = 216 bytes,
+//   + `elem_owned` i64 = 224 bytes.  `elem_owned` is set at create
+//   (1 when the elements are `OwnedBuf`, #1476) so `sfn_channel_destroy`
+//   can drain abandoned buffers; it is appended after `closed` so the
+//   hand-maintained `closed` offset (208) stays put.
 struct Channel {
     buffer_addr: i64;
     capacity: i64;
@@ -79,6 +83,7 @@ struct Channel {
     not_empty: PthreadCond;
     not_full: PthreadCond;
     closed: i64;
+    elem_owned: i64;
 }
 
 // ── Externs ───────────────────────────────────────────────────────
@@ -118,16 +123,20 @@ fn _sfn_channel_struct_size() -> i64 { return 208; }
 //   [112..160) not_empty PthreadCond (48 B)
 //   [160..208) not_full PthreadCond (48 B)
 //   [208..216) closed i64
-// Total: 216 bytes.
-fn _sfn_channel_struct_size_full() -> i64 { return 216; }
+//   [216..224) elem_owned i64
+// Total: 224 bytes.
+fn _sfn_channel_struct_size_full() -> i64 { return 224; }
 
 fn _sfn_channel_closed_offset() -> i64 { return 208; }
 
 // ── sfn_channel_create ────────────────────────────────────────────
 // Allocates a channel handle and its element buffer.  `capacity` is
 // clamped to at least 1; `elem_size` must be > 0 (clamped to 1 if
-// not).  Returns null on OOM or a failed pthread init.
-fn sfn_channel_create(capacity: i64, elem_size: i64) -> * u8 {
+// not).  `owned` is 1 when the elements are `OwnedBuf` (#1476) — it is
+// stored so `sfn_channel_destroy` drains and frees any libc-backed
+// buffers abandoned in the ring at close.  Returns null on OOM or a
+// failed pthread init.
+fn sfn_channel_create(capacity: i64, elem_size: i64, owned: i64) -> * u8 {
     let mut cap: i64 = capacity;
     if cap <= 0 { cap = 1; }
     let mut esz: i64 = elem_size;
@@ -149,6 +158,7 @@ fn sfn_channel_create(capacity: i64, elem_size: i64) -> * u8 {
     ch.head = 0;
     ch.tail = 0;
     ch.count = 0;
+    ch.elem_owned = owned;
 
     // Zero the closed flag via offset arithmetic (same pattern as
     // Task.done in scheduler.sfn).
@@ -297,6 +307,39 @@ fn sfn_channel_close(ch: * u8) -> void {
 fn sfn_channel_destroy(ch: * u8) -> void {
     if ch as i64 == 0 { return; }
     let c: * Channel = ch as * Channel;
+    // Drain owned elements abandoned in the ring (#1476).  When the
+    // channel carries `OwnedBuf` elements (`elem_owned == 1`), every
+    // element still buffered at close owns its backing storage.  Free the
+    // libc-backed ones (`arena_addr == 0`); arena-backed buffers
+    // (`arena_addr != 0`) are reclaimed by their owning arena and must
+    // never be individually freed (see runtime/sfn/memory/ownedbuf.sfn).
+    // The caller has closed the channel and drained receivers, so no other
+    // thread is touching the ring here — the walk needs no lock.  An
+    // `OwnedBuf` slot is `{ i64 ptr_addr, i64 len, i64 cap, i64 arena_addr }`:
+    // `ptr_addr` at slot+0, `arena_addr` at slot+24.
+    if c.elem_owned != 0 {
+        let buf_base: i64 = c.buffer_addr;
+        let cap: i64 = c.capacity;
+        let esz: i64 = c.elem_size;
+        let live: i64 = c.count;
+        let head: i64 = c.head;
+        if buf_base != 0 && cap > 0 {
+            let mut i: i64 = 0;
+            loop {
+                if i >= live { break; }
+                let slot_index: i64 = (head + i) % cap;
+                let slot_addr: i64 = buf_base + slot_index * esz;
+                let ptr_slot: * i64 = slot_addr as * i64;
+                let ptr_addr: i64 = atomic_load(ptr_slot);
+                let arena_slot: * i64 = (slot_addr + 24) as * i64;
+                let arena_addr: i64 = atomic_load(arena_slot);
+                if arena_addr == 0 && ptr_addr != 0 {
+                    free(ptr_addr as * u8);
+                }
+                i = i + 1;
+            }
+        }
+    }
     pthread_cond_destroy(c.not_full);
     pthread_cond_destroy(c.not_empty);
     pthread_mutex_destroy(c.mutex);

@@ -1335,12 +1335,13 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     }
 
     // ── channel(<capacity>) / channel:<kind>(<capacity>) ───────────────
-    // Both forms lower to `sfn_channel_create(i64 capacity, i64 elem_size)`
-    // matching `runtime/sfn/concurrency/channel.sfn` (#1266, was 1-arg i32
-    // in #1091). v0 monomorphizes every channel to pointer-sized elements,
-    // so `elem_size` is the constant 8. The kind qualifier is recorded for
-    // future typed-channel work but the runtime ABI is uniform today
-    // (opaque i8* channel handle).
+    // Both forms lower to
+    // `sfn_channel_create(i64 capacity, i64 elem_size, i64 owned)` matching
+    // `runtime/sfn/concurrency/channel.sfn` (#1266, was 1-arg i32 in #1091;
+    // the `owned` flag added in #1476). The bare form monomorphizes to
+    // pointer-sized elements (`elem_size` = 8, `owned` = 0). The typed form
+    // sizes the ring slot to the aggregate width and sets `owned` = 1 only
+    // for `channel:OwnedBuf`, so destroy can drain abandoned buffers.
     if starts_with(stripped, "channel(") {
         let chan_inner = trim_text(substring(stripped, 8, stripped.length));
         // The end index is computed in a standalone statement (not a
@@ -1377,7 +1378,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         chan_temp += 1;
         chan_lines.push("  " + chan_result + " = call i8* @sfn_channel_create("
             + cap_llvm
-            + ", i64 8)");
+            + ", i64 8, i64 0)");
         let chan_operand = LLVMOperand {
             llvm_type: "i8*",
             value: chan_result
@@ -1433,8 +1434,14 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         // stride. A divergence over-writes or under-reads the ring slot
         // (an #1205-class heap hazard under concurrent producers/consumers).
         let mut typed_elem_size_llvm: string = "i64 8";
+        // `owned` flag (#1476): 1 only when the element kind is exactly
+        // `OwnedBuf`, so `sfn_channel_destroy`'s drain seam frees each
+        // abandoned element's `ptr_addr`. A generic struct element does not
+        // own heap by this convention, so it stays 0 (no drain).
+        let mut typed_owned_llvm: string = "i64 0";
         if paren_pos > 8 {
             let kind_text = trim_text(substring(stripped, 8, paren_pos));
+            if kind_text == "OwnedBuf" { typed_owned_llvm = "i64 1"; }
             let kind_struct = resolve_struct_info_for_literal(context, kind_text);
             if kind_struct != null {
                 let esz_ptr = format_temp_name(chantyped_temp);
@@ -1461,6 +1468,8 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             + typed_cap_llvm
             + ", "
             + typed_elem_size_llvm
+            + ", "
+            + typed_owned_llvm
             + ")");
         let chantyped_operand = LLVMOperand {
             llvm_type: "i8*",

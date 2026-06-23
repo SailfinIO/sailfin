@@ -70,13 +70,26 @@ test "concurrency-ir: channel(N) lowers to sfn_channel_create (#1091)" ![io] {
     assert contains(ir, "sfn_channel_create");
 }
 
-// channel_create call carries the capacity AND the elem_size operand, matching
-// runtime/sfn/concurrency/channel.sfn (§2.6.4): v0 channels are monomorphized
-// to pointer-sized elements, so elem_size is 8.
-test "concurrency-ir: channel_create carries i64 capacity + elem_size (#1266)" ![io] {
+// channel_create call carries the capacity, the elem_size operand AND the
+// `owned` flag (#1476), matching runtime/sfn/concurrency/channel.sfn (§2.6.4):
+// a bare channel(N) is monomorphized to pointer-sized, non-owned elements, so
+// elem_size is 8 and owned is 0.
+test "concurrency-ir: channel_create carries i64 capacity + elem_size + owned (#1266, #1476)" ![io] {
     let ir = _emit_llvm("fn main() ![io] {\n    let ch = channel(4);\n}\n", "channel_create_i64");
     assert ir.length > 0;
-    assert contains(ir, "sfn_channel_create(i64 4, i64 8)");
+    assert contains(ir, "sfn_channel_create(i64 4, i64 8, i64 0)");
+}
+
+// channel:OwnedBuf(N) sizes the ring slot to the 32-byte aggregate AND sets
+// the `owned` flag to 1 (#1476), so sfn_channel_destroy drains abandoned
+// buffers. A struct named OwnedBuf is defined inline so the kind resolves and
+// the elem_size GEP-sizeof idiom yields 32.
+test "concurrency-ir: channel:OwnedBuf carries elem_size 32 + owned 1 (#1476)" ![io] {
+    let src = "struct OwnedBuf {\n    ptr_addr: int;\n    len: int;\n    cap: int;\n    arena_addr: int;\n}\n\nfn main() ![io] {\n    let ch = channel:OwnedBuf(2);\n}\n";
+    let ir = _emit_llvm(src, "channel_create_owned");
+    assert ir.length > 0;
+    assert contains(ir, "@sfn_channel_create");
+    assert contains(ir, ", i64 1)");
 }
 
 // spawn:int <lambda> → sfn_spawn_int (#1090 flip)
