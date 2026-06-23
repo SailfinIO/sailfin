@@ -148,9 +148,19 @@ fn closure_pair_marker(lambda_id: int, env_var: string) -> string {
 // (a malloc-backed, individually-freeable block the spawned worker owns
 // and frees) instead of the arena-routed `@sfn_alloc_struct`. Synchronous
 // capturing lambdas pass false and keep the arena fast-path (status quo).
-fn closure_pair_env_alloc_marker(lambda_id: int, captures_text: string, owned_env: boolean) -> string {
+// `owned_buf` (#1476) refines `owned_env`: true when the env's first
+// capture is a moved `OwnedBuf` (at env offset 0). It emits the more
+// specific `owned_buf` tag so the spawn dispatch selects the
+// `_owned_buf_ctx` trampoline family (env-container free + libc-backed
+// buffer reclaim). It still routes env alloc through `@sfn_env_alloc`
+// (the env must be malloc-backed, else the trampoline's `free(env)`
+// corrupts the arena — a #1205-class hazard). `owned_buf` implies
+// `owned_env`; when both are true the `owned_buf` tag wins.
+fn closure_pair_env_alloc_marker(lambda_id: int, captures_text: string, owned_env: boolean, owned_buf: boolean) -> string {
     let mut owned_tag: string = "";
-    if owned_env { owned_tag = "owned_env "; }
+    if owned_buf { owned_tag = "owned_buf "; } else if owned_env {
+        owned_tag = "owned_env ";
+    }
     return "<closure_pair @sfn_lambda_" + number_to_string(lambda_id)
         + " env_alloc "
         + owned_tag
@@ -686,7 +696,20 @@ fn _rewrite_lambda(ctx: LiftContext, lambda: Expression, owned_env: boolean) -> 
         lifted: new_lifted,
         records: ctx.records
     };
-    let marker_text = closure_pair_env_alloc_marker(lambda_id, _encode_captures(record.captures), owned_env);
+    // #1476: when this is a spawn/parallel task lambda (`owned_env`) whose
+    // FIRST capture is a moved `OwnedBuf`, it sits at env offset 0, so the
+    // worker can reclaim its libc-backed buffer via the `_owned_buf_ctx`
+    // family. Gate on the first capture only — `sfn_env_free_owned` reads a
+    // single offset (0); a non-first OwnedBuf keeps the `owned_env` path
+    // (env-container free only, status quo) rather than reading the wrong
+    // 32 bytes.
+    let mut owned_buf: boolean = false;
+    if owned_env {
+        if record.captures.length > 0 {
+            if record.captures[0].type_text == "OwnedBuf" { owned_buf = true; }
+        }
+    }
+    let marker_text = closure_pair_env_alloc_marker(lambda_id, _encode_captures(record.captures), owned_env, owned_buf);
     return ExpressionRewriteResult {
         ctx: new_ctx,
         expression: Expression.Raw { text: marker_text, span: null }
