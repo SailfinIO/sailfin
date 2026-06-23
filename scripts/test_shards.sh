@@ -8,9 +8,21 @@
 # runner, the Makefile, and the cover lint can never drift apart.
 #
 # Shards (disjoint; their union == `make test`'s surface):
-#   unit-a        odd-indexed  compiler/tests/unit/*_test.sfn
-#   unit-b        even-indexed compiler/tests/unit/*_test.sfn
-#   int-e2e-caps  integration + e2e + capsules *_test.sfn
+#   unit-a/b/c    compiler/tests/unit/*_test.sfn, strided 1..3 of 3
+#   int-caps      integration + capsules *_test.sfn
+#   e2e-a/b/c/d   compiler/tests/e2e/*_test.sfn, strided 1..4 of 4
+#
+# Why this split (#1529 follow-on): the former single `int-e2e-caps` leg
+# ran ~212 *_test.sfn files SERIALLY (the runner is `--jobs 1`), and ~140
+# of them spawn a full `sfn build`/`run` (compile fixture -> clang ->
+# link -> run). On the slower macOS-arm64 toolchain that one leg ran
+# >60 min and blocked iteration. e2e is the heavy bulk (132/140 are
+# build-spawners), so it is striped 4 ways; integration+capsules ride
+# their own leg; unit is striped 3 ways (it was the other ~30 min pole).
+# Each leg still runs serially INTERNALLY, so per-leg memory stays
+# bounded (no re-OOM) — the parallelism is across CI runners, not within
+# a process. The `cover` lint guarantees the union still equals the full
+# surface.
 #
 # (The legacy `e2e-sh-*` shards were retired when the bash e2e suite was
 # fully migrated to `*_test.sfn` peers — Phase 3.1, epic #840.)
@@ -24,7 +36,7 @@
 
 set -euo pipefail
 
-SFN_SHARDS="unit-a unit-b int-e2e-caps"
+SFN_SHARDS="unit-a unit-b unit-c int-caps e2e-a e2e-b e2e-c e2e-d"
 
 _all_shard_names() {
 	printf '%s\n' "$SFN_SHARDS"
@@ -46,16 +58,31 @@ list() {
 	local shard="$1"
 	case "$shard" in
 	unit-a)
-		find compiler/tests/unit -name '*_test.sfn' -print | sort | _stride 1 2
+		find compiler/tests/unit -name '*_test.sfn' -print | sort | _stride 1 3
 		;;
 	unit-b)
-		find compiler/tests/unit -name '*_test.sfn' -print | sort | _stride 2 2
+		find compiler/tests/unit -name '*_test.sfn' -print | sort | _stride 2 3
 		;;
-	int-e2e-caps)
+	unit-c)
+		find compiler/tests/unit -name '*_test.sfn' -print | sort | _stride 3 3
+		;;
+	int-caps)
 		{
-			find compiler/tests/integration compiler/tests/e2e -name '*_test.sfn' -print
+			find compiler/tests/integration -name '*_test.sfn' -print
 			find capsules -path '*/tests/*_test.sfn' -print
 		} | sort
+		;;
+	e2e-a)
+		find compiler/tests/e2e -name '*_test.sfn' -print | sort | _stride 1 4
+		;;
+	e2e-b)
+		find compiler/tests/e2e -name '*_test.sfn' -print | sort | _stride 2 4
+		;;
+	e2e-c)
+		find compiler/tests/e2e -name '*_test.sfn' -print | sort | _stride 3 4
+		;;
+	e2e-d)
+		find compiler/tests/e2e -name '*_test.sfn' -print | sort | _stride 4 4
 		;;
 	*)
 		echo "[test_shards] unknown shard: $shard (want: $SFN_SHARDS)" >&2

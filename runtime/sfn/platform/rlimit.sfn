@@ -52,7 +52,7 @@
 // `runtime/ir/windows_stubs.ll`, which only the
 // cross-windows link consumes — Linux/macOS link this module's
 // definition and never see the stub. Sync pinned by
-// `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.
+// `compiler/tests/e2e/cross_windows_runtime_modules_test.sfn`.
 // Overlay matching the Linux x86_64 `struct rlimit`: two 8-byte
 // unsigned slots (`rlim_cur`, `rlim_max`), 16 bytes total, no
 // padding. `RLIM_INFINITY` is all-bits-set, which reads back as
@@ -128,14 +128,14 @@ fn _mem_limit_trace(msg: string) ![io] {
 // that as advisory, not fatal: a missing budget never blocks a
 // build, it only removes the guardrail.
 fn apply_default_mem_limit() -> i32 ![io] {
-    // Linux gate: /proc is the cheapest reliable probe and avoids
-    // both a `uname` subprocess and a wrong-constant hazard
-    // (`RLIMIT_AS` is 9 on Linux but 5 on Darwin — calling resource
-    // 9 there would silently target RLIMIT_NPROC).
-    let s_proc: string = "/proc/self/status";
-    if !sfn_fs_exists(s_proc as * u8) { return 0; }
-
-    // 8 GiB — the historical repo-wide cap (`ulimit -v 8388608`).
+    // Resolve the requested budget first so every platform branch
+    // below shares one decision. 8 GiB is the historical repo-wide
+    // default (`ulimit -v 8388608`); SAILFIN_MEM_LIMIT overrides it.
+    // `unlimited`/`off`/`0` disables the self-cap entirely and must
+    // short-circuit on ALL platforms before any cap/monitor is armed
+    // — ASAN/TSAN reserve ~16 TB of virtual address space and abort
+    // under any finite budget, so the disable path is load-bearing
+    // for sanitizer legs (`.claude/rules/compiler-safety.md`).
     let mut target: i64 = 8589934592;
     let mut explicit: bool = false;
 
@@ -169,6 +169,48 @@ fn apply_default_mem_limit() -> i32 ![io] {
         }
     }
 
+    // Linux: a hard `RLIMIT_AS` cap, inherited across fork/exec so the
+    // emit subprocesses + `clang`/`llvm-link` children share it. /proc
+    // is the cheapest reliable probe and avoids both a `uname`
+    // subprocess and a wrong-constant hazard (`RLIMIT_AS` is 9 on Linux
+    // but 5 on Darwin — calling resource 9 there would silently target
+    // RLIMIT_NPROC).
+    let s_proc: string = "/proc/self/status";
+    if sfn_fs_exists(s_proc as * u8) {
+        return _apply_linux_rlimit_as(target, explicit);
+    }
+
+    // Darwin: `setrlimit(RLIMIT_AS)` returns EINVAL, so there is NO
+    // inheritable hard cap (confirmed by spike — see
+    // `docs/proposals/darwin-memory-governor.md` §2.2). The memory
+    // floor on macOS is therefore the RAM-aware emit fan-out governor
+    // in `capsule_resolver.sfn::_cr_resolve_jobs` (#1532). This branch
+    // is the scaffolding for a best-effort in-process footprint
+    // monitor (Step 3); for now it only records — under
+    // SAILFIN_TRACE_MEM_LIMIT — that the Darwin path was taken, with no
+    // enforcement. `/System/Library/CoreServices` is a Darwin marker
+    // (always present on macOS, absent on Linux) needing no new extern.
+    let s_darwin: string = "/System/Library/CoreServices";
+    if sfn_fs_exists(s_darwin as * u8) {
+        let m_dwn: string = "[mem-limit] darwin: no RLIMIT_AS; fan-out governor is the floor (in-process monitor pending)\n";
+        _mem_limit_trace(m_dwn);
+        return 0;
+    }
+
+    // Windows / unknown: the cross-windows bridge excludes this module
+    // and resolves the strong no-op stub in `runtime/ir/windows_stubs.ll`
+    // instead; any other non-Linux/Darwin host runs without a self-cap,
+    // exactly as before this branch existed.
+    return 0;
+}
+
+// Install the 8 GiB (or SAILFIN_MEM_LIMIT) soft `RLIMIT_AS` cap on
+// Linux. Split out of `apply_default_mem_limit` so the platform
+// dispatch reads cleanly; the body is byte-for-byte the pre-#1532
+// Linux path. Returns 0 when the cap is in place or an external cap
+// already governs, -1 on an unexpected getrlimit/setrlimit/malloc
+// failure (advisory only — a missing budget never blocks a build).
+fn _apply_linux_rlimit_as(target: i64, explicit: bool) -> i32 ![io] {
     let buf: * u8 = malloc(16 as usize);
     if buf as i64 == 0 { return -1; }
     let rl: * RLimit = buf as * RLimit;

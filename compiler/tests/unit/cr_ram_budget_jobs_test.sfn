@@ -1,0 +1,47 @@
+// #1532: unit coverage for `_cr_ram_budget_jobs`, the memory-aware
+// fan-out ceiling used by `_cr_resolve_jobs`. The clamp caps the
+// CPU-derived emit-worker count by how many ~3 GiB workers fit in a
+// 66% slice of physical RAM. On macOS this is the ONLY emit memory
+// backpressure (`RLIMIT_AS` is a no-op on Darwin), so the arithmetic
+// is regression-tested directly, apart from the host RAM probe.
+//
+// Reserve = 3 GiB = 3221225472 B; usable = memsize * 66 / 100.
+import { _cr_ram_budget_jobs } from "../../src/capsule_resolver";
+
+// 7 GiB runner (the ~7 GiB macOS CI box that OOMed in #1532):
+// usable = 7516192768*0.66 = 4.96 GiB; 4.96/3 = 1 -> serial emit.
+test "ram budget: 7 GiB runner clamps to 1 (the #1532 fix)" {
+    assert _cr_ram_budget_jobs(7516192768, 8) == 1;
+}
+
+// 16 GiB laptop: usable = 10.56 GiB; 10.56/3 = 3.
+test "ram budget: 16 GiB host yields 3" {
+    assert _cr_ram_budget_jobs(17179869184, 8) == 3;
+}
+
+// 64 GiB dev box: usable = 42.24 GiB; 42.24/3 = 14, clamped to nproc.
+test "ram budget: 64 GiB host stays clamped to nproc (unchanged local)" {
+    assert _cr_ram_budget_jobs(68719476736, 8) == 8;
+}
+
+// The clamp only ever LOWERS the count: a RAM-rich host with few
+// cores keeps the small nproc.
+test "ram budget: never raises above nproc" {
+    assert _cr_ram_budget_jobs(68719476736, 2) == 2;
+}
+
+// Unknown / unprobed RAM (memsize <= 0) is fail-open: return nproc
+// unchanged so an undetectable host is never starved.
+test "ram budget: zero memsize falls open to nproc" {
+    assert _cr_ram_budget_jobs(0, 8) == 8;
+}
+
+test "ram budget: negative memsize falls open to nproc" {
+    assert _cr_ram_budget_jobs(-1, 4) == 4;
+}
+
+// A tiny host still gets serial emit, never zero (the `max(1, ...)`
+// floor) — a build must always make progress.
+test "ram budget: tiny host floors at 1, never 0" {
+    assert _cr_ram_budget_jobs(1073741824, 8) == 1;
+}
