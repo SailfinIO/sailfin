@@ -324,3 +324,45 @@ fn sfn_env_free(ptr: * u8) -> void {
     // non-arena block reaches libc `free`.
     unsafe { free(ptr); }
 }
+
+// `sfn_env_free_owned(env, ownedbuf_off)` frees a captured-env block that
+// carries a moved `OwnedBuf` by value (#1476).  When a spawn/parallel task
+// lambda captures (moves) an `OwnedBuf`, the 32-byte struct rides inside the
+// `@sfn_env_alloc`'d env; `sfn_env_free` alone reclaims the env container but
+// leaks the buffer the `OwnedBuf.ptr_addr` points at.  This helper reclaims a
+// **libc-backed** captured buffer (`arena_addr == 0`) before freeing the
+// container; an **arena-backed** buffer (`arena_addr != 0`) is left untouched
+// — the owning arena reclaims it, and handing an arena pointer to libc `free`
+// is the #1205-class glibc-corruption landmine.
+//
+// `ownedbuf_off` is the byte offset of the moved `OwnedBuf` within the env;
+// the lowering pins the moved buffer to offset 0 (the env's first field), so
+// callers pass 0.  A negative offset means "no owned buffer" — free the
+// container only (equivalent to `sfn_env_free`).
+//
+// `OwnedBuf` layout (runtime/sfn/memory/ownedbuf.sfn): `{ i64 ptr_addr@0,
+// i64 len@8, i64 cap@16, i64 arena_addr@24 }`.  Field addresses are computed
+// with split arithmetic (a fresh `i64` base then the field cast) — an inline
+// `(env as i64 + 24) as * i64` miscompiles under the seed.
+fn sfn_env_free_owned(env: * u8, ownedbuf_off: i64) -> void {
+    if env as i64 == 0 { return; }
+    if ownedbuf_off >= 0 {
+        let base: i64 = env as i64;
+        let ptr_field: i64 = base + ownedbuf_off;
+        let arena_field: i64 = base + ownedbuf_off + 24;
+        let ptr_slot: * i64 = ptr_field as * i64;
+        let arena_slot: * i64 = arena_field as * i64;
+        let ptr_addr: i64 = atomic_load(ptr_slot);
+        let arena_addr: i64 = atomic_load(arena_slot);
+        if arena_addr == 0 {
+            if ptr_addr != 0 {
+                // Raw disposal (#1218 / E9): the captured buffer is libc-backed
+                // and uniquely owned by this worker after the move (#1220).
+                unsafe { free(ptr_addr as * u8); }
+            }
+        }
+    }
+    // Free the env container itself (calloc-backed, non-arena — see
+    // `sfn_env_free`'s contract).
+    unsafe { free(env); }
+}

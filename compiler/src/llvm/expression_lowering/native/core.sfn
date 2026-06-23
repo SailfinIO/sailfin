@@ -318,6 +318,7 @@ import {
     spawn_symbol_for_kind,
     spawn_ctx_symbol_for_kind,
     spawn_owned_ctx_symbol_for_kind,
+    spawn_owned_buf_ctx_symbol_for_kind,
     llvm_return_type_for_spawn_kind,
     future_type_for_spawn_kind,
     map_parameter_type
@@ -547,7 +548,12 @@ fn _lower_closure_env_alloc(env_var_text: string, target: NativeFunction, bindin
     // `owned_env` (spawn/parallel task lambdas, #1475) is tagged right
     // after `env_alloc` by the lift pass; route its env through the
     // malloc-backed `@sfn_env_alloc` so the spawned worker can free it.
-    let owned_env: boolean = starts_with(env_var_text, "env_alloc owned_env ");
+    // #1476: the `owned_buf` tag (env's first capture is a moved OwnedBuf)
+    // ALSO requires a malloc-backed env — the `_owned_buf_ctx` trampoline
+    // `free(env)`s the container, which corrupts the arena if the env were
+    // arena-routed (a #1205-class hazard). Treat both tags as owned-env.
+    let owned_env: boolean = starts_with(env_var_text, "env_alloc owned_env ")
+        || starts_with(env_var_text, "env_alloc owned_buf ");
     let lambda_id = _parse_marker_int_field(env_var_text, "lambda_id=");
     let captures_text = _parse_marker_string_field(env_var_text, "captures=");
     let captures = decode_captures(captures_text);
@@ -1166,7 +1172,15 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         // closure-pair operand text (set by the lift pass for spawn targets);
         // non-capturing (null env) and async ctx paths keep the plain `_ctx`.
         let mut spawn_ctx_sym = spawn_ctx_symbol_for_kind(spawn_kind);
-        if index_of(spawn_operand_text, "env_alloc owned_env ") >= 0 {
+        // #1476: a capturing task lambda whose first capture is a moved
+        // `OwnedBuf` carries the `owned_buf` tag — route through the
+        // `_owned_buf_ctx` family whose trampoline reclaims the libc-backed
+        // buffer at env offset 0. Check `owned_buf` BEFORE `owned_env`: both
+        // markers contain `env_alloc`, and `owned_buf` is the more specific
+        // (env-free + buffer reclaim) selection.
+        if index_of(spawn_operand_text, "env_alloc owned_buf ") >= 0 {
+            spawn_ctx_sym = spawn_owned_buf_ctx_symbol_for_kind(spawn_kind);
+        } else if index_of(spawn_operand_text, "env_alloc owned_env ") >= 0 {
             spawn_ctx_sym = spawn_owned_ctx_symbol_for_kind(spawn_kind);
         }
         let future_type = future_type_for_spawn_kind(spawn_kind);
