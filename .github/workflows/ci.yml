@@ -420,6 +420,19 @@ jobs:
           set -euo pipefail
           tar -xzf "build-tree-linux-x86_64.tar.gz"
           rm -f "build-tree-linux-x86_64.tar.gz"
+          # mtime fix (the real cause of the macOS e2e "exit 134"
+          # misattributed to #892): the artifact binary was built from
+          # THIS commit's sources, but tar transport leaves it older than
+          # the freshly-checked-out sources. A nested `make compile` (run
+          # by make_result_contract_test / make_report_contract_test) then
+          # sees the binary as stale -> triggers `make rebuild` -> and,
+          # since build/seed is not bundled, fetches the seed over the
+          # network (unauthenticated, no GITHUB_TOKEN in the test child
+          # env) and fails -> status != "pass" -> the test aborts (134).
+          # The binary IS up-to-date for this commit, so mark it current
+          # and `make compile` becomes the intended no-op.
+          touch build/native/sailfin
+          [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
           ls -lh build/native/sailfin
 
       - name: Test + package (via Makefile)
@@ -688,19 +701,6 @@ jobs:
     # blind 8 that previously OOMed the int-e2e-caps shard.
     runs-on: macos-26
     timeout-minutes: 120
-    # TEMPORARY (#892): the macOS `e2e-*` legs are non-gating. They still
-    # run and report, but a failure does NOT red the PR. Reason: #892
-    # (residual non-deterministic heap corruption in runtime-helper
-    # declare emission) is live on macOS-arm64 and crashes some e2e
-    # fixture *builds* (SIGABRT/SIGKILL before any test output), so it
-    # cannot be skipped in-source. The #1529 fan-out governor (this PR)
-    # already removed the whole-shard exit-137 cascade — these are now
-    # bounded single-test build crashes. The SAME e2e tests still gate on
-    # Linux (where #892 does not reproduce), so e2e *logic* regressions
-    # are still caught; only macOS-specific e2e breakage can slip while
-    # this holds. macOS unit + int-caps + the compiler build stay
-    # gating. REVERT this `continue-on-error` when #892 is fixed.
-    continue-on-error: ${{ startsWith(matrix.shard, 'e2e-') }}
     strategy:
       fail-fast: false
       matrix:
@@ -752,6 +752,19 @@ jobs:
           set -euo pipefail
           tar -xzf "build-tree-macos-arm64.tar.gz"
           rm -f "build-tree-macos-arm64.tar.gz"
+          # mtime fix (the real cause of the macOS e2e "exit 134"
+          # misattributed to #892): the artifact binary was built from
+          # THIS commit's sources, but tar transport leaves it older than
+          # the freshly-checked-out sources. A nested `make compile` (run
+          # by make_result_contract_test / make_report_contract_test) then
+          # sees the binary as stale -> triggers `make rebuild` -> and,
+          # since build/seed is not bundled, fetches the seed over the
+          # network (unauthenticated, no GITHUB_TOKEN in the test child
+          # env) and fails -> status != "pass" -> the test aborts (134).
+          # The binary IS up-to-date for this commit, so mark it current
+          # and `make compile` becomes the intended no-op.
+          touch build/native/sailfin
+          [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
           ls -lh build/native/sailfin
 
       - name: Test + package (via Makefile)
