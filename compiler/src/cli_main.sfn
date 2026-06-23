@@ -54,7 +54,6 @@ import {
     empty_determinism_snapshot
 } from "./build_report";
 import {
-    handle_fmt_command,
     handle_lock_command,
     handle_test_command,
     handle_config_command,
@@ -1954,7 +1953,6 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     let is_package = strings_equal(cmd, "package");
     let is_lock = strings_equal(cmd, "lock");
     let is_config = strings_equal(cmd, "config");
-    let is_fmt = strings_equal(cmd, "fmt");
     let is_check = strings_equal(cmd, "check");
     if trace_argv {
         if is_emit { print.err("cli: cmd_is_emit=true"); }
@@ -2786,8 +2784,8 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
     if is_config { return handle_config_command(args); }
 
-    if is_fmt { return handle_fmt_command(args); }
-
+    // `sfn fmt` migrated to `sfn/cli` (epic #351, Issue 3.4) — handled
+    // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
     if is_check { return handle_check_command(args, binary_dir); }
 
     // Bare-file dispatch: `sailfin <file.sfn>` (no subcommand) compiles
