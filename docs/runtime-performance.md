@@ -66,7 +66,7 @@ Compiler `sfn 0.7.0-alpha.47+dev.64ed8a6d`, Apple Silicon, K=5. Raw CSV:
 
 | Workload | inner ms (min) | inner ms (median) | peak RSS | ops | ops/ms |
 |---|---|---|---|---|---|
-| `arena_alloc` | 336 | 336 | 691 MB | 30,000,000 | 89,286 |
+| `arena_alloc` | 336 | 336 | 691 MB † | 30,000,000 | 89,286 |
 | `arena_reset_churn` | 331 | 331 | 764 MB | 60,000,000 | 181,269 |
 | `string_concat` | 101 | 101 | 159 MB | 2,005,000 | 19,852 |
 | `string_find_format` | 441 | 442 | 197 MB | 220,000 | 498 |
@@ -79,14 +79,44 @@ Observations for follow-up (not regressions — first baseline, nothing to compa
 against yet):
 
 - **Arena allocation dominates RSS** (~700–760 MB for 30–60M allocations) —
-  expected for a bump allocator that grows its page chain; the next baseline
-  shows whether reset/reuse reclaims it.
+  expected for a bump allocator that grows its page chain. **† Resolved for
+  non-escaping loop-local allocations** by in-loop arena reclamation (#1514 /
+  #1515); see the post-fix note below. The 691 MB row above is the
+  pre-reclamation baseline, retained for comparison.
 - **`string_find_format` is the slowest per-op** (498 ops/ms) — the int→str
   formatting path is heavier than raw scanning; worth a look if string-heavy
   programs feel slow.
 - **Linux x86_64 baseline pending** — runtime numbers are not cross-platform
   comparable (wall + RSS differ by arch), so a Linux row must be captured on a
   Linux runner before CI regression gating is meaningful.
+
+### Post-fix: in-loop arena reclamation (#1514 / #1515, epic #1513)
+
+The 0.7.0 baseline above is **pre-reclamation** — it was captured on
+`sfn 0.7.0-alpha.47+dev.64ed8a6d`, which predates the arena-rewind emission
+landed by #1514 (generic `loop`) and #1515 (`for`-range / `for`-array). The
+baseline CSV is left frozen at that build stamp on purpose; this note records
+the post-fix number rather than mutating a stamped snapshot.
+
+With reclamation on, the emitter wraps a non-escaping loop body in
+`sfn_arena_sfn_mark` / `sfn_arena_sfn_rewind`, so per-iteration arena structs
+are freed each pass instead of accumulating. The `arena_alloc` workload
+(30M non-escaping `Cell` structs) therefore drops from a linearly-growing
+**~691 MB (1.01× the raw allocation size)** to a **flat ~1.7 MB** peak, with
+its `RESULT` output unchanged (correctness preserved). Number recorded by the
+shipping change, PR #1528 (#1514); the gate is `loop_body_rewind_eligible`
+(`compiler/src/llvm/lowering/instructions_helpers.sfn`).
+
+**Bounds.** Reclamation is scoped to non-escaping loop-local arena allocations:
+the body must allocate via a real `@sfn_alloc_struct`, every body-scope heap
+local must be an all-primitive-scalar struct still `allocation_kind=="arena"`
+(not promoted to `rc`, consumed, or stored into an ancestor-scope binding), and
+the body must contain no other call/store that could grow an ancestor container
+in the arena. `arena_reset_churn` (which deliberately reuses pages across
+explicit reset rounds) is unaffected. Strategy B (scalar replacement) and
+nested-loop mark stacking are post-1.0. A re-run of the full suite to refresh
+the frozen darwin-arm64 CSV (and the pending Linux x86_64 baseline) will fold
+this number into a stamped baseline.
 
 ## Known runtime limitations exercised here
 
