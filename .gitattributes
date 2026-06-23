@@ -1,1 +1,23 @@
 .github/workflows/*.lock.yml linguist-generated=true merge=ours
+
+# --- GitHub linguist language-bar accuracy ---
+# Sailfin (.sfn) has no upstream linguist grammar yet, so the compiler,
+# runtime, and capsules (the actual codebase, all .sfn) contribute zero
+# bytes to GitHub's language stats. Without the rules below the bar is
+# computed entirely from the marketing site and dev tooling, which
+# misrepresents the repo as a Shell/Astro/TypeScript project. These
+# attributes exclude the non-representative surfaces so the bar reflects
+# what's left honestly (rather than aliasing .sfn to an unrelated
+# language, which would pollute GitHub language search). A real "Sailfin"
+# entry requires an upstream github-linguist submission backed by broad
+# repo adoption.
+
+# Marketing / documentation site (Astro, CSS, config) — not the language.
+site/** linguist-documentation
+
+# Developer & build tooling — not the language.
+tools/** linguist-vendored
+scripts/** linguist-vendored
+.claude/** linguist-vendored
+.codex/** linguist-vendored
+install.sh linguist-vendored
