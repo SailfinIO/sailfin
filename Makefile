@@ -382,13 +382,14 @@ test-capsules-impl:
 # concurrent CI legs. `scripts/test_shards.sh` owns the shard -> file
 # mapping (single source of truth); `test-shard-cover` asserts the union
 # of all shards equals `make test`'s surface so a rebalance can never
-# silently drop coverage. Shard names: unit-a unit-b int-e2e-caps.
+# silently drop coverage. Shard names: unit-a unit-b unit-c int-caps
+# e2e-a e2e-b e2e-c e2e-d (see scripts/test_shards.sh for the map).
 #   make test-shard SHARD=unit-a
 .PHONY: test-shard test-shard-cover
 SHARD ?=
 test-shard:
 	@if [ -z "$(SHARD)" ]; then \
-		echo "[test-shard] SHARD required: unit-a|unit-b|int-e2e-caps" >&2; \
+		echo "[test-shard] SHARD required: unit-a|unit-b|unit-c|int-caps|e2e-a|e2e-b|e2e-c|e2e-d" >&2; \
 		exit 1; \
 	fi
 	@if [ ! -x $(NATIVE_BIN) ]; then \
