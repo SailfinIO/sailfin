@@ -39,6 +39,14 @@ fn first_let_lambda_body(source: string) -> Block ![io] {
     return lambda_body(stmt.initializer);
 }
 
+// The lambda expression bound by the first top-level `let` in `source`.
+fn first_let_lambda(source: string) -> Expression? ![io] {
+    let program = parse_program(source);
+    let stmt = program.statements[0];
+    assert stmt.variant == "VariableDeclaration";
+    return stmt.initializer;
+}
+
 // -------------------------------------------------------------------
 // Empty body — boundary case: a lambda with no statements parses to an
 // empty (but structured) statement list, not a token blob.
@@ -84,4 +92,24 @@ test "lambda body: nested lambda body is itself structured" ![io] {
     let inner_body = lambda_body(ret.expression);
     assert inner_body.statements.length == 1;
     assert inner_body.statements[0].variant == "ReturnStatement";
+}
+
+// -------------------------------------------------------------------
+// Effect annotation on a lambda return type (#1546) — a trailing
+// `![...]` must NOT be folded into the return-type text. Before the fix
+// the parser collected the return type through the body `{`, producing
+// `return_type.text == "int ![io]"`; that mis-text made the spawn
+// future-kind classifier fall to the `ptr` catch-all and corrupted the
+// `await` result. The return type must read exactly `int`, and the body
+// must still parse structurally after the effect tokens are consumed.
+// -------------------------------------------------------------------
+test "lambda return type: effect annotation is not folded into return type (#1546)" ![io] {
+    let expr = first_let_lambda("let f = fn() -> int ![io] { return 0; };");
+    assert expr != null;
+    assert expr.variant == "Lambda";
+    let rt = expr.return_type;
+    assert rt != null;
+    assert rt.text == "int";
+    assert expr.body.statements.length == 1;
+    assert expr.body.statements[0].variant == "ReturnStatement";
 }

@@ -87,3 +87,24 @@ test "spawn/await: non-capturing int tasks execute on the pool (#1474)" ![io] {
     assert contains(out, "B-OK");
     assert contains(out, "C-OK");
 }
+
+// ── effectful task lambda (`-> int ![io]`) round-trips its typed result ──
+// Regression for #1546: the lambda parser collected the return type through
+// the body `{`, swallowing a trailing effect annotation into the
+// return-type text (`int ![io]`). `spawn_future_kind` then fell to the
+// `ptr` catch-all, so `spawn fn() -> int ![io] { ... }` lowered through
+// `sfn_spawn_ptr_ctx` / `sfn_await_ptr` (and the worker returned `i8*`),
+// and `await` yielded a garbage pointer-as-int instead of the value. The
+// fix stops the return-type capture at the effect marker `!` (mirroring the
+// fn-decl parser), so the effectful lambda classifies as `int` and the
+// typed result survives `await`.
+test "spawn/await: effectful task lambda result survives await (#1546)" ![io] {
+    let out = _run_and_capture("int_effectful", "fn main() ![io] {\n"
+        + "    let h = spawn fn() -> int ![io] { return 6 * 7; };\n"
+        + "    let v: int = await h;\n"
+        + "    print.info(\"v: \" + number_to_string(v));\n"
+        + "    if v == 42 { print.info(\"EFF-OK\"); }\n"
+        + "}");
+    assert contains(out, "v: 42");
+    assert contains(out, "EFF-OK");
+}
