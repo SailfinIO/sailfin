@@ -2,11 +2,12 @@
 //
 // Wave 2 of epic #1321. Wires the capsule's typed `fn(Request) -> Response`
 // handler onto the runtime's framed accept loop (`sfn_serve_framed`,
-// runtime/sfn/concurrency/serve.sfn). The runtime speaks a raw
-// `fn(* u8 request) -> * u8 response` ABI and sends the handler's return
-// verbatim; this module supplies a trampoline that parses the raw request
-// into a `Request`, invokes the user handler, and serializes the
-// `Response` back to bytes — so status codes and headers reach the wire.
+// runtime/sfn/concurrency/serve.sfn). The runtime speaks a moved-`OwnedBuf`
+// `fn(OwnedBuf request) -> OwnedBuf response` ABI (#1476) and sends the
+// handler's returned buffer verbatim; this module supplies a trampoline
+// that parses the moved request buffer into a `Request`, invokes the user
+// handler, and serializes the `Response` back into a moved `OwnedBuf` — so
+// status codes and headers reach the wire.
 //
 // Handler ABI. The user handler must be a TOP-LEVEL function passed
 // address-taken: `serve(my_handler as * fn (Request) -> Response, 8080)`.
@@ -23,10 +24,62 @@
 // so the extern resolves at link time (like the libc externs in the
 // client adapter). The extern carries no effect annotation (externs may
 // not); enforcement rides on `serve`'s own `![net, io]`.
-import { Request, Response } from "./types";
 import { parse_request, serialize_response } from "./wire";
+import { Request, Response } from "./types";
 
 extern fn sfn_serve_framed(handler: * u8, port: i32) -> void;
+
+// libc surface for marshalling the serialized response into a moved
+// `OwnedBuf` (the #1476 handler ABI). Inlined per the every-module
+// convention (mirrors `runtime/sfn/concurrency/serve.sfn`).
+extern fn malloc(size: usize) -> * u8;
+
+extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
+
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+// `OwnedBuf` — the runtime owned-buffer aggregate, inlined byte-identically
+// (four `i64` fields, 32 bytes, `arena_addr == 0` = libc-backed). The
+// trampoline marshals the request in and the serialized response out as
+// moved `OwnedBuf` values (#1476). Layout MUST match
+// `runtime/sfn/memory/ownedbuf.sfn` and `serve.sfn`'s inlined copy.
+struct OwnedBuf {
+    ptr_addr: i64;
+    len: i64;
+    cap: i64;
+    arena_addr: i64;
+}
+
+// `_http_owned_from_str(s)` — copy a serialized response string into a
+// fresh libc-backed `OwnedBuf` moved back to the runtime worker (which is
+// its last owner and frees it after the send). A copy — not the string's
+// own backing — so the worker's free never collides with the capsule's
+// string storage. NUL-terminated (the framed send path measures with
+// `strlen`); HTTP/1.1 text responses carry no internal NUL. Empty
+// `OwnedBuf` on OOM (the worker emits a `500`).
+fn _http_owned_from_str(s: string) -> OwnedBuf {
+    let src: * u8 = s as * u8;
+    let n: i64 = strlen(src) as i64;
+    let copy: * u8 = malloc((n + 1) as usize);
+    if copy as i64 == 0 {
+        return OwnedBuf {
+            ptr_addr: 0,
+            len: 0,
+            cap: 0,
+            arena_addr: 0
+        };
+    }
+    memcpy(copy, src, n as usize);
+    memset(((copy as i64) + n) as * u8, 0, 1 as usize);
+    return OwnedBuf {
+        ptr_addr: copy as i64,
+        len: n,
+        cap: n + 1,
+        arena_addr: 0
+    };
+}
 
 // Handler code pointer, set by `serve` before the accept loop starts and
 // read by `_sfn_http_trampoline` on pool-worker threads. Written once
@@ -34,31 +87,35 @@ extern fn sfn_serve_framed(handler: * u8, port: i32) -> void;
 // per process). 0 = no handler registered.
 let mut _sfn_http_handler_addr: i64 = 0;
 
-// `_sfn_http_trampoline(raw)` — the raw `fn(* u8) -> * u8` boundary the
-// runtime dispatches to. Parses the request, calls the registered typed
-// handler, and serializes the response to full HTTP/1.1 bytes. Must be a
-// top-level function so its address is a bare code pointer.
-// M1.A.2: the runtime dispatches to this trampoline through a bare
-// `fn(* u8) -> * u8` code pointer (registered via `sfn_serve_framed`), so
-// its parameter and return MUST keep the `* u8` ABI. Declaring them as
-// `string` worked only while `string` lowered to a bare `i8*`; after the
-// scalar flip a `string` parameter is the two-word `{i8*, i64}` aggregate,
-// which mismatches the runtime's single-pointer call — the second
-// (length) word arrives as a garbage register, so `raw.length` is wrong
-// and the request body is truncated. Take/return `* u8` and bridge to
-// `string` internally: `raw as string` recovers the full request length
-// via `sfn_str_len` (the request buffer is NUL-terminated), and the
-// serialized response is handed back as its data pointer.
-fn _sfn_http_trampoline(raw: * u8) -> * u8 {
+// `_sfn_http_trampoline(req)` — the `fn(OwnedBuf) -> OwnedBuf` boundary the
+// runtime dispatches to (#1476). Parses the request, calls the registered
+// typed handler, and serializes the response to full HTTP/1.1 bytes moved
+// back as an owned buffer. Must be a top-level function so its address is
+// a bare code pointer.
+//
+// ABI (#1476): the handler boundary is now moved `OwnedBuf` in / moved
+// `OwnedBuf` out. A user struct crosses the call as a boxed `%OwnedBuf*` —
+// a SINGLE pointer, the same register footprint as the old `* u8` — so it
+// is shape-stable. This is precisely why the OwnedBuf push is immune to
+// the M1.A.2 trap that bit the earlier `string` ABI: declaring the param
+// `string` made it the two-word `{i8*, i64}` aggregate, whose second
+// (length) word arrived as a garbage register on the runtime's
+// single-pointer dispatch and truncated the body. `OwnedBuf`-by-pointer
+// never changes word count, so the dispatch register layout always agrees.
+// Bridge to `string` internally: `req.ptr_addr as * u8 as string` recovers
+// the full request length via `sfn_str_len` (the request buffer is
+// NUL-terminated by the runtime recv), and the serialized response is
+// copied into a fresh libc `OwnedBuf` the runtime worker reclaims.
+fn _sfn_http_trampoline(req: OwnedBuf) -> OwnedBuf {
     if _sfn_http_handler_addr == 0 {
-        return serialize_response(Response {
+        return _http_owned_from_str(serialize_response(Response {
             status: 500, headers: [], body: ""
-        }) as * u8;
+        }));
     }
     let entry: * fn (Request) -> Response = _sfn_http_handler_addr as * fn (Request) -> Response;
-    let req: Request = parse_request(raw as string);
-    let resp: Response = entry(req);
-    return serialize_response(resp) as * u8;
+    let parsed: Request = parse_request(req.ptr_addr as * u8 as string);
+    let resp: Response = entry(parsed);
+    return _http_owned_from_str(serialize_response(resp));
 }
 
 // `serve(handler, port)` — start a blocking HTTP/1.1 server that

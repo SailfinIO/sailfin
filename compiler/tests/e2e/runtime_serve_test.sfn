@@ -177,6 +177,24 @@ test "serve emit: define for sfn_serve + sfn_serve_handler_dispatch" ![io] {
     assert _has_define(ir, "sfn_serve_handler_dispatch");
 }
 
+// #1476 — the serve handler boundary carries moved `OwnedBuf` (request
+// in, response out). At the call ABI a user struct crosses as a boxed
+// `%OwnedBuf*` (a single pointer — shape-stable, immune to the #1387
+// word-count class). Pins the 32-byte four-i64 layout and the dispatch
+// signature so a layout drift or an accidental ABI revert is caught at
+// emit time (the IR-level round-trip evidence; the live round-trip is
+// `serve_loopback_test.sfn`).
+test "serve emit: handler dispatch carries the OwnedBuf ABI (#1476)" ![io] {
+    let ir = _emit_module("serve", "runtime/sfn/concurrency/serve.sfn");
+    assert ir != "EMIT_FAILED";
+    // The owned-buffer aggregate is the 32-byte four-i64 layout.
+    assert contains(ir, "%OwnedBuf = type { i64, i64, i64, i64 }");
+    // The dispatch boundary returns an OwnedBuf and takes the moved
+    // request OwnedBuf (boxed `%OwnedBuf*` at the ABI).
+    assert contains(ir, "define %OwnedBuf* @sfn_serve_handler_dispatch(");
+    assert contains(ir, "@sfn_serve_handler_dispatch(i8* %handler, %OwnedBuf*");
+}
+
 test "serve emit: declares the BSD-sockets server surface" ![io] {
     let ir = _emit_module("serve", "runtime/sfn/concurrency/serve.sfn");
     assert ir != "EMIT_FAILED";

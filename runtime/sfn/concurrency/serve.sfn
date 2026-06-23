@@ -21,19 +21,23 @@
 // external linkage — two `sfn-sources` modules defining `_append`
 // would be a duplicate-symbol link error.
 //
-// Handler ABI (v0). The emitter (`compiler/src/llvm/expression_lowering/
-// native/core.sfn`) lowers `serve(<handler>, <port>)` by bitcasting the
-// handler function value to a bare `i8*` code pointer and passing it
-// with the port to `sfn_serve`. The handler's compiled C-ABI is
-// `fn (* u8 request) -> * u8 response_body`: it receives the raw
-// request bytes (NUL-terminated) and returns the response BODY as a
-// NUL-terminated string. `sfn_serve` wraps that body in a minimal
-// HTTP/1.1 `200 OK` response. This raw `i8*`-in / `i8*`-out shape
-// mirrors the `sfn_http_*` client exactly and needs NO Request /
-// Response struct marshalling — keeping the boxing self-contained
-// (the issue's architect flag). The richer `fn (Request) -> Response`
-// struct handler (the `sfn/http` capsule types) is a follow-up wave
-// that adds the request/response marshalling on top of this ABI.
+// Handler ABI (#1476 — moved OwnedBuf). The emitter (`compiler/src/llvm/
+// expression_lowering/native/core.sfn`) lowers `serve(<handler>, <port>)`
+// by bitcasting the handler function value to a bare `i8*` code pointer
+// and passing it with the port to `sfn_serve` (unchanged — the bitcast
+// is ABI-agnostic). The handler's compiled ABI is now
+// `fn (OwnedBuf request) -> OwnedBuf response`: the request bytes are
+// MOVED in as an owned buffer and the response BODY is moved out the
+// same way, so ownership transfers end-to-end across the handler
+// boundary. A user struct crosses the call as a boxed `%OwnedBuf*` (a
+// single pointer — the SAME register footprint as the old `* u8`), so
+// this is shape-stable and immune to the #1387/M1.A.2 word-count
+// mismatch that bit the `string` flip. `sfn_serve` wraps the response
+// body in a minimal HTTP/1.1 `200 OK` response; the worker is the
+// response buffer's last owner and reclaims it after the send. The
+// richer `fn (Request) -> Response` struct handler (the `sfn/http`
+// capsule types) marshals OwnedBuf <-> Request/Response in its
+// trampoline on top of this ABI.
 //
 // ABI flip. `compiler/src/llvm/runtime_helpers.sfn` flips the two
 // serve registry rows to the symbols defined here:
@@ -394,16 +398,95 @@ fn _serve_send_raw(fd: i32, resp: * u8) -> bool {
     return _serve_send_all(fd, resp, strlen(resp) as i64);
 }
 
+// `OwnedBuf` — the runtime owned-buffer aggregate (`runtime/sfn/memory/
+// ownedbuf.sfn`), inlined here byte-identically per the every-module
+// convention (the seed cannot return a struct defined in another module
+// — see `ownedbuf.sfn` for the rationale). MUST stay layout-identical:
+// four `i64` fields, 32 bytes, `arena_addr == 0` meaning libc-backed.
+struct OwnedBuf {
+    ptr_addr: i64;
+    len: i64;
+    cap: i64;
+    arena_addr: i64;
+}
+
+// `_serve_wrap_owned(ptr, len)` — wrap a libc-backed byte buffer into a
+// moved `OwnedBuf` (`arena_addr == 0`, `cap == len + 1` for the trailing
+// NUL the recv/serialize paths guarantee). The returned value carries
+// ownership of `ptr` across the handler boundary.
+fn _serve_wrap_owned(ptr: * u8, len: i64) -> OwnedBuf {
+    return OwnedBuf {
+        ptr_addr: ptr as i64,
+        len: len,
+        cap: len + 1,
+        arena_addr: 0
+    };
+}
+
+// `_serve_empty_owned()` — the null/error sentinel `OwnedBuf` (no backing
+// buffer). The framed/unframed send helpers treat a zero `ptr_addr` as
+// the `500` path.
+fn _serve_empty_owned() -> OwnedBuf {
+    return OwnedBuf {
+        ptr_addr: 0,
+        len: 0,
+        cap: 0,
+        arena_addr: 0
+    };
+}
+
+// `_serve_free_owned(buf)` — reclaim a moved `OwnedBuf`'s backing buffer.
+// Frees `ptr_addr` only when libc-backed (`arena_addr == 0`) and non-null;
+// arena-backed buffers are left to their arena (the #1205-class guard,
+// mirroring `mem.sfn::sfn_env_free_owned`'s arena check). There is no
+// container to free here — the `OwnedBuf` is a by-value aggregate, not a
+// heap env block — so this frees the buffer ONLY (do NOT route through
+// `sfn_env_free_owned`, which would also `free` a non-container address).
+fn _serve_free_owned(buf: OwnedBuf) -> void {
+    if buf.arena_addr == 0 {
+        if buf.ptr_addr != 0 { free(buf.ptr_addr as * u8); }
+    }
+}
+
 // `sfn_serve_handler_dispatch(handler, request)` — invoke the user
-// handler through its raw `i8*` code pointer. The handler's compiled
-// C-ABI is `fn (* u8 request) -> * u8 response_body`; this is the
-// single boxing boundary between the runtime and user code (mirrors
-// the `sfn_task_run` fn-pointer call in `scheduler.sfn`). Null-safe
-// on the handler (returns null so the worker emits a `500`).
-fn sfn_serve_handler_dispatch(handler: * u8, request: * u8) -> * u8 {
-    if handler as i64 == 0 { return null; }
-    let entry: * fn (* u8) -> * u8 = (handler as i64) as * fn (* u8) -> * u8;
-    return entry(request);
+// handler through its erased `i8*` code pointer. The handler's compiled
+// ABI is `fn (OwnedBuf request) -> OwnedBuf response` (#1476): the
+// request buffer is MOVED in as an `OwnedBuf` (a boxed `%OwnedBuf*` at
+// the call ABI — a single pointer, the SAME register footprint as the
+// old `* u8`, so this is immune to the #1387/M1.A.2 word-count class of
+// mismatch) and the response buffer is moved out the same way. This is
+// the single boxing boundary between the runtime and user code (mirrors
+// the `sfn_task_run` fn-pointer call in `scheduler.sfn`).
+//
+// Ownership: the request is moved end-to-end (worker -> dispatch ->
+// handler). Dispatch is the request's drop point: after the handler
+// returns, dispatch reclaims the request's libc backing — the handler
+// borrowed the bytes only for the duration of the call and must NOT
+// free or retain them (the same discipline as the `future.sfn`
+// `_owned_ctx` trampolines, which free the moved ctx after the body
+// runs). The handler returns a FRESH response `OwnedBuf`; if a handler
+// instead returns the request buffer itself (an echo), the alias guard
+// skips the request free so the worker frees it exactly once as the
+// response. Null-safe on the handler (frees the orphaned request and
+// returns an empty `OwnedBuf` so the worker emits a `500`).
+fn sfn_serve_handler_dispatch(handler: * u8, request: OwnedBuf) -> OwnedBuf {
+    if handler as i64 == 0 {
+        _serve_free_owned(request);
+        return _serve_empty_owned();
+    }
+    let entry: * fn (OwnedBuf) -> OwnedBuf = (handler as i64) as * fn (OwnedBuf) -> OwnedBuf;
+    let req_ptr: i64 = request.ptr_addr;
+    let req_arena: i64 = request.arena_addr;
+    let response: OwnedBuf = entry(request);
+    // Reclaim the request now the handler has returned — unless the
+    // handler echoed it back as the response (then the worker frees it
+    // once as the response, avoiding an alias double-free).
+    if req_arena == 0 {
+        if req_ptr != 0 {
+            if response.ptr_addr != req_ptr { free(req_ptr as * u8); }
+        }
+    }
+    return response;
 }
 
 // `_serve_conn_worker(ctx)` — the per-connection pool task body. It
@@ -416,8 +499,8 @@ fn sfn_serve_handler_dispatch(handler: * u8, request: * u8) -> * u8 {
 // effect annotation (matching `future.sfn`'s trampolines).
 //
 // A null request (recv error, OOM, or the header cap exceeded) is
-// NOT handed to user code — the handler receives a `* u8 request` it
-// is free to read, so a null would risk a crash inside the handler.
+// NOT handed to user code — the handler reads the request `OwnedBuf`'s
+// bytes, so a null backing would risk a crash inside the handler.
 // Instead the worker skips dispatch and sends a `500` directly
 // (`_serve_send_response(fd, null)`).
 fn _serve_conn_worker(ctx: * u8) -> * u8 {
@@ -437,10 +520,17 @@ fn _serve_conn_worker(ctx: * u8) -> * u8 {
         close(client_fd as i32);
         return null;
     }
-    let response: * u8 = sfn_serve_handler_dispatch(handler as * u8, request);
-    _serve_send_response(client_fd as i32, response);
+    // Move the request bytes into the handler as an OwnedBuf; dispatch
+    // reclaims the request after the handler returns, and the handler
+    // returns a FRESH response OwnedBuf moved back out. The worker is the
+    // response's last owner and frees it after the send (closing the v0
+    // leak). The raw `request` buffer is owned by the move now — do NOT
+    // free it here (dispatch does).
+    let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
+    let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
+    _serve_send_response(client_fd as i32, response.ptr_addr as * u8);
     close(client_fd as i32);
-    free(request);
+    _serve_free_owned(response);
     return null;
 }
 
@@ -452,13 +542,13 @@ fn _serve_conn_worker(ctx: * u8) -> * u8 {
 // Sailfin and registers a trampoline as the handler, so framing is the
 // handler's job here. Same 16-byte [client_fd][handler] ctx.
 //
-// Ownership: the worker does NOT free the handler's returned `response`
-// buffer (it has no way to know the handler's allocation discipline). A
-// handler that allocates a fresh response per request therefore leaks one
-// buffer per connection until a request-scoped arena lands (same class as
-// the documented fire-and-forget `Task` leak; same caveat applies to the
-// unframed `_serve_conn_worker`). v0 servers are expected to be short-lived
-// or tolerate this; the bounded fix is tracked with the arena work.
+// Ownership (#1476): the handler returns a moved response `OwnedBuf`; the
+// worker is its last owner and reclaims the backing buffer after the send
+// (`_serve_free_owned`), closing the per-connection response-buffer leak
+// the v0 `* u8`-out ABI could not — the runtime now has a typed last
+// owner that knows the libc/arena discipline. The fire-and-forget `Task`
+// handle leak (a separate concern) is still tracked with the pool-reaping
+// work.
 fn _serve_conn_worker_framed(ctx: * u8) -> * u8 {
     if ctx as i64 == 0 { return null; }
     let base: i64 = ctx as i64;
@@ -474,10 +564,11 @@ fn _serve_conn_worker_framed(ctx: * u8) -> * u8 {
         close(client_fd as i32);
         return null;
     }
-    let response: * u8 = sfn_serve_handler_dispatch(handler as * u8, request);
-    _serve_send_raw(client_fd as i32, response);
+    let req_box: OwnedBuf = _serve_wrap_owned(request, strlen(request) as i64);
+    let response: OwnedBuf = sfn_serve_handler_dispatch(handler as * u8, req_box);
+    _serve_send_raw(client_fd as i32, response.ptr_addr as * u8);
     close(client_fd as i32);
-    free(request);
+    _serve_free_owned(response);
     return null;
 }
 
