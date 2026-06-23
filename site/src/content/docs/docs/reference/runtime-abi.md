@@ -225,6 +225,25 @@ async-context calloc/free pair in
 intentionally stays on raw `@calloc` / `@free` because both ends
 of the allocation are libc-resident regardless of arena state.
 
+**In-loop reclamation (#1514 / #1515).** Beyond the function-scope
+rewind, the emitter now reclaims *per-iteration* arena allocations:
+it wraps a loop body in `sfn_arena_sfn_mark` at body entry and
+`sfn_arena_sfn_rewind` at iteration close, so a hot allocation loop
+stops growing RSS linearly (the `arena_alloc` benchmark drops from
+~691 MB to a flat ~1.7 MB — see
+[`docs/runtime-performance.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/runtime-performance.md)).
+This is **gated** on a non-escape proof
+(`loop_body_rewind_eligible`, `instructions_helpers.sfn`) and fires
+only when the body allocates via a real `@sfn_alloc_struct`, every
+body-scope heap local is an all-primitive-scalar struct still routed
+to the arena (not promoted to `rc`, consumed, or stored into an
+ancestor-scope binding), and the body has no other call/store that
+could grow an ancestor container the rewind would then free. It
+covers generic `loop`, `for x in arr`, and `for i in a..b`;
+`continue` / `break` / `return` paths skip the rewind (a safe missed
+reclamation, never a dangling pointer). Scalar-replacement
+(strategy B) and nested-loop mark stacking are post-1.0.
+
 **Default arena global.** Arena-aware string helpers take a pointer
 to the arena slot — the C signature is `SfnArena **arena_slot` and
 the body dereferences once. Every emitted module declares the slot
