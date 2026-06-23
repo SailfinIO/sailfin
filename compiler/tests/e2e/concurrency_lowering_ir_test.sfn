@@ -99,6 +99,22 @@ test "concurrency-ir: spawn:int lowers to sfn_spawn_int (#1090)" ![io] {
     assert contains(ir, "sfn_spawn_int");
 }
 
+// #1476: a spawn task capturing a moved OwnedBuf stores the 32-byte aggregate
+// by VALUE in the closure env (env field `%OwnedBuf`, not a `%OwnedBuf*`
+// pointer — the by-value capture fix) and routes the spawn through the
+// `_owned_buf_ctx` trampoline family, whose worker reclaims the libc-backed
+// buffer at env offset 0. A struct named OwnedBuf is defined inline so the
+// capture type resolves.
+test "concurrency-ir: spawn capturing OwnedBuf uses by-value env + owned_buf_ctx (#1476)" ![io] {
+    let src = "struct OwnedBuf {\n    ptr_addr: int;\n    len: int;\n    cap: int;\n    arena_addr: int;\n}\n\nfn main() ![io] {\n    let buf: OwnedBuf = OwnedBuf { ptr_addr: 0, len: 7, cap: 8, arena_addr: 0 };\n    let f = spawn fn() -> int { return buf.len; };\n}\n";
+    let ir = _emit_llvm(src, "spawn_owned_buf");
+    assert ir.length > 0;
+    // env field is the by-value aggregate, NOT a pointer.
+    assert contains(ir, "%sfn_closure_env_0 = type { %OwnedBuf }");
+    // spawn routes through the owned-buffer reclaim trampoline family.
+    assert contains(ir, "sfn_spawn_int_owned_buf_ctx");
+}
+
 // parallel [<lambda>, ...] → a single sfn_parallel fan-out/join call (#1474).
 // Each task's lifted-lambda closure pair `{i8*, i8*}` is unpacked (extractvalue)
 // into an (fn_ptr, ctx) i64 pair and handed to the runtime combinator, which
