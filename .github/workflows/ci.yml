@@ -679,9 +679,13 @@ jobs:
     needs: build-compiler-macos
     # macos-26: adopted from the nightly-selfhost canary now that the
     # `macos-latest` migration (2026-06-15) has made macos-15 runners
-    # scarce. The shard suite (int-e2e-caps runs serially) is green on
-    # macOS 26 with the #1409 dirent-offset and #1410 child-env-linking
-    # fixes landed in this PR.
+    # scarce. The *test runner* is serial (`sailfin test --jobs 1` via
+    # `test_shards.sh run`), but each fixture build fans out internally
+    # to `_cr_resolve_jobs()` emit workers. `RLIMIT_AS` is a no-op on
+    # Darwin, so that fan-out is the only memory backpressure on macOS;
+    # it is now RAM-aware (#1532, `docs/proposals/darwin-memory-governor.md`)
+    # and self-selects a small N on the ~7 GiB runner instead of the
+    # blind 8 that previously OOMed the int-e2e-caps shard.
     runs-on: macos-26
     timeout-minutes: 120
     strategy:
