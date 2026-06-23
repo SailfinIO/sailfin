@@ -25,7 +25,7 @@ inputs:
     required: false
     default: ""
   shard:
-    description: "Test shard to run (unit-a|unit-b|int-e2e-caps|e2e-sh). Empty = run the full `make test` suite. See scripts/test_shards.sh."
+    description: "Test shard to run (unit-a|unit-b|unit-c|int-caps|e2e-a|e2e-b|e2e-c|e2e-d). Empty = run the full `make test` suite. See scripts/test_shards.sh."
     required: false
     default: ""
   test_jobs:

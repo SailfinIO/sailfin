@@ -77,6 +77,15 @@ fn _scratch_dir() -> string ![io] {
 // caller skips the body.
 fn _is_linux() -> boolean ![io] { return fs.exists("/proc/self/status"); }
 
+// Darwin marker: `/System/Library/CoreServices` is always present on
+// macOS and absent on Linux/Windows — the same probe the driver's
+// Darwin branch uses (`runtime/sfn/platform/rlimit.sfn`). On Darwin
+// `RLIMIT_AS` is a no-op (EINVAL), so the driver records the Darwin
+// path under the trace flag instead of installing a cap (#1532).
+fn _is_darwin() -> boolean ![io] {
+    return fs.exists("/System/Library/CoreServices");
+}
+
 // Spawn the compiler directly (no shell) with the given SAILFIN_* trace
 // vars appended, and return captured stderr. `extra` is a list of
 // `KEY=value` strings appended to the base child env.
@@ -188,4 +197,32 @@ test "mem-limit: 8 GiB default applies (or inherited cap wins)" ![io] {
     let default_applied = contains(err, "[mem-limit] RLIMIT_AS set to the 8 GiB default");
     let cap_inherited = contains(err, "[mem-limit] inherited RLIMIT_AS cap left in place");
     assert default_applied || cap_inherited;
+}
+
+// 6. Darwin path (#1532): `RLIMIT_AS` is a no-op on macOS, so the
+//    driver records that the Darwin branch ran (the RAM-aware emit
+//    fan-out governor is the actual floor) rather than installing a
+//    cap. Pins the Step-2 detection + trace plumbing.
+test "mem-limit: darwin records the no-RLIMIT_AS path" ![io] {
+    if !_is_darwin() {
+        assert true;
+        return;
+    }
+    let err = _run_direct(["SAILFIN_TRACE_MEM_LIMIT=1", "SAILFIN_MEM_LIMIT="]);
+    assert contains(err, "[mem-limit] darwin: no RLIMIT_AS");
+}
+
+// 6b. The `unlimited` disable short-circuits BEFORE the platform
+//     branch on Darwin too — load-bearing for sanitizer legs, which
+//     must arm no budget at all (ASAN's ~16 TB shadow reservation
+//     aborts under any finite cap). Asserts the disable token wins
+//     over the Darwin token.
+test "mem-limit: darwin honors SAILFIN_MEM_LIMIT=unlimited disable" ![io] {
+    if !_is_darwin() {
+        assert true;
+        return;
+    }
+    let err = _run_direct(["SAILFIN_TRACE_MEM_LIMIT=1", "SAILFIN_MEM_LIMIT=unlimited"]);
+    assert contains(err, "[mem-limit] self-cap disabled via SAILFIN_MEM_LIMIT");
+    assert ! contains(err, "[mem-limit] darwin: no RLIMIT_AS");
 }

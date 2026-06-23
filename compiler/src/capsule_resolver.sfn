@@ -92,6 +92,7 @@ export {
     ResolverConsumer,
     TestCapsuleResolution,
     WorkspaceMember,
+    _cr_ram_budget_jobs,
     collect_relative_import_specs,
     collect_scoped_import_specs,
     compile_capsule_modules,
@@ -449,10 +450,44 @@ fn _cr_resolve_jobs() -> int ![io] {
     // and only the fallback's output gets captured — observed
     // as stray "4" lines leaking into `make rebuild` output.
     let nproc = _cr_shell_read("{ nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1; }");
-    let parsed_nproc = _cr_parse_positive_int(nproc);
-    if parsed_nproc <= 0 { return 1; }
-    if parsed_nproc > 8 { return 8; }
-    return parsed_nproc;
+    let mut parsed_nproc = _cr_parse_positive_int(nproc);
+    if parsed_nproc <= 0 { parsed_nproc = 1; }
+    if parsed_nproc > 8 { parsed_nproc = 8; }
+    // Memory-aware clamp (#1532): cap the CPU-derived fan-out by how
+    // many ~3 GiB emit workers fit in physical RAM. On macOS this is
+    // the *only* emit backpressure — `RLIMIT_AS` is a no-op on Darwin
+    // (`runtime/sfn/platform/rlimit.sfn`), so 8 uncapped concurrent
+    // emits OOM a ~7 GiB CI runner (Jetsam SIGKILL — the #1532
+    // failure). On Linux the clamp is a strictly-better default that
+    // the inherited `RLIMIT_AS` floor still backstops. `hw.memsize`
+    // is the Darwin RAM source; `/proc/meminfo` MemTotal (kB) is the
+    // Linux one. `printf "%d"` keeps awk from emitting scientific
+    // notation that `_cr_parse_positive_int` would reject.
+    let memsize = _cr_shell_read("{ sysctl -n hw.memsize 2>/dev/null || awk '/MemTotal/{printf \"%d\", $2*1024; exit}' /proc/meminfo 2>/dev/null || echo 0; }");
+    let memsize_bytes = _cr_parse_positive_int(memsize);
+    return _cr_ram_budget_jobs(memsize_bytes, parsed_nproc);
+}
+
+// Memory-aware fan-out ceiling for `_cr_resolve_jobs`. Returns how
+// many concurrent `sfn emit` workers fit in RAM, each reserving
+// `per_job_reserve` bytes out of a 66% slice of physical memory
+// (headroom for the parent, the `clang`/`llvm-link` grandchildren,
+// and the OS). Pure arithmetic so it is unit-testable apart from the
+// host RAM probe. `memsize_bytes <= 0` means "unknown" — return
+// `nproc` unchanged (fail-open: never starve a build on a host we
+// cannot measure). The clamp only ever *lowers* the CPU-derived
+// count, never raises it.
+fn _cr_ram_budget_jobs(memsize_bytes: int, nproc: int) -> int {
+    if memsize_bytes <= 0 { return nproc; }
+    // 3 GiB — the measured peak RSS of the heaviest compiler-module
+    // emit (`capsule_resolver.sfn` ~3.23 GiB); see
+    // `docs/proposals/darwin-memory-governor.md` §2.4.
+    let per_job_reserve: int = 3221225472;
+    let usable: int = memsize_bytes * 66 / 100;
+    let mut budget: int = usable / per_job_reserve;
+    if budget < 1 { budget = 1; }
+    if budget >= nproc { return nproc; }
+    return budget;
 }
 
 // Parse a non-negative integer from a string. Returns 0 on any

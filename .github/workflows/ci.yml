@@ -372,7 +372,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [unit-a, unit-b, int-e2e-caps]
+        shard: [unit-a, unit-b, unit-c, int-caps, e2e-a, e2e-b, e2e-c, e2e-d]
         include:
           # Primary leg: runs the one-shot non-test steps + packaging.
           - shard: unit-a
@@ -420,6 +420,19 @@ jobs:
           set -euo pipefail
           tar -xzf "build-tree-linux-x86_64.tar.gz"
           rm -f "build-tree-linux-x86_64.tar.gz"
+          # mtime fix (the real cause of the macOS e2e "exit 134"
+          # misattributed to #892): the artifact binary was built from
+          # THIS commit's sources, but tar transport leaves it older than
+          # the freshly-checked-out sources. A nested `make compile` (run
+          # by make_result_contract_test / make_report_contract_test) then
+          # sees the binary as stale -> triggers `make rebuild` -> and,
+          # since build/seed is not bundled, fetches the seed over the
+          # network (unauthenticated, no GITHUB_TOKEN in the test child
+          # env) and fails -> status != "pass" -> the test aborts (134).
+          # The binary IS up-to-date for this commit, so mark it current
+          # and `make compile` becomes the intended no-op.
+          touch build/native/sailfin
+          [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
           ls -lh build/native/sailfin
 
       - name: Test + package (via Makefile)
@@ -679,15 +692,19 @@ jobs:
     needs: build-compiler-macos
     # macos-26: adopted from the nightly-selfhost canary now that the
     # `macos-latest` migration (2026-06-15) has made macos-15 runners
-    # scarce. The shard suite (int-e2e-caps runs serially) is green on
-    # macOS 26 with the #1409 dirent-offset and #1410 child-env-linking
-    # fixes landed in this PR.
+    # scarce. The *test runner* is serial (`sailfin test --jobs 1` via
+    # `test_shards.sh run`), but each fixture build fans out internally
+    # to `_cr_resolve_jobs()` emit workers. `RLIMIT_AS` is a no-op on
+    # Darwin, so that fan-out is the only memory backpressure on macOS;
+    # it is now RAM-aware (#1532, `docs/proposals/darwin-memory-governor.md`)
+    # and self-selects a small N on the ~7 GiB runner instead of the
+    # blind 8 that previously OOMed the int-e2e-caps shard.
     runs-on: macos-26
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        shard: [unit-a, unit-b, int-e2e-caps]
+        shard: [unit-a, unit-b, unit-c, int-caps, e2e-a, e2e-b, e2e-c, e2e-d]
         include:
           # Primary leg: runs the one-shot non-test steps + packaging.
           - shard: unit-a
@@ -735,6 +752,19 @@ jobs:
           set -euo pipefail
           tar -xzf "build-tree-macos-arm64.tar.gz"
           rm -f "build-tree-macos-arm64.tar.gz"
+          # mtime fix (the real cause of the macOS e2e "exit 134"
+          # misattributed to #892): the artifact binary was built from
+          # THIS commit's sources, but tar transport leaves it older than
+          # the freshly-checked-out sources. A nested `make compile` (run
+          # by make_result_contract_test / make_report_contract_test) then
+          # sees the binary as stale -> triggers `make rebuild` -> and,
+          # since build/seed is not bundled, fetches the seed over the
+          # network (unauthenticated, no GITHUB_TOKEN in the test child
+          # env) and fails -> status != "pass" -> the test aborts (134).
+          # The binary IS up-to-date for this commit, so mark it current
+          # and `make compile` becomes the intended no-op.
+          touch build/native/sailfin
+          [ -f build/native/.build-stamp ] && touch build/native/.build-stamp || true
           ls -lh build/native/sailfin
 
       - name: Test + package (via Makefile)

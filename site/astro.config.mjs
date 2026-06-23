@@ -1,7 +1,13 @@
+import { createRequire } from "node:module";
 import { defineConfig } from "astro/config";
 import mdx from "@astrojs/mdx";
 import sitemap from "@astrojs/sitemap";
 import starlight from "@astrojs/starlight";
+
+// Custom TextMate grammar so `sfn` code blocks are syntax-highlighted.
+// Loaded via createRequire for Node-version-agnostic JSON import.
+const require = createRequire(import.meta.url);
+const sailfinGrammar = require("./src/grammars/sailfin.tmLanguage.json");
 
 export default defineConfig({
   site: "https://sailfin.dev",
@@ -89,6 +95,7 @@ export default defineConfig({
   markdown: {
     shikiConfig: {
       theme: "github-dark",
+      langs: [{ ...sailfinGrammar, aliases: ["sfn"] }],
     },
   },
 });
