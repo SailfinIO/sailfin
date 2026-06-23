@@ -303,6 +303,42 @@ fn get_instruction_let_value(instructions: NativeInstruction[], idx: int) -> str
     return instr.value;
 }
 
+// #1514: the escape-relevant source text of an instruction, consumed by the
+// arena mark/rewind eligibility scan (`loop_body_rewind_eligible`) to detect
+// any non-field-read use of a loop-body heap local. Returns the value
+// expression for a `Let` (the binding NAME is intentionally excluded — a
+// local's own definition is never an escape of itself), the expression text
+// for `Expression` / `Return` / `Match` / `Throw`, the condition for `If`, the
+// iterable for `For`, the guard for `Case`, and the raw text for `Unknown`.
+// Control-flow markers carrying no embedded expression yield "".
+//
+// Dispatch is by `get_instruction_tag` + direct field access (the same shape
+// as `get_instruction_let_value`), NOT a field-binding `match`: a `match`
+// arm that binds and *returns* a variant field lowers to a per-arm alloca
+// that fails to dominate the load at the function's return merge (the LLVM
+// verifier rejects it at `llvm-link` time even though per-module `clang`
+// accepts it). The tag-guarded direct accesses avoid that latent codegen bug.
+fn get_instruction_scan_text(instructions: NativeInstruction[], idx: int) -> string {
+    let tag = get_instruction_tag(instructions, idx);
+    let instr = instructions[idx];
+    // Return (0) / Expression (1) / Match (12) / Throw (19) carry `expression`.
+    if tag == 0 { return instr.expression; }
+    if tag == 1 { return instr.expression; }
+    if tag == 12 { return instr.expression; }
+    if tag == 19 { return instr.expression; }
+    if tag == 2 {
+        // Let — scan the value expression; the binding name is excluded.
+        let value = instr.value;
+        if value == null { return ""; }
+        return value;
+    }
+    if tag == 3 { return instr.condition; }
+    if tag == 6 { return instr.iterable; }
+    if tag == 13 { return instr.guard; }
+    if tag == 21 { return instr.text; }
+    return "";
+}
+
 // ── NativeFunction field accessors ───────────────────────────────────
 fn get_function_name_at(functions: NativeFunction[], idx: int) -> string {
     let f = functions[idx];

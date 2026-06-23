@@ -25,7 +25,8 @@ import {
     emit_scope_drops,
     extend_mutations,
     _parse_int_from_string,
-    extend_lifetime_regions
+    extend_lifetime_regions,
+    loop_body_rewind_eligible
 } from "./instructions_helpers";
 import { find_local_binding } from "../expressions_bindings";
 import { trace_lowering } from "../lowering_debug_state";
@@ -34,7 +35,7 @@ import {
     lower_condition_to_i1,
     sanitize_if_condition_text
 } from "./instructions_condition";
-import { get_instruction_tag } from "./lowering_native_helpers";
+import { get_instruction_tag, get_instruction_scan_text } from "./lowering_native_helpers";
 import { lower_expression } from "../expression_lowering/native/core";
 
 fn collect_loop_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> LoopStructure {
@@ -276,6 +277,24 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
     collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
     collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
 
+    // #1514: decide whether this loop body's per-iteration arena allocations
+    // can be reclaimed with a mark/rewind pair. Only bodies that fall through
+    // to the latch are candidates (a terminated body never reaches the
+    // rewind). The eligibility predicate scans the body's escape-relevant
+    // instruction text alongside the body locals/mutations — see
+    // `loop_body_rewind_eligible`.
+    let mut arena_rewind_eligible: boolean = false;
+    if !body_result.terminated {
+        let mut body_scan_texts: string[] = [];
+        let mut _bt_idx: int = body_start_effective;
+        loop {
+            if _bt_idx >= structure.body_end { break; }
+            body_scan_texts.push(get_instruction_scan_text(function.instructions, _bt_idx));
+            _bt_idx += 1;
+        }
+        arena_rewind_eligible = loop_body_rewind_eligible(body_result.locals, body_result.mutations, body_scope_id, base_locals, body_scan_texts, body_result.lines, context);
+    }
+
     // Now emit phi nodes in the header for mutated locals
     let mut header_phis: string[] = [];
     let mut phi_stores: string[] = [];
@@ -331,6 +350,22 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
     }
     current_lines.push(body_label + ":");
 
+    // #1514: when the body is rewind-eligible, mark the arena at body entry.
+    // `sfn_arena_sfn_mark` records the current bump cursor (a Sailfin
+    // `number`, lowered as `double`); the matching rewind at iteration close
+    // resets the cursor, freeing every arena allocation made this iteration.
+    // The mark dominates the close point (body entry dominates every path to
+    // the latch), so the SSA temp is valid at the rewind. The intrinsic is
+    // declared unconditionally (lowering_helpers.sfn) and no-ops when the
+    // arena is disabled.
+    let mut arena_mark_temp: string = "";
+    if arena_rewind_eligible {
+        arena_mark_temp = format_temp_name(current_temp);
+        current_temp += 1;
+        current_lines.push("  " + arena_mark_temp
+            + " = call double @sfn_arena_sfn_mark()");
+    }
+
     // Append body lines
     current_lines = extend_string_array(current_lines, body_result.lines);
 
@@ -350,6 +385,16 @@ fn lower_loop_instruction(function: NativeFunction, start_index: int, llvm_retur
             _bcd_i += 1;
         }
         current_temp = _body_close_result.next_temp;
+        // #1514: reclaim this iteration's non-escaping arena allocations
+        // before branching to the latch. Emitted after the rc scope drops
+        // (which release disjoint, escaped `rc` locals — none exist when the
+        // body is rewind-eligible) and before the latch's phi loads, which
+        // read alloca slots, never arena memory.
+        if arena_mark_temp.length > 0 {
+            current_lines.push("  call void @sfn_arena_sfn_rewind(double "
+                + arena_mark_temp
+                + ")");
+        }
         current_lines.push("  br label %" + latch_label);
     }
 

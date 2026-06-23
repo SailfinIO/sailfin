@@ -1,0 +1,34 @@
+// Fixture for compiler/tests/e2e/arena_loop_rewind_test.sfn (#1514).
+//
+// Negative case (inline nested-struct field escape): nested struct fields
+// lower INLINE (`%Outer = type { %Inner, i64 }`), so an `%Inner` field is not
+// pointer-suffixed even though `%Inner` itself embeds an arena `i8*`. Reading
+// `o.inner` copies that inline aggregate — pointer and all — into the ancestor
+// array. The eligibility gate's primitive-scalar field whitelist must reject
+// `Outer` (its `inner` field is not a first-class primitive), suppressing the
+// rewind that would otherwise free the string storage `sink` references.
+struct Inner {
+    s: string;
+}
+
+struct Outer {
+    inner: Inner;
+    n: int;
+}
+
+fn main() ![io] {
+    let iterations = 1000;
+    let mut sink: Inner[] = [];
+    let mut i = 0;
+    loop {
+        if i >= iterations { break; }
+        let o = Outer {
+            inner: Inner { s: "x" },
+            n: i
+        };
+        sink.push(o.inner);
+        i = i + 1;
+    }
+    if sink.length < 0 { return; }
+    print("done");
+}

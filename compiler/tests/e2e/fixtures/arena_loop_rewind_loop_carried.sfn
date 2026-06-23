@@ -1,0 +1,26 @@
+// Fixture for compiler/tests/e2e/arena_loop_rewind_test.sfn (#1514).
+//
+// Negative case (loop-carried escape): the per-iteration `Cell` is stored
+// into a heap-typed mutable declared in an ancestor scope (`last`), so the
+// value written this iteration is read back the next. Rewinding would free a
+// live value, so the gate must suppress it — caught by both the
+// ancestor-heap mutation check and the body-text scan (bare `cell` RHS).
+struct Cell {
+    a: int;
+    b: int;
+    c: int;
+}
+
+fn main() ![io] {
+    let iterations = 1000;
+    let mut last = Cell { a: 0, b: 0, c: 0 };
+    let mut i = 0;
+    loop {
+        if i >= iterations { break; }
+        let cell = Cell { a: i, b: i + 1, c: i + 2 };
+        last = cell;
+        i = i + 1;
+    }
+    if last.a < 0 { return; }
+    print("done");
+}
