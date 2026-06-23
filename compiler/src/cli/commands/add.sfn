@@ -1,0 +1,220 @@
+// compiler/src/cli/commands/add.sfn
+//
+// `add` subcommand (CLI modularization epic #351, Issue 3.5 — proposal
+// §5 Phase 3 item 5, §7). Migrates `sfn add` off the legacy
+// `cli_commands` handler onto the per-command `command_def()`/`run()`
+// pattern established by Issue 2.4 (`version`) and exercised by Issues 3.1
+// (`init`), 3.2 (`login`), and 3.3 (`guillermo`).
+//
+// `add` takes two boolean flags (`--dev`, `--update`) and one required
+// positional `<capsule>`:
+//   sfn add [--dev] [--update] <capsule>
+// `run` reproduces the legacy handler byte-for-byte: the same capsule-name
+// validation, registry resolution, download + extract, `capsule.toml` /
+// `capsule.lock` mutations, messages, and exit codes:
+//   - 0 — dependency added (and lock entry written).
+//   - 1 — no `capsule.toml`, invalid id, registry miss, download/hash error.
+// The usage error (2) for a missing `<capsule>` or an unexpected extra
+// positional is enforced by the v2 dispatch in `cli/main.sfn`: a missing
+// or surplus positional makes the parse non-ok while marking `add` as
+// descended, and the dispatch returns 2 there — the parser owns argument
+// validation, matching the legacy `capsule_arg.length == 0` /
+// "unexpected argument" guards. The explicit `sfn add ""` case (an empty
+// positional that parses ok) is caught by the length guard in `run`,
+// preserving the legacy exit-2 behavior for it too.
+//
+// Exit codes are integer literals, not the `sfn/cli` `EXIT_*` constants:
+// those are module-level `let` constants with no cross-capsule import value
+// path today (see the `init.sfn` note), so they lower to 0 in the importing
+// module — `add` needs 1/2, so it uses literals to return them correctly.
+//
+// The capsule-name validation helpers (`_is_safe_capsule_segment_cmd`,
+// `_is_safe_capsule_version_cmd`, `_resolve_registry_url_cmd`) still live in
+// `cli_commands.sfn` and are imported in place; relocating them is Phase 4
+// (out of scope here).
+import {
+    get,
+    arg,
+    flag,
+    Command,
+    Matches,
+    command,
+    has_flag,
+    with_arg,
+    with_flag
+} from "sfn/cli";
+
+import { CliContext } from "../context";
+import { lock_add_entry, lock_get_version } from "../../lock";
+import { toml_add_dependency, toml_add_dev_dependency } from "../../toml_parser";
+import { substring, find_char_local } from "../../string_utils";
+import {
+    _resolve_registry_url_cmd,
+    _is_safe_capsule_segment_cmd,
+    _is_safe_capsule_version_cmd
+} from "../../cli_commands";
+import {
+    _get_home_cmd,
+    _shell_read_cmd,
+    _curl_download_cmd,
+    _extract_sfnpkg_cmd,
+    _sha256_of_file_cmd,
+    _resolve_capsule_name_cmd,
+    _display_capsule_name_cmd,
+    _ensure_dir_recursive_cmd
+} from "../../cli_commands_utils";
+
+// The `sfn/cli` definition for `add`, registered on the v2 root via
+// `with_subcommand`. Two boolean flags and one required `<capsule>`
+// positional.
+fn command_def() -> Command {
+    return with_arg(with_flag(with_flag(command("add", "Add a dependency capsule to capsule.toml"), flag("dev", "Add as a dev dependency")), flag("update", "Ignore the lockfile and fetch the latest version")), arg("capsule", "Capsule to add (scope/name)"));
+}
+
+// Add a dependency capsule: resolve its version (locked or from the
+// registry), download and extract the package into the cache, then update
+// `capsule.toml` and `capsule.lock`. Byte-identical to the legacy `add`
+// command-handler body. `ctx` is part of the per-command contract but
+// unused here.
+fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let is_dev: boolean = has_flag(matches, "dev");
+    let is_update: boolean = has_flag(matches, "update");
+    let capsule_arg: string = get(matches, "capsule");
+    if capsule_arg.length == 0 {
+        print("usage: sfn add [--dev] [--update] <capsule>");
+        return 2;
+    }
+
+    if !fs.exists("capsule.toml") {
+        print("no capsule.toml found — run `sfn init` first");
+        return 1;
+    }
+
+    let registry_name = _resolve_capsule_name_cmd(capsule_arg);
+    // `display_name` is only used for human-facing print output. Storage in
+    // capsule.toml / capsule.lock uses the scoped `registry_name` so that
+    // sfn/ capsules and third-party (`acme/router`) deps have a consistent
+    // `scope/name` format.
+    let display_name = _display_capsule_name_cmd(registry_name);
+
+    // Validate scope/name up front — registry_name is interpolated into a
+    // shell pipeline below when fetching the index, and into the cache path
+    // and download URL after. Rejecting path-traversal and directory-separator
+    // characters early covers both the shell-injection and traversal risks.
+    let slash_pos = find_char_local(registry_name, "/", 0);
+    if slash_pos < 0 {
+        print("invalid capsule id — expected scope/name format: "
+            + registry_name);
+        return 1;
+    }
+    let scope = substring(registry_name, 0, slash_pos);
+    let name = substring(registry_name, slash_pos + 1, registry_name.length);
+    if !_is_safe_capsule_segment_cmd(scope) {
+        print("invalid capsule scope: " + scope);
+        return 1;
+    }
+    if !_is_safe_capsule_segment_cmd(name) {
+        print("invalid capsule name: " + name);
+        return 1;
+    }
+
+    // If --update was not passed and a lockfile entry exists, use the locked version.
+    let mut use_locked: boolean = false;
+    let mut locked_version: string = "";
+    if !is_update {
+        if fs.exists("capsule.lock") {
+            let lock_text = fs.readFile("capsule.lock");
+            locked_version = lock_get_version(lock_text, registry_name);
+            if locked_version.length == 0 {
+                // Backward compat: older lockfiles may have stored the bare
+                // display name for sfn/ capsules.
+                locked_version = lock_get_version(lock_text, display_name);
+            }
+            if locked_version.length > 0 { use_locked = true; }
+        }
+    }
+
+    let mut resolved_version: string = "";
+    if use_locked {
+        resolved_version = locked_version;
+        print("using locked version: " + display_name + "@" + resolved_version);
+    } else {
+        print("fetching registry index...");
+        let registry_base = _resolve_registry_url_cmd();
+        resolved_version = _shell_read_cmd("curl -sfS '" + registry_base
+            + "/api/index.json'"
+            + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('"
+            + registry_name
+            + "',{}); print(c.get('latest',''))\" 2>/dev/null");
+        if resolved_version.length == 0 {
+            print("capsule not found in registry: " + registry_name);
+            return 1;
+        }
+    }
+
+    if !_is_safe_capsule_version_cmd(resolved_version) {
+        print("invalid version (possible path traversal): " + resolved_version);
+        return 1;
+    }
+
+    let home = _get_home_cmd();
+    if home.length == 0 {
+        print("could not determine home directory");
+        return 1;
+    }
+    let cache_base = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/"
+        + resolved_version;
+    _ensure_dir_recursive_cmd(home + "/.sfn");
+    _ensure_dir_recursive_cmd(home + "/.sfn/cache");
+    _ensure_dir_recursive_cmd(home + "/.sfn/cache/capsules");
+    _ensure_dir_recursive_cmd(home + "/.sfn/cache/capsules/" + scope);
+    _ensure_dir_recursive_cmd(home + "/.sfn/cache/capsules/" + scope + "/"
+        + name);
+    _ensure_dir_recursive_cmd(cache_base);
+
+    let pkg_path = cache_base + "/" + resolved_version + ".sfnpkg";
+    let dl_registry_base = _resolve_registry_url_cmd();
+    let download_url = dl_registry_base + "/api/capsules/" + scope + "/" + name
+        + "/"
+        + resolved_version
+        + ".sfnpkg";
+    print("downloading " + display_name + "@" + resolved_version + "...");
+    let dl_rc = _curl_download_cmd(download_url, pkg_path);
+    if dl_rc != 0 {
+        print("failed to download: " + download_url);
+        return 1;
+    }
+
+    let pkg_content = fs.readFile(pkg_path);
+    _extract_sfnpkg_cmd(pkg_content, cache_base);
+
+    let toml_text = fs.readFile("capsule.toml");
+    let mut updated_toml: string = "";
+    if is_dev {
+        updated_toml = toml_add_dev_dependency(toml_text, registry_name, resolved_version);
+    } else {
+        updated_toml = toml_add_dependency(toml_text, registry_name, resolved_version);
+    }
+    fs.writeFile("capsule.toml", updated_toml);
+
+    // Compute integrity hash of the downloaded package and write capsule.lock
+    let raw_hash = _sha256_of_file_cmd(pkg_path);
+    if raw_hash.length == 0 {
+        print("warning: could not compute integrity hash for " + pkg_path
+            + " — lockfile entry will have no hash");
+    }
+    let mut pkg_hash: string = "";
+    if raw_hash.length > 0 { pkg_hash = "sha256:" + raw_hash; }
+    let mut existing_lock: string = "";
+    if fs.exists("capsule.lock") {
+        existing_lock = fs.readFile("capsule.lock");
+    }
+    let updated_lock = lock_add_entry(existing_lock, registry_name, resolved_version, pkg_hash);
+    fs.writeFile("capsule.lock", updated_lock);
+
+    if is_dev {
+        print("added dev dependency: " + display_name + "@" + resolved_version);
+    } else { print("added " + display_name + "@" + resolved_version); }
+    if is_update { print("lock entry updated for " + display_name); }
+    return 0;
+}

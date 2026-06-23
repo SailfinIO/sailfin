@@ -38,6 +38,7 @@ import {
 import { CliContext, parse_driver_prefix, driver_prefix_length } from "./context";
 import { sailfin_cli_main_legacy } from "../cli_main";
 import { number_to_string } from "../num_format";
+import { run as add_run, command_def as add_command_def } from "./commands/add";
 import { run as init_run, command_def as init_command_def } from "./commands/init";
 import { run as login_run, command_def as login_command_def } from "./commands/login";
 import { run as version_run, command_def as version_command_def } from "./commands/version";
@@ -82,7 +83,7 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
     // resolving it eagerly here would add a filesystem read to every
     // `build` / `run` invocation. `parse()` skips argv[0] (the program
     // name), so a synthetic "sfn" head is prepended before parsing.
-    let root: Command = with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("sfn", "Sailfin compiler"), version_command_def()), guillermo_command_def()), init_command_def()), login_command_def());
+    let root: Command = with_subcommand(with_subcommand(with_subcommand(with_subcommand(with_subcommand(command("sfn", "Sailfin compiler"), version_command_def()), guillermo_command_def()), init_command_def()), login_command_def()), add_command_def());
 
     let mut parse_argv: string[] = ["sfn"];
     let mut j: int = 0;
@@ -133,6 +134,21 @@ fn sailfin_cli_main_v2(argv: string[]) -> int ![io, clock] {
         if ctx.trace_argv { _v2_trace_argv(argv); }
         if result.ok { return login_run(result.matches, ctx); }
         print("usage: sfn login [token]");
+        return 2;
+    }
+
+    // `sfn add [--dev] [--update] <capsule>` — the registered subcommand
+    // matched. A clean parse dispatches to `add.run`. A non-ok parse that
+    // still descended into `add` (a missing `<capsule>`, an unexpected extra
+    // positional, or `--help`) is a usage error (exit 2), matching the legacy
+    // handler's `capsule_arg.length == 0` / "unexpected argument" guards — the
+    // parser owns argument validation, so the misuse never reaches `add.run`.
+    // The literal `2` mirrors the `init` / `login` dispatches above (the
+    // `sfn/cli` `EXIT_*` constants lower to 0 here).
+    if strings_equal(subcommand(result.matches), "add") {
+        if ctx.trace_argv { _v2_trace_argv(argv); }
+        if result.ok { return add_run(result.matches, ctx); }
+        print("usage: sfn add [--dev] [--update] <capsule>");
         return 2;
     }
 
