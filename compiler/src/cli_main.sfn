@@ -58,8 +58,7 @@ import {
     handle_lock_command,
     handle_test_command,
     handle_config_command,
-    handle_package_command,
-    handle_publish_command
+    handle_package_command
 } from "./cli_commands";
 import { emit_llvm_with_retry, emit_parse_nonneg_int } from "./emit_helpers";
 import { resolve_import_module_slug_for_module } from "./llvm/imports";
@@ -1952,7 +1951,6 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     if strings_equal(cmd, "-h") { _let10 = true; }
     if strings_equal(cmd, "--help") { _let10 = true; }
     let is_help = _let10;
-    let is_publish = strings_equal(cmd, "publish");
     let is_package = strings_equal(cmd, "package");
     let is_lock = strings_equal(cmd, "lock");
     let is_config = strings_equal(cmd, "config");
@@ -2778,8 +2776,8 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     // ---- Package management commands ----
     // `sfn init` migrated to `sfn/cli` (epic #351, Issue 3.1) — handled
     // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
-    if is_publish { return handle_publish_command(args); }
-
+    // `sfn publish` migrated to `sfn/cli` (epic #351, Issue 3.9) — handled
+    // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
     if is_package { return handle_package_command(args); }
 
     if is_lock { return handle_lock_command(args); }

@@ -1,0 +1,216 @@
+// compiler/src/cli/commands/publish.sfn
+//
+// `publish` subcommand (CLI modularization epic #351, Issue 3.9 — proposal
+// §5 Phase 3 item 9, §7). Migrates `sfn publish` off the legacy
+// `cli_commands` handler onto the per-command `command_def()`/`run()`
+// pattern established by Issue 2.4 (`version`) and exercised by Issues 3.1
+// (`init`), 3.2 (`login`), 3.3 (`guillermo`), and 3.5 (`add`).
+//
+// `publish` takes a single optional positional `[path]` — the capsule
+// directory to publish, defaulting to `.` (the current directory). `run`
+// reproduces the legacy handler byte-for-byte: the same token resolution
+// (`SFN_TOKEN` env then `~/.sfn/credentials`), the same packaging, the same
+// registry upload, and every message and exit code:
+//   - 0 — published (server response printed).
+//   - 1 — no `capsule.toml`, missing name/version, no token, temp-file /
+//         digest / payload failure, or a non-2xx / unreachable registry.
+// The usage error (2) for an extra positional (`sfn publish a b c`) is
+// enforced by the v2 dispatch in `cli/main.sfn`: a second positional makes
+// the parse non-ok while still marking `publish` as descended, and the
+// dispatch returns 2 there — the parser owns argument validation, matching
+// the legacy `args.length > 2` guard.
+//
+// The optional `[path]` uses an empty-string default rather than a sentinel
+// (cf. `login.sfn`): the legacy handler treated an absent path and an
+// explicit empty path identically (both leave `capsule_dir == ""`), so
+// `get(matches, "path")` returning "" on either route preserves behavior
+// without distinguishing the two cases.
+//
+// Exit codes are integer literals, not the `sfn/cli` `EXIT_*` constants:
+// those are module-level `let` constants with no cross-capsule import value
+// path today (see the `init.sfn` note), so they lower to 0 in the importing
+// module — `publish` needs 1, so it uses literals to return it correctly.
+//
+// The packaging / registry helpers (`_resolve_registry_url_cmd`,
+// `_collect_sfn_files_cmd`, `_sha256_of_file_cmd`, …) still live in
+// `cli_commands.sfn` / `cli_commands_utils.sfn` and are imported in place;
+// relocating them (and the http/crypto helpers) is Phase 4 (out of scope).
+import {
+    get,
+    Command,
+    Matches,
+    command,
+    with_arg,
+    arg_optional
+} from "sfn/cli";
+
+import { CliContext } from "../context";
+import { toml_get_name, toml_get_version } from "../../toml_parser";
+import { substring, find_char_local } from "../../string_utils";
+import { _resolve_registry_url_cmd } from "../../cli_commands";
+import {
+    _get_env_cmd,
+    _get_home_cmd,
+    _toml_trim_cmd,
+    _shell_read_cmd,
+    _sha256_of_file_cmd,
+    _collect_sfn_files_cmd
+} from "../../cli_commands_utils";
+
+// The `sfn/cli` definition for `publish`, registered on the v2 root via
+// `with_subcommand`. A single optional `[path]` positional; no flags.
+fn command_def() -> Command {
+    return with_arg(command("publish", "Publish a capsule to the registry"), arg_optional("path", "Capsule directory to publish (defaults to .)", ""));
+}
+
+// Package the capsule at `[path]` (or the current directory) and upload it
+// to the registry, authenticating with the token from `SFN_TOKEN` or
+// `~/.sfn/credentials`. Byte-identical to the legacy `publish` command-handler
+// body. `ctx` is part of the per-command contract but unused here.
+fn run(matches: Matches, ctx: CliContext) -> int ![io] {
+    let mut capsule_dir: string = get(matches, "path");
+    if capsule_dir.length > 0 {
+        if substring(capsule_dir, capsule_dir.length - 1, capsule_dir.length) == "/" {
+            capsule_dir = substring(capsule_dir, 0, capsule_dir.length - 1);
+        }
+    }
+    let mut toml_path: string = "capsule.toml";
+    let mut src_dir: string = "src";
+    if capsule_dir.length > 0 {
+        toml_path = capsule_dir + "/capsule.toml";
+        src_dir = capsule_dir + "/src";
+    }
+    if !fs.exists(toml_path) {
+        print("no capsule.toml found — run `sfn init` first");
+        return 1;
+    }
+    let toml_text = fs.readFile(toml_path);
+    let pkg_name = toml_get_name(toml_text);
+    let pkg_version = toml_get_version(toml_text);
+    if pkg_name.length == 0 {
+        print("capsule.toml: missing capsule name");
+        return 1;
+    }
+    if pkg_version.length == 0 {
+        print("capsule.toml: missing capsule version");
+        return 1;
+    }
+
+    let mut token: string = "";
+    let env_token = _get_env_cmd("SFN_TOKEN");
+    if env_token.length > 0 { token = env_token; } else {
+        let home = _get_home_cmd();
+        if home.length > 0 {
+            let cred_path = home + "/.sfn/credentials";
+            if fs.exists(cred_path) {
+                let cred = fs.readFile(cred_path);
+                token = _toml_trim_cmd(cred);
+            }
+        }
+    }
+    if token.length == 0 {
+        print("no auth token found — set SFN_TOKEN or create ~/.sfn/credentials");
+        return 1;
+    }
+
+    print("packaging " + pkg_name + "@" + pkg_version + "...");
+    let mut payload: string = "SFNPKG/1\n";
+    payload = payload + "--- path: capsule.toml\n" + toml_text + "\n";
+
+    let src_files = _collect_sfn_files_cmd(src_dir, 10);
+    let mut fi: int = 0;
+    loop {
+        if fi >= src_files.length { break; }
+        let file_path = src_files[fi];
+        let content = fs.readFile(file_path);
+        let mut rel_path: string = file_path;
+        if capsule_dir.length > 0 {
+            rel_path = substring(file_path, capsule_dir.length + 1, file_path.length);
+        }
+        payload = payload + "--- path: " + rel_path + "\n" + content + "\n";
+        fi += 1;
+    }
+
+    let payload_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    if payload_tmp.length == 0 {
+        print("failed to create temp file");
+        return 1;
+    }
+    fs.writeFile(payload_tmp, payload);
+    let raw_digest = _sha256_of_file_cmd(payload_tmp);
+    if raw_digest.length == 0 {
+        print("failed to compute digest");
+        process.run(["rm", "-f", payload_tmp]);
+        return 1;
+    }
+    let digest = "sha256:" + raw_digest;
+
+    let body_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    if body_tmp.length == 0 {
+        print("failed to create temp file");
+        process.run(["rm", "-f", payload_tmp]);
+        return 1;
+    }
+    let build_json_rc = process.run(["sh", "-c", "printf '{\"type\":\"capsule\",\"capsule\":\""
+        + pkg_name
+        + "\",\"version\":\""
+        + pkg_version
+        + "\",\"digest\":\""
+        + digest
+        + "\",\"content_b64\":\"' > "
+        + body_tmp
+        + " && base64 < '"
+        + payload_tmp
+        + "' | tr -d '\\n' >> "
+        + body_tmp
+        + " && printf '\",\"meta\":{}}' >> "
+        + body_tmp]);
+    if build_json_rc != 0 {
+        print("failed to build publish payload");
+        process.run(["rm", "-f", payload_tmp]);
+        process.run(["rm", "-f", body_tmp]);
+        return 1;
+    }
+
+    let auth_header = "Bearer " + token;
+    let registry_base = _resolve_registry_url_cmd();
+    let registry_url = registry_base + "/api/publish";
+    print("publishing to " + registry_url + "...");
+    let response_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    let header_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    let curl_rc = process.run(["curl", "-sS", "-X", "POST", "-H", "Content-Type: application/json", "-H", "Authorization: "
+        + auth_header, "-d", "@"
+        + body_tmp, "-o", response_tmp, "-D", header_tmp, registry_url]);
+    process.run(["rm", "-f", payload_tmp]);
+    process.run(["rm", "-f", body_tmp]);
+    let mut response: string = "";
+    if fs.exists(response_tmp) {
+        response = _toml_trim_cmd(fs.readFile(response_tmp));
+        process.run(["rm", "-f", response_tmp]);
+    }
+    let mut status: string = "";
+    if fs.exists(header_tmp) {
+        let headers = fs.readFile(header_tmp);
+        process.run(["rm", "-f", header_tmp]);
+        let sp = find_char_local(headers, " ", 0);
+        if sp >= 0 {
+            if headers.length >= sp + 4 {
+                status = substring(headers, sp + 1, sp + 4);
+            }
+        }
+    }
+    if curl_rc != 0 {
+        print("publish failed — could not reach registry");
+        if response.length > 0 { print("server: " + response); }
+        return 1;
+    }
+    if status.length >= 1 {
+        if substring(status, 0, 1) != "2" {
+            print("publish failed (HTTP " + status + ")");
+            if response.length > 0 { print("server: " + response); }
+            return 1;
+        }
+    }
+    print(response);
+    return 0;
+}
