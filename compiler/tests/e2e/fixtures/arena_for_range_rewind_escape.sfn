@@ -1,0 +1,22 @@
+// Fixture for compiler/tests/e2e/arena_loop_rewind_test.sfn (#1515).
+//
+// Negative case (for-range, container escape): the per-iteration `Cell` is
+// pushed into an array declared in an ancestor scope, so its pointer survives
+// the iteration. The body-text scan catches the bare `cell` argument and the
+// `results.push(…)` call; the gate must suppress the rewind — emitting one
+// here would free the pointers `results` still holds.
+struct Cell {
+    a: number;
+    b: number;
+    c: number;
+}
+
+fn main() ![io] {
+    let mut results: Cell[] = [];
+    for i in 0 .. 1000 {
+        let cell = Cell { a: i, b: i + 1, c: i + 2 };
+        results.push(cell);
+    }
+    if results.length < 0 { return; }
+    print("done");
+}

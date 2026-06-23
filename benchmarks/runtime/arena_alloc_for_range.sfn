@@ -1,0 +1,33 @@
+// benchmarks/runtime/arena_alloc_for_range.sfn
+//
+// Runtime-execution benchmark: arena bump allocation in a for-range loop.
+//
+// The for-range counterpart to arena_alloc.sfn (#1515). Allocates a large
+// number of small structs in a `for i in 0..N { … }` loop, summing a field of
+// each so the allocation is not dead-code-eliminated. With the per-iteration
+// arena mark/rewind seam (#1514 generic `loop`, extended to for-range/for-array
+// in #1515), the non-escaping `Cell` is reclaimed each iteration, so peak RSS
+// stays flat instead of growing linearly with ITERATIONS.
+//
+// Fixed work: ITERATIONS is a compile-time constant so the measured cost is
+// comparable across releases.
+struct Cell {
+    a: number;
+    b: number;
+    c: number;
+}
+
+fn main() ![io, clock] {
+    let iterations = 30000000;
+    let start = monotonic_millis();
+    let mut acc: number = 0.0;
+    for i in 0 .. 30000000 {
+        let cell = Cell { a: i, b: i + 1, c: i + 2 };
+        acc = acc + cell.a + cell.b + cell.c;
+    }
+    let end = monotonic_millis();
+    // Guard against dead-code elimination of the allocations.
+    if acc < 0.0 { return; }
+    let dur = end - start;
+    print("RESULT arena_alloc_for_range {{dur}} {{iterations}}");
+}
