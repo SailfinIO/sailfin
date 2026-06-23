@@ -372,7 +372,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [unit-a, unit-b, int-e2e-caps]
+        shard: [unit-a, unit-b, unit-c, int-caps, e2e-a, e2e-b, e2e-c, e2e-d]
         include:
           # Primary leg: runs the one-shot non-test steps + packaging.
           - shard: unit-a
@@ -691,7 +691,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [unit-a, unit-b, int-e2e-caps]
+        shard: [unit-a, unit-b, unit-c, int-caps, e2e-a, e2e-b, e2e-c, e2e-d]
         include:
           # Primary leg: runs the one-shot non-test steps + packaging.
           - shard: unit-a
