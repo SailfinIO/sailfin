@@ -330,15 +330,61 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
         };
     }
 
-    // Find '?' and ':' at the same nesting level (depth 0)
+    // Find '?' and ':' at the same nesting level (depth 0), skipping string
+    // and char literals so a `?`/`:` inside a literal (e.g. `"?a:" + x`) is
+    // never mistaken for a ternary operator (#1003).
     let mut depth: int = 0;
     let mut question_index: int = -1;
     let mut colon_index: int = -1;
     let mut index: int = 0;
+    let mut in_double: boolean = false;
+    let mut in_single: boolean = false;
+    let mut escape_next: boolean = false;
 
     loop {
         if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
+
+        if in_double {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" { in_double = false; }
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "'" { in_single = false; }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
 
         let mut _if117: boolean = false;
         if ch == "(" { _if117 = true; }
