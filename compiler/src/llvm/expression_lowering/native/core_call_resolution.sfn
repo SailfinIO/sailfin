@@ -512,6 +512,12 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                         if _pre_field == "concat" {
                             _pre_is_array_method = true;
                         }
+                        // #1507: `arr.map(closure)` is an array method too —
+                        // route it through the early fallback so it reaches
+                        // the `runtime_array_map_fn` helper below instead of
+                        // falling into the struct-method fusion (which would
+                        // form the bogus `<type>map` target).
+                        if _pre_field == "map" { _pre_is_array_method = true; }
                         if _pre_is_array_method {
                             if is_simple_identifier(_pre_base) {
                                 let _pre_am_local = find_local_binding(locals, _pre_base);
@@ -585,6 +591,34 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                                 helper_descriptor = make_concat_descriptor(_pre_am_type, [_pre_am_type, _pre_am_type]);
                                             }
                                         }
+                                        // #1507: route `arr.map(closure)` to the
+                                        // `runtime_array_map_fn` helper. The array
+                                        // is already injected as arg0 (method_operand
+                                        // / injected_argument_count above); the
+                                        // user's closure becomes arg1, passed by
+                                        // value as `{i8*, i8*}` (descriptor
+                                        // parameter_types[1]) to the real
+                                        // `sfn_array_sfn_map` body. The helper
+                                        // returns the mapped array as `i8*`, coerced
+                                        // to the binding's element-array type at use.
+                                        // Pointer-width `i64` element arrays only
+                                        // (the mapper ABI is `i64(i8* env, i64)`).
+                                        // `string[]` (a `{i8*, i64}` element),
+                                        // `float[]`, and struct-element arrays would
+                                        // miscompile through this i64-only body, so
+                                        // they are NOT routed — they fall through to
+                                        // an honest "callee signature is not known"
+                                        // diagnostic. Generic / non-i64 element maps
+                                        // are gated on generics (#766).
+                                        if _pre_field == "map" {
+                                            if _pre_am_elem == "i64" {
+                                                let _pre_map_desc = find_runtime_helper("runtime_array_map_fn");
+                                                if _pre_map_desc != null {
+                                                    result_target = "runtime_array_map_fn";
+                                                    helper_descriptor = _pre_map_desc;
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -598,6 +632,12 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                         _pre_struct = _pre_local.type_annotation;
                                     }
                                 }
+                                // #1507: `map` was already routed to the
+                                // `runtime_array_map_fn` helper above; clear the
+                                // struct type so the fusion below skips it (it
+                                // would otherwise overwrite the helper target
+                                // with the bogus `<type>map`).
+                                if _pre_field == "map" { _pre_struct = ""; }
                                 if _pre_struct.length > 0 {
                                     // #1041: fail closed when the base local's
                                     // declared type is a bare struct name that is

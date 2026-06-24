@@ -43,8 +43,11 @@
 //
 // Still under the `sfn_array_sfn_*` infix (proof-of-life, not yet
 // flipped): `create` / `push` / `slice` (spec-ABI stubs) and
-// `map` / `filter` / `reduce` (gated on generics + closures, #766).
-// Those rename to bare form when their real bodies land.
+// `filter` / `reduce` (gated on generics + closures, #766). `map` now
+// carries a real pointer-width body (#1507): the `runtime_array_map_fn`
+// descriptor passes the `{i8*, i8*}` closure by value and the body
+// closure-dispatches it per element. Those rename to bare form when
+// their real bodies land.
 //
 // Naming: the `_sfn_` infix distinguishes this module's exports from
 // the C trampolines' canonical names. The C runtime's
@@ -509,7 +512,48 @@ fn sfn_array_push_slot(data_ptr: * * u8, len_ptr: * i64, cap_ptr: * i64, elem_si
 // the descriptor arity (`["i8*","i8*"]` / `["i8*","i8*","i8*"]`)
 // matches the defined symbol's signature one-to-one — no reliance
 // on the SysV/AAPCS "extra args are ignored" rule.
-fn sfn_array_sfn_map(arr: * u8, mapper: * u8) -> * u8 { return arr; }
+// `sfn_array_sfn_map(arr, mapper) -> arr'` — real one-element-at-a-time
+// map (#1507). `mapper` is typed `fn(int) -> int` so the call
+// `mapper(elem)` below is an ordinary closure dispatch: the descriptor
+// `runtime_array_map_fn` passes the `{i8*, i8*}` closure pair by value
+// (parameter_types[1] = `{i8*, i8*}`, in lockstep with this signature),
+// and the emitter extracts the fn-ptr + env and prepends the env to the
+// call — the same path `fn apply(cb: fn(int) -> int, x)` exercises
+// (closure_two_int_capture). Pointer-width elements only (the lambda ABI
+// is `i64(i8* env, i64 arg)`); generic / typed element widths are
+// post-1.0 (gated on generics — #766). Allocates a fresh `SfnArray`
+// (`{ data @0, len @8, cap @16 }`) of `len` 8-byte slots, applies the
+// mapper to each element, and stores the result — the concat_v2 span
+// idiom. The container is freshly, uniquely owned (#1218 / E9).
+fn sfn_array_sfn_map(arr: * u8, mapper: fn (int) -> int) -> * u8 {
+    unsafe {
+        let mut len: i64 = 0;
+        let mut data: i64 = 0;
+        if (arr as i64) != 0 {
+            let l: i64 = atomic_load((arr as i64 + 8) as * i64);
+            if l > 0 { len = l; }
+            data = atomic_load(arr as * i64);
+        }
+        let out: * u8 = _sfn_array_alloc_v2(len, 8);
+        if (out as i64) == 0 { return null; }
+        // out.len = len (the allocator already wrote cap = len).
+        atomic_store((out as i64 + 8) as * i64, len);
+        let buf: i64 = atomic_load(out as * i64);
+        if buf != 0 {
+            if data != 0 {
+                let mut i: i64 = 0;
+                loop {
+                    if i >= len { break; }
+                    let elem: i64 = atomic_load((data + i * 8) as * i64);
+                    let mapped: int = mapper(elem as int);
+                    atomic_store((buf + i * 8) as * i64, mapped as i64);
+                    i = i + 1;
+                }
+            }
+        }
+        return out;
+    }
+}
 
 fn sfn_array_sfn_filter(arr: * u8, predicate: * u8) -> * u8 { return arr; }
 

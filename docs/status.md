@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-06-22. Seed pinned to `0.7.0-alpha.39` (`.seed-version`);
+Updated: 2026-06-23. Seed pinned to `0.7.0-alpha.39` (`.seed-version`);
 the compiler version source of truth is `compiler/capsule.toml`.
 
 This document is the **current-state source of truth**: what ships today,
@@ -111,6 +111,7 @@ doc, or `docs/runtime_architecture.md`, not here.
 | Bitwise operators (`&`, `\|`, `^`, `<<`, `>>`) | **Shipped** | Slice B; rejected on `double` operands |
 | `Result<T, E>` + `?` operator | **Shipped** | Prelude `Result`/`Error` (#832), typed `?` (`E0810`–`E0812`, #833), pure control-flow desugar (#834); spec §12. `From<E>` coercion and the `E: Error` bound gate on generic constraints |
 | Closures with capture | **Shipped** | Capture inference (#458) → env synthesis (#459) → lifting + hidden-env dispatch (#689); multi-capture fix #1106 |
+| `array.map(closure)` | **Shipped** (pointer-width int elements) | `arr.map(fn (x: int) -> int { ... })` dispatches via `runtime_array_map_fn` → `sfn_array_sfn_map` (`runtime/sfn/array.sfn`); by-value `{i8*, i8*}` closure pair; capturing closures work. Scope: pointer-width (`i64`) element arrays only — generic element types gated on #766. `filter` / `reduce` remain stubs (return input/initial unchanged, #766). E2e: `compiler/tests/e2e/array_map_closure_test.sfn` |
 | Generic type inference | Partial | Type params captured; coverage limited |
 | Generic type constraints | Planned | `fn sort<T: Comparable>`, real `Array<T>` / `HashMap<K, V>` / `Channel<T>` |
 | Raw pointer types (`*T`) enforced | Planned | Pointer-typed struct fields lower correctly (#713, seed-blocker); full typecheck enforcement pending |
