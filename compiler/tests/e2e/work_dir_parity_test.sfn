@@ -8,11 +8,15 @@
 // `make check`'s 30-min fixed-point comparison.
 //
 // Two ACs from #379:
-//   1. The two compiler binaries are byte-identical (Linux ELF). This is
-//      proven via the driver's own `--check-determinism`, which builds
-//      `-p compiler` twice into sibling work-dirs and compares the binary
-//      sha256 internally (NUL-safe — `fs.readFile` truncates binaries at
-//      the first NUL, so a Sailfin-level `==` cannot prove byte identity).
+//   1. The two compiler binaries are byte-identical (Linux ELF). Proven
+//      by building `-p compiler` into the two sibling `--work-dir` roots
+//      this test already stages and comparing them with `cmp -s`
+//      (NUL-safe, exit 0 iff identical — `fs.readFile` truncates binaries
+//      at the first NUL, so a Sailfin-level `==` cannot prove byte
+//      identity). The heavier full byte-fixed-point determinism check
+//      stays in `make check` (stage2-vs-stage3 IR comparison); the former
+//      standalone `--check-determinism` double-build is dropped from the
+//      e2e leg so it no longer times out under the parallel pool (#1576).
 //   2. The set of staged filenames under `<DIR>/native/import-context/`
 //      is identical between two `--work-dir` roots (we compare the full
 //      recursive filename set — strictly stronger than `.ll`-only).
@@ -59,6 +63,26 @@ fn _host_is_darwin() -> boolean ![io] {
     let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     return contains(out, "Darwin");
+}
+
+// `cmp` availability probe (coreutils, near-universal on Linux). Mirrors
+// the `command -v` SKIP the old bash hold-outs used: if `cmp` is absent
+// the byte-identity leg is skipped rather than failed.
+fn _have_cmp() -> boolean ![io] {
+    let exit = process.run_capture(["cmp", "--version"], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit == 0;
+}
+
+// Byte-identity of two files via `cmp -s` (silent; exit 0 iff identical).
+// NUL-safe — unlike a Sailfin-level `fs.readFile` `==`, which truncates
+// at the first NUL byte and so cannot prove ELF byte identity.
+fn _cmp_identical(a: string, b: string) -> boolean ![io] {
+    let exit = process.run_capture(["cmp", "-s", a, b], _child_env());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    return exit == 0;
 }
 
 // Build `-p compiler` into `work_dir` (idempotent: skips if the binary is
@@ -133,27 +157,45 @@ fn _subset(a: string[], b: string[]) -> boolean {
 }
 
 // ---- Test 1: binary equivalence across two work-dir roots ----
-// Headline #379 AC. `--check-determinism -p compiler` builds the compiler
-// twice into sibling work-dirs and compares the binary sha256 internally
-// (NUL-safe). A divergence means the work-dir absolute path leaked into
-// the compiled binary (e.g. via __FILE__ metadata or debug-info prefixes).
-test "work-dir-parity: two --work-dir builds produce equivalent compilers" ![io] {
+// Headline #379 AC. Builds `-p compiler` into the two sibling `--work-dir`
+// roots Test 2 also uses (idempotent — whichever test runs first pays the
+// build, the other reuses it, so the file spends ~2 self-host builds, not
+// ~4) and compares the resulting binaries with `cmp -s`. A divergence means
+// the work-dir absolute path leaked into the compiled binary (e.g. via
+// __FILE__ metadata or debug-info prefixes). The former standalone
+// `--check-determinism` double-build is dropped from the e2e leg (#1576);
+// the full byte-fixed-point determinism check lives in `make check`.
+test "work-dir-parity: two --work-dir builds produce byte-identical compilers" ![io] {
+    let work_a = _scratch_base() + "/sfn-work-dir-parity-a";
+    let bin_a = work_a + "/native/sailfin";
+
+    let ra = _build_compiler_into(work_a);
+    assert ra == 0;
+    assert fs.exists(bin_a);
+
     if _host_is_darwin() {
         // The byte-identity AC does not hold on macOS arm64 (Mach-O
-        // non-reproducible data). Assert only that the --work-dir compiler
-        // build path works there; the byte-identity AC is pinned on Linux
-        // below, and the staged-artifact parity AC (next test) runs on both.
-        let work = _scratch_base() + "/sfn-work-dir-parity-darwin";
-        let r = _build_compiler_into(work);
-        assert r == 0;
-        assert fs.exists(work + "/native/sailfin");
-    } else {
-        let exit = process.run_capture([_sfn_bin(), "build", "-p", "compiler", "--check-determinism"], _child_env());
-        let out = process.capture_take_stdout();
-        let err = process.capture_take_stderr();
-        assert exit == 0;
-        assert contains(out + err, "[determinism] match:");
+        // non-reproducible data: LC_UUID, codesign). The single --work-dir
+        // build path working is the only portable assertion here; the
+        // staged-artifact parity AC (next test) runs on both.
+        return;
     }
+
+    let work_b = _scratch_base() + "/sfn-work-dir-parity-b";
+    let bin_b = work_b + "/native/sailfin";
+
+    let rb = _build_compiler_into(work_b);
+    assert rb == 0;
+    assert fs.exists(bin_b);
+
+    // Lighter probe than --check-determinism's standalone build-twice:
+    // compare the two already-built --work-dir binaries byte-for-byte.
+    // Skip (SKIP, not fail) if `cmp` is unavailable.
+    if !_have_cmp() {
+        assert true;
+        return;
+    }
+    assert _cmp_identical(bin_a, bin_b);
 }
 
 // ---- Test 2: import-context filename sets are identical ----
