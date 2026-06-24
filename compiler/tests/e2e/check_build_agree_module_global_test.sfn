@@ -1,0 +1,91 @@
+// End-to-end regression for #1389 (P4): `sfn check` must not report a
+// false green on a program that then fails `sfn build` at link.
+//
+// The original symptom (#1386 repro): a module-level global whose
+// initializer needs runtime evaluation — `let mut xs: int[] = [];` —
+// returned `checked 1 files: ok` from `sfn check`, then failed
+// `sfn build` with `use of undefined value '@sailfin_module_init__'`
+// (link failed, clang exit=1). Static analysis does not model the
+// module-global init-emission path, so the gap was invisible to check.
+//
+// #1386 defined `@sailfin_module_init__` end-to-end, so the specific
+// unbuildable-global class disappears: check and build now AGREE on a
+// representative module-global program (both succeed). This test locks
+// that agreement so the false-green cannot silently return.
+//
+// Contract note (the residual, documented gap): `sfn check` is parse +
+// typecheck + effect-check ONLY — it never emits IR or links — so it
+// cannot, by construction, catch every codegen/link-only failure. This
+// test asserts agreement on the once-broken class, not that check is a
+// build oracle (see site .../reference/cli.md and CLAUDE.md's validation
+// ladder for the full contract).
+//
+// Build/parallel-runner hygiene (temp-dir build, full inherited env via
+// `process.environ()` for the nested clang/ld toolchain + per-invocation
+// SAILFIN_TEST_SCRATCH) mirrors module_global_runtime_init_test.sfn —
+// see `.claude/rules/no-bash-e2e.md` for the why. `check` emits no IR,
+// so it needs no build-cache isolation and runs outside `with_tmp_dir`.
+import { with_tmp_dir } from "sfn/test";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The representative module-global program: an empty-array-literal global
+// (the #1386/#1389 repro) plus a runtime mutation in `main`. Before the
+// fix this checked green but failed to link.
+fn _repro_src() -> string {
+    return "let mut xs: int[] = [];\n"
+        + "fn main() ![io] { xs.push(1); print(\"ok\"); }\n";
+}
+
+// Inherit the full parent environment so the nested clang/ld the build
+// spawns find their toolchain (a minimal PATH-only set links on Linux but
+// fails on macOS, #1410), and SAILFIN_TEST_SCRATCH routes the build cache
+// per-invocation (#1333). Mirrors module_global_runtime_init_test.sfn.
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// A fresh out-of-tree source path for the shared check/build input.
+// (Survives `with_tmp_dir` teardown; this test owns the filename, so no
+// cross-test collision under the parallel pool.)
+fn _scratch_src() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    fs.createDirectory(dir, true);
+    let path = dir + "/sfn-1389-check-build-agree.sfn";
+    fs.writeFile(path, _repro_src());
+    return path;
+}
+
+test "check/build agree: runtime-initialized module global is not a false green (#1389)" ![io] {
+    let srcpath = _scratch_src();
+
+    // `sfn check`: parse + typecheck + effect-check, no codegen. Safe to
+    // run anywhere — it writes no `program.ll`.
+    let check_exit = process.run_capture([_sfn_bin(), "check", srcpath], _child_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+
+    // `sfn build`: full codegen + link. This is where the missing
+    // `@sailfin_module_init__` definition used to surface as a link
+    // failure while check stayed green. Isolated in a temp dir.
+    let build_exit = with_tmp_dir(fn (dir: string) -> int {
+        let binpath = dir + "/repro";
+        let be = process.run_capture([_sfn_bin(), "build", "-o", binpath, srcpath], _child_env());
+        let _bo = process.capture_take_stdout();
+        let _be = process.capture_take_stderr();
+        return be;
+    });
+
+    if fs.exists(srcpath) { fs.deleteFile(srcpath); }
+
+    // check reports the program clean...
+    assert check_exit == 0;
+    // ...and build agrees by succeeding (pre-#1386 this was the link
+    // failure that made check a false green).
+    assert build_exit == 0;
+    // The agreement itself: check's verdict matches build's outcome.
+    assert check_exit == build_exit;
+}

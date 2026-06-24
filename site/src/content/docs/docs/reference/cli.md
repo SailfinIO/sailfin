@@ -213,6 +213,8 @@ Typecheck codes (`E0001`, `E0301`, `E0302`) are shared with the regular compilat
 
 **Why:** A full `make compile` takes many minutes; `sfn check` gives you the parse/typecheck/effect verdict in seconds. Use it during editing, wire it into pre-commit hooks, or run it from CI as an early-gate before the full build.
 
+**Limitations — `check` is not a build oracle:** `sfn check` runs *parse + typecheck + effect-check only*. It never emits `.sfn-asm`/LLVM IR or invokes `clang`/the linker, so by construction it cannot catch failures that surface only during codegen or linking. A `check` green therefore does **not** guarantee `sfn build` succeeds — run `sfn build` (or `make compile`) for that. The historical instance of this gap (runtime-evaluated module globals such as `let mut xs: int[] = [];` checking green but failing at link with `use of undefined value '@sailfin_module_init__'`) was fixed in the emitter, so `check` and `build` now agree on that class; the agreement is locked by `compiler/tests/e2e/check_build_agree_module_global_test.sfn`.
+
 ---
 
 ### `sfn build <file>`
