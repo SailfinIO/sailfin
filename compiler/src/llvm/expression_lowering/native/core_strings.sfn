@@ -1,13 +1,13 @@
 // compiler/src/llvm/expression_lowering/native/core_strings.sfn
 //
 // String lowering helpers for expression lowering extracted from core.sfn.
-import { LLVMOperand, StringConstant, ExpressionResult } from "../../types";
-import { append_string, number_to_string } from "../../utils";
-import { unescape_string_literal } from "./core_text";
-import { escape_string_for_llvm, empty_string_constant_set } from "../../strings";
-import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
-import { harmonise_operands, coerce_operand_to_type } from "./core_operands";
 import { format_temp_name } from "../../expressions_helpers";
+import { empty_string_constant_set, escape_string_for_llvm } from "../../strings";
+import { ExpressionResult, LLVMOperand, StringConstant } from "../../types";
+import { append_string, number_to_string } from "../../utils";
+import { coerce_operand_to_type, harmonise_operands } from "./core_operands";
+import { unescape_string_literal } from "./core_text";
+import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
 fn lower_string_literal(literal: string, temp_index: int, lines: string[]) -> ExpressionResult ![io] {
     // M1.A — String literal lowering to {i8*, i64} aggregate.

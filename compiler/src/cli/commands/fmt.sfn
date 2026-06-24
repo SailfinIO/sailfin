@@ -32,21 +32,21 @@
 // in `cli_commands_utils.sfn`; both are imported in place (relocating them
 // is out of scope here).
 import {
-    flag,
     Command,
     Matches,
+    arg_variadic,
     command,
+    flag,
     has_flag,
-    with_arg,
-    with_flag,
     positionals,
-    arg_variadic
+    with_arg,
+    with_flag
 } from "sfn/cli";
 
-import { CliContext } from "../context";
-import { format_source } from "../../tools/fmt";
-import { substring } from "../../string_utils";
 import { _collect_sfn_files_cmd } from "../../cli_commands_utils";
+import { substring } from "../../string_utils";
+import { format_source } from "../../tools/fmt";
+import { CliContext } from "../context";
 
 // The `sfn/cli` definition for `fmt`, registered on the v2 root via
 // `with_subcommand`. Two boolean flags and a variadic `[path...]`

@@ -4,95 +4,95 @@
 import { bold } from "sfn/cli";
 
 import {
-    number_to_string,
-    compile_to_sailfin,
-    module_name_from_path,
-    print_llvm_with_module,
-    compile_to_llvm_with_module,
-    compile_to_llvm_file_with_module,
-    compile_to_llvm_with_module_timed,
-    print_native_text_with_module_gated,
-    write_native_text_file_with_module_gated
-} from "./main";
-import { resolve_compiler_version } from "./version";
-import { sailfin_cli_main_v2 } from "./cli/main";
-import { handle_check_command } from "./cli_check";
-import {
+    BuildCacheConfig,
     CacheKey,
     CacheStats,
+    cache_compiler_identity,
+    cache_copy_artifact_to,
+    cache_lookup_artifact,
     cache_root,
-    BuildCacheConfig,
-    empty_cache_stats,
-    merge_cache_stats,
     cache_stats_is_empty,
     cache_store_artifact,
-    cache_lookup_artifact,
-    cache_copy_artifact_to,
-    cache_compiler_identity,
-    runtime_object_cache_key,
+    empty_cache_stats,
+    merge_cache_stats,
     resolve_build_cache_config,
-    runtime_object_entry_key_from_str,
-    runtime_object_cache_key_with_identity
+    runtime_object_cache_key,
+    runtime_object_cache_key_with_identity,
+    runtime_object_entry_key_from_str
 } from "./build_cache";
-import { emit_compiler_build_stamp_if_applicable } from "./build_stamp";
-import { CliContext, parse_driver_prefix, driver_prefix_length } from "./cli/context";
-import {
-    toml_get_name,
-    toml_get_entry,
-    toml_get_version,
-    toml_get_build_kind
-} from "./toml_parser";
 import {
     BuildReport,
     DeterminismDiff,
     DeterminismModule,
-    empty_build_report,
     DeterminismSnapshot,
     build_report_to_json,
     compare_for_determinism,
-    make_determinism_module,
     determinism_diff_to_json,
     determinism_diff_to_text,
-    empty_determinism_snapshot
+    empty_build_report,
+    empty_determinism_snapshot,
+    make_determinism_module
 } from "./build_report";
-import { handle_lock_command, handle_config_command, handle_package_command } from "./cli_commands";
-import { emit_llvm_with_retry, emit_parse_nonneg_int } from "./emit_helpers";
-import { resolve_import_module_slug_for_module } from "./llvm/imports";
-import { parse_native_imports_for_import } from "./native_ir_api";
+import { emit_compiler_build_stamp_if_applicable } from "./build_stamp";
 import {
-    ScopeName,
-    parse_scope_name,
-    is_safe_scope_name,
-    capsule_artifact_dir,
-    CapsuleArtifactModule,
     CapsuleArtifactManifest,
-    capsule_default_bin_name,
+    CapsuleArtifactModule,
+    ScopeName,
     capsule_artifact_bin_path,
-    capsule_artifact_obj_path,
-    make_capsule_artifact_module,
+    capsule_artifact_dir,
     capsule_artifact_manifest_path,
+    capsule_artifact_manifest_to_json,
+    capsule_artifact_obj_path,
+    capsule_default_bin_name,
     empty_capsule_artifact_manifest,
-    capsule_artifact_manifest_to_json
+    is_safe_scope_name,
+    make_capsule_artifact_module,
+    parse_scope_name
 } from "./capsule_artifact";
 import {
     ModuleCacheEvent,
-    ResolverConsumer,
     ProjectCapsuleResult,
+    ResolverConsumer,
     empty_resolver_consumer,
     prepare_project_capsules,
     stage_capsule_imports_for_emit
 } from "./capsule_resolver";
+import { CliContext, driver_prefix_length, parse_driver_prefix } from "./cli/context";
+import { sailfin_cli_main_v2 } from "./cli/main";
+import { handle_check_command } from "./cli_check";
+import { handle_config_command, handle_lock_command, handle_package_command } from "./cli_commands";
 import {
+    _atomic_rename_into_place,
     _env_flag,
-    _resolve_linker,
-    _shell_read_cmd,
     _legacy_flag_file,
     _mktemp_sibling_cmd,
+    _resolve_linker,
     _sha256_of_file_cmd,
-    _shell_single_quote_arg,
-    _atomic_rename_into_place
+    _shell_read_cmd,
+    _shell_single_quote_arg
 } from "./cli_commands_utils";
+import { emit_llvm_with_retry, emit_parse_nonneg_int } from "./emit_helpers";
+import { resolve_import_module_slug_for_module } from "./llvm/imports";
+import {
+    compile_to_llvm_file_with_module,
+    compile_to_llvm_with_module,
+    compile_to_llvm_with_module_timed,
+    compile_to_sailfin,
+    module_name_from_path,
+    number_to_string,
+    print_llvm_with_module,
+    print_native_text_with_module_gated,
+    write_native_text_file_with_module_gated
+} from "./main";
+import { parse_native_imports_for_import } from "./native_ir_api";
 import { RuntimeCapsuleArtifacts, runtime_capsule_from_root } from "./runtime_capsule_resolver";
+import {
+    toml_get_build_kind,
+    toml_get_entry,
+    toml_get_name,
+    toml_get_version
+} from "./toml_parser";
+import { resolve_compiler_version } from "./version";
 
 // M5.5 (#473) entry-point dependencies. `fn main` below resolves the
 // running binary's path and the runtime bundle root directly via the

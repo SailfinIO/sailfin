@@ -10,35 +10,35 @@
 //   - statements.sfn:   Block statement parsing (control flow, return, match)
 //   - declarations.sfn: Top-level declarations (fn, struct, enum, import, etc.)
 import { Program, Statement } from "../ast";
-// Import types from submodules
-import { Parser, StatementParseResult } from "./types";
 import { lex } from "../lexer";
+import { substring } from "../string_utils";
 import { Token, TokenKind } from "../token";
 import {
-    skip_trivia,
-    is_end_of_file,
-    parser_peek_raw,
-    identifier_matches,
-    parser_advance_raw
-} from "./token_utils";
-import {
-    parse_enum,
-    parse_test,
-    parse_export,
-    parse_import,
-    parse_struct,
-    parse_unknown,
-    parse_function,
-    parse_variable,
-    parse_interface,
     parse_decorators,
-    parse_extern_var,
-    parse_type_alias,
-    parse_lifecycle_hook,
+    parse_enum,
+    parse_export,
     parse_extern_function,
+    parse_extern_var,
+    parse_function,
+    parse_import,
+    parse_interface,
+    parse_lifecycle_hook,
+    parse_struct,
+    parse_test,
+    parse_type_alias,
+    parse_unknown,
+    parse_variable,
     parse_variable_with_storage
 } from "./declarations";
-import { substring } from "../string_utils";
+import {
+    identifier_matches,
+    is_end_of_file,
+    parser_advance_raw,
+    parser_peek_raw,
+    skip_trivia
+} from "./token_utils";
+// Import types from submodules
+import { Parser, StatementParseResult } from "./types";
 
 // ============================================================================
 // Main Entry Points

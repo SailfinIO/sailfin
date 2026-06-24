@@ -2,17 +2,17 @@
 //
 // Expression parsing helpers: member access, index expressions, assignments,
 // inline let, ternary, cast, and raw address parsing.
+import { char_at, index_of, substring } from "../string_utils";
 import {
+    AssignmentParseResult,
     CastParseResult,
-    MemberAccessParse,
-    TernaryParseResult,
     IndexExpressionParse,
     InlineLetParseResult,
-    AssignmentParseResult,
-    RawAddressParseResult
+    MemberAccessParse,
+    RawAddressParseResult,
+    TernaryParseResult
 } from "./types";
-import { ends_with, trim_text, starts_with } from "./utils";
-import { char_at, index_of, substring } from "../string_utils";
+import { ends_with, starts_with, trim_text } from "./utils";
 
 // =============================================================================
 // Expression Parsing Helpers

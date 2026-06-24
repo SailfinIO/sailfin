@@ -4,8 +4,8 @@
 // implementation is intentionally modest: it tokenises identifier-like runs and
 // individual punctuation characters, preserving whitespace and comments so the
 // parser can decide what to ignore.
-import { Token, TokenKind, eof_token } from "./token";
 import { char_code } from "./string_utils";
+import { Token, TokenKind, eof_token } from "./token";
 
 struct LexerState {
     source: string;

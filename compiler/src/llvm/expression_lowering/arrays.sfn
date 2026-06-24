@@ -5,17 +5,17 @@
 // Implements LLVM IR generation for array operations: concatenation
 // (`lower_struct_array_concat`), element type extraction from array pointer
 // types, and array struct type mapping.
-import { LLVMOperand, ExpressionResult } from "../types";
-import { ends_with, trim_text, append_string } from "../utils";
+import { substring } from "../../string_utils";
+import { format_temp_name } from "../expressions_helpers";
 import { strip_pointer_suffix } from "../type_mapping";
 import { array_struct_type_for_element } from "../type_mapping";
-import { substring } from "../../string_utils";
+import { ExpressionResult, LLVMOperand } from "../types";
+import { append_string, ends_with, trim_text } from "../utils";
 import {
-    emit_runtime_call,
     RuntimeCallOverrides,
+    emit_runtime_call,
     empty_runtime_call_overrides
 } from "./native/runtime_call";
-import { format_temp_name } from "../expressions_helpers";
 
 fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: int) -> ExpressionResult ![io] {
     let mut current_lines = lines;

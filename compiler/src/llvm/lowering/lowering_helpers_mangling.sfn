@@ -4,44 +4,44 @@
 // collection helpers.  Split from lowering_helpers.sfn to keep both
 // files under 1000 lines.
 import {
-    TraitMetadata,
-    TraitDescriptor,
+    NativeFunction,
+    NativeImport,
+    NativeImportSpecifier,
+    NativeInterface,
+    NativeParameter,
+    NativeStruct
+} from "../../native_ir";
+import { substring } from "../../string_utils";
+import { trace_lowering } from "../lowering_debug_state";
+import {
     CapabilityManifest,
-    TraitImplementationDescriptor
+    TraitDescriptor,
+    TraitImplementationDescriptor,
+    TraitMetadata
 } from "../types";
 import {
     index_of,
-    trim_text,
-    starts_with,
-    sanitize_symbol,
-    number_to_string,
     join_with_separator,
-    string_array_contains
+    number_to_string,
+    sanitize_symbol,
+    starts_with,
+    string_array_contains,
+    trim_text
 } from "../utils";
-import {
-    NativeImport,
-    NativeStruct,
-    NativeFunction,
-    NativeInterface,
-    NativeParameter,
-    NativeImportSpecifier
-} from "../../native_ir";
-import { substring } from "../../string_utils";
 import {
     DeclareSignature,
     MangledModuleResult,
-    render_function_shim,
-    find_declare_signature,
-    sanitize_module_suffix,
-    insert_before_llvm_footer,
     apply_symbol_substitutions,
+    collect_available_import_module_names,
     collect_defined_function_symbols,
-    should_keep_unmangled_abi_symbol,
-    resolve_import_provider_module_name,
     extract_module_name_from_native_text,
-    collect_available_import_module_names
+    find_declare_signature,
+    insert_before_llvm_footer,
+    render_function_shim,
+    resolve_import_provider_module_name,
+    sanitize_module_suffix,
+    should_keep_unmangled_abi_symbol
 } from "./lowering_helpers";
-import { trace_lowering } from "../lowering_debug_state";
 
 // #960: scan a `.sfn-asm` native text for struct-method symbols.
 // `flatten_struct_methods` names each method `<StructName><MethodName>`, so a
