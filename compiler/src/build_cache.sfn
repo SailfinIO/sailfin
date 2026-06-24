@@ -661,6 +661,42 @@ fn runtime_object_cache_key(src_path: string, opt_flag: string) -> string ![io] 
     return content + "\n" + opt_flag + "\nsecsplit1-strabi1";
 }
 
+// Compiler-identity-aware variant of `runtime_object_cache_key` for the
+// runtime sfn-source emit path (#1197).
+//
+// `runtime_object_cache_key` keys a runtime object purely on its source
+// content + opt flag + a hand-maintained ABI tag. That is correct for the
+// C / LL object path (`clang -c` output does not depend on the Sailfin
+// compiler's codegen), but it is UNSOUND for runtime `.sfn` sources, which
+// are emitted to `.ll`/`.o` BY the Sailfin compiler: a codegen change in
+// `compiler/src` alters the emitted IR of a runtime module WITHOUT touching
+// the module's source bytes, so the source-only key hits and the linker
+// silently reuses a stale object emitted by the previous compiler. That is
+// exactly the failure #1197 documents (a cast-lowering fix never reaching the
+// linked `future.sfn` runtime until a manual `rm`), and the C-runtime
+// deletion (#822/#823) made it the common case — the *entire* runtime now
+// flows through this compiler-emitted path. The historical mitigation was to
+// hand-bump the `secsplit1-strabi1` tag on every codegen-ABI change; folding
+// the compiler identity in makes that automatic.
+//
+// `compiler_identity` is the same value the `.ll` module cache mixes into
+// `cache_key_for` — `cache_compiler_identity(version, binary_path)`: the
+// build stamp (a committed codegen change bumps the `+dev.<hash>` commit
+// hash) plus, for `.dirty` stamps, the emitting binary's SHA-256 (an
+// iterative rebuild at the same commit busts the key). The determinism gate's
+// pass1→pass2 use the SAME binary, so the identity — and therefore the key —
+// is stable across those work-dirs and the shared cache still warm-hits.
+//
+// Returns "" when the base key is unhashable (propagating the
+// always-recompile fallback). An empty `compiler_identity` degrades to the
+// base key byte-for-byte (no worse than the pre-#1197 behaviour).
+fn runtime_object_cache_key_with_identity(src_path: string, opt_flag: string, compiler_identity: string) -> string ![io] {
+    let base = runtime_object_cache_key(src_path, opt_flag);
+    if base.length == 0 { return ""; }
+    if compiler_identity.length == 0 { return base; }
+    return base + "\n" + compiler_identity;
+}
+
 // Derive a content-addressed shared-cache `CacheKey` from a
 // `runtime_object_cache_key` string (#1096). The runtime object layer
 // historically cached `.o` outputs only in the per-build work-dir (a
@@ -972,6 +1008,7 @@ export {
     cache_compiler_identity,
     sha256_of_file,
     runtime_object_cache_key,
+    runtime_object_cache_key_with_identity,
     runtime_object_entry_key_from_str,
     empty_cache_stats,
     merge_cache_stats,

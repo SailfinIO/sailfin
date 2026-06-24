@@ -14,7 +14,7 @@
 // before and after a content edit and asserting key (in)equality.
 // The key is content-addressed, not mtime-addressed: a pure
 // rewrite-with-identical-bytes must reproduce the same key.
-import { runtime_object_cache_key } from "../../src/build_cache";
+import { runtime_object_cache_key, runtime_object_cache_key_with_identity } from "../../src/build_cache";
 
 // Each test gets its own tmp namespace so parallel runs don't
 // collide on `/tmp/sfn_c_source_cache_test_<X>`.
@@ -98,6 +98,78 @@ test "c-source cache: missing source yields empty key" ![io] {
     let src = scratch + "/does_not_exist.c";
 
     let key = runtime_object_cache_key(src, "-O2");
+    assert key.length == 0;
+
+    _cleanup(scratch);
+}
+
+// #1197: the runtime *sfn-source* emit path keys its `.o` via
+// `runtime_object_cache_key_with_identity`, which folds the emitting
+// compiler's identity into the base key. A codegen change in
+// `compiler/src` changes the identity (the build-stamp commit hash, or
+// the binary SHA-256 for a `.dirty` build) WITHOUT touching the runtime
+// source bytes — so the key must change and bust the stale object. The
+// source-only `runtime_object_cache_key` could not see a compiler change,
+// which is the exact stale-runtime-after-codegen-fix bug #1197 fixes.
+test "sfn-source cache: compiler identity participates in the key" ![io] {
+    let scratch = _tmp_root("identity");
+    let src = scratch + "/future.sfn";
+    fs.writeFile(src, "fn f() -> int { return 1; }\n");
+
+    let key_a = runtime_object_cache_key_with_identity(src, "-O2", "0.7.0+dev.aaaa");
+    let key_b = runtime_object_cache_key_with_identity(src, "-O2", "0.7.0+dev.bbbb");
+
+    // Same source + opt flag, different compiler identity -> distinct key.
+    assert key_a != key_b;
+    // The identity is appended after the base key, so each must end with
+    // its own identity and start with the shared base.
+    let base = runtime_object_cache_key(src, "-O2");
+    assert key_a == base + "\n0.7.0+dev.aaaa";
+    assert key_b == base + "\n0.7.0+dev.bbbb";
+
+    _cleanup(scratch);
+}
+
+// A stable identity reproduces the key, so an unchanged compiler still
+// warm-hits the cache (the determinism gate's pass1->pass2 share one
+// binary and must not thrash the runtime object cache).
+test "sfn-source cache: identical identity reproduces the key" ![io] {
+    let scratch = _tmp_root("identity_stable");
+    let src = scratch + "/string.sfn";
+    fs.writeFile(src, "fn g() -> int { return 2; }\n");
+
+    let key_1 = runtime_object_cache_key_with_identity(src, "-O0", "0.7.0+dev.cccc");
+    let key_2 = runtime_object_cache_key_with_identity(src, "-O0", "0.7.0+dev.cccc");
+
+    assert key_1 == key_2;
+
+    _cleanup(scratch);
+}
+
+// An empty identity degrades to the base key byte-for-byte, so the
+// helper is never worse than the pre-#1197 source-only behaviour when
+// the caller cannot resolve a compiler identity.
+test "sfn-source cache: empty identity degrades to the base key" ![io] {
+    let scratch = _tmp_root("identity_empty");
+    let src = scratch + "/arena.sfn";
+    fs.writeFile(src, "fn h() -> int { return 3; }\n");
+
+    let base = runtime_object_cache_key(src, "-O2");
+    let with_empty = runtime_object_cache_key_with_identity(src, "-O2", "");
+
+    assert with_empty == base;
+
+    _cleanup(scratch);
+}
+
+// An unhashable source still yields an empty key even with an identity,
+// preserving the always-recompile fallback (identity can never resurrect
+// a key the base helper rejected).
+test "sfn-source cache: missing source yields empty key despite identity" ![io] {
+    let scratch = _tmp_root("identity_missing");
+    let src = scratch + "/nope.sfn";
+
+    let key = runtime_object_cache_key_with_identity(src, "-O2", "0.7.0+dev.dddd");
     assert key.length == 0;
 
     _cleanup(scratch);
