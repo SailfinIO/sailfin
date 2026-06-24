@@ -88,3 +88,63 @@ test "json: parse / stringify roundtrip on object" {
     assert strings_equal(v.kind, "string");
     assert strings_equal(v.string_value, "v");
 }
+
+// -- Hardening: recursion-depth and input-size caps (#1585) --
+// Builds a string of `count` copies of `unit`.
+fn _repeat(unit: string, count: int) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        out = out + unit;
+        i += 1;
+    }
+    return out;
+}
+
+test "json: deeply-nested array is rejected at the depth cap without crashing" {
+    // Far past the parser's depth cap (1000). Before the guard this
+    // recursed until the native stack overflowed and crashed the runner;
+    // now it unwinds gracefully. The test completing at all proves no
+    // stack exhaustion; the outer structure still resolves to an array.
+    let deep = _repeat("[", 5000) + _repeat("]", 5000);
+    let parsed: JsonValue = parse(deep);
+    assert strings_equal(parsed.kind, "array");
+}
+
+test "json: deeply-nested object is rejected at the depth cap without crashing" {
+    let deep = _repeat("{\"k\":", 5000) + "1" + _repeat("}", 5000);
+    let parsed: JsonValue = parse(deep);
+    assert strings_equal(parsed.kind, "object");
+}
+
+test "json: over-length input is rejected at the size cap" {
+    // _max_input_len() is 10_000_000; double a seed string past it. The
+    // length guard returns null_val() before any recursion runs.
+    let mut big: string = "1";
+    loop {
+        if big.length > 10000000 { break; }
+        big = big + big;
+    }
+    let parsed: JsonValue = parse(big);
+    assert strings_equal(parsed.kind, "null");
+}
+
+test "json: moderately-nested document within the cap parses unchanged" {
+    // Depth 50 is well under the 1000 cap and must parse structurally.
+    let doc = _repeat("[", 50) + "42" + _repeat("]", 50);
+    let parsed: JsonValue = parse(doc);
+    assert strings_equal(parsed.kind, "array");
+    // Drill all 50 levels; the innermost element is the number 42.
+    let mut cur: JsonValue = parsed;
+    let mut level: int = 0;
+    loop {
+        if level >= 50 { break; }
+        assert strings_equal(cur.kind, "array");
+        assert array_length(cur) == 1;
+        cur = array_at(cur, 0);
+        level += 1;
+    }
+    assert strings_equal(cur.kind, "number");
+    assert cur.number_value == 42;
+}
