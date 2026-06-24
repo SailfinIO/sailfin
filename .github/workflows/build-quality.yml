@@ -123,7 +123,7 @@ jobs:
       # instead SAVED after the gates pass (save-only, no `if:`), so a
       # failed gate never poisons the cache PRs consume.
       - name: Restore seed cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: build/seed
           key: sailfin-seed-linux-x86_64-${{ steps.seed.outputs.seed_version }}
@@ -240,7 +240,7 @@ jobs:
       # already exists (no source change since the last main run) the
       # save is a no-op.
       - name: Save build cache for PR CI
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: build/cache
           key: sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', '.seed-version') }}
@@ -341,7 +341,7 @@ jobs:
           echo "CLANG=clang-18" >> "$GITHUB_ENV"
 
       - name: Restore seed cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: build/seed
           key: sailfin-seed-linux-x86_64-${{ steps.seed.outputs.seed_version }}
@@ -364,7 +364,7 @@ jobs:
       # gate, this job has no cold-build requirement, so restoring is safe
       # and desirable. Keys mirror `.github/actions/sailfin-build`.
       - name: Restore build cache (content-addressed module IR)
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: build/cache
           key: sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'compiler/capsule.toml', '.seed-version') }}
@@ -415,7 +415,7 @@ jobs:
       # baseline can publish a fresh entry (an existing key makes
       # `cache/save` a no-op). (`runtime/native/**` retired in #823.)
       - name: Save test-bin cache for PR CI
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: build/cache/test-bin
           key: sailfin-testbin-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ hashFiles('compiler/src/**/*.sfn', 'runtime/**/*.sfn', 'runtime/capsule.toml', 'runtime/ir/**', 'compiler/capsule.toml', '.seed-version') }}
