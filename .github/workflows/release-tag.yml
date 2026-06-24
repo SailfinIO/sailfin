@@ -195,7 +195,7 @@ jobs:
       # --- Cross-compile Windows binary from Linux LLVM IR ---
       - name: Cache MinGW-w64 apt packages
         if: matrix.package_label == 'linux-x86_64'
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.cache/mingw-debs
           key: apt-mingw-w64-x86-64-${{ runner.os }}-v1
