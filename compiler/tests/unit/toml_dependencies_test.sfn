@@ -1,6 +1,10 @@
 // Regression tests for toml_get_dependencies() and capsule dependency
 // resolution helpers used by compile-time dependency resolution.
-import { toml_get_dependencies } from "../../src/toml_parser";
+import {
+    toml_get_dependencies,
+    toml_get_capabilities_required,
+    toml_merge_capabilities_required
+} from "../../src/toml_parser";
 
 // -- Local helpers for string assertions --
 fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
@@ -128,4 +132,43 @@ test "toml_get_dependencies: quoted keys preserved" {
     let deps = toml_get_dependencies(toml);
     // The toml parser strips quotes, so the key should be "sfn/special"
     assert _str_eq(_test_lookup_dep(deps, "sfn/special"), "0.5.0");
+}
+
+// -- toml_merge_capabilities_required (#1395) --
+test "merge caps: into empty required set records dep capabilities" {
+    let toml = "[capsule]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\n[capabilities]\nrequired = []\n\n[build]\nentry = \"src/main.sfn\"\n";
+    let merged = toml_merge_capabilities_required(toml, ["io", "net"]);
+    let caps = toml_get_capabilities_required(merged);
+    assert caps.length == 2;
+    assert _contains(merged, "\"io\"");
+    assert _contains(merged, "\"net\"");
+}
+
+test "merge caps: union preserves existing and dedupes" {
+    let toml = "[capsule]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\n[capabilities]\nrequired = [\"io\"]\n\n[build]\nentry = \"src/main.sfn\"\n";
+    let merged = toml_merge_capabilities_required(toml, ["io", "net"]);
+    let caps = toml_get_capabilities_required(merged);
+    // io already present, net is new — union of size 2, no duplicate io.
+    assert caps.length == 2;
+    assert _str_eq(caps[0], "io");
+    assert _str_eq(caps[1], "net");
+}
+
+test "merge caps: empty list leaves required unchanged" {
+    let toml = "[capsule]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\n[capabilities]\nrequired = [\"io\"]\n\n[build]\nentry = \"src/main.sfn\"\n";
+    let empty: string[] = [];
+    let merged = toml_merge_capabilities_required(toml, empty);
+    let caps = toml_get_capabilities_required(merged);
+    assert caps.length == 1;
+    assert _str_eq(caps[0], "io");
+}
+
+test "merge caps: dependency surface preserved through write round-trip" {
+    let toml = "[capsule]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"sfn/http\" = \"0.3.0\"\n\n[capabilities]\nrequired = []\n\n[build]\nentry = \"src/main.sfn\"\n";
+    let merged = toml_merge_capabilities_required(toml, ["io", "net"]);
+    // Dependency must survive the parse/merge/write round-trip.
+    let deps = toml_get_dependencies(merged);
+    assert _contains(deps, "sfn/http=0.3.0");
+    let caps = toml_get_capabilities_required(merged);
+    assert caps.length == 2;
 }

@@ -592,6 +592,35 @@ fn toml_add_dev_dependency(toml_text: string, capsule: string, version: string) 
     return _write_toml(t);
 }
 
+// Merge a list of required capabilities into an existing capsule.toml
+// text's `[capabilities] required = [...]` set and return the updated
+// text. Used by `sfn add` to propagate a dependency's required
+// capability surface into the consumer manifest (#1395). Existing
+// capabilities are preserved and duplicates are not re-added, so the
+// result is the order-stable union (consumer's existing caps first,
+// then any new caps from `caps` in argument order). Empty entries are
+// ignored; an empty `caps` list returns the text unchanged modulo
+// manifest normalization.
+fn toml_merge_capabilities_required(toml_text: string, caps: string[]) -> string {
+    let t = _parse_toml_internal(toml_text);
+    let mut ci: int = 0;
+    loop {
+        if ci >= caps.length { break; }
+        let cap = caps[ci];
+        ci += 1;
+        if cap.length == 0 { continue; }
+        let mut exists: boolean = false;
+        let mut ei: int = 0;
+        loop {
+            if ei >= t.capabilities.length { break; }
+            if strings_equal(t.capabilities[ei], cap) { exists = true; }
+            ei += 1;
+        }
+        if !exists { t.capabilities.push(cap); }
+    }
+    return _write_toml(t);
+}
+
 // Write a SailToml back to string (internal)
 fn _write_toml(toml: SailToml) -> string {
     let mut out: string = "[capsule]\n";
