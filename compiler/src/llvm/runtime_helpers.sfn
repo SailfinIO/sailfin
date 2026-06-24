@@ -1105,6 +1105,22 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "char_code", symbol: "char_code", return_type: "i64", parameter_types: ["{i8*, i64}"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    // #1572: `char_at(value, index)` — bare-name descriptor mirroring the
+    // `char_from_code` / `char_code` rows below/above. `char_at` is a prelude
+    // free function (`runtime/prelude.sfn`); modules that call it without
+    // importing the prelude (e.g. `sfn/strings`'s `to_upper`/`to_lower`)
+    // resolve through `context_functions` on a normal build, but the test
+    // command path never loads the prelude `.sfn-asm`, so the callee signature
+    // was unknown and lowering emitted a spurious `cannot resolve return type`
+    // [fatal]. This row resolves the return type (`{i8*, i64}`, matching the
+    // prelude's emitted `{i8*, i64} @char_at({i8*, i64}, i64)`) so the call
+    // lowers to `call {i8*, i64} @char_at` and links to the prelude body.
+    // `native_signature: null` — the symbol IS the prelude function; self-host
+    // is unaffected since `find_function_by_name_or_import` resolves `char_at`
+    // before this descriptor is ever consulted.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "char_at", symbol: "char_at", return_type: "{i8*, i64}", parameter_types: ["{i8*, i64}", "i64"], effects: [], native_signature: null, c_abi_return_type: null
+    });
     // #874: `char_from_code(code)` — raw single-byte string constructor, the
     // write counterpart to `char_code`'s read. Bare-name descriptor so user
     // call sites resolve the return type and emit `call i8* @char_from_code`,
