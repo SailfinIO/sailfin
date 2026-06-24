@@ -7,27 +7,27 @@
 // Skeleton-shape coverage (typecheck + fmt + LLVM define/call
 // shape) lives in `compiler/tests/e2e/test_runtime_process.sh`;
 // this file pins the runtime behavior.
-test "process_run: echo returns exit code 0" {
+test "process_run: echo returns exit code 0" ![io] {
     let rc = process.run(["echo", "hello"]);
     assert rc == 0;
 }
 
-test "process_run: true returns exit code 0" {
+test "process_run: true returns exit code 0" ![io] {
     let rc = process.run(["true"]);
     assert rc == 0;
 }
 
-test "process_run: false returns exit code 1" {
+test "process_run: false returns exit code 1" ![io] {
     let rc = process.run(["false"]);
     assert rc == 1;
 }
 
-test "process_run: nonexistent command returns 127" {
+test "process_run: nonexistent command returns 127" ![io] {
     let rc = process.run(["this_command_definitely_does_not_exist_405"]);
     assert rc == 127;
 }
 
-test "process_run: empty argv returns 127" {
+test "process_run: empty argv returns 127" ![io] {
     let rc = process.run([]);
     assert rc == 127;
 }
