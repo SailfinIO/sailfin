@@ -1,0 +1,74 @@
+// Regression coverage for string ordered comparison (`<` `>` `<=` `>=`) on the
+// canonical SfnString representation `{i8*, i64}` (#1365).
+//
+// History: `comparison_predicate_for_symbol`
+// (`compiler/src/llvm/expression_lowering/native/core_operands.sfn`) had no
+// `{i8*, i64}` arm for ordered operators, so they fell through to an empty
+// predicate -> a null comparison operand -> the if-statement lowering SILENTLY
+// DROPPED the guarded branch. `sfn check` passed (lowering isn't run) and the
+// build succeeded, so the miscompile was invisible — it disabled all of
+// `sfn fmt`'s import sorting (its sole consumer of string ordering).
+//
+// These tests MUST observe a distinct value from BOTH arms of an `if`. A bare
+// `assert (a < b)` is a FALSE POSITIVE under the bug: the dropped branch never
+// runs, but `assert` (lowered as `if !cond { abort }`) also never aborts, so
+// it "passes" regardless of the comparison's truth. Returning "lt"/"ge" makes
+// the taken branch observable.
+import { char_at } from "../../src/string_utils";
+
+fn _lt(a: string, b: string) -> string {
+    if a < b { return "lt"; }
+    return "ge";
+}
+
+fn _gt(a: string, b: string) -> string {
+    if a > b { return "gt"; }
+    return "le";
+}
+
+fn _le(a: string, b: string) -> string {
+    if a <= b { return "le"; }
+    return "gt";
+}
+
+fn _ge(a: string, b: string) -> string {
+    if a >= b { return "ge"; }
+    return "lt";
+}
+
+test "string ordered compare: less than selects the taken branch" {
+    assert _lt("apple", "banana") == "lt";
+    assert _lt("banana", "apple") == "ge";
+    assert _lt("apple", "apple") == "ge";  // equal is not-less
+}
+
+test "string ordered compare: greater than selects the taken branch" {
+    assert _gt("banana", "apple") == "gt";
+    assert _gt("apple", "banana") == "le";
+    assert _gt("apple", "apple") == "le";  // equal is not-greater
+}
+
+test "string ordered compare: less equal and greater equal include equality" {
+    assert _le("apple", "apple") == "le";
+    assert _le("apple", "banana") == "le";
+    assert _le("banana", "apple") == "gt";
+    assert _ge("apple", "apple") == "ge";
+    assert _ge("banana", "apple") == "ge";
+    assert _ge("apple", "banana") == "lt";
+}
+
+test "string ordered compare: shared-prefix orders by length" {
+    assert _lt("run", "runner") == "lt";  // prefix sorts before longer
+    assert _lt("runner", "run") == "ge";
+}
+
+// The actual fmt sorters compare single graphemes from `char_at`, then
+// tie-break on length. Exercise that exact operand shape (the live real-vs-real
+// arm of `sfn_str_cmp`).
+test "string ordered compare: char_at grapheme operands compare correctly" {
+    let r = char_at("run", 0);  // 'r'
+    let c = char_at("command_def", 0);  // 'c'
+    assert _lt(c, r) == "lt";  // 'c' < 'r'
+    assert _lt(r, c) == "ge";  // 'r' not < 'c'
+    assert _gt(r, c) == "gt";  // 'r' > 'c'
+}

@@ -1102,6 +1102,12 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "strings_equal", symbol: "strings_equal", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_str_eq", c_abi_return_type: null
     });
+    // #1365: lexicographic string ordering (`<`/`>`/`<=`/`>=`). The lowering
+    // emits `call i32 @sfn_str_cmp(i8*, i8*)` then `icmp <pred> i32 ..., 0`.
+    // Auto-declared via the post-lowering line scan, exactly like sfn_str_eq.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.compare", symbol: "sfn_str_cmp", return_type: "i32", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_str_cmp", c_abi_return_type: null
+    });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "char_code", symbol: "char_code", return_type: "i64", parameter_types: ["{i8*, i64}"], effects: [], native_signature: null, c_abi_return_type: null
     });

@@ -8,8 +8,8 @@
 // corrupting the binding (a multi-specifier line scrambled across the `as`
 // boundary, e.g. `command_def as run`). The fix treats `A as B` as one
 // sortable unit keyed on the imported name `A`, preserving the pairing.
-import { index_of } from "../../src/string_utils";
 import { format_source } from "../../src/tools/fmt";
+import { index_of } from "../../src/string_utils";
 
 fn _contains(haystack: string, needle: string) -> boolean {
     return index_of(haystack, needle) >= 0;
@@ -38,17 +38,36 @@ test "fmt import-alias: multi-specifier aliased line stays paired" ![io] {
     assert _contains(out, "cdef as command_def") == false;
 }
 
-// ── Misordered aliased specifiers keep their pairing intact ─────────
-test "fmt import-alias: misordered aliased specifiers keep their pairing" ![io] {
+// ── Misordered aliased specifiers sort to exact within-line order ───
+test "fmt import-alias: misordered aliased specifiers sort to exact order" ![io] {
     let src = "import { run as runner, command_def as cdef } from \"./z\";\nimport { x } from \"./a\";\n";
     let out = format_source(src);
-    // The bug being guarded is the side-swap, which is order-independent:
-    // each `imported as local` pairing must survive regardless of the final
-    // within-line ordering (exact ordering is incidental and not asserted).
+    // Pairing must survive (no side-swap, order-independent).
     assert _contains(out, "command_def as cdef");
     assert _contains(out, "run as runner");
     assert _contains(out, "command_def as run") == false;
     assert _contains(out, "run as cdef") == false;
+    // Exact within-line order: sorted by imported name, `command_def` < `run`.
+    // This assertion was relaxed in PR #1362 because string ordered comparison
+    // was miscompiled and the sort silently no-op'd (#1365); re-tightened now
+    // that `<` works and import sorting is live again.
+    let i_cmd = index_of(out, "command_def as cdef");
+    let i_run = index_of(out, "run as runner");
+    assert i_cmd >= 0;
+    assert i_run >= 0;
+    assert i_cmd < i_run;
+}
+
+// ── Cross-import path sort reorders consecutive imports by path ──────
+test "fmt import: cross-import path sort reorders by path" ![io] {
+    // Non-alphabetical path order on input; same import group.
+    let src = "import { b } from \"./z\";\nimport { a } from \"./a\";\n";
+    let out = format_source(src);
+    let i_a = index_of(out, "from \"./a\"");
+    let i_z = index_of(out, "from \"./z\"");
+    assert i_a >= 0;
+    assert i_z >= 0;
+    assert i_a < i_z;  // `./a` sorts before `./z` (#1365)
 }
 
 // ── Idempotency: a second pass changes nothing ──────────────────────

@@ -348,6 +348,97 @@ fn sfn_str_eq(a: * u8, b: * u8) -> bool {
     return memcmp(ra, b, la2 as usize) == 0;
 }
 
+// #1365: lexicographic compare of two immediate codepoints by their UTF-8
+// encodings — the ordered analogue of the imm-vs-imm arm of `sfn_str_eq`.
+// Walks `min(na, nb)` bytes via `_sfn_utf8_byte`; first non-zero byte delta
+// (unsigned) decides, else the shorter encoding sorts first.
+fn _sfn_imm_cmp_imm(ca: i64, cb: i64) -> i32 {
+    let na: i64 = _sfn_utf8_byte_len(ca);
+    let nb: i64 = _sfn_utf8_byte_len(cb);
+    let mut m: i64 = na;
+    if nb < m { m = nb; }
+    let mut i: i64 = 0;
+    loop {
+        if i >= m { break; }
+        let ba: i64 = _sfn_utf8_byte(ca, na, i);
+        let bb: i64 = _sfn_utf8_byte(cb, nb, i);
+        if ba < bb { return -1; }
+        if ba > bb { return 1; }
+        i = i + 1;
+    }
+    if na < nb { return -1; }
+    if na > nb { return 1; }
+    return 0;
+}
+
+// #1365: lexicographic compare of an immediate codepoint `cp` against a real,
+// deref-safe string `real` of byte length `len` — the ordered analogue of
+// `_sfn_imm_eq_real`. `cp` is on the LEFT; callers comparing real-vs-immediate
+// invert the sign. Bytes are read unsigned (`sfn_str_read_byte` zero-extends),
+// matching `memcmp`'s unsigned-byte ordering.
+fn _sfn_imm_cmp_real(cp: i64, real: * u8, len: i64) -> i32 {
+    let n: i64 = _sfn_utf8_byte_len(cp);
+    let mut m: i64 = n;
+    if len < m { m = len; }
+    let mut i: i64 = 0;
+    loop {
+        if i >= m { break; }
+        let ba: i64 = _sfn_utf8_byte(cp, n, i);
+        let bb: i64 = sfn_str_read_byte(real, i);
+        if ba < bb { return -1; }
+        if ba > bb { return 1; }
+        i = i + 1;
+    }
+    if n < len { return -1; }
+    if n > len { return 1; }
+    return 0;
+}
+
+// `sfn_str_cmp(a, b)` — #1365: lexicographic ordering for the string `<`/`>`/
+// `<=`/`>=` emission target. Returns <0 / 0 / >0 like libc `strcmp`, ordering
+// by unsigned byte value with the shorter string first on a shared prefix. The
+// lowering (`core_operands.sfn`) calls this and `icmp`s the result against 0 —
+// previously these operators fell through to an empty predicate and the guarded
+// branch was silently dropped (no `{i8*, i64}` arm in
+// `comparison_predicate_for_symbol`). Mirrors `sfn_str_eq` arm-for-arm:
+// pointer-equal (both-null / identical immediates) is 0; a single null sorts
+// first (null < any real string); immediates are classified via the
+// non-allocating `sfn_str_immediate_codepoint` bridge (always -1 post-#1420, so
+// the real-vs-real arm is the live one — the immediate arms are defensive
+// parity). Real operands route through `sfn_str_decode_owned` (identity, no
+// alloc) for the call-seq bump, then `memcmp` over the common length with a
+// length tie-break.
+fn sfn_str_cmp(a: * u8, b: * u8) -> i32 {
+    if (a as i64) == (b as i64) { return 0; }
+    if (a as i64) == 0 { return -1; }
+    if (b as i64) == 0 { return 1; }
+    let ca: i64 = sfn_str_immediate_codepoint(a);
+    let cb: i64 = sfn_str_immediate_codepoint(b);
+    if ca >= 0 {
+        if cb >= 0 { return _sfn_imm_cmp_imm(ca, cb); }
+        let rb: * u8 = sfn_str_decode_owned(b);
+        let lb: i64 = strnlen(rb, 16777216) as i64;
+        return _sfn_imm_cmp_real(ca, rb, lb);
+    }
+    let ra: * u8 = sfn_str_decode_owned(a);
+    if cb >= 0 {
+        let la: i64 = strnlen(ra, 16777216) as i64;
+        let r: i32 = _sfn_imm_cmp_real(cb, ra, la);
+        if r < 0 { return 1; }
+        if r > 0 { return -1; }
+        return 0;
+    }
+    let la2: i64 = strnlen(ra, 16777216) as i64;
+    let lb2: i64 = strnlen(b, 16777216) as i64;
+    let mut m: i64 = la2;
+    if lb2 < m { m = lb2; }
+    let r: i32 = memcmp(ra, b, m as usize);
+    if r != 0 { return r; }
+    if la2 < lb2 { return -1; }
+    if la2 > lb2 { return 1; }
+    return 0;
+}
+
 // `_sfn_substring_unchecked(text, start, end)` — #1308 (M1.A.2): the i64-indexed
 // substring entrypoint, now a real Sailfin body (the C
 // `sailfin_runtime_substring_unchecked` def is `static`, retaining only its two

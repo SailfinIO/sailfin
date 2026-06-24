@@ -155,6 +155,77 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
             }
         }
     }
+    // #1365: string ordered comparison (`<`/`>`/`<=`/`>=`). Route through the
+    // runtime `sfn_str_cmp` helper (lexicographic, strcmp-style i32) then
+    // `icmp <pred> i32 <cmp>, 0`. Without this, ordered string compares fell
+    // through to `comparison_predicate_for_symbol`, which has no `{i8*, i64}`
+    // arm — yielding an empty predicate, a null operand, and a silently dropped
+    // guarded branch. The data-pointer extraction mirrors the equality block
+    // above (covering the mixed `i8*` / `{i8*, i64}` literal-vs-local case).
+    let mut symbol_is_ordered: boolean = false;
+    if symbol == "<" { symbol_is_ordered = true; }
+    if symbol == "<=" { symbol_is_ordered = true; }
+    if symbol == ">" { symbol_is_ordered = true; }
+    if symbol == ">=" { symbol_is_ordered = true; }
+    if symbol_is_ordered {
+        if left_is_string {
+            if right_is_string {
+                if !left_is_null {
+                    if !right_is_null {
+                        let mut next_index = temp_index;
+                        let mut left_ptr_value = left_operand.value;
+                        if left_operand.llvm_type == "{i8*, i64}" {
+                            let lext = format_temp_name(next_index);
+                            current_lines.push("  " + lext
+                                + " = extractvalue {i8*, i64} "
+                                + left_operand.value
+                                + ", 0");
+                            left_ptr_value = lext;
+                            next_index += 1;
+                        }
+                        let mut right_ptr_value = right_operand.value;
+                        if right_operand.llvm_type == "{i8*, i64}" {
+                            let rext = format_temp_name(next_index);
+                            current_lines.push("  " + rext
+                                + " = extractvalue {i8*, i64} "
+                                + right_operand.value
+                                + ", 0");
+                            right_ptr_value = rext;
+                            next_index += 1;
+                        }
+                        let cmp_temp = format_temp_name(next_index);
+                        current_lines.push("  " + cmp_temp
+                            + " = call i32 @sfn_str_cmp(i8* "
+                            + left_ptr_value
+                            + ", i8* "
+                            + right_ptr_value
+                            + ")");
+                        next_index += 1;
+                        let mut pred = "icmp slt";
+                        if symbol == "<=" { pred = "icmp sle"; }
+                        if symbol == ">" { pred = "icmp sgt"; }
+                        if symbol == ">=" { pred = "icmp sge"; }
+                        let result_temp = format_temp_name(next_index);
+                        current_lines.push("  " + result_temp + " = " + pred
+                            + " i32 "
+                            + cmp_temp
+                            + ", 0");
+                        next_index += 1;
+                        let ordered_operand = LLVMOperand {
+                            llvm_type: "i1",
+                            value: result_temp
+                        };
+                        return ComparisonEmission {
+                            lines: current_lines,
+                            temp_index: next_index,
+                            operand: ordered_operand,
+                            diagnostics: diagnostics
+                        };
+                    }
+                }
+            }
+        }
+    }
     let llvm_type = left_operand.llvm_type;
     let predicate = comparison_predicate_for_symbol(symbol, llvm_type);
     if predicate.length == 0 {
