@@ -422,15 +422,11 @@ fn make_try_non_result_fn_diagnostic(return_type: string, span: SourceSpan?) -> 
 // coercion yet (Q2, deferred until generic constraints land). Both types
 // are named in the message.
 fn make_try_error_type_mismatch_diagnostic(operand_error: string, fn_error: string, span: SourceSpan?) -> Diagnostic {
-    // The message is assembled via intermediate `let` bindings rather than
-    // a single inline `+` chain to dodge a string-concatenation codegen
-    // bug (#1003) that lowers certain inline literal chains to an empty
-    // string. Keep the `let`-binding form until #1003 lands.
-    let head = "`?` error type mismatch: the operand's error type `";
-    let mid = "` differs from the enclosing function's error type `";
-    let tail = "`. `?` requires an exact match (no `From` coercion yet).";
-    let message = head + trim_text(operand_error) + mid + trim_text(fn_error)
-        + tail;
+    let message = "`?` error type mismatch: the operand's error type `"
+        + trim_text(operand_error)
+        + "` differs from the enclosing function's error type `"
+        + trim_text(fn_error)
+        + "`. `?` requires an exact match (no `From` coercion yet).";
     return Diagnostic {
         code: "E0812",
         severity: "error",

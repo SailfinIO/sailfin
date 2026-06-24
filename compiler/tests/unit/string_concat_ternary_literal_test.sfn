@@ -1,0 +1,42 @@
+// Regression coverage for #1003: an inline string-literal `+` concat chain
+// whose literal content contains a `?` ... `:` sequence (e.g. the E0812 `?`
+// diagnostic message) miscompiled to an empty string. The LLVM-lowering
+// ternary-expression scanner (`parse_ternary_expression`) did not skip string
+// literals, so a `?`/`:` inside a literal operand was mistaken for a real
+// ternary operator; the bogus ternary lowering collapsed the whole expression
+// to `ret zeroinitializer`. The scanner now skips string/char literals.
+//
+// Assigning the segments to `let` bindings first always worked, so each case
+// pins the inline literal form that used to break.
+// Minimal trigger: a `?<x>:` sequence inside a literal that is a `+` operand.
+fn _min(a: string) -> string { return "?a:" + a; }
+
+test "concat: minimal ?<x>: literal in a + chain (#1003)" {
+    let r = _min("X");
+    assert r == "?a:X";
+    assert r.length == 4;
+}
+
+// The exact case from the issue: the E0812 `?`-operator diagnostic message.
+fn _inline(a: string, b: string) -> string {
+    return "`?` error type mismatch: the operand's error type `" + a
+        + "` differs from the enclosing function's error type `"
+        + b
+        + "`";
+}
+
+test "concat: inline ?: diagnostic chain is not empty (#1003)" {
+    let r = _inline("Error", "MyError");
+    assert r.length > 0;
+    assert r == "`?` error type mismatch: the operand's error type `Error` differs from the enclosing function's error type `MyError`";
+}
+
+// A genuine ternary alongside literal `?`/`:` content must still lower.
+fn _real_ternary(flag: boolean, a: string) -> string {
+    return flag? "q? yes:" + a: "no:" + a;
+}
+
+test "concat: real ternary with ?: literal operands still works (#1003)" {
+    assert _real_ternary(true, "X") == "q? yes:X";
+    assert _real_ternary(false, "X") == "no:X";
+}
