@@ -94,10 +94,10 @@
 //
 import { RuntimeHelperDescriptor } from "./types";
 import {
-    trim_text,
-    starts_with,
     join_with_separator,
-    string_array_contains
+    starts_with,
+    string_array_contains,
+    trim_text
 } from "./utils";
 
 // Synthetic descriptor constructors for array `concat()` and `push()`

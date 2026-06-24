@@ -7,54 +7,54 @@
 // live in instructions_helpers.sfn so that
 // lower_instruction_range is at source position 1 — within the v0.1.1
 // seed's per-module streaming emission limit.
-import { find_last_label } from "./phi";
-import {
-    LLVMOperand,
-    LoopContext,
-    TypeContext,
-    LocalBinding,
-    LocalMutation,
-    StringConstant,
-    ParameterBinding,
-    LetLoweringResult,
-    BlockLoweringResult,
-    LifetimeRegionMetadata
-} from "../types";
-import {
-    index_of,
-    trim_text,
-    append_string,
-    number_to_string,
-    extend_string_array
-} from "../utils";
-import { merge_string_constants, empty_string_constant_set } from "../strings";
+import { NativeFunction, NativeInstruction } from "../../native_ir";
+import { substring } from "../../string_utils";
+import { test_runner_trace } from "../../test_runner_state";
 import {
     decode_captures,
-    synthesize_closure_env_struct,
-    emit_closure_env_load_prologue
+    emit_closure_env_load_prologue,
+    synthesize_closure_env_struct
 } from "../closures";
-import { apply_lifetime_release_events } from "../lifetime";
-import { NativeFunction, NativeInstruction } from "../../native_ir";
-import { lower_if_instruction } from "./instructions_if";
-import { substring } from "../../string_utils";
-import { lower_for_instruction } from "./instructions_for";
-import { lower_let_instruction } from "./instructions_let";
-import { lower_try_instruction, lower_throw_instruction } from "./instructions_try";
-import { last_loop_context, append_loop_context, lower_loop_instruction } from "./instructions_loops";
-import { lower_match_instruction } from "./instructions_match";
-import {
-    extend_mutations,
-    _parse_int_from_string,
-    extend_lifetime_regions,
-    emit_drops_for_scope_chain
-} from "./instructions_helpers";
-import { lower_routine_instruction } from "./instructions_routine";
-import { test_runner_trace } from "../../test_runner_state";
-import { trace_lowering } from "../lowering_debug_state";
-import { get_instruction_tag } from "./lowering_native_helpers";
-import { lower_return_instruction, lower_expression_statement } from "../expression_lowering/native/statement";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
+import { lower_expression_statement, lower_return_instruction } from "../expression_lowering/native/statement";
 import { parse_inline_let_expression } from "../expression_lowering/native/statement_parsing";
+import { apply_lifetime_release_events } from "../lifetime";
+import { trace_lowering } from "../lowering_debug_state";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
+import {
+    BlockLoweringResult,
+    LLVMOperand,
+    LetLoweringResult,
+    LifetimeRegionMetadata,
+    LocalBinding,
+    LocalMutation,
+    LoopContext,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
+} from "../types";
+import {
+    append_string,
+    extend_string_array,
+    index_of,
+    number_to_string,
+    trim_text
+} from "../utils";
+import { lower_for_instruction } from "./instructions_for";
+import {
+    _parse_int_from_string,
+    emit_drops_for_scope_chain,
+    extend_lifetime_regions,
+    extend_mutations
+} from "./instructions_helpers";
+import { lower_if_instruction } from "./instructions_if";
+import { lower_let_instruction } from "./instructions_let";
+import { append_loop_context, last_loop_context, lower_loop_instruction } from "./instructions_loops";
+import { lower_match_instruction } from "./instructions_match";
+import { lower_routine_instruction } from "./instructions_routine";
+import { lower_throw_instruction, lower_try_instruction } from "./instructions_try";
+import { get_instruction_tag } from "./lowering_native_helpers";
+import { find_last_label } from "./phi";
 
 fn lower_instruction_range(function: NativeFunction, start_index: int, end: int, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: int, block_counter: int, next_local_id: int, next_region_id: int, functions: NativeFunction[], loop_stack: LoopContext[], context: TypeContext, scope_id: string, scope_depth: int, current_label: string) -> BlockLoweringResult ![io] {
     let mut diagnostics: string[] = [];

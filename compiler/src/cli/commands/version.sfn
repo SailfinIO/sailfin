@@ -33,8 +33,8 @@ import {
     command
 } from "sfn/cli";
 
-import { CliContext } from "../context";
 import { resolve_compiler_version } from "../../version";
+import { CliContext } from "../context";
 
 // The `sfn/cli` definition for `version`, registered on the v2 root via
 // `with_subcommand`. No args or flags — `version` is a bare subcommand.

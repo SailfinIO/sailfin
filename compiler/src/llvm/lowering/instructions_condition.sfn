@@ -1,24 +1,24 @@
 // compiler/src/llvm/lowering/instructions_condition.sfn
 //
 // Shared condition-lowering utilities used by if, loop, and match instruction handlers.
-import {
-    LLVMOperand,
-    TypeContext,
-    LocalBinding,
-    StringConstant,
-    BlockLabelResult,
-    ParameterBinding,
-    ConditionConversion
-} from "../types";
-import { trim_text, starts_with, number_to_string } from "../utils";
-import { NativeFunction, NativeSourceSpan, NativeInstruction } from "../../native_ir";
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { substring } from "../../string_utils";
-import { format_temp_name, default_return_literal } from "../expressions_helpers";
-import { find_local_binding, find_parameter_binding } from "../expressions_bindings";
-import { is_number_literal, normalise_number_literal } from "../expressions_literals";
 import { lower_expression } from "../expression_lowering/native/core";
-import { recover_temp_from_lines } from "../expression_lowering/native/temp_recovery";
 import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
+import { recover_temp_from_lines } from "../expression_lowering/native/temp_recovery";
+import { find_local_binding, find_parameter_binding } from "../expressions_bindings";
+import { default_return_literal, format_temp_name } from "../expressions_helpers";
+import { is_number_literal, normalise_number_literal } from "../expressions_literals";
+import {
+    BlockLabelResult,
+    ConditionConversion,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
+} from "../types";
+import { number_to_string, starts_with, trim_text } from "../utils";
 
 fn allocate_block_label(prefix: string, counter: int) -> BlockLabelResult {
     return BlockLabelResult {

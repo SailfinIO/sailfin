@@ -41,26 +41,26 @@
 // `FunctionDeclaration` (in synthesis order). The counter starts at
 // zero per module — LLVM `internal` linkage on synthesised fns
 // keeps cross-module name collisions impossible.
-import { number_to_string } from "../../utils";
 import {
     Block,
     Capture,
-    Program,
     Decorator,
-    MatchCase,
-    Parameter,
-    Statement,
     ElseBranch,
     Expression,
-    WithClause,
+    FunctionSignature,
+    MatchCase,
     ObjectField,
+    Parameter,
+    Program,
+    Statement,
     TypeAnnotation,
-    FunctionSignature
+    WithClause
 } from "../../../ast";
-import { percent_escape_capture_text } from "../../closures";
-import { Parser } from "../../../parser/types";
 import { parse_block } from "../../../parser/statements";
+import { Parser } from "../../../parser/types";
 import { LambdaCaptureRecord, analyze_lambda_captures } from "../../../typecheck_captures";
+import { percent_escape_capture_text } from "../../closures";
+import { number_to_string } from "../../utils";
 
 // Mutable walker state threaded through every rewrite call. The
 // counter is module-monotonic and is the source of truth for both

@@ -28,23 +28,23 @@
 // `extractvalue` to expose the success bit (`i1` → Sailfin `boolean`)
 // and discards the value slot (the v0 contract is success-bit only;
 // a `Result`-shaped return is post-1.0).
-import {
-    LLVMOperand,
-    TypeContext,
-    LocalBinding,
-    StringConstant,
-    ExpressionResult,
-    ParameterBinding
-} from "./types";
-import { trim_text, number_to_string, extend_string_array } from "./utils";
-import { merge_string_constants } from "./strings";
 import { NativeFunction } from "../native_ir";
-import { format_temp_name } from "./expressions_helpers";
 // Mutually recursive: lower_atomic_builtin lowers each argument via
 // lower_expression, which itself dispatches calls back through this
 // module. The codebase already supports this cycle (see core.sfn
 // ↔ core_call_lowering.sfn).
 import { lower_expression } from "./expression_lowering/native/core";
+import { format_temp_name } from "./expressions_helpers";
+import { merge_string_constants } from "./strings";
+import {
+    ExpressionResult,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
+} from "./types";
+import { extend_string_array, number_to_string, trim_text } from "./utils";
 
 // Predicate over the six reserved atomic-builtin names. Used by the
 // pre-resolution dispatch hook in `lower_call_expression` (see

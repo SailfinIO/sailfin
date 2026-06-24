@@ -1,24 +1,24 @@
 // compiler/src/llvm/lowering/phi.sfn
 //
 // Phi-node and mutation materialization helpers.
+import { substring } from "../../string_utils";
+import { find_local_binding } from "../expressions_bindings";
+import { format_temp_name } from "../expressions_helpers";
 import {
     LocalBinding,
     LocalMutation,
-    PhiStoreEntry,
-    PhiMergeResult,
     MatchArmMutations,
-    MutationMaterializationResult
+    MutationMaterializationResult,
+    PhiMergeResult,
+    PhiStoreEntry
 } from "../types";
 import {
-    trim_text,
-    starts_with,
     append_string,
     extend_string_array,
-    join_with_separator
+    join_with_separator,
+    starts_with,
+    trim_text
 } from "../utils";
-import { substring } from "../../string_utils";
-import { format_temp_name } from "../expressions_helpers";
-import { find_local_binding } from "../expressions_bindings";
 
 // Helper: Find preloaded value for a local by name
 fn find_preloaded_value(locals: LocalBinding[], preloaded_values: string[], name: string) -> string? {

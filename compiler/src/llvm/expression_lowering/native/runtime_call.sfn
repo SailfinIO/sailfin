@@ -33,16 +33,16 @@
 // sites that hit this path haven't populated overrides — surfacing
 // the gap keeps malformed IR from leaking into emission. See epic
 // #494 for the M1.7 architecture and migration sequencing.
-import {
-    LLVMOperand,
-    StringConstant,
-    ExpressionResult,
-    RuntimeHelperDescriptor
-} from "../../types";
-import { number_to_string, extend_string_array, join_with_separator } from "../../utils";
-import { coerce_operand_to_type } from "./core_operands";
-import { find_runtime_helper } from "../../runtime_helpers";
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
+import { find_runtime_helper } from "../../runtime_helpers";
+import {
+    ExpressionResult,
+    LLVMOperand,
+    RuntimeHelperDescriptor,
+    StringConstant
+} from "../../types";
+import { extend_string_array, join_with_separator, number_to_string } from "../../utils";
+import { coerce_operand_to_type } from "./core_operands";
 
 // Per-call-site overrides for `emit_runtime_call`. Empty fields fall
 // back to the descriptor returned by `find_runtime_helper(target)`.

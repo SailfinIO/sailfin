@@ -18,30 +18,30 @@
 // on whichever path came first.
 import { Statement } from "./ast";
 import {
-    summarize,
-    CheckResult,
-    CheckSummary,
-    render_summary,
-    check_source_with_imports
-} from "./tools/check";
-import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
-import { Diagnostic } from "./typecheck_types";
-import {
-    discover_project_root,
     CheckCapsuleResolution,
+    discover_project_root,
     discover_workspace_root,
     empty_resolver_consumer,
     prepare_project_capsules_for_check
 } from "./capsule_resolver";
+import { _collect_sfn_files_cmd, _dirname_cmd, _path_join_cmd } from "./cli_commands_utils";
 import {
     CheckJsonEvent,
     CheckJsonSummary,
     classify_producer,
     render_check_json_envelope
 } from "./diagnostics_json";
-import { _dirname_cmd, _path_join_cmd, _collect_sfn_files_cmd } from "./cli_commands_utils";
 import { render_diagnostic } from "./diagnostics_render";
+import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
+import {
+    CheckResult,
+    CheckSummary,
+    check_source_with_imports,
+    render_summary,
+    summarize
+} from "./tools/check";
 import { ImportedInterfaceLoadResult, load_imported_interfaces_from_paths } from "./typecheck_import_loader";
+import { Diagnostic } from "./typecheck_types";
 
 // One distinct `(project_root, workspace_root)` resolution group. Every
 // file in `entry_paths` shares those roots, so `prepare_project_capsules_for_check`

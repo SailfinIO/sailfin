@@ -7,46 +7,46 @@
 // close the bootstrap loop.
 import {
     Block,
-    Program,
     Decorator,
-    ForClause,
-    MatchCase,
-    Parameter,
-    Statement,
-    ElseBranch,
-    Expression,
-    WithClause,
-    EnumVariant,
-    TypeParameter,
-    TypeAnnotation,
-    ExportSpecifier,
-    ImportSpecifier,
-    FieldDeclaration,
     DecoratorArgument,
+    ElseBranch,
+    EnumVariant,
+    ExportSpecifier,
+    Expression,
+    FieldDeclaration,
+    ForClause,
     FunctionSignature,
-    MethodDeclaration
+    ImportSpecifier,
+    MatchCase,
+    MethodDeclaration,
+    Parameter,
+    Program,
+    Statement,
+    TypeAnnotation,
+    TypeParameter,
+    WithClause
 } from "./ast";
-import { Token } from "./token";
 import {
     format_expression,
     format_initializer,
-    format_type_annotation,
-    format_optional_expression
+    format_optional_expression,
+    format_type_annotation
 } from "./emitter_sailfin_expr";
 import {
     TextBuilder,
-    builder_new,
-    trim_block_body,
-    format_test_name,
-    tokens_to_source,
-    builder_emit_line,
-    builder_to_string,
     builder_emit_blank,
+    builder_emit_line,
+    builder_new,
     builder_pop_indent,
     builder_push_indent,
+    builder_to_string,
     collapse_whitespace,
-    join_with_separator
+    format_test_name,
+    join_with_separator,
+    tokens_to_source,
+    trim_block_body
 } from "./emitter_sailfin_utils";
+import { Token } from "./token";
 
 fn is_import_like(statement: Statement) -> boolean {
     if statement.variant == "ImportDeclaration" { return true; }

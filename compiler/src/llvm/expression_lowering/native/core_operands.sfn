@@ -6,36 +6,36 @@
 // `harmonise_operands`), emits comparison instructions for equality and
 // relational operators (`emit_comparison_instruction`, `emit_boolean_and`),
 // and provides local variable loading (`load_local_operand`).
-import { array_pointer_element_type } from "../arrays";
+import { NativeSourceSpan } from "../../../native_ir";
+import { char_code } from "../../../string_utils";
+import { default_return_literal, format_temp_name } from "../../expressions_helpers";
+import { trace_lowering } from "../../lowering_debug_state";
+import { ends_with_pointer_suffix, numeric_type_kind, strip_pointer_suffix } from "../../type_mapping";
 import {
-    LLVMOperand,
-    LocalBinding,
+    BinaryAlignmentResult,
     CoercionResult,
-    LoadLocalResult,
     ComparisonEmission,
-    BinaryAlignmentResult
+    LLVMOperand,
+    LoadLocalResult,
+    LocalBinding
 } from "../../types";
 import { starts_with } from "../../utils";
+import { array_pointer_element_type } from "../arrays";
 import {
-    trim_text,
     append_string,
-    number_to_string,
     char_code_at_text,
-    is_union_llvm_type,
     find_substring_from,
-    parse_union_payload_types
+    is_union_llvm_type,
+    number_to_string,
+    parse_union_payload_types,
+    trim_text
 } from "./core_text";
 import {
-    emit_runtime_call,
     RuntimeCallOverrides,
+    emit_runtime_call,
     empty_runtime_call_overrides
 } from "./runtime_call";
 import { recover_temp_from_lines } from "./temp_recovery";
-import { NativeSourceSpan } from "../../../native_ir";
-import { numeric_type_kind, strip_pointer_suffix, ends_with_pointer_suffix } from "../../type_mapping";
-import { char_code } from "../../../string_utils";
-import { format_temp_name, default_return_literal } from "../../expressions_helpers";
-import { trace_lowering } from "../../lowering_debug_state";
 
 // Slice E.2 follow-up (#540): tiny inline formatter so coerce diagnostics
 // can attach a source span without crossing the `core_ownership` →

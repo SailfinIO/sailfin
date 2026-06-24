@@ -4,16 +4,16 @@
 //
 // Detects when mutable borrows remain active across `await`/`yield` suspension
 // points, and provides future type / spawn symbol mapping for the async runtime.
-import { format_suspension_location } from "./core";
-import { LocalBinding, ParameterBinding } from "../../types";
-import {
-    trim_text,
-    starts_with,
-    matches_keyword,
-    is_identifier_part_char
-} from "../../utils";
 import { NativeSourceSpan } from "../../../native_ir";
 import { substring } from "../../../string_utils";
+import { LocalBinding, ParameterBinding } from "../../types";
+import {
+    is_identifier_part_char,
+    matches_keyword,
+    starts_with,
+    trim_text
+} from "../../utils";
+import { format_suspension_location } from "./core";
 import { unwrap_move_wrapper } from "./statement_type_mapping";
 
 // ---------------------------------------------------------------------------

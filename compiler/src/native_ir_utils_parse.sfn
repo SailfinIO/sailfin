@@ -3,40 +3,40 @@
 // IR definition and instruction parsing utilities: imports, cases, decorators,
 // interfaces, structs, enums, bindings, parameters, and effects.
 import {
-    NativeImport,
+    BindingComponents,
     CaseComponents,
     HeaderNameParse,
-    NativeInterface,
-    NativeParameter,
-    NativeSourceSpan,
-    BindingComponents,
-    NativeEnumVariant,
-    NativeInstruction,
-    NativeStructField,
-    StructHeaderParse,
     InterfaceHeaderParse,
     InterfaceParseResult,
-    NativeImportSpecifier,
-    NativeEnumVariantField,
     InterfaceSignatureParse,
-    NativeInterfaceSignature
+    NativeEnumVariant,
+    NativeEnumVariantField,
+    NativeImport,
+    NativeImportSpecifier,
+    NativeInstruction,
+    NativeInterface,
+    NativeInterfaceSignature,
+    NativeParameter,
+    NativeSourceSpan,
+    NativeStructField,
+    StructHeaderParse
 } from "./native_ir";
-import { substring } from "./string_utils";
 import {
-    index_of,
-    trim_text,
-    starts_with,
-    is_trim_char,
-    strip_prefix,
-    strip_quotes,
-    last_index_of,
-    strip_generics,
     find_matching_angle,
     find_matching_paren,
+    index_of,
+    is_trim_char,
+    last_index_of,
     split_comma_separated,
     split_top_level_commas,
+    starts_with,
+    strip_generics,
+    strip_prefix,
+    strip_quotes,
+    trim_text,
     trim_trailing_delimiters
 } from "./native_ir_utils_text";
+import { substring } from "./string_utils";
 
 export {
     parse_case_instruction,

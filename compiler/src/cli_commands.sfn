@@ -2,95 +2,95 @@
 //
 // CLI command handlers extracted from cli_main.sfn to keep
 // sailfin_cli_main under ~500 .sfn-asm instructions (avoids seed OOM).
+import { AssertFailure, _empty_assert_failure, _parse_assert_failure_record } from "./assert_failure";
 import { Program, Statement } from "./ast";
-import { workspace_lock_write } from "./lock";
-import {
-    module_name_from_path,
-    compile_to_llvm_file_with_module,
-    compile_tests_to_llvm_file_with_module_imports
-} from "./main";
-import { LayoutManifest } from "./native_ir";
-import { number_to_string } from "./num_format";
-import { parse_program } from "./parser/mod";
 import {
     CacheKey,
-    canonicalize_flags,
-    test_bin_cache_key,
-    test_bin_cache_root,
-    cache_store_artifact,
-    cache_lookup_artifact,
     cache_copy_artifact_to,
-    runtime_link_inputs_identity
+    cache_lookup_artifact,
+    cache_store_artifact,
+    canonicalize_flags,
+    runtime_link_inputs_identity,
+    test_bin_cache_key,
+    test_bin_cache_root
 } from "./build_cache";
-import {
-    toml_get_name,
-    toml_get_string,
-    toml_get_version,
-    toml_get_dependencies
-} from "./toml_parser";
-import {
-    index_of,
-    substring,
-    find_char_local,
-    char_code_at_text
-} from "./string_utils";
-import { DistManifest, empty_dist_manifest, dist_manifest_to_json } from "./dist_manifest";
-import { AssertFailure, _empty_assert_failure, _parse_assert_failure_record } from "./assert_failure";
-import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
-import { parse_scope_name, is_safe_scope_name } from "./capsule_artifact";
+import { is_safe_scope_name, parse_scope_name } from "./capsule_artifact";
 import {
     ResolverConsumer,
     TestCapsuleResolution,
     discover_project_root,
     discover_workspace_root,
-    resolve_workspace_lock_entries,
-    prepare_project_capsules_for_test
+    prepare_project_capsules_for_test,
+    resolve_workspace_lock_entries
 } from "./capsule_resolver";
 import {
-    TestEntry,
-    render_test_event,
-    render_start_event,
-    locate_failing_test,
-    collect_test_entries,
-    render_summary_event
-} from "./test_runner_json";
-import {
-    set_test_filters,
-    test_filters_active,
-    exit_test_runner_mode,
-    enter_test_runner_mode,
-    test_decl_matches_filters,
-    test_decl_is_matching_test
-} from "./test_runner_state";
-import {
-    _env_flag,
+    _collect_sfn_files_cmd,
+    _collect_test_files_cmd,
+    _curl_post_json_cmd,
     _dirname_cmd,
+    _ends_with_cmd,
+    _ensure_dir_cmd,
+    _ensure_dir_recursive_cmd,
+    _env_flag,
     _get_env_cmd,
     _get_home_cmd,
-    _ends_with_cmd,
-    _path_join_cmd,
-    _toml_trim_cmd,
-    _ensure_dir_cmd,
     _has_prefix_cmd,
-    _shell_read_cmd,
-    _write_text_cmd,
     _legacy_flag_file,
-    _parse_jobs_value,
-    _sort_strings_cmd,
-    _curl_post_json_cmd,
-    _sha256_of_file_cmd,
-    _string_contains_cmd,
-    _suite_name_from_path,
-    _collect_sfn_files_cmd,
-    _sanitize_filename_cmd,
-    _collect_test_files_cmd,
-    _shell_single_quote_arg,
-    _ensure_dir_recursive_cmd,
     _looks_like_test_file_cmd,
-    _strip_trailing_slashes_cmd
+    _parse_jobs_value,
+    _path_join_cmd,
+    _sanitize_filename_cmd,
+    _sha256_of_file_cmd,
+    _shell_read_cmd,
+    _shell_single_quote_arg,
+    _sort_strings_cmd,
+    _string_contains_cmd,
+    _strip_trailing_slashes_cmd,
+    _suite_name_from_path,
+    _toml_trim_cmd,
+    _write_text_cmd
 } from "./cli_commands_utils";
-import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
+import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "./dist_manifest";
+import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
+import { workspace_lock_write } from "./lock";
+import {
+    compile_tests_to_llvm_file_with_module_imports,
+    compile_to_llvm_file_with_module,
+    module_name_from_path
+} from "./main";
+import { LayoutManifest } from "./native_ir";
+import { number_to_string } from "./num_format";
+import { parse_program } from "./parser/mod";
 import { runtime_capsule_from_root } from "./runtime_capsule_resolver";
+import {
+    char_code_at_text,
+    find_char_local,
+    index_of,
+    substring
+} from "./string_utils";
+import {
+    TestEntry,
+    collect_test_entries,
+    locate_failing_test,
+    render_start_event,
+    render_summary_event,
+    render_test_event
+} from "./test_runner_json";
+import {
+    enter_test_runner_mode,
+    exit_test_runner_mode,
+    set_test_filters,
+    test_decl_is_matching_test,
+    test_decl_matches_filters,
+    test_filters_active
+} from "./test_runner_state";
+import {
+    toml_get_dependencies,
+    toml_get_name,
+    toml_get_string,
+    toml_get_version
+} from "./toml_parser";
+import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
 
 // Validate a path segment (scope, name) contains no traversal or illegal chars.
 fn _is_safe_capsule_segment_cmd(value: string) -> boolean {

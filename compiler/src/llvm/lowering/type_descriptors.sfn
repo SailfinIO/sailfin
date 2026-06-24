@@ -38,12 +38,12 @@
 //
 // Pinned by `compiler/tests/e2e/test_runtime_type_meta.sh`.
 import {
-    TypeContext,
     EnumTypeInfo,
+    InterfaceTypeInfo,
     StructTypeInfo,
-    InterfaceTypeInfo
+    TypeContext
 } from "../types";
-import { sanitize_symbol, number_to_string } from "../utils";
+import { number_to_string, sanitize_symbol } from "../utils";
 import { fnv1a_64_hash, limbs_to_unsigned_decimal } from "./abi_hash";
 
 // Tag constants — must match `runtime/sfn/type_meta.sfn` header

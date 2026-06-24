@@ -7,15 +7,15 @@
 // enums to arrive empty or with empty names.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
+import { NativeEnum, NativeInterface, NativeStruct } from "../../native_ir";
+import { build_type_context } from "../type_context";
 import {
-    TypeContext,
     EnumTypeInfo,
     EnumVariantInfo,
+    TypeContext,
     TypeContextBuildResult
 } from "../types";
-import { sanitize_symbol, number_to_string } from "../utils";
-import { NativeEnum, NativeStruct, NativeInterface } from "../../native_ir";
-import { build_type_context } from "../type_context";
+import { number_to_string, sanitize_symbol } from "../utils";
 import { get_enum_name_at } from "./lowering_native_helpers";
 
 // Build skeletal EnumTypeInfo[] directly from in-memory NativeEnum[].
