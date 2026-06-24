@@ -60,7 +60,12 @@ and `make check` are different tools, not fast/slow versions of the same one:
 1. **`sfn check <files>`** — fast static analysis (parse + typecheck + effect-check),
    no IR / `clang` / self-host. Seconds for a few files, ~5 min for the whole
    `compiler/src/` tree. Use it as the **inner loop** after every edit. It catches
-   type, effect, and parse errors but does **not** prove self-hosting.
+   type, effect, and parse errors but does **not** prove self-hosting. Because it
+   models no codegen or link, a narrow class of **build-only failures can still pass
+   `check`** — `check` green is not a build guarantee (#1389). The known instance
+   (runtime-evaluated module globals failing at link, #1386) is fixed and guarded by
+   `compiler/tests/e2e/check_build_agree_module_global_test.sfn`; clear the bar with
+   `make compile` before declaring any `compiler/src/*.sfn` change done.
 2. **`make compile`** — self-hosts the compiler. Required before committing any
    `compiler/src/*.sfn` change (the self-host invariant).
 3. **`make check`** — full triple-pass self-host + suite (~15–20 min). Reserve for
