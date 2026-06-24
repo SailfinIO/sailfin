@@ -126,6 +126,14 @@ extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
+// `setsockopt` — arm SO_RCVTIMEO / SO_SNDTIMEO (recv/send deadlines) on an
+// accepted connection (#1581). `optval` is the `struct timeval` byte buffer
+// cast through `* u8` (the `net.sfn` opaque-handle policy — no struct-by-
+// value at the boundary). Identical C ABI to
+// `int setsockopt(int, int, int, const void *, socklen_t)`. Declared inline
+// per the same #306 cross-module-extern workaround as the sockets above.
+extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen: i32) -> i32;
+
 // ── Scheduler (M4.1, scheduler.sfn) ───────────────────────────
 // The shared MPMC task queue + fixed worker pool. `sfn_serve`
 // creates one queue + pool, then enqueues a `Task` per connection.
@@ -208,6 +216,33 @@ fn _serve_send_all(fd: i32, buf: * u8, total: i64) -> bool {
     return true;
 }
 
+// `_serve_io_timeout_secs()` — the recv/send socket-timeout budget
+// (seconds) for an accepted connection. A dead or slow client must not pin
+// a pool worker forever (#1581, gap B3 of epic #1540). 10s bounds a
+// slow-loris / black-hole peer while staying generous for a healthy
+// loopback client.
+fn _serve_io_timeout_secs() -> i64 { return 10; }
+
+// `_serve_set_socket_timeouts(fd)` — arm SO_RCVTIMEO + SO_SNDTIMEO on an
+// accepted socket so a worker's recv (awaiting the request) or send
+// (writing the response) cannot block forever on a non-responsive client.
+// Serve-local copy of `http.sfn::_set_socket_timeouts`; see that helper for
+// the `struct timeval` layout + dual-platform constant rationale. A recv
+// timeout surfaces as `recv -> -1` in `_serve_recv_request`, which frees
+// the buffer and returns null → the worker emits a clean `500`, never a
+// hang.
+fn _serve_set_socket_timeouts(fd: i32) -> void {
+    let tv: * u8 = malloc(16 as usize);
+    if tv as i64 == 0 { return; }
+    memset(tv, 0, 16 as usize);
+    memset(_serve_ptr_off(tv, 0), _serve_io_timeout_secs() as i32, 1 as usize);
+    setsockopt(fd, 1, 20, tv, 16);
+    setsockopt(fd, 1, 21, tv, 16);
+    setsockopt(fd, 65535, 4102, tv, 16);
+    setsockopt(fd, 65535, 4101, tv, 16);
+    free(tv);
+}
+
 // `_serve_content_length(buf, header_end)` — extract the declared
 // `Content-Length` from the request head (bytes `[0, header_end)`,
 // where `header_end` is the offset just past the `\r\n\r\n`
@@ -260,6 +295,11 @@ fn _serve_content_length(buf: * u8, header_end: i64) -> i64 {
 // Chunked transfer-encoding is out of scope (post-1.0); only an
 // explicit `Content-Length` body is drained.
 fn _serve_recv_request(fd: i32) -> * u8 {
+    // Bound recv/send so a slow-loris or dead client cannot pin this pool
+    // worker forever (#1581). A recv timeout returns -1 below, which is
+    // handled exactly like any recv error: free + null → the worker emits
+    // a 500 and closes.
+    _serve_set_socket_timeouts(fd);
     let max_header: i64 = 65536;
     let max_body: i64 = 1048576;
     let mut capacity: i64 = 4096;

@@ -126,6 +126,15 @@ extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
 
 extern fn close(fd: i32) -> i32;
 
+// `setsockopt` — arm SO_RCVTIMEO / SO_SNDTIMEO (recv/send deadlines) on
+// the client socket (#1581). `optval` is the `struct timeval` byte buffer
+// cast through `* u8` (the `net.sfn` opaque-handle policy — no struct-by-
+// value at the boundary). Identical C ABI to
+// `int setsockopt(int, int, int, const void *, socklen_t)`. Declared
+// inline (not imported) per the same #306 cross-module-extern workaround
+// as the other socket externs above.
+extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen: i32) -> i32;
+
 // ── libc stdio (download write path) ──────────────────────────
 extern fn fopen(path: * u8, mode: * u8) -> * File;
 
@@ -220,6 +229,44 @@ fn _host_ip4(host: * u8, out: * u8) -> bool {
     return true;
 }
 
+// `_http_io_timeout_secs()` — the recv/send socket-timeout budget
+// (seconds) for the client. A dead or slow upstream must not pin a
+// worker thread forever (#1581, gap B3 of epic #1540 — blocker for the
+// ~150 ms hot-path SLA). 10s is generous for a healthy localhost peer yet
+// bounds a black-hole upstream to a clean failure (`null` return).
+fn _http_io_timeout_secs() -> i64 { return 10; }
+
+// `_set_socket_timeouts(fd)` — arm SO_RCVTIMEO + SO_SNDTIMEO on a socket
+// so a recv/send against a non-responsive peer returns (EAGAIN → a clean
+// failure) instead of blocking forever.
+//
+// `struct timeval { tv_sec; tv_usec; }` is 16 bytes on both targets this
+// runtime builds for (Linux x86_64: i64 + i64; macOS arm64: i64 + i32 +
+// 4 pad). `tv_sec` is an i64 at offset 0 on both, so zeroing the 16 bytes
+// and writing the seconds as the low byte at offset 0 (both targets are
+// little-endian) yields `{sec, 0}` portably for any budget < 256s.
+//
+// The SOL_SOCKET / SO_*TIMEO option numbers DIFFER by platform and the
+// platform-agnostic emitted IR cannot branch on the target (the same
+// constraint as the dual `sockaddr_in` layout in `_connect_tcp`), so we
+// issue both the Linux and the macOS variant and ignore failures: the
+// wrong-platform call returns ENOPROTOOPT and leaves the socket at its
+// prior (blocking) state — the pre-fix status quo, never an error
+// surfaced to the caller.
+//   - Linux x86_64: SOL_SOCKET=1,      SO_RCVTIMEO=20,     SO_SNDTIMEO=21.
+//   - macOS arm64:  SOL_SOCKET=0xffff, SO_RCVTIMEO=0x1006, SO_SNDTIMEO=0x1005.
+fn _set_socket_timeouts(fd: i32) -> void {
+    let tv: * u8 = malloc(16 as usize);
+    if tv as i64 == 0 { return; }
+    memset(tv, 0, 16 as usize);
+    memset(_ptr_off(tv, 0), _http_io_timeout_secs() as i32, 1 as usize);
+    setsockopt(fd, 1, 20, tv, 16);
+    setsockopt(fd, 1, 21, tv, 16);
+    setsockopt(fd, 65535, 4102, tv, 16);
+    setsockopt(fd, 65535, 4101, tv, 16);
+    free(tv);
+}
+
 // `_connect_tcp(host, port)` — build an IPv4 `sockaddr_in`, open a
 // stream socket, and connect. Returns the connected fd, or -1 on
 // any failure.
@@ -263,6 +310,9 @@ fn _connect_tcp(host: * u8, port: i64) -> i32 ![net] {
                 free(addr);
                 return 0 - 1;
             }
+            // Bound recv/send so a connected-but-silent upstream cannot
+            // pin this worker forever (#1581).
+            _set_socket_timeouts(fd);
             let rc: i32 = connect(fd, addr, 16);
             free(addr);
             if rc == 0 { return fd; }
