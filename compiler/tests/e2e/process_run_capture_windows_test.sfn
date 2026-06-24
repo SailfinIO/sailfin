@@ -1,0 +1,118 @@
+// End-to-end test for the native Windows `run_capture`
+// (`runtime/sfn/platform/process_windows.sfn`, #1487 / epic #1485).
+//
+// `run_capture` on Windows spawns a child with stdout/stderr redirected
+// through anonymous pipes (CreatePipe + CreateProcessA) and drains both
+// concurrently (PeekNamedPipe/ReadFile) so a child writing more than the
+// 64 KiB default pipe buffer cannot deadlock the parent.
+//
+// PLATFORM GATE. The `run_capture` symbol this exercises lives ONLY in the
+// Windows runtime module (`process_windows.sfn`, in the cross-windows
+// RUNTIME_MODS, NOT in `runtime/capsule.toml`). On Linux/macOS the test
+// binary instead links the POSIX `process.sfn`, so these assertions would
+// be testing the POSIX path. The test therefore SKIPS (asserts trivially)
+// off Windows and only does real work when the runner is a Windows binary
+// built with `process_windows.sfn`. Detection is by the `OS` /
+// `SYSTEMROOT` / `windir` environment variables Windows always sets.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and
+// unusable from an `![io]` test (#842); assert on captured output with
+// `sfn/strings::find` / `.length` instead.
+import { find } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` (compile_assert.sfn).
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// True when the test runner is a Windows binary (the only platform whose
+// `run_capture` comes from `process_windows.sfn`).
+fn _is_windows() -> bool ![io] {
+    let os = env.get("OS");
+    if find(os, "Windows", 0) >= 0 { return true; }
+    if env.get("SYSTEMROOT").length > 0 { return true; }
+    if env.get("windir").length > 0 { return true; }
+    return false;
+}
+
+// Per-child environment: thread the parent's Windows essentials so the
+// spawned compiler resolves its runtime. `run_capture`'s `env_flat` is the
+// child's whole environment (empty array == empty environment, never
+// "inherit"), so the vars the child needs must be passed explicitly.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let sysroot = env.get("SYSTEMROOT");
+    if sysroot.length > 0 { e.push("SYSTEMROOT=" + sysroot); }
+    let windir = env.get("windir");
+    if windir.length > 0 { e.push("windir=" + windir); }
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let temp = env.get("TEMP");
+    if temp.length > 0 { e.push("TEMP=" + temp); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// Per-invocation scratch directory for the large-output fixture.
+fn _scratch_dir() -> string ![io] {
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { return scratch; }
+    let temp = env.get("TEMP");
+    if temp.length > 0 { return temp; }
+    return ".";
+}
+
+// A Sailfin source whose emitted LLVM IR is comfortably larger than the
+// 64 KiB pipe buffer: a ~256 KiB string literal the emitter materialises
+// as a global constant. `emit llvm` (no `-o`) prints that IR to the
+// child's stdout, so the parent must drain > 64 KiB without deadlocking.
+fn _big_source() -> string {
+    let mut a = "AAAAAAAAAAAAAAAA";
+    let mut i = 0;
+    loop {
+        if i >= 14 { break; }
+        a = a + a;
+        i = i + 1;
+    }
+    return "fn payload() -> int {\n    let s = \"" + a
+        + "\";\n    return s.length;\n}\n";
+}
+
+// ── Acceptance: sentinel + exit code round-trip ──────────────────────
+test "run_capture (windows): captures a child's stdout sentinel + exit code" ![io] {
+    if _is_windows() {
+        let exit = process.run_capture([_sfn_bin(), "guillermo"], _child_env());
+        let out = process.capture_take_stdout();
+        let err = process.capture_take_stderr();
+        // The mascot greeting is the sentinel; it may land on stdout or
+        // stderr. Capture must surface it and the command's 0 exit code.
+        assert exit == 0;
+        assert find(out + err, "Guillermo", 0) >= 0;
+    } else {
+        // Off Windows the binary links the POSIX `process.sfn`, not the
+        // module under test — skip (covered by the POSIX run_capture tests).
+        assert true;
+    }
+}
+
+// ── Acceptance: no deadlock on > 64 KiB child output ─────────────────
+test "run_capture (windows): drains > 64KiB child output without deadlock" ![io] {
+    if _is_windows() {
+        let src = _scratch_dir() + "/pw_run_capture_big.sfn";
+        fs.writeFile(src, _big_source());
+        let exit = process.run_capture([_sfn_bin(), "emit", "llvm", src], _child_env());
+        let out = process.capture_take_stdout();
+        let _err = process.capture_take_stderr();
+        if fs.exists(src) { fs.deleteFile(src); }
+        // A deadlocked drain would hang (test timeout) or truncate; a
+        // successful drain returns the full IR (well over the 64 KiB pipe
+        // buffer) with a clean exit.
+        assert exit == 0;
+        assert out.length > 65536;
+    } else { assert true; }
+}

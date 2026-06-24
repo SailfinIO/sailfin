@@ -21,12 +21,16 @@
 // forwarders at :8163). Sync of the RUNTIME_MODS membership is pinned by
 // `compiler/tests/e2e/test_cross_windows_runtime_modules.sh`.
 //
-// CONTRACT. `run` and `exit` are REAL (the shipped Windows installer
-// must spawn clang/linker). The capture/handle/environ family is
-// degraded-but-linking (failure sentinels / empty results), preserving
-// the exact behaviour the retired C `_WIN32` shims provided — a real
-// Windows implementation (CreatePipe / GetEnvironmentStringsA) is
-// post-1.0 follow-up.
+// CONTRACT. `run`, `exit`, and `run_capture` (+ its `capture_take_*`)
+// are REAL: the shipped Windows installer must spawn clang/linker, and
+// the self-host build captures the child compiler's output (#1487 /
+// epic #1485). `run_capture` uses CreatePipe + CreateProcessA with
+// redirected stdout/stderr + a deadlock-free two-pipe drain
+// (PeekNamedPipe/ReadFile). The streaming-handle family
+// (`spawn_with_env` / `handle_*`) and `environ` remain degraded-but-
+// linking (failure sentinels / empty results), preserving the retired C
+// `_WIN32` shim behaviour — their real Windows implementations are
+// follow-up work (M4 child-spawn consumer; GetEnvironmentStringsA).
 extern fn malloc(size: usize) -> * u8;
 
 extern fn free(ptr: * u8) -> void;
@@ -52,6 +56,21 @@ extern fn GetExitCodeProcess(handle: i64, code: * i32) -> i32;
 
 extern fn CloseHandle(handle: i64) -> i32;
 
+// ── Win32 capture family (CreatePipe / ReadFile / PeekNamedPipe). ────
+// `run_capture` redirects the child's stdout/stderr through anonymous
+// pipes and drains both concurrently. All implicitly linked by mingw.
+extern fn CreatePipe(read_handle: * i64, write_handle: * i64, sec_attrs: * u8, size: i32) -> i32;
+
+extern fn SetHandleInformation(handle: i64, mask: i32, flags: i32) -> i32;
+
+extern fn ReadFile(handle: i64, buffer: * u8, to_read: i32, read_count: * i32, overlapped: * u8) -> i32;
+
+extern fn PeekNamedPipe(handle: i64, buffer: * u8, buf_size: i32, read_count: * i32, total_avail: * i32, left: * i32) -> i32;
+
+extern fn GetStdHandle(which: i32) -> i64;
+
+extern fn Sleep(ms: i32) -> void;
+
 // First field of `STARTUPINFOA` (104 bytes on x86_64). `CreateProcessA`
 // requires `.cb = sizeof(STARTUPINFOA)`; every other field is zero. The
 // buffer is `malloc(104)` + `memset 0`, then `.cb` is written through
@@ -59,6 +78,33 @@ extern fn CloseHandle(handle: i64) -> i32;
 struct WinStartupInfo {
     cb: i32;
 }
+
+// One-field `i32` overlay for writing an aligned `DWORD` field of a
+// Win32 struct through a computed offset (`STARTUPINFOA.cb` @0,
+// `.dwFlags` @60 — both 4-byte aligned). A plain field store (`align 4`),
+// unlike `atomic_store` (which requires `align 8`), so it can target the
+// 4-aligned `dwFlags` slot directly.
+struct PwDword {
+    v: i32;
+}
+
+// Local growable byte buffer for accumulating captured pipe output. Kept
+// module-private (the `process.sfn` `GrowBuf` lives in the POSIX module,
+// which this file deliberately does NOT import — see the #306 / file-header
+// self-containment note). `{ addr, len, cap }` mirror the POSIX layout.
+struct PwGrowBuf {
+    addr: i64;
+    len: i64;
+    cap: i64;
+}
+
+// `run_capture` stashes the malloc'd, NUL-terminated stdout/stderr here
+// for the matching `capture_take_*`. `i64` addresses (not `* u8`) to dodge
+// the seed's non-`i64` module-mutable-global quirk, exactly as
+// `process.sfn` does for the POSIX capture slots.
+let mut pw_capture_stdout_addr: i64 = 0;
+
+let mut pw_capture_stderr_addr: i64 = 0;
 
 // `sfn_process_run(argv)` — real Windows spawn. Mirrors the retired
 // `sailfin_runtime.c:5564` `CreateProcessA` body: build a single quoted
@@ -179,13 +225,416 @@ fn _pw_empty_cstr() -> * u8 {
     return p;
 }
 
-fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
-    return -1;
+// `_pw_build_cmdline(argv)` — single quoted Win32 command line
+// (`"arg0" "arg1" ...`), the form `CreateProcessA` parses. Same quoting
+// the real `sfn_process_run` builds inline; factored out here so
+// `run_capture` shares it without touching the existing `run` body.
+// Returns a malloc'd, NUL-terminated buffer the caller frees, or null on
+// OOM. The buffer is writable (CreateProcessA may edit lpCommandLine in
+// place). 1-char separators are `memcpy`'d (no single-byte store — a
+// word-RMW byte store would over-read a malloc tail; #1316-class hazard).
+fn _pw_build_cmdline(argv: string[]) -> * u8 {
+    let len: i64 = argv.length;
+    let quote: string = "\"";
+    let space: string = " ";
+    let empty: string = "";
+    let q: * u8 = sfn_str_to_cstr(quote as * u8);
+    let sp: * u8 = sfn_str_to_cstr(space as * u8);
+    let nul: * u8 = sfn_str_to_cstr(empty as * u8);
+
+    let mut total: i64 = 0;
+    let mut i: i64 = 0;
+    loop {
+        if i >= len { break; }
+        let a: * u8 = sfn_str_to_cstr(argv[i] as * u8);
+        total = total + (strlen(a) as i64) + 3;
+        i = i + 1;
+    }
+
+    let cmdline: * u8 = malloc((total + 1) as usize);
+    if cmdline as i64 == 0 { return cmdline; }
+    let base: i64 = cmdline as i64;
+    let mut wp: i64 = 0;
+    i = 0;
+    loop {
+        if i >= len { break; }
+        if i > 0 {
+            memcpy((base + wp) as * u8, sp, 1 as usize);
+            wp = wp + 1;
+        }
+        memcpy((base + wp) as * u8, q, 1 as usize);
+        wp = wp + 1;
+        let a: * u8 = sfn_str_to_cstr(argv[i] as * u8);
+        let n: i64 = strlen(a) as i64;
+        if n > 0 {
+            memcpy((base + wp) as * u8, a, n as usize);
+            wp = wp + n;
+        }
+        memcpy((base + wp) as * u8, q, 1 as usize);
+        wp = wp + 1;
+        i = i + 1;
+    }
+    memcpy((base + wp) as * u8, nul, 1 as usize);
+    return cmdline;
 }
 
-fn sfn_process_capture_take_stdout() -> * u8 ![io] { return _pw_empty_cstr(); }
+// `_pw_build_env_block(env_flat)` — the Win32 ANSI environment block a
+// `"KEY=VALUE\0KEY=VALUE\0\0"` double-NUL-terminated buffer for
+// `CreateProcessA`'s `lpEnvironment`. An empty `env_flat` yields a valid
+// empty block (two zero bytes), preserving the os-capsule contract that an
+// empty array means the EMPTY environment, never "inherit" (mirrors the
+// POSIX module). Returns a malloc'd buffer the caller frees, or null on OOM.
+fn _pw_build_env_block(env_flat: string[]) -> * u8 {
+    let n: i64 = env_flat.length;
+    let mut total: i64 = 1;
+    let mut i: i64 = 0;
+    loop {
+        if i >= n { break; }
+        let e: * u8 = sfn_str_to_cstr(env_flat[i] as * u8);
+        total = total + (strlen(e) as i64) + 1;
+        i = i + 1;
+    }
+    if total < 2 { total = 2; }
+    let blk: * u8 = malloc(total as usize);
+    if blk as i64 == 0 { return blk; }
+    memset(blk, 0, total as usize);
+    let base: i64 = blk as i64;
+    let mut wp: i64 = 0;
+    i = 0;
+    loop {
+        if i >= n { break; }
+        let e: * u8 = sfn_str_to_cstr(env_flat[i] as * u8);
+        let l: i64 = strlen(e) as i64;
+        if l > 0 { memcpy((base + wp) as * u8, e, l as usize); }
+        // The NUL separator and the final terminator are already zero
+        // from `memset`; just step past this entry's separator.
+        wp = wp + l + 1;
+        i = i + 1;
+    }
+    return blk;
+}
 
-fn sfn_process_capture_take_stderr() -> * u8 ![io] { return _pw_empty_cstr(); }
+// `_pw_gb_append(gb, src, n)` — append `n` bytes to a `PwGrowBuf`,
+// doubling capacity as needed and reserving one byte of headroom so a
+// later `_pw_gb_take` can NUL-terminate in place. OOM on growth silently
+// drops the chunk (best-effort capture; never corrupts the buffer).
+fn _pw_gb_append(gb: * PwGrowBuf, src: * u8, n: i64) -> void {
+    if n <= 0 { return; }
+    let need: i64 = gb.len + n + 1;
+    if need > gb.cap {
+        let mut newcap: i64 = gb.cap;
+        if newcap < 4096 { newcap = 4096; }
+        loop {
+            if newcap >= need { break; }
+            newcap = newcap * 2;
+        }
+        let nb: * u8 = malloc(newcap as usize);
+        if nb as i64 == 0 { return; }
+        if gb.len > 0 { memcpy(nb, gb.addr as * u8, gb.len as usize); }
+        if gb.addr != 0 { free(gb.addr as * u8); }
+        gb.addr = nb as i64;
+        gb.cap = newcap;
+    }
+    memcpy((gb.addr + gb.len) as * u8, src, n as usize);
+    gb.len = gb.len + n;
+}
+
+// `_pw_gb_take(gb)` — NUL-terminate and hand the buffer to the caller,
+// resetting `gb` to empty. A never-grown buffer yields a fresh empty
+// string. Caller owns the returned pointer (mirrors `process.sfn`'s
+// `_growbuf_take`).
+fn _pw_gb_take(gb: * PwGrowBuf) -> * u8 {
+    let addr: i64 = gb.addr;
+    let len: i64 = gb.len;
+    if addr == 0 { return _pw_empty_cstr(); }
+    memset((addr + len) as * u8, 0, 1 as usize);
+    gb.addr = 0;
+    gb.len = 0;
+    gb.cap = 0;
+    return addr as * u8;
+}
+
+// `_pw_read_chunk(h, buf, cap, gb)` — non-blocking single read of one
+// pipe. `PeekNamedPipe` reports buffered bytes WITHOUT blocking; if any
+// are available, `ReadFile` drains up to `cap` of them into `gb`. Returns
+// the byte count appended (>= 0), or -1 when the pipe is broken / at EOF
+// (`PeekNamedPipe`/`ReadFile` fail once the only writer — the child — has
+// exited and the buffer is empty). Non-blocking is what makes the
+// two-pipe drain deadlock-free.
+fn _pw_read_chunk(h: i64, buf: * u8, cap: i64, gb: * PwGrowBuf) -> i64 ![io] {
+    let mut avail: i32 = 0;
+    let mut peeked: i32 = 0;
+    let mut left: i32 = 0;
+    let avail_ptr: * i32 = & avail;
+    let peek_ptr: * i32 = & peeked;
+    let left_ptr: * i32 = & left;
+    let ok: i32 = PeekNamedPipe(h, null, 0, peek_ptr, avail_ptr, left_ptr);
+    if ok == 0 { return -1; }
+    if avail <= 0 { return 0; }
+    let mut want: i64 = avail as i64;
+    if want > cap { want = cap; }
+    let mut got: i32 = 0;
+    let got_ptr: * i32 = & got;
+    let rok: i32 = ReadFile(h, buf, want as i32, got_ptr, null);
+    if rok == 0 { return -1; }
+    if got <= 0 { return -1; }
+    _pw_gb_append(gb, buf, got as i64);
+    return got as i64;
+}
+
+// `_pw_drain(out_rd, err_rd, gb_out, gb_err)` — drain BOTH pipe read ends
+// concurrently until each hits EOF. Polling both (rather than reading one
+// to completion first) is mandatory: a child writing > 64 KiB (the default
+// pipe buffer) to one stream would otherwise deadlock the parent blocked on
+// the other. `_pw_read_chunk` never blocks, so the alternation is safe; a
+// `Sleep(1)` when both pipes are open-but-empty avoids a busy spin.
+fn _pw_drain(out_rd: i64, err_rd: i64, gb_out: * PwGrowBuf, gb_err: * PwGrowBuf) -> void ![io] {
+    let cap: i64 = 65536;
+    let buf: * u8 = malloc(cap as usize);
+    if buf as i64 == 0 { return; }
+    let mut out_open: i64 = 1;
+    let mut err_open: i64 = 1;
+    loop {
+        if out_open == 0 {
+            if err_open == 0 { break; }
+        }
+        let mut did: i64 = 0;
+        if out_open != 0 {
+            let r: i64 = _pw_read_chunk(out_rd, buf, cap, gb_out);
+            if r < 0 { out_open = 0; } else { did = did + r; }
+        }
+        if err_open != 0 {
+            let r: i64 = _pw_read_chunk(err_rd, buf, cap, gb_err);
+            if r < 0 { err_open = 0; } else { did = did + r; }
+        }
+        // Both pipes idle this round (open but empty): yield to avoid a
+        // busy spin. The loop only reaches here while at least one pipe is
+        // still open (the both-closed case breaks above), so an
+        // unconditional sleep is correct.
+        if did == 0 { Sleep(1); }
+    }
+    free(buf);
+}
+
+// `sfn_process_run_capture(argv, env_flat)` — real Windows capture.
+// Spawns the child with stdout/stderr redirected through anonymous pipes,
+// drains both to completion (deadlock-free), reaps the exit code, and
+// stashes the captured streams for `capture_take_stdout/stderr`. Returns
+// the child's exit code, or -1 on any setup/spawn failure (matching the
+// POSIX `run_capture` contract, `process.sfn:740`). Modeled on that body
+// with `CreatePipe`/`CreateProcessA`/`ReadFile` in place of
+// `pipe`/`posix_spawnp`/`read`.
+fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
+    // Drop any capture left pending from a previous call.
+    if pw_capture_stdout_addr != 0 {
+        free(pw_capture_stdout_addr as * u8);
+        pw_capture_stdout_addr = 0;
+    }
+    if pw_capture_stderr_addr != 0 {
+        free(pw_capture_stderr_addr as * u8);
+        pw_capture_stderr_addr = 0;
+    }
+
+    let len: i64 = argv.length;
+    if len <= 0 { return -1; }
+
+    let cmdline: * u8 = _pw_build_cmdline(argv);
+    if cmdline as i64 == 0 { return -1; }
+    let env_block: * u8 = _pw_build_env_block(env_flat);
+    if env_block as i64 == 0 {
+        free(cmdline);
+        return -1;
+    }
+
+    // Inheritable SECURITY_ATTRIBUTES (24 bytes): `{ nLength@0,
+    // lpSecurityDescriptor@8, bInheritHandle@16 }`. nLength=24,
+    // bInheritHandle=TRUE so the child inherits the pipe write ends.
+    let sa: * u8 = malloc(24 as usize);
+    if sa as i64 == 0 {
+        free(cmdline);
+        free(env_block);
+        return -1;
+    }
+    memset(sa, 0, 24 as usize);
+    atomic_store(sa as * i64, 24);
+    atomic_store((sa as i64 + 16) as * i64, 1);
+
+    // Two anonymous pipes packed into one 32-byte buffer:
+    // stdout (rd@0, wr@8), stderr (rd@16, wr@24).
+    let hbuf: * u8 = malloc(32 as usize);
+    if hbuf as i64 == 0 {
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        return -1;
+    }
+    memset(hbuf, 0, 32 as usize);
+    let hbase: i64 = hbuf as i64;
+    if CreatePipe(hbase as * i64, (hbase + 8) as * i64, sa, 0) == 0 {
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        free(hbuf);
+        return -1;
+    }
+    if CreatePipe((hbase + 16) as * i64, (hbase + 24) as * i64, sa, 0) == 0 {
+        let o_rd: i64 = atomic_load(hbase as * i64);
+        let o_wr: i64 = atomic_load((hbase + 8) as * i64);
+        let _co1: i32 = CloseHandle(o_rd);
+        let _co2: i32 = CloseHandle(o_wr);
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        free(hbuf);
+        return -1;
+    }
+    let out_rd: i64 = atomic_load(hbase as * i64);
+    let out_wr: i64 = atomic_load((hbase + 8) as * i64);
+    let err_rd: i64 = atomic_load((hbase + 16) as * i64);
+    let err_wr: i64 = atomic_load((hbase + 24) as * i64);
+    free(hbuf);
+
+    // The read ends are parent-only: clear HANDLE_FLAG_INHERIT (1) so the
+    // child does not inherit (and leak) them.
+    let _s1: i32 = SetHandleInformation(out_rd, 1, 0);
+    let _s2: i32 = SetHandleInformation(err_rd, 1, 0);
+
+    // STARTUPINFOA (104 bytes): zeroed, then cb@0=104,
+    // dwFlags@60=STARTF_USESTDHANDLES(0x100=256), hStdInput@80,
+    // hStdOutput@88=out_wr, hStdError@96=err_wr. cb/dwFlags are 4-aligned
+    // DWORDs written via the `PwDword` overlay; the three HANDLEs are
+    // 8-aligned and written with `atomic_store`.
+    let si: * u8 = malloc(104 as usize);
+    if si as i64 == 0 {
+        let _c1: i32 = CloseHandle(out_rd);
+        let _c2: i32 = CloseHandle(out_wr);
+        let _c3: i32 = CloseHandle(err_rd);
+        let _c4: i32 = CloseHandle(err_wr);
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        return -1;
+    }
+    memset(si, 0, 104 as usize);
+    let cb_view: * PwDword = si as * PwDword;
+    cb_view.v = 104;
+    let flags_view: * PwDword = (si as i64 + 60) as * PwDword;
+    flags_view.v = 256;
+    let h_stdin: i64 = GetStdHandle(-10);
+    atomic_store((si as i64 + 80) as * i64, h_stdin);
+    atomic_store((si as i64 + 88) as * i64, out_wr);
+    atomic_store((si as i64 + 96) as * i64, err_wr);
+
+    // PROCESS_INFORMATION (24 bytes): `{ hProcess@0, hThread@8, ... }`.
+    let pi: * u8 = malloc(24 as usize);
+    if pi as i64 == 0 {
+        let _c1: i32 = CloseHandle(out_rd);
+        let _c2: i32 = CloseHandle(out_wr);
+        let _c3: i32 = CloseHandle(err_rd);
+        let _c4: i32 = CloseHandle(err_wr);
+        free(cmdline);
+        free(env_block);
+        free(sa);
+        free(si);
+        return -1;
+    }
+    memset(pi, 0, 24 as usize);
+
+    // bInheritHandles=TRUE(1) so the child inherits the redirected write
+    // ends; flags=0 (ANSI environment block).
+    let ok: i32 = CreateProcessA(null, cmdline, null, null, 1, 0, env_block, null, si, pi);
+    free(cmdline);
+    free(env_block);
+    free(sa);
+    if ok == 0 {
+        let _c1: i32 = CloseHandle(out_rd);
+        let _c2: i32 = CloseHandle(out_wr);
+        let _c3: i32 = CloseHandle(err_rd);
+        let _c4: i32 = CloseHandle(err_wr);
+        free(si);
+        free(pi);
+        return -1;
+    }
+
+    let h_process: i64 = atomic_load(pi as * i64);
+    let h_thread: i64 = atomic_load((pi as i64 + 8) as * i64);
+
+    // Parent closes the write ends so the read ends see EOF once the
+    // child (now the only writer) exits.
+    let _cw1: i32 = CloseHandle(out_wr);
+    let _cw2: i32 = CloseHandle(err_wr);
+
+    let gb_out: * PwGrowBuf = malloc(24 as usize) as * PwGrowBuf;
+    let gb_err: * PwGrowBuf = malloc(24 as usize) as * PwGrowBuf;
+    if gb_out as i64 == 0 {
+        let _c3: i32 = CloseHandle(out_rd);
+        let _c4: i32 = CloseHandle(err_rd);
+        if gb_err as i64 != 0 { free(gb_err as * u8); }
+        let _w: i32 = WaitForSingleObject(h_process, -1);
+        let _cp: i32 = CloseHandle(h_process);
+        let _ct: i32 = CloseHandle(h_thread);
+        free(si);
+        free(pi);
+        return -1;
+    }
+    if gb_err as i64 == 0 {
+        let _c3: i32 = CloseHandle(out_rd);
+        let _c4: i32 = CloseHandle(err_rd);
+        free(gb_out as * u8);
+        let _w: i32 = WaitForSingleObject(h_process, -1);
+        let _cp: i32 = CloseHandle(h_process);
+        let _ct: i32 = CloseHandle(h_thread);
+        free(si);
+        free(pi);
+        return -1;
+    }
+    gb_out.addr = 0;
+    gb_out.len = 0;
+    gb_out.cap = 0;
+    gb_err.addr = 0;
+    gb_err.len = 0;
+    gb_err.cap = 0;
+
+    _pw_drain(out_rd, err_rd, gb_out, gb_err);
+
+    let _cr1: i32 = CloseHandle(out_rd);
+    let _cr2: i32 = CloseHandle(err_rd);
+
+    // INFINITE = 0xFFFFFFFF, passed as i32 -1 (same bit pattern; a hex
+    // literal folds to 0 on the seed — see `sfn_process_run`).
+    let _w: i32 = WaitForSingleObject(h_process, -1);
+    let mut code: i32 = 0;
+    let code_ptr: * i32 = & code;
+    let _g: i32 = GetExitCodeProcess(h_process, code_ptr);
+    let _cp: i32 = CloseHandle(h_process);
+    let _ct: i32 = CloseHandle(h_thread);
+    free(si);
+    free(pi);
+
+    pw_capture_stdout_addr = _pw_gb_take(gb_out) as i64;
+    pw_capture_stderr_addr = _pw_gb_take(gb_err) as i64;
+    free(gb_out as * u8);
+    free(gb_err as * u8);
+
+    return code as i64;
+}
+
+// Hand off the captured stream stashed by the preceding `run_capture`,
+// clearing the global so a second take yields empty. A fresh empty string
+// is returned when no capture is pending (mirrors `process.sfn`).
+fn sfn_process_capture_take_stdout() -> * u8 ![io] {
+    let addr: i64 = pw_capture_stdout_addr;
+    pw_capture_stdout_addr = 0;
+    if addr == 0 { return _pw_empty_cstr(); }
+    return addr as * u8;
+}
+
+fn sfn_process_capture_take_stderr() -> * u8 ![io] {
+    let addr: i64 = pw_capture_stderr_addr;
+    pw_capture_stderr_addr = 0;
+    if addr == 0 { return _pw_empty_cstr(); }
+    return addr as * u8;
+}
 
 // `0` is the spawn-handle failure sentinel (not -1) — matches the C
 // `_WIN32` contract (`sailfin_runtime.c:8195`).
