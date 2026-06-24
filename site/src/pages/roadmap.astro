@@ -161,7 +161,7 @@ const postV1Platform: RoadmapCategory = {
   title: "Platform & Ecosystem",
   description: "Runtime, tooling, and ecosystem infrastructure for post-1.0 growth.",
   items: [
-    { label: "Async runtime — Sailfin-native event loop, task scheduler, and channels", status: "planned" },
+    { label: "Async runtime — Sailfin-native event loop and async I/O (the v0 task scheduler, channels, spawn/await, and parallel shipped pre-1.0; post-1.0 scope is the non-blocking event loop and TLS/keep-alive network integration)", status: "planned" },
     { label: "Runtime diagnostics — structured tracing and allocation telemetry", status: "planned" },
     { label: "WebAssembly emission target", status: "planned" },
     { label: "Native test framework — golden, adversarial, and replay test types", status: "planned" },
@@ -173,7 +173,7 @@ const postV1Platform: RoadmapCategory = {
 const exploration: RoadmapItem[] = [
   { label: "Capability-sealed runtime — effects enforced to the syscall boundary, scoped/revocable per-task capabilities (post-1.0 capstone vision)", status: "planned" },
   { label: "Toolchain independence — seal-sufficient Sailfin-native backend (correct + metadata-carrying + syscall-gating), perf-parity backend as a separate long tail", status: "planned" },
-  { label: "Structured concurrency — atomics, await, routine, channel, spawn, scheduler", status: "planned" },
+  { label: "Structured concurrency (v0 shipped) — routine, channel, spawn/await, parallel, scheduler work today; atomics beyond channel-send and richer sync primitives are post-1.0", status: "in-progress" },
   { label: "Effect system hardening — wire validate_effects() into compilation gate, hierarchical effects, polymorphism", status: "planned" },
   { label: "Phase 2 containers — closures with capture, generic constraints, drop emission", status: "planned" },
   { label: "Documentation expansion — production-quality site coverage, remove legacy stage references", status: "planned" },

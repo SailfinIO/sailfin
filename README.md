@@ -30,8 +30,9 @@
 </p>
 
 > **Status:** Pre-1.0, active development. The self-hosted native compiler is
-> stable enough for daily use; some marquee features (structured concurrency,
-> the pure-Sailfin runtime) are still on the path to 1.0. See
+> stable enough for daily use. The v0 structured-concurrency surface
+> (`routine`, `channel`, `spawn`/`await`, `parallel`) works end-to-end today;
+> the pure-Sailfin runtime is still being completed. See
 > [What Works Today](#what-works-today) and the
 > [roadmap](https://sailfin.dev/roadmap) for the unvarnished picture.
 
@@ -57,9 +58,11 @@
   real native toolchain, not an interpreter wrapper. Releases ship per
   OS/arch as a `sailfin` / `sfn` binary alongside the runtime bundle
   (`sfn run` / `sfn build` resolve runtime sources from it).
-- **Structured concurrency (planned).** Routines, channels, and parallel
-  blocks as first-class language constructs with deterministic scoping —
-  on the critical path to 1.0.
+- **Structured concurrency (v0).** `routine { }` blocks, `channel`, `spawn`/`await`,
+  and `parallel` are first-class language constructs with deterministic scoping.
+  The v0 surface works end-to-end on Linux x86_64; the surface is still maturing
+  pre-1.0 (full `async fn` semantics, typed `Channel<T>`, and richer sync
+  primitives are coming).
 
 ## What Works Today
 
@@ -91,7 +94,7 @@ The self-hosted native compiler (`build/native/sailfin`, installed as
   `atomic_sub`, `atomic_cas`, `atomic_fence` (sequential consistency at v0)
 - `extern fn` declarations for C-ABI interop (parser + typecheck +
   LLVM `declare` emission)
-- Decorators, `async fn` parsing (concurrency runtime pending), string
+- Decorators, `async fn` parsing (structural only; use `spawn fn() -> T { ... }` + `await` for concurrency today), string
   interpolation (`{{ expression }}` — migrating to `${ expression }` before
   1.0)
 
@@ -130,9 +133,11 @@ The self-hosted native compiler (`build/native/sailfin`, installed as
 
 `strings`, `json`, `crypto`, `math`, `path`, `toml`, `fs`, `os`, `log`,
 `time`, `cli`, `test`, `http` (partial), `tensor` / `layers` / `nn` /
-`losses` (CPU). `net` and `sync` exist as stubs pending the concurrency
-runtime. See [`docs/status.md`](docs/status.md) for the full feature
-matrix and effect requirements per capsule.
+`losses` (CPU). `net` is a stub pending TCP/UDP socket intrinsics. `sync`
+is a stub whose capsule API is not yet built; use the language constructs
+`channel`, `spawn`, `parallel`, and `routine` directly. See
+[`docs/status.md`](docs/status.md) for the full feature matrix and effect
+requirements per capsule.
 
 ```sfn
 struct User {
@@ -175,11 +180,12 @@ and a pure Sailfin runtime. The critical path:
 - **Deterministic drop emission** (in flight) — compiler-emitted scope-exit
   drops for owned values. Unblocks memory reclamation in the Sailfin-native
   runtime.
-- **Structured concurrency** — `routine { }` blocks, `await`, `channel()`,
-  and `spawn` as first-class constructs. Atomic intrinsics and the v0
-  scheduler runtime (task lifecycle, `spawn`/`await`, fan-out/join) are
-  built, and the language constructs parse; wiring the type rules into
-  the live typecheck walk and LLVM lowering are the remaining steps.
+- **Structured concurrency hardening** — the v0 surface (`routine`, `channel`,
+  `spawn`/`await`, `parallel`) works end-to-end today. Remaining pre-1.0 work:
+  full `async fn` return-value `await` wired into the live typecheck walk,
+  typed `Channel<T>` generic constructor (#829), and typed result-array
+  collection from `parallel`. Richer sync primitives and a non-blocking event
+  loop are post-1.0.
 - **Effect system hardening** — hierarchical effects (`io.fs`, `net.http`),
   effect polymorphism for generics, and `sfn fix` for auto-inserting missing
   annotations.
