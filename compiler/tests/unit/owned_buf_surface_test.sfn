@@ -32,7 +32,7 @@ fn _emit(source: string) -> string ![io] {
     return emit_native_text_with_module_name(program, "owned_buf_surface_test");
 }
 
-test "parser: OwnedBuf struct parses with four i64 fields" {
+test "parser: OwnedBuf struct parses with four i64 fields" ![io] {
     let asm = _emit("struct OwnedBuf { ptr_addr: i64; len: i64; cap: i64; arena_addr: i64; }");
     assert _contains(asm, ".field ptr_addr: i64");
     assert _contains(asm, ".field len: i64");
@@ -42,7 +42,7 @@ test "parser: OwnedBuf struct parses with four i64 fields" {
     assert _contains(asm, ".layout struct name=OwnedBuf size=32 align=8");
 }
 
-test "parser: Slice struct parses with two i64 fields" {
+test "parser: Slice struct parses with two i64 fields" ![io] {
     let asm = _emit("struct Slice { ptr_addr: i64; len: i64; }");
     assert _contains(asm, ".field ptr_addr: i64");
     assert _contains(asm, ".field len: i64");

@@ -25,38 +25,38 @@ fn _diagnostics(source: string) -> Diagnostic[] ![io] {
 }
 
 // ── Each bitwise/shift op typechecks cleanly on int operands ──
-test "bitwise: int and int typechecks (ampersand)" {
+test "bitwise: int and int typechecks (ampersand)" ![io] {
     let diagnostics = _diagnostics("fn andv(x: int, y: int) -> int { return x & y; }");
     assert diagnostics.length == 0;
 }
 
-test "bitwise: int or int typechecks (pipe)" {
+test "bitwise: int or int typechecks (pipe)" ![io] {
     let diagnostics = _diagnostics("fn orv(x: int, y: int) -> int { return x | y; }");
     assert diagnostics.length == 0;
 }
 
-test "bitwise: int xor int typechecks (caret)" {
+test "bitwise: int xor int typechecks (caret)" ![io] {
     let diagnostics = _diagnostics("fn xorv(x: int, y: int) -> int { return x ^ y; }");
     assert diagnostics.length == 0;
 }
 
-test "bitwise: int shl int typechecks (left shift)" {
+test "bitwise: int shl int typechecks (left shift)" ![io] {
     let diagnostics = _diagnostics("fn shlv(x: int, n: int) -> int { return x << n; }");
     assert diagnostics.length == 0;
 }
 
-test "bitwise: int shr int typechecks (right shift)" {
+test "bitwise: int shr int typechecks (right shift)" ![io] {
     let diagnostics = _diagnostics("fn shrv(x: int, n: int) -> int { return x >> n; }");
     assert diagnostics.length == 0;
 }
 
 // ── Bitwise expressions round-trip through native IR ──
-test "bitwise: native IR carries the ampersand through" {
+test "bitwise: native IR carries the ampersand through" ![io] {
     let asm = _emit("fn f(x: int, y: int) -> int { return x & y; }");
     assert index_of(asm, "x & y") >= 0;
 }
 
-test "bitwise: native IR carries the left-shift through" {
+test "bitwise: native IR carries the left-shift through" ![io] {
     let asm = _emit("fn f(x: int, n: int) -> int { return x << n; }");
     assert index_of(asm, "x << n") >= 0;
 }
@@ -66,12 +66,12 @@ test "bitwise: native IR carries the left-shift through" {
 // precedence than `|`. The native IR text reflects what the
 // parser produced after precedence resolution; if the precedence
 // were wrong the AST/text shape would differ.
-test "bitwise: mixed pipe and ampersand parse without diagnostics" {
+test "bitwise: mixed pipe and ampersand parse without diagnostics" ![io] {
     let diagnostics = _diagnostics("fn mix(a: int, b: int, c: int) -> int { return a | b & c; }");
     assert diagnostics.length == 0;
 }
 
-test "bitwise: mixed shift and plus parse without diagnostics" {
+test "bitwise: mixed shift and plus parse without diagnostics" ![io] {
     let diagnostics = _diagnostics("fn mix(a: int, b: int, c: int) -> int { return a + b << c; }");
     assert diagnostics.length == 0;
 }
@@ -80,7 +80,7 @@ test "bitwise: mixed shift and plus parse without diagnostics" {
 // The accept-list now spans int and i64 (and the wider widths
 // via Slice C); none of those is a typecheck error when used as
 // the operand of a bitwise/shift expression.
-test "bitwise: i64 ampersand i64 typechecks" {
+test "bitwise: i64 ampersand i64 typechecks" ![io] {
     let diagnostics = _diagnostics("fn maskbits(flags: i64, mask: i64) -> i64 { return flags & mask; }");
     assert diagnostics.length == 0;
 }
@@ -88,7 +88,7 @@ test "bitwise: i64 ampersand i64 typechecks" {
 // ── Bitwise + comparison combinations parse with correct precedence ──
 // `(flags & mask) == mask` should parse correctly as a comparison
 // at the top level (since `==` has lower precedence than `&`).
-test "bitwise: parenthesised flag-mask compare typechecks" {
+test "bitwise: parenthesised flag-mask compare typechecks" ![io] {
     let diagnostics = _diagnostics("fn has_flag(flags: int, mask: int) -> bool { return (flags & mask) == mask; }");
     assert diagnostics.length == 0;
 }

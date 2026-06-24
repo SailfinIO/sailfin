@@ -26,7 +26,7 @@ fn _emit(source: string) -> string ![io] {
 }
 
 // ── Comma-separated fields parse as fields, not silently as nothing ──
-test "struct field: comma separator captures all fields" {
+test "struct field: comma separator captures all fields" ![io] {
     let asm = _emit("struct Pair { name: string, age: number }");  // alias-coverage: IR text fixture pins legacy number type token
     // Both fields must appear in the layout; pre-fix the seed produced
     // `size=0` and emitted only a `noop` body.
@@ -36,7 +36,7 @@ test "struct field: comma separator captures all fields" {
     assert index_of(asm, ".field age: number") >= 0;  // alias-coverage: IR text fixture pins legacy number type token
 }
 
-test "struct field: comma separator yields non-zero size" {
+test "struct field: comma separator yields non-zero size" ![io] {
     let asm = _emit("struct Pair { name: string, age: number }");  // alias-coverage: IR text fixture pins legacy number type token
     // Two pointer/double-sized fields → size 16. The pre-fix output
     // was `size=0 align=1`, which is the diagnostic for "field-list
@@ -45,21 +45,21 @@ test "struct field: comma separator yields non-zero size" {
 }
 
 // ── Semicolon-separated fields stay working (status quo) ─────────────
-test "struct field: semicolon separator still works" {
+test "struct field: semicolon separator still works" ![io] {
     let asm = _emit("struct Pair { name: string; age: number; }");  // alias-coverage: IR text fixture pins legacy number type token
     assert index_of(asm, ".layout field name type=string") >= 0;
     assert index_of(asm, ".layout field age type=number") >= 0;
 }
 
 // ── Mixed and trailing terminator are accepted ───────────────────────
-test "struct field: mixed separators accepted" {
+test "struct field: mixed separators accepted" ![io] {
     let asm = _emit("struct Trio { a: string, b: number; c: boolean }");  // alias-coverage: IR text fixture pins legacy number type token
     assert index_of(asm, ".layout field a type=string") >= 0;
     assert index_of(asm, ".layout field b type=number") >= 0;
     assert index_of(asm, ".layout field c type=boolean") >= 0;
 }
 
-test "struct field: last field without terminator accepted" {
+test "struct field: last field without terminator accepted" ![io] {
     // `}` immediately following the type is treated as the implicit
     // end of the field list — matches Rust's optional-trailing-comma
     // ergonomic and the existing `parse_enum_variant_field` precedent.
@@ -68,7 +68,7 @@ test "struct field: last field without terminator accepted" {
     assert index_of(asm, ".layout field age type=number") >= 0;
 }
 
-test "struct field: trailing comma accepted" {
+test "struct field: trailing comma accepted" ![io] {
     let asm = _emit("struct Pair { name: string, age: number, }");  // alias-coverage: IR text fixture pins legacy number type token
     assert index_of(asm, ".layout field name type=string") >= 0;
     assert index_of(asm, ".layout field age type=number") >= 0;
@@ -81,7 +81,7 @@ test "struct field: trailing comma accepted" {
 // `%LLVMOperand = type {}` in the rendered IR; post-fix the layout
 // lines carry both field types so the LLVM rendering pass can emit
 // `%LLVMOperand = type { i8*, i8* }` and downstream GEPs resolve.
-test "struct field: two-string-field struct preserves both fields" {
+test "struct field: two-string-field struct preserves both fields" ![io] {
     let asm = _emit("struct LLVMOperand { llvm_type: string, value: string }");
     assert index_of(asm, ".layout field llvm_type type=string offset=0 size=8 align=8") >= 0;
     assert index_of(asm, ".layout field value type=string offset=8 size=8 align=8") >= 0;
@@ -89,7 +89,7 @@ test "struct field: two-string-field struct preserves both fields" {
 }
 
 // ── `mut` qualifier is preserved across both separator forms ─────────
-test "struct field: mut qualifier with comma separator" {
+test "struct field: mut qualifier with comma separator" ![io] {
     let asm = _emit("struct Counter { mut value: number, label: string }");  // alias-coverage: IR text fixture pins legacy number type token
     assert index_of(asm, ".field mut value: number") >= 0;  // alias-coverage: IR text fixture pins legacy number type token
     assert index_of(asm, ".field label: string") >= 0;
@@ -106,13 +106,13 @@ test "struct field: mut qualifier with comma separator" {
 // generic argument lists intact while leaving expression captures
 // (e.g. `let x = a < b;`) on the original `collect_until` path where
 // `<` is unambiguously a comparison operator.
-test "struct field: generic with comma in args captures whole type" {
+test "struct field: generic with comma in args captures whole type" ![io] {
     let asm = _emit("struct Box { inner: Result<string, number>, label: string }");
     assert index_of(asm, ".field inner: Result<string, number>") >= 0;
     assert index_of(asm, ".field label: string") >= 0;
 }
 
-test "struct field: nested generic with `>>` captures whole type" {
+test "struct field: nested generic with `>>` captures whole type" ![io] {
     // The lexer glues the closing brackets of nested generics into a
     // single `>>` shift token. The angle-balanced capture unglues it
     // back to two closes when emitted from inside a generic context.
@@ -121,7 +121,7 @@ test "struct field: nested generic with `>>` captures whole type" {
     assert index_of(asm, ".field other: int") >= 0;
 }
 
-test "struct field: generic-typed field with semicolon separator" {
+test "struct field: generic-typed field with semicolon separator" ![io] {
     // Pre-fix this also misparsed: `collect_until` saw the inner `,`
     // first and stripped the trailing `, E>;`. With angle balancing
     // semicolon-terminated generic fields parse cleanly too.

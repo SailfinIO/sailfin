@@ -71,7 +71,7 @@ test "dominant_type: double + i1 returns empty sentinel symmetrically" {
     assert dominant_type("double", "i1") == "";
 }
 
-test "harmonise_operands: i1 + i64 refuses with fatal" {
+test "harmonise_operands: i1 + i64 refuses with fatal" ![io] {
     let left = _make_operand("i1", "%t0");
     let right = _make_operand("i64", "%t1");
     let mut lines: string[] = [];
@@ -91,7 +91,7 @@ test "harmonise_operands: i1 + i64 refuses with fatal" {
 }
 
 // ── harmonise_operands fatal refusal on int↔float arithmetic ────────
-test "harmonise_operands: i64 + double refuses with fatal + fix-it" {
+test "harmonise_operands: i64 + double refuses with fatal + fix-it" ![io] {
     let left = _make_operand("i64", "%t0");
     let right = _make_operand("double", "%t1");
     let mut lines: string[] = [];
@@ -120,7 +120,7 @@ test "harmonise_operands: i64 + double refuses with fatal + fix-it" {
     assert found_fixit;
 }
 
-test "harmonise_operands: double + i64 refuses symmetrically" {
+test "harmonise_operands: double + i64 refuses symmetrically" ![io] {
     let left = _make_operand("double", "%t0");
     let right = _make_operand("i64", "%t1");
     let mut lines: string[] = [];
@@ -138,7 +138,7 @@ test "harmonise_operands: double + i64 refuses symmetrically" {
     assert found_fatal;
 }
 
-test "harmonise_operands: i64 + i64 still produces coerced operands (same-kind passthrough)" {
+test "harmonise_operands: i64 + i64 still produces coerced operands (same-kind passthrough)" ![io] {
     let left = _make_operand("i64", "%t0");
     let right = _make_operand("i64", "%t1");
     let mut lines: string[] = [];
@@ -148,7 +148,7 @@ test "harmonise_operands: i64 + i64 still produces coerced operands (same-kind p
     assert result.result_type == "i64";
 }
 
-test "harmonise_operands: double + double still produces coerced operands" {
+test "harmonise_operands: double + double still produces coerced operands" ![io] {
     let left = _make_operand("double", "%t0");
     let right = _make_operand("double", "%t1");
     let mut lines: string[] = [];
