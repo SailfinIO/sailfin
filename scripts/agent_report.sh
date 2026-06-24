@@ -165,9 +165,33 @@ classify() {
 	# SIGKILL code), so a memory signature wins the tie.
 	if out_has 'out of memory|cannot allocate memory|std::bad_alloc|bad_alloc|memory exhausted|virtual memory exhausted|LLVM ERROR: out of memory'; then
 		FAILURE="oom"
+	# Crash (#1206): a test child killed by a hard fault — SIGSEGV (139),
+	# SIGBUS (135), SIGFPE (136), SIGILL (132) — or an explicit
+	# `Segmentation fault` / `core dumped` signature. Classified ABOVE
+	# both `timeout` and `setup-error`: a fault exit (139) is not a
+	# wall-clock timeout, and a post-crash `No such file or directory` (a
+	# missing fail.bin / _subframe_summary.json the crashed child never
+	# wrote) must not win `setup-error` for what is really a crash.
+	#
+	# SIGABRT (134) is deliberately EXCLUDED here: a clean `assert` aborts
+	# with 134 (and the multi-file runner even prints `child terminated by
+	# signal` for it), so a bare 134 is a `test-failure`, not a crash. OOM
+	# still wins above (a 137 with a memory signature is an OOM-kill); a
+	# bare SIGKILL 137 with no crash signature stays a `timeout` below.
+	elif out_has 'Segmentation fault|SIGSEGV|SIGBUS|SIGFPE|SIGILL|core dumped' \
+		|| [ "$RC" -eq 139 ] || [ "$RC" -eq 135 ] || [ "$RC" -eq 136 ] || [ "$RC" -eq 132 ]; then
+		FAILURE="crash"
+	# A signal-killed child (`_emit_crash_diagnostic`'s `child terminated
+	# by signal`) that left NO assertion attribution — the genuine
+	# multi-file crash the in-process FAIL banner couldn't pin. Gated on
+	# the ABSENCE of a clean-assert signature (`assertion failed` /
+	# `test failed:`) so a normal `assert` (which also exits 134 and emits
+	# the `child terminated by signal` line) stays a `test-failure`.
+	elif out_has 'child terminated by signal' && ! out_has 'assertion failed|test failed:'; then
+		FAILURE="crash"
 	elif [ "$RC" -eq 124 ] || [ "$RC" -eq 137 ]; then
 		FAILURE="timeout"
-	elif out_has "missing seed compiler|is not invokable|SEED_VERSION is empty|\[fetch-seed\]\[error\]|No such file or directory|run: make compile|run 'make compile'|GITHUB_TOKEN"; then
+	elif out_has "missing seed compiler|is not invokable|SEED_VERSION is empty|\[fetch-seed\]\[error\]|(seed|\.seed-version|fetch-seed|SEED=)[^[:cntrl:]]*No such file or directory|run: make compile|run 'make compile'|GITHUB_TOKEN"; then
 		FAILURE="setup-error"
 	elif out_has 'passed, [1-9][0-9]* failed|\[check\]\[FAIL\]|assertion failed|[0-9]+ failed ═══'; then
 		FAILURE="test-failure"

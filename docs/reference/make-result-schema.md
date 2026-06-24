@@ -102,13 +102,21 @@ string.
 |---|---|---|
 | `compile-error` | `sfn build`/`check` reported diagnostics. | Read diagnostics, fix source — do **not** retry. |
 | `test-failure` | One or more tests failed assertions. | Read the failing test's output. |
+| `crash` | A test child (or the toolchain) died by a hard fault signal — SIGSEGV/SIGBUS/SIGFPE/SIGILL (exit `139`/`135`/`136`/`132`), an explicit `Segmentation fault`/`core dumped` line, or a `child terminated by signal` marker with no assertion attribution. Distinct from `test-failure` (a clean assertion) and `setup-error` (a missing artifact). Often transient under memory pressure (#1205). **SIGABRT (134) is *not* a crash** — a clean `assert` aborts with 134, so a bare 134 stays `test-failure`. | Re-run once; if it reproduces, it is a real crash — capture the failing file (named in the `[test] FAIL:` line) and the in-flight `RUN  <test>` breadcrumb, then escalate to `seed-stabilizer`. |
 | `nondeterminism` | stage2 ≠ stage3 fixed-point mismatch (`make check`). | Pairs with `status:"warn"`, exit `0`. Re-run once; if it persists, escalate to `seed-stabilizer`. |
-| `setup-error` | Bad path, missing seed, staging/env failure. | Fix the invocation/env, not the source. |
+| `setup-error` | Bad path, missing seed, staging/env failure. A bare `No such file or directory` only counts here when it carries a seed/staging context (`seed`, `.seed-version`, `fetch-seed`, `SEED=`); a post-crash artifact-not-found does **not** masquerade as setup. | Fix the invocation/env, not the source. |
 | `oom` | Hit the compiler's self-applied 8 GiB memory budget (`RLIMIT_AS`, #1291). | Escalate (memory regression) — do **not** blind-retry. |
-| `timeout` | Wall-clock `timeout` tripped (exit 124, or SIGKILL 137). | Re-run or escalate per phase. |
+| `timeout` | Wall-clock `timeout` tripped (exit 124, or a bare SIGKILL 137 with no crash signature). | Re-run or escalate per phase. |
 
 `nondeterminism` is the only class that pairs with `status:"warn"`; every other
 class pairs with `status:"fail"`.
+
+Ordering note: `crash` is classified **above** `timeout` and `setup-error`. A
+signal-killed child carries a fault exit code (e.g. `139`) and/or a `child
+terminated by signal` line, so it resolves to `crash` before a co-incident
+post-crash `No such file or directory` can reach the `setup-error` arm. `oom`
+still wins over `crash` for a 137 that carries a memory-exhaustion signature, so
+an OOM-kill is never mislabelled a crash.
 
 ## `phase` values for `check`
 
