@@ -13,6 +13,12 @@ description = "Test assertion helpers and utilities for Sailfin"
 # the same formatter `pure_assert_eq_float` already uses for fractions.
 "sfn/strings" = "*"
 
+# `with_tmp_dir`'s teardown imports `sfn/fs::remove_all` (#976) instead of
+# carrying an inlined copy. The earlier workaround (PR #1110) dropped this
+# dependency to dodge the batched cross-capsule link bug (#1113); that bug
+# is fixed (#873 slug canonicalization), so the import is restored (#1571).
+"sfn/fs" = "*"
+
 [capabilities]
 required = ["io"]
 

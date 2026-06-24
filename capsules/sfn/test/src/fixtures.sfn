@@ -21,42 +21,11 @@
 //     already ships as the typed `Env` + `os::run_capture` API. A
 //     concurrency-aware redesign is tracked in #1107.
 //
-// Teardown is a pure-Sailfin `rm -rf` composed from the `fs.*` runtime
-// intrinsics (`deleteFile` / `exists` / `listDirectory` / `removeDirectory`).
-// No new C runtime surface is introduced.
-//
-// NOTE — why this does NOT import `sfn/fs::remove_all` (#976): the batched
-// test runner (`sailfin test <many files>`, used by CI's int-e2e-caps
-// shard) miscompiles when a non-inlined capsule is consumed by *two*
-// capsules in one invocation — only the first consumer links the capsule's
-// object; later ones fail with `undefined reference` (sfn/strings, which
-// inlines, is unaffected; sfn/fs is not). Having `sfn/test` depend on
-// `sfn/fs` made every `sfn/test` barrel test a second `sfn/fs` consumer
-// alongside `sfn/fs`'s own tests, breaking the shard (tracked as #1113).
-// Until that harness bug is fixed, `with_tmp_dir` uses `fs.*` directly — the
-// same primitives `#976`'s `remove_all` composes (and the same approach
-// `snapshot.sfn` already uses for `fs.writeFile`/`fs.createDirectory`), so
-// there is no new C and no behavioral difference. `_remove_all` below
-// mirrors `capsules/sfn/fs/src/mod.sfn::remove_all`; once the batched-link
-// bug is resolved this can switch back to importing that helper.
-// Recursively remove `path` and everything beneath it (`rm -rf`), returning
-// true when the path is gone afterward (including the no-op case where it
-// never existed). Mirrors `sfn/fs::remove_all` (#976): try the file/symlink
-// unlink first (removes dangling symlinks directly and never recurses
-// *through* a symlinked directory), treat a missing path as success, then
-// clear a real directory's children before removing the emptied directory.
-fn _remove_all(path: string) -> boolean ![io] {
-    if fs.deleteFile(path) { return true; }
-    if !fs.exists(path) { return true; }
-    let entries = fs.listDirectory(path);
-    let mut i: int = 0;
-    loop {
-        if i >= entries.length { break; }
-        let _ = _remove_all(path + "/" + entries[i]);
-        i += 1;
-    }
-    return fs.removeDirectory(path);
-}
+// Teardown delegates to `sfn/fs::remove_all` (#976) — a pure-Sailfin
+// `rm -rf` composed from the `fs.*` runtime intrinsics
+// (`deleteFile` / `exists` / `listDirectory` / `removeDirectory`). No new
+// C runtime surface is introduced.
+import { remove_all } from "sfn/fs";
 
 // Create a fresh temporary directory, hand its absolute path to `body`,
 // and recursively remove the whole tree on scope exit — on both the
@@ -86,10 +55,10 @@ fn with_tmp_dir(body: fn (string) -> int) -> int ![io] {
     }
     try {
         let result = body(dir);
-        let _ = _remove_all(dir);
+        let _ = remove_all(dir);
         return result;
     } catch (e) {
-        let _ = _remove_all(dir);
+        let _ = remove_all(dir);
         throw e;
     }
 }
