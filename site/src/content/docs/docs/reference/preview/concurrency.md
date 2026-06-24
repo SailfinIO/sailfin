@@ -1,33 +1,29 @@
 ---
 title: "Concurrency"
-description: "Design preview — Concurrency. Partially shipped; `await` and full async semantics are still planned."
+description: "Design preview — Concurrency (v0). `routine`, `channel`, `spawn`/`await` on spawned tasks, and `parallel` work today. Full `async fn` semantics and typed `Channel<T>` are still planned."
 sidebar:
   order: 1
 ---
 
 ```sfn
-// `routine { }`, channels, `spawn`, and `parallel` work today; `await` does not.
+// v0: `routine { }`, channels, `spawn`/`await`, and `parallel` work today.
+// `async fn` return-value `await` is not yet wired into the live typecheck walk.
 
-import { Channel, channel } from "sync";
-
-async fn fetch(url: string) -> string ![net] {
-    return await http.get(url);   // await not yet implemented
-}
-
-fn process_batch(items: Item[]) ![io] {
-    let messages: Channel<string> = channel();
+fn process_batch(items: string[]) ![io] {
+    let messages = channel(4);   // bounded MPMC channel, capacity 4
 
     routine {
-        messages.send("hello");
+        messages.send(42);       // runs inside the structured-concurrency nursery
     }
 
-    let msg = await messages.receive();
+    let task = spawn fn() -> int { return 1 + 1; };
+    let result: int = await task;   // runs on the thread pool; await joins
 }
 ```
 
-## What ships today
+## What ships today (v0)
 
-`routine { }` lowers to a real structured-concurrency nursery (`sfn_nursery_enter`/`sfn_nursery_exit`), `channel(N)` runs end-to-end as a bounded MPMC channel, `spawn fn() -> T { ... }` runs tasks on the thread pool, and `parallel [...]` fans tasks out across the pool and joins them. See [docs/status.md](/docs/status.md) for per-feature detail.
+`routine { }` lowers to a real structured-concurrency nursery (`sfn_nursery_enter`/`sfn_nursery_exit`), `channel(N)` runs end-to-end as a bounded MPMC channel, `spawn fn() -> T { ... }` runs tasks on the thread pool and `await` joins them returning the typed result, and `parallel [...]` fans tasks out across the pool and joins them. The worker pool floors at two workers; use `SAILFIN_THREADS=N` to override. See [docs/status.md](/docs/status.md) for per-feature detail.
 
 ### Capture-env ownership for `spawn` / `parallel` (#1475, epic #1466)
 
@@ -40,5 +36,5 @@ A task lambda that captures variables from the enclosing scope owns its heap env
 
 **Boundary.** This covers the env-container lifetime for value and pointer-identity captures. `OwnedBuf`/string capture-buffer ownership across the thread boundary (result-aliases, length-carrying buffers) is deferred to #1476.
 
-**Planned for 1.0**: `await`, full async semantics, typed result-array collection from `parallel`, and `OwnedBuf` capture-buffer ABI (#1476).
+**Remaining pre-1.0 work**: full `async fn` return-value `await` wired into the live typecheck walk (#829), typed `Channel<T>` generic constructor (#829), typed result-array collection from `parallel`, and `OwnedBuf` capture-buffer ABI across the thread boundary (#1476).
 See the [roadmap](/roadmap).

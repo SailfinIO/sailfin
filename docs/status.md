@@ -1,6 +1,6 @@
 # Status
 
-Updated: 2026-06-23. Seed pinned to `0.7.0-alpha.39` (`.seed-version`);
+Updated: 2026-06-24. Seed pinned to `0.7.0-alpha.39` (`.seed-version`);
 the compiler version source of truth is `compiler/capsule.toml`.
 
 This document is the **current-state source of truth**: what ships today,
@@ -90,7 +90,7 @@ doc, or `docs/runtime_architecture.md`, not here.
 | `let` / `let mut` | Shipped | Annotations optional; limited inference |
 | `thread_local let mut` | Shipped | Top-level only; ELF TLS; immutable form rejected (`E0807`) |
 | Functions (`fn`) | Shipped | Generics, default params, decorators |
-| `async fn` | Parsed | Structural only; language-level concurrency lowering pending (#1084) — the v0 runtime surface itself ships (see Runtime) |
+| `async fn` | Parsed | Structural only; `spawn`/`await` on spawned tasks works end-to-end (v0, #1084 closed, #1474/#1477/#1546); `await` on `async fn` return values is not wired into the live typecheck walk (pending #829). Use `spawn fn() -> T { ... }` + `await` instead |
 | Structs | Shipped | Generic params, `implements` clause |
 | Interfaces | Shipped | Trait-style method signatures |
 | Enums / ADTs | Shipped | Payload variants; generic payloads monomorphise per instantiation (#830). >8-byte by-value payload layouts not yet emitted |
@@ -171,7 +171,7 @@ Capsules ship under `capsules/sfn/` and are imported by bare name
 | `sfn/test` | `"test"` | Partial | None (pure tier) / `io` | Assertions: legacy `assert_*` (`![io]`), `pure_assert_*`, free-function `expect_*` tier, snapshot tier (#977). Fluent `expect(x).to_be(y)` deferred on generic monomorphization + cross-module method-dispatch ABI |
 | `sfn/http` | `"sfn/http"` | Partial (Waves 1–4 shipped) | `net`, `io` | GET/POST client wrappers; typed `fetch(method, url, headers, body) -> Response` client surfacing status + headers (`sfn_http_request_raw`); pure-Sailfin wire layer (parse/serialize/accessors, request + response parsers); typed HTTP/1.1 `serve` on the M4 runtime (`sfn_serve_framed`); POST/PUT bodies drained via `Content-Length` (1 MiB cap). v0 limits: blocking/single-process, no TLS, no DNS, no keep-alive, no chunked encoding. Post-v0 (TLS, keep-alive, routing) pending. (#1321; #1324 Content-Length drain; #1325 typed client) |
 | `sfn/net` | `"net"` | Stubbed | `net`, `io` | TCP/UDP socket API (pending runtime intrinsics) |
-| `sfn/sync` | `"sync"` | Stubbed | `io` | channel/parallel/spawn API (pending concurrency runtime) |
+| `sfn/sync` | `"sync"` | Stubbed | `io` | channel/parallel/spawn API (capsule API not yet built; use language constructs `channel`, `spawn`, `parallel`, `routine` directly — the runtime ships, the typed capsule wrapper does not) |
 | `sfn/tensor` | `"tensor"` | Shipped (CPU) | `gpu` (planned) | Tensor ops, matmul, transpose; no GPU dispatch yet |
 | `sfn/layers` | `"layers"` | Shipped (CPU) | `gpu` (planned) | Linear layers, ReLU, sequential models |
 | `sfn/nn` | `"nn"` | Shipped (CPU) | `gpu` (planned) | Activations, normalization, argmax, one_hot |
@@ -202,10 +202,15 @@ Capsules ship under `capsules/sfn/` and are imported by bare name
   The auto-detected pool floors at **two workers**
   (`sfn_scheduler_resolve_thread_count`): a producer/consumer pair sharing a
   bounded channel needs both tasks on their own thread or the fixed pool
-  deadlocks (#1474). This also masks a latent macOS bug — Darwin's
-  `_SC_NPROCESSORS_ONLN` is 58, not the Linux `84` the runtime currently
-  passes to `sysconf`, so core detection fails closed there; the per-target
-  constant (an emit-time intrinsic) is a follow-up. Design:
+  deadlocks (#1474). The macOS core-detection bug (Darwin's `_SC_NPROCESSORS_ONLN`
+  is 58, not the Linux 84) is **fixed** via the emit-time
+  `sailfin_intrinsic_sc_nprocessors_onln` sentinel (#1480/#1498/#1501), which
+  folds to the correct per-target `i32` immediate at emit time.
+  Coverage: `channel_producer_consumer_exec_test.sfn`,
+  `parallel_concurrent_execution_test.sfn`,
+  `spawn_await_concurrent_execution_test.sfn`, `serve_loopback_test.sfn`, and
+  the whole-program ASAN-interleave gate over the moved-OwnedBuf surface
+  (`concurrency_ownedbuf_asan_interleave_test.sfn`, #1567). Design:
   `docs/runtime_architecture.md` §2.6.
 
 ### Runtime Migration (C → Sailfin)
