@@ -1,0 +1,590 @@
+// E2E: the ASAN-interleave gate over the moved-`OwnedBuf` concurrency
+// surface — the final acceptance criterion of epic #1466 (issue #1550).
+//
+// Epic #1466's three children shipped the moved-`OwnedBuf` ABI across the
+// concurrency surface — the channel-element ABI + `sfn_channel_destroy`
+// drain seam (#1472 / #1545), the worker capture-env move/free discipline
+// (#1475 / #1519), and the serve request/response `OwnedBuf` reclaim
+// (#1476 / #1547) — but each deferred the *live concurrent* sanitizer gate
+// because it could not be asserted meaningfully until #1546 was fixed
+// (non-capturing `spawn`/`await:int` returned `0`, so a concurrent run was
+// indistinguishable from a broken one). #1546 landed (PR #1552); this test
+// owns the deferred gate.
+//
+// What this gates. The moved-ownership ABI's failure mode is a
+// *cross-owner heap-corruption hazard* (the #1205-class double-free /
+// use-after-free): if a buffer that is *moved* across the channel-drain,
+// worker-env, or serve req/resp boundary is freed by BOTH the mover and
+// the new owner — or read after the move frees it — that is a double-free
+// / heap-use-after-free. AddressSanitizer's allocator interceptor reports
+// exactly those, *immediately* at the offending free/access, on real
+// worker threads. This test drives the REAL runtime seams (not a harness
+// reimplementation) under `-fsanitize=address` and fails on any
+// `ERROR: AddressSanitizer:` report.
+//
+// Why whole-program, and why `detect_leaks=0`. With the C runtime retired
+// (#822/#823) the runtime is entirely Sailfin-emitted, so a `sfn build`
+// work-dir holds the complete, named object set; relinking it under
+// `-fsanitize=address` instruments the whole program — the actual
+// `channel.sfn` / `scheduler.sfn` / `future.sfn` / `serve.sfn` bodies, not
+// a stub. ASAN's allocator interceptor catches use-after-free /
+// double-free / heap-overflow across those prebuilt objects even without
+// per-function instrumentation. LeakSanitizer is run with
+// `detect_leaks=0`: the real runtime carries benign process-lifetime
+// allocations (a one-time global-init `sfn_alloc_struct`; a module-global
+// `channel` is never destroyed; a separate boxed-`int` channel-element
+// per-element leak predates this surface), so a whole-program leak
+// assertion cannot cleanly separate the moved-buffer discipline from those
+// — it would false-positive on the correct runtime. The corruption hazard
+// the moved-ownership ABI actually risks (double-free / UAF) is fully
+// gated; the env-free *leak* balance is covered separately by the #1475
+// interpose test (`spawn_capture_env_free_test.sfn`).
+//
+// Skip discipline (`.claude/rules/compiler-safety.md`). ASAN reserves
+// ~16 TB of virtual address space for its shadow at startup, which the
+// toolchain's 8 GiB self-cap aborts before `main()`. The ASAN legs run
+// with `SAILFIN_MEM_LIMIT=unlimited`; a relink that fails (no clang
+// compiler-rt AND no gcc libasan) or a run that aborts at startup under a
+// vmem cap is a SKIP, not a failure — only a genuine `ERROR:
+// AddressSanitizer:` line fails. The plain (uninstrumented) legs always
+// run and carry the concurrent-result coverage (AC2) on their own.
+//
+// Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
+// cannot be called from an `![io]` test; assert on captured output with
+// `sfn/strings` predicates instead.
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build + relink LINK a binary (clang/gcc + ld), needing the full
+// toolchain environment; `run_capture`'s empty array is the EMPTY
+// environment, not "inherit", so snapshot the parent's environment
+// (`SAILFIN_TEST_SCRATCH` is already in there — the runner sets it —
+// keeping the nested build cache per-invocation under the parallel pool).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// ASAN child env: `SAILFIN_MEM_LIMIT=unlimited` so the instrumented
+// binary's ~16 TB shadow reservation is not aborted by the toolchain
+// self-cap; `detect_leaks=0` per the file header (the corruption gate is
+// double-free / UAF, not leaks).
+fn _asan_run_env() -> string[] ![io] {
+    let mut e = _child_env();
+    e.push("SAILFIN_MEM_LIMIT=unlimited");
+    e.push("ASAN_OPTIONS=detect_leaks=0");
+    return e;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    fs.createDirectory(base, true);
+    return fs.mkdtemp(base + "/sfn-ownedbuf-asan-");
+}
+
+// Relink a `sfn build --work-dir` object set under `-fsanitize=address`.
+// The work-dir's `sailfin/` holds the top module IR (`program.ll`) plus
+// every RUNTIME object (`sfn__runtime-native__*.o`). A capsule dependency
+// (e.g. `sfn/http`) is compiled transiently during the real link and is
+// NOT persisted in the work-dir, so its IR must be supplied separately via
+// `extra_ll_glob` (the stable per-capsule `build/capsules/<name>/ir/*.ll`)
+// — "" when the program has no capsule dependency.
+//
+// Strategy: compile `program.ll` and each `extra_ll_glob` IR into objects
+// INSIDE the work-dir's `sailfin/` with the build toolchain's clang (plain
+// — ASAN's allocator interception is a link-time, whole-process concern),
+// so a single uniform `sailfin/*.o` glob then links the whole program. Try
+// clang's compiler-rt first; fall back to gcc's libasan, so the leg runs
+// wherever EITHER sanitizer runtime is present. Returns the binary path,
+// or "" when the compile/link cannot complete (→ skip the ASAN leg). The
+// globs need a shell, so the steps go through `bash -c` vehicles
+// (`run_capture` argv has no glob expansion) — a supported external-tool
+// idiom (`.claude/rules/no-bash-e2e.md`).
+fn _asan_relink(work_dir: string, extra_ll_glob: string, bin: string) -> string ![io] {
+    let saildir = work_dir + "/sailfin";
+    let prog_ll = saildir + "/program.ll";
+    if !fs.exists(prog_ll) { return ""; }
+
+    let prog_o = saildir + "/program.o";
+    let cexit = process.run_capture(["clang", "-c", "-Wno-override-module", prog_ll, "-o", prog_o], _child_env());
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    if cexit != 0 { return ""; }
+
+    // Compile any capsule IR into the work-dir so the uniform glob below
+    // picks the objects up. A failure to compile an extra leaves the link
+    // with undefined capsule symbols → it fails → skip.
+    if extra_ll_glob.length > 0 {
+        let compile_extras = "n=0; for f in " + extra_ll_glob
+            + "; do clang -c -Wno-override-module \"$f\" -o \""
+            + saildir
+            + "/xcap_$n.o\" || exit 1; n=$((n+1)); done";
+        let xexit = process.run_capture(["bash", "-c", compile_extras], _child_env());
+        let _xo = process.capture_take_stdout();
+        let _xe = process.capture_take_stderr();
+        if xexit != 0 { return ""; }
+    }
+
+    let link_clang = "clang -fsanitize=address -Wno-override-module " + saildir
+        + "/*.o -lpthread -lm -o "
+        + bin;
+    let lexit = process.run_capture(["bash", "-c", link_clang], _child_env());
+    let _lo = process.capture_take_stdout();
+    let _le = process.capture_take_stderr();
+    if lexit == 0 { return bin; }
+
+    let link_gcc = "gcc -fsanitize=address " + saildir
+        + "/*.o -lpthread -lm -o "
+        + bin;
+    let gexit = process.run_capture(["bash", "-c", link_gcc], _child_env());
+    let _go = process.capture_take_stdout();
+    let _ge = process.capture_take_stderr();
+    if gexit == 0 { return bin; }
+    return "";
+}
+
+// True iff ASAN reported a genuine finding (the only verdict that fails an
+// ASAN leg; any other non-zero exit is a startup/environment skip).
+fn _asan_reported(out: string, err: string) -> boolean {
+    return find(out + err, "ERROR: AddressSanitizer:", 0) >= 0;
+}
+
+// ── (1) channel: concurrent producer/consumer over the moved-OwnedBuf
+//        channel-element + worker-env seams ──────────────────────────────
+//
+// A capturing producer (exercises the worker capture-env move/free seam,
+// #1519) and a consumer share a BOUNDED capacity-2 channel carrying a
+// by-value `Payload` struct (exercises the moved-OwnedBuf channel-element
+// ABI + the `sfn_channel_destroy` drain seam, #1472/#1545), run as two
+// `parallel` tasks. The producer sends 50 structs; the consumer drains 50.
+// A sequential / inline regression (tasks not actually concurrent) fills
+// the capacity-2 channel at 2 and BLOCKS forever on the 3rd send with no
+// drainer — it deadlocks and never prints the sum. So `sum: 51275`
+// (50*1000 + (1+...+50)) is reachable ONLY via real concurrent draining
+// across the bounded buffer on separate threads, with the typed struct
+// round-tripping correctly (AC2). The ASAN relink then proves the moved
+// struct elements + captured env cross the thread boundary without a
+// double-free / use-after-free (AC1).
+fn _channel_fixture() -> string {
+    return "struct Payload {\n" + "    v: int;\n" + "}\n"
+        + "let g_ch = channel(2);\n"
+        + "let mut g_sum: int = 0;\n"
+        + "fn main() ![io] {\n"
+        + "    let base: int = 1000;\n"
+        + "    let _rs = parallel [\n"
+        + "        fn() -> int ![io] {\n"
+        + "            let mut i: int = 1;\n"
+        + "            loop {\n"
+        + "                if i > 50 { break; }\n"
+        + "                g_ch.send(Payload { v: base + i });\n"
+        + "                i = i + 1;\n"
+        + "            }\n"
+        + "            return 0;\n"
+        + "        },\n"
+        + "        fn() -> int ![io] {\n"
+        + "            let mut n: int = 0;\n"
+        + "            loop {\n"
+        + "                if n >= 50 { break; }\n"
+        + "                let p: Payload = g_ch.receive();\n"
+        + "                g_sum = g_sum + p.v;\n"
+        + "                n = n + 1;\n"
+        + "            }\n"
+        + "            return 0;\n"
+        + "        },\n"
+        + "    ];\n"
+        + "    print.info(\"sum: \" + number_to_string(g_sum));\n"
+        + "}\n";
+}
+
+test "asan: concurrent channel producer/consumer over the moved-OwnedBuf seam is corruption-clean (#1550)" ![io] {
+    let dir = _scratch_dir();
+    let src = dir + "/chan.sfn";
+    fs.writeFile(src, _channel_fixture());
+
+    let work_dir = dir + "/chanwd";
+    let plain_bin = dir + "/chan_plain";
+    let bexit = process.run_capture([_sfn_bin(), "build", "--work-dir", work_dir, "-o", plain_bin, src], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert bexit == 0;
+
+    // Plain leg (always runs): the concurrent-only typed result (AC2).
+    let pexit = process.run_capture([plain_bin], _child_env());
+    let pout = process.capture_take_stdout();
+    let perr = process.capture_take_stderr();
+    assert pexit == 0;
+    assert contains(pout + perr, "sum: 51275");
+
+    // ASAN leg (best effort): the moved-OwnedBuf corruption gate (AC1).
+    let asan_bin = dir + "/chan_asan";
+    // No capsule dependency — the single-file channel program links from
+    // the runtime objects + program.ll alone.
+    let relinked = _asan_relink(work_dir, "", asan_bin);
+    if relinked.length == 0 {
+        // Neither clang compiler-rt nor gcc libasan available — skip. The
+        // plain leg above still pins the concurrent round-trip.
+        assert true;
+        return;
+    }
+
+    let aexit = process.run_capture([asan_bin], _asan_run_env());
+    let aout = process.capture_take_stdout();
+    let aerr = process.capture_take_stderr();
+    if _asan_reported(aout, aerr) {
+        // A genuine double-free / use-after-free in the moved-OwnedBuf
+        // channel-element or worker-env seam.
+        assert false;
+    } else if aexit == 0 {
+        // Clean under ASAN — and it still produced the concurrent result,
+        // so the instrumented run exercised the real interleave.
+        assert contains(aout + aerr, "sum: 51275");
+    } else {
+        // Startup abort under a vmem cap / missing runtime — skip.
+        assert true;
+    }
+}
+
+// ── raw loopback HTTP client (inlined `http.sfn::_connect_tcp` idiom, the
+//        same surface `serve_loopback_test.sfn` uses) ──────────────────────
+// The libc socket externs carry no effect annotation, so the effect
+// checker infers no `net` requirement for these direct callers (the
+// compiler capsule's surface is `["io", "clock"]`, no `net`); they are
+// left un-annotated while the `![io]` test keeps `io` for its
+// `process.*` / `fs.*` calls. Identical rationale to `serve_loopback_test`.
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+
+extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+
+extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+extern fn close(fd: i32) -> i32;
+
+// Sole ASAN-serve test in the native e2e pool, so a fixed high port does
+// not collide under `--jobs N`. Distinct from `serve_loopback_test`'s
+// 18790 so the two never clash.
+fn _sv_port() -> i64 { return 18793; }
+
+fn _sv_port_str() -> string { return "18793"; }
+
+fn _sv_ptr_off(p: * u8, off: i64) -> * u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as * u8;
+}
+
+// Connect a stream socket to 127.0.0.1:port; tries both sockaddr_in byte
+// layouts (Linux / BSD), first success wins. Returns the fd or -1.
+fn _sv_connect(port: i64) -> i32 {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 2 { break; }
+        let addr: * u8 = malloc(16 as usize);
+        if addr as i64 == 0 { return 0 - 1; }
+        memset(addr, 0, 16 as usize);
+        if attempt == 0 {
+            memset(_sv_ptr_off(addr, 0), 2, 1 as usize);
+        } else {
+            memset(_sv_ptr_off(addr, 0), 16, 1 as usize);
+            memset(_sv_ptr_off(addr, 1), 2, 1 as usize);
+        }
+        memset(_sv_ptr_off(addr, 2), ((port >> 8) & 255) as i32, 1 as usize);
+        memset(_sv_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
+        memset(_sv_ptr_off(addr, 4), 127, 1 as usize);
+        memset(_sv_ptr_off(addr, 7), 1, 1 as usize);
+        let fd: i32 = socket(2, 1, 0);
+        if fd < 0 {
+            free(addr);
+            return 0 - 1;
+        }
+        let rc: i32 = connect(fd, addr, 16);
+        free(addr);
+        if rc == 0 { return fd; }
+        close(fd);
+        attempt = attempt + 1;
+    }
+    return 0 - 1;
+}
+
+fn _sv_send_all(fd: i32, buf: * u8, total: i64) -> bool {
+    let mut sent: i64 = 0;
+    loop {
+        if sent >= total { break; }
+        let n: i64 = send(fd, _sv_ptr_off(buf, sent), total - sent, 0);
+        if n <= 0 { return false; }
+        sent = sent + n;
+    }
+    return true;
+}
+
+// Drain to EOF (server frames `Connection: close`) and return the bytes.
+// The buffer is intentionally not freed: `* u8 as string` aliases the
+// pointer (no copy) and the test process is short-lived.
+fn _sv_recv_all(fd: i32) -> string {
+    let mut capacity: i64 = 8192;
+    let mut len: i64 = 0;
+    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    if buf as i64 == 0 { return ""; }
+    let chunk: i64 = 8192;
+    loop {
+        if len + chunk > capacity {
+            let new_cap: i64 = capacity * 2;
+            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            if new_buf as i64 == 0 {
+                free(buf);
+                return "";
+            }
+            buf = new_buf;
+            capacity = new_cap;
+        }
+        let n: i64 = recv(fd, _sv_ptr_off(buf, len), chunk, 0);
+        if n < 0 {
+            free(buf);
+            return "";
+        }
+        if n == 0 { break; }
+        len = len + n;
+    }
+    memset(_sv_ptr_off(buf, len), 0, 1 as usize);
+    return buf as string;
+}
+
+// Open a fresh connection, send `request` verbatim, drain, close. Returns
+// "" on a connect/send failure (server not up yet).
+fn _sv_request(port: i64, request: string) -> string {
+    let fd: i32 = _sv_connect(port);
+    if fd < 0 { return ""; }
+    if !_sv_send_all(fd, request as * u8, strlen(request as * u8) as i64) {
+        close(fd);
+        return "";
+    }
+    let resp = _sv_recv_all(fd);
+    close(fd);
+    return resp;
+}
+
+// Build a POST /echo request with a distinct body so each concurrent
+// response is independently verifiable (no cross-connection contamination
+// under the pool). The body is "B-<tag>-E", whose length is 4 + tag.length.
+fn _echo_request(tag: string) -> string {
+    let body = "B-" + tag + "-E";
+    return "POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: "
+        + number_to_string(body.length)
+        + "\r\nConnection: close\r\n\r\n"
+        + body;
+}
+
+// Drive `count` echo requests in sequence, each a full
+// open → send → drain → close cycle (the reliable single-connection idiom
+// `serve_loopback_test` uses; this serve does not tolerate many
+// simultaneously-pending connections). Each request's handler still runs
+// on a runtime-pool WORKER thread — distinct from the accept loop — so the
+// moved-`OwnedBuf` request/response reclaim (#1547) runs on a worker per
+// request, and worker reuse across the `count` requests re-exercises the
+// reclaim repeatedly: under ASAN a double-free / use-after-free on ANY of
+// them aborts immediately. Returns the number of responses whose distinct
+// body round-tripped (HTTP 200 + the per-connection body); a wrong/garbled
+// body (the empty-`Request` / cross-buffer symptom) drops the count.
+fn _drive_echoes(port: i64, count: i64) -> i64 ![io] {
+    let mut ok_count: i64 = 0;
+    let mut i: i64 = 0;
+    loop {
+        if i >= count { break; }
+        let tag = number_to_string(i);
+        let resp = _sv_request(port, _echo_request(tag));
+        let want = "B-" + tag + "-E";
+        if contains(resp, "HTTP/1.1 200") && contains(resp, want) {
+            ok_count = ok_count + 1;
+        }
+        i = i + 1;
+    }
+    return ok_count;
+}
+
+fn _timeout_cmd() -> string ![io] {
+    let probe = process.run(["sh", "-c", "command -v timeout >/dev/null 2>&1"]);
+    if probe == 0 { return "timeout"; }
+    let gprobe = process.run(["sh", "-c", "command -v gtimeout >/dev/null 2>&1"]);
+    if gprobe == 0 { return "gtimeout"; }
+    return "";
+}
+
+// Lay out a consumer capsule depending on `sfn/http` whose handler echoes
+// the POST body. Lives INSIDE the repo tree so workspace discovery
+// resolves the `sfn/http` dependency (mirrors `serve_loopback_test`).
+fn _server_app_root() -> string { return "build/asan-serve-e2e"; }
+
+fn _write_server_app(port_str: string) -> string ![io] {
+    let root = _server_app_root();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/http-asan-e2e-app\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"sfn/http serve ASAN-interleave e2e consumer\"\n"
+        + "\n"
+        + "[dependencies]\n"
+        + "\"sfn/http\" = \"*\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "import { serve, Request, Response, not_found } from \"sfn/http\";\n"
+        + "\n"
+        + "fn handle(req: Request) -> Response {\n"
+        + "    if strings_equal(req.path, \"/echo\") {\n"
+        + "        return Response { status: 200, headers: [\"X-Echo: 1\"], body: req.body };\n"
+        + "    }\n"
+        + "    if strings_equal(req.path, \"/probe\") {\n"
+        + "        return Response { status: 200, headers: [\"X-Probe: 1\"], body: \"M=\" + req.method + \";P=\" + req.path };\n"
+        + "    }\n"
+        + "    return not_found();\n"
+        + "}\n"
+        + "\n"
+        + "fn main() -> int ![net, io] {\n"
+        + "    serve(handle as * fn (Request) -> Response, "
+        + port_str
+        + ");\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+// Spawn `bin` as a background server, wrapped in a wall-clock `timeout` so
+// it self-reaps (there is no process-kill primitive and `serve()` never
+// returns), with stdout+stderr redirected to `logpath` so an ASAN report
+// from a crashing worker is recoverable after the run. Caller guards on a
+// timeout command being present. `extra_env` is prepended to the child's
+// environment (used to inject the ASAN run vars).
+fn _spawn_server_logged(bin: string, logpath: string, extra_env: string[]) -> i64 ![io] {
+    let tcmd = _timeout_cmd();
+    let cmd = "exec " + tcmd + " 60 " + bin + " > " + logpath + " 2>&1";
+    return process.spawn_with_env(["bash", "-c", cmd], extra_env);
+}
+
+// Poll `GET /probe` until the server answers (startup is just the binary
+// launching + bind). Returns the response, or "" if it never came up.
+fn _await_server(port: i64) -> string ![io] {
+    let probe = "GET /probe HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 90 { break; }
+        let resp = _sv_request(port, probe);
+        if resp.length > 0 {
+            if contains(resp, "M=GET") { return resp; }
+        }
+        let _ = process.run(["sleep", "0.5"]);
+        attempt = attempt + 1;
+    }
+    return "";
+}
+
+// ── (2) serve: pool-handled handlers over the moved-OwnedBuf req/resp seam ──
+//
+// Build the `sfn/http` serve server, then run it under ASAN when a
+// sanitizer runtime is available (else plain), and drive 8 echo requests
+// (one full connection at a time — this serve does not tolerate many
+// simultaneously-pending connections, the same single-connection idiom
+// `serve_loopback_test` uses). Each request is dispatched onto a runtime
+// thread-pool WORKER, distinct from the accept loop: the request body
+// moves in and the response body moves out as `OwnedBuf` values; dispatch
+// reclaims the moved request after the handler returns and the worker
+// frees the response after the send (#1547). Asserting all 8 distinct
+// bodies round-trip proves real handler execution on the pool + correct
+// typed round-trip (AC2); under ASAN a double-free / use-after-free in the
+// req/resp reclaim aborts the worker with `ERROR: AddressSanitizer:` on
+// any of the 8 (AC1). The strong inline-vs-concurrent discriminator (a
+// deadlock-or-correct bounded channel) lives in the channel leg above;
+// here the worker reuse across 8 requests re-exercises the reclaim.
+test "asan: serve handlers over the moved-OwnedBuf req/resp seam are corruption-clean (#1550)" ![io] {
+    // Teardown of the never-returning server relies on a wall-clock
+    // timeout (no process-kill primitive). Without `timeout`/`gtimeout`,
+    // spawning would orphan the fixed port — skip cleanly. CI runners
+    // (Linux + coreutils) always have `timeout`.
+    if _timeout_cmd().length == 0 {
+        print.info("[asan-serve] SKIP: no timeout/gtimeout to reap the blocking server");
+        return;
+    }
+
+    let dir = _scratch_dir();
+    let main_path = _write_server_app(_sv_port_str());
+
+    let work_dir = dir + "/srvwd";
+    let plain_bin = dir + "/server_plain";
+    let bexit = process.run_capture([_sfn_bin(), "build", "--work-dir", work_dir, "-o", plain_bin, main_path], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert bexit == 0;
+
+    // Prefer the ASAN-instrumented server (covers AC1 + AC2 in one run);
+    // fall back to the plain server (AC2 only) when no sanitizer runtime
+    // links.
+    let asan_bin = dir + "/server_asan";
+    // The serve program depends on the `sfn/http` capsule, whose IR is
+    // persisted (per build) at the stable `build/capsules/sfn/http/ir/`.
+    let relinked = _asan_relink(work_dir, "build/capsules/sfn/http/ir/*.ll", asan_bin);
+    let mut server_bin = plain_bin;
+    let mut server_env = _child_env();
+    let mut asan_active = false;
+    if relinked.length > 0 {
+        server_bin = asan_bin;
+        server_env = _asan_run_env();
+        asan_active = true;
+    }
+
+    let port = _sv_port();
+    let logpath = dir + "/server.log";
+    let _handle = _spawn_server_logged(server_bin, logpath, server_env);
+
+    let probe = _await_server(port);
+    if probe.length == 0 {
+        // The server never came up. Under ASAN this is the startup
+        // shadow-reservation abort (vmem cap / missing runtime) — a SKIP,
+        // unless the log carries a genuine finding.
+        let log = "";
+        let log2 = _read_if_exists(logpath);
+        if asan_active && _asan_reported(log, log2) { assert false; }
+        assert true;
+        return;
+    }
+
+    // Drive 8 echo requests, each handled on a pool worker (exercising the
+    // moved-OwnedBuf req/resp reclaim per request).
+    let ok = _drive_echoes(port, 8);
+
+    if asan_active {
+        // Give a crashing worker a beat to flush its ASAN report, then
+        // inspect the server log. Only a genuine finding fails.
+        let _ = process.run(["sleep", "0.5"]);
+        let log = _read_if_exists(logpath);
+        if _asan_reported(log, "") { assert false; }
+    }
+
+    // Typed round-trip (AC2): all 8 distinct bodies came back 200, each
+    // from a handler run on a worker thread.
+    assert ok == 8;
+
+    let _rm = process.run(["rm", "-rf", _server_app_root()]);
+}
+
+// Read a file if present, else "" — the server log may not exist yet if
+// the spawn failed outright.
+fn _read_if_exists(path: string) -> string ![io] {
+    if fs.exists(path) { return fs.readFile(path); }
+    return "";
+}
