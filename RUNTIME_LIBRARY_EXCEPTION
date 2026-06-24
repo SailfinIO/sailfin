@@ -1,6 +1,6 @@
 SAILFIN RUNTIME LIBRARY EXCEPTION
 
-Version 1.0, 11 April 2026
+Version 1.1, 24 June 2026
 
 Copyright (C) 2026 Michael Curtis <michael@sailfin.io>
 
@@ -10,13 +10,16 @@ license document, but changing it is not allowed.
 This Sailfin Runtime Library Exception ("Exception") is an additional
 permission granted by the copyright holder of the Sailfin compiler and
 runtime libraries. It applies to the source files in the runtime/
-directory of the Sailfin source distribution (the "Runtime Library").
+directory and to the standard-library capsules under the capsules/
+directory of the Sailfin source distribution (collectively, the
+"Runtime Library").
 
 The purpose of this Exception is to allow compilation of non-GPL
 (including proprietary) programs using the Sailfin compiler, so that
-such programs may use the header files, prelude, and runtime libraries
-covered by this Exception without being subject to the copyleft
-requirements of the GNU General Public License, version 2.
+such programs may use the header files, prelude, standard library, and
+runtime support routines covered by this Exception without being subject
+to the copyleft requirements of the GNU General Public License,
+version 2.
 
 0. Definitions.
 
