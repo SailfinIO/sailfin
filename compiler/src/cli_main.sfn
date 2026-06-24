@@ -28,9 +28,11 @@ import {
     cache_store_artifact,
     cache_lookup_artifact,
     cache_copy_artifact_to,
+    cache_compiler_identity,
     runtime_object_cache_key,
     resolve_build_cache_config,
-    runtime_object_entry_key_from_str
+    runtime_object_entry_key_from_str,
+    runtime_object_cache_key_with_identity
 } from "./build_cache";
 import { emit_compiler_build_stamp_if_applicable } from "./build_stamp";
 import { CliContext, parse_driver_prefix, driver_prefix_length } from "./cli/context";
@@ -1120,7 +1122,7 @@ fn _runtime_obj_key_with_sibling_deps(base_key: string, ctx_root: string, slug: 
     return key;
 }
 
-fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string) -> RuntimeEmitResult ![io] {
+fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string, compiler_identity: string) -> RuntimeEmitResult ![io] {
     let mut stats = empty_cache_stats();
     let slug = module_name_from_path(src);
     let ll_path = _path_join(out_dir, cap_prefix + _path_basename(src)
@@ -1140,7 +1142,11 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
     // surfacing as `Undefined symbols ... link failed` (#969). This
     // mirrors the `_clang_compile_runtime_capsule_objects` c-source
     // path so the sfn-source + prelude emit invalidates identically.
-    let key = _runtime_obj_key_with_sibling_deps(runtime_object_cache_key(src, opt_flag), ctx_root, slug);
+    // #1197: fold the emitting compiler's identity into the key so a
+    // codegen change in `compiler/src` busts the cached runtime object
+    // even when the runtime source bytes are unchanged. See
+    // `runtime_object_cache_key_with_identity`.
+    let key = _runtime_obj_key_with_sibling_deps(runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity), ctx_root, slug);
     if key.length == 0 { stats.invalid_keys = stats.invalid_keys + 1; }
     let shared_suffix = cap_prefix + _path_basename(src) + opt_flag;
     if _runtime_obj_cache_hit(obj_path, key) {
@@ -1244,10 +1250,14 @@ fn _runtime_sfn_ctx_root(out_dir: string) -> string {
 // (#1011) so a concurrent reader never observes a torn artifact.
 // The `native` emit stage is import-context-free by design (#906),
 // so staging order across the sfn-sources list does not matter.
-fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, ctx_root: string) -> boolean ![io] {
+fn _stage_one_runtime_sfn_import_context(self_path: string, src: string, ctx_root: string, compiler_identity: string) -> boolean ![io] {
     let slug = module_name_from_path(src);
     let asm_path = ctx_root + "/" + slug + ".sfn-asm";
-    let key = runtime_object_cache_key(src, "");
+    // #1197: the staged `.sfn-asm` import-context is emitted by the
+    // compiler too, so a codegen change must bust it on the same identity
+    // basis as the `.o` emit below — otherwise a stale staged context
+    // feeds outdated sibling signatures into `_emit_runtime_sfn_to_obj`.
+    let key = runtime_object_cache_key_with_identity(src, "", compiler_identity);
     if _runtime_obj_cache_hit(asm_path, key) { return true; }
     _ensure_dir(_dirname(asm_path));
     let staged = _mktemp_sibling_cmd(asm_path);
@@ -1361,7 +1371,7 @@ fn _write_runtime_sfn_import_deps(asm_path: string, slug: string, ctx_root: stri
 // emit failure does — a missing sibling artifact would otherwise
 // surface later as the far less actionable "cannot resolve return
 // type" fatal in whichever module imports it.
-fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: RuntimeCapsuleArtifacts[], ctx_root: string) -> boolean ![io] {
+fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: RuntimeCapsuleArtifacts[], ctx_root: string, compiler_identity: string) -> boolean ![io] {
     let mut staged_slugs: string[] = [];
     let mut staged_asm_paths: string[] = [];
     let mut i: int = 0;
@@ -1372,7 +1382,7 @@ fn _stage_runtime_sfn_import_context(self_path: string, runtime_capsules: Runtim
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            if !_stage_one_runtime_sfn_import_context(self_path, src, ctx_root) {
+            if !_stage_one_runtime_sfn_import_context(self_path, src, ctx_root, compiler_identity) {
                 return false;
             }
             let slug = module_name_from_path(src);
@@ -1435,10 +1445,18 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
             + "\")");
         return _failed_runtime_link_inputs();
     }
+    // #1197: the emitting compiler's identity, computed once and threaded
+    // into every runtime object/import-context cache key so a codegen
+    // change busts the cache without a manual `rm`. `self_path` is the
+    // binary doing the emit, so its content hash (for `.dirty` stamps) is
+    // exactly the right codegen fingerprint; tagged / clean-commit stamps
+    // carry the commit hash in the version. Computed once here (not per
+    // source) so the binary is hashed at most once per build.
+    let compiler_identity = cache_compiler_identity(resolve_compiler_version(""), self_path);
     // #1288: stage every sfn-source's import-context artifacts FIRST
     // so each module's llvm emit below can resolve sibling imports.
     let ctx_root = _runtime_sfn_ctx_root(out_dir);
-    if !_stage_runtime_sfn_import_context(self_path, runtime_capsules, ctx_root) {
+    if !_stage_runtime_sfn_import_context(self_path, runtime_capsules, ctx_root, compiler_identity) {
         return _failed_runtime_link_inputs();
     }
     let mut i: int = 0;
@@ -1450,7 +1468,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            let emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root);
+            let emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root, compiler_identity);
             stats = merge_cache_stats(stats, emit.stats);
             if emit.obj_path.length == 0 {
                 return _failed_runtime_link_inputs();
@@ -1527,6 +1545,9 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
                 + "\")");
             return _failed_runtime_link_inputs();
         }
+        // #1197: same compiler-identity fold as the sfn-sources emit, so a
+        // codegen change busts the cached prelude object too.
+        let compiler_identity = cache_compiler_identity(resolve_compiler_version(""), self_path);
         let mut pi: int = 0;
         loop {
             if pi >= runtime_capsules.length { break; }
@@ -1537,7 +1558,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
                 // `.import-deps` sidecar — the threaded context root
                 // is inert here and the prelude keeps its legacy
                 // descriptor-based emit byte-for-byte (#940 Risk R2).
-                let prelude_emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir));
+                let prelude_emit = _emit_runtime_sfn_to_obj(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir), compiler_identity);
                 stats = merge_cache_stats(stats, prelude_emit.stats);
                 if prelude_emit.obj_path.length == 0 {
                     return _failed_runtime_link_inputs();

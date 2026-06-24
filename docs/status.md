@@ -35,7 +35,22 @@ doc, or `docs/runtime_architecture.md`, not here.
   stderr (Stage C PR1–1f, #254–#259). Runtime C/LL/sfn objects share the same
   cache across work-dirs (#915, #1096). `sfn test` content-addresses each
   linked test binary, cross-commit-stable (#1230, #1233); `make check` passes
-  `--no-test-cache` so the full gate always cold-builds.
+  `--no-test-cache` so the full gate always cold-builds. **Runtime object
+  invalidation (#1197):** with the C runtime retired (#822/#823) the entire
+  runtime is now `sfn-sources` (`runtime/capsule.toml`) emitted by the Sailfin
+  compiler, so a codegen change in `compiler/src` alters a runtime module's IR
+  without touching its source bytes. The runtime sfn-source `.o` (and
+  `.sfn-asm` import-context) cache therefore folds the emitting compiler's
+  identity (`cache_compiler_identity` — the build-stamp commit hash, plus the
+  binary SHA-256 for `.dirty` stamps) into its key, so a recompiled compiler
+  busts the cache automatically — no manual `secsplit*` tag bump or
+  `rm build/sailfin/*.o`. Which binary emits the runtime: during a cold
+  `make compile` the *seed* emits the first-pass binary's runtime, so a
+  runtime codegen fix only reaches the linked runtime after the *next* pass
+  emits it (the first-pass binary re-emits for `seedcheck`, and `make check`'s
+  test binaries link those first-pass-emitted objects); a codegen fix that must
+  change the runtime shipped in `build/native` therefore still requires a fresh
+  seed pin (same seed dependency as #1193's E0808 class).
 - **Per-capsule artifacts.** `sfn build -p` writes
   `build/capsules/<scope>/<name>/` with a `manifest.json` sidecar
   (schema v1) enumerating per-module IR + cache keys (Stage C2, #261–#264).
