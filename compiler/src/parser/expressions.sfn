@@ -1252,13 +1252,35 @@ fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
         let sep_result = expression_tokens_consume_type_separator(current, false, true);
         if sep_result.found {
             current = sep_result.state;
-            let capture = expression_tokens_collect_until(current, ["{"]);
+            // Stop the return-type capture at the effect marker `!` as well
+            // as the body `{`, mirroring the fn-decl parser
+            // (`declarations.sfn`). Collecting through `{` alone swallows a
+            // trailing `![...]` annotation into the return-type text (e.g.
+            // `int ![io]`), which makes the future-kind classifier
+            // (`spawn_future_kind`) and the lambda return-type lowering fall
+            // to the `ptr` catch-all — the #1546 typed-result round-trip bug.
+            let capture = expression_tokens_collect_until(current, ["!", "{"]);
             if !capture.success { return expression_parse_failure(state); }
             let type_text = trim_text(tokens_to_text(capture.tokens));
             if type_text.length > 0 {
                 return_type = TypeAnnotation { text: type_text };
             }
             current = capture.state;
+            // Consume an optional effect annotation `![...]` sitting between
+            // the return type and the body so the block collection below
+            // still starts at `{`. The lambda effect set is not yet tracked
+            // on the AST node, so the tokens are discarded (status quo) —
+            // only the return-type text is corrected here.
+            let after_type = expression_tokens_peek(current);
+            if after_type.kind.variant == "Symbol" {
+                if strings_equal(after_type.lexeme, "!") {
+                    let effect_capture = expression_tokens_collect_until(current, ["{"]);
+                    if !effect_capture.success {
+                        return expression_parse_failure(state);
+                    }
+                    current = effect_capture.state;
+                }
+            }
         }
     }
 
