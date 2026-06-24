@@ -2472,7 +2472,7 @@ fn dominant_type(first: string, second: string) -> string {
     return first;
 }
 
-fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, lines: string[]) -> BinaryAlignmentResult {
+fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: int, lines: string[]) -> BinaryAlignmentResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: int = temp_index;

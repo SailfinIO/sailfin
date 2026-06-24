@@ -356,7 +356,7 @@ fn write_llvm_ir_from_native_text_with_context(native_text: string, module_name:
     return compile_native_text_to_llvm_file_with_context(native_text, module_name, out_path, imported_native_texts);
 }
 
-fn lower_to_llvm_with_manifests(native_module: NativeModule, imported_manifests: LayoutManifest[]) -> LoweredLLVMResult {
+fn lower_to_llvm_with_manifests(native_module: NativeModule, imported_manifests: LayoutManifest[]) -> LoweredLLVMResult ![io] {
     return lower_to_llvm_with_context(native_module, imported_manifests, [], []);
 }
 
@@ -390,7 +390,7 @@ fn lower_to_llvm_with_parsed_context(native_module: NativeModule, parse: ParseNa
     };
 }
 
-fn lower_to_llvm_with_context(native_module: NativeModule, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMResult {
+fn lower_to_llvm_with_context(native_module: NativeModule, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMResult ![io] {
     let lowered = lower_to_llvm_lines_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics);
     let ir = _join_llvm_lines_linear(lowered.lines);
     let mut output: string = ir;
