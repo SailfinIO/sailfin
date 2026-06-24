@@ -49,6 +49,7 @@ import {
     localize_import_symbols_for_program
 } from "./effect_imports";
 import { is_universally_allowed_effect } from "./effect_taxonomy";
+import { effects_for_callee_target } from "./llvm/runtime_helpers";
 
 struct EffectRequirement {
     effect: string;
@@ -614,6 +615,28 @@ fn _propagate_imported_callee_effects(name: string, imports: ImportSymbolTable, 
     return required;
 }
 
+// G1 (#1183): append one EffectRequirement per capability the builtin
+// callee `target` requires, sourced from the authoritative runtime
+// descriptor registry (`effects_for_callee_target` in
+// `llvm/runtime_helpers.sfn`). This keeps the effect checker free of
+// hardcoded name->effect chains for registry-backed builtins: a
+// descriptor's `effects` change flows through here with zero edits.
+// `trigger` carets the diagnostic at the call/namespace token.
+fn _append_builtin_effects(base: EffectRequirement[], target: string, trigger: Token?) -> EffectRequirement[] {
+    let effects = effects_for_callee_target(target);
+    let mut required = base;
+    let mut index: int = 0;
+    loop {
+        if index >= effects.length { break; }
+        required = append_requirement(required, EffectRequirement {
+            effect: effects[index], description: "builtin `" + target
+                + "` usage", trigger: trigger
+        });
+        index += 1;
+    }
+    return required;
+}
+
 fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbolTable) -> EffectRequirement[] {
     if expression == null { return []; }
     if expression.variant == "Call" {
@@ -628,34 +651,42 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             // call expressions (e.g. the runtime fail-call wrapper).
             let callee_trigger = _token_from_span(expression.callee.span, name);
             if name == "spawn" {
+                // Concurrency anchor (out of #1183 scope): no runtime
+                // descriptor backs the `spawn` keyword form.
                 required = append_requirement(required, EffectRequirement {
                     effect: "io", description: "spawn call", trigger: callee_trigger
                 });
             }
-            if name == "sleep" {
-                required = append_requirement(required, EffectRequirement {
-                    effect: "clock", description: "sleep call", trigger: callee_trigger
-                });
-            }
             if name == "serve" {
+                // Retained (no registry descriptor): the only `serve`
+                // targets are `serve_start` / `serve_handler_dispatch`,
+                // not a Call-form `serve` callee, so
+                // `effects_for_callee_target("serve")` is empty. Keep
+                // explicit `net` enforcement until a descriptor lands —
+                // follow-up #1601. Dropping this silently removes net
+                // capability checking on `serve(...)`.
                 required = append_requirement(required, EffectRequirement {
                     effect: "net", description: "serve call", trigger: callee_trigger
                 });
             }
-            // Bare `print(...)` / `console(...)` are the Call-form
-            // analog of the Member-form `print.info(...)` paths
-            // handled below in the "Member" branch. Without this
-            // Call-side check, a capability-less
-            // `fn main() { print("hi"); }` slips through `sfn check`
-            // despite the README's first example asserting exactly
-            // the opposite. Closes #614.
-            let mut _print_or_console: boolean = false;
-            if name == "print" { _print_or_console = true; }
-            if name == "console" { _print_or_console = true; }
-            if _print_or_console {
-                required = append_requirement(required, EffectRequirement {
-                    effect: "io", description: "print/console helper usage", trigger: callee_trigger
-                });
+            // Registry-driven bare builtins: `print(...)` / `console(...)`
+            // (the Call-form analog of the Member-form `print.info(...)`
+            // paths in the "Member" branch — closes #614) and `sleep(...)`
+            // (clock). EFFECTS come from the descriptor registry (#1183).
+            // The NAME set stays explicit because bare identifiers are not
+            // yet scope-resolved (G1b, #1184): a registry lookup over
+            // *every* bare target would also flag internal lowering names
+            // (`monotonic_millis`, `runtime_serve_fn`, …) that in-tree
+            // callers invoke without the matching effect, breaking
+            // self-host. #1184 lands that resolution with the in-tree
+            // annotation fixups it forces, after which this allowlist can
+            // be removed.
+            let mut _bare_builtin: boolean = false;
+            if name == "print" { _bare_builtin = true; }
+            if name == "console" { _bare_builtin = true; }
+            if name == "sleep" { _bare_builtin = true; }
+            if _bare_builtin {
+                required = _append_builtin_effects(required, name, callee_trigger);
             }
             // Phase E: cross-module call resolution. The imports
             // table is per-program-localized (alias-rewritten,
@@ -712,26 +743,26 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             // effectful. The Member-token span lives on
             // `expression.span`; the namespace span lives on
             // `expression.object.span`. Use the object span because
-            // the namespace name is what the diagnostic message
-            // references ("filesystem helper usage").
+            // the namespace identifier is the user-visible cue the
+            // diagnostic carets (e.g. `fs` in `fs.exists(...)`).
             let object_trigger = _token_from_span(expression.object.span, root);
-            if root == "fs" {
-                required = append_requirement(required, EffectRequirement {
-                    effect: "io", description: "filesystem helper usage", trigger: object_trigger
-                });
-            }
-            let mut _if16: boolean = false;
-            if root == "print" { _if16 = true; }
-            if root == "console" { _if16 = true; }
-            if _if16 {
-                required = append_requirement(required, EffectRequirement {
-                    effect: "io", description: "print/console helper usage", trigger: object_trigger
-                });
-            }
-            let mut _if17: boolean = false;
-            if root == "http" { _if17 = true; }
-            if root == "websocket" { _if17 = true; }
-            if _if17 {
+            // Registry-driven builtin effect resolution (#1183): the
+            // authoritative `target -> effects` registry in
+            // `llvm/runtime_helpers.sfn` is the single source of truth.
+            // Exact descriptor first (`fs.exists`, `http.get`,
+            // `http.download` -> `[net, io]`), namespace-union fallback
+            // for members with no exact row (`fs.read` inherits `fs.*`
+            // -> io) so conservative capability coverage is never
+            // dropped. A descriptor's `effects` change is picked up here
+            // with zero edits. Covers `fs.*`, `print.*`, `console.*`,
+            // `http.*` — the literal-name `if` chains they replaced.
+            required = _append_builtin_effects(required, root + "." + expression.member, object_trigger);
+            // Retained (no registry descriptor): `websocket.*` has no
+            // runtime descriptor yet, so `effects_for_callee_target`
+            // returns empty for it. Keep explicit `net` enforcement
+            // until a descriptor lands — follow-up #1601. Dropping this
+            // silently removes net capability checking on `websocket.*`.
+            if root == "websocket" {
                 required = append_requirement(required, EffectRequirement {
                     effect: "net", description: "network helper usage", trigger: object_trigger
                 });

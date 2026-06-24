@@ -93,7 +93,12 @@
 // and Epic #450 for the milestone-level sequencing.
 //
 import { RuntimeHelperDescriptor } from "./types";
-import { trim_text, join_with_separator, string_array_contains } from "./utils";
+import {
+    trim_text,
+    starts_with,
+    join_with_separator,
+    string_array_contains
+} from "./utils";
 
 // Synthetic descriptor constructors for array `concat()` and `push()`
 // dispatch. Unlike the ~115 registry entries below (which each carry a
@@ -1460,6 +1465,74 @@ fn find_runtime_helper(target: string) -> RuntimeHelperDescriptor? {
         index += 1;
     }
     return null;
+}
+
+// Resolve the capability effects a builtin callee `target` requires from
+// the authoritative `target -> effects` descriptor registry above
+// (#1183, epic #1180 Phase G). This registry is the single source of
+// truth the effect checker keys on, so a descriptor's `effects` change
+// is picked up by the checker with zero edits to `effect_checker.sfn`.
+//
+// Resolution is exact-target-first, namespace-union fallback:
+//   1. An exact descriptor for `target` (e.g. "fs.exists", "http.get",
+//      "http.download", "sleep") returns that descriptor's precise
+//      effects — so `http.get` stays `[net]` while `http.download`
+//      carries `[net, io]`. Flat-unioning the whole namespace would
+//      leak `http.download`'s `io` onto every `http.*` sibling.
+//   2. A target with no exact descriptor (e.g. "fs.read", or a bare
+//      namespace root like "console") inherits the UNION of effects
+//      across its namespace ("fs.*", "console.*"). This preserves the
+//      conservative root-keyed coverage the checker had before #1183 —
+//      an under-approximation here would drop a required capability,
+//      the one failure the effect pillar must never allow.
+//
+// Returns an empty list when nothing matches (e.g. "websocket", the
+// Call-form "serve" — no runtime descriptor exists yet; the checker
+// retains explicit enforcement for those pending #1601's registry rows).
+fn effects_for_callee_target(target: string) -> string[] {
+    let trimmed = trim_text(target);
+    let exact = find_runtime_helper(trimmed);
+    if exact != null { return exact.effects; }
+    let prefix = _rh_namespace_prefix(trimmed);
+    let descriptors = runtime_helper_descriptors();
+    let mut accumulated: string[] = [];
+    let mut index: int = 0;
+    loop {
+        if index >= descriptors.length { break; }
+        if starts_with(descriptors[index].target, prefix) {
+            accumulated = _rh_union_effects(accumulated, descriptors[index].effects);
+        }
+        index += 1;
+    }
+    return accumulated;
+}
+
+// Namespace prefix for the union fallback: the text up to and including
+// the first `.` ("fs.read" -> "fs."), or `<target>.` when the target has
+// no dot ("console" -> "console.").
+fn _rh_namespace_prefix(target: string) -> string {
+    let mut root = "";
+    let mut index: int = 0;
+    loop {
+        if index >= target.length { break; }
+        if target[index] == "." { break; }
+        root = root + target[index];
+        index += 1;
+    }
+    return root + ".";
+}
+
+fn _rh_union_effects(into: string[], additions: string[]) -> string[] {
+    let mut out = into;
+    let mut index: int = 0;
+    loop {
+        if index >= additions.length { break; }
+        if !string_array_contains(out, additions[index]) {
+            out.push(additions[index]);
+        }
+        index += 1;
+    }
+    return out;
 }
 
 // LLVM return type for `declare`-line emission. Mirrors the
