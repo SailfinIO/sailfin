@@ -747,6 +747,70 @@ test "effect violation: bare console() Call carets at the callee for io effect" 
     assert trig.lexeme == "console";
 }
 
+test "effect (#1183): http.download Member call requires net AND io from the registry" {
+    // Registry-driven proof. The descriptor for `http.download` carries
+    // `effects: ["net", "io"]`, while `http.get` carries `["net"]`. A
+    // hardcoded `root == "http" -> net` chain could never produce the
+    // `io` requirement here — it can only come from
+    // `effects_for_callee_target` reading the descriptor's effects.
+    let stmt = _routine_with_member_call("save_remote", [], 1, "http", "download", 9, 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert _effects_contains(v.missing_effects, "net");
+    assert _effects_contains(v.missing_effects, "io");
+}
+
+test "effect (#1183): http.download declaring ![net, io] is clean" {
+    let stmt = _routine_with_member_call("save_remote_ok", ["net", "io"], 1, "http", "download", 9, 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+test "effect (#1183): fs.read_bytes Member call requires io from the registry" {
+    // Exact descriptor `fs.read_bytes` -> io, beyond the `fs.exists`
+    // case above — exercises a different registry row via the accessor.
+    let stmt = _routine_with_member_call("slurp", [], 1, "fs", "read_bytes", 4, 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert _effects_contains(violations[0].missing_effects, "io");
+}
+
+test "effect (#1183): fs.read Member call (no exact row) still requires io via namespace union" {
+    // `fs.read` has no exact descriptor; the namespace-union fallback in
+    // `effects_for_callee_target` must still derive io from the `fs.*`
+    // family so conservative coverage is never dropped — an
+    // under-approximation here would be a capability escape.
+    let stmt = _routine_with_member_call("reader", [], 1, "fs", "read", 4, 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert _effects_contains(violations[0].missing_effects, "io");
+}
+
+test "effect (#1183): console.log Member call requires io from the registry" {
+    let stmt = _routine_with_member_call("logger", [], 1, "console", "log", 4, 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert _effects_contains(violations[0].missing_effects, "io");
+}
+
+test "effect (#1183): websocket.send Member call retains net enforcement" {
+    // `websocket.*` has no runtime descriptor yet, so it is the one
+    // namespace `effects_for_callee_target` cannot resolve; the checker
+    // retains an explicit `net` check pending #1601. Lock that net
+    // enforcement is NOT regressed by the registry refactor.
+    let stmt = _routine_with_member_call("push", [], 1, "websocket", "send", 4, 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert _effects_contains(violations[0].missing_effects, "net");
+}
+
 test "effect violation: AST trigger overrides signature fallback" {
     // Lock the precedence rule in: when the body walker captures a
     // per-call-site trigger, that trigger wins over the signature
