@@ -108,8 +108,27 @@ struct PthreadCond {
 // atomic intrinsics (0 = pending, 1 = complete). `cond` / `mutex`
 // are embedded by value: the awaiter blocks on `cond` under
 // `mutex` until the worker sets `done` and signals (§2.6.3).
+//
+// `detached` (#1203) is the fire-and-forget flag: 0 = joinable (a joiner
+// calls `sfn_task_join` then `sfn_task_destroy`), 1 = detached (no joiner —
+// the pool worker that runs it reclaims the handle itself after
+// `sfn_task_run` returns, in `sfn_scheduler_worker`). It is the **last**
+// field so `done` keeps its offset-24 slot (reached by raw offset
+// arithmetic) and the embedded `cond`/`mutex` keep their offsets — adding
+// it disturbs no existing layout dependency. It is written once at create
+// time (before the task is enqueued / made visible to a worker) and read
+// once by the worker before it runs the body, so a plain (non-atomic) load
+// suffices: the enqueue/dequeue queue mutex already establishes the
+// producer→worker happens-before.
+//
+// Shared-layout invariant: `channel.sfn::sfn_spawn_task` allocates a Task by
+// this same layout and `future.sfn` treats it opaquely — any Task a shared
+// pool worker may run MUST carry this `detached` slot (zeroed unless
+// genuinely detached) or the worker's offset-144 read overruns the
+// allocation (#1205-class). Keep `_sfn_task_struct_size` and the
+// `channel.sfn` mirror in lockstep with this struct.
 // Layout (max-sized handles): four i64s (32 B) + PthreadCond (48 B) +
-// PthreadMutex (64 B) = 144 bytes.
+// PthreadMutex (64 B) + `detached` i64 (8 B) = 152 bytes.
 struct Task {
     fn_ptr: i64;
     ctx: i64;
@@ -117,6 +136,7 @@ struct Task {
     done: i64;
     cond: PthreadCond;
     mutex: PthreadMutex;
+    detached: i64;
 }
 
 // Shared MPMC task queue — a fixed-capacity ring buffer of `Task`
@@ -521,9 +541,11 @@ fn sfn_scheduler_resolve_thread_count() -> i64 {
 // signals `Task.cond`. The done flag + cond/mutex live by value in the
 // `Task` (see the struct header) so no extra allocation is needed.
 // `Task` byte size (max-sized handles): four i64s (32 B) +
-// PthreadCond (48 B) + PthreadMutex (64 B) = 144 bytes. Tracks the
-// struct above; the allocator path is the only layout dependency.
-fn _sfn_task_struct_size() -> i64 { return 144; }
+// PthreadCond (48 B) + PthreadMutex (64 B) + `detached` i64 (8 B) = 152
+// bytes. Tracks the struct above; the allocator path is the only layout
+// dependency. The `channel.sfn` mirror (`_sfn_task_struct_size_ch`) must
+// match.
+fn _sfn_task_struct_size() -> i64 { return 152; }
 
 // Byte offset of `Task.done` (field 4) — three leading i64s precede it.
 // `done` is reached by offset arithmetic rather than `& task.done`
@@ -549,6 +571,13 @@ fn sfn_task_create(fn_ptr: i64, ctx: i64) -> * u8 {
     task.ctx = ctx;
     task.result = 0;
     task.done = 0;
+    // Joinable by default — a worker must NOT reclaim it; the joiner does
+    // (`sfn_task_join` + `sfn_task_destroy`). `sfn_task_create_detached`
+    // flips this to 1. Initialising it explicitly is load-bearing: the
+    // malloc'd bytes are otherwise garbage, and a nonzero `detached` would
+    // make the worker free a still-joinable task (use-after-free /
+    // double-free).
+    task.detached = 0;
 
     let mutex_rc: i32 = pthread_mutex_init(task.mutex, null);
     if mutex_rc != 0 {
@@ -561,6 +590,23 @@ fn sfn_task_create(fn_ptr: i64, ctx: i64) -> * u8 {
         free(task_ptr);
         return null;
     }
+    return task_ptr;
+}
+
+// `sfn_task_create_detached(fn_ptr, ctx)` builds a fire-and-forget task
+// (#1203): identical to `sfn_task_create` but with `detached = 1`, so the
+// pool worker that runs it reclaims the handle in `sfn_scheduler_worker`
+// after `sfn_task_run` returns — there is no joiner. Used by `sfn_serve`'s
+// per-connection tasks (`serve.sfn`), which were never joined or destroyed
+// and so leaked one `Task` per connection (unbounded under sustained load).
+// Returns the task address as `* u8`, or null on the same OOM /
+// `pthread_*_init` failure paths as `sfn_task_create`. The `detached` write
+// happens-before the task is enqueued, so the worker observes it.
+fn sfn_task_create_detached(fn_ptr: i64, ctx: i64) -> * u8 {
+    let task_ptr: * u8 = sfn_task_create(fn_ptr, ctx);
+    if task_ptr as i64 == 0 { return task_ptr; }
+    let t: * Task = task_ptr as * Task;
+    t.detached = 1;
     return task_ptr;
 }
 
@@ -643,12 +689,26 @@ fn sfn_task_join(task: * u8) -> * u8 {
 // pulled task is run via `sfn_task_run` (#1089) — invoke `fn_ptr(ctx)`,
 // store the result, set `done`, signal the task cond; the pull itself is
 // recorded in `Scheduler.processed` by `sfn_scheduler_next_task`.
+//
+// Detached reclaim (#1203): a fire-and-forget task has no joiner, so the
+// worker is its last owner and destroys it after running it. The
+// `detached` flag is snapshotted BEFORE `sfn_task_run`: once `sfn_task_run`
+// sets `done` and signals, a JOINABLE task's joiner is free to wake and
+// reclaim the handle, so reading any field of `task` after the run would
+// race that free (use-after-free). Before the run no joiner can be active
+// (it blocks on `done`, still 0), so the pre-run read is safe; the snapshot
+// then decides the reclaim without touching freed memory. Joinable tasks
+// (`detached == 0`) are left untouched — reclaimed by the joiner, exactly
+// as before.
 fn sfn_scheduler_worker(arg: * u8) -> * u8 {
     let scheduler: * u8 = arg;
     loop {
         let task: * u8 = sfn_scheduler_next_task(scheduler);
         if task as i64 == 0 { break; }
+        let t: * Task = task as * Task;
+        let detached: i64 = t.detached;
         sfn_task_run(task);
+        if detached != 0 { sfn_task_destroy(task); }
     }
     return null;
 }

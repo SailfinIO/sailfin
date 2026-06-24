@@ -367,8 +367,14 @@ fn sfn_channel_destroy(ch: * u8) -> void {
 // discipline as the scheduler).
 //
 // Task byte size (max-sized handles): four i64s (32) + PthreadCond (48) +
-// PthreadMutex (64) = 144 bytes.  Mirrors scheduler.sfn's Task.
-fn _sfn_task_struct_size_ch() -> i64 { return 144; }
+// PthreadMutex (64) + `detached` i64 (8) = 152 bytes.  Mirrors
+// scheduler.sfn's Task — MUST stay byte-identical: a task allocated here can
+// be run by the shared pool worker (`sfn_scheduler_worker`), which reads the
+// `detached` flag at offset 144 to decide whether to reclaim it. An
+// undersized (144-byte) allocation would make that read overrun the buffer
+// (#1205-class). Keep this in lockstep with `scheduler.sfn`'s
+// `_sfn_task_struct_size`.
+fn _sfn_task_struct_size_ch() -> i64 { return 152; }
 
 fn sfn_spawn_task(fn_ptr: * u8) -> * u8 {
     // Allocate the task via malloc.
@@ -376,17 +382,22 @@ fn sfn_spawn_task(fn_ptr: * u8) -> * u8 {
     if task_ptr as i64 == 0 { return null; }
 
     // Zero the allocation: fn_ptr at offset 0, ctx at 8, result at 16,
-    // done at 24.  Use offset arithmetic (same split-statement pattern
-    // as sfn_task_run / sfn_task_join in scheduler.sfn).
+    // done at 24, detached at 144.  Use offset arithmetic (same
+    // split-statement pattern as sfn_task_run / sfn_task_join in
+    // scheduler.sfn).  `detached` is zeroed so the shared pool worker treats
+    // this task as joinable and never reclaims it (v0 join-without-destroy),
+    // matching the scheduler's default `sfn_task_create` discipline.
     let base: i64 = task_ptr as i64;
     let fn_slot: * i64 = base as * i64;
     let ctx_slot: * i64 = (base + 8) as * i64;
     let result_slot: * i64 = (base + 16) as * i64;
     let done_slot: * i64 = (base + 24) as * i64;
+    let detached_slot: * i64 = (base + 144) as * i64;
     atomic_store(fn_slot, fn_ptr as i64);
     atomic_store(ctx_slot, 0);
     atomic_store(result_slot, 0);
     atomic_store(done_slot, 0);
+    atomic_store(detached_slot, 0);
 
     return task_ptr;
 }

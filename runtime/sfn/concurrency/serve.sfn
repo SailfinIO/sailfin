@@ -54,14 +54,17 @@
 // (post-1.0). The default `sfn_serve` response is always `200 OK` with
 // a `Content-Length`; a null handler return becomes a `500`.
 //
-// v0 limitations (follow-up waves): (1) per-connection `Task`
-// handles are fire-and-forget — never `sfn_task_join`ed or
-// destroyed — so each connection leaks one 144-byte `Task`. Reaping
-// fire-and-forget tasks needs a scheduler-side completion sweep
-// (separate issue); the connection `ctx` pair IS freed by the
-// worker. (2) No keep-alive (`Connection: close` semantics, one
-// request per connection). (3) No request routing / method dispatch
-// — that is the handler's job.
+// v0 limitations (follow-up waves): (1) No keep-alive (`Connection:
+// close` semantics, one request per connection). (2) No request
+// routing / method dispatch — that is the handler's job.
+//
+// (#1203, fixed) Per-connection `Task` handles are fire-and-forget —
+// never `sfn_task_join`ed — so they use the detached constructor
+// (`sfn_task_create_detached`): the pool worker that runs each one reclaims
+// its `Task` after the body returns (`sfn_scheduler_worker`), so a
+// sustained-connection workload no longer leaks one `Task` per connection.
+// The connection `ctx` pair is freed by the worker body; the response
+// `OwnedBuf` is freed by the worker after the send.
 //
 // Effects: `sfn_serve` is `![net, io]`; the flipped `serve_start`
 // descriptor carries the same effects, so calling `serve(...)`
@@ -132,7 +135,11 @@ extern fn sfn_taskqueue_destroy(queue: * u8) -> void;
 
 extern fn sfn_taskqueue_enqueue(queue: * u8, task: * u8) -> void;
 
-extern fn sfn_task_create(fn_ptr: i64, ctx: i64) -> * u8;
+// Per-connection tasks are fire-and-forget: `sfn_serve` never joins them,
+// so they use the detached constructor (#1203). The pool worker that runs a
+// detached task reclaims its `Task` handle after `sfn_task_run` returns —
+// closing the one-`Task`-per-connection leak the v0 server documented.
+extern fn sfn_task_create_detached(fn_ptr: i64, ctx: i64) -> * u8;
 
 extern fn sfn_scheduler_create(queue: * u8) -> * u8;
 
@@ -547,8 +554,8 @@ fn _serve_conn_worker(ctx: * u8) -> * u8 {
 // (`_serve_free_owned`), closing the per-connection response-buffer leak
 // the v0 `* u8`-out ABI could not — the runtime now has a typed last
 // owner that knows the libc/arena discipline. The fire-and-forget `Task`
-// handle leak (a separate concern) is still tracked with the pool-reaping
-// work.
+// handle is now reclaimed by the pool worker via the detached path (#1203 —
+// `sfn_task_create_detached` in the accept loop below).
 fn _serve_conn_worker_framed(ctx: * u8) -> * u8 {
     if ctx as i64 == 0 { return null; }
     let base: i64 = ctx as i64;
@@ -660,7 +667,7 @@ fn sfn_serve(handler: * u8, port: i32) -> void ![net, io] {
         atomic_store(handler_slot, handler as i64);
 
         let worker: * fn (* u8) -> * u8 = _serve_conn_worker as * fn (* u8) -> * u8;
-        let task: * u8 = sfn_task_create(worker as i64, conn_ctx as i64);
+        let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
         if task as i64 == 0 {
             free(conn_ctx);
             close(client_fd);
@@ -713,7 +720,7 @@ fn sfn_serve_framed(handler: * u8, port: i32) -> void ![net, io] {
         atomic_store(handler_slot, handler as i64);
 
         let worker: * fn (* u8) -> * u8 = _serve_conn_worker_framed as * fn (* u8) -> * u8;
-        let task: * u8 = sfn_task_create(worker as i64, conn_ctx as i64);
+        let task: * u8 = sfn_task_create_detached(worker as i64, conn_ctx as i64);
         if task as i64 == 0 {
             free(conn_ctx);
             close(client_fd);

@@ -945,6 +945,14 @@ spawn+await.
 listening socket, dispatching each connection to the thread pool. Blocking
 accept, thread-pool dispatch. No async I/O in v0.
 
+Per-connection tasks are **detached** (fire-and-forget): the server never
+joins them, so they are created via `sfn_task_create_detached` and the pool
+worker that runs each one reclaims its `Task` after the body returns
+(`sfn_scheduler_worker`, #1203). Without this the server leaked one `Task`
+per connection — unbounded under sustained load. The joinable `spawn`/`await`
+path is unchanged: those tasks set `detached = 0` and are reclaimed by their
+joiner.
+
 #### 2.6.7 Routine Nursery (Structured Concurrency)
 
 `routine { }` is a structured-concurrency boundary, not a plain block. It
