@@ -2,8 +2,8 @@
 //
 // General utility functions for the LLVM lowering pass. These are basic
 // string manipulation, array helpers, and parsing utilities.
-import { ParameterBinding } from "./types";
 import { char_code, substring } from "../string_utils";
+import { ParameterBinding } from "./types";
 
 // =============================================================================
 // String manipulation

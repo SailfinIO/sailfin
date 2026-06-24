@@ -1,0 +1,339 @@
+// Behavioral regression for SO_REUSEADDR on the `serve` listening socket
+// (#1583, gap B8 of epic #1540). `_serve_bind_listen`
+// (runtime/sfn/concurrency/serve.sfn) now arms `SO_REUSEADDR` before
+// `bind`, so a server can rebind its port immediately after a restart
+// instead of failing with `EADDRINUSE` while a prior connection's socket
+// lingers in `TIME_WAIT`.
+//
+// The scenario this pins: start a server, drive ONE loopback request (the
+// server actively closes the connection, leaving a `TIME_WAIT` socket
+// bound to the listen port), let the first server self-reap, then start a
+// SECOND server on the SAME port. Without `SO_REUSEADDR` the second
+// `bind` returns `EADDRINUSE` (the `TIME_WAIT` socket holds the port),
+// `_serve_bind_listen` returns -1, the server exits without binding, and
+// the readiness probe never succeeds. With it, the rebind succeeds and
+// the second server answers.
+//
+// Pattern + scaffolding mirror `serve_loopback_test.sfn` (raw libc client,
+// build-once / spawn-as-subprocess, `timeout`-wrapped self-reap, skip
+// cleanly when no timeout command exists). Matchers note (#842):
+// `sfn/test`'s `expect_*` are `![pure]`, so an `![io]` test asserts on the
+// captured response text with `sfn/strings::contains` instead.
+import { contains } from "sfn/strings";
+
+// ── libc memory + string + socket surface (test-local raw client) ──
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+
+extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+
+extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+extern fn close(fd: i32) -> i32;
+
+// A fixed port, distinct from `serve_loopback_test.sfn`'s 18790 so the two
+// server-loopback legs never collide under `--jobs N`. This test spawns
+// its two servers strictly sequentially (the first is reaped before the
+// second binds), so the port is reused only after `TIME_WAIT`.
+fn _rr_port() -> i64 { return 18791; }
+
+fn _rr_port_str() -> string { return "18791"; }
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The nested build LINKS a binary (clang + ld), so thread the parent's
+// full environment (`run_capture`/`spawn_with_env`'s empty env is the
+// EMPTY environment, not "inherit"). SAILFIN_TEST_SCRATCH is already in
+// there (the runner sets it), keeping the build cache per-invocation under
+// the parallel pool (`.claude/rules/no-bash-e2e.md`).
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+// Resolve a wall-clock timeout command (mirrors serve_loopback_test.sfn).
+// Empty => none found; the test then skips, since the blocking server has
+// no other teardown path (`serve()` never returns, no process-kill
+// primitive).
+fn _timeout_cmd() -> string ![io] {
+    let probe = process.run(["sh", "-c", "command -v timeout >/dev/null 2>&1"]);
+    if probe == 0 { return "timeout"; }
+    let gprobe = process.run(["sh", "-c", "command -v gtimeout >/dev/null 2>&1"]);
+    if gprobe == 0 { return "gtimeout"; }
+    return "";
+}
+
+// ── raw loopback client (inlined `http.sfn::_connect_tcp` idiom) ──
+fn _rr_ptr_off(p: * u8, off: i64) -> * u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as * u8;
+}
+
+// Connect a stream socket to `127.0.0.1:port`, trying both `sockaddr_in`
+// byte layouts (Linux u16 sin_family at 0; macOS/BSD u8 sin_len at 0 + u8
+// sin_family at 1), first success wins. Returns the connected fd or -1.
+fn _rr_connect(port: i64) -> i32 {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 2 { break; }
+        let addr: * u8 = malloc(16 as usize);
+        if addr as i64 == 0 { return 0 - 1; }
+        memset(addr, 0, 16 as usize);
+        if attempt == 0 {
+            memset(_rr_ptr_off(addr, 0), 2, 1 as usize);
+        } else {
+            memset(_rr_ptr_off(addr, 0), 16, 1 as usize);
+            memset(_rr_ptr_off(addr, 1), 2, 1 as usize);
+        }
+        memset(_rr_ptr_off(addr, 2), ((port >> 8) & 255) as i32, 1 as usize);
+        memset(_rr_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
+        // sin_addr = 127.0.0.1
+        memset(_rr_ptr_off(addr, 4), 127, 1 as usize);
+        memset(_rr_ptr_off(addr, 7), 1, 1 as usize);
+        let fd: i32 = socket(2, 1, 0);
+        if fd < 0 {
+            free(addr);
+            return 0 - 1;
+        }
+        let rc: i32 = connect(fd, addr, 16);
+        free(addr);
+        if rc == 0 { return fd; }
+        close(fd);
+        attempt = attempt + 1;
+    }
+    return 0 - 1;
+}
+
+fn _rr_send_all(fd: i32, buf: * u8, total: i64) -> bool {
+    let mut sent: i64 = 0;
+    loop {
+        if sent >= total { break; }
+        let n: i64 = send(fd, _rr_ptr_off(buf, sent), total - sent, 0);
+        if n <= 0 { return false; }
+        sent = sent + n;
+    }
+    return true;
+}
+
+// Drain to EOF (the server frames `Connection: close`) and return the
+// bytes as a string. The buffer is intentionally not freed: `* u8 as
+// string` aliases the pointer (no copy) and the test process is
+// short-lived.
+fn _rr_recv_all(fd: i32) -> string {
+    let mut capacity: i64 = 8192;
+    let mut len: i64 = 0;
+    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    if buf as i64 == 0 { return ""; }
+    let chunk: i64 = 8192;
+    loop {
+        if len + chunk > capacity {
+            let new_cap: i64 = capacity * 2;
+            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            if new_buf as i64 == 0 {
+                free(buf);
+                return "";
+            }
+            buf = new_buf;
+            capacity = new_cap;
+        }
+        let n: i64 = recv(fd, _rr_ptr_off(buf, len), chunk, 0);
+        if n < 0 {
+            free(buf);
+            return "";
+        }
+        if n == 0 { break; }
+        len = len + n;
+    }
+    memset(_rr_ptr_off(buf, len), 0, 1 as usize);
+    return buf as string;
+}
+
+// Open a fresh connection, send `request` verbatim, drain the response,
+// and close. Returns "" on a connect/send failure (server not up).
+fn _rr_request(port: i64, request: string) -> string {
+    let fd: i32 = _rr_connect(port);
+    if fd < 0 { return ""; }
+    if !_rr_send_all(fd, request as * u8, strlen(request as * u8) as i64) {
+        close(fd);
+        return "";
+    }
+    let resp = _rr_recv_all(fd);
+    close(fd);
+    return resp;
+}
+
+// A minimal `sfn/http` consumer: `/probe` echoes the method (readiness),
+// `/` returns a fixed body. Lives inside the repo tree so workspace
+// discovery resolves the `sfn/http` dependency.
+fn _app_root() -> string { return "build/serve-reuseaddr-e2e"; }
+
+fn _write_server(port_str: string) -> string ![io] {
+    let root = _app_root();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"sfn/http-reuseaddr-e2e-app\"\n"
+        + "version = \"0.0.1\"\n"
+        + "description = \"sfn/http serve SO_REUSEADDR restart e2e consumer\"\n"
+        + "\n"
+        + "[dependencies]\n"
+        + "\"sfn/http\" = \"*\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = [\"io\", \"net\"]\n"
+        + "\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n"
+        + "kind = \"library\"\n");
+    fs.writeFile(root + "/src/main.sfn", "import { serve, Request, Response, not_found } from \"sfn/http\";\n"
+        + "\n"
+        + "fn handle(req: Request) -> Response {\n"
+        + "    if strings_equal(req.path, \"/\") {\n"
+        + "        return Response { status: 200, headers: [\"X-Root: 1\"], body: \"ROOT-OK\" };\n"
+        + "    }\n"
+        + "    if strings_equal(req.path, \"/probe\") {\n"
+        + "        return Response { status: 200, headers: [\"X-Probe: 1\"], body: \"M=\" + req.method };\n"
+        + "    }\n"
+        + "    return not_found();\n"
+        + "}\n"
+        + "\n"
+        + "fn main() -> int ![net, io] {\n"
+        + "    serve(handle as * fn (Request) -> Response, "
+        + port_str
+        + ");\n"
+        + "    return 0;\n"
+        + "}\n");
+    return root + "/src/main.sfn";
+}
+
+// Compile the consumer to a standalone binary up front (synchronous), so
+// the cold `sfn/http` compile happens ONCE and is not inside any readiness
+// window. Returns the binary path, or "" on a build failure.
+fn _build_bin(main_path: string, bin: string) -> string ![io] {
+    let exit = process.run_capture([_sfn_bin(), "build", "-o", bin, main_path], _child_env());
+    let _out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    return bin;
+}
+
+// Spawn the prebuilt blocking server wrapped in a wall-clock timeout so it
+// self-reaps (`serve()` never returns; no process-kill primitive). `secs`
+// bounds the server's lifetime. Returns the spawn handle (unused for
+// teardown — the timeout owns the lifetime).
+fn _spawn_server(bin: string, secs: string) -> i64 ![io] {
+    let tcmd = _timeout_cmd();
+    let mut argv: string[] = [];
+    if tcmd.length > 0 {
+        argv.push(tcmd);
+        argv.push(secs);
+    }
+    argv.push(bin);
+    return process.spawn_with_env(argv, _child_env());
+}
+
+// Poll `GET /probe` until the prebuilt server answers. Returns the
+// response, or "" if it never came up within the budget (~30s = 60 × 0.5s).
+fn _await_ready(port: i64) -> string ![io] {
+    let probe = "GET /probe HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 60 { break; }
+        let resp = _rr_request(port, probe);
+        if resp.length > 0 {
+            if contains(resp, "M=GET") { return resp; }
+        }
+        let _ = process.run(["sleep", "0.5"]);
+        attempt = attempt + 1;
+    }
+    return "";
+}
+
+// Poll until the server stops answering — i.e. the `timeout`-wrapped
+// process has been reaped and released the listening socket. Returns true
+// once a probe fails (server down), false if it was still up after the
+// budget (~30s = 60 × 0.5s). The second server must NOT race a live first
+// server for the port (SO_REUSEADDR does not permit two live listeners —
+// that is SO_REUSEPORT).
+fn _await_down(port: i64) -> bool ![io] {
+    let probe = "GET /probe HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 60 { break; }
+        let resp = _rr_request(port, probe);
+        if resp.length == 0 || !contains(resp, "M=GET") { return true; }
+        let _ = process.run(["sleep", "0.5"]);
+        attempt = attempt + 1;
+    }
+    return false;
+}
+
+test "serve: SO_REUSEADDR lets a server rebind its port after restart (#1583)" ![io] {
+    // The blocking server is reaped only by a wall-clock timeout; without
+    // `timeout`/`gtimeout` the spawned server would orphan the fixed port
+    // and poison subsequent runs — skip cleanly (CI runners always have
+    // `timeout`). Mirrors serve_loopback_test.sfn / the sanitizer-skip
+    // precedent in `.claude/rules/compiler-safety.md`.
+    if _timeout_cmd().length == 0 {
+        print.info("[serve-reuseaddr] SKIP: no timeout/gtimeout to reap the blocking server");
+        return;
+    }
+
+    let port = _rr_port();
+    let main_path = _write_server(_rr_port_str());
+
+    // Build once; both phases run the same binary.
+    let server_bin = _build_bin(main_path, _app_root() + "/server-bin");
+    assert server_bin.length > 0;
+
+    // ── Phase 1: bring a server up, drive one request, then reap it. ──
+    // The short timeout self-reaps the first server within ~6s; the one
+    // request makes the server actively close a connection, leaving a
+    // TIME_WAIT socket bound to the listen port — the exact condition that
+    // makes a naive rebind fail with EADDRINUSE.
+    let _h1 = _spawn_server(server_bin, "6");
+    let ready1 = _await_ready(port);
+    print.info("[serve-reuseaddr] phase-1 ready: " + ready1);
+    assert ready1.length > 0;
+    assert contains(ready1, "HTTP/1.1 200");
+    assert contains(ready1, "M=GET");
+
+    let r1 = _rr_request(port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    print.info("[serve-reuseaddr] phase-1 root: " + r1);
+    assert contains(r1, "ROOT-OK");
+
+    // Wait for the first server to be reaped (port released by the live
+    // listener; the TIME_WAIT connection socket remains).
+    let down = _await_down(port);
+    print.info("[serve-reuseaddr] phase-1 down: reaped");
+    assert down;
+
+    // ── Phase 2: immediately rebind the SAME port. ──
+    // Without SO_REUSEADDR, bind() returns EADDRINUSE (the TIME_WAIT socket
+    // still holds the port), the server exits without listening, and the
+    // readiness probe never succeeds. With SO_REUSEADDR the rebind succeeds.
+    let _h2 = _spawn_server(server_bin, "30");
+    let ready2 = _await_ready(port);
+    print.info("[serve-reuseaddr] phase-2 ready: " + ready2);
+    assert ready2.length > 0;
+    assert contains(ready2, "HTTP/1.1 200");
+    assert contains(ready2, "M=GET");
+
+    let r2 = _rr_request(port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    print.info("[serve-reuseaddr] phase-2 root: " + r2);
+    assert contains(r2, "ROOT-OK");
+
+    // Best-effort cleanup (the timeout reaps the second server).
+    let _rm = process.run(["rm", "-rf", _app_root()]);
+}

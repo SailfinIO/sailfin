@@ -200,6 +200,53 @@ test "string-cast: float → string stringifies via the number→string aggregat
     assert contains(body, "insertvalue {i8*, i64}");
 }
 
+// ---- narrow int / bool / f32 → string stringify (narrow-width arms) — #1587 ----
+// #1505 only added the source-level `int` (i64) and `float` (double) arms;
+// narrower scalar numerics (`i32`/`i16`/`i8`, `bool`/`i1`, `f32`/float) fell
+// through to a null operand and silently lowered to "0". These widen to the
+// i64/double the #1505 arms stringify (`sext`/`zext` to i64, `fpext` to
+// double) then reuse the number→string + length-recovery aggregate.
+test "string-cast: i32 → string widens via sext then stringifies (#1587)" ![io] {
+    let body = _emit_body("fn label(x: i32) -> string { return x as string; }", "define {i8*, i64} @label", "i32_to_string");
+    assert body.length > 0;
+    assert contains(body, "sext i32 %x to i64");
+    assert contains(body, "sitofp i64");
+    assert contains(body, "insertvalue {i8*, i64}");
+}
+
+test "string-cast: i8 → string widens via sext then stringifies (#1587)" ![io] {
+    let body = _emit_body("fn label(x: i8) -> string { return x as string; }", "define {i8*, i64} @label", "i8_to_string");
+    assert body.length > 0;
+    assert contains(body, "sext i8 %x to i64");
+    assert contains(body, "insertvalue {i8*, i64}");
+}
+
+test "string-cast: bool → string widens via zext then stringifies (#1587)" ![io] {
+    let body = _emit_body("fn label(x: bool) -> string { return x as string; }", "define {i8*, i64} @label", "bool_to_string");
+    assert body.length > 0;
+    assert contains(body, "zext i1 %x to i64");
+    assert contains(body, "insertvalue {i8*, i64}");
+}
+
+test "string-cast: f32 → string widens via fpext then stringifies (#1587)" ![io] {
+    let body = _emit_body("fn label(x: f32) -> string { return x as string; }", "define {i8*, i64} @label", "f32_to_string");
+    assert body.length > 0;
+    assert contains(body, "fpext float %x to double");
+    assert contains(body, "insertvalue {i8*, i64}");
+}
+
+// ---- f32 local from a double literal narrows via fptrunc (#1587 bundled) ----
+// Float literals lower as `double` constants; storing one into an `f32` slot
+// needs a narrowing `fptrunc`. Without the `double → float` arm in
+// `coerce_numeric_primitive` the store defaulted to `zeroinitializer`, so
+// `let x: f32 = 3.5` silently became 0 and `x as string` printed "0".
+test "numeric-cast: f32 local from double literal narrows via fptrunc (#1587)" ![io] {
+    let body = _emit_body("fn mk() -> f32 { let x: f32 = 3.5; return x; }", "define float @mk", "f32_local_fptrunc");
+    assert body.length > 0;
+    assert contains(body, "fptrunc double");
+    assert ! contains(body, "store float zeroinitializer");
+}
+
 // ---- pointer → bool is rejected (not ptrtoint) ----
 // Without the early `as bool` check, `ptr as bool` would lower to
 // `ptrtoint ptr to i1`, a low-bit reinterpretation rather than the

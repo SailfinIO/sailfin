@@ -35,21 +35,21 @@
 // path today (see the `init.sfn` note), so they lower to 0 in the importing
 // module — `login` needs 1, so it uses literals to return it correctly.
 import {
-    get,
     Command,
     Matches,
+    arg_optional,
     command,
-    with_arg,
-    arg_optional
+    get,
+    with_arg
 } from "sfn/cli";
 
-import { CliContext } from "../context";
 import {
+    _ensure_dir_recursive_cmd,
     _get_home_cmd,
-    _toml_trim_cmd,
     _shell_read_cmd,
-    _ensure_dir_recursive_cmd
+    _toml_trim_cmd
 } from "../../cli_commands_utils";
+import { CliContext } from "../context";
 
 // Sentinel `default_value` for the optional `[token]` positional, returned
 // by `get(matches, "token")` only when no token was supplied on the command

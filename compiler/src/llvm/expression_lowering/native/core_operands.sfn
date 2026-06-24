@@ -6,36 +6,36 @@
 // `harmonise_operands`), emits comparison instructions for equality and
 // relational operators (`emit_comparison_instruction`, `emit_boolean_and`),
 // and provides local variable loading (`load_local_operand`).
-import { array_pointer_element_type } from "../arrays";
+import { NativeSourceSpan } from "../../../native_ir";
+import { char_code } from "../../../string_utils";
+import { default_return_literal, format_temp_name } from "../../expressions_helpers";
+import { trace_lowering } from "../../lowering_debug_state";
+import { ends_with_pointer_suffix, numeric_type_kind, strip_pointer_suffix } from "../../type_mapping";
 import {
-    LLVMOperand,
-    LocalBinding,
+    BinaryAlignmentResult,
     CoercionResult,
-    LoadLocalResult,
     ComparisonEmission,
-    BinaryAlignmentResult
+    LLVMOperand,
+    LoadLocalResult,
+    LocalBinding
 } from "../../types";
 import { starts_with } from "../../utils";
+import { array_pointer_element_type } from "../arrays";
 import {
-    trim_text,
     append_string,
-    number_to_string,
     char_code_at_text,
-    is_union_llvm_type,
     find_substring_from,
-    parse_union_payload_types
+    is_union_llvm_type,
+    number_to_string,
+    parse_union_payload_types,
+    trim_text
 } from "./core_text";
 import {
-    emit_runtime_call,
     RuntimeCallOverrides,
+    emit_runtime_call,
     empty_runtime_call_overrides
 } from "./runtime_call";
 import { recover_temp_from_lines } from "./temp_recovery";
-import { NativeSourceSpan } from "../../../native_ir";
-import { numeric_type_kind, strip_pointer_suffix, ends_with_pointer_suffix } from "../../type_mapping";
-import { char_code } from "../../../string_utils";
-import { format_temp_name, default_return_literal } from "../../expressions_helpers";
-import { trace_lowering } from "../../lowering_debug_state";
 
 // Slice E.2 follow-up (#540): tiny inline formatter so coerce diagnostics
 // can attach a source span without crossing the `core_ownership` →
@@ -503,6 +503,29 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
                 lines: stn_result.lines,
                 temp_index: stn_result.temp_index,
                 operand: stn_result.operand,
+                diagnostics: diagnostics
+            };
+        }
+    }
+    if target == "float" {
+        if operand_type == "double" {
+            // #1587 (bundled): float literals lower as `double` constants, so
+            // storing one into an `f32` slot (`let x: f32 = 3.5`) or passing it
+            // to a `float` parameter needs a narrowing `fptrunc`. Without this
+            // arm the coercion returned null and the store defaulted to
+            // `zeroinitializer`, so `let x: f32 = 3.5` silently became 0 (and
+            // `x as string` then printed "0"). This mirrors the `fptrunc`
+            // double→float entry the `as` cast matrix already maps
+            // (type_mapping.sfn) but that was missing from this primitive
+            // coercion helper.
+            let temp_name = format_temp_name(temp_index);
+            current_lines.push("  " + temp_name + " = fptrunc double " + operand.value
+                + " to float");
+            let coerced = LLVMOperand { llvm_type: "float", value: temp_name };
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index + 1,
+                operand: coerced,
                 diagnostics: diagnostics
             };
         }
@@ -1070,6 +1093,103 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 operand: coerced,
                 diagnostics: diagnostics
             };
+        }
+        // #1587: the `i64`/`double` arms above only match the source-level
+        // `int`/`float` widths the #1505 fix targeted. Any other scalar
+        // numeric operand (narrow ints, `bool`, `f32`) previously fell
+        // through to the "unable to coerce" diagnostic and a null operand,
+        // which `lower_cast_expression` defaults to `double 0.0` — so
+        // `x as string` silently lowered to "0". Widen each to the `i64` /
+        // `double` an arm above already stringifies, then recurse so the
+        // widened operand reuses the existing number→string + length
+        // recovery chain. Mirrors the `coerce_operand_to_string` precedent
+        // (core_strings.sfn). Signed widening (`sext`) matches the `i64`
+        // arm's `sitofp`; the source-level signed/unsigned cast matrix is a
+        // separate Slice D follow-up (out of scope per the issue).
+        let mut _is_narrow_int: boolean = false;
+        if operand_type == "i32" { _is_narrow_int = true; }
+        if operand_type == "i16" { _is_narrow_int = true; }
+        if operand_type == "i8" { _is_narrow_int = true; }
+        if _is_narrow_int {
+            let widened = format_temp_name(temp_index);
+            current_lines.push("  " + widened + " = sext " + operand_type + " "
+                + operand.value
+                + " to i64");
+            let widened_operand = LLVMOperand {
+                llvm_type: "i64",
+                value: widened
+            };
+            let rec = coerce_pointer_or_struct(widened_operand, "i64", target, temp_index
+                + 1, current_lines);
+            if rec != null {
+                let mut _rd_i: int = 0;
+                loop {
+                    if _rd_i >= rec.diagnostics.length { break; }
+                    diagnostics.push(rec.diagnostics[_rd_i]);
+                    _rd_i += 1;
+                }
+                return CoercionResult {
+                    lines: rec.lines,
+                    temp_index: rec.temp_index,
+                    operand: rec.operand,
+                    diagnostics: diagnostics
+                };
+            }
+        }
+        if operand_type == "i1" {
+            // No runtime bool→string helper exists, and a `true`/`false`
+            // string literal would need the `string_constants` table that
+            // only `ExpressionResult` carries (not `CoercionResult`), so
+            // emit decimal `0`/`1` via the i64 chain — the issue sanctions
+            // 0/1 text for this arm.
+            let widened = format_temp_name(temp_index);
+            current_lines.push("  " + widened + " = zext i1 " + operand.value
+                + " to i64");
+            let widened_operand = LLVMOperand {
+                llvm_type: "i64",
+                value: widened
+            };
+            let rec = coerce_pointer_or_struct(widened_operand, "i64", target, temp_index
+                + 1, current_lines);
+            if rec != null {
+                let mut _rd_i: int = 0;
+                loop {
+                    if _rd_i >= rec.diagnostics.length { break; }
+                    diagnostics.push(rec.diagnostics[_rd_i]);
+                    _rd_i += 1;
+                }
+                return CoercionResult {
+                    lines: rec.lines,
+                    temp_index: rec.temp_index,
+                    operand: rec.operand,
+                    diagnostics: diagnostics
+                };
+            }
+        }
+        if operand_type == "float" {
+            let widened = format_temp_name(temp_index);
+            current_lines.push("  " + widened + " = fpext float " + operand.value
+                + " to double");
+            let widened_operand = LLVMOperand {
+                llvm_type: "double",
+                value: widened
+            };
+            let rec = coerce_pointer_or_struct(widened_operand, "double", target, temp_index
+                + 1, current_lines);
+            if rec != null {
+                let mut _rd_i: int = 0;
+                loop {
+                    if _rd_i >= rec.diagnostics.length { break; }
+                    diagnostics.push(rec.diagnostics[_rd_i]);
+                    _rd_i += 1;
+                }
+                return CoercionResult {
+                    lines: rec.lines,
+                    temp_index: rec.temp_index,
+                    operand: rec.operand,
+                    diagnostics: diagnostics
+                };
+            }
         }
     }
 

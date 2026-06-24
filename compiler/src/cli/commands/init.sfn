@@ -27,10 +27,10 @@
 // it must use literals to return them correctly.
 import { Command, Matches, command } from "sfn/cli";
 
-import { CliContext } from "../context";
-import { toml_generate } from "../../toml_parser";
-import { substring } from "../../string_utils";
 import { _get_env_cmd } from "../../cli_commands_utils";
+import { substring } from "../../string_utils";
+import { toml_generate } from "../../toml_parser";
+import { CliContext } from "../context";
 
 // The `sfn/cli` definition for `init`, registered on the v2 root via
 // `with_subcommand`. No args or flags — `init` is a bare subcommand.

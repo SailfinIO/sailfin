@@ -1,45 +1,45 @@
 // compiler/src/llvm/lowering/instructions_for_range.sfn
 //
 // Control flow handler: range-based for-loop instruction lowering.
-import { collect_mutation_names, find_mutation_for_name } from "./phi";
-import {
-    LLVMOperand,
-    LoopContext,
-    TypeContext,
-    LocalBinding,
-    LocalMutation,
-    LoopStructure,
-    StringConstant,
-    ParameterBinding,
-    BlockLoweringResult,
-    LifetimeRegionMetadata
-} from "../types";
-import { trim_text, extend_string_array } from "../utils";
-import { merge_string_constants, empty_string_constant_set } from "../strings";
-import { make_child_scope_id } from "../lifetime";
-import { lower_instruction_range } from "./instructions";
-import { NativeFunction, NativeSourceSpan, NativeInstruction } from "../../native_ir";
-import { append_loop_context } from "./instructions_loops";
-import { format_temp_name, format_local_pointer_name } from "../expressions_helpers";
-import {
-    emit_scope_drops,
-    extend_mutations,
-    _parse_int_from_string,
-    extend_lifetime_regions,
-    loop_body_rewind_eligible
-} from "./instructions_helpers";
-import { find_local_binding } from "../expressions_bindings";
-import { is_number_literal, normalise_number_literal } from "../expressions_literals";
-import { allocate_block_label } from "./instructions_condition";
-import { get_instruction_scan_text } from "./lowering_native_helpers";
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { lower_expression } from "../expression_lowering/native/core";
+import {
+    coerce_operand_to_type,
+    emit_comparison_instruction,
+    load_local_operand
+} from "../expression_lowering/native/core_operands";
 import { parse_range_iterable } from "../expression_lowering/native/core_parse";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
+import { find_local_binding } from "../expressions_bindings";
+import { format_local_pointer_name, format_temp_name } from "../expressions_helpers";
+import { is_number_literal, normalise_number_literal } from "../expressions_literals";
+import { make_child_scope_id } from "../lifetime";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
-    load_local_operand,
-    coerce_operand_to_type,
-    emit_comparison_instruction
-} from "../expression_lowering/native/core_operands";
+    BlockLoweringResult,
+    LLVMOperand,
+    LifetimeRegionMetadata,
+    LocalBinding,
+    LocalMutation,
+    LoopContext,
+    LoopStructure,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
+} from "../types";
+import { extend_string_array, trim_text } from "../utils";
+import { lower_instruction_range } from "./instructions";
+import { allocate_block_label } from "./instructions_condition";
+import {
+    _parse_int_from_string,
+    emit_scope_drops,
+    extend_lifetime_regions,
+    extend_mutations,
+    loop_body_rewind_eligible
+} from "./instructions_helpers";
+import { append_loop_context } from "./instructions_loops";
+import { get_instruction_scan_text } from "./lowering_native_helpers";
+import { collect_mutation_names, find_mutation_for_name } from "./phi";
 
 // Lower a range-based for loop (e.g., `for i in 0..10`).
 // Returns null if the iterable is not a recognized range pattern.

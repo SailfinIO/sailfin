@@ -3,14 +3,14 @@
 // String array operations, file I/O helpers, and miscellaneous lowering
 // utilities.  Extracted from lowering_core.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
-import { StringConstant, LifetimeRegionMetadata } from "../types";
+import { substring } from "../../string_utils";
+import { LifetimeRegionMetadata, StringConstant } from "../types";
 import {
     index_of,
-    trim_text,
+    number_to_string,
     starts_with,
-    number_to_string
+    trim_text
 } from "../utils";
-import { substring } from "../../string_utils";
 
 // ── String array operations ──────────────────────────────────────────
 fn extend_string_lines(values: string[], extras: string[]) -> string[] {

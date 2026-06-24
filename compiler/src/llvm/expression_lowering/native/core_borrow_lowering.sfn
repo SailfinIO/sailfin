@@ -1,18 +1,18 @@
 // compiler/src/llvm/expression_lowering/native/core_borrow_lowering.sfn
 //
 // Borrow-expression lowering extracted from core.sfn.
+import { empty_string_constant_set } from "../../strings";
 import {
+    BorrowParseResult,
+    ExpressionResult,
     LLVMOperand,
     LocalBinding,
-    ExpressionResult,
-    ParameterBinding,
-    BorrowParseResult
+    ParameterBinding
 } from "../../types";
-import { ends_with, trim_text, append_string } from "../../utils";
-import { empty_string_constant_set } from "../../strings";
-import { find_local_binding } from "./core_scopes";
+import { append_string, ends_with, trim_text } from "../../utils";
 import { find_parameter_binding } from "./core_bindings";
 import { strip_enclosing_parentheses } from "./core_operators";
+import { find_local_binding } from "./core_scopes";
 
 fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[]) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;

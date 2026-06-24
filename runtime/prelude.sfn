@@ -49,20 +49,20 @@
 // emits `@runtime = external global` in every module it compiles, so
 // the definition must survive until a post-flip seed is cut. See
 // `docs/runtime_audit.md` for the full per-symbol table.
-import { sfn_print_sfn, sfn_log_execution } from "./sfn/io";
 import { sfn_array_sfn_map } from "./sfn/array";
 import { sfn_sleep } from "./sfn/clock";
-import { sfn_to_debug_string } from "./sfn/string";
-import { sfn_process_run } from "./sfn/process";
 import { sfn_throw } from "./sfn/exception";
+import { sfn_log_execution, sfn_print_sfn } from "./sfn/io";
+import { sfn_process_run } from "./sfn/process";
+import { sfn_to_debug_string } from "./sfn/string";
 import {
-    sfn_is_void,
+    sfn_instance_of,
     sfn_is_array,
+    sfn_is_boolean,
+    sfn_is_callable,
     sfn_is_number,
     sfn_is_string,
-    sfn_is_boolean,
-    sfn_instance_of,
-    sfn_is_callable,
+    sfn_is_void,
     sfn_resolve_type
 } from "./sfn/type_meta";
 

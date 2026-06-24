@@ -243,6 +243,26 @@ fn _serve_set_socket_timeouts(fd: i32) -> void {
     free(tv);
 }
 
+// `_serve_set_reuseaddr(fd)` — arm SO_REUSEADDR on the listening socket
+// before `bind` so a server can rebind its port immediately after a
+// restart instead of failing with `EADDRINUSE` while the prior socket
+// lingers in `TIME_WAIT` (#1583, gap B8 of epic #1540). The optval is a
+// 4-byte `int` set to 1 (little-endian: low byte = 1). Like
+// `_serve_set_socket_timeouts`, the constants differ across the two
+// targets this runtime builds for, so we arm both and let the
+// wrong-platform call fail harmlessly:
+//   - Linux:     SOL_SOCKET = 1,     SO_REUSEADDR = 2.
+//   - macOS/BSD: SOL_SOCKET = 65535, SO_REUSEADDR = 4.
+fn _serve_set_reuseaddr(fd: i32) -> void {
+    let optval: * u8 = malloc(4 as usize);
+    if optval as i64 == 0 { return; }
+    memset(optval, 0, 4 as usize);
+    memset(_serve_ptr_off(optval, 0), 1, 1 as usize);
+    setsockopt(fd, 1, 2, optval, 4);
+    setsockopt(fd, 65535, 4, optval, 4);
+    free(optval);
+}
+
 // `_serve_content_length(buf, header_end)` — extract the declared
 // `Content-Length` from the request head (bytes `[0, header_end)`,
 // where `header_end` is the offset just past the `\r\n\r\n`
@@ -637,6 +657,9 @@ fn _serve_bind_listen(port: i64) -> i32 {
         if attempt >= 2 { break; }
         let fd: i32 = socket(2, 1, 0);
         if fd < 0 { return 0 - 1; }
+        // Allow immediate rebind after a restart (skip TIME_WAIT
+        // EADDRINUSE) — armed before `bind` (#1583).
+        _serve_set_reuseaddr(fd);
         let addr: * u8 = malloc(16 as usize);
         if addr as i64 == 0 {
             close(fd);

@@ -3,9 +3,9 @@
 // Text processing utilities and structured data parsers used by the
 // LLVM lowering recovery code.  Extracted from lowering_core.sfn to
 // reduce per-file memory footprint during self-hosting compilation.
+import { char_code, substring } from "../../string_utils";
 import { StringConstant } from "../types";
 import { index_of } from "../utils";
-import { char_code, substring } from "../../string_utils";
 
 // ── Character / string utilities ─────────────────────────────────────
 fn is_trim_char_local(ch: string) -> boolean {
