@@ -574,6 +574,24 @@ fn type_is_future(type_text: string) -> boolean {
 // cannot be determined. Inferring the kind from a bare named-function call or
 // an arbitrary expression body needs symbol/expression-type resolution that
 // is out of scope (#829); annotate the spawned lambda/fn return type instead.
+// E0816 — a parser-originated diagnostic (issue #1531). The expression
+// parser emits an `Expression.ParseError` node carrying the message when it
+// detects syntax that must fail closed (today: the internal-only
+// `spawn:<type>` operator form). The typecheck walk wraps it here so a
+// malformed construct surfaces as a real error and `sfn check` exits
+// non-zero instead of silently dropping the statement. `message` is the
+// full text supplied by the parser arm; `span` locates the offending token.
+fn make_parse_error_diagnostic(message: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0816",
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: token_from_name("spawn", span),
+        suggestion: null
+    };
+}
+
 fn make_spawn_unresolvable_kind_diagnostic(span: SourceSpan?) -> Diagnostic {
     let head = "`spawn` target has no declared return type, so its future";
     let mid = " kind cannot be determined. Annotate the spawned lambda/fn";

@@ -132,6 +132,16 @@ enum Expression {
     // `serve(handler, port)` — accept loop dispatching to the thread pool;
     // `port` is optional to allow a configured default (§2.6.6).
     Serve { handler: Expression, port: Expression?, span: SourceSpan? },
+    // A parser-originated diagnostic node (issue #1531). The expression
+    // parser has no diagnostic channel of its own — a `success: false`
+    // result is silently swallowed into `Raw` by `expression_from_tokens`,
+    // so a malformed construct never reaches the user as an error. When an
+    // arm detects syntax that must fail closed (e.g. the internal-only
+    // `spawn:<type>` operator form), it emits this node instead, carrying
+    // the human-readable message. The typecheck walk turns it into a real
+    // `Diagnostic` (E0816), so `sfn check` exits non-zero. `message` is the
+    // full diagnostic text; `span` locates the offending token.
+    ParseError { message: string, span: SourceSpan? },
     Raw { text: string, span: SourceSpan? }
 }
 
