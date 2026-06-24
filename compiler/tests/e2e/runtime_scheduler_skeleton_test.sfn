@@ -339,3 +339,36 @@ test "scheduler: emit produces the task-invocation surface (#1089)" ![io] {
     assert contains(join_body, "load atomic i64, i64* ");
     assert contains(join_body, "call i32 @pthread_cond_wait(");
 }
+
+// ---- 7. detached fire-and-forget reclaim (#1203) ----
+// A detached task (no joiner — `sfn_serve`'s per-connection tasks) is
+// reclaimed by the pool worker after it runs, instead of leaking one `Task`
+// per fire-and-forget submission. Pins the emit shape of that lifecycle:
+//   - `sfn_task_create_detached` is defined and SETS the detached flag
+//     (a plain `store i64 1` into the `Task.detached` slot — the flag the
+//     worker reads to decide reclaim).
+//   - `sfn_scheduler_worker` runs each task (`@sfn_task_run`) and then
+//     CONDITIONALLY reclaims it (`@sfn_task_destroy` under a `br i1`), so a
+//     joinable task (flag 0) is left for its joiner while a detached task is
+//     freed by the worker.
+test "scheduler: detached tasks are reclaimed by the worker (#1203)" ![io] {
+    let ir = _emit_scheduler_ir();
+    assert ir != "EMIT_FAILED";
+
+    // The detached constructor exists and flips the flag to 1.
+    assert _has_define(ir, "sfn_task_create_detached");
+    let det_body = _define_body(ir, "sfn_task_create_detached");
+    assert det_body.length > 0;
+    assert contains(det_body, "store i64 1");
+    // It builds on the base constructor (which zero-inits `detached`).
+    assert contains(det_body, "@sfn_task_create(");
+
+    // The worker runs the task then conditionally destroys it: the
+    // fire-and-forget reclaim path. A `br i1` guards the destroy so the
+    // joinable path (flag 0) is untouched.
+    let worker_body = _define_body(ir, "sfn_scheduler_worker");
+    assert worker_body.length > 0;
+    assert contains(worker_body, "@sfn_task_run(");
+    assert contains(worker_body, "@sfn_task_destroy(");
+    assert contains(worker_body, "br i1 ");
+}

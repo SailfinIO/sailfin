@@ -211,7 +211,11 @@ test "serve emit: references the M4.1 scheduler/task externs" ![io] {
     let ir = _emit_module("serve", "runtime/sfn/concurrency/serve.sfn");
     assert ir != "EMIT_FAILED";
     assert _references(ir, "sfn_taskqueue_create");
-    assert _references(ir, "sfn_task_create");
+    // Per-connection tasks are fire-and-forget, so serve uses the detached
+    // constructor (#1203) — NOT the joinable `sfn_task_create` — so the pool
+    // worker reclaims each `Task` and the server stops leaking one per
+    // connection.
+    assert _references(ir, "sfn_task_create_detached");
     assert _references(ir, "sfn_taskqueue_enqueue");
     assert _references(ir, "sfn_scheduler_create");
 }
