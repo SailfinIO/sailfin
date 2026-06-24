@@ -1586,6 +1586,35 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
         };
     }
 
+    // #1505: an `as string` cast must stringify its operand — the same
+    // int/float→string lowering the `{{ }}` interpolation path uses — rather
+    // than fall through to the numeric/pointer matrices below, which have no
+    // `i64 → {i8*, i64}` arm and previously emitted a non-fatal
+    // "unsupported cast" diagnostic. The null operand that left behind made
+    // the binding default to `double 0.0`, so `n as string` silently printed
+    // "0". The `{i8*, i64}` identity (operand already a string) returned early
+    // above, and pointer→string was consumed by the `_agg_cast` shim, so the
+    // operand here is a scalar numeric value. `coerce_operand_to_type` builds
+    // the proper `{i8*, i64}` aggregate (number.to_string + length recovery),
+    // so the result matches the cast's declared `string` type for both
+    // annotated and inferred bindings.
+    if target_type == "{i8*, i64}" {
+        let str_cast = coerce_operand_to_type(operand, target_type, current_temp, current_lines, true, null);
+        let mut _str_di: int = 0;
+        loop {
+            if _str_di >= str_cast.diagnostics.length { break; }
+            diagnostics.push(str_cast.diagnostics[_str_di]);
+            _str_di += 1;
+        }
+        return ExpressionResult {
+            lines: str_cast.lines,
+            temp_index: str_cast.temp_index,
+            operand: str_cast.operand,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+
     if ends_with_pointer_suffix(operand.llvm_type) {
         if ends_with_pointer_suffix(target_type) {
             current_lines.push("  " + cast_name + " = bitcast " + operand.llvm_type

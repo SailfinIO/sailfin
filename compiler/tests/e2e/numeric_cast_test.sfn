@@ -178,6 +178,28 @@ test "numeric-cast: double → f32 narrowing lowers as fptrunc" ![io] {
     assert contains(body, "fptrunc double %x to float");
 }
 
+// ---- int → string stringifies (not a silent constant 0) — #1505 ----
+// Regression for #1505: `n as string` previously hit no arm of the cast
+// matrix (there is no `i64 → {i8*, i64}` numeric case), emitted a non-fatal
+// "unsupported cast" diagnostic, and returned a null operand — so the binding
+// defaulted to `double 0.0` and silently printed "0". The fix routes the
+// `as string` cast through the same int→string aggregate lowering the `{{ }}`
+// interpolation path uses: `sitofp i64 → double`, the number→string helper,
+// then `insertvalue {i8*, i64}` to build the SfnString aggregate.
+test "string-cast: int → string stringifies via the number→string aggregate (#1505)" ![io] {
+    let body = _emit_body("fn label(x: int) -> string { return x as string; }", "define {i8*, i64} @label", "int_to_string");
+    assert body.length > 0;
+    assert contains(body, "sitofp i64 %x to double");
+    assert contains(body, "insertvalue {i8*, i64}");
+}
+
+// ---- float → string stringifies (double source arm) — #1505 ----
+test "string-cast: float → string stringifies via the number→string aggregate (#1505)" ![io] {
+    let body = _emit_body("fn label(x: float) -> string { return x as string; }", "define {i8*, i64} @label", "float_to_string");
+    assert body.length > 0;
+    assert contains(body, "insertvalue {i8*, i64}");
+}
+
 // ---- pointer → bool is rejected (not ptrtoint) ----
 // Without the early `as bool` check, `ptr as bool` would lower to
 // `ptrtoint ptr to i1`, a low-bit reinterpretation rather than the
