@@ -1,0 +1,22 @@
+// compiler/tests/e2e/fixtures/array_reduce_closure/main.sfn
+//
+// Issue #1508 acceptance — `arr.reduce(initial, closure)` over a capturing
+// reducer folds correctly, not returning the initial unchanged. `.reduce`
+// dispatch routes to the `runtime_array_reduce_fn` helper, which passes the
+// `{i8*, i8*}` closure pair by value (descriptor parameter_types[2]) to
+// `sfn_array_sfn_reduce`; the real runtime body threads both the
+// accumulator and the element after the env pointer (2-arg closure
+// dispatch over the #1507 seam).
+//
+// offset = 1, [1,2,3,4].reduce(0, (acc, x) => acc + x + offset):
+//   acc=0 -> 0+1+1=2 -> 2+2+1=5 -> 5+3+1=9 -> 9+4+1=14.
+// (A stub `reduce` returning the initial unchanged would print 0.)
+fn main() ![io] {
+    let offset: int = 1;
+    let initial: int = 0;
+    let xs: int[] = [1, 2, 3, 4];
+    let sum: int = xs.reduce(initial, fn (acc: int, x: int) -> int {
+        return acc + x + offset;
+    });
+    print(sum);
+}

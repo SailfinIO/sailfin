@@ -1,0 +1,28 @@
+// compiler/tests/e2e/fixtures/array_filter_closure/main.sfn
+//
+// Issue #1508 acceptance — `arr.filter(closure)` over a capturing lambda
+// returns only the elements for which the predicate is true, not the input
+// unchanged. `.filter` dispatch routes to the `runtime_array_filter_fn`
+// helper, which passes the `{i8*, i8*}` closure pair by value to
+// `sfn_array_sfn_filter`; the real runtime body closure-dispatches the
+// predicate per element over the #1507 seam.
+//
+// threshold = 2, [1,2,3,4,5].filter(x => x > threshold) = [3,4,5],
+// sum = 12, count = 3. (A stub `filter` returning the input unchanged
+// would sum to 15 with count 5.)
+fn main() ![io] {
+    let threshold: int = 2;
+    let xs: int[] = [1, 2, 3, 4, 5];
+    let ys: int[] = xs.filter(fn (x: int) -> bool { return x > threshold; });
+    let mut total: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= ys.length { break; }
+        total = total + ys[i];
+        i = i + 1;
+    }
+    // Print "count:sum" so the test asserts both the kept count and the
+    // kept values — distinguishing the real body (3:12) from the stub (5:15).
+    print(ys.length);
+    print(total);
+}

@@ -1,0 +1,51 @@
+// End-to-end test for `arr.filter(closure)` over a capturing lambda (#1508).
+//
+// `.filter` dispatch routes to the `runtime_array_filter_fn` helper, which
+// passes the `{i8*, i8*}` closure pair BY VALUE to `sfn_array_sfn_filter`
+// (descriptor `parameter_types[1] = "{i8*, i8*}"`, in lockstep with the
+// runtime body's `predicate: fn(int) -> bool` signature). The real runtime
+// body in `runtime/sfn/array.sfn` closure-dispatches the predicate per
+// element over the seam landed in #1507 — the same by-value path `map`
+// exercises (array_map_closure).
+//
+// Drives the compiler-under-test as a subprocess with the runtime
+// `process.*` builtins and asserts on captured stdout — the canonical
+// e2e pattern (see `.claude/rules/no-bash-e2e.md`, `array_map_closure_test.sfn`).
+import { trim_right } from "sfn/strings";
+
+// The compiler-under-test: `$SAILFIN_BIN` if set, else the self-hosted
+// binary relative to the repo root the runner starts from. Mirrors
+// `sfn/test`'s `_resolve_sfn_bin` so CI can point the test at any compiler.
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `sfn run` compiles+links+executes the fixture, so the spawned compiler
+// needs a real environment (PATH for the linker, plus SAILFIN_TEST_SCRATCH
+// for per-invocation build-cache isolation under the parallel pool, #1333).
+// Inherit the full parent environment — mirrors array_map_closure_test.sfn.
+fn _child_env() -> string[] ![io] { return process.environ(); }
+
+struct RunOut {
+    exit: int;
+    out: string;
+}
+
+// Compile+run a fixture and return its exit code plus the trailing-
+// newline-normalized stdout.
+fn _run_fixture(path: string) -> RunOut ![io] {
+    let exit = process.run_capture([_sfn_bin(), "run", path], _child_env());
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return RunOut { exit: exit, out: trim_right(out) };
+}
+
+test "array filter: capturing predicate keeps only matching elements (3:12, not 5:15)" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/array_filter_closure/main.sfn");
+    assert r.exit == 0;
+    // count then sum: real body keeps [3,4,5] -> "3\n12"; a stub returning
+    // the input unchanged would print "5\n15".
+    assert r.out == "3\n12";
+}

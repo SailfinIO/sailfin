@@ -101,7 +101,11 @@ test "runtime-array: non-core ops remain sfn_array_sfn_* infix" ![io] {
     assert contains(ir, "define i8* @sfn_array_sfn_slice(i8* ");
     assert contains(ir, "define i8* @sfn_array_sfn_map(i8* ");
     assert contains(ir, "define i8* @sfn_array_sfn_filter(i8* ");
-    assert contains(ir, "define i8* @sfn_array_sfn_reduce(i8* ");
+    // #1508: reduce folds to a pointer-width scalar, so its return type is
+    // `i64` (descriptor return_type), not `i8*` — a scalar in an `i8*`
+    // (`any`) slot would be number-boxed to a string. Still emitted under
+    // the `sfn_array_sfn_*` infix with a bare `define`.
+    assert contains(ir, "define i64 @sfn_array_sfn_reduce(i8* ");
 }
 
 // #1308: the `_v2` entrypoints are now defined in pure Sailfin in
