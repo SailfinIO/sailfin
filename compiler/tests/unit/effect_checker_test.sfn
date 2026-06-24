@@ -11,20 +11,20 @@
 // check_tool_test.sfn preamble for the same dodge).
 import {
     Block,
+    Program,
     Decorator,
+    Statement,
     Expression,
+    SourceSpan,
+    TypeParameter,
+    TypeAnnotation,
     FieldDeclaration,
     FunctionSignature,
-    MethodDeclaration,
-    Program,
-    SourceSpan,
-    Statement,
-    TypeAnnotation,
-    TypeParameter
+    MethodDeclaration
 } from "../../src/ast";
+import { Token } from "../../src/token";
 import { EffectViolation, validate_effects } from "../../src/effect_checker";
 import { canonical_effects, is_canonical_effect } from "../../src/effect_taxonomy";
-import { Token } from "../../src/token";
 
 // -------------------------------------------------------------------
 // Builder helpers
@@ -116,6 +116,86 @@ fn _make_spawn_routine(name: string, declared_effects: string[], span_line: int)
         decorators: empty_decorators,
         is_unsafe: false
     };
+}
+
+// Build a FunctionDeclaration whose body is an arbitrary `Raw` text
+// blob, so the effect checker's `collect_effects_from_text` fallback
+// path is the only thing that runs. Used by the #1530 identifier-
+// boundary regression tests below.
+fn _make_raw_routine(name: string, declared_effects: string[], body_text: string, span_line: int) -> Statement {
+    let span = _span(span_line, 4);
+    let body_stmt = Statement.ExpressionStatement {
+        expression: Expression.Raw { text: body_text },
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: body_text,
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, declared_effects, span),
+        body: body_block,
+        decorators: empty_decorators,
+        is_unsafe: false
+    };
+}
+
+fn _effects_contains(effects: string[], target: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= effects.length { break; }
+        if effects[index] == target { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+// -------------------------------------------------------------------
+// #1530 — text-fallback heuristics are identifier-boundary aware
+// -------------------------------------------------------------------
+test "effect violation: sfn_spawn( in text body does not require io (#1530)" {
+    // `spawn(` inside the longer identifier `sfn_spawn(` must NOT match
+    // the `spawn(` needle — otherwise a runtime call spuriously demands
+    // ![io]. This is the false-positive that bit #1475 / PR #1519.
+    let body = "let handle = sfn_spawn(worker, payload);";
+    let stmt = _make_raw_routine("rt_spawn", [], body, 9);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+test "effect violation: sfn_serve( and nanosleep( in text body stay clean (#1530)" {
+    // `serve(` inside `sfn_serve(` and `sleep(` inside `nanosleep(` are
+    // both interior matches and must not contribute net/clock.
+    let body = "let s = sfn_serve(handler); let _ = nanosleep(deadline);";
+    let stmt = _make_raw_routine("rt_serve_sleep", [], body, 9);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+test "effect violation: bare spawn( in text body still requires io (#1530)" {
+    // The real surface heuristic must still fire at an identifier
+    // boundary — guard the true-positive direction.
+    let body = "spawn(worker);";
+    let stmt = _make_raw_routine("launch", [], body, 9);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert violations[0].routine_name == "launch";
+    assert _effects_contains(violations[0].missing_effects, "io");
+}
+
+test "effect violation: bare serve( and sleep( in text body still require net/clock (#1530)" {
+    let body = "serve(handler); sleep(ms);";
+    let stmt = _make_raw_routine("srv", [], body, 9);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert _effects_contains(violations[0].missing_effects, "net");
+    assert _effects_contains(violations[0].missing_effects, "clock");
 }
 
 // -------------------------------------------------------------------

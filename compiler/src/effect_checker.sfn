@@ -40,7 +40,7 @@ import {
     MethodDeclaration
 } from "./ast";
 import { Token, TokenKind } from "./token";
-import { substring } from "./string_utils";
+import { substring, char_code_at_text } from "./string_utils";
 import {
     ImportSymbolTable,
     empty_import_symbols,
@@ -905,9 +905,32 @@ fn collect_effects_from_text(text: string) -> EffectRequirement[] {
     return required;
 }
 
+fn _is_effect_ident_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let c = char_code_at_text(ch, 0);
+    let mut _ret: boolean = false;
+    if c >= 65 {
+        if c <= 90 { _ret = true; }
+    }
+    if c >= 97 {
+        if c <= 122 { _ret = true; }
+    }
+    if c >= 48 {
+        if c <= 57 { _ret = true; }
+    }
+    if c == 95 { _ret = true; }
+    return _ret;
+}
+
 fn contains_code(text: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if text.length < needle.length { return false; }
+
+    // When the needle begins with an identifier char (e.g. "spawn("),
+    // require a left identifier boundary so it does not match inside a
+    // longer identifier (e.g. "spawn(" inside "sfn_spawn("). All current
+    // heuristic needles start with a letter; see #1530.
+    let needle_starts_ident = _is_effect_ident_char(substring(needle, 0, 1));
 
     let mut index: int = 0;
     let mut in_line_comment: boolean = false;
@@ -984,7 +1007,16 @@ fn contains_code(text: string, needle: string) -> boolean {
 
         let _end_pos = index + needle.length;
         if _end_pos <= text.length {
-            if substring(text, index, _end_pos) == needle { return true; }
+            if substring(text, index, _end_pos) == needle {
+                let mut _boundary_ok: boolean = true;
+                if needle_starts_ident {
+                    if index > 0 {
+                        let _prev = substring(text, index - 1, index);
+                        if _is_effect_ident_char(_prev) { _boundary_ok = false; }
+                    }
+                }
+                if _boundary_ok { return true; }
+            }
         }
         index += 1;
     }
