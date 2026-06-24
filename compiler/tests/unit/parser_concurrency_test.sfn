@@ -13,7 +13,21 @@
 // convention in `parser_iife_postfix_test.sfn` (the block-scoped `let`
 // initializer path is opaque, tracked separately).
 import { Block, Expression } from "../../src/ast";
+import { typecheck_diagnostics } from "../../src/typecheck";
 import { parse_program } from "../../src/parser/mod";
+
+// True if typechecking `source` produces a diagnostic with `code`.
+fn _produces_diagnostic(source: string, code: string) -> boolean ![io] {
+    let program = parse_program(source);
+    let diags = typecheck_diagnostics(program);
+    let mut index: int = 0;
+    loop {
+        if index >= diags.length { break; }
+        if strings_equal(diags[index].code, code) { return true; }
+        index += 1;
+    }
+    return false;
+}
 
 // Initializer of the first top-level `let` in `source`.
 fn first_let_initializer(source: string) -> Expression ![io] {
@@ -86,6 +100,43 @@ test "concurrency: spawn of a named-fn call leaves kind unresolved" ![io] {
     let expr = first_let_initializer("let f = spawn worker();");
     assert expr.variant == "Spawn";
     assert strings_equal(expr.kind, "");
+}
+
+// -------------------------------------------------------------------
+// `spawn:<type>` is internal native-IR notation, NOT user surface syntax
+// (issue #1531). Committing to the `spawn` operator and then seeing `:`
+// is a fail-closed parse error: the parser emits a `ParseError` node
+// (never `Raw`, which would be silently dropped), so the malformed
+// statement surfaces as a hard error instead of vanishing.
+// -------------------------------------------------------------------
+test "concurrency: spawn-colon operator form parses to ParseError" ![io] {
+    let expr = first_let_initializer("let f = spawn:int fn() -> int { return 1; };");
+    assert expr.variant == "ParseError";
+}
+
+// The `ParseError` node surfaces as a real E0816 diagnostic through the
+// typecheck walk, so `sfn check` exits non-zero rather than silently
+// accepting the dropped statement (the fail-open footgun #1531 fixes).
+test "concurrency: spawn-colon form produces an E0816 diagnostic" ![io] {
+    assert _produces_diagnostic("let f = spawn:int fn() -> int { return 1; };", "E0816");
+}
+
+// Regression guard: `spawn` as an ordinary identifier must NOT trip the
+// `spawn:` guard. An object-literal key `spawn:` still parses to an
+// `Object` (the guard fires only in the spawn prefix-operator context).
+test "concurrency: spawn as an object-literal key is not a ParseError" ![io] {
+    let expr = first_let_initializer("let o = { spawn: 1 };");
+    assert expr.variant == "Object";
+    assert ! _produces_diagnostic("let o = { spawn: 1 };", "E0816");
+}
+
+// Regression guard: `spawn` as a binding name with a type annotation
+// (`let spawn: int = 5;`) still parses — the binding name is not in the
+// expression-prefix-operator context, so the guard does not fire.
+test "concurrency: spawn as a typed binding name is not a ParseError" ![io] {
+    let expr = first_let_initializer("let spawn: int = 5;");
+    assert expr.variant == "NumberLiteral";
+    assert ! _produces_diagnostic("let spawn: int = 5;", "E0816");
 }
 
 // -------------------------------------------------------------------

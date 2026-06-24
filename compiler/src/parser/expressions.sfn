@@ -411,6 +411,38 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
     if token.kind.variant == "Identifier" {
         if identifier_matches(token, "spawn") {
             let advanced = expression_tokens_advance(state);
+            // `spawn:<type>` is internal native-IR notation (like `channel:`),
+            // not user surface syntax — the future kind is always inferred
+            // from the operand, so there is no `spawn:` grammar (issue #1531).
+            // Committing to the spawn operator and then seeing `:` is a
+            // fail-closed parse error. Emit a `ParseError` node (the parser's
+            // diagnostic channel) rather than a `success: false` that
+            // `expression_from_tokens` would silently swallow into `Raw`,
+            // dropping the whole `spawn … await` statement. This fires ONLY
+            // here, in the spawn prefix-operator context — `spawn` as an
+            // ordinary identifier (`{ spawn: 1 }`, `let spawn: int = 5;`) is
+            // parsed elsewhere and is unaffected. The remaining tokens are
+            // consumed so no leftover degrades the node back to `Raw`.
+            if !expression_tokens_is_at_end(advanced) {
+                if symbol_matches(expression_tokens_peek(advanced), ":") {
+                    let head = "the `spawn:<type>` operator form is not";
+                    let mid = " supported syntax — it is internal native-IR"
+                        + " notation, not user surface syntax. Use bare"
+                        + " `spawn <expr>`; the future kind is inferred from"
+                        + " the operand's return type.";
+                    return ExpressionParseResult {
+                        state: ExpressionTokens {
+                            tokens: advanced.tokens,
+                            index: advanced.tokens.length
+                        },
+                        expression: Expression.ParseError {
+                            message: head + mid,
+                            span: source_span_from_tokens([token])
+                        },
+                        success: true
+                    };
+                }
+            }
             let operand_result = parse_expression_bp(advanced, unary_precedence());
             if !operand_result.success { return operand_result; }
             // Tag the future kind when it is statically derivable from the

@@ -54,6 +54,7 @@ import {
     check_interface_members,
     check_function_signature,
     detect_removed_ai_keyword,
+    make_parse_error_diagnostic,
     make_removed_keyword_diagnostic,
     make_await_non_future_diagnostic,
     make_fn_value_position_diagnostic,
@@ -1040,6 +1041,13 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
     if expression.variant == "Channel" {
         if expression.capacity == null { return []; }
         return walk_expression(expression.capacity, bindings, imports);
+    }
+    // A parser-originated diagnostic node (issue #1531): the parser emitted
+    // this for syntax that must fail closed (e.g. the internal-only
+    // `spawn:<type>` form). Surface it as a real error so `sfn check` exits
+    // non-zero instead of silently dropping the statement.
+    if expression.variant == "ParseError" {
+        return [make_parse_error_diagnostic(expression.message, expression.span)];
     }
     // #1147: a bare identifier that resolves to a function used in value
     // position (not as a call target — those are handled in the Call arm)
