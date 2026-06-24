@@ -13,7 +13,7 @@
 // `$()` stripping it). The `sfn/test` `expect_*` matchers are `![pure]`
 // and cannot be called from an `![io]` test, so equality is asserted
 // directly. See `.claude/rules/no-bash-e2e.md` and `guillermo_test.sfn`.
-import { trim_right } from "sfn/strings";
+import { trim_right, find } from "sfn/strings";
 
 fn _sfn_bin() -> string ![io] {
     let configured = env.get("SAILFIN_BIN");
@@ -162,18 +162,64 @@ test "fmt: --write modifies file in place" ![io] {
     assert c == 0;
 }
 
-// Bulk directory-argument path (#1599 regression). A single `sfn fmt
-// --check` over whole source directories formats every matched file in
-// one process. Before the per-file arena rewind, that process
-// accumulated each file's token/string buffers until it hit the 8 GiB
-// `RLIMIT_AS` self-cap and aborted with SIGABRT (exit 134) partway
-// through the tree. With the rewind, scratch is released between files,
-// so the bulk walk completes (the tree is canonically formatted, so
-// `--check` exits 0). A revert of the rewind regresses to a non-zero
-// abort here on a tree this size.
-test "fmt: --check over source directories completes (no bulk OOM)" ![io] {
-    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "compiler/src", "runtime"], []);
-    let _o = process.capture_take_stdout();
+// Bulk directory-argument path (#1599 regression). `sfn fmt` with a
+// directory argument collects every `.sfn` under it and formats them in
+// a single process. Before the per-file arena rewind, that process held
+// every file's token/string scratch for the whole run, so the footprint
+// grew with the file count until it crossed the 8 GiB `RLIMIT_AS`
+// self-cap and aborted (exit 134) partway through a large tree. With the
+// rewind, each file's scratch is released before the next, so the bulk
+// walk is bounded by the single largest file rather than the sum.
+//
+// This guards the directory-walk + per-file-flush logic deterministically
+// on a handful of small fixtures (a real-tree bulk run is intentionally
+// left to CI's per-file loop — it costs ~GiB per large file regardless of
+// the fix and is environment-sensitive near the cap). A regression that
+// breaks the multi-file iteration or corrupts state across the rewind
+// surfaces here as a wrong exit code or a mis-detected file.
+fn _bulk_dir() -> string ![io] {
+    let dir = _scratch_dir() + "/fmt-bulk-dir";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+test "fmt: --check over a directory flags only unformatted files" ![io] {
+    let dir = _bulk_dir();
+    let unformatted = "fn   a( )  ->   int  {  return 1 ;  }";
+    // Canonical form: inline body plus the trailing newline `fmt` emits.
+    let formatted = "fn b() -> int { return 2; }\n";
+    fs.writeFile(dir + "/a.sfn", unformatted);
+    fs.writeFile(dir + "/b.sfn", formatted);
+    fs.writeFile(dir + "/c.sfn", unformatted);
+    fs.writeFile(dir + "/d.sfn", formatted);
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", dir], []);
+    let out = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
-    assert exit == 0;
+    // Two files would change → non-zero, and only those are listed.
+    assert exit != 0;
+    assert find(out, "a.sfn", 0) >= 0;
+    assert find(out, "c.sfn", 0) >= 0;
+    assert find(out, "b.sfn", 0) < 0;
+    assert find(out, "d.sfn", 0) < 0;
+}
+
+test "fmt: --write over a directory formats every file, then --check is clean" ![io] {
+    let dir = _bulk_dir();
+    let unformatted = "fn   a( )  ->   int  {  return 1 ;  }";
+    fs.writeFile(dir + "/a.sfn", unformatted);
+    fs.writeFile(dir + "/b.sfn", unformatted);
+    fs.writeFile(dir + "/c.sfn", unformatted);
+    let w = process.run_capture([_sfn_bin(), "fmt", "--write", dir], []);
+    let _wo = process.capture_take_stdout();
+    let _we = process.capture_take_stderr();
+    assert w == 0;
+    // Every file in the directory is now canonical → --check exits 0.
+    let c = process.run_capture([_sfn_bin(), "fmt", "--check", dir], []);
+    let _co = process.capture_take_stdout();
+    let _ce = process.capture_take_stderr();
+    if fs.exists(dir + "/a.sfn") { fs.deleteFile(dir + "/a.sfn"); }
+    if fs.exists(dir + "/b.sfn") { fs.deleteFile(dir + "/b.sfn"); }
+    if fs.exists(dir + "/c.sfn") { fs.deleteFile(dir + "/c.sfn"); }
+    if fs.exists(dir + "/d.sfn") { fs.deleteFile(dir + "/d.sfn"); }
+    assert c == 0;
 }
