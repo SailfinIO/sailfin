@@ -518,6 +518,17 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                         // falling into the struct-method fusion (which would
                         // form the bogus `<type>map` target).
                         if _pre_field == "map" { _pre_is_array_method = true; }
+                        // #1508: `arr.filter(closure)` / `arr.reduce(init,
+                        // closure)` route identically to `map` — the same
+                        // early fallback reaches the `runtime_array_filter_fn`
+                        // / `runtime_array_reduce_fn` helpers below instead of
+                        // the bogus `<type>filter` / `<type>reduce` fusion.
+                        if _pre_field == "filter" {
+                            _pre_is_array_method = true;
+                        }
+                        if _pre_field == "reduce" {
+                            _pre_is_array_method = true;
+                        }
                         if _pre_is_array_method {
                             if is_simple_identifier(_pre_base) {
                                 let _pre_am_local = find_local_binding(locals, _pre_base);
@@ -619,6 +630,49 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                                 }
                                             }
                                         }
+                                        // #1508: route `arr.filter(closure)` to
+                                        // the `runtime_array_filter_fn` helper.
+                                        // The array is arg0 (injected above); the
+                                        // user's predicate becomes arg1, passed by
+                                        // value as `{i8*, i8*}` (descriptor
+                                        // parameter_types[1]) to the real
+                                        // `sfn_array_sfn_filter` body. Same i64-only
+                                        // element restriction as `map` (the
+                                        // predicate ABI is `i1(i8* env, i64)`);
+                                        // non-i64 elements fall through to the
+                                        // honest "callee signature is not known"
+                                        // diagnostic (gated on generics — #766).
+                                        if _pre_field == "filter" {
+                                            if _pre_am_elem == "i64" {
+                                                let _pre_filter_desc = find_runtime_helper("runtime_array_filter_fn");
+                                                if _pre_filter_desc != null {
+                                                    result_target = "runtime_array_filter_fn";
+                                                    helper_descriptor = _pre_filter_desc;
+                                                }
+                                            }
+                                        }
+                                        // #1508: route `arr.reduce(init, closure)`
+                                        // to the `runtime_array_reduce_fn` helper.
+                                        // The array is arg0 (injected above); the
+                                        // user's `initial` becomes arg1 and the
+                                        // reducer arg2, passed by value as `{i8*,
+                                        // i8*}` (descriptor parameter_types[2]) to
+                                        // the real `sfn_array_sfn_reduce` body. Same
+                                        // i64-only element/accumulator restriction
+                                        // (the reducer ABI is `i64(i8* env, i64
+                                        // acc, i64 elem)`); non-i64 elements fall
+                                        // through to the honest "callee signature is
+                                        // not known" diagnostic (gated on generics —
+                                        // #766).
+                                        if _pre_field == "reduce" {
+                                            if _pre_am_elem == "i64" {
+                                                let _pre_reduce_desc = find_runtime_helper("runtime_array_reduce_fn");
+                                                if _pre_reduce_desc != null {
+                                                    result_target = "runtime_array_reduce_fn";
+                                                    helper_descriptor = _pre_reduce_desc;
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -638,6 +692,13 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                 // would otherwise overwrite the helper target
                                 // with the bogus `<type>map`).
                                 if _pre_field == "map" { _pre_struct = ""; }
+                                // #1508: same for `filter` / `reduce` — already
+                                // routed to their helpers above; clear the struct
+                                // type so the fusion skips them (it would
+                                // otherwise form the bogus `<type>filter` /
+                                // `<type>reduce` target).
+                                if _pre_field == "filter" { _pre_struct = ""; }
+                                if _pre_field == "reduce" { _pre_struct = ""; }
                                 if _pre_struct.length > 0 {
                                     // #1041: fail closed when the base local's
                                     // declared type is a bare struct name that is

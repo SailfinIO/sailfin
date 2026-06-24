@@ -493,25 +493,20 @@ fn sfn_array_push_slot(data_ptr: * * u8, len_ptr: * i64, cap_ptr: * i64, elem_si
     }
 }
 
-// `sfn_array_sfn_map(arr, mapper) -> arr` — placeholder per §2.3.3.
-// Real bodies are tracked in #766 and gated on generic constraints
-// (post-1.0). Closures-with-capture (Epic #450 M1.5) has now
-// landed — env-capturing lambda emission shipped via #699 — so
-// the call-site closure surface is available; the remaining
-// blocker is the typed `SfnArray<T>` / `(T) -> U` signature shape,
-// which depends on generics. Until #766 ships real bodies, these
-// stubs return the input unchanged (`map`/`filter` → `arr`,
-// `reduce` → `initial`), matching the legacy C
-// `sailfin_runtime_array_*` bodies' observable behavior.
-//
-// #925: the parameter lists mirror the runtime-helper descriptors'
-// ABI exactly — `map`/`filter` take `(arr, callback)` and `reduce`
-// takes `(arr, initial, reducer)` (the arg order the prelude's
-// `array_reduce(items, initial, reducer)` wrapper emits). The
-// trailing callback/reducer operands are accepted-and-ignored so
-// the descriptor arity (`["i8*","i8*"]` / `["i8*","i8*","i8*"]`)
-// matches the defined symbol's signature one-to-one — no reliance
-// on the SysV/AAPCS "extra args are ignored" rule.
+// Array higher-order helpers `map`/`filter`/`reduce` — real bodies over
+// the runtime-callable closure-apply seam landed in #1507 (epic #1118,
+// closing the #766 gap). Each typed callback param (`mapper: fn(int) ->
+// int`, `predicate: fn(int) -> bool`, `reducer: fn(int, int) -> int`) is
+// invoked as an ordinary closure dispatch: the matching descriptor passes
+// the `{i8*, i8*}` closure pair by value, and the emitter extracts the
+// fn-ptr + env and prepends the env to the call. The parameter lists
+// mirror the runtime-helper descriptors' ABI exactly — `map`/`filter`
+// take `(arr, callback)`, `reduce` takes `(arr, initial, reducer)` (the
+// prelude `array_reduce(items, initial, reducer)` arg order), with the
+// closure operand typed `{i8*, i8*}` in lockstep with these signatures.
+// Pointer-width `i64` elements / accumulator only (the callback ABIs are
+// `iN(i8* env, i64 ...)`); generic / typed element widths are post-1.0
+// (gated on generics — #766).
 // `sfn_array_sfn_map(arr, mapper) -> arr'` — real one-element-at-a-time
 // map (#1507). `mapper` is typed `fn(int) -> int` so the call
 // `mapper(elem)` below is an ordinary closure dispatch: the descriptor
@@ -555,8 +550,85 @@ fn sfn_array_sfn_map(arr: * u8, mapper: fn (int) -> int) -> * u8 {
     }
 }
 
-fn sfn_array_sfn_filter(arr: * u8, predicate: * u8) -> * u8 { return arr; }
+// `sfn_array_sfn_filter(arr, predicate) -> arr'` — real one-element-at-a-
+// time filter (#1508). `predicate` is typed `fn(int) -> bool` so the call
+// `predicate(elem)` below is an ordinary closure dispatch over the seam
+// landed in #1507: the descriptor `runtime_array_filter_fn` passes the
+// `{i8*, i8*}` closure pair by value (parameter_types[1] = `{i8*, i8*}`,
+// in lockstep with this signature), and the emitter extracts the fn-ptr +
+// env and prepends the env to the call — the same path `map` exercises.
+// Pointer-width `i64` elements only (the predicate ABI is
+// `i1(i8* env, i64 arg)`); generic / typed element widths are post-1.0
+// (gated on generics — #766). Over-allocates a fresh `SfnArray`
+// (`{ data @0, len @8, cap @16 }`) of `len` 8-byte slots (the kept count
+// is an upper bound), copies each element for which the predicate is true,
+// then writes the final kept count as `len`. The container is freshly,
+// uniquely owned (#1218 / E9).
+fn sfn_array_sfn_filter(arr: * u8, predicate: fn (int) -> bool) -> * u8 {
+    unsafe {
+        let mut len: i64 = 0;
+        let mut data: i64 = 0;
+        if (arr as i64) != 0 {
+            let l: i64 = atomic_load((arr as i64 + 8) as * i64);
+            if l > 0 { len = l; }
+            data = atomic_load(arr as * i64);
+        }
+        let out: * u8 = _sfn_array_alloc_v2(len, 8);
+        if (out as i64) == 0 { return null; }
+        let buf: i64 = atomic_load(out as * i64);
+        let mut kept: i64 = 0;
+        if buf != 0 {
+            if data != 0 {
+                let mut i: i64 = 0;
+                loop {
+                    if i >= len { break; }
+                    let elem: i64 = atomic_load((data + i * 8) as * i64);
+                    if predicate(elem as int) {
+                        atomic_store((buf + kept * 8) as * i64, elem);
+                        kept = kept + 1;
+                    }
+                    i = i + 1;
+                }
+            }
+        }
+        // out.len = kept (the allocator already wrote cap = len).
+        atomic_store((out as i64 + 8) as * i64, kept);
+        return out;
+    }
+}
 
-fn sfn_array_sfn_reduce(arr: * u8, initial: * u8, reducer: * u8) -> * u8 {
-    return initial;
+// `sfn_array_sfn_reduce(arr, initial, reducer) -> acc` — real left fold
+// (#1508). `reducer` is typed `fn(int, int) -> int` so the call
+// `reducer(acc, elem)` below is an ordinary 2-arg closure dispatch: after
+// the env pointer the emitter threads both the accumulator and the element
+// (descriptor `runtime_array_reduce_fn` parameter_types[2] = `{i8*, i8*}`,
+// in lockstep with this signature). `initial` and the returned accumulator
+// are typed `i64` directly (descriptor parameter_types[1] / return_type),
+// not `i8*`/`any`: a pointer-width scalar coerced into an `i8*` (`any`)
+// slot would be number-boxed to its string representation, destroying the
+// integer value — so the fold value rides the descriptor as a raw `i64`.
+// Pointer-width `i64` elements and accumulator only (the reducer ABI is
+// `i64(i8* env, i64 acc, i64 elem)`); generic / typed widths are post-1.0
+// (gated on generics — #766).
+fn sfn_array_sfn_reduce(arr: * u8, initial: i64, reducer: fn (int, int) -> int) -> i64 {
+    unsafe {
+        let mut len: i64 = 0;
+        let mut data: i64 = 0;
+        if (arr as i64) != 0 {
+            let l: i64 = atomic_load((arr as i64 + 8) as * i64);
+            if l > 0 { len = l; }
+            data = atomic_load(arr as * i64);
+        }
+        let mut acc: i64 = initial;
+        if data != 0 {
+            let mut i: i64 = 0;
+            loop {
+                if i >= len { break; }
+                let elem: i64 = atomic_load((data + i * 8) as * i64);
+                acc = reducer(acc as int, elem as int) as i64;
+                i = i + 1;
+            }
+        }
+        return acc;
+    }
 }
