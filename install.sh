@@ -132,11 +132,17 @@ log "Using release tag: ${TAG}"
 log "Using version: ${VERSION}"
 log "Expected asset: ${ASSET}"
 
-release_json="$(api "https://api.github.com/repos/${REPO}/releases/tags/${TAG}")"
-asset_id="$(printf '%s' "$release_json" | jq -r '.assets[]? | select(.name=="'"$ASSET"'") | .id' | head -n 1)"
-
-if [ -z "$asset_id" ] || [ "$asset_id" = "null" ]; then
-  die "Could not find asset '${ASSET}' in release '${TAG}'."
+# Resolve the asset id for the GitHub API download path. This call hits
+# api.github.com, whose unauthenticated/low-quota responses can be rate
+# limited (HTTP 403) — and a scoped token may not grant REST releases
+# access at all. Treat the lookup as NON-FATAL: TAG and ASSET are already
+# known (for a pinned version they are constructed without the API), so a
+# failure here just routes us to the public release-download URL below,
+# which consumes no API quota. `|| true` keeps `set -e` from aborting.
+release_json="$(api "https://api.github.com/repos/${REPO}/releases/tags/${TAG}" 2>/dev/null || true)"
+asset_id=""
+if [ -n "$release_json" ]; then
+  asset_id="$(printf '%s' "$release_json" | jq -r '.assets[]? | select(.name=="'"$ASSET"'") | .id' 2>/dev/null | head -n 1)"
 fi
 
 TMPDIR="$(mktemp -d)"
@@ -146,17 +152,47 @@ cleanup() {
 trap cleanup EXIT
 
 ARCHIVE_PATH="${TMPDIR}/${ASSET}"
-log "Downloading asset via GitHub API (id=${asset_id})…"
 
+# Auth header shared by both download paths (optional; raises API rate
+# limits and enables private-repo asset access).
 DL_AUTH_ARGS=()
 if [ -n "${GITHUB_TOKEN:-}" ]; then
   DL_AUTH_ARGS=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
 fi
-curl --fail -sSL \
-  ${DL_AUTH_ARGS[@]+"${DL_AUTH_ARGS[@]}"} \
-  -H "Accept: application/octet-stream" \
-  "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" \
-  -o "$ARCHIVE_PATH"
+
+# Primary: GitHub API asset download (handles private repos + auth). Only
+# attempted when the asset id resolved above.
+download_via_api() {
+  [ -n "$asset_id" ] && [ "$asset_id" != "null" ] || return 1
+  log "Downloading asset via GitHub API (id=${asset_id})…"
+  curl --fail -sSL \
+    ${DL_AUTH_ARGS[@]+"${DL_AUTH_ARGS[@]}"} \
+    -H "Accept: application/octet-stream" \
+    "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" \
+    -o "$ARCHIVE_PATH"
+}
+
+# Fallback: the public browser release-download URL. Needs neither the
+# REST API nor an asset id, so it survives API rate limiting / a
+# REST-restricted token for public releases.
+DIRECT_URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"
+download_via_direct() {
+  log "Downloading asset via release URL (${DIRECT_URL})…"
+  curl --fail -sSL \
+    ${DL_AUTH_ARGS[@]+"${DL_AUTH_ARGS[@]}"} \
+    "$DIRECT_URL" \
+    -o "$ARCHIVE_PATH"
+}
+
+if ! download_via_api; then
+  if [ -n "$asset_id" ] && [ "$asset_id" != "null" ]; then
+    log "GitHub API asset download failed; falling back to the public release URL."
+  else
+    log "GitHub API asset lookup unavailable (rate limit or restricted token); using the public release URL."
+  fi
+  download_via_direct \
+    || die "Could not download asset '${ASSET}' for release '${TAG}' via the GitHub API or ${DIRECT_URL}."
+fi
 
 # Validate archive
 if ! tar -tzf "$ARCHIVE_PATH" >/dev/null 2>&1; then
