@@ -665,10 +665,17 @@ fn _do_determinism_check(pass1_out: string, is_library: boolean, cap_capsule_nam
 
     let pass2_work_dir = _derive_pass2_work_dir(work_dir);
     let pass2_out = _pass2_out_path(pass2_work_dir, is_library);
-    let self_exe = binary_dir + "/sailfin";
-    if binary_dir.length == 0 {
+    // #1482: resolve through `_resolve_self_path` so the `.exe`
+    // variants are tried on Windows (and the binary's existence is
+    // verified) instead of blindly concatenating `<dir>/sailfin`. On
+    // POSIX the first candidate (`sailfin`) matches, so this is
+    // behavior-identical there.
+    let self_exe = _resolve_self_path(binary_dir);
+    if self_exe.length == 0 {
         if !json_flag {
-            print.err("[determinism] cannot locate self binary (empty binary_dir)");
+            print.err("[determinism] cannot locate self binary (binary_dir=\""
+                + binary_dir
+                + "\")");
         }
         return 1;
     }
@@ -1043,8 +1050,21 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
 //      always threaded portably.
 fn _resolve_self_path(binary_dir: string) -> string ![io] {
     if binary_dir.length > 0 {
-        let candidate = _path_join(binary_dir, "sailfin");
-        if fs.exists(candidate) { return candidate; }
+        // Try each known compiler-binary name in order. The bare
+        // `sailfin` / `sfn` names cover the dev-tree and installed
+        // POSIX layouts; the `.exe`-suffixed variants cover native
+        // Windows, where `GetModuleFileNameA` resolves the running
+        // binary as `sailfin.exe` and the suffixless join would miss
+        // it (#1482, epic #1485 M2). The Windows variants never match
+        // on POSIX (no such file), so the ordering is host-neutral.
+        let names: string[] = ["sailfin", "sailfin.exe", "sfn", "sfn.exe"];
+        let mut i: int = 0;
+        loop {
+            if i >= names.length { break; }
+            let candidate = _path_join(binary_dir, names[i]);
+            if fs.exists(candidate) { return candidate; }
+            i += 1;
+        }
     }
     return "";
 }
@@ -2981,13 +3001,13 @@ fn main(argv: string[]) -> int ![io, clock] {
     // either way, so the pinned semantics here survive the future
     // shape change without source edits.
     //
-    // `exe_path()` only resolves `/proc/self/exe` (Linux). On macOS
-    // and Windows it returns `""` until `runtime/sfn/platform/exec.sfn`
-    // gains `_NSGetExecutablePath` / `GetModuleFileNameA` bodies (a
-    // follow-up to #468 / #473). The retired C driver covered those
-    // platforms via `realpath(argv[0], ...)` as a fallback; mirror
-    // that here so the runtime-root walk still has a directory to
-    // start from. argv[0] is not guaranteed to be canonical (a bare
+    // `exe_path()` now resolves the running binary on every host via
+    // the `sailfin_intrinsic_exe_path` sentinel (#967): `readlink`
+    // (Linux), `_NSGetExecutablePath` (Darwin), `GetModuleFileNameA`
+    // (Windows). It still returns `""` when the host lookup genuinely
+    // fails, so the retired C driver's `realpath(argv[0], ...)`
+    // fallback is preserved below to give the runtime-root walk a
+    // directory to start from. argv[0] is not guaranteed to be canonical (a bare
     // `$PATH` name fails the walk on its own), but `_runtime_bundle_exists`
     // in `sailfin_cli_main` provides the final CWD-relative
     // `runtime` fallback either way.

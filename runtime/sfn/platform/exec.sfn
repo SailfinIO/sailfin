@@ -188,7 +188,18 @@ fn binary_dir(exe: * u8) -> * u8 {
     // string now arrives as a valid non-null pointer to a lone NUL. Without
     // this guard `strrchr` finds no slash and the dir wrongly collapses to ".".
     if strlen(p) == 0 { return ""; }
-    let slash: * u8 = strrchr(p, 47);
+    // Windows `GetModuleFileNameA` returns a backslash-separated path
+    // (`C:\dir\sailfin.exe`), while POSIX uses `/`. Scan for the
+    // rightmost separator of *either* kind so the dirname is correct on
+    // every host: a path with no `/` would otherwise miss the `\` and
+    // collapse to the bare-name "." fallback, which aborted Windows
+    // self-path resolution (#1482). `92` is the ASCII code for `\` (the
+    // seed compiler does not yet accept char literals — same `47`-for-`/`
+    // convention used throughout this file).
+    let fwd: * u8 = strrchr(p, 47);
+    let back: * u8 = strrchr(p, 92);
+    let mut slash: * u8 = fwd;
+    if (back as i64) > (slash as i64) { slash = back; }
     if slash as i64 == 0 { return "."; }
     if slash as i64 == p as i64 { return "/"; }
     let len: i64 = (slash as i64) - (p as i64);

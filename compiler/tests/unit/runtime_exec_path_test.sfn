@@ -75,3 +75,18 @@ test "binary_dir: single-component relative path returns dot" {
     let r: * u8 = binary_dir("hello.sfn" as * u8);
     assert equal_cstr(r, "." as * u8);
 }
+
+// Windows coverage (#1482): `GetModuleFileNameA` returns a
+// backslash-separated path, so `binary_dir` must scan for `\` (92)
+// as well as `/` (47). Before the fix these paths had no `/` and
+// collapsed to the bare-name "." fallback, which aborted self-path
+// resolution on native Windows.
+test "binary_dir: backslash path returns dirname" {
+    let r: * u8 = binary_dir("C:\\dir\\sailfin.exe" as * u8);
+    assert equal_cstr(r, "C:\\dir" as * u8);
+}
+
+test "binary_dir: mixed separators use the rightmost" {
+    let r: * u8 = binary_dir("C:/proj\\build\\sailfin.exe" as * u8);
+    assert equal_cstr(r, "C:/proj\\build" as * u8);
+}
