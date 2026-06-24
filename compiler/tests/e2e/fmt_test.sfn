@@ -161,3 +161,19 @@ test "fmt: --write modifies file in place" ![io] {
     if fs.exists(path) { fs.deleteFile(path); }
     assert c == 0;
 }
+
+// Bulk directory-argument path (#1599 regression). A single `sfn fmt
+// --check` over whole source directories formats every matched file in
+// one process. Before the per-file arena rewind, that process
+// accumulated each file's token/string buffers until it hit the 8 GiB
+// `RLIMIT_AS` self-cap and aborted with SIGABRT (exit 134) partway
+// through the tree. With the rewind, scratch is released between files,
+// so the bulk walk completes (the tree is canonically formatted, so
+// `--check` exits 0). A revert of the rewind regresses to a non-zero
+// abort here on a tree this size.
+test "fmt: --check over source directories completes (no bulk OOM)" ![io] {
+    let exit = process.run_capture([_sfn_bin(), "fmt", "--check", "compiler/src", "runtime"], []);
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+}
