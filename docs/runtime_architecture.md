@@ -32,11 +32,16 @@
 >        `create_capability_grant` / `create_filesystem_bridge` /
 >        `create_http_bridge`), `monotonic_millis`, `logExecution`,
 >        `to_debug_string`, `assert_fail`, `serve`.
->     2. **`sfn_*` stub exists but `native_signature: null`** —
->        `array_map` / `array_filter` / `array_reduce`. The Sailfin
->        module exports placeholder `sfn_array_sfn_*` symbols, but
->        the descriptor still emits calls to the legacy C bodies;
->        real implementations gate on closures-with-capture.
+>     2. ~~**`sfn_*` stub exists but `native_signature: null`** —
+>        `array_map` / `array_filter` / `array_reduce`.~~ **Resolved
+>        (#1507 / #1508, epic #1118).** The `sfn_array_sfn_map` /
+>        `_filter` / `_reduce` bodies are now real (one element at a
+>        time over the closure-apply seam), the descriptors carry
+>        `native_signature: "sfn_array_sfn_*"`, and emitted code binds
+>        the Sailfin symbols — not the legacy C bodies. Closures with
+>        capture (the gating prerequisite) shipped. Scope is
+>        pointer-width `i64` elements only; generic element types stay
+>        gated on #766 (post-1.0). See §2.3.3.
 >     3. **TLS / setjmp API split** — `raise_value_error` (TLS) vs
 >        `sfn_throw` (setjmp/longjmp); M3 unifies them.
 >     4. **`native_signature` routes to a `sfn_*` C trampoline,
@@ -703,17 +708,27 @@ data).
 
 #### 2.3.3 Map/Filter/Reduce
 
-Unlike the current C stubs that return input unchanged, the Sailfin-native
-implementations accept typed closures:
+**Status (shipped — #1507 / #1508, epic #1118).** The Sailfin-native bodies
+are real: `sfn_array_sfn_map` / `_filter` / `_reduce` in `runtime/sfn/array.sfn`
+iterate the array and invoke a typed closure per element over the
+runtime-callable closure-apply seam. The closure arrives as the by-value
+`{i8*, i8*}` pair (descriptors `runtime_array_{map,filter,reduce}_fn`), and the
+emitter extracts the fn-ptr + env and prepends the env to the call — the same
+closure-dispatch path a capturing lambda exercises. The method forms
+`arr.map`, `arr.filter`, and `arr.reduce(init, …)` route through these helpers.
 
-- `sfn_array_map(arr: SfnArray<T>, f: fn(T) -> U, elem_size_in: i64, elem_size_out: i64, Arena*) -> SfnArray<U>`
-- `sfn_array_filter(arr: SfnArray<T>, f: fn(T) -> bool, elem_size: i64, Arena*) -> SfnArray<T>`
-- `sfn_array_reduce(arr: SfnArray<T>, init: U, f: fn(U, T) -> U, elem_size: i64, Arena*) -> U`
+- `sfn_array_sfn_map(arr, mapper: fn(int) -> int) -> arr'`
+- `sfn_array_sfn_filter(arr, predicate: fn(int) -> bool) -> arr'`
+- `sfn_array_sfn_reduce(arr, init: int, reducer: fn(int, int) -> int) -> int`
 
-These require **closures with capture** (roadmap §0 item 5) and **generic
-constraints** (roadmap §2). Until those land, the prelude versions remain stubs.
-This is acceptable — map/filter/reduce are not on the compiler's self-hosting
-critical path.
+**Boundary (no overclaim).** This is the *pointer-width* surface only: the
+callback ABIs are `iN(i8* env, i64 …)`, so element/accumulator types are
+`i64` (`int[]`). Generic / non-pointer-width element types (e.g. `float[]`,
+`string[]`, struct arrays) require **generic constraints** (roadmap §2) and
+remain gated on #766 (post-1.0) — they are rejected with a diagnostic rather
+than mis-mapped. **Closures with capture** (roadmap §0 item 5) shipped, which
+is what unblocked these bodies. E2e:
+`compiler/tests/e2e/array_{map,filter,reduce}_closure_test.sfn`.
 
 ### 2.4 Exception/Unwind Subsystem
 

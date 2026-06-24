@@ -479,7 +479,7 @@ lowering paths:
 | `sailfin_runtime_append_string` | ✅ | In-place push into pointer array |
 | `sailfin_runtime_array_push` | ✅ | In-place pointer push (internal to runtime) |
 | `sailfin_runtime_array_push_slot` | ✅ | Generic byte-wise grow for non-pointer elements |
-| `sailfin_runtime_array_map/filter/reduce` | 🚫 **Stub** | `map`/`filter` return input unchanged; `reduce` returns initial |
+| `sailfin_runtime_array_map/filter/reduce` | ✅ **Superseded** | Real Sailfin bodies `sfn_array_sfn_map`/`_filter`/`_reduce` in `runtime/sfn/array.sfn` now back the `.map`/`.filter`/`.reduce` method forms via the closure-apply seam (#1507 / #1508, epic #1118). Pointer-width `i64` elements only; generic element types post-1.0 (#766). The legacy C stub is no longer the dispatch target |
 
 **Arrays are never freed.** There is no `array_drop`, no RC, no arena. Every
 `string[]`, `NativeFunction[]`, `LocalBinding[]` allocated during compilation
