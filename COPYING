@@ -5,11 +5,12 @@ The Sailfin compiler is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License as published
 by the Free Software Foundation; version 2 of the License.
 
-The Sailfin runtime libraries (runtime/) are distributed under the same
-license with an additional permission described in the file
-RUNTIME_LIBRARY_EXCEPTION. This exception allows programs compiled by
-Sailfin to link against the runtime libraries without those programs
-being subject to the GPL. See RUNTIME_LIBRARY_EXCEPTION for details.
+The Sailfin runtime libraries (runtime/) and standard-library capsules
+(capsules/) are distributed under the same license with an additional
+permission described in the file RUNTIME_LIBRARY_EXCEPTION. This
+exception allows programs compiled by Sailfin to link against the
+runtime libraries and the standard library without those programs being
+subject to the GPL. See RUNTIME_LIBRARY_EXCEPTION for details.
 
 The full text of the GNU General Public License version 2 is in the file
 LICENSE.
