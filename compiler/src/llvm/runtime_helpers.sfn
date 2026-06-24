@@ -999,7 +999,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
 
     // Collection helpers
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_array_map_fn", symbol: "sfn_array_sfn_map", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_array_sfn_map", c_abi_return_type: null
+        target: "runtime_array_map_fn", symbol: "sfn_array_sfn_map", return_type: "i8*", parameter_types: ["i8*", "{i8*, i8*}"], effects: [], native_signature: "sfn_array_sfn_map", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_array_filter_fn", symbol: "sfn_array_sfn_filter", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_array_sfn_filter", c_abi_return_type: null

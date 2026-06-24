@@ -400,13 +400,20 @@ fn main() ![io] {
 
 #### `array_map(items: any[], mapper: (any) -> any) -> any[]`
 
-Apply `mapper` to each element and return a new array of results.
+Apply `mapper` to each element and return a new array of results. The
+working spelling today is the method form `arr.map(closure)` for `int[]`
+arrays (see [Arrays (available today)](#arrays-available-today) above) —
+use that:
 
 ```sfn
 let numbers = [1, 2, 3, 4];
-let doubled = array_map(numbers, fn(n: int) -> int { return n * 2; });
+let doubled: int[] = numbers.map(fn (n: int) -> int { return n * 2; });
 // [2, 4, 6, 8]
 ```
+
+This `array_map` prelude free function is a thin wrapper and remains an
+internal utility; its generic `(any) -> any` closure path is gated on
+generics (#766). Prefer the `.map` method form.
 
 #### `array_filter(items: any[], predicate: (any) -> boolean) -> any[]`
 
@@ -1081,7 +1088,7 @@ fn parse_token(raw: string) -> string ![io] {
 
 > **Coming in 1.0:** Generic containers (`Map<K, V>`, `Set<T>`, and an explicit growable `Vec<T>`) depend on generic type constraints landing first. See the [roadmap](/roadmap) for sequencing.
 >
-> Today, array literals (`[1, 2, 3]`) with `T[]` types, `.length`, `.push(item)`, and the prelude array utilities (`array_map`, `array_filter`, `array_reduce`) are the shipped collection surface.
+> Today, array literals (`[1, 2, 3]`) with `T[]` types, `.length`, `.push(item)`, `.map(closure)` (pointer-width `int` elements), and the prelude array utilities (`array_map`, `array_filter`, `array_reduce`) are the shipped collection surface. `.filter` and `.reduce` method forms are stubs pending generic type constraints (#766).
 
 ### Arrays (available today)
 
@@ -1089,8 +1096,15 @@ fn parse_token(raw: string) -> string ![io] {
 let numbers: int[] = [1, 2, 3];
 numbers.push(4);
 let n = numbers.length;        // 4
-let first = numbers[0];         // 1
+let first = numbers[0];        // 1
+
+// .map(closure) — shipped for pointer-width int arrays
+let base: int = 10;
+let shifted: int[] = numbers.map(fn (x: int) -> int { return x + base; });
+// shifted == [11, 12, 13, 14]
 ```
+
+**`.map` scope:** the element ABI is `i64(i8* env, i64 arg)`, so `.map` works on `int[]` arrays today (the binding must be annotated `int[]`). Generic element types (e.g. `float[]`, `string[]`, struct arrays) are gated on type-constraint generics (#766) and are rejected with a diagnostic rather than mis-mapped. `.filter` and `.reduce` have **no** method dispatch yet — only the prelude free functions exist and their runtime bodies are stubs (return the input array / initial value unchanged) until #766 ships.
 
 ### Planned `Vec<T>`
 
