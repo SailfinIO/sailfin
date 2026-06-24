@@ -310,6 +310,8 @@ sfn add --update acme/router  # force a fresh lookup
 
 If a `capsule.lock` entry already exists and `--update` is not passed, the locked version is used without contacting the registry.
 
+When you add a (non-dev) dependency, its `[capabilities] required` set is merged into your project's `[capabilities] required` so the consumer manifest reflects the capability surface it actually pulls in. Adding an `io`+`net` capsule, for example, records `io` and `net` (deduplicated against what you already declared) and prints the capabilities it propagated. Dev dependencies are build/test-time only and are not folded into the consumer's runtime surface.
+
 ---
 
 ### `sfn publish [path]`

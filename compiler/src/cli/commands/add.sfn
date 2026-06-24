@@ -46,7 +46,12 @@ import {
 
 import { CliContext } from "../context";
 import { lock_add_entry, lock_get_version } from "../../lock";
-import { toml_add_dependency, toml_add_dev_dependency } from "../../toml_parser";
+import {
+    toml_add_dependency,
+    toml_add_dev_dependency,
+    toml_get_capabilities_required,
+    toml_merge_capabilities_required
+} from "../../toml_parser";
 import { substring, find_char_local } from "../../string_utils";
 import {
     _resolve_registry_url_cmd,
@@ -69,6 +74,20 @@ import {
 // positional.
 fn command_def() -> Command {
     return with_arg(with_flag(with_flag(command("add", "Add a dependency capsule to capsule.toml"), flag("dev", "Add as a dev dependency")), flag("update", "Ignore the lockfile and fetch the latest version")), arg("capsule", "Capsule to add (scope/name)"));
+}
+
+// Join capability names into a human-facing comma-separated list for
+// the propagation notice printed by `run`.
+fn _join_caps_cmd(caps: string[]) -> string {
+    let mut out: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= caps.length { break; }
+        if i > 0 { out = out + ", "; }
+        out = out + caps[i];
+        i += 1;
+    }
+    return out;
 }
 
 // Add a dependency capsule: resolve its version (locked or from the
@@ -194,6 +213,25 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
         updated_toml = toml_add_dev_dependency(toml_text, registry_name, resolved_version);
     } else {
         updated_toml = toml_add_dependency(toml_text, registry_name, resolved_version);
+    }
+    // Propagate the dependency's required capability surface into the
+    // consumer manifest so `[capabilities] required` reflects reality
+    // (#1395). The extracted package always carries its own
+    // `capsule.toml` at the cache root (the `SFNPKG/1` payload begins
+    // with `--- path: capsule.toml`, see `publish.sfn`). Dev
+    // dependencies are build/test-time only, so their capabilities are
+    // not folded into the consumer's runtime surface.
+    if !is_dev {
+        let dep_manifest_path = cache_base + "/capsule.toml";
+        if fs.exists(dep_manifest_path) {
+            let dep_caps = toml_get_capabilities_required(fs.readFile(dep_manifest_path));
+            if dep_caps.length > 0 {
+                updated_toml = toml_merge_capabilities_required(updated_toml, dep_caps);
+                print("recorded required capabilities from " + display_name
+                    + ": "
+                    + _join_caps_cmd(dep_caps));
+            }
+        }
     }
     fs.writeFile("capsule.toml", updated_toml);
 

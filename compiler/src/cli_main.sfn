@@ -276,8 +276,13 @@ fn _emit_capsule_artifact_sidecar(spec_capsule_name: string, spec_version: strin
     }
     let parts = parse_scope_name(spec_capsule_name);
     if parts.scope.length == 0 {
-        print.err("[capsule-artifact] capsule name \"" + spec_capsule_name
-            + "\" is not in scope/name form; skipping sidecar");
+        // Single-segment (scope-less) names are a legitimate, supported
+        // configuration: the compiler self-host's own `name = "sailfin"`
+        // is one, and `sfn init` scaffolds bare names too (#1395). A bare
+        // name simply means "no per-capsule sidecar" — it is not an error,
+        // so skip silently rather than warning on stderr on every build.
+        // `sfn package` still surfaces a clear, actionable error at
+        // packaging time when a sidecar is genuinely required.
         return;
     }
     // Path-traversal guard: `[capsule].name` is end-user-controlled,

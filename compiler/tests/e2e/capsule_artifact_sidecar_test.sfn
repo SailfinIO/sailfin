@@ -313,11 +313,47 @@ test "sidecar: positional sfn build produces the output artifact" ![io] {
     // been written by an earlier test; so we assert that if the build
     // succeeded the output artifact exists.
     if exit == 0 { assert fs.exists(out_o); }
-    // No assert on sidecar absence — that is covered by the
-    // `[capsule-artifact] capsule name ... skipping sidecar` message
-    // from the actual compiler output; the important structural assertion
-    // is that no -p-specific sidecar is synthesized for positional builds,
-    // which the compiler already enforces.
+    // No assert on sidecar absence — a positional build never calls
+    // `_emit_capsule_artifact_sidecar`, so the important structural
+    // assertion is that no -p-specific sidecar is synthesized for
+    // positional builds, which the compiler already enforces.
     let ok = true;
     assert ok;
+}
+
+// Bare (scope-less) capsule name fixture (`barewidget`, binary, no deps).
+// A single-segment name is a legitimate configuration — the compiler
+// self-host's own `name = "sailfin"` is one, and `sfn init` scaffolds
+// bare names from the directory basename. `sfn build -p` must NOT emit a
+// `scope/name form` warning for it (#1395).
+fn _bare_root() -> string { return "build/sfn-sidecar-bare-test"; }
+
+fn _ensure_bare_fixture() ![io] {
+    fs.createDirectory(_bare_root() + "/src", true);
+    fs.writeFile(_bare_root() + "/capsule.toml", "[capsule]\n"
+        + "name = \"barewidget\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"src/main.sfn\"\n");
+    fs.writeFile(_bare_root() + "/src/main.sfn", "fn main() ![io] {\n"
+        + "    print(\"barewidget ok\");\n"
+        + "}\n");
+}
+
+// ---- Test 18: a bare (scope-less) capsule name builds without the
+// `scope/name form` warning and skips the sidecar silently (#1395) ----
+test "sidecar: bare capsule name builds without scope/name-form warning" ![io] {
+    _ensure_bare_fixture();
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", _bare_root()], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    assert exit == 0;
+    // A legitimate bare name must not trip the stderr warning.
+    assert ! contains(out + err, "is not in scope/name form");
+    assert ! contains(out + err, "skipping sidecar");
+    // No per-capsule sidecar is synthesized for a scope-less name.
+    assert ! fs.exists("build/capsules/barewidget/manifest.json");
 }
