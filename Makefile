@@ -398,6 +398,11 @@ test-shard:
 	fi
 	@# Every shard is a disjoint slice of the unified `*_test.sfn` runner
 	@# (the legacy e2e `.sh` shards were retired with the bash suite — #840).
+	@# JSON=1 gate (#1235): `JSON=1 make test-shard` (or SAILFIN_AGENT_REPORT=1
+	@# in the env, as the macOS measurement legs set) makes test_shards.sh
+	@# forward `--json` and tee build/agent-test.shard-<shard>.jsonl, whose
+	@# `summary` event carries cache.test_bin_hit_rate (#1230). Default
+	@# (gate off) keeps the byte-identical human run — see scripts/test_shards.sh.
 	@bash scripts/test_shards.sh run "$(SHARD)" "$(NATIVE_BIN)"
 
 # Coverage guard: fail if the shard map drops or double-counts any test

@@ -324,6 +324,33 @@ jobs:
           seed_version: ${{ steps.seed.outputs.seed_version }}
           package: 'false'
 
+      # #1235 measurement (read-only): surface the build-phase wall time and
+      # the module-IR cache.hit_rate that the sailfin-build action captured
+      # (build/ci-metrics.env) into the job log + step summary. The findings
+      # comment scrapes the `[ci-metrics]` line; queue/start/end come from
+      # the Actions API at analysis time. macOS-only — Linux is out of scope.
+      - name: Emit macOS build-leg metrics (#1235)
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          f=build/ci-metrics.env
+          if [ ! -f "$f" ]; then
+            echo "[ci-metrics] no metrics file ($f) — build likely failed before measurement"
+            exit 0
+          fi
+          # shellcheck disable=SC1090
+          . "$f"
+          echo "[ci-metrics] target=${ci_metrics_target:-macos-arm64} phase=build build_s=${build_seconds:-?} build_cache_hit_rate=${build_cache_hit_rate:-?}"
+          {
+            echo "### macOS build leg metrics (#1235)"
+            echo ""
+            echo "| metric | value |"
+            echo "| --- | --- |"
+            echo "| build wall (s) | ${build_seconds:-?} |"
+            echo "| module-IR cache.hit_rate | ${build_cache_hit_rate:-?} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # Bounded shard payload — see the Linux twin above for the
       # include/exclude rationale.
       - name: Bundle compiler tree for shard legs
@@ -780,6 +807,35 @@ jobs:
           # Each leg runs only its shard; package only on the primary leg.
           shard: ${{ matrix.shard }}
           package: ${{ matrix.primary && 'true' || 'false' }}
+
+      # #1235 measurement (read-only): surface this shard leg's test-phase
+      # wall time and cache.test_bin_hit_rate (captured by the sailfin-build
+      # action into build/ci-metrics.env) into the job log + step summary.
+      # The findings comment scrapes the per-shard `[ci-metrics]` line; the
+      # per-leg queue/start/end come from the Actions API at analysis time.
+      - name: Emit macOS test-leg metrics (#1235)
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          f=build/ci-metrics.env
+          if [ ! -f "$f" ]; then
+            echo "[ci-metrics] no metrics file ($f) — tests likely failed before measurement (shard ${{ matrix.shard }})"
+            exit 0
+          fi
+          # shellcheck disable=SC1090
+          . "$f"
+          shard="${ci_metrics_shard:-${{ matrix.shard }}}"
+          echo "[ci-metrics] target=${ci_metrics_target:-macos-arm64} phase=test shard=${shard} test_s=${test_seconds:-?} test_bin_hit_rate=${test_bin_hit_rate:-?}"
+          {
+            echo "### macOS test leg metrics — shard ${shard} (#1235)"
+            echo ""
+            echo "| metric | value |"
+            echo "| --- | --- |"
+            echo "| shard | ${shard} |"
+            echo "| test wall (s) | ${test_seconds:-?} |"
+            echo "| cache.test_bin_hit_rate | ${test_bin_hit_rate:-?} |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report compiler metadata
         if: ${{ matrix.primary }}

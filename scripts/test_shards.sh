@@ -104,8 +104,25 @@ run() {
 		exit 1
 	fi
 	echo "[test_shards] shard '$shard': $(printf '%s\n' "$files" | wc -l | tr -d ' ') file(s)"
+	# JSON-report gate (#1235, additive / default-off). When
+	# SAILFIN_AGENT_REPORT=1 (the repo-wide JSON=1 gate, exported by the
+	# Makefile and set directly by the macOS measurement legs in
+	# .github/actions/sailfin-build), forward `--json` and tee the runner's
+	# JSONL stream — whose `summary` event carries `cache.test_bin_hit_rate`
+	# (#1230) — to a per-shard sidecar so CI can dump the per-test-binary
+	# cache hit-rate without a second test pass. `set -o pipefail` preserves
+	# the runner's real exit status across the tee (the `exec` form below
+	# would lose it to `tee`). The default path stays the byte-identical
+	# `exec "$native" test $files` so normal local/Linux runs are unchanged.
 	# Word-splitting is intentional: pass the file list as positionals.
 	# shellcheck disable=SC2086
+	if [ "${SAILFIN_AGENT_REPORT:-}" = "1" ]; then
+		mkdir -p build
+		local sidecar="build/agent-test.shard-${shard}.jsonl"
+		set -o pipefail
+		"$native" test $files --json | tee "$sidecar"
+		exit "${PIPESTATUS[0]}"
+	fi
 	exec "$native" test $files
 }
 

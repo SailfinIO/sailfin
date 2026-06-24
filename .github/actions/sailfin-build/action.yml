@@ -161,6 +161,19 @@ runs:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
       run: |
         set -euo pipefail
+        # #1235 measurement (macOS only — the issue scopes Linux OUT).
+        # Time the build phase and flip on the existing SAILFIN_AGENT_REPORT
+        # gate (Makefile rebuild-impl, #1120) so the seed emits its module-IR
+        # BuildReport to build/native/.build-report.json — that is where
+        # `cache.hit_rate` lives. Purely additive + macOS-scoped: the two
+        # `date` calls are no-ops and every write is behind `_measure`, so
+        # Linux / release builds stay byte-identical.
+        _measure=0
+        if [ "${{ inputs.target }}" = "macos-arm64" ]; then
+          _measure=1
+          export SAILFIN_AGENT_REPORT=1
+        fi
+        _t0=$(date +%s)
         # Forward build_jobs only when explicitly set; an empty value means
         # "let the Makefile auto-detect" (scripts/detect_build_jobs.sh).
         # The if/else split avoids bash 3.2's "${arr[@]}" empty-array
@@ -175,6 +188,22 @@ runs:
           make rebuild \
             CLANG="${{ inputs.clang }}" \
             SEED_NATIVE="build/seed/bin/sailfin"
+        fi
+        _t1=$(date +%s)
+        if [ "$_measure" = "1" ]; then
+          _build_s=$(( _t1 - _t0 ))
+          _hit_rate="n/a"
+          if command -v jq >/dev/null 2>&1 && [ -f build/native/.build-report.json ]; then
+            _hit_rate="$(jq -r '.cache.hit_rate // "n/a"' build/native/.build-report.json 2>/dev/null || echo n/a)"
+          fi
+          mkdir -p build
+          {
+            echo "ci_metrics_phase=build"
+            echo "ci_metrics_target=${{ inputs.target }}"
+            echo "build_seconds=${_build_s}"
+            echo "build_cache_hit_rate=${_hit_rate}"
+          } >> build/ci-metrics.env
+          echo "[ci-metrics] build phase: ${_build_s}s, module-IR cache.hit_rate=${_hit_rate}"
         fi
 
     # skip-build mode: the compiler tree was downloaded from the shared
@@ -206,6 +235,18 @@ runs:
       shell: bash {0}
       run: |
         set -euo pipefail
+        # #1235 measurement (macOS only). Time the test phase and flip on
+        # the SAILFIN_AGENT_REPORT gate so `make test-shard` →
+        # scripts/test_shards.sh forwards `--json` + tees
+        # build/agent-test.shard-<shard>.jsonl, whose `summary` event carries
+        # cache.test_bin_hit_rate (#1230). Additive + macOS-scoped; Linux
+        # shard legs keep the byte-identical human run.
+        _measure=0
+        if [ "${{ inputs.target }}" = "macos-arm64" ]; then
+          _measure=1
+          export SAILFIN_AGENT_REPORT=1
+        fi
+        _t0=$(date +%s)
         # No step-level ulimit: since seed 0.7.0-alpha.33 every sailfin
         # invocation self-applies an 8 GiB RLIMIT_AS on Linux at its own
         # startup (#1291, .claude/rules/compiler-safety.md) — each
@@ -241,6 +282,24 @@ runs:
           echo "::warning title=test flake (likely #892)::tests failed on attempt 1; retrying once. If this recurs, it is the non-deterministic codegen corruption tracked in #892."
           echo "[ci] retrying tests once (attempt 2/2) — see #892"
           run_tests
+        fi
+        if [ "$_measure" = "1" ]; then
+          _t1=$(date +%s)
+          _test_s=$(( _t1 - _t0 ))
+          _tbhr="n/a"
+          sidecar="build/agent-test.shard-${{ inputs.shard }}.jsonl"
+          if command -v jq >/dev/null 2>&1 && [ -s "$sidecar" ]; then
+            _tbhr="$(jq -rs 'map(select(.event == "summary")) | last | .cache.test_bin_hit_rate // "n/a"' "$sidecar" 2>/dev/null || echo n/a)"
+          fi
+          mkdir -p build
+          {
+            echo "ci_metrics_phase=test"
+            echo "ci_metrics_target=${{ inputs.target }}"
+            echo "ci_metrics_shard=${{ inputs.shard }}"
+            echo "test_seconds=${_test_s}"
+            echo "test_bin_hit_rate=${_tbhr}"
+          } >> build/ci-metrics.env
+          echo "[ci-metrics] test phase (shard ${{ inputs.shard }}): ${_test_s}s, cache.test_bin_hit_rate=${_tbhr}"
         fi
 
     - name: Package artifacts
