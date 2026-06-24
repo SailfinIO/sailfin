@@ -1,0 +1,19 @@
+// compiler/tests/e2e/fixtures/closure_inferred_capture/main.sfn
+//
+// Issue #1610 acceptance — a capturing lambda whose captured local is
+// declared WITHOUT an explicit type annotation (`let base = 100`), then
+// passed to a general `fn(int) -> int` parameter. Before the fix, the
+// capture's `type_text` was empty, so `closure_field_llvm_type` laid the
+// env field out as the opaque `i8*` slot while the env-store wrote the
+// `i64` value — `store i8* %v, i8** ...`, invalid IR that failed at link.
+// The fix infers the field type from the literal initializer so an
+// un-annotated `let base = 100` lays out the same `i64` env field its
+// annotated form (`let base: int = 100`) already did.
+//
+// Expected stdout: 105 (5 argument + 100 inferred-int capture).
+fn apply(cb: fn (int) -> int, x: int) -> int { return cb(x); }
+
+fn main() ![io] {
+    let base = 100;
+    print(apply(fn (d: int) -> int { return d + base; }, 5));
+}
