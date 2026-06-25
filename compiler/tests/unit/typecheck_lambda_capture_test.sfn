@@ -89,6 +89,58 @@ test "captures: type annotation is echoed onto the Capture" ![io] {
     assert strings_equal(records[0].captures[0].type_text, "string");
 }
 
+// #1610: an un-annotated `let base = 100` has no `type_annotation`, so the
+// capture's `type_text` must be inferred from the literal initializer —
+// otherwise the env field falls back to the opaque `i8*` slot and the
+// env-store writes the `i64` value through an `i8**` pointer (invalid IR).
+test "captures: un-annotated int initializer infers int type_text" ![io] {
+    let source = "let base = 100; let f = fn() -> int { return base; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    assert records[0].captures.length == 1;
+    assert strings_equal(records[0].captures[0].type_text, "int");
+    assert records[0].captures[0].by_value;
+}
+
+test "captures: un-annotated float initializer infers float type_text" ![io] {
+    let source = "let ratio = 1.5; let f = fn() -> float { return ratio; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    assert records[0].captures.length == 1;
+    assert strings_equal(records[0].captures[0].type_text, "float");
+}
+
+test "captures: un-annotated string initializer infers string type_text" ![io] {
+    let source = "let name = \"hi\"; let f = fn() -> string { return name; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    assert records[0].captures.length == 1;
+    assert strings_equal(records[0].captures[0].type_text, "string");
+}
+
+test "captures: un-annotated boolean initializer infers boolean type_text" ![io] {
+    let source = "let flag = true; let f = fn() -> boolean { return flag; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    assert records[0].captures.length == 1;
+    assert strings_equal(records[0].captures[0].type_text, "boolean");
+}
+
+// A signed literal parses as `Unary { -, NumberLiteral }`; the inference
+// recurses into the operand so the sign does not defeat the numeric kind.
+test "captures: un-annotated negative int initializer infers int type_text" ![io] {
+    let source = "let delta = -3; let f = fn() -> int { return delta; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    assert records[0].captures.length == 1;
+    assert strings_equal(records[0].captures[0].type_text, "int");
+}
+
 test "captures: mutability of the enclosing binding is recorded" ![io] {
     let source = "let mut counter: int = 0; let inc = fn() -> int { return counter; };";
     let program = parse_program(source);

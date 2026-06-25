@@ -103,3 +103,9 @@ test "closure: mixed string+int two-capture lambda prints xv42" ![io] {
     assert r.exit == 0;
     assert r.out == "xv42";
 }
+
+test "closure: un-annotated inferred-int capture via fn(int) -> int param prints 105" ![io] {
+    let r = _run_fixture("compiler/tests/e2e/fixtures/closure_inferred_capture/main.sfn");
+    assert r.exit == 0;
+    assert r.out == "105";
+}
