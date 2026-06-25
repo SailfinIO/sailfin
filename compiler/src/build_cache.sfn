@@ -493,15 +493,37 @@ fn cache_store_artifact(root: string, key: CacheKey, kind: string, src_path: str
 // or shell metacharacter cannot escape `/tmp/.sfn_build_cache_*`
 // or break the downstream `sha256sum '<path>'` shell invocation.
 //
-// Cross-process race note: two parallel workers calling this with
-// the same sanitized suffix would collide on the same tmp path.
-// Today the cache module is single-process; Stage E's long-lived
-// driver will introduce parallel module compilation and at that
-// point this helper should switch to `mktemp` (or thread a
-// per-worker nonce) — flagged in the proposal's open questions.
+// Cross-process race fix: two parallel workers calling this with the
+// same sanitized suffix used to collide on the single fixed tmp path
+// `/tmp/.sfn_build_cache_hash_<suffix>` — one worker `rm -f`'d the file
+// out from under another's `sha256sum`, surfacing as
+// `sha256sum: /tmp/.sfn_build_cache_hash_…: No such file or directory`
+// and a roaming build-and-run failure under the parallel test pool /
+// `make check --jobs N` (macOS nightly self-host check). The runtime
+// object cache-key path (`runtime_object_entry_key_from_str`) hashes a
+// per-source `hash_suffix` (`cap_prefix + basename + opt_flag`) that is
+// IDENTICAL across concurrent builds of the same runtime source, so the
+// collision is process-global — independent of `SAILFIN_TEST_SCRATCH`.
+//
+// Fix: derive a per-process-unique tmp path via `mktemp` (same pattern
+// as `_cache_atomic_copy`). `mktemp` guarantees a fresh, exclusively
+// created file, so no two workers ever share the path. Falls back to the
+// legacy fixed path when `mktemp` is unavailable (degrades to the prior
+// single-process behaviour rather than failing the hash).
 fn _sha256_of_string(input: string, unique_suffix: string) -> string ![io] {
     let safe_suffix = _sanitize_filename_cmd(unique_suffix);
-    let tmp = "/tmp/.sfn_build_cache_hash_" + safe_suffix;
+    let template = _shell_single_quote_arg("/tmp/.sfn_build_cache_hash_"
+        + safe_suffix
+        + ".XXXXXX");
+    let tmp = _shell_read_cmd("mktemp " + template + " 2>/dev/null");
+    if tmp.length == 0 {
+        // mktemp unavailable — degrade to the legacy fixed path.
+        let fixed = "/tmp/.sfn_build_cache_hash_" + safe_suffix;
+        _write_text_cmd(fixed, input);
+        let fixed_digest = _sha256_of_file_cmd(fixed);
+        process.run(["rm", "-f", fixed]);
+        return fixed_digest;
+    }
     _write_text_cmd(tmp, input);
     let digest = _sha256_of_file_cmd(tmp);
     process.run(["rm", "-f", tmp]);
