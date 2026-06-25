@@ -57,23 +57,39 @@ fn _signature(name: string, effects: string[], span: SourceSpan?) -> FunctionSig
     };
 }
 
-// Build a FunctionDeclaration statement with a body that triggers
-// an `![io]` requirement (a `print.info(…)` call). The body is a
-// `Raw` expression wrapping the source text so the effect checker's
-// fallback `collect_effects_from_text` path picks it up — that's the
-// production path today and exactly what Phase A's signature-span
-// fix is supposed to attribute to the function declaration.
-fn _make_io_violating_routine(name: string, declared_effects: string[], span_line: int) -> Statement {
-    let span = _span(span_line, 4);
-    let body_text = "print.info(\"hello\");";
-    let body_stmt = Statement.ExpressionStatement {
-        expression: Expression.Raw { text: body_text },
+// A structured `print.info(...)` body statement that triggers an `![io]`
+// requirement via the name-resolution detector — the production path after
+// the text-pattern fallback was deleted (#1186, epic #1180 Phase G). Inner
+// spans are left null, so the requirement's per-call-site trigger is null and
+// the violation falls back to `signature_token` for its caret; tests that
+// want a call-site trigger build a spanned body via `_routine_with_member_call`.
+fn _io_member_body_stmt() -> Statement {
+    let object = Expression.Identifier { name: "print", span: null };
+    let member_expr = Expression.Member {
+        object: object,
+        member: "info",
         span: null
     };
+    let no_args: Expression[] = [];
+    let call_expr = Expression.Call {
+        callee: member_expr,
+        arguments: no_args,
+        span: null
+    };
+    return Statement.ExpressionStatement { expression: call_expr, span: null };
+}
+
+// Build a FunctionDeclaration statement whose body triggers an `![io]`
+// requirement (a `print.info(...)` call) via the name-resolution detector.
+// Used by the span-attribution / severity / suppression tests below as a
+// convenient violation generator; the body carries no spans, so the
+// violation's trigger falls back to the signature token.
+fn _make_io_violating_routine(name: string, declared_effects: string[], span_line: int) -> Statement {
+    let span = _span(span_line, 4);
     let body_block = Block {
         tokens: [],
-        text: body_text,
-        statements: [body_stmt]
+        text: "",
+        statements: [_io_member_body_stmt()]
     };
     let mut empty_decorators: Decorator[] = [];
     return Statement.FunctionDeclaration {
@@ -121,30 +137,6 @@ fn _make_spawn_routine(name: string, declared_effects: string[], span_line: int)
     };
 }
 
-// Build a FunctionDeclaration whose body is an arbitrary `Raw` text
-// blob, so the effect checker's `collect_effects_from_text` fallback
-// path is the only thing that runs. Used by the #1530 identifier-
-// boundary regression tests below.
-fn _make_raw_routine(name: string, declared_effects: string[], body_text: string, span_line: int) -> Statement {
-    let span = _span(span_line, 4);
-    let body_stmt = Statement.ExpressionStatement {
-        expression: Expression.Raw { text: body_text },
-        span: null
-    };
-    let body_block = Block {
-        tokens: [],
-        text: body_text,
-        statements: [body_stmt]
-    };
-    let mut empty_decorators: Decorator[] = [];
-    return Statement.FunctionDeclaration {
-        signature: _signature(name, declared_effects, span),
-        body: body_block,
-        decorators: empty_decorators,
-        is_unsafe: false
-    };
-}
-
 fn _effects_contains(effects: string[], target: string) -> boolean {
     let mut index: int = 0;
     loop {
@@ -153,52 +145,6 @@ fn _effects_contains(effects: string[], target: string) -> boolean {
         index += 1;
     }
     return false;
-}
-
-// -------------------------------------------------------------------
-// #1530 — text-fallback heuristics are identifier-boundary aware
-// -------------------------------------------------------------------
-test "effect violation: sfn_spawn( in text body does not require io (#1530)" {
-    // `spawn(` inside the longer identifier `sfn_spawn(` must NOT match
-    // the `spawn(` needle — otherwise a runtime call spuriously demands
-    // ![io]. This is the false-positive that bit #1475 / PR #1519.
-    let body = "let handle = sfn_spawn(worker, payload);";
-    let stmt = _make_raw_routine("rt_spawn", [], body, 9);
-    let program = Program { statements: [stmt] };
-    let violations = validate_effects(program);
-    assert violations.length == 0;
-}
-
-test "effect violation: sfn_serve( and nanosleep( in text body stay clean (#1530)" {
-    // `serve(` inside `sfn_serve(` and `sleep(` inside `nanosleep(` are
-    // both interior matches and must not contribute net/clock.
-    let body = "let s = sfn_serve(handler); let _ = nanosleep(deadline);";
-    let stmt = _make_raw_routine("rt_serve_sleep", [], body, 9);
-    let program = Program { statements: [stmt] };
-    let violations = validate_effects(program);
-    assert violations.length == 0;
-}
-
-test "effect violation: bare spawn( in text body still requires io (#1530)" {
-    // The real surface heuristic must still fire at an identifier
-    // boundary — guard the true-positive direction.
-    let body = "spawn(worker);";
-    let stmt = _make_raw_routine("launch", [], body, 9);
-    let program = Program { statements: [stmt] };
-    let violations = validate_effects(program);
-    assert violations.length == 1;
-    assert violations[0].routine_name == "launch";
-    assert _effects_contains(violations[0].missing_effects, "io");
-}
-
-test "effect violation: bare serve( and sleep( in text body still require net/clock (#1530)" {
-    let body = "serve(handler); sleep(ms);";
-    let stmt = _make_raw_routine("srv", [], body, 9);
-    let program = Program { statements: [stmt] };
-    let violations = validate_effects(program);
-    assert violations.length == 1;
-    assert _effects_contains(violations[0].missing_effects, "net");
-    assert _effects_contains(violations[0].missing_effects, "clock");
 }
 
 // -------------------------------------------------------------------
@@ -259,15 +205,14 @@ test "effect violation: signature_token populated from name_span" {
     assert tok.lexeme == "boom";
 }
 
-test "effect violation: trigger falls back to signature_token on Raw text bodies" {
-    // The `Raw` text-pattern path (used by routines whose bodies the
-    // parser couldn't fully descend into) has no AST node to attach
-    // a span to, so per-requirement triggers are null and the
-    // violation falls back to signature_token. B1 promotes the
-    // primary path (Identifier / Member walk) to per-call-site
-    // triggers; this test locks the fallback in for the residual
-    // text-pattern path so synthesized routines and parser-recovery
-    // edges keep their declaration-site caret.
+test "effect violation: trigger falls back to signature_token when no call-site span" {
+    // A violation whose missing requirement carries no per-call-site
+    // trigger (the body's effectful call has null spans — e.g. a
+    // synthesized routine or a parser-recovery edge) must fall back to
+    // signature_token so the diagnostic still carets at the declaration.
+    // B1 promotes the primary path (Identifier / Member walk) to
+    // per-call-site triggers when spans are present; this locks in the
+    // fallback for the span-less case.
     let stmt = _make_io_violating_routine("ping", [], 12);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
@@ -319,15 +264,10 @@ test "effect violation: routines without name_span produce a null trigger" {
     // `trigger` left null. The renderer falls back to `file_path`-
     // only rendering when primary is null, so this case must not
     // crash.
-    let body_text = "print.info(\"hello\");";
-    let body_stmt = Statement.ExpressionStatement {
-        expression: Expression.Raw { text: body_text },
-        span: null
-    };
     let body_block = Block {
         tokens: [],
-        text: body_text,
-        statements: [body_stmt]
+        text: "",
+        statements: [_io_member_body_stmt()]
     };
     let mut empty_decorators: Decorator[] = [];
     let stmt = Statement.FunctionDeclaration {
@@ -364,15 +304,10 @@ test "effect violation: struct method uses bare identifier in token lexeme" {
     // identifier — otherwise the renderer's caret width covers the
     // wrong span. Lock the bare-vs-qualified split in.
     let span = _span(5, 8);
-    let body_text = "print.info(\"hi\");";
-    let body_stmt = Statement.ExpressionStatement {
-        expression: Expression.Raw { text: body_text },
-        span: null
-    };
     let body_block = Block {
         tokens: [],
-        text: body_text,
-        statements: [body_stmt]
+        text: "",
+        statements: [_io_member_body_stmt()]
     };
     let mut empty_decorators: Decorator[] = [];
     let method_sig = _signature("noisy", [], span);
@@ -416,15 +351,10 @@ test "effect violation: TestDeclaration plumbs name_span" {
     // the synthesized FunctionSignature so test diagnostics get the
     // same signature-token attribution functions/methods get.
     let span = _span(42, 6);
-    let body_text = "print.info(\"x\");";
-    let body_stmt = Statement.ExpressionStatement {
-        expression: Expression.Raw { text: body_text },
-        span: null
-    };
     let body_block = Block {
         tokens: [],
-        text: body_text,
-        statements: [body_stmt]
+        text: "",
+        statements: [_io_member_body_stmt()]
     };
     let mut empty_decorators: Decorator[] = [];
     let mut empty_effects: string[] = [];
@@ -462,7 +392,7 @@ test "effect violation: TestDeclaration plumbs name_span" {
 // picks the first non-null trigger from the missing-requirements
 // list as the violation's `trigger` so the diagnostic carets at the
 // offending call rather than at the function declaration. The
-// fallback to signature_token is exercised by the Raw-text test
+// fallback to signature_token is exercised by the span-less test
 // above.
 //
 // These tests construct AST bodies directly so we don't depend on
@@ -855,17 +785,12 @@ fn _brace_token(line: int, column: int) -> Token {
 
 fn _routine_with_brace(name: string, sig_line: int, brace_line: int, brace_column: int) -> Statement {
     let sig_span = _span(sig_line, 4);
-    let body_text = "print.info(\"hello\");";
-    let body_stmt = Statement.ExpressionStatement {
-        expression: Expression.Raw { text: body_text },
-        span: null
-    };
     let mut block_tokens: Token[] = [];
     block_tokens.push(_brace_token(brace_line, brace_column));
     let body_block = Block {
         tokens: block_tokens,
-        text: body_text,
-        statements: [body_stmt]
+        text: "",
+        statements: [_io_member_body_stmt()]
     };
     let mut empty_decorators: Decorator[] = [];
     let mut empty_effects: string[] = [];
@@ -891,7 +816,7 @@ test "effect violation: body_open_token captures the body's opening brace" {
 }
 
 test "effect violation: body_open_token is null when block has no tokens" {
-    // Synthesized routines and the `Raw` text-only path leave Block
+    // Synthesized routines (no parser-captured tokens) leave Block
     // tokens empty. The renderer must accept the null and skip
     // structured-suggestion generation; the human-readable
     // suggestion line in the message stays.

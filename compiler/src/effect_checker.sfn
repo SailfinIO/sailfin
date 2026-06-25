@@ -49,7 +49,6 @@ import {
 } from "./effect_imports";
 import { is_universally_allowed_effect } from "./effect_taxonomy";
 import { effects_for_callee_target } from "./llvm/runtime_helpers";
-import { char_code_at_text, substring } from "./string_utils";
 import { Token, TokenKind } from "./token";
 
 struct EffectRequirement {
@@ -619,9 +618,6 @@ fn collect_effects_from_statement(statement: Statement, imports: ImportSymbolTab
         }
         return required;
     }
-    if statement.variant == "Unknown" {
-        return collect_effects_from_text(statement.text);
-    }
     return [];
 }
 
@@ -937,9 +933,6 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         // and lowering (R.4) stay deferred; this is non-regression only.
         return collect_effects_from_expression(expression.operand, imports);
     }
-    if expression.variant == "Raw" {
-        return collect_effects_from_text(expression.text);
-    }
     // Concurrency frontend nodes (epic #965, issues #1079-#1082). Mirror the
     // Call-form name handlers above so the new prefix/construct syntax carries
     // the same effects: `spawn`/`parallel` → io, `serve` → net. Each arm also
@@ -989,179 +982,6 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         return required;
     }
     return [];
-}
-
-fn collect_effects_from_text(text: string) -> EffectRequirement[] {
-    let mut required: EffectRequirement[] = [];
-
-    // Keep this conservative: false positives are worse than missing a hint.
-    // This checker exists to produce friendly diagnostics, not enforce soundness.
-    // The text-pattern path has no AST node, so trigger stays null —
-    // diagnostics fall back to the routine's signature span.
-    if contains_code(text, "fs.") {
-        required = append_requirement(required, EffectRequirement {
-            effect: "io", description: "filesystem helper usage", trigger: null
-        });
-    }
-    let mut _if18: boolean = false;
-    if contains_code(text, "print(") { _if18 = true; }
-    if contains_code(text, "print.") { _if18 = true; }
-    if _if18 {
-        required = append_requirement(required, EffectRequirement {
-            effect: "io", description: "print helper usage", trigger: null
-        });
-    }
-    if contains_code(text, "console.") {
-        required = append_requirement(required, EffectRequirement {
-            effect: "io", description: "console helper usage", trigger: null
-        });
-    }
-    if contains_code(text, "http.") {
-        required = append_requirement(required, EffectRequirement {
-            effect: "net", description: "http helper usage", trigger: null
-        });
-    }
-    if contains_code(text, "websocket.") {
-        required = append_requirement(required, EffectRequirement {
-            effect: "net", description: "websocket helper usage", trigger: null
-        });
-    }
-    if contains_code(text, "spawn(") {
-        required = append_requirement(required, EffectRequirement {
-            effect: "io", description: "spawn call", trigger: null
-        });
-    }
-    if contains_code(text, "serve(") {
-        required = append_requirement(required, EffectRequirement {
-            effect: "net", description: "serve call", trigger: null
-        });
-    }
-    if contains_code(text, "sleep(") {
-        required = append_requirement(required, EffectRequirement {
-            effect: "clock", description: "sleep call", trigger: null
-        });
-    }
-
-    return required;
-}
-
-fn _is_effect_ident_char(ch: string) -> boolean {
-    if ch.length == 0 { return false; }
-    let c = char_code_at_text(ch, 0);
-    let mut _ret: boolean = false;
-    if c >= 65 {
-        if c <= 90 { _ret = true; }
-    }
-    if c >= 97 {
-        if c <= 122 { _ret = true; }
-    }
-    if c >= 48 {
-        if c <= 57 { _ret = true; }
-    }
-    if c == 95 { _ret = true; }
-    return _ret;
-}
-
-fn contains_code(text: string, needle: string) -> boolean {
-    if needle.length == 0 { return true; }
-    if text.length < needle.length { return false; }
-
-    // When the needle begins with an identifier char (e.g. "spawn("),
-    // require a left identifier boundary so it does not match inside a
-    // longer identifier (e.g. "spawn(" inside "sfn_spawn("). All current
-    // heuristic needles start with a letter; see #1530.
-    let needle_starts_ident = _is_effect_ident_char(substring(needle, 0, 1));
-
-    let mut index: int = 0;
-    let mut in_line_comment: boolean = false;
-    let mut in_block_comment: boolean = false;
-    let mut in_string_quote: string = "";
-    let mut escaped: boolean = false;
-
-    loop {
-        if index >= text.length { break; }
-
-        let _ec_next = index + 1;
-        let ch = substring(text, index, _ec_next);
-        let mut two: string = "";
-        if _ec_next < text.length {
-            let _ec_next2 = index + 2;
-            two = substring(text, index, _ec_next2);
-        }
-
-        if in_string_quote.length > 0 {
-            if escaped {
-                escaped = false;
-                index += 1;
-                continue;
-            }
-            if ch == "\\" {
-                escaped = true;
-                index += 1;
-                continue;
-            }
-            if ch == in_string_quote {
-                in_string_quote = "";
-                index += 1;
-                continue;
-            }
-            index += 1;
-            continue;
-        }
-
-        if in_line_comment {
-            if ch == "\n" { in_line_comment = false; }
-            index += 1;
-            continue;
-        }
-
-        if in_block_comment {
-            if two == "*/" {
-                in_block_comment = false;
-                index += 2;
-                continue;
-            }
-            index += 1;
-            continue;
-        }
-
-        if two == "//" {
-            in_line_comment = true;
-            index += 2;
-            continue;
-        }
-        if two == "/*" {
-            in_block_comment = true;
-            index += 2;
-            continue;
-        }
-        let mut _if19: boolean = false;
-        if ch == "\"" { _if19 = true; }
-        if ch == "'" { _if19 = true; }
-        if _if19 {
-            in_string_quote = ch;
-            escaped = false;
-            index += 1;
-            continue;
-        }
-
-        let _end_pos = index + needle.length;
-        if _end_pos <= text.length {
-            if substring(text, index, _end_pos) == needle {
-                let mut _boundary_ok: boolean = true;
-                if needle_starts_ident {
-                    if index > 0 {
-                        let _prev = substring(text, index - 1, index);
-                        if _is_effect_ident_char(_prev) { _boundary_ok = false; }
-                    }
-                }
-                if _boundary_ok { return true; }
-            }
-        }
-        index += 1;
-    }
-
-    return false;
 }
 
 fn append_violations(violations: EffectViolation[], new_violations: EffectViolation[]) -> EffectViolation[] {

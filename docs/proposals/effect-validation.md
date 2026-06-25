@@ -1136,8 +1136,14 @@ ulimit -v 8388608 && timeout 600 make check
 **Goal.** Replace text-pattern detection with semantic name-resolution.
 Add effect polymorphism for HOFs.
 
-This phase is post-1.0. The proposal sketches it for forward-compatibility
-only; the implementation is a separate workstream.
+> **Status update.** The *name-resolution detection* sub-track shipped
+> pre-1.0 under epic #1180: G1/G1b wired the detector to the runtime
+> descriptor registry and the symbol table (#1183, #1184), G1c proved
+> superset parity with the legacy text-pattern detector (#1185), and **G4
+> (#1186) deleted `collect_effects_from_text` and the `Raw`/`Unknown`
+> text-scan fallback** — name resolution is now the only detection path.
+> The *effect-polymorphism* sub-track (`!E` variables, polymorphic stdlib
+> HOFs) remains post-1.0 and is sketched below for forward-compatibility.
 
 **Sub-phases.**
 

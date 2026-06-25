@@ -1,0 +1,176 @@
+// Effect-detector coverage: the name-resolution detector attributes the
+// correct effect for every builtin/concurrency family.
+//
+// History: this began as the G1c parity harness (#1185), proving the
+// name-resolution detector (`collect_effects_from_expression`, wired to the
+// runtime descriptor registry in #1183 + symbol resolution in #1184) was a
+// superset of the legacy text-pattern detector. That text fallback
+// (`collect_effects_from_text`) was deleted in G4 (#1186, epic #1180,
+// Phase G), so there is no longer a second path to compare against. The
+// resolution-path assertions are retained here as a standalone regression
+// net: now that the text safety-net is gone, these are the only thing
+// guarding against a silent enforcement hole if the detector regresses.
+//
+// FAITHFULNESS: each case is parsed from real source through `parse_program`
+// — the exact frontend path enforcement relies on — not from a hand-built
+// AST that could drift from what the parser actually produces.
+//
+//   construct          effect   resolution-path node
+//   ---------          ------   --------------------
+//   fs.exists / fs.read  io     Member  (descriptor + namespace union)
+//   print("…")           io     Call    (bare builtin)
+//   print.info("…")      io     Member  (descriptor)
+//   console.log("…")     io     Member  (descriptor)
+//   http.get("…")        net    Member  (descriptor + namespace union)
+//   websocket.send("…")  net    Member  (explicit net, #1601)
+//   spawn(task)          io     Spawn   (parser → Spawn node; Call arm also covered)
+//   serve(handler)       net    Serve   (parser → Serve node; Call arm also covered)
+//   sleep(1.0)           clock  Call    (descriptor)
+//
+// NOTE on spawn/serve: the parser intercepts `spawn(...)`/`serve(...)` into
+// dedicated `Spawn`/`Serve` AST nodes (concurrency frontend), NOT generic
+// `Call` expressions — so real source is covered by the `Spawn`/`Serve`
+// variant arms of `collect_effects_from_expression`. The detector ALSO keeps
+// defensive `Call`+Identifier arms for `spawn`/`serve` (effect_checker.sfn,
+// the `name == "spawn"` / `name == "serve"` branches); those are exercised
+// here via a hand-built `Call` node so neither arm is left uncovered.
+//
+// >>> WHEN YOU ADD A NEW EFFECTFUL BUILTIN FAMILY TO THE DETECTOR, ADD A
+// >>> MATCHING COVERAGE CASE HERE. A missed family becomes a silent
+// >>> enforcement hole.
+import { Expression } from "../../src/ast";
+import { EffectRequirement, collect_effects_from_expression } from "../../src/effect_checker";
+import { empty_import_symbols } from "../../src/effect_imports";
+import { parse_program } from "../../src/parser/mod";
+
+// -------------------------------------------------------------------
+// Helpers
+// -------------------------------------------------------------------
+// Parse `snippet` as the sole expression-statement of a probe function and
+// return the resulting `Expression`. Asserts the shape so a parser change
+// fails here with a clear message rather than trapping downstream. The
+// referenced identifiers (`p`, `task`, `handler`) need not be declared —
+// this is parse + effect-collection only, no typecheck.
+fn _probe_expr(snippet: string) -> Expression ![io] {
+    let program = parse_program("fn probe() { " + snippet + "; }");
+    assert program.statements.length >= 1;
+    let fn_stmt = program.statements[0];
+    assert fn_stmt.variant == "FunctionDeclaration";
+    assert fn_stmt.body.statements.length >= 1;
+    let stmt = fn_stmt.body.statements[0];
+    assert stmt.variant == "ExpressionStatement";
+    return stmt.expression;
+}
+
+// A hand-built `Call` over a bare `Identifier` callee — the shape the
+// parser does NOT produce for the keyword forms `spawn`/`serve` (it routes
+// them to `Spawn`/`Serve` nodes), so the only way to exercise the detector's
+// defensive `Call`+Identifier arms for those names is to construct the node
+// directly.
+fn _bare_call(callee: string) -> Expression {
+    let no_args: Expression[] = [];
+    return Expression.Call {
+        callee: Expression.Identifier { name: callee, span: null },
+        arguments: no_args,
+        span: null
+    };
+}
+
+fn _reqs_contain(reqs: EffectRequirement[], effect: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= reqs.length { break; }
+        if reqs[index].effect == effect { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+// Resolution path requirements for a parsed snippet (empty import table —
+// these are all runtime builtins / concurrency anchors, not cross-module
+// imports, so no import symbols are needed).
+fn _resolution_reqs(snippet: string) -> EffectRequirement[] ![io] {
+    return collect_effects_from_expression(_probe_expr(snippet), empty_import_symbols());
+}
+
+// The core coverage invariant for one construct: the resolution path
+// attributes `effect` for `snippet`.
+fn _assert_detects(snippet: string, effect: string) ![io] {
+    let reqs = _resolution_reqs(snippet);
+    assert _reqs_contain(reqs, effect);
+}
+
+// -------------------------------------------------------------------
+// Per-family coverage cases (one per effectful builtin/concurrency family)
+// -------------------------------------------------------------------
+test "detect: fs.* filesystem helper -> io (exact descriptor)" ![io] {
+    _assert_detects("fs.exists(p)", "io");
+}
+
+test "detect: fs.* non-exact member -> io (namespace union)" ![io] {
+    // No `fs.read` descriptor row exists; the resolution path must still
+    // attribute `io` via the namespace-union fallback in
+    // `effects_for_callee_target`.
+    _assert_detects("fs.read(p)", "io");
+}
+
+test "detect: print(...) bare call -> io" ![io] {
+    _assert_detects("print(\"x\")", "io");
+}
+
+test "detect: print.info(...) member -> io" ![io] {
+    _assert_detects("print.info(\"x\")", "io");
+}
+
+test "detect: console.* member -> io" ![io] {
+    _assert_detects("console.log(\"x\")", "io");
+}
+
+test "detect: http.* member -> net" ![io] {
+    _assert_detects("http.get(\"u\")", "net");
+}
+
+test "detect: websocket.* member -> net" ![io] {
+    _assert_detects("websocket.send(\"m\")", "net");
+}
+
+test "detect: spawn(...) -> io (Spawn node, real source)" ![io] {
+    // Pin the parser routing: real `spawn(...)` source becomes a `Spawn`
+    // node, so the `Spawn` variant arm carries the effect. If a future
+    // parser change re-routes this through the generic `Call` path, this
+    // assertion fails and forces a re-check of arm coverage.
+    assert _probe_expr("spawn(task)").variant == "Spawn";
+    _assert_detects("spawn(task)", "io");
+}
+
+test "detect: spawn(...) -> io (defensive Call+Identifier arm)" ![io] {
+    // The detector also keeps a `Call`+Identifier arm for `spawn` that the
+    // parser never reaches; cover it directly so a future change can't
+    // silently drop it.
+    let reqs = collect_effects_from_expression(_bare_call("spawn"), empty_import_symbols());
+    assert _reqs_contain(reqs, "io");
+}
+
+test "detect: serve(...) -> net (Serve node, real source)" ![io] {
+    assert _probe_expr("serve(handler)").variant == "Serve";
+    _assert_detects("serve(handler)", "net");
+}
+
+test "detect: serve(...) -> net (defensive Call+Identifier arm)" ![io] {
+    let reqs = collect_effects_from_expression(_bare_call("serve"), empty_import_symbols());
+    assert _reqs_contain(reqs, "net");
+}
+
+test "detect: sleep(...) call -> clock" ![io] {
+    _assert_detects("sleep(1.0)", "clock");
+}
+
+// -------------------------------------------------------------------
+// Baseline: a non-effectful call requires nothing. Proves the suite is not
+// trivially satisfied and that the resolution path introduces no false
+// positives for ordinary user calls.
+// -------------------------------------------------------------------
+test "detect: non-effectful call requires nothing" ![io] {
+    let reqs = _resolution_reqs("compute(a, b)");
+    assert reqs.length == 0;
+}
