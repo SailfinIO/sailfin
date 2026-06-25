@@ -1,8 +1,8 @@
 ---
 name: compiler-architect
-description: Fable 5-powered architect for designing compiler features, refactors, and fixes that account for self-hosting constraints, the full pipeline, and the 1.0 roadmap. Use when you need a forward-thinking plan before implementing.
+description: Opus-powered architect for designing compiler features, refactors, and fixes that account for self-hosting constraints, the full pipeline, and the 1.0 roadmap. Use when you need a forward-thinking plan before implementing.
 tools: Read, Grep, Glob, Bash, Write
-model: fable
+model: opus
 effort: high
 maxTurns: 30
 color: purple
