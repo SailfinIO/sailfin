@@ -88,8 +88,15 @@ doc, or `docs/runtime_architecture.md`, not here.
   resolution and decorator-implied transitives are Phase E2 (deferred).
 - **Capsule capability cross-check** (`E0403`, Phase F): `[capabilities]
   required = [...]` is a compile-time contract; an empty surface skips the
-  check. Phase G (post-1.0) moves to name-resolution detection + effect
-  polymorphism.
+  check.
+- **Name-resolution-driven effect detection** (epic #1180, Phase G): every
+  effect requirement is resolved through the symbol table (local + imported)
+  and the runtime descriptor registry — not text heuristics. The legacy
+  text-pattern fallback (`collect_effects_from_text`) was proven redundant by
+  a parity harness (#1185) and **deleted in #1186**; parse-failure `Raw`/
+  `Unknown` nodes are now effect-blind by design (they carry no resolvable
+  call). Effect polymorphism (`!E` variables, polymorphic HOFs) remains
+  post-1.0.
 - **Undefined free-function rejection** (`E0420`, #616/#812): unresolvable
   bare-identifier callees fail typecheck.
 - **Function references**: a bare fn name in value position lowers to the
