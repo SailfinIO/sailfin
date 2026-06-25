@@ -2,22 +2,22 @@
 //
 // LLVM IR rendering helpers for interfaces, vtables, test harness, symbol visibility,
 // and utility functions for type extraction and parameter collection.
+import {
+    NativeFunction,
+    NativeImport,
+    NativeInterfaceSignature,
+    NativeParameter
+} from "../native_ir";
+import { find_last_index_of_char, substring } from "../string_utils";
+import { map_parameter_type, map_struct_type_annotation } from "./type_mapping";
 import { TypeContext } from "./types";
 import {
-    starts_with,
-    sanitize_symbol,
-    number_to_string,
     join_with_separator,
+    number_to_string,
+    sanitize_symbol,
+    starts_with,
     string_array_contains
 } from "./utils";
-import {
-    NativeImport,
-    NativeFunction,
-    NativeParameter,
-    NativeInterfaceSignature
-} from "../native_ir";
-import { map_parameter_type, map_struct_type_annotation } from "./type_mapping";
-import { substring, find_last_index_of_char } from "../string_utils";
 
 fn clamp_collection_length(value: int, max: int) -> int {
     if value < 0 { return 0; }

@@ -6,23 +6,23 @@
 import {
     Block,
     Decorator,
-    MatchCase,
-    Parameter,
-    Statement,
-    ElseBranch,
-    Expression,
-    SourceSpan,
-    WithClause,
-    EnumVariant,
-    ObjectField,
-    TypeParameter,
-    TypeAnnotation,
-    ExportSpecifier,
-    ImportSpecifier,
-    FieldDeclaration,
     DecoratorArgument,
+    ElseBranch,
+    EnumVariant,
+    ExportSpecifier,
+    Expression,
+    FieldDeclaration,
     FunctionSignature,
-    MethodDeclaration
+    ImportSpecifier,
+    MatchCase,
+    MethodDeclaration,
+    ObjectField,
+    Parameter,
+    SourceSpan,
+    Statement,
+    TypeAnnotation,
+    TypeParameter,
+    WithClause
 } from "../ast";
 import { Token } from "../token";
 

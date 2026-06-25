@@ -27,13 +27,13 @@
 // rationale.
 import {
     Decorator,
+    FunctionSignature,
     Parameter,
     Statement,
-    TypeParameter,
     TypeAnnotation,
-    FunctionSignature
+    TypeParameter
 } from "./ast";
-import { NativeInterface, NativeParameter, NativeInterfaceSignature } from "./native_ir";
+import { NativeInterface, NativeInterfaceSignature, NativeParameter } from "./native_ir";
 
 // -------------------------------------------------------------------
 // Field-level converters

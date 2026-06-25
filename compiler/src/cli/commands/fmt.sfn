@@ -32,21 +32,21 @@
 // in `cli_commands_utils.sfn`; both are imported in place (relocating them
 // is out of scope here).
 import {
-    flag,
     Command,
     Matches,
+    arg_variadic,
     command,
+    flag,
     has_flag,
-    with_arg,
-    with_flag,
     positionals,
-    arg_variadic
+    with_arg,
+    with_flag
 } from "sfn/cli";
 
-import { CliContext } from "../context";
-import { format_source } from "../../tools/fmt";
-import { substring } from "../../string_utils";
 import { _collect_sfn_files_cmd } from "../../cli_commands_utils";
+import { substring } from "../../string_utils";
+import { format_source } from "../../tools/fmt";
+import { CliContext } from "../context";
 
 // The `sfn/cli` definition for `fmt`, registered on the v2 root via
 // `with_subcommand`. Two boolean flags and a variadic `[path...]`
@@ -97,6 +97,20 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
 
     let mut would_change = 0;
     let mut fi = 0;
+
+    // Phase 5a (`docs/proposals/phase-5a-arena-reset.md`): take an arena
+    // mark immediately before the per-file loop and rewind to it at the
+    // end of every iteration. Each file's `source`/`formatted` token and
+    // string buffers (allocated below the mark by `fs.readFile` /
+    // `format_source`) are reclaimed before the next file, so a bulk
+    // `sfn fmt --write compiler/src/ runtime/` stays bounded instead of
+    // accumulating every file's working state until it hits the 8 GiB
+    // self-cap and aborts (exit 134 — #1599). The only state carried
+    // across iterations is scalar (`would_change`, `fi`) or allocated
+    // above the mark (`files`, from which `path` is re-read each pass),
+    // so the rewind is correctness-safe. No-op when the arena is disabled
+    // (`SAILFIN_USE_ARENA=0`) — the runtime wrapper short-circuits.
+    let scratch_mark = sailfin_intrinsic_runtime_arena_mark();
     loop {
         if fi >= files.length { break; }
         let path = files[fi];
@@ -120,6 +134,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
                 } else { print(formatted); }
             }
         }
+        sailfin_intrinsic_runtime_arena_rewind(scratch_mark);
         fi += 1;
     }
 

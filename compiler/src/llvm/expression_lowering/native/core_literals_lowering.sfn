@@ -1,71 +1,71 @@
 // compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn
 //
 // Literal/cast/interpolation lowering extracted from core.sfn.
-import { lower_expression } from "./core";
-import { array_pointer_element_type } from "../arrays";
+import { NativeFunction, NativeSourceSpan } from "../../../native_ir";
+import { substring } from "../../../string_utils";
+import { default_return_literal, format_temp_name } from "../../expressions_helpers";
+import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import {
-    LLVMOperand,
-    TypeContext,
-    LocalBinding,
-    HeapBoxResult,
-    StringConstant,
+    find_enum_info_by_llvm_type,
+    find_struct_info_by_llvm_type,
+    lookup_allocation_info,
+    resolve_enum_info_for_literal,
+    resolve_enum_variant_info,
+    resolve_struct_info_for_literal
+} from "../../type_context_queries";
+import {
+    array_struct_type_for_element,
+    ends_with_pointer_suffix,
+    enum_inst_annotation_references_param,
+    map_type_annotation,
+    strip_pointer_suffix
+} from "../../type_mapping";
+import {
     CastParseResult,
     EnumLiteralParse,
     ExpressionResult,
+    HeapBoxResult,
+    InterpolatedTemplateParse,
+    LLVMOperand,
+    LocalBinding,
     ParameterBinding,
+    StringConstant,
     StructLiteralField,
     StructLiteralParse,
-    InterpolatedTemplateParse
+    TypeContext
 } from "../../types";
 import {
-    trim_text,
-    starts_with,
     append_string,
-    number_to_string,
     extend_string_array,
     join_with_separator,
-    string_array_contains
+    number_to_string,
+    starts_with,
+    string_array_contains,
+    trim_text
 } from "../../utils";
-import {
-    find_substring_from,
-    unescape_string_literal,
-    parse_interpolated_template,
-    encode_string_literal_for_sailfin
-} from "./core_text";
+import { array_pointer_element_type } from "../arrays";
 import { split_array_elements } from "../splitting";
-import { merge_string_constants, empty_string_constant_set } from "../../strings";
-import { parse_array_literal_metadata } from "./core_parsing";
-import { emit_string_concat, lower_string_literal, coerce_operand_to_string } from "./core_strings";
+import { lower_expression } from "./core";
 import {
-    emit_runtime_call,
-    RuntimeCallOverrides,
-    empty_runtime_call_overrides
-} from "./runtime_call";
-import {
+    coerce_operand_to_type,
     dominant_type,
     integer_llvm_width,
     is_float_llvm_type,
-    is_integer_llvm_type,
-    coerce_operand_to_type
+    is_integer_llvm_type
 } from "./core_operands";
-import { NativeFunction, NativeSourceSpan } from "../../../native_ir";
+import { parse_array_literal_metadata } from "./core_parsing";
+import { coerce_operand_to_string, emit_string_concat, lower_string_literal } from "./core_strings";
 import {
-    map_type_annotation,
-    strip_pointer_suffix,
-    ends_with_pointer_suffix,
-    array_struct_type_for_element,
-    enum_inst_annotation_references_param
-} from "../../type_mapping";
-import { substring } from "../../../string_utils";
-import { format_temp_name, default_return_literal } from "../../expressions_helpers";
+    encode_string_literal_for_sailfin,
+    find_substring_from,
+    parse_interpolated_template,
+    unescape_string_literal
+} from "./core_text";
 import {
-    lookup_allocation_info,
-    resolve_enum_variant_info,
-    find_enum_info_by_llvm_type,
-    find_struct_info_by_llvm_type,
-    resolve_enum_info_for_literal,
-    resolve_struct_info_for_literal
-} from "../../type_context_queries";
+    RuntimeCallOverrides,
+    emit_runtime_call,
+    empty_runtime_call_overrides
+} from "./runtime_call";
 
 // Slice E.2 follow-up (#540): mirrors `format_coerce_span_location` in
 // `core_operands.sfn`. Inline rather than imported to avoid a cyclic

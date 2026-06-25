@@ -31,10 +31,10 @@
 // and the seed compiler does not handle import cycles cleanly. The
 // duplication is small (~50 lines, four pure string helpers) and
 // changes here are decoupled from changes to `main.sfn`'s own copies.
-import { Token } from "./token";
+import { CapabilityViolation, EffectRequirement, EffectViolation } from "./effect_checker";
 import { substring } from "./string_utils";
-import { EffectViolation, EffectRequirement, CapabilityViolation } from "./effect_checker";
-import { TextEdit, Diagnostic, FixSuggestion } from "./typecheck_types";
+import { Token } from "./token";
+import { Diagnostic, FixSuggestion, TextEdit } from "./typecheck_types";
 
 // -------------------------------------------------------------------
 // Effect-violation → Diagnostic

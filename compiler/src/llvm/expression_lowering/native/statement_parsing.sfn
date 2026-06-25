@@ -5,9 +5,9 @@
 // Contains `parse_assignment_expression` (splits `target = value` and compound
 // assignments like `x += y`) and `parse_inline_let_expression` (parses
 // `let [mut] name [: type] = init`).
-import { InlineLetParseResult, AssignmentParseResult } from "../../types";
-import { index_of, trim_text } from "../../utils";
 import { substring } from "../../../string_utils";
+import { AssignmentParseResult, InlineLetParseResult } from "../../types";
+import { index_of, trim_text } from "../../utils";
 
 fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
     let trimmed = trim_text(expression);

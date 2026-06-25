@@ -3,43 +3,23 @@
 // Struct and enum definition parsing, extracted from native_ir_parser.sfn
 // to keep the module under the seed compiler's OOM threshold.
 import {
-    NativeEnum,
-    NativeStruct,
-    NativeFunction,
     EnumParseResult,
-    NativeParameter,
-    NativeEnumLayout,
-    NativeSourceSpan,
-    NativeEnumVariant,
-    NativeInstruction,
-    NativeStructField,
-    StructParseResult,
-    NativeStructLayout,
     InstructionParseResult,
+    NativeEnum,
+    NativeEnumLayout,
+    NativeEnumVariant,
     NativeEnumVariantLayout,
-    NativeStructLayoutField
+    NativeFunction,
+    NativeInstruction,
+    NativeParameter,
+    NativeSourceSpan,
+    NativeStruct,
+    NativeStructField,
+    NativeStructLayout,
+    NativeStructLayoutField,
+    StructParseResult
 } from "./native_ir";
-import { char_code, substring } from "./string_utils";
-import {
-    index_of,
-    trim_text,
-    starts_with,
-    is_trim_char,
-    strip_prefix,
-    last_index_of,
-    strip_generics,
-    split_whitespace,
-    split_top_level_commas
-} from "./native_ir_utils_text";
-import {
-    parse_effect_list,
-    parse_function_name,
-    parse_struct_header,
-    parse_decorator_name,
-    parse_parameter_entry,
-    parse_enum_variant_line,
-    parse_struct_field_line
-} from "./native_ir_utils_parse";
+import { parse_instruction } from "./native_ir_parser_instructions";
 import {
     parse_decimal_number,
     parse_enum_layout_header,
@@ -48,7 +28,27 @@ import {
     parse_struct_layout_field,
     parse_struct_layout_header
 } from "./native_ir_utils_layout";
-import { parse_instruction } from "./native_ir_parser_instructions";
+import {
+    parse_decorator_name,
+    parse_effect_list,
+    parse_enum_variant_line,
+    parse_function_name,
+    parse_parameter_entry,
+    parse_struct_field_line,
+    parse_struct_header
+} from "./native_ir_utils_parse";
+import {
+    index_of,
+    is_trim_char,
+    last_index_of,
+    split_top_level_commas,
+    split_whitespace,
+    starts_with,
+    strip_generics,
+    strip_prefix,
+    trim_text
+} from "./native_ir_utils_text";
+import { char_code, substring } from "./string_utils";
 
 fn parse_source_span(text: string) -> NativeSourceSpan? {
     let trimmed = trim_text(text);

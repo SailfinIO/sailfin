@@ -10,61 +10,61 @@
 // lowering_core.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
-import { index_of, number_to_string } from "../utils";
 import {
     NativeEnum,
-    NativeImport,
-    NativeStruct,
-    NativeFunction,
     NativeEnumLayout,
     NativeEnumVariant,
-    NativeInstruction,
-    NativeStructField,
-    NativeStructLayout,
     NativeEnumVariantField,
     NativeEnumVariantLayout,
+    NativeFunction,
+    NativeImport,
+    NativeInstruction,
+    NativeStruct,
+    NativeStructField,
+    NativeStructLayout,
     NativeStructLayoutField
 } from "../../native_ir";
-import { substring } from "../../string_utils";
-import { sanitize_collection_length } from "./lowering_helpers";
 import {
-    parse_native_functions_from_text,
-    parse_native_function_count_from_text
+    parse_native_function_count_from_text,
+    parse_native_functions_from_text
 } from "../../native_ir_api";
+import { substring } from "../../string_utils";
+import { index_of, number_to_string } from "../utils";
+import { sanitize_collection_length } from "./lowering_helpers";
+import { append_native_function } from "./lowering_helpers_mangling";
 import {
-    trim_text_local,
-    extract_kv_number,
-    extract_kv_string,
-    split_lines_local,
-    starts_with_local,
-    index_of_char_local,
-    net_unquoted_brace_depth,
-    recover_function_name_from_header,
-    recover_function_is_async_from_header
-} from "./lowering_text_utils";
-import {
-    make_native_enum,
-    make_native_import,
-    make_native_struct,
+    append_instruction_to_function,
     append_native_import,
-    make_native_parameter,
-    make_native_enum_layout,
-    update_function_effects,
     append_param_to_function,
+    make_native_enum,
+    make_native_enum_layout,
     make_native_enum_variant,
-    make_native_struct_field,
-    make_native_struct_layout,
+    make_native_enum_variant_layout,
+    make_native_enum_variant_layout_with_fields,
     make_native_function_basic,
     make_native_function_method,
-    update_function_return_type,
-    append_instruction_to_function,
-    make_native_enum_variant_layout,
-    make_native_struct_layout_field,
-    make_native_struct_layout_field,
     make_native_function_with_return,
-    make_native_enum_variant_layout_with_fields
+    make_native_import,
+    make_native_parameter,
+    make_native_struct,
+    make_native_struct_field,
+    make_native_struct_layout,
+    make_native_struct_layout_field,
+    make_native_struct_layout_field,
+    update_function_effects,
+    update_function_return_type
 } from "./lowering_native_helpers";
-import { append_native_function } from "./lowering_helpers_mangling";
+import {
+    extract_kv_number,
+    extract_kv_string,
+    index_of_char_local,
+    net_unquoted_brace_depth,
+    recover_function_is_async_from_header,
+    recover_function_name_from_header,
+    split_lines_local,
+    starts_with_local,
+    trim_text_local
+} from "./lowering_text_utils";
 
 // ── Light function recovery ──────────────────────────────────────────
 fn recover_native_functions_light(native_text: string) -> NativeFunction[] {

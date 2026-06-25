@@ -4,30 +4,30 @@
 // lower_instruction_range occupies position 1 in its module -- within
 // the v0.1.1 seed's per-module streaming emission limit.
 import {
-    TypeContext,
+    char_at,
+    char_code,
+    grapheme_at,
+    substring
+} from "../../string_utils";
+import { is_heap_type } from "../expression_lowering/native/core_type_mapping";
+import { find_local_binding } from "../expressions_bindings";
+import { is_scope_descendant } from "../lifetime";
+import { find_struct_info_by_llvm_type, find_struct_info_by_name } from "../type_context_queries";
+import {
+    GuardedDropResult,
+    LifetimeRegionMetadata,
     LocalBinding,
     LocalMutation,
     ScopeDropResult,
-    GuardedDropResult,
-    LifetimeRegionMetadata
+    TypeContext
 } from "../types";
 import {
     contains_text,
-    number_to_string,
     extend_string_array,
     is_identifier_part_char,
-    is_identifier_start_char
+    is_identifier_start_char,
+    number_to_string
 } from "../utils";
-import { is_scope_descendant } from "../lifetime";
-import {
-    char_at,
-    char_code,
-    substring,
-    grapheme_at
-} from "../../string_utils";
-import { find_struct_info_by_name, find_struct_info_by_llvm_type } from "../type_context_queries";
-import { find_local_binding } from "../expressions_bindings";
-import { is_heap_type } from "../expression_lowering/native/core_type_mapping";
 
 fn clone_local_bindings(values: LocalBinding[]) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];

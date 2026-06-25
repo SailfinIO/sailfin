@@ -3,35 +3,27 @@
 // Public API entry points for `.sfn-asm` parsing.
 // Thin wrappers around parse_native_artifact_impl (in native_ir_parser)
 // plus the layout-manifest parser.
+import { NativeArtifact } from "./emit_native_layout";
 import {
-    NativeEnum,
-    NativeImport,
-    NativeStruct,
-    NativeBinding,
-    LayoutManifest,
-    NativeFunction,
-    NativeInterface,
-    NativeEnumLayout,
-    ParseNativeResult,
-    NativeStructLayout,
     EnumLayoutHeaderParse,
     EnumLayoutPayloadParse,
     EnumLayoutVariantParse,
-    StructLayoutFieldParse,
+    LayoutManifest,
+    NativeBinding,
+    NativeEnum,
+    NativeEnumLayout,
     NativeEnumVariantLayout,
+    NativeFunction,
+    NativeImport,
+    NativeInterface,
+    NativeStruct,
+    NativeStructLayout,
     NativeStructLayoutField,
+    ParseNativeResult,
+    StructLayoutFieldParse,
     StructLayoutHeaderParse
 } from "./native_ir";
 import { parse_native_artifact_impl } from "./native_ir_parser";
-import { NativeArtifact } from "./emit_native_layout";
-import {
-    trim_text,
-    split_lines,
-    starts_with,
-    is_trim_char,
-    strip_prefix
-} from "./native_ir_utils_text";
-import { parse_import_entry } from "./native_ir_utils_parse";
 import {
     parse_enum_layout_header,
     parse_enum_payload_layout,
@@ -39,6 +31,14 @@ import {
     parse_struct_layout_field,
     parse_struct_layout_header
 } from "./native_ir_utils_layout";
+import { parse_import_entry } from "./native_ir_utils_parse";
+import {
+    is_trim_char,
+    split_lines,
+    starts_with,
+    strip_prefix,
+    trim_text
+} from "./native_ir_utils_text";
 
 fn select_text_artifact(artifacts: NativeArtifact[]) -> NativeArtifact? {
     if artifacts == null { return null; }

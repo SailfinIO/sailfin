@@ -21,25 +21,25 @@
 //
 // See docs/proposals/check-architecture.md for the broader design.
 import { Statement } from "../ast";
-import { Token, TokenKind } from "../token";
-import { typecheck_diagnostics_with_import_symbols_prelude } from "../typecheck";
-import { number_to_string } from "../num_format";
-import { parse_program } from "../parser/mod";
-import { resolve_effect_enforcement, read_effect_enforcement_env } from "../effect_gate";
-import { substring } from "../string_utils";
-import { validate_capsule_capabilities, validate_effects_with_imports } from "../effect_checker";
-import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
-import { collect_reexport_violations } from "../reexport_check";
-import { load_prelude_global_names } from "../prelude_globals";
-import { Diagnostic, FixSuggestion } from "../typecheck_types";
 import { collect_bare_assert_findings } from "../bare_assert_check";
 import {
-    render_diagnostic,
-    split_source_lines,
+    capability_violation_to_diagnostic,
     effect_violation_to_diagnostic,
-    capability_violation_to_diagnostic
+    render_diagnostic,
+    split_source_lines
 } from "../diagnostics_render";
+import { validate_capsule_capabilities, validate_effects_with_imports } from "../effect_checker";
+import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
+import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
 import { runtime_helper_call_names } from "../llvm/runtime_helpers";
+import { number_to_string } from "../num_format";
+import { parse_program } from "../parser/mod";
+import { load_prelude_global_names } from "../prelude_globals";
+import { collect_reexport_violations } from "../reexport_check";
+import { substring } from "../string_utils";
+import { Token, TokenKind } from "../token";
+import { typecheck_diagnostics_with_import_symbols_prelude } from "../typecheck";
+import { Diagnostic, FixSuggestion } from "../typecheck_types";
 
 // -------------------------------------------------------------------
 // Result types

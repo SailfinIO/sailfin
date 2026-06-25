@@ -28,28 +28,28 @@
 // transitives are out of scope for E1; see proposal §5 (Phase E).
 import {
     Block,
-    Program,
     Decorator,
-    MatchCase,
-    Statement,
     ElseBranch,
     Expression,
-    SourceSpan,
-    decorator_names,
     FunctionSignature,
-    MethodDeclaration
+    MatchCase,
+    MethodDeclaration,
+    Program,
+    SourceSpan,
+    Statement,
+    decorator_names
 } from "./ast";
-import { Token, TokenKind } from "./token";
-import { substring, char_code_at_text } from "./string_utils";
 import {
     ImportSymbolTable,
-    empty_import_symbols,
-    lookup_imported_function,
     ImportedFunctionSignature,
-    localize_import_symbols_for_program
+    empty_import_symbols,
+    localize_import_symbols_for_program,
+    lookup_imported_function
 } from "./effect_imports";
 import { is_universally_allowed_effect } from "./effect_taxonomy";
 import { effects_for_callee_target } from "./llvm/runtime_helpers";
+import { char_code_at_text, substring } from "./string_utils";
+import { Token, TokenKind } from "./token";
 
 struct EffectRequirement {
     effect: string;

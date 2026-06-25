@@ -2,22 +2,22 @@
 //
 // Layout parsing utilities for struct and enum layout sections in .sfn-asm IR.
 import {
-    NumberParseResult,
     EnumLayoutHeaderParse,
     EnumLayoutPayloadParse,
     EnumLayoutVariantParse,
-    StructLayoutFieldParse,
     NativeEnumVariantLayout,
     NativeStructLayoutField,
+    NumberParseResult,
+    StructLayoutFieldParse,
     StructLayoutHeaderParse
 } from "./native_ir";
-import { substring } from "./string_utils";
 import {
     index_of,
-    trim_text,
+    split_whitespace,
     starts_with,
-    split_whitespace
+    trim_text
 } from "./native_ir_utils_text";
+import { substring } from "./string_utils";
 
 export {
     parse_decimal_number,

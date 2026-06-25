@@ -1,0 +1,104 @@
+// End-to-end regression for #1572: a `-p` sibling that calls the prelude
+// free function `char_at` (without importing the prelude) must resolve the
+// callee's return-type signature during its own per-module lowering and
+// emit cleanly — no spurious `cannot resolve return type for call to
+// `char_at`` `[fatal]`.
+//
+// Root cause (pre-#1572): `char_at` is a `runtime/prelude.sfn` free function.
+// On a normal single-file build the prelude's `.declare` reaches the lowering
+// `context_functions`, but the multi-capsule / per-module emit path does not
+// load the prelude `.sfn-asm`, so the callee signature was unknown and
+// lowering fell through to the `cannot resolve return type` fatal. `char_code`,
+// `substring`, and `strings_equal` already carried bare-name descriptors in
+// `runtime_helpers.sfn` for exactly this case; `char_at` was the lone omission.
+// #1572 adds the `char_at` bare-name descriptor so the call resolves to
+// `call {i8*, i64} @char_at` and links to the prelude body.
+//
+// NOTE: assert on captured stdout+stderr with `sfn/strings` predicates
+// (the `sfn/test` `expect_*` matchers are `![pure]` and cannot be called
+// from an `![io]` test). (#842.)
+import { find, contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The build spawns a nested `clang` + linker, so the child needs `PATH`
+// (an empty `run_capture` env is the *empty* environment, not "inherit").
+// `SAILFIN_TEST_SCRATCH` routes the `program.ll` build-cache dir per
+// invocation so the parallel pool does not collide on `build/sailfin`.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+// A fresh capsule root under the runner's scratch dir (or /tmp), keyed by
+// `tag` so concurrent tests in the parallel pool never collide.
+fn _make_capsule(tag: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = "/tmp"; }
+    let root = base + "/sfn-charat-sig-" + tag;
+    fs.createDirectory(root + "/src/util", true);
+
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"charat-sig-test\"\n"
+        + "version = \"0.1.0\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "kind = \"binary\"\n"
+        + "entry = \"src/main.sfn\"\n");
+
+    // Sibling: calls the prelude free fn `char_at` directly (no import).
+    // This is the lowering site whose callee-signature lookup missed
+    // pre-#1572.
+    fs.writeFile(root + "/src/util/sib.sfn", "fn second_char(text: string) -> string {\n"
+        + "    return char_at(text, 1);\n"
+        + "}\n\n"
+        + "export { second_char };\n");
+
+    // Entry: imports the sibling so the linked binary is runnable and the
+    // sibling's `char_at` call is exercised at runtime.
+    fs.writeFile(root + "/src/main.sfn", "import { second_char } from \"./util/sib\";\n\n"
+        + "fn main() ![io] {\n"
+        + "    let c = second_char(\"hello\");\n"
+        + "    print.info(\"charat-result=\" + c);\n"
+        + "}\n");
+
+    return root;
+}
+
+// Build emits with NO `char_at` unresolved-callee fatal, links, and the
+// linked binary computes `char_at("hello", 1) == "e"`.
+test "cross-module char_at call resolves its signature, links, runs (#1572)" ![io] {
+    let root = _make_capsule("link");
+    let out_bin = root + "/prog";
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", root, "-o", out_bin], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    let log = out + err;
+
+    // The #1572 signal: no spurious lowering fatal for `char_at`.
+    assert ! contains(log, "cannot resolve return type for call to `char_at`");
+    assert exit == 0;
+
+    // The linked binary runs and prints the resolved value. `print.info`
+    // prefixes with `[info] `, pinning the match. `char_at("hello", 1)` is
+    // the second character, "e" — confirms the call lowered correctly, not
+    // merely that the diagnostic was suppressed.
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert find(run_out + run_err, "[info] charat-result=e", 0) >= 0;
+}

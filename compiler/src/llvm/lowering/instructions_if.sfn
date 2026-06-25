@@ -1,64 +1,64 @@
 // compiler/src/llvm/lowering/instructions_if.sfn
 //
 // Control flow handlers: if/else instruction lowering.
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
+import { char_code, grapheme_at, substring } from "../../string_utils";
+import { lower_expression } from "../expression_lowering/native/core";
+import { format_scope_id, pop_scope_metadata, push_scope_metadata } from "../expression_lowering/native/core_scopes";
+import { find_local_binding, find_parameter_binding } from "../expressions_bindings";
+import { default_return_literal, format_temp_name } from "../expressions_helpers";
+import { make_child_scope_id } from "../lifetime";
+import { append_string_constant, merge_string_constants } from "../strings";
 import {
-    find_last_label,
-    collect_mutation_names,
-    find_mutation_for_name,
-    retarget_recent_mutations,
-    emit_phi_merges_for_if_else,
-    emit_phi_merges_for_straight_if,
-    materialize_mutation_values_at_label
-} from "./phi";
-import {
+    BlockLoweringResult,
     IfStructure,
     LLVMOperand,
-    LoopContext,
-    TypeContext,
+    LifetimeRegionMetadata,
     LocalBinding,
     LocalMutation,
+    LoopContext,
     OwnershipInfo,
+    ParameterBinding,
     ScopeMetadata,
     StringConstant,
-    ParameterBinding,
-    BlockLoweringResult,
-    LifetimeRegionMetadata
+    TypeContext
 } from "../types";
 import {
-    index_of,
-    trim_text,
-    starts_with,
     append_string,
-    number_to_string,
-    strip_mut_prefix,
     copy_string_array,
     extend_string_array,
+    index_of,
     is_simple_identifier,
-    merge_parameter_bindings
+    merge_parameter_bindings,
+    number_to_string,
+    starts_with,
+    strip_mut_prefix,
+    trim_text
 } from "../utils";
-import { append_string_constant, merge_string_constants } from "../strings";
-import { make_child_scope_id } from "../lifetime";
 import { lower_instruction_range } from "./instructions";
-import { NativeFunction, NativeSourceSpan, NativeInstruction } from "../../native_ir";
-import { char_code, substring, grapheme_at } from "../../string_utils";
-import { format_temp_name, default_return_literal } from "../expressions_helpers";
-import {
-    emit_scope_drops,
-    extend_mutations,
-    clone_local_bindings,
-    _parse_int_from_string,
-    extend_lifetime_regions,
-    insert_lines_before_index
-} from "./instructions_helpers";
-import { find_local_binding, find_parameter_binding } from "../expressions_bindings";
 import {
     allocate_block_label,
     lower_condition_to_i1,
     sanitize_if_condition_text
 } from "./instructions_condition";
+import {
+    _parse_int_from_string,
+    clone_local_bindings,
+    emit_scope_drops,
+    extend_lifetime_regions,
+    extend_mutations,
+    insert_lines_before_index
+} from "./instructions_helpers";
 import { get_instruction_tag } from "./lowering_native_helpers";
-import { lower_expression } from "../expression_lowering/native/core";
-import { format_scope_id, pop_scope_metadata, push_scope_metadata } from "../expression_lowering/native/core_scopes";
+import {
+    collect_mutation_names,
+    emit_phi_merges_for_if_else,
+    emit_phi_merges_for_straight_if,
+    find_last_label,
+    find_mutation_for_name,
+    materialize_mutation_values_at_label,
+    retarget_recent_mutations
+} from "./phi";
 
 fn collect_if_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> IfStructure {
     let mut diagnostics: string[] = [];

@@ -36,26 +36,26 @@
 // `cli_commands.sfn` / `cli_commands_utils.sfn` and are imported in place;
 // relocating them (and the http/crypto helpers) is Phase 4 (out of scope).
 import {
-    get,
     Command,
     Matches,
+    arg_optional,
     command,
-    with_arg,
-    arg_optional
+    get,
+    with_arg
 } from "sfn/cli";
 
-import { CliContext } from "../context";
-import { toml_get_name, toml_get_version } from "../../toml_parser";
-import { substring, find_char_local } from "../../string_utils";
 import { _resolve_registry_url_cmd } from "../../cli_commands";
 import {
+    _collect_sfn_files_cmd,
     _get_env_cmd,
     _get_home_cmd,
-    _toml_trim_cmd,
-    _shell_read_cmd,
     _sha256_of_file_cmd,
-    _collect_sfn_files_cmd
+    _shell_read_cmd,
+    _toml_trim_cmd
 } from "../../cli_commands_utils";
+import { find_char_local, substring } from "../../string_utils";
+import { toml_get_name, toml_get_version } from "../../toml_parser";
+import { CliContext } from "../context";
 
 // The `sfn/cli` definition for `publish`, registered on the v2 root via
 // `with_subcommand`. A single optional `[path]` positional; no flags.
