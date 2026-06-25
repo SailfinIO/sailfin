@@ -14,7 +14,7 @@ import {
 } from "../src/mod";
 
 test "spawn_with_env: cat echoes piped stdin to stdout" ![io] {
-    let h = spawn_with_env(["cat"], env_empty());
+    let h = spawn_with_env(["cat"], env_empty(), "");
     assert h.handle_id != 0;
     let written = handle_write(h, "hello world\n");
     assert written == 12;
@@ -27,7 +27,7 @@ test "spawn_with_env: cat echoes piped stdin to stdout" ![io] {
 }
 
 test "spawn_with_env: multiple writes accumulate before EOF" ![io] {
-    let h = spawn_with_env(["cat"], env_empty());
+    let h = spawn_with_env(["cat"], env_empty(), "");
     assert h.handle_id != 0;
     handle_write(h, "alpha\n");
     handle_write(h, "beta\n");
@@ -40,7 +40,7 @@ test "spawn_with_env: multiple writes accumulate before EOF" ![io] {
 }
 
 test "spawn_with_env: stderr is captured independently of stdout" ![io] {
-    let h = spawn_with_env(["sh", "-c", "printf to_out; printf to_err 1>&2"], env_empty());
+    let h = spawn_with_env(["sh", "-c", "printf to_out; printf to_err 1>&2"], env_empty(), "");
     assert h.handle_id != 0;
     handle_close_stdin(h);
     let out = handle_read_stdout(h);
@@ -53,7 +53,7 @@ test "spawn_with_env: stderr is captured independently of stdout" ![io] {
 
 test "spawn_with_env: env overrides propagate to the spawned child" ![io] {
     let env = env_set(env_empty(), "GREETING", "salve");
-    let h = spawn_with_env(["printenv", "GREETING"], env);
+    let h = spawn_with_env(["printenv", "GREETING"], env, "");
     assert h.handle_id != 0;
     handle_close_stdin(h);
     let out = handle_read_stdout(h);
@@ -63,7 +63,7 @@ test "spawn_with_env: env overrides propagate to the spawned child" ![io] {
 }
 
 test "spawn_with_env: handle_wait surfaces non-zero exit" ![io] {
-    let h = spawn_with_env(["sh", "-c", "exit 3"], env_empty());
+    let h = spawn_with_env(["sh", "-c", "exit 3"], env_empty(), "");
     assert h.handle_id != 0;
     handle_close_stdin(h);
     let exit = handle_wait(h);
@@ -80,13 +80,26 @@ test "spawn_with_env: heavy stderr does not deadlock sequential read_stdout" ![i
     // `head | tr` avoids `yes`'s broken-pipe diagnostic landing on
     // the test's stderr (see the matching note in
     // `run_capture_test.sfn`'s pipe-buffer test).
-    let h = spawn_with_env(["sh", "-c", "head -c 200000 /dev/zero | tr '\\0' E 1>&2; head -c 5000 /dev/zero | tr '\\0' O"], env_empty());
+    let h = spawn_with_env(["sh", "-c", "head -c 200000 /dev/zero | tr '\\0' E 1>&2; head -c 5000 /dev/zero | tr '\\0' O"], env_empty(), "");
     assert h.handle_id != 0;
     handle_close_stdin(h);
     let out = handle_read_stdout(h);
     assert out.length == 5000;
     let err = handle_read_stderr(h);
     assert err.length == 200000;
+    let exit = handle_wait(h);
+    assert exit == 0;
+}
+
+test "spawn_with_env: cwd runs the spawned child in the given directory (#1167)" ![io] {
+    // `pwd` rooted at "/" prints "/" on every POSIX platform. The
+    // per-child chdir happens via posix_spawn_file_actions, never a
+    // process-global chdir.
+    let h = spawn_with_env(["pwd"], env_empty(), "/");
+    assert h.handle_id != 0;
+    handle_close_stdin(h);
+    let out = handle_read_stdout(h);
+    assert strings_equal(out, "/\n");
     let exit = handle_wait(h);
     assert exit == 0;
 }

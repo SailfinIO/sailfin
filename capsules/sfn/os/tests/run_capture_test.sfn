@@ -10,7 +10,7 @@ import {
 } from "../src/mod";
 
 test "run_capture: captures stdout from a simple command" ![io] {
-    let result = run_capture(["sh", "-c", "printf hello"], env_empty());
+    let result = run_capture(["sh", "-c", "printf hello"], env_empty(), "");
     assert result.exit == 0;
     assert strings_equal(result.stdout, "hello");
     assert strings_equal(result.stderr, "");
@@ -18,7 +18,7 @@ test "run_capture: captures stdout from a simple command" ![io] {
 
 test "run_capture: captures stderr separately from stdout" ![io] {
     // printf to stderr only — stdout should be empty, stderr populated.
-    let result = run_capture(["sh", "-c", "printf err 1>&2"], env_empty());
+    let result = run_capture(["sh", "-c", "printf err 1>&2"], env_empty(), "");
     assert result.exit == 0;
     assert strings_equal(result.stdout, "");
     assert strings_equal(result.stderr, "err");
@@ -27,14 +27,14 @@ test "run_capture: captures stderr separately from stdout" ![io] {
 test "run_capture: captures both stdout and stderr from one child" ![io] {
     // Interleaved writes — concurrent drain must keep both streams
     // intact regardless of timing.
-    let result = run_capture(["sh", "-c", "printf out; printf err 1>&2"], env_empty());
+    let result = run_capture(["sh", "-c", "printf out; printf err 1>&2"], env_empty(), "");
     assert result.exit == 0;
     assert strings_equal(result.stdout, "out");
     assert strings_equal(result.stderr, "err");
 }
 
 test "run_capture: non-zero exit code surfaces in ProcessOutput.exit" ![io] {
-    let result = run_capture(["sh", "-c", "exit 7"], env_empty());
+    let result = run_capture(["sh", "-c", "exit 7"], env_empty(), "");
     assert result.exit == 7;
 }
 
@@ -42,14 +42,14 @@ test "run_capture: env overrides propagate to the child" ![io] {
     // `env` SfnArray contains a single KEY=VALUE entry; printenv FOO
     // should print the value followed by a newline.
     let env = env_set(env_empty(), "FOO", "bar");
-    let result = run_capture(["printenv", "FOO"], env);
+    let result = run_capture(["printenv", "FOO"], env, "");
     assert result.exit == 0;
     assert strings_equal(result.stdout, "bar\n");
 }
 
 test "run_capture: env_set replaces existing entries (last write wins)" ![io] {
     let env = env_set(env_set(env_empty(), "FOO", "first"), "FOO", "second");
-    let result = run_capture(["printenv", "FOO"], env);
+    let result = run_capture(["printenv", "FOO"], env, "");
     assert result.exit == 0;
     assert strings_equal(result.stdout, "second\n");
 }
@@ -65,7 +65,7 @@ test "run_capture: drains output larger than the pipe buffer" ![io] {
     // (GNU coreutils' `yes` writes "yes: standard output: Broken pipe"
     // to stderr when its downstream consumer closes the pipe — a real
     // CI hazard since the stderr assertion below would catch it).
-    let result = run_capture(["sh", "-c", "head -c 200000 /dev/zero | tr '\\0' x"], env_empty());
+    let result = run_capture(["sh", "-c", "head -c 200000 /dev/zero | tr '\\0' x"], env_empty(), "");
     assert result.exit == 0;
     assert result.stdout.length == 200000;
     assert strings_equal(result.stderr, "");
@@ -75,6 +75,35 @@ test "run_capture: spawn failure surfaces as exit == -1" ![io] {
     // Distinguishable from a legitimate child exit code of 127
     // ("command not found" in the shell convention) — a non-existent
     // binary makes posix_spawnp fail before the child is ever born.
-    let result = run_capture(["sfn-no-such-binary-12345"], env_empty());
+    let result = run_capture(["sfn-no-such-binary-12345"], env_empty(), "");
     assert result.exit == -1;
+}
+
+test "run_capture: cwd runs the child in the given directory (#1167)" ![io] {
+    // `pwd` in the root directory prints "/" on every POSIX platform,
+    // with no symlink indirection (unlike /tmp -> /private/tmp on
+    // macOS). A non-empty cwd must place the child there.
+    let result = run_capture(["pwd"], env_empty(), "/");
+    assert result.exit == 0;
+    assert strings_equal(result.stdout, "/\n");
+}
+
+test "run_capture: empty cwd inherits parent cwd and leaves it unchanged (#1167)" ![io] {
+    // Baseline: the parent's working directory (the test runner's cwd,
+    // which is not the root "/").
+    let before = run_capture(["pwd"], env_empty(), "");
+    assert before.exit == 0;
+    assert ! strings_equal(before.stdout, "/\n");
+
+    // Run a child rooted at "/". The per-child chdir must NOT leak into
+    // the parent process (no global chdir).
+    let moved = run_capture(["pwd"], env_empty(), "/");
+    assert moved.exit == 0;
+    assert strings_equal(moved.stdout, "/\n");
+
+    // A subsequent inherit-cwd ("") child still reports the original
+    // parent directory — proof the parent cwd was never mutated.
+    let after = run_capture(["pwd"], env_empty(), "");
+    assert after.exit == 0;
+    assert strings_equal(after.stdout, before.stdout);
 }
