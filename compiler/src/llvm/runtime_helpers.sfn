@@ -870,6 +870,23 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "io.poll_readable", symbol: "sfn_io_poll_readable", return_type: "i1", parameter_types: ["i64", "i64"], effects: ["io"], native_signature: "sfn_io_poll_readable", c_abi_return_type: null
     });
 
+    // #1579 (epic #1540 Track A, gap A2): read the process's own stdin
+    // (fd 0) incrementally without shelling out. `io.read_fd(fd, n)`
+    // does one `read(2)` of up to `n` bytes; `io.read_line(fd)` reads up
+    // to the next newline. Both return a fresh NUL-terminated buffer
+    // (`i8*` → Sailfin `string`, like `process.handle_read_stdout`).
+    // Sailfin-native bodies in `runtime/sfn/io.sfn` (`sfn_read_fd` /
+    // `sfn_read_line`) over the `read` extern there; `fd` / `n` arrive
+    // as `int` (i64). `read(2)` links on every io.sfn target (the same
+    // libc surface as the file's `write` extern), so — unlike
+    // `io.poll_readable` — no Windows stub is needed.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "io.read_fd", symbol: "sfn_read_fd", return_type: "i8*", parameter_types: ["i64", "i64"], effects: ["io"], native_signature: "sfn_read_fd", c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "io.read_line", symbol: "sfn_read_line", return_type: "i8*", parameter_types: ["i64"], effects: ["io"], native_signature: "sfn_read_line", c_abi_return_type: null
+    });
+
     // Filesystem adapters.
     //
     // M3.1a (#814): `read_file` / `write_file` / `append_file`

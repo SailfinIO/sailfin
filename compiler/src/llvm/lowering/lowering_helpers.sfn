@@ -1113,6 +1113,13 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     // separate-compilation modules that consume it emit a `declare` and
     // clang resolves the symbol against the runtime object.
     helpers = append_unique_effect(helpers, "io.poll_readable");
+    // #1579: `io.read_fd` / `io.read_line` lower to the bare
+    // `sfn_read_fd` / `sfn_read_line` symbols (Sailfin-native bodies in
+    // `runtime/sfn/io.sfn`). Declare-track them so separate-compilation
+    // modules that consume them emit a `declare` and clang resolves the
+    // symbol against the runtime object.
+    helpers = append_unique_effect(helpers, "io.read_fd");
+    helpers = append_unique_effect(helpers, "io.read_line");
     helpers = append_unique_effect(helpers, "is_decimal_digit");
     return helpers;
 }
