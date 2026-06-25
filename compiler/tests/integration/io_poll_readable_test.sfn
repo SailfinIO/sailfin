@@ -1,0 +1,75 @@
+// Integration coverage for the `io.poll_readable(fd, timeout_ms)` builtin
+// (#1580, epic #1540 Track A gap A3). The Sailfin-native body lives in
+// `runtime/sfn/io.sfn:sfn_io_poll_readable`; `runtime_helpers.sfn` maps the
+// `io.poll_readable` descriptor onto it and `lowering_helpers.sfn`
+// declare-tracks the symbol. These tests drive a real `pipe(2)` so the
+// readiness transition is deterministic: an empty pipe is not readable, a
+// written-to pipe is. The `{ rd, wr }` overlay over the two-int `pipe`
+// buffer mirrors the `PollSlot` reuse in `runtime/sfn/process.sfn`.
+// Two-`int` overlay for the `pipe(2)` out-buffer: fds[0] = read end,
+// fds[1] = write end (little-endian, contiguous i32 pair).
+struct PipeFds {
+    rd: i32;
+    wr: i32;
+}
+
+extern fn pipe(fds: * i32) -> i32;
+
+extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+
+extern fn close(fd: i32) -> i32;
+
+extern fn malloc(size: usize) -> * u8;
+
+test "io.poll_readable: an empty pipe is not readable" ![io] {
+    let buf: * u8 = malloc(8 as usize);
+    assert pipe(buf as * i32) == 0;
+    let fds: * PipeFds = buf as * PipeFds;
+    let read_fd: i32 = fds.rd;
+    let write_fd: i32 = fds.wr;
+
+    // timeout_ms == 0 returns immediately; a fresh pipe has no data.
+    assert io.poll_readable(read_fd as i64, 0) == false;
+    // A small positive timeout still resolves to "not readable".
+    assert io.poll_readable(read_fd as i64, 5) == false;
+
+    let _ = close(read_fd);
+    let _ = close(write_fd);
+}
+
+test "io.poll_readable: a written-to pipe becomes readable" ![io] {
+    let buf: * u8 = malloc(8 as usize);
+    assert pipe(buf as * i32) == 0;
+    let fds: * PipeFds = buf as * PipeFds;
+    let read_fd: i32 = fds.rd;
+    let write_fd: i32 = fds.wr;
+
+    let payload: string = "x";
+    assert write(write_fd, payload as * u8, 1 as usize) == 1;
+
+    // The byte is buffered in the pipe, so the read end reports readable
+    // even at timeout_ms == 0.
+    assert io.poll_readable(read_fd as i64, 0) == true;
+
+    let _ = close(read_fd);
+    let _ = close(write_fd);
+}
+
+test "io.poll_readable: a closed write end signals readable EOF" ![io] {
+    let buf: * u8 = malloc(8 as usize);
+    assert pipe(buf as * i32) == 0;
+    let fds: * PipeFds = buf as * PipeFds;
+    let read_fd: i32 = fds.rd;
+    let write_fd: i32 = fds.wr;
+
+    // Closing the write end makes the read end report POLLHUP — pending
+    // EOF counts as readable so a follow-up `read(2)` runs and sees 0.
+    let _ = close(write_fd);
+    assert io.poll_readable(read_fd as i64, 0) == true;
+
+    let _ = close(read_fd);
+}
+
+test "io.poll_readable: a negative fd is never readable" ![io] {
+    assert io.poll_readable(-1, 0) == false;
+}

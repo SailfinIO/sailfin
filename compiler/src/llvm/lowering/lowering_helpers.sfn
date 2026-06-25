@@ -1107,6 +1107,11 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "process.handle_read_stderr");
     helpers = append_unique_effect(helpers, "process.handle_wait");
     helpers = append_unique_effect(helpers, "process.environ");
+    // #1580: `io.poll_readable` lowers to the bare `sfn_io_poll_readable`
+    // symbol (Sailfin-native body in `runtime/sfn/io.sfn`). Declare-track
+    // it so separate-compilation modules that consume it emit a `declare`
+    // and clang resolves the symbol against the runtime object.
+    helpers = append_unique_effect(helpers, "io.poll_readable");
     helpers = append_unique_effect(helpers, "is_decimal_digit");
     return helpers;
 }
