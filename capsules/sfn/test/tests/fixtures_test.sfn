@@ -25,9 +25,10 @@
 // separate multi-capture lowering bug). Single capture — the path the
 // `closure_single_capture` e2e fixture exercises and that #979 actually
 // rides — works; these tests stay within it deliberately.
+import { env_set, env_empty, ProcessOutput } from "sfn/os";
 import { find } from "sfn/strings";
 
-import { with_tmp_dir } from "../src/mod";
+import { with_env, with_tmp_dir } from "../src/mod";
 
 // Scratch root for marker files. Prefer the runner's
 // `SAILFIN_TEST_SCRATCH`; fall back to `/tmp` for a direct
@@ -131,4 +132,69 @@ test "with_tmp_dir: body captures an enclosing local" ![io] {
         return -1;
     });
     assert r == token.length;
+}
+
+// ---------------------------------------------------------------------------
+// with_env — scoped per-child environment runner (#1166)
+// ---------------------------------------------------------------------------
+// `with_env(args, env, body)` runs `args` as a subprocess under the scoped
+// `os::Env`, capturing stdout/stderr, then threads the `ProcessOutput` to
+// `body`. The parent `environ` is never mutated — the override lives only in
+// the spawned child. These tests prove the three contract points from #1166:
+// the child sees the override, the parent is unchanged, and an empty `Env`
+// yields a child with no environment.
+//
+// Subprocesses use `printenv` / `env` (coreutils). `posix_spawnp` resolves
+// the bare binary name via the *parent's* PATH even when the *child's*
+// environment is empty, so these run without threading PATH into the scoped
+// `Env` — mirroring `sfn/os`'s own `run_capture_test.sfn`. Each body lambda
+// captures nothing (literals + the imported `find`), staying within the
+// single-capture lowering constraint documented above.
+// The child process sees a variable set only in the scoped `Env`.
+test "with_env: child sees the scoped override" ![io] {
+    let r = with_env(["printenv", "SFN_WITH_ENV_CHILD"], env_set(env_empty(), "SFN_WITH_ENV_CHILD", "scoped-value"), fn (out: ProcessOutput) -> int {
+        if out.exit != 0 { return -1; }
+        if find(out.stdout, "scoped-value", 0) >= 0 { return 1; }
+        return 0;
+    });
+    assert r == 1;
+}
+
+// The scoped override never leaks into the parent: reading the same
+// variable before and after the call yields identical (and empty)
+// results, proving `environ` was untouched. The read goes through the
+// builtin `env.get` — exactly the call `os::env(name)` wraps
+// (`sfn/os::env` is `return env.get(name)`); using it directly avoids
+// shadowing the builtin `env` namespace with a same-named import.
+test "with_env: parent environment is unchanged by a scoped child env" ![io] {
+    let before = env.get("SFN_WITH_ENV_PARENT");
+    let r = with_env(["printenv", "SFN_WITH_ENV_PARENT"], env_set(env_empty(), "SFN_WITH_ENV_PARENT", "child-only"), fn (out: ProcessOutput) -> int {
+        // Sanity: the scoping worked at all — the child did see it.
+        if find(out.stdout, "child-only", 0) >= 0 { return 1; }
+        return 0;
+    });
+    let after = env.get("SFN_WITH_ENV_PARENT");
+    assert r == 1;
+    assert before == after;
+    assert after.length == 0;
+}
+
+// An empty `Env` means "empty", not "inherit": the child's environment
+// listing (via the `env` coreutil) is empty.
+test "with_env: empty Env yields a child with no environment" ![io] {
+    let r = with_env(["env"], env_empty(), fn (out: ProcessOutput) -> int {
+        if out.exit != 0 { return -1; }
+        return out.stdout.length;
+    });
+    assert r == 0;
+}
+
+// The captured `ProcessOutput` threads back through the helper: a body
+// returning an extracted value is the helper's return value (mirrors
+// `with_tmp_dir`'s result-threading contract).
+test "with_env: body return value threads back out" ![io] {
+    let r = with_env(["sh", "-c", "exit 7"], env_empty(), fn (out: ProcessOutput) -> int {
+        return out.exit;
+    });
+    assert r == 7;
 }

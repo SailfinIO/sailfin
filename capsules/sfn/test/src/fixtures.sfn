@@ -21,11 +21,17 @@
 //     already ships as the typed `Env` + `os::run_capture` API. A
 //     concurrency-aware redesign is tracked in #1107.
 //
+// That concurrency-aware redesign ships here as `with_env` (#1166): a
+// per-child scoped-environment runner over the typed `os::Env` +
+// `os::run_capture` API, with the parent `environ` never mutated. See
+// its doc comment below.
+//
 // Teardown delegates to `sfn/fs::remove_all` (#976) — a pure-Sailfin
 // `rm -rf` composed from the `fs.*` runtime intrinsics
 // (`deleteFile` / `exists` / `listDirectory` / `removeDirectory`). No new
 // C runtime surface is introduced.
 import { remove_all } from "sfn/fs";
+import { Env, run_capture, ProcessOutput } from "sfn/os";
 
 // Create a fresh temporary directory, hand its absolute path to `body`,
 // and recursively remove the whole tree on scope exit — on both the
@@ -61,4 +67,40 @@ fn with_tmp_dir(body: fn (string) -> int) -> int ![io] {
         let _ = remove_all(dir);
         throw e;
     }
+}
+
+// Run `args` as a subprocess under the scoped environment `env`, hand the
+// captured `ProcessOutput` to `body`, and return whatever `body` returns.
+//
+// This is the concurrency-safe successor to the dropped process-global
+// `with_env` / `with_cwd` fixtures (see the note at the top of this file
+// for why those were rejected). Rather than mutating the shared, non
+// thread-safe `environ` with `setenv(3)` — which corrupts sibling tasks
+// the moment the test runner goes parallel — the scoped environment is
+// applied to a *single* child via `os::run_capture(args, env)`. The
+// parent process environment is never read or written, so the scoping is
+// confined to that one child and concurrent tests are unaffected.
+//
+// Build `env` with the typed `os::Env` constructors:
+//
+//   * `env_empty()` — a child with NO environment at all (an empty `Env`
+//     means "empty", not "inherit").
+//   * `env_from_current()` — a snapshot of the parent's environment to
+//     inherit from; layer overrides on top with `env_set(e, name, value)`.
+//
+// `body` is an ordinary closure that may capture the enclosing test's
+// locals (single capture; see `fixtures_test.sfn`). It is typed
+// `fn(ProcessOutput) -> int` with no `![io]` row, for the same reason
+// `with_tmp_dir`'s body is: the effect checker attributes a lambda body's
+// effects to the scope that *defines* the lambda, so an `![io]` test that
+// builds the closure already accounts for any io inside it — the fn-type
+// itself carries no effect row. (`-> int` is the interim return shape
+// shared with `with_tmp_dir`; a generic result type waits on generics.)
+//
+// Unlike `with_tmp_dir` there is no teardown step: a scoped child env owns
+// no host resource to release — the override lived only in the child's
+// `environ`, which dies with the child.
+fn with_env(args: string[], env: Env, body: fn (ProcessOutput) -> int) -> int ![io] {
+    let out = run_capture(args, env);
+    return body(out);
 }

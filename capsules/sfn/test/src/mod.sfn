@@ -393,8 +393,12 @@ export { CompileExpect, assert_compiles, assert_does_not_compile } from "./compi
 // `body` closure against it, and recursively removes the tree on scope
 // exit — including the throwing path — via a pure-Sailfin `rm -rf` over the
 // `fs.*` intrinsics (mirroring `sfn/fs::remove_all` from #976; see the note
-// in `fixtures.sfn` for why it does not import that capsule). The proposed
-// `with_env` / `with_cwd` are intentionally omitted (no runtime
-// setenv/chdir primitive; process-global mutation is unsound under
-// structured concurrency). See `fixtures.sfn`.
-export { with_tmp_dir } from "./fixtures";
+// in `fixtures.sfn` for why it does not import that capsule).
+//
+// `with_env(args, env, body)` (issue #1166) is the concurrency-safe
+// successor to the dropped process-global `with_env`: it runs `args` as a
+// subprocess under a scoped `os::Env` via `os::run_capture` and threads the
+// captured `ProcessOutput` to `body`, never mutating the parent `environ`.
+// (`with_cwd` stays omitted — no per-child cwd primitive yet; tracked in
+// #1107.) See `fixtures.sfn`.
+export { with_env, with_tmp_dir } from "./fixtures";
