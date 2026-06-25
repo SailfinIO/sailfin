@@ -752,22 +752,14 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
                     effect: "io", description: "spawn call", trigger: callee_trigger
                 });
             }
-            if name == "serve" {
-                // Retained (no registry descriptor): the only `serve`
-                // targets are `serve_start` / `serve_handler_dispatch`,
-                // not a Call-form `serve` callee, so
-                // `effects_for_callee_target("serve")` is empty. Keep
-                // explicit `net` enforcement until a descriptor lands —
-                // follow-up #1601. Dropping this silently removes net
-                // capability checking on `serve(...)`.
-                required = append_requirement(required, EffectRequirement {
-                    effect: "net", description: "serve call", trigger: callee_trigger
-                });
-            }
             // Registry-driven bare builtins: `print(...)` / `console(...)`
             // (the Call-form analog of the Member-form `print.info(...)`
-            // paths in the "Member" branch — closes #614) and `sleep(...)`
-            // (clock). EFFECTS come from the descriptor registry (#1183).
+            // paths in the "Member" branch — closes #614), `sleep(...)`
+            // (clock), and the Call-form `serve(...)` (-> io, net via the
+            // `serve` metadata row, #1601). EFFECTS come from the
+            // descriptor registry (#1183/#1601); this replaces the former
+            // hardcoded `if name == "serve"` net-only check.
+            //
             // The NAME set stays explicit because bare identifiers are not
             // yet scope-resolved (G1b, #1184): a registry lookup over
             // *every* bare target would also flag internal lowering names
@@ -775,11 +767,15 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             // callers invoke without the matching effect, breaking
             // self-host. #1184 lands that resolution with the in-tree
             // annotation fixups it forces, after which this allowlist can
-            // be removed.
+            // be removed. (Real `serve(...)` source commits to the `Serve`
+            // AST node in the parser, so this Call-arm path is the
+            // latent/synthesized-callee form — the live `serve(...)`
+            // enforcement lives in the `Serve` node arm below.)
             let mut _bare_builtin: boolean = false;
             if name == "print" { _bare_builtin = true; }
             if name == "console" { _bare_builtin = true; }
             if name == "sleep" { _bare_builtin = true; }
+            if name == "serve" { _bare_builtin = true; }
             if _bare_builtin {
                 required = _append_builtin_effects(required, name, callee_trigger);
             }
@@ -851,17 +847,13 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             // dropped. A descriptor's `effects` change is picked up here
             // with zero edits. Covers `fs.*`, `print.*`, `console.*`,
             // `http.*` — the literal-name `if` chains they replaced.
+            // As of #1601 this covers `websocket.*` too: the
+            // `websocket.<op>` metadata rows in `runtime_helpers.sfn`
+            // resolve to `["net"]` here (exact row or namespace-union),
+            // so the former explicit `if root == "websocket"` net check
+            // is gone — `websocket.*` is now registry-derived like
+            // `fs.*` / `http.*`.
             required = _append_builtin_effects(required, root + "." + expression.member, object_trigger);
-            // Retained (no registry descriptor): `websocket.*` has no
-            // runtime descriptor yet, so `effects_for_callee_target`
-            // returns empty for it. Keep explicit `net` enforcement
-            // until a descriptor lands — follow-up #1601. Dropping this
-            // silently removes net capability checking on `websocket.*`.
-            if root == "websocket" {
-                required = append_requirement(required, EffectRequirement {
-                    effect: "net", description: "network helper usage", trigger: object_trigger
-                });
-            }
             // G1b (#1184): cross-module member callee `mod.fetch()`. When
             // the member name resolves to an imported function with
             // declared effects, require them of the caller (`E0402`),

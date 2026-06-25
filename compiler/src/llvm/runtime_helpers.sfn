@@ -1043,6 +1043,44 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "serve_handler_dispatch", symbol: "sailfin_adapter_serve_handler_dispatch", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net", "io"], native_signature: "sfn_serve_handler_dispatch", c_abi_return_type: null
     });
 
+    // Effect-metadata-only rows (#1601, epic #1180 Phase G). These give
+    // the effect checker a registry source for `websocket.*` and the
+    // Call-form `serve` so `effects_for_callee_target` resolves them,
+    // letting the checker drop the last two hardcoded name->effect `if`
+    // chains (`websocket` Member arm, `serve` Call arm in
+    // `effect_checker.sfn`). They are NOT bridged to a runtime symbol:
+    // the `symbol`s below are deliberately fake (`sfn_*_unbridged`) and
+    // these targets are sentinel-skipped in
+    // `rendering.sfn::render_runtime_helper_declarations` so no `declare`
+    // is ever emitted for them — a metadata row must never produce a
+    // call/declare to an undefined symbol (the spurious-declare/link
+    // hazard that kept #1183 from adding them). `return_type`/
+    // `parameter_types` are placeholders; no lowering consults them.
+    //
+    // `serve` carries `["io", "net"]` to match the prelude/capsule
+    // `fn serve(...) ![io, net]` signatures and the
+    // `serve_start`/`serve_handler_dispatch` rows above — the honest set,
+    // tighter than #1183's retained `net`-only check. One `websocket.*`
+    // row makes `effects_for_callee_target("websocket.<anything>")`
+    // resolve to `["net"]` via the namespace-union fallback; the four
+    // concrete ops document the intended op surface for the future
+    // websocket runtime bridge (gap tracked separately).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "websocket.serve", symbol: "sfn_websocket_unbridged", return_type: "void", parameter_types: [], effects: ["net"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "websocket.send", symbol: "sfn_websocket_unbridged", return_type: "void", parameter_types: [], effects: ["net"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "websocket.close", symbol: "sfn_websocket_unbridged", return_type: "void", parameter_types: [], effects: ["net"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "websocket.connect", symbol: "sfn_websocket_unbridged", return_type: "void", parameter_types: [], effects: ["net"], native_signature: null, c_abi_return_type: null
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "serve", symbol: "sfn_serve_unbridged", return_type: "void", parameter_types: [], effects: ["io", "net"], native_signature: null, c_abi_return_type: null
+    });
+
     // Concurrency adapters — flipped to sfn_* symbols (#1091)
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "spawn_task", symbol: "sfn_spawn_task", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: "sfn_spawn_task", c_abi_return_type: null
@@ -1567,9 +1605,10 @@ fn find_runtime_helper(target: string) -> RuntimeHelperDescriptor? {
 //      an under-approximation here would drop a required capability,
 //      the one failure the effect pillar must never allow.
 //
-// Returns an empty list when nothing matches (e.g. "websocket", the
-// Call-form "serve" — no runtime descriptor exists yet; the checker
-// retains explicit enforcement for those pending #1601's registry rows).
+// Returns an empty list when nothing matches. As of #1601 `websocket.*`
+// (-> net) and the Call-form `serve` (-> io, net) have metadata-only
+// rows here, so the effect checker derives them from this registry too —
+// completing the "zero hardcoded name->effect chains" goal of Phase G.
 fn effects_for_callee_target(target: string) -> string[] {
     let trimmed = trim_text(target);
     let exact = find_runtime_helper(trimmed);
