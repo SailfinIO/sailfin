@@ -32,189 +32,243 @@ import {
 // re-tokenized downstream (`expression_from_tokens`, `parse_let_instruction`),
 // so dropping the parens silently changes precedence and corrupts arithmetic
 // like `(a - 0) / b`.
+// Expression rendering is O(N) in the expression-tree size, not O(N^2).
+//
+// The string-returning entry points (`format_expression`,
+// `_format_binary_operand`, `format_array_expression`) are thin wrappers that
+// collect tokens into a shared `string[]` sink via the `*_into` recursion and
+// `join_with_separator(..., "")` once at the end. The recursion must ALWAYS
+// call the `*_into` variants (sharing the one `out` accumulator) — never the
+// string wrappers — so each token is pushed exactly once (amortized-O(1) array
+// push) instead of re-concatenating the whole accumulated subtree at every
+// nesting level. The former `parent = prefix + format(child) + suffix` style
+// allocated a fresh memcpy'd buffer (`sfn_str_concat`, runtime/sfn/string.sfn)
+// per level — O(depth^2) bytes, all retained by the never-free compile arena
+// (docs/build-performance.md Root Cause 5) — and was the dominant emit-native
+// peak-RSS driver. Output is byte-identical to the old return-and-concat form.
 fn _format_binary_operand(operand: Expression) -> string {
+    let mut out: string[] = [];
+    _format_binary_operand_into(operand, out);
+    return join_with_separator(out, "");
+}
+
+// Append the parenthesized-if-needed rendering of a binary/unary/await operand
+// onto `out`. A `Binary` or `Cast` operand is wrapped in parens so the
+// re-parse honours the original grouping: without it `(a - 0) / b` formats as
+// `a - 0 / b` (re-parses with `/` tighter than `-`, #521), and `a / (len as
+// float)` mis-groups as `(a / len) as float` (Slice E.3b, #556). The text is
+// re-tokenized downstream, so dropping the parens silently corrupts precedence.
+fn _format_binary_operand_into(operand: Expression, out: string[]) -> string[] {
     if operand.variant == "Binary" {
-        return "(" + format_expression(operand) + ")";
+        out.push("(");
+        format_expression_into(operand, out);
+        out.push(")");
+        return out;
     }
     if operand.variant == "Cast" {
-        // Wrap Cast operands in parens too. `format_expression(Cast)`
-        // emits `(operand) as Type`, which has weaker precedence than
-        // binary `/`/`*` etc. — without these outer parens, `a /
-        // Cast(len, float)` round-trips as `a / (len) as float`, which
-        // the cast recognizer then re-parses as `(a / (len)) as float`,
-        // silently re-grouping the expression. Surfaced by Slice E.3b
-        // (#556) when the symmetric arithmetic refusal started catching
-        // `double / i64` produced by the mis-grouped re-parse.
-        return "(" + format_expression(operand) + ")";
+        out.push("(");
+        format_expression_into(operand, out);
+        out.push(")");
+        return out;
     }
-    return format_expression(operand);
+    format_expression_into(operand, out);
+    return out;
 }
 
 fn format_expression(expression: Expression) -> string {
+    let mut out: string[] = [];
+    format_expression_into(expression, out);
+    return join_with_separator(out, "");
+}
+
+// Append the `.sfn-asm` rendering of `expression` to `out` as a token stream
+// (depth-first, same order the old return-and-concat produced). See the header
+// comment on `_format_binary_operand` for why this is O(N), not O(N^2).
+fn format_expression_into(expression: Expression, out: string[]) -> string[] {
     if expression.variant == "Identifier" {
-        let name = expression.name;
-        return name;
+        out.push(expression.name);
+        return out;
     }
-    if expression.variant == "NumberLiteral" { return expression.value; }
-    if expression.variant == "BooleanLiteral" { return expression.value; }
-    if expression.variant == "NullLiteral" { return "null"; }
+    if expression.variant == "NumberLiteral" {
+        out.push(expression.value);
+        return out;
+    }
+    if expression.variant == "BooleanLiteral" {
+        out.push(expression.value);
+        return out;
+    }
+    if expression.variant == "NullLiteral" {
+        out.push("null");
+        return out;
+    }
     if expression.variant == "StringLiteral" {
-        return quote_string(expression.value);
+        out.push(quote_string(expression.value));
+        return out;
     }
     if expression.variant == "Unary" {
-        // Same precedence concern as Binary: `!a && b` parses as
-        // `(!a) && b`, but the original `!(a && b)` had the negation
-        // outside. Wrap a Binary operand so the unary scope survives
-        // round-tripping. Surfaced by the `assert !(... && ...)` pattern
-        // in `compiler/tests/unit/cli_path_normalization_test.sfn:79`.
-        return expression.operator + _format_binary_operand(expression.operand);
+        // `!a && b` parses as `(!a) && b`, but `!(a && b)` had the negation
+        // outside — wrap a Binary operand so the unary scope survives the
+        // round-trip (cli_path_normalization_test.sfn:79).
+        out.push(expression.operator);
+        _format_binary_operand_into(expression.operand, out);
+        return out;
     }
     if expression.variant == "Binary" {
-        // Wrap nested Binary operands in parens so the round-trip preserves
-        // grouping. Without this, `(a - 0) / b` formats as `a - 0 / b` and
-        // re-parses with `/` binding tighter than `-`, silently changing
-        // semantics. Surfaced by issue #521 once block-scoped `let`
-        // initializers started flowing through `format_expression` instead
-        // of the raw-text passthrough.
-        let left = _format_binary_operand(expression.left);
-        let right = _format_binary_operand(expression.right);
-        return left + " " + expression.operator + " " + right;
+        _format_binary_operand_into(expression.left, out);
+        out.push(" ");
+        out.push(expression.operator);
+        out.push(" ");
+        _format_binary_operand_into(expression.right, out);
+        return out;
     }
     if expression.variant == "Member" {
-        return format_expression(expression.object) + "." + expression.member;
+        format_expression_into(expression.object, out);
+        out.push(".");
+        out.push(expression.member);
+        return out;
     }
     if expression.variant == "Call" {
-        let mut rendered: string[] = [];
+        format_expression_into(expression.callee, out);
+        out.push("(");
         let mut index: int = 0;
         loop {
             if index >= expression.arguments.length { break; }
-            rendered.push(format_expression(expression.arguments[index]));
+            if index > 0 { out.push(", "); }
+            format_expression_into(expression.arguments[index], out);
             index += 1;
         }
-        let args = join_with_separator(rendered, ", ");
-        return format_expression(expression.callee) + "(" + args + ")";
+        out.push(")");
+        return out;
     }
     if expression.variant == "Index" {
-        return format_expression(expression.sequence) + "[" + format_expression(expression.index)
-            + "]";
+        format_expression_into(expression.sequence, out);
+        out.push("[");
+        format_expression_into(expression.index, out);
+        out.push("]");
+        return out;
     }
     if expression.variant == "Array" {
-        return format_array_expression(expression.elements);
+        format_array_expression_into(expression.elements, out);
+        return out;
     }
     if expression.variant == "Object" {
-        let mut rendered: string[] = [];
+        out.push("{ ");
         let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
+            if index > 0 { out.push(", "); }
             let field = expression.fields[index];
-            rendered.push(field.name + ": " + format_expression(field.value));
+            out.push(field.name);
+            out.push(": ");
+            format_expression_into(field.value, out);
             index += 1;
         }
-        return "{ " + join_with_separator(rendered, ", ") + " }";
+        out.push(" }");
+        return out;
     }
     if expression.variant == "Struct" {
-        let mut rendered: string[] = [];
+        let type_name = join_with_separator(expression.type_name, ".");
+        out.push(type_name);
+        out.push(" { ");
         let mut index: int = 0;
         loop {
             if index >= expression.fields.length { break; }
+            if index > 0 { out.push(", "); }
             let field = expression.fields[index];
-            rendered.push(field.name + ": " + format_expression(field.value));
+            out.push(field.name);
+            out.push(": ");
+            format_expression_into(field.value, out);
             index += 1;
         }
-        let type_name = join_with_separator(expression.type_name, ".");
-        return type_name + " { " + join_with_separator(rendered, ", ") + " }";
+        out.push(" }");
+        return out;
     }
     if expression.variant == "Range" {
-        return format_expression(expression.start) + ".." + format_expression(expression.end);
+        format_expression_into(expression.start, out);
+        out.push("..");
+        format_expression_into(expression.end, out);
+        return out;
     }
     if expression.variant == "Cast" {
-        // Render as `(operand) as <type>` — matches the existing
-        // `parse_cast_expression` recognizer in
-        // `compiler/src/llvm/expression_lowering/native/core_parsing.sfn`,
-        // which scans for the literal ` as ` substring at top level
-        // (outside parens/brackets/strings). Wrapping the operand in
-        // parens contains any embedded operators so the recognizer's
+        // `(operand) as <type>` — matches `parse_cast_expression`
+        // (core_parsing.sfn), which scans for ` as ` at top level; the
+        // operand parens contain embedded operators so the recognizer's
         // `strip_enclosing_parentheses` recovers the operand text.
-        return "(" + format_expression(expression.operand) + ") as "
-            + expression.target_type.text;
+        out.push("(");
+        format_expression_into(expression.operand, out);
+        out.push(") as ");
+        out.push(expression.target_type.text);
+        return out;
     }
     if expression.variant == "Await" {
-        // Bridge the structured `Await` node (parsed since issue #1080)
-        // back to the text form the existing `async`/`await` lowering
-        // consumes: `lower_expression` in
-        // `llvm/expression_lowering/native/core.sfn` and
-        // `find_suspension_keyword` in `llvm/lifetime.sfn` both key on a
-        // leading `"await "` substring. Rendering it here keeps the
-        // legacy text-based await pipeline working unchanged until the
-        // dedicated `Await` lowering lands in a follow-up.
-        //
-        // Use `_format_binary_operand` (the same helper `Unary` uses) so a
-        // `Binary`/`Cast` operand keeps its parens on the round-trip:
-        // `await (a + b)` must not re-serialize to `await a + b`, which
-        // would re-parse as `(await a) + b` and silently change grouping.
-        // The parser parses `await` at unary precedence, so a bare binary
-        // operand only arises from an explicitly parenthesized awaited
-        // expression — exactly the case these parens preserve.
-        return "await " + _format_binary_operand(expression.operand);
+        // Bridge the structured `Await` node (#1080) to the legacy text form
+        // the `async`/`await` lowering keys on (a leading `"await "`). Use the
+        // `_format_binary_operand` helper so `await (a + b)` keeps its parens
+        // and does not re-parse as `(await a) + b`.
+        out.push("await ");
+        _format_binary_operand_into(expression.operand, out);
+        return out;
     }
     if expression.variant == "Spawn" {
-        // `spawn <operand>` — enqueue a task, yields a future
-        // (docs/runtime_architecture.md §2.6.2). `kind` is the monomorphized
-        // future kind the parser tagged from a lambda operand's declared
-        // return type (`parser/expressions.sfn:412`, via `spawn_future_kind`);
-        // it is "" when the kind is not statically derivable (e.g.
-        // `spawn foo()`, which needs symbol resolution — #829). Render the
-        // kind as a `spawn:<kind>` qualifier so the LLVM lowering (#1085) can
-        // select the matching `spawn_<kind>` runtime helper without
-        // re-deriving it. The lowering fails closed on this form until that
-        // follow-up lands (see the guards in
-        // `llvm/expression_lowering/native/core.sfn`).
+        // `spawn[:<kind>] <operand>` (docs/runtime_architecture.md §2.6.2).
+        // `kind` is "" when not statically derivable (#829); rendered as a
+        // `spawn:<kind>` qualifier so the LLVM lowering (#1085) selects the
+        // matching helper. Fails closed downstream until that lands.
         if expression.kind.length > 0 {
-            return "spawn:" + expression.kind + " " + _format_binary_operand(expression.operand);
+            out.push("spawn:");
+            out.push(expression.kind);
+            out.push(" ");
+            _format_binary_operand_into(expression.operand, out);
+            return out;
         }
-        return "spawn " + _format_binary_operand(expression.operand);
+        out.push("spawn ");
+        _format_binary_operand_into(expression.operand, out);
+        return out;
     }
     if expression.variant == "Channel" {
-        // `channel(capacity?)` — construct a channel (§2.6.4). Capacity is
-        // optional (unbuffered default). `kind` carries the monomorphized
-        // element kind when known; the `channel<T>` element-type form is
-        // deferred in the parser, so it is "" today. The lowering fails
-        // closed on this form until #1085.
-        let mut channel_capacity: string = "";
-        if expression.capacity != null {
-            channel_capacity = format_expression(expression.capacity);
-        }
+        // `channel[:<kind>](capacity?)` (§2.6.4). Capacity optional
+        // (unbuffered default); `kind` is "" today (element-type form
+        // deferred in the parser). Fails closed downstream until #1085.
         if expression.kind.length > 0 {
-            return "channel:" + expression.kind + "(" + channel_capacity + ")";
+            out.push("channel:");
+            out.push(expression.kind);
+            out.push("(");
+        } else { out.push("channel("); }
+        if expression.capacity != null {
+            format_expression_into(expression.capacity, out);
         }
-        return "channel(" + channel_capacity + ")";
+        out.push(")");
+        return out;
     }
     if expression.variant == "Parallel" {
-        // `parallel [t1, t2, ...]` — fan out tasks, await all (§2.6.5).
-        // Render the task list with the array-literal grammar the parser
-        // consumed (`parser/expressions.sfn:834`). The lowering fails closed
-        // on this form until #1085.
-        let mut parallel_tasks: string[] = [];
+        // `parallel [t1, t2, ...]` (§2.6.5) — array-literal grammar the
+        // parser consumed. Fails closed downstream until #1085.
+        out.push("parallel [");
         let mut parallel_index: int = 0;
         loop {
             if parallel_index >= expression.tasks.length { break; }
-            parallel_tasks.push(format_expression(expression.tasks[parallel_index]));
+            if parallel_index > 0 { out.push(", "); }
+            format_expression_into(expression.tasks[parallel_index], out);
             parallel_index += 1;
         }
-        return "parallel [" + join_with_separator(parallel_tasks, ", ") + "]";
+        out.push("]");
+        return out;
     }
     if expression.variant == "Serve" {
-        // `serve(handler, port?)` — accept loop dispatching to the pool
-        // (§2.6.6). `port` is optional. The lowering fails closed on this
-        // form until #1085.
-        let serve_handler = format_expression(expression.handler);
+        // `serve(handler, port?)` (§2.6.6). Fails closed until #1085.
+        out.push("serve(");
+        format_expression_into(expression.handler, out);
         if expression.port != null {
-            return "serve(" + serve_handler + ", " + format_expression(expression.port)
-                + ")";
+            out.push(", ");
+            format_expression_into(expression.port, out);
         }
-        return "serve(" + serve_handler + ")";
+        out.push(")");
+        return out;
     }
-    if expression.variant == "Lambda" { return "<lambda>"; }
+    if expression.variant == "Lambda" {
+        out.push("<lambda>");
+        return out;
+    }
     if expression.variant == "Raw" {
         let raw_text = trim_text(expression.text);
         // Normalize multi-line raw expressions to single line so that
@@ -234,27 +288,50 @@ fn format_expression(expression: Expression) -> string {
             }
             ri += 1;
         }
-        return trim_text(normalized);
+        out.push(trim_text(normalized));
+        return out;
     }
-    return "<" + expression.variant + ">";
+    out.push("<");
+    out.push(expression.variant);
+    out.push(">");
+    return out;
 }
 
 fn format_array_expression(elements: Expression[]) -> string {
+    let mut out: string[] = [];
+    format_array_expression_into(elements, out);
+    return join_with_separator(out, "");
+}
+
+// Append the array-literal rendering onto `out`. Output is byte-identical to
+// the prior `format_array_expression`: `[]` / `[#element:T]` when empty,
+// `[body]` / `[#element:T, body]` otherwise.
+fn format_array_expression_into(elements: Expression[], out: string[]) -> string[] {
     let annotation = infer_array_element_type(elements);
-    let mut rendered: string[] = [];
+    if elements.length == 0 {
+        if annotation.length == 0 {
+            out.push("[]");
+            return out;
+        }
+        out.push("[#element:");
+        out.push(annotation);
+        out.push("]");
+        return out;
+    }
+    if annotation.length == 0 { out.push("["); } else {
+        out.push("[#element:");
+        out.push(annotation);
+        out.push(", ");
+    }
     let mut index: int = 0;
     loop {
         if index >= elements.length { break; }
-        rendered.push(format_expression(elements[index]));
+        if index > 0 { out.push(", "); }
+        format_expression_into(elements[index], out);
         index += 1;
     }
-    if rendered.length == 0 {
-        if annotation.length == 0 { return "[]"; }
-        return "[#element:" + annotation + "]";
-    }
-    let body = join_with_separator(rendered, ", ");
-    if annotation.length == 0 { return "[" + body + "]"; }
-    return "[#element:" + annotation + ", " + body + "]";
+    out.push("]");
+    return out;
 }
 
 fn infer_array_element_type(elements: Expression[]) -> string {
