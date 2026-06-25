@@ -19,6 +19,11 @@ description = "Test assertion helpers and utilities for Sailfin"
 # is fixed (#873 slug canonicalization), so the import is restored (#1571).
 "sfn/fs" = "*"
 
+# `with_env` (#1166) composes the typed `os::Env` + `os::run_capture` to run
+# a subprocess under a scoped, per-child environment without mutating the
+# parent `environ`. `sfn/os` has no dependencies of its own, so no cycle.
+"sfn/os" = "*"
+
 [capabilities]
 required = ["io"]
 
