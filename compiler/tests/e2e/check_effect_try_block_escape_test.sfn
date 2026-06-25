@@ -1,0 +1,112 @@
+// End-to-end regression test for the effect-checker soundness hole where
+// `try`/`catch`/`finally`, `throw`, and bare/`unsafe` block statements were
+// not visited by `collect_effects_from_statement` (effect_checker.sfn). An
+// effectful call wrapped in any of those statements escaped `![effect]`
+// enforcement entirely — a silent capability-security bypass of the project's
+// #1 pillar (compile-time capability enforcement).
+//
+// Each fixture wraps an effectful call (`print.info` → `![io]`, `http.get` →
+// `![net]`) in one of the previously-unvisited statements inside a function
+// that does NOT declare the effect. `sfn check` must reject every one with
+// E0400. The final test is a positive control: the same `try`-wrapped call in
+// a function that DOES declare `![io]` must still compile, guarding against an
+// over-broad fix.
+//
+// `sfn check` is a frontend-only pass (no link), so the child is spawned with
+// an empty environment, mirroring `sfn/test`'s own `assert_compiles`. Assert
+// on captured output with `sfn/strings` predicates — the `sfn/test` `expect_*`
+// matchers are `![pure]` and cannot be called from an `![io]` test (#842).
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+struct _CheckRun {
+    exit: int;
+    output: string;
+}
+
+fn _run_check(source: string) -> _CheckRun ![io] {
+    let dir = fs.mkdtemp("sfn-check-effect-escape-");
+    let path = dir + "/leak.sfn";
+    fs.writeFile(path, source);
+    let exit = process.run_capture([_sfn_bin(), "check", path], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(path);
+    fs.removeDirectory(dir);
+    return _CheckRun { exit: exit, output: out + err };
+}
+
+// ---- try block must not hide an effect ----
+test "effect escape: try block ![io] fires E0400" ![io] {
+    let r = _run_check("fn leaky() {\n"
+        + "    try { print.info(\"escaped\"); } catch (e) { print.info(\"x\"); }\n"
+        + "}\n");
+    assert r.exit == 1;
+    assert find(r.output, "E0400", 0) >= 0;
+    assert find(r.output, "io", 0) >= 0;
+}
+
+// ---- catch block must not hide an effect ----
+test "effect escape: catch block ![io] fires E0400" ![io] {
+    let r = _run_check("fn leaky() {\n"
+        + "    try { let x: number = 1; } catch (e) { print.info(\"escaped\"); }\n"
+        + "}\n");
+    assert r.exit == 1;
+    assert find(r.output, "E0400", 0) >= 0;
+    assert find(r.output, "io", 0) >= 0;
+}
+
+// ---- finally block must not hide an effect ----
+test "effect escape: finally block ![io] fires E0400" ![io] {
+    let r = _run_check("fn leaky() {\n"
+        + "    try { let x: number = 1; } finally { print.info(\"escaped\"); }\n"
+        + "}\n");
+    assert r.exit == 1;
+    assert find(r.output, "E0400", 0) >= 0;
+    assert find(r.output, "io", 0) >= 0;
+}
+
+// ---- throw expression must not hide an effect ----
+test "effect escape: throw expression ![net] fires E0400" ![io] {
+    let r = _run_check("fn leaky() {\n"
+        + "    throw http.get(\"http://evil\");\n"
+        + "}\n");
+    assert r.exit == 1;
+    assert find(r.output, "E0400", 0) >= 0;
+    assert find(r.output, "net", 0) >= 0;
+}
+
+// ---- bare block must not hide an effect ----
+test "effect escape: bare block ![io] fires E0400" ![io] {
+    let r = _run_check("fn leaky() {\n" + "    { print.info(\"escaped\"); }\n"
+        + "}\n");
+    assert r.exit == 1;
+    assert find(r.output, "E0400", 0) >= 0;
+    assert find(r.output, "io", 0) >= 0;
+}
+
+// ---- unsafe block must not hide an effect (unsafe relaxes memory safety,
+// not capability enforcement) ----
+test "effect escape: unsafe block ![io] fires E0400" ![io] {
+    let r = _run_check("fn leaky() {\n"
+        + "    unsafe { print.info(\"escaped\"); }\n"
+        + "}\n");
+    assert r.exit == 1;
+    assert find(r.output, "E0400", 0) >= 0;
+    assert find(r.output, "io", 0) >= 0;
+}
+
+// ---- positive control: a declared ![io] satisfies the requirement even
+// when the call is inside a try block (no false positive) ----
+test "effect escape: declared ![io] inside try compiles" ![io] {
+    let r = _run_check("fn ok() ![io] {\n"
+        + "    try { print.info(\"fine\"); } catch (e) { print.info(\"x\"); }\n"
+        + "}\n");
+    assert r.exit == 0;
+    assert find(r.output, "E0400", 0) < 0;
+}

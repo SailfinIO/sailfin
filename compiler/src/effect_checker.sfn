@@ -575,6 +575,25 @@ fn collect_effects_from_statement(statement: Statement, imports: ImportSymbolTab
         required = merge_requirements(required, collect_effects_from_else_branch(else_branch, imports));
         return required;
     }
+    if statement.variant == "TryStatement" {
+        // `try`/`catch`/`finally` is ordinary control flow — every branch runs
+        // in the enclosing function's capability context, so an effectful call
+        // inside any of them must be collected transitively. Wrapping a call in
+        // `try` is not a capability escape hatch.
+        let mut required = collect_effects_from_block(statement.try_block, imports);
+        required = merge_requirements(required, collect_effects_from_optional_block(statement.catch_block, imports));
+        required = merge_requirements(required, collect_effects_from_optional_block(statement.finally_block, imports));
+        return required;
+    }
+    if statement.variant == "ThrowStatement" {
+        return collect_effects_from_expression(statement.expression, imports);
+    }
+    if statement.variant == "BlockStatement" {
+        // A bare `{ }` (or `unsafe { }`) block runs in the enclosing
+        // capability context. `unsafe` relaxes memory-safety checks, not
+        // capability enforcement, so its effects are still required.
+        return collect_effects_from_block(statement.body, imports);
+    }
     if statement.variant == "ReturnStatement" {
         return collect_effects_from_expression(statement.expression, imports);
     }
