@@ -8,7 +8,7 @@
 // `sfn_taskqueue_*` section below implements the mutex-guarded
 // enqueue/dequeue surface that producers and consumers share. The
 // `sfn_scheduler_*` section spins up the fixed worker pool —
-// `pthread_create` worker loop, `min(cores, 4)` / `SAILFIN_THREADS`
+// `pthread_create` worker loop, `min(cores, 32)` / `SAILFIN_THREADS`
 // sizing, and atomic shutdown that drains + joins (§2.6.2). The
 // remaining runtime behaviour — task invocation and the spawn/await
 // result surface (§2.6.3) — lands in follow-up M4 issues and is
@@ -171,7 +171,7 @@ struct TaskQueue {
 // `threads_addr` points at a `thread_count`-slot array of `pthread_t`
 // ids (each written by `pthread_create`; `pthread_t` is pointer-sized —
 // modelled as `usize` in `pthread.sfn`). `thread_count` is the pool
-// size, defaulting to `min(available_cores, 4)` and overridable via
+// size, defaulting to `min(available_cores, 32)` and overridable via
 // `SAILFIN_THREADS` (see `sfn_scheduler_resolve_thread_count`).
 // `queue_addr` is the shared `* TaskQueue`. `processed` counts tasks
 // pulled off the queue, incremented under the queue mutex (so a plain
@@ -472,8 +472,19 @@ fn _sfn_scheduler_sc_nprocessors_onln() -> i32 {
     return sailfin_intrinsic_sc_nprocessors_onln();
 }
 
-// Default pool-size ceiling: `min(available_cores, 4)` per §2.6.1.
-fn _sfn_scheduler_default_max() -> i64 { return 4; }
+// Default auto-pool ceiling: `min(available_cores, 32)`. Raised from the
+// original `4` (#1584, epic #1540 gap B5 cap-raise): the 4-cap throttled an
+// I/O-bound proxy/server to four concurrent in-flight connections regardless
+// of how many cores the host had, since `sfn_scheduler_resolve_thread_count`
+// clamps the auto-detected core count to this value. `32` lets the auto-pool
+// size to the host's real core count on typical server hardware (≤ 32 cores →
+// all cores) while still bounding the eagerly-spun pthread pool — and its
+// thread-stack overhead — well below the `1024` explicit-`SAILFIN_THREADS`
+// sanity ceiling on very-large-core boxes. This is a fixed-pool cap raise
+// only; true per-connection scale for thousands of idle long-lived sessions
+// still needs the deferred epoll/kqueue event loop (#1540 B5). The
+// `SAILFIN_THREADS` override and the `1024` hard ceiling are unchanged.
+fn _sfn_scheduler_default_max() -> i64 { return 32; }
 
 // Sanity ceiling for an explicit `SAILFIN_THREADS` override. The value
 // is honoured verbatim up to this cap; the cap only guards against an
@@ -484,7 +495,7 @@ fn _sfn_scheduler_max_thread_count() -> i64 { return 1024; }
 
 // Resolve the worker count. An explicit `SAILFIN_THREADS=N` (N >= 1)
 // wins, clamped to the sanity ceiling; a missing, empty, non-numeric,
-// or non-positive value falls through to `clamp(online_cores, 2, 4)`. A
+// or non-positive value falls through to `clamp(online_cores, 2, 32)`. A
 // `sysconf` failure (returns -1) or a single-core box both clamp up to
 // the two-worker floor — the minimum a producer/consumer pair needs to
 // avoid the bounded-pool deadlock (see the clamp comment below).
@@ -517,7 +528,7 @@ fn sfn_scheduler_resolve_thread_count() -> i64 {
     // `_sfn_scheduler_sc_nprocessors_onln`'s
     // `sailfin_intrinsic_sc_nprocessors_onln` intrinsic (#1480), so macOS
     // no longer fails closed to `-1` and the pool sizes to
-    // `min(realcores, 4)` rather than collapsing to this floor.
+    // `min(realcores, 32)` rather than collapsing to this floor.
     // Oversubscribing a genuine
     // single-core box with two pool threads is safe — the OS time-slices
     // the blocked worker out. An explicit `SAILFIN_THREADS=1` still wins

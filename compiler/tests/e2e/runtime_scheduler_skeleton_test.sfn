@@ -372,3 +372,49 @@ test "scheduler: detached tasks are reclaimed by the worker (#1203)" ![io] {
     assert contains(worker_body, "@sfn_task_destroy(");
     assert contains(worker_body, "br i1 ");
 }
+
+// ---- 8. default auto-pool ceiling raised to 32 (#1584) ----
+// `_sfn_scheduler_default_max` is the upper clamp in
+// `sfn_scheduler_resolve_thread_count` (`clamp(cores, 2, default_max)`), so its
+// value IS the default in-flight worker ceiling. #1584 (epic #1540 gap B5
+// cap-raise) lifted it from the original `4` to `32` so an I/O-bound
+// proxy/server is no longer throttled to four concurrent in-flight connections
+// regardless of host core count. The helper folds to a single `ret i64 32`;
+// pin it as a host-independent emit-shape invariant.
+test "scheduler: default auto-pool ceiling is 32 (#1584)" ![io] {
+    let ir = _emit_scheduler_ir();
+    assert ir != "EMIT_FAILED";
+    let body = _define_body(ir, "_sfn_scheduler_default_max");
+    assert body.length > 0;
+    assert contains(body, "ret i64 32");
+    // The original `4` must be gone — a regression back to the throttled cap.
+    assert ! contains(body, "ret i64 4");
+}
+
+// ---- 9. SAILFIN_THREADS override + 1024 hard ceiling unchanged (#1584) ----
+// The cap-raise must leave the explicit-override path untouched: an
+// `SAILFIN_THREADS=N` is still read (`getenv` + `atoi`) and still clamped to
+// the `1024` sanity ceiling (`_sfn_scheduler_max_thread_count`), which the
+// resolve body consults BEFORE the auto path. The auto path still clamps the
+// detected core count to the (now `32`) default-ceiling helper. Pins both
+// helpers and the override read so a future cap tweak can't silently drop the
+// override or move the hard ceiling.
+test "scheduler: SAILFIN_THREADS override + 1024 ceiling intact (#1584)" ![io] {
+    let ir = _emit_scheduler_ir();
+    assert ir != "EMIT_FAILED";
+
+    // The 1024 explicit-override sanity ceiling is unchanged.
+    let ceil = _define_body(ir, "_sfn_scheduler_max_thread_count");
+    assert ceil.length > 0;
+    assert contains(ceil, "ret i64 1024");
+
+    // The resolve body still reads the SAILFIN_THREADS override (getenv +
+    // atoi) and clamps it against the 1024 ceiling helper before the auto path.
+    let resolve = _define_body(ir, "sfn_scheduler_resolve_thread_count");
+    assert resolve.length > 0;
+    assert contains(resolve, "@getenv(");
+    assert contains(resolve, "@atoi(");
+    assert contains(resolve, "@_sfn_scheduler_max_thread_count(");
+    // And the auto path still clamps to the (now 32) default-ceiling helper.
+    assert contains(resolve, "@_sfn_scheduler_default_max(");
+}
