@@ -27,6 +27,7 @@ import { code_for_missing_effect } from "../../src/diagnostics_render";
 import { EffectViolation, validate_effects, validate_effects_with_imports } from "../../src/effect_checker";
 import { append_import_function, empty_import_symbols } from "../../src/effect_imports";
 import { canonical_effects, is_canonical_effect } from "../../src/effect_taxonomy";
+import { effects_for_callee_target } from "../../src/llvm/runtime_helpers";
 import { Token } from "../../src/token";
 
 // -------------------------------------------------------------------
@@ -732,16 +733,94 @@ test "effect (#1183): console.log Member call requires io from the registry" {
     assert _effects_contains(violations[0].missing_effects, "io");
 }
 
-test "effect (#1183): websocket.send Member call retains net enforcement" {
-    // `websocket.*` has no runtime descriptor yet, so it is the one
-    // namespace `effects_for_callee_target` cannot resolve; the checker
-    // retains an explicit `net` check pending #1601. Lock that net
-    // enforcement is NOT regressed by the registry refactor.
+test "effect (#1601): websocket.send Member call requires net from the registry" {
+    // `websocket.*` is now registry-derived (#1601): the
+    // `websocket.send` metadata row resolves to `["net"]` via
+    // `effects_for_callee_target`, replacing the former hardcoded
+    // `if root == "websocket"` check. Lock that net enforcement is NOT
+    // regressed by the registry refactor.
     let stmt = _routine_with_member_call("push", [], 1, "websocket", "send", 4, 5);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 1;
     assert _effects_contains(violations[0].missing_effects, "net");
+}
+
+test "effect (#1601): websocket.serve Member call requires net from the registry" {
+    // A second op beyond `send` — proves the namespace surface (not a
+    // single hardcoded member) resolves to net via the registry.
+    let stmt = _routine_with_member_call("host", [], 1, "websocket", "serve", 4, 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert _effects_contains(violations[0].missing_effects, "net");
+}
+
+test "effect (#1601): websocket.broadcast (no exact row) requires net via namespace union" {
+    // `websocket.broadcast` has no exact descriptor; the namespace-union
+    // fallback in `effects_for_callee_target` must still derive net from
+    // the `websocket.*` family so conservative coverage is never dropped
+    // for an op the future runtime might add.
+    let stmt = _routine_with_member_call("fanout", [], 1, "websocket", "broadcast", 4, 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert _effects_contains(violations[0].missing_effects, "net");
+}
+
+test "effect (#1601): websocket.close declaring ![net] is clean" {
+    // Use `close`, not `send`/`receive`: those member names also trip the
+    // object-agnostic channel send/receive heuristic (-> io), so
+    // `websocket.send` legitimately requires BOTH net and io. `close` is a
+    // plain websocket op, so the registry-derived `["net"]` alone
+    // satisfies it — isolating the #1601 net requirement.
+    let stmt = _routine_with_member_call("close_ok", ["net"], 1, "websocket", "close", 4, 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+test "effect (#1601): Call-form serve requires both io and net from the registry" {
+    // The Call-arm `serve` is now registry-driven (#1601), replacing the
+    // former hardcoded net-only `if name == "serve"`. The `serve`
+    // metadata row carries `["io", "net"]`, so a bare `serve(...)` Call
+    // missing both effects must surface BOTH — impossible under the old
+    // net-only check. (Real `serve(...)` source commits to the `Serve`
+    // AST node; this exercises the latent Call-callee form via the
+    // direct-AST helper, mirroring the `spawn` test.)
+    let stmt = _routine_with_bare_call("srv", [], 50, "serve", 200, 4);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert _effects_contains(v.missing_effects, "net");
+    assert _effects_contains(v.missing_effects, "io");
+}
+
+test "effect (#1601): Call-form serve declaring ![io, net] is clean" {
+    let stmt = _routine_with_bare_call("srv_ok", ["io", "net"], 50, "serve", 200, 4);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+// Direct accessor assertions pinning the #1601 acceptance criteria at
+// the registry level, independent of the effect-checker wiring above.
+test "registry (#1601): effects_for_callee_target(\"websocket.\") returns net" {
+    let effects = effects_for_callee_target("websocket.");
+    assert effects.length == 1;
+    assert _effects_contains(effects, "net");
+}
+
+test "registry (#1601): effects_for_callee_target(\"websocket.send\") contains net" {
+    let effects = effects_for_callee_target("websocket.send");
+    assert _effects_contains(effects, "net");
+}
+
+test "registry (#1601): effects_for_callee_target(\"serve\") contains io and net" {
+    let effects = effects_for_callee_target("serve");
+    assert _effects_contains(effects, "io");
+    assert _effects_contains(effects, "net");
 }
 
 test "effect violation: AST trigger overrides signature fallback" {
