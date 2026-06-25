@@ -123,16 +123,6 @@ extern fn pclose(fp: * u8) -> i32;
 
 extern fn fread(ptr: * u8, size: usize, nmemb: usize, fp: * u8) -> i64;
 
-// libc `poll(2)` — the fd-readiness primitive behind `io.poll_readable`
-// (#1580, epic #1540 Track A gap A3). Inlined (not imported) for the
-// same #306 reason as `write`/`getenv` above: the isolated runtime-sfn
-// emit only pre-stages the platform symbols the seed snapshots, so any
-// other libc surface must be declared locally. Mirrors the identical
-// declaration in `runtime/sfn/process.sfn:143` (the `_drain_two_pipes`
-// poll loop) — the two stay in lockstep until a shared `posix` module
-// lands.
-extern fn poll(fds: * u8, nfds: usize, timeout: i32) -> i32;
-
 // stdout / stderr file descriptors — the `write(2)` targets for the
 // print family. Matches the C `_print_line` stream routing: raw/info to
 // stdout (fd 1), err/warn/error to stderr (fd 2).
@@ -463,69 +453,4 @@ fn sfn_log_execution(value: * u8) -> * u8 ![io] {
         _sfn_print_line(STDOUT_FD, prefix as * u8, 7, value, strlen(value) as i64);
     }
     return value;
-}
-
-// `pollfd` overlay for the single-slot `io.poll_readable` check.
-// The C `struct pollfd { int fd; short events; short revents; }` is 8
-// bytes: the two `short`s pack into `events_revents` (little-endian low
-// half = `events`, high half = `revents`). Set `events_revents = 1`
-// (POLLIN, revents cleared) before `poll`; read `revents` back as
-// `(events_revents >> 16) & 65535`. Byte-identical to the `PollSlot`
-// overlay in `runtime/sfn/process.sfn` — duplicated here because each
-// runtime sfn-source is emitted to its own object and cannot import the
-// other's struct (the #306 cross-module-extern discipline this file
-// already follows for `write`/`poll`).
-struct IoPollSlot {
-    fd: i32;
-    events_revents: i32;
-}
-
-// POSIX `EINTR` (4 on Linux and macOS): the only `poll` failure that
-// warrants a resume. Read via the same decimal literal `runtime/sfn/
-// process.sfn` uses (`SFN_EINTR`); the seed lexer has no `0x`, so the
-// value is spelled in decimal.
-let SFN_IO_EINTR: i32 = 4;
-
-// `sfn_io_poll_readable(fd, timeout_ms)` — #1580 (epic #1540 Track A,
-// gap A3). Wait for `fd` to become readable via a single-slot `POLLIN`
-// `poll(2)`. The canonical symbol `io.poll_readable` lowers to
-// (`runtime_helpers.sfn`: `symbol: sfn_io_poll_readable`,
-// `return_type: "i1"`, `parameter_types: ["i64", "i64"]`).
-//
-// `fd` / `timeout_ms` arrive as Sailfin `int` (i64) and narrow to the
-// `i32` `poll` ABI. `timeout_ms < 0` blocks until readable; `0` polls
-// and returns immediately; `> 0` waits up to that many milliseconds.
-// Returns `true` iff the slot reports a non-empty `revents` (data, EOF,
-// `POLLHUP`, or `POLLERR` all set the bit — exactly the conditions a
-// follow-up `read(2)` must run for). A negative `fd`, an allocation
-// failure, or a non-EINTR `poll` error returns `false` (not readable).
-// `EINTR` re-arms and re-polls, mirroring the `_drain_two_pipes` loop;
-// a finite timeout is restarted on the rare interrupt rather than
-// threaded through a clock, which the single-slot wait keeps simple.
-fn sfn_io_poll_readable(fd: i64, timeout_ms: i64) -> bool ![io] {
-    if fd < 0 { return false; }
-    let pbuf: * u8 = malloc(8 as usize);
-    if pbuf as i64 == 0 { return false; }
-    let slot: * IoPollSlot = pbuf as * IoPollSlot;
-    let to: i32 = timeout_ms as i32;
-    let mut ready: bool = false;
-    loop {
-        slot.fd = fd as i32;
-        slot.events_revents = 1;
-        let pr: i32 = poll(pbuf, 1 as usize, to);
-        if pr < 0 {
-            let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
-            if err == SFN_IO_EINTR {
-                // Interrupted before readiness — re-arm and poll again.
-            } else { break; }
-        } else {
-            if pr > 0 {
-                let revents: i32 = (slot.events_revents >> 16) & 65535;
-                if revents != 0 { ready = true; }
-            }
-            break;
-        }
-    }
-    free(pbuf);
-    return ready;
 }

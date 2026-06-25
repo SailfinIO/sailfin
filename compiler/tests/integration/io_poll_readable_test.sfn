@@ -1,6 +1,7 @@
 // Integration coverage for the `io.poll_readable(fd, timeout_ms)` builtin
 // (#1580, epic #1540 Track A gap A3). The Sailfin-native body lives in
-// `runtime/sfn/io.sfn:sfn_io_poll_readable`; `runtime_helpers.sfn` maps the
+// `runtime/sfn/process.sfn:sfn_io_poll_readable` (with a Windows stub in
+// `process_windows.sfn`); `runtime_helpers.sfn` maps the
 // `io.poll_readable` descriptor onto it and `lowering_helpers.sfn`
 // declare-tracks the symbol. These tests drive a real `pipe(2)` so the
 // readiness transition is deterministic: an empty pipe is not readable, a

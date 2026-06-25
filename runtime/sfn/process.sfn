@@ -544,6 +544,62 @@ fn _drain_two_pipes(out_fd_in: i32, err_fd_in: i32, gb_out: * GrowBuf, gb_err: *
     free(pbuf);
 }
 
+// ── io.poll_readable ───────────────────────────────────────────
+// `sfn_io_poll_readable(fd, timeout_ms)` — #1580 (epic #1540 Track A,
+// gap A3). The user-callable single-fd readiness check behind the
+// `io.poll_readable` descriptor (`runtime_helpers.sfn`:
+// `symbol: sfn_io_poll_readable`, `return_type: "i1"`,
+// `parameter_types: ["i64", "i64"]`). Lets bidirectional stdio
+// forwarding wait on `{own stdin, child stdout, child stderr}` together
+// without deadlock.
+//
+// The `io.*`-namespaced symbol lives in `process.sfn` rather than
+// `io.sfn` because it needs the POSIX `poll(2)` + `errno` surface, and
+// only `process.sfn` is excluded from the Windows `RUNTIME_MODS`
+// (replaced by `process_windows.sfn`, which carries a `WSAPoll`-less
+// stub). Defining it in the Windows-compiled `io.sfn` would emit
+// `undefined reference to 'poll' / '__errno_location'` at the mingw
+// link. It reuses this module's existing `poll` extern, `PollSlot`
+// overlay, and `SFN_EINTR` rather than re-declaring them.
+//
+// `fd` / `timeout_ms` arrive as Sailfin `int` (i64) and narrow to the
+// `i32` `poll` ABI. `timeout_ms < 0` blocks until readable; `0` polls
+// and returns immediately; `> 0` waits up to that many milliseconds.
+// Returns `true` iff the slot reports a non-empty `revents` (data, EOF,
+// `POLLHUP`, or `POLLERR` all set the bit — exactly the conditions a
+// follow-up `read(2)` must run for). A negative `fd`, an allocation
+// failure, or a non-EINTR `poll` error returns `false` (not readable).
+// `EINTR` re-arms and re-polls, mirroring the `_drain_two_pipes` loop;
+// a finite timeout is restarted on the rare interrupt rather than
+// threaded through a clock, which the single-slot wait keeps simple.
+fn sfn_io_poll_readable(fd: i64, timeout_ms: i64) -> bool ![io] {
+    if fd < 0 { return false; }
+    let pbuf: * u8 = malloc(8 as usize);
+    if pbuf as i64 == 0 { return false; }
+    let slot: * PollSlot = pbuf as * PollSlot;
+    let to: i32 = timeout_ms as i32;
+    let mut ready: bool = false;
+    loop {
+        slot.fd = fd as i32;
+        slot.events_revents = 1;
+        let pr: i32 = poll(pbuf, 1 as usize, to);
+        if pr < 0 {
+            let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
+            if err == SFN_EINTR {
+                // Interrupted before readiness — re-arm and poll again.
+            } else { break; }
+        } else {
+            if pr > 0 {
+                let revents: i32 = (slot.events_revents >> 16) & 65535;
+                if revents != 0 { ready = true; }
+            }
+            break;
+        }
+    }
+    free(pbuf);
+    return ready;
+}
+
 // ── process.exit ───────────────────────────────────────────────
 // Port of `sailfin_runtime_process_exit`. `code` arrives as `double`
 // per the descriptor's `parameter_types: ["double"]`; truncate

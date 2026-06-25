@@ -861,8 +861,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // within the timeout (`timeout_ms < 0` blocks until readable, `0`
     // polls and returns immediately). Lets bidirectional stdio
     // forwarding wait on multiple fds without deadlock. Sailfin-native
-    // body (`runtime/sfn/io.sfn:sfn_io_poll_readable`); `fd` /
-    // `timeout_ms` arrive as `int` (i64), the result as `bool` (i1).
+    // body (`runtime/sfn/process.sfn:sfn_io_poll_readable` — defined
+    // there, not in `io.sfn`, because it needs the POSIX `poll(2)` +
+    // `errno` surface and only `process.sfn` is excluded from the
+    // Windows cross-build; `process_windows.sfn` carries the stub). `fd`
+    // / `timeout_ms` arrive as `int` (i64), the result as `bool` (i1).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "io.poll_readable", symbol: "sfn_io_poll_readable", return_type: "i1", parameter_types: ["i64", "i64"], effects: ["io"], native_signature: "sfn_io_poll_readable", c_abi_return_type: null
     });
