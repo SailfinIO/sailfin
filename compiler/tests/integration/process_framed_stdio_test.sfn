@@ -1,0 +1,104 @@
+// Integration coverage for the framed/length-aware child stdio builtins
+// (#1578, epic #1540 Track A gaps A1 + A4). The Sailfin-native bodies
+// live in `runtime/sfn/process.sfn`
+// (`sfn_process_handle_read_line_stdout`,
+// `sfn_process_handle_read_bytes_stdout`,
+// `sfn_process_handle_write_bytes`); the `process.*` descriptor rows in
+// `compiler/src/llvm/runtime_helpers.sfn` flip the builtin surface onto
+// them. These pin the raw builtins independently of any `sfn/os`
+// wrapper, mirroring `process_spawn_with_env_test.sfn`. All assume a
+// POSIX `sh`/`cat`/`printf` (the same platform assumption the sibling
+// `spawn_with_env` tests rely on).
+test "handle_read_line_stdout: reads framed lines and buffers the remainder" ![io] {
+    // One child write delivers three `\n`-framed lines in a single read;
+    // each call returns one line (newline stripped) and stashes the rest.
+    let id = process.spawn_with_env(["sh", "-c", "printf 'one\\ntwo\\nthree\\n'"], []);
+    assert id != 0;
+    let a = process.handle_read_line_stdout(id);
+    assert a == "one";
+    let b = process.handle_read_line_stdout(id);
+    assert b == "two";
+    let c = process.handle_read_line_stdout(id);
+    assert c == "three";
+    // Past the last newline: EOF yields the empty string.
+    let d = process.handle_read_line_stdout(id);
+    assert d == "";
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+}
+
+test "handle_read_line_stdout: returns the final unterminated line then empty" ![io] {
+    // "a\nb" — the trailing "b" has no newline; it is returned on EOF,
+    // then subsequent calls return the empty string.
+    let id = process.spawn_with_env(["sh", "-c", "printf 'a\\nb'"], []);
+    assert id != 0;
+    let a = process.handle_read_line_stdout(id);
+    assert a == "a";
+    let b = process.handle_read_line_stdout(id);
+    assert b == "b";
+    let c = process.handle_read_line_stdout(id);
+    assert c == "";
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+}
+
+test "handle_read_line_stdout: reads from a live child without closing the pipe" ![io] {
+    // `cat` echoes each block as it reads — write one frame, read it back
+    // while the child is still running (stdin not yet closed), then a
+    // second frame, proving the pipe stays open across calls.
+    let id = process.spawn_with_env(["cat"], []);
+    assert id != 0;
+    let w1 = process.handle_write_bytes(id, "ping\n", 5);
+    assert w1 == 5;
+    let l1 = process.handle_read_line_stdout(id);
+    assert l1 == "ping";
+    let w2 = process.handle_write_bytes(id, "pong\n", 5);
+    assert w2 == 5;
+    let l2 = process.handle_read_line_stdout(id);
+    assert l2 == "pong";
+    process.handle_close_stdin(id);
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+}
+
+test "handle_read_bytes_stdout: returns at most n bytes preserving the remainder" ![io] {
+    let id = process.spawn_with_env(["sh", "-c", "printf 'abcdefgh'"], []);
+    assert id != 0;
+    // First call caps at 3 bytes; the remaining 5 stay buffered.
+    let p1 = process.handle_read_bytes_stdout(id, 3);
+    assert p1 == "abc";
+    // n exceeds what is buffered: returns the 5-byte remainder.
+    let p2 = process.handle_read_bytes_stdout(id, 10);
+    assert p2 == "defgh";
+    // Nothing left: EOF yields the empty string.
+    let p3 = process.handle_read_bytes_stdout(id, 4);
+    assert p3 == "";
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+}
+
+test "handle_write_bytes: writes exactly len bytes rather than strlen" ![io] {
+    let id = process.spawn_with_env(["cat"], []);
+    assert id != 0;
+    // An 11-char buffer but len=5: only "hello" must reach the child,
+    // proving the body honors `len` instead of strlen-truncating.
+    let w = process.handle_write_bytes(id, "hello world", 5);
+    assert w == 5;
+    process.handle_close_stdin(id);
+    let out = process.handle_read_stdout(id);
+    assert out == "hello";
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+}
+
+test "handle_write_bytes: a zero length writes nothing and returns 0" ![io] {
+    let id = process.spawn_with_env(["cat"], []);
+    assert id != 0;
+    let w = process.handle_write_bytes(id, "ignored", 0);
+    assert w == 0;
+    process.handle_close_stdin(id);
+    let out = process.handle_read_stdout(id);
+    assert out == "";
+    let exit = process.handle_wait(id);
+    assert exit == 0;
+}

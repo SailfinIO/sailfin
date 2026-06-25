@@ -1,0 +1,392 @@
+// runtime/sfn/adapters/net.sfn
+//
+// Sailfin-native TCP socket primitives backing the `sfn/net` capsule
+// (#1582, epic #1540 Track B / gap B6). Provides the real
+// connect/read/write/close client surface and a minimal bind/listen/
+// accept server surface so `capsules/sfn/net/src/mod.sfn` performs
+// actual I/O instead of returning zero-values.
+//
+// This is migration-mechanism 3 (additive frontend): every symbol here
+// is a new Sailfin-only `sfn_net_*` export — there is no C body being
+// flipped, no shared-struct layout, and no emitted-ABI change. The
+// socket calls are libc (`socket`/`connect`/`bind`/`listen`/`accept`/
+// `send`/`recv`/`close`/`getsockname`/`setsockopt`), reused verbatim
+// from the proven `runtime/sfn/adapters/http.sfn` client and
+// `runtime/sfn/concurrency/serve.sfn` server. The `sfn/net` capsule
+// declares the `sfn_net_*` symbols as `extern fn` and marshals
+// `string` <-> `* u8` at the boundary exactly as the `sfn/http` capsule
+// does for `sfn_http_request_raw`.
+//
+// Helper names carry a `_net_` prefix rather than reusing the
+// `http.sfn` / `serve.sfn` copies: the native backend gives file-local
+// runtime helpers external linkage, so two `sfn-sources` modules
+// defining `_ptr_off` / `_connect_tcp` would be a duplicate-symbol link
+// error (the same rationale `serve.sfn`'s `_serve_` prefix documents).
+//
+// ABI. The capsule's externs and these definitions share the raw
+// `* u8` / `i32` / `i64` C-ABI surface (no arena threading, no aggregate
+// returns) — the same plain-pointer shape `sfn_http_*` uses, which keeps
+// the boundary on the v0 C-ABI accept-list (E0801–E0805). Read paths
+// return a caller-owned NUL-terminated `* u8`; the capsule views it via
+// the canonical `* u8 as string` cast.
+//
+// v0 scope: TCP only. UDP, TLS, and real DNS (`getaddrinfo`) are out of
+// scope (epic #1540 B1/B2); host resolution is the `localhost` alias plus
+// numeric dotted-quad IPv4, reused from `http.sfn::_host_ip4`. Bodies are
+// length-bounded by `strlen` (text v0); embedded-NUL binary payloads are a
+// follow-up wave, matching the rest of the runtime socket surface.
+//
+// Effects: the socket-touching helpers and public symbols carry `![net]`,
+// mirroring `http.sfn`. Externs carry no effect (externs may not); the
+// capsule's own `![net]` / `![net, io]` annotations are what enforce the
+// capability on the public surface.
+//
+// Decimal byte constants (no char/octal literals in the seed):
+//   46 = '.'   127 = loopback first octet
+// AF_INET = 2, SOCK_STREAM = 1 (identical on Linux x86_64 and macOS
+// arm64, the two targets this runtime builds for).
+// ── libc memory + string helpers ──────────────────────────────
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+
+extern fn memset(dst: * u8, byte: i32, n: usize) -> * u8;
+
+extern fn strlen(s: * u8) -> usize;
+
+extern fn strchr(s: * u8, c: i32) -> * u8;
+
+extern fn strcmp(a: * u8, b: * u8) -> i32;
+
+// C `int atoi(const char *)` — parses a leading decimal integer, stops at
+// the first non-digit. Declared `-> i32` to match the C 32-bit return;
+// octet / port values fit comfortably.
+extern fn atoi(s: * u8) -> i32;
+
+// ── BSD sockets (libc) ────────────────────────────────────────
+// `addr` is spelled `* u8` (the `net.sfn` opaque-handle policy: adapters
+// cast the family-specific sockaddr struct through `* u8` at the call
+// site). `accept` / `getsockname` take a `socklen_t *` (`* i32`) for the
+// address-length in/out parameter. Declared inline (not imported) per the
+// same #306 cross-module-extern workaround as `http.sfn` / `serve.sfn`;
+// the linker resolves each module's `declare` to the single libc symbol.
+extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+
+extern fn connect(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+
+extern fn bind(sockfd: i32, addr: * u8, addrlen: i32) -> i32;
+
+extern fn listen(sockfd: i32, backlog: i32) -> i32;
+
+extern fn accept(sockfd: i32, addr: * u8, addrlen: * i32) -> i32;
+
+extern fn getsockname(sockfd: i32, addr: * u8, addrlen: * i32) -> i32;
+
+extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+extern fn close(fd: i32) -> i32;
+
+extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen: i32) -> i32;
+
+// `_net_ptr_off(p, off)` — byte-stride pointer arithmetic for a variable
+// offset (net-local copy of `http.sfn`'s `_ptr_off`).
+fn _net_ptr_off(p: * u8, off: i64) -> * u8 {
+    let addr: i64 = (p as i64) + off;
+    return addr as * u8;
+}
+
+// `_net_host_ip4(host, out)` — resolve `host` to four IPv4 octets, written
+// to `out[0..4]`. Handles the `localhost` alias and numeric dotted-quad
+// addresses; returns false on anything else (no DNS in v0). `out` must
+// point at >= 4 writable bytes. Net-local copy of `http.sfn`'s `_host_ip4`.
+fn _net_host_ip4(host: * u8, out: * u8) -> bool {
+    let localhost: string = "localhost";
+    if strcmp(host, localhost as * u8) == 0 {
+        memset(_net_ptr_off(out, 0), 127, 1 as usize);
+        memset(_net_ptr_off(out, 1), 0, 1 as usize);
+        memset(_net_ptr_off(out, 2), 0, 1 as usize);
+        memset(_net_ptr_off(out, 3), 1, 1 as usize);
+        return true;
+    }
+    let mut cursor: * u8 = host;
+    let mut i: i64 = 0;
+    loop {
+        if i >= 4 { break; }
+        let octet: i64 = atoi(cursor) as i64;
+        // Reject malformed octets — `atoi` happily returns values outside
+        // 0..255 (or negative), which would silently wrap/truncate into one
+        // byte and bind/connect to an unintended address.
+        if octet < 0 || octet > 255 { return false; }
+        memset(_net_ptr_off(out, i), octet as i32, 1 as usize);
+        if i < 3 {
+            let dot: * u8 = strchr(cursor, 46);
+            if dot as i64 == 0 { return false; }
+            cursor = _net_ptr_off(dot, 1);
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+// `_net_io_timeout_secs()` — the recv/send/accept socket-timeout budget
+// (seconds). A dead or slow peer must not pin a thread forever (#1581,
+// gap B3 of epic #1540). 10s is generous for a healthy localhost peer yet
+// bounds a black-hole peer to a clean failure.
+fn _net_io_timeout_secs() -> i64 { return 10; }
+
+// `_net_set_socket_timeouts(fd)` — arm SO_RCVTIMEO + SO_SNDTIMEO on a
+// socket so a recv/send/accept against a non-responsive peer returns
+// (EAGAIN → a clean failure) instead of blocking forever. Net-local copy
+// of `http.sfn::_set_socket_timeouts`; see that helper for the
+// `struct timeval` layout + dual-platform constant rationale (the
+// wrong-platform call returns ENOPROTOOPT and is ignored).
+//   - Linux x86_64: SOL_SOCKET=1,      SO_RCVTIMEO=20,     SO_SNDTIMEO=21.
+//   - macOS arm64:  SOL_SOCKET=0xffff, SO_RCVTIMEO=0x1006, SO_SNDTIMEO=0x1005.
+fn _net_set_socket_timeouts(fd: i32) -> void {
+    let tv: * u8 = malloc(16 as usize);
+    if tv as i64 == 0 { return; }
+    memset(tv, 0, 16 as usize);
+    memset(_net_ptr_off(tv, 0), _net_io_timeout_secs() as i32, 1 as usize);
+    setsockopt(fd, 1, 20, tv, 16);
+    setsockopt(fd, 1, 21, tv, 16);
+    setsockopt(fd, 65535, 4102, tv, 16);
+    setsockopt(fd, 65535, 4101, tv, 16);
+    free(tv);
+}
+
+// `_net_set_reuseaddr(fd)` — arm SO_REUSEADDR on a listening socket before
+// `bind` so a server can rebind its port immediately after a restart
+// instead of failing with EADDRINUSE while the prior socket lingers in
+// TIME_WAIT. Net-local copy of `serve.sfn::_serve_set_reuseaddr`; the
+// optval is a 4-byte `int` set to 1 and both platform constant pairs are
+// armed (the wrong-platform call fails harmlessly).
+//   - Linux:     SOL_SOCKET = 1,     SO_REUSEADDR = 2.
+//   - macOS/BSD: SOL_SOCKET = 65535, SO_REUSEADDR = 4.
+fn _net_set_reuseaddr(fd: i32) -> void {
+    let optval: * u8 = malloc(4 as usize);
+    if optval as i64 == 0 { return; }
+    memset(optval, 0, 4 as usize);
+    memset(_net_ptr_off(optval, 0), 1, 1 as usize);
+    setsockopt(fd, 1, 2, optval, 4);
+    setsockopt(fd, 65535, 4, optval, 4);
+    free(optval);
+}
+
+// `_net_fill_sockaddr(addr, attempt, port, ip_ok)` — zero a 16-byte
+// `sockaddr_in` and fill family + port for the given platform `attempt`
+// (0 = Linux, 1 = macOS/BSD). The four `sin_addr` octets at offset 4 are
+// left to the caller (filled by `_net_host_ip4`, or zeroed for
+// INADDR_ANY). See `http.sfn::_connect_tcp` for the dual-layout rationale.
+fn _net_fill_sockaddr(addr: * u8, attempt: i64, port: i64) -> void {
+    memset(addr, 0, 16 as usize);
+    if attempt == 0 {
+        // Linux: u16 sin_family at offset 0.
+        memset(_net_ptr_off(addr, 0), 2, 1 as usize);
+    } else {
+        // macOS/BSD: u8 sin_len at 0, u8 sin_family at 1.
+        memset(_net_ptr_off(addr, 0), 16, 1 as usize);
+        memset(_net_ptr_off(addr, 1), 2, 1 as usize);
+    }
+    // sin_port (network byte order = big-endian) at offset 2.
+    memset(_net_ptr_off(addr, 2), ((port >> 8) & 255) as i32, 1 as usize);
+    memset(_net_ptr_off(addr, 3), (port & 255) as i32, 1 as usize);
+}
+
+// `sfn_net_connect(host, port)` — open a TCP stream socket and connect to
+// `host:port`. Returns the connected fd, or -1 on any failure. Tries both
+// the Linux and macOS `sockaddr_in` layouts (fresh socket each time, first
+// success wins) so the platform-agnostic emitted IR connects on either
+// target. Recv/send timeouts are armed before connect (#1581).
+fn sfn_net_connect(host: * u8, port: i64) -> i32 ![net] {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 2 { break; }
+        let addr: * u8 = malloc(16 as usize);
+        if addr as i64 == 0 { return 0 - 1; }
+        _net_fill_sockaddr(addr, attempt, port);
+        // sin_addr octets at offset 4..8.
+        if _net_host_ip4(host, _net_ptr_off(addr, 4)) {
+            let fd: i32 = socket(2, 1, 0);
+            if fd < 0 {
+                free(addr);
+                return 0 - 1;
+            }
+            _net_set_socket_timeouts(fd);
+            let rc: i32 = connect(fd, addr, 16);
+            free(addr);
+            if rc == 0 { return fd; }
+            close(fd);
+        } else {
+            free(addr);
+            return 0 - 1;
+        }
+        attempt = attempt + 1;
+    }
+    return 0 - 1;
+}
+
+// `sfn_net_write_all(fd, data)` — write the NUL-terminated `data` buffer in
+// full, retrying on short sends. Returns 0 on success, -1 on any `send`
+// failure. v0 length is `strlen(data)` (text bodies); embedded-NUL binary
+// writes are a follow-up wave.
+fn sfn_net_write_all(fd: i32, data: * u8) -> i32 ![net] {
+    if data as i64 == 0 { return 0 - 1; }
+    let total: i64 = strlen(data) as i64;
+    let mut sent: i64 = 0;
+    loop {
+        if sent >= total { break; }
+        let n: i64 = send(fd, _net_ptr_off(data, sent), total - sent, 0);
+        if n <= 0 { return 0 - 1; }
+        sent = sent + n;
+    }
+    return 0;
+}
+
+// `sfn_net_read_all(fd)` — drain the socket into a growing libc buffer
+// (doubling like `http.sfn`'s `_recv_all`), NUL-terminated and
+// caller-owned. Returns null on OOM or a `recv` error; a clean EOF ends the
+// loop and returns the buffer. The peer signals EOF by closing its write
+// half (`close` / shutdown). Net-local mirror of `http.sfn::_recv_all`
+// without the length out-param (text v0: the caller views the result as a
+// `* u8 as string`).
+fn sfn_net_read_all(fd: i32) -> * u8 ![net] {
+    let mut capacity: i64 = 8192;
+    let mut len: i64 = 0;
+    let mut buf: * u8 = malloc((capacity + 1) as usize);
+    if buf as i64 == 0 { return null; }
+    let chunk: i64 = 8192;
+    loop {
+        if len + chunk > capacity {
+            let new_cap: i64 = capacity * 2;
+            let new_buf: * u8 = realloc(buf, (new_cap + 1) as usize);
+            if new_buf as i64 == 0 {
+                free(buf);
+                return null;
+            }
+            buf = new_buf;
+            capacity = new_cap;
+        }
+        let n: i64 = recv(fd, _net_ptr_off(buf, len), chunk, 0);
+        // Distinguish a socket error from a clean close: a partial buffer
+        // from an errored socket must not look like success.
+        if n < 0 {
+            free(buf);
+            return null;
+        }
+        if n == 0 { break; }
+        len = len + n;
+    }
+    memset(_net_ptr_off(buf, len), 0, 1 as usize);
+    return buf;
+}
+
+// `sfn_net_read_bytes(fd, max)` — read up to `max` bytes with a single
+// `recv`, returning whatever is currently available (does not wait for
+// EOF). The result is a fresh NUL-terminated caller-owned buffer; an empty
+// string is returned for a clean EOF (`recv == 0`). Returns null on OOM, a
+// `recv` error, or a non-positive `max`.
+fn sfn_net_read_bytes(fd: i32, max: i64) -> * u8 ![net] {
+    if max <= 0 { return null; }
+    let buf: * u8 = malloc((max + 1) as usize);
+    if buf as i64 == 0 { return null; }
+    let n: i64 = recv(fd, buf, max, 0);
+    if n < 0 {
+        free(buf);
+        return null;
+    }
+    memset(_net_ptr_off(buf, n), 0, 1 as usize);
+    return buf;
+}
+
+// `sfn_net_close(fd)` — close a connection or listener fd. Negative fds
+// (the failure sentinel from connect/listen/accept) are ignored.
+fn sfn_net_close(fd: i32) -> void {
+    if fd >= 0 { close(fd); }
+}
+
+// `sfn_net_listen(host, port)` — open a stream socket bound to `host:port`
+// and start listening. `port` 0 requests an ephemeral port (read back via
+// `sfn_net_listen_port`). Returns the listening fd, or -1 on failure. Tries
+// both sockaddr layouts like `sfn_net_connect`; SO_REUSEADDR is armed
+// before bind and recv-timeouts (which bound a hung `accept`) after listen.
+fn sfn_net_listen(host: * u8, port: i64) -> i32 ![net] {
+    let mut attempt: i64 = 0;
+    loop {
+        if attempt >= 2 { break; }
+        let fd: i32 = socket(2, 1, 0);
+        if fd < 0 { return 0 - 1; }
+        _net_set_reuseaddr(fd);
+        let addr: * u8 = malloc(16 as usize);
+        if addr as i64 == 0 {
+            close(fd);
+            return 0 - 1;
+        }
+        _net_fill_sockaddr(addr, attempt, port);
+        // sin_addr octets at offset 4..8 (the bind address).
+        if _net_host_ip4(host, _net_ptr_off(addr, 4)) {
+            let rc: i32 = bind(fd, addr, 16);
+            free(addr);
+            if rc == 0 {
+                if listen(fd, 128) == 0 {
+                    _net_set_socket_timeouts(fd);
+                    return fd;
+                }
+                close(fd);
+                return 0 - 1;
+            }
+        } else {
+            free(addr);
+            close(fd);
+            return 0 - 1;
+        }
+        close(fd);
+        attempt = attempt + 1;
+    }
+    return 0 - 1;
+}
+
+// `sfn_net_listen_port(fd)` — return the local TCP port a listening socket
+// is bound to (the resolved ephemeral port when it was bound with port 0),
+// or -1 on failure. Reads `sin_port` (offset 2, network byte order) out of
+// the `sockaddr_in` filled by `getsockname`. The 8-byte aligned read at
+// offset 0 covers `sin_family` (bytes 0..2) + `sin_port` (bytes 2..4); the
+// big-endian port is `byte2 * 256 + byte3`.
+fn sfn_net_listen_port(fd: i32) -> i64 ![net] {
+    let addr: * u8 = malloc(16 as usize);
+    if addr as i64 == 0 { return 0 - 1; }
+    memset(addr, 0, 16 as usize);
+    let lenbuf: * u8 = malloc(4 as usize);
+    if lenbuf as i64 == 0 {
+        free(addr);
+        return 0 - 1;
+    }
+    memset(lenbuf, 0, 4 as usize);
+    memset(lenbuf, 16, 1 as usize);
+    let rc: i32 = getsockname(fd, addr, lenbuf as * i32);
+    let mut port: i64 = 0 - 1;
+    if rc == 0 {
+        let raw: i64 = sailfin_intrinsic_pointer_read_i64(addr);
+        let hi: i64 = (raw >> 16) & 255;
+        let lo: i64 = (raw >> 24) & 255;
+        port = hi * 256 + lo;
+    }
+    free(addr);
+    free(lenbuf);
+    return port;
+}
+
+// `sfn_net_accept(fd)` — accept the next pending connection on a listening
+// socket and return the connected fd, or -1 on failure (including an accept
+// timeout). The peer address is not inspected (NULL addr/len out-params).
+// Recv/send timeouts are armed on the accepted socket so a silent client
+// cannot pin the caller (#1581).
+fn sfn_net_accept(fd: i32) -> i32 ![net] {
+    let conn: i32 = accept(fd, null, null);
+    if conn < 0 { return 0 - 1; }
+    _net_set_socket_timeouts(conn);
+    return conn;
+}

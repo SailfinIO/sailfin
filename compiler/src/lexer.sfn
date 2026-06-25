@@ -195,13 +195,16 @@ fn lex(source: string) -> Token[] ![io] {
             state.index += 1;
             state.column += 1;
 
+            // Integer run: digits with optional `_` separators between digits.
             loop {
-                if state.index >= state.source_len { break; }
-                if !is_digit(byte_at(state.source, state.index)) { break; }
+                if !_number_run_byte(state.source, state.source_len, state.index) {
+                    break;
+                }
                 state.index += 1;
                 state.column += 1;
             }
 
+            // Optional fraction: `.` immediately followed by a digit run.
             if state.index < state.source_len {
                 if byte_at(state.source, state.index) == "." {
                     let mut _let43: boolean = false;
@@ -215,8 +218,52 @@ fn lex(source: string) -> Token[] ![io] {
                         state.index += 1;
                         state.column += 1;
                         loop {
-                            if state.index >= state.source_len { break; }
-                            if !is_digit(byte_at(state.source, state.index)) {
+                            if !_number_run_byte(state.source, state.source_len, state.index) {
+                                break;
+                            }
+                            state.index += 1;
+                            state.column += 1;
+                        }
+                    }
+                }
+            }
+
+            // Optional scientific exponent: `e`/`E`, optional `+`/`-` sign, then
+            // a digit run. Consumed only when a digit actually follows, so `1e`
+            // (where `e` begins an identifier) keeps the literal as `1`.
+            if state.index < state.source_len {
+                let exp_marker = byte_at(state.source, state.index);
+                let mut _is_exp: boolean = false;
+                if exp_marker == "e" { _is_exp = true; }
+                if exp_marker == "E" { _is_exp = true; }
+                if _is_exp {
+                    let mut probe = state.index + 1;
+                    if probe < state.source_len {
+                        let sign = byte_at(state.source, probe);
+                        let mut _is_sign: boolean = false;
+                        if sign == "+" { _is_sign = true; }
+                        if sign == "-" { _is_sign = true; }
+                        if _is_sign { probe += 1; }
+                    }
+                    let mut _has_exp_digit: boolean = false;
+                    if probe < state.source_len {
+                        if is_digit(byte_at(state.source, probe)) {
+                            _has_exp_digit = true;
+                        }
+                    }
+                    if _has_exp_digit {
+                        state.index += 1;
+                        state.column += 1;
+                        let sign2 = byte_at(state.source, state.index);
+                        let mut _is_sign2: boolean = false;
+                        if sign2 == "+" { _is_sign2 = true; }
+                        if sign2 == "-" { _is_sign2 = true; }
+                        if _is_sign2 {
+                            state.index += 1;
+                            state.column += 1;
+                        }
+                        loop {
+                            if !_number_run_byte(state.source, state.source_len, state.index) {
                                 break;
                             }
                             state.index += 1;
@@ -351,6 +398,21 @@ fn is_digit(ch: string) -> boolean {
         if c <= 57 { _ret42 = true; }
     }
     return _ret42;
+}
+
+// True when the numeric scanner should consume the byte at `index`: a digit,
+// or a `_` digit separator that sits between two digits (`1_000`). A trailing
+// `_` not followed by a digit is left to start an identifier (`1_foo`).
+fn _number_run_byte(source: string, source_len: int, index: int) -> boolean {
+    if index >= source_len { return false; }
+    let ch = byte_at(source, index);
+    if is_digit(ch) { return true; }
+    if ch == "_" {
+        if index + 1 < source_len {
+            if is_digit(byte_at(source, index + 1)) { return true; }
+        }
+    }
+    return false;
 }
 
 fn is_double_quote(ch: string) -> boolean { return ch == "\""; }
