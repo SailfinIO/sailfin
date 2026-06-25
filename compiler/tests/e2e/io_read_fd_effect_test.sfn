@@ -1,0 +1,62 @@
+// End-to-end effect-checker coverage for the `io.read_fd` / `io.read_line`
+// builtins (#1579, epic #1540 Track A gap A2). The descriptors carry
+// `effects: ["io"]` (`runtime_helpers.sfn`), so calling either from a
+// non-`![io]` context must fire the effect checker's E0400. This drives
+// the full parse → typecheck → effect-check pipeline via `sfn check`,
+// mirroring `check_effect_call_site_caret_test.sfn`.
+//
+// NOTE: assert on captured output with `sfn/strings` predicates — the
+// `sfn/test` `expect_*` matchers are `![pure]` and cannot be called from
+// an `![io]` test (#842).
+import { find } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// `reader` omits `![io]` but calls `io.read_line(0)`, so the effect
+// checker must reject it.
+fn _read_line_fixture() -> string {
+    return "fn reader() -> string {\n" + "    return io.read_line(0);\n" + "}\n"
+        + "\n"
+        + "export { reader };\n";
+}
+
+// Same shape for `io.read_fd`.
+fn _read_fd_fixture() -> string {
+    return "fn reader() -> string {\n" + "    return io.read_fd(0, 16);\n"
+        + "}\n"
+        + "\n"
+        + "export { reader };\n";
+}
+
+struct _CheckRun {
+    exit: int;
+    output: string;
+}
+
+fn _run_check(source: string) -> _CheckRun ![io] {
+    let dir = fs.mkdtemp("sfn-check-readfd-");
+    let path = dir + "/reader.sfn";
+    fs.writeFile(path, source);
+    let exit = process.run_capture([_sfn_bin(), "check", path], []);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    fs.deleteFile(path);
+    fs.removeDirectory(dir);
+    return _CheckRun { exit: exit, output: out + err };
+}
+
+test "io.read_line from non-![io] context fires E0400" ![io] {
+    let r = _run_check(_read_line_fixture());
+    assert r.exit == 1;
+    assert find(r.output, "E0400", 0) >= 0;
+}
+
+test "io.read_fd from non-![io] context fires E0400" ![io] {
+    let r = _run_check(_read_fd_fixture());
+    assert r.exit == 1;
+    assert find(r.output, "E0400", 0) >= 0;
+}

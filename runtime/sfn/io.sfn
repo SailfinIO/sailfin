@@ -84,6 +84,13 @@
 // `arena.sfn` / `string.sfn` / `process.sfn` discipline.
 extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
 
+// libc `read` — the read-side primitive for the `io.read_fd` /
+// `io.read_line` builtins (#1579, epic #1540 Track A gap A2: the MCP
+// proxy reads JSON-RPC frames from its own fd 0). Symmetric with the
+// `write` extern above and declared inline for the same #306
+// cross-module-extern reason; mirrors `posix.sfn:53`.
+extern fn read(fd: i32, buf: * u8, count: usize) -> i64;
+
 // libc `strlen` — recovers the byte length of a NUL-terminated cstring for
 // the `sfn_print_sfn` prelude entry (which carries no length parameter).
 // Inlined per the same #306 cross-module-extern workaround as `write`.
@@ -132,6 +139,68 @@ let STDERR_FD: i32 = 2;
 
 fn sfn_write_fd(fd: i32, buf: * u8, count: usize) -> i64 ![io] {
     return write(fd, buf, count);
+}
+
+// `sfn_read_fd(fd, n)` — the bare canonical symbol behind the
+// `io.read_fd(fd, n) -> string` builtin (#1579, epic #1540 Track A gap
+// A2). Performs a single `read(2)` of up to `n` bytes from `fd` into a
+// fresh `n + 1`-byte buffer and returns it NUL-terminated (so the
+// `i8*` descriptor return surfaces as a Sailfin `string` exactly like
+// `process.handle_read_stdout`). A short read returns fewer than `n`
+// bytes; EOF or error returns the empty string (never null — callers
+// iterate the result as a `string`). `fd` arrives as Sailfin `int`
+// (i64) and narrows to the `read` `i32` ABI.
+fn sfn_read_fd(fd: i64, n: i64) -> * u8 ![io] {
+    if n <= 0 { return _sfn_shell_empty(); }
+    let buf: * u8 = malloc((n + 1) as usize);
+    if buf as i64 == 0 { return _sfn_shell_empty(); }
+    let got: i64 = read(fd as i32, buf, n as usize);
+    let mut len: i64 = got;
+    if len < 0 { len = 0; }
+    // NUL-terminate at buf[len] (one byte — a wider store could over-run
+    // the allocation tail when the read filled the buffer).
+    memset((buf as i64 + len) as * u8, 0, 1 as usize);
+    return buf;
+}
+
+// `sfn_read_line(fd)` — the bare canonical symbol behind the
+// `io.read_line(fd) -> string` builtin (#1579). Reads one byte at a
+// time from `fd` until a newline (`'\n'`, 10) or EOF, returning the
+// line without the trailing newline as a fresh NUL-terminated buffer
+// (empty string on immediate EOF). The byte-at-a-time loop never reads
+// past the newline, so the next `read` on a streamed fd (the MCP
+// proxy's own fd 0, the `login` token prompt) sees the following frame
+// intact — a buffered read could swallow it. The just-read byte is
+// recovered from an 8-byte scratch via the i32 pointer-load intrinsic
+// (no i8 load exists) masked to its low byte, and appended with a
+// single-byte `memset` (no byte-store builtin exists).
+fn sfn_read_line(fd: i64) -> * u8 ![io] {
+    let mut cap: i64 = 128;
+    let mut len: i64 = 0;
+    let mut buf: * u8 = malloc(cap as usize);
+    if buf as i64 == 0 { return _sfn_shell_empty(); }
+    let scratch: * u8 = malloc(8 as usize);
+    if scratch as i64 == 0 {
+        free(buf);
+        return _sfn_shell_empty();
+    }
+    loop {
+        let n: i64 = read(fd as i32, scratch, 1 as usize);
+        if n <= 0 { break; }
+        let b: i32 = sailfin_intrinsic_pointer_read_i32(scratch) & 255;
+        if b == 10 { break; }
+        if len + 1 >= cap {
+            cap = cap * 2;
+            let tmp: * u8 = realloc(buf, cap as usize);
+            if tmp as i64 == 0 { break; }
+            buf = tmp;
+        }
+        memset((buf as i64 + len) as * u8, b, 1 as usize);
+        len = len + 1;
+    }
+    free(scratch);
+    memset((buf as i64 + len) as * u8, 0, 1 as usize);
+    return buf;
 }
 
 // Is `data` a legacy immediate-codepoint tagged pointer rather than a

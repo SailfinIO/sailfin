@@ -1,0 +1,97 @@
+// Integration coverage for the `io.read_fd(fd, n)` and `io.read_line(fd)`
+// builtins (#1579, epic #1540 Track A gap A2). The Sailfin-native bodies
+// live in `runtime/sfn/io.sfn` (`sfn_read_fd` / `sfn_read_line`) over the
+// `read` extern there; `runtime_helpers.sfn` maps the `io.read_fd` /
+// `io.read_line` descriptors onto them and `lowering_helpers.sfn`
+// declare-tracks the symbols. These tests drive a real `pipe(2)` so the
+// read transitions are deterministic: bytes written to the write end are
+// read back through the builtins from the read end. The `{ rd, wr }`
+// overlay over the two-int `pipe` buffer mirrors `io_poll_readable_test`.
+struct PipeFds {
+    rd: i32;
+    wr: i32;
+}
+
+extern fn pipe(fds: * i32) -> i32;
+
+extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
+
+extern fn close(fd: i32) -> i32;
+
+extern fn malloc(size: usize) -> * u8;
+
+// `io.read_fd(fd, n)` returns at most `n` bytes from a single `read(2)`.
+test "io.read_fd: returns up to n bytes from the read end" ![io] {
+    let buf: * u8 = malloc(8 as usize);
+    assert pipe(buf as * i32) == 0;
+    let fds: * PipeFds = buf as * PipeFds;
+    let read_fd: i32 = fds.rd;
+    let write_fd: i32 = fds.wr;
+
+    let payload: string = "abcdef";
+    assert write(write_fd, payload as * u8, 6 as usize) == 6;
+
+    // A 3-byte request returns exactly the first three bytes.
+    assert io.read_fd(read_fd as i64, 3) == "abc";
+
+    let _ = close(read_fd);
+    let _ = close(write_fd);
+}
+
+// A request larger than the buffered bytes returns just those bytes.
+test "io.read_fd: a short read returns fewer than n bytes" ![io] {
+    let buf: * u8 = malloc(8 as usize);
+    assert pipe(buf as * i32) == 0;
+    let fds: * PipeFds = buf as * PipeFds;
+    let read_fd: i32 = fds.rd;
+    let write_fd: i32 = fds.wr;
+
+    let payload: string = "hi";
+    assert write(write_fd, payload as * u8, 2 as usize) == 2;
+    // Close the write end so the read sees the two bytes then EOF rather
+    // than blocking for the full 16.
+    let _ = close(write_fd);
+
+    assert io.read_fd(read_fd as i64, 16) == "hi";
+
+    let _ = close(read_fd);
+}
+
+// `io.read_line(fd)` reads up to (and consuming) the next newline,
+// returning the line without the trailing `'\n'`. A second call reads
+// the following line — the byte-at-a-time loop never over-reads past the
+// newline, so successive frames stay intact.
+test "io.read_line: reads successive newline-terminated lines" ![io] {
+    let buf: * u8 = malloc(8 as usize);
+    assert pipe(buf as * i32) == 0;
+    let fds: * PipeFds = buf as * PipeFds;
+    let read_fd: i32 = fds.rd;
+    let write_fd: i32 = fds.wr;
+
+    let payload: string = "hello\nworld\n";
+    assert write(write_fd, payload as * u8, 12 as usize) == 12;
+
+    assert io.read_line(read_fd as i64) == "hello";
+    assert io.read_line(read_fd as i64) == "world";
+
+    let _ = close(read_fd);
+    let _ = close(write_fd);
+}
+
+// A final line without a trailing newline is returned on EOF.
+test "io.read_line: an unterminated final line is returned at EOF" ![io] {
+    let buf: * u8 = malloc(8 as usize);
+    assert pipe(buf as * i32) == 0;
+    let fds: * PipeFds = buf as * PipeFds;
+    let read_fd: i32 = fds.rd;
+    let write_fd: i32 = fds.wr;
+
+    let payload: string = "tail";
+    assert write(write_fd, payload as * u8, 4 as usize) == 4;
+    // EOF (no newline) ends the line.
+    let _ = close(write_fd);
+
+    assert io.read_line(read_fd as i64) == "tail";
+
+    let _ = close(read_fd);
+}
