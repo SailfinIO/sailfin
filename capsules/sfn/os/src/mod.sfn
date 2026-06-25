@@ -185,9 +185,15 @@ fn env_from_current() -> Env ![io] {
 // exit code. `ProcessOutput.exit` is `-1` when the runtime itself
 // couldn't complete the call (invalid argv, OOM, spawn failure),
 // distinct from a legitimate child exit code of 127.
-fn run_capture(args: string[], env: Env) -> ProcessOutput ![io] {
+//
+// `cwd` (#1167) is the child's working directory: `""` inherits the
+// parent's cwd (the prior behaviour), a non-empty path runs the child
+// in that directory via `posix_spawn_file_actions_addchdir_np` — no
+// process-global `chdir`, so it is safe under the concurrent runner.
+// Posix-only; ignored on Windows.
+fn run_capture(args: string[], env: Env, cwd: string) -> ProcessOutput ![io] {
     let env_flat = env_to_flat(env);
-    let exit_code = process.run_capture(args, env_flat);
+    let exit_code = process.run_capture_cwd(args, env_flat, cwd);
     let captured_stdout = process.capture_take_stdout();
     let captured_stderr = process.capture_take_stderr();
     return ProcessOutput {
@@ -203,9 +209,12 @@ fn run_capture(args: string[], env: Env) -> ProcessOutput ![io] {
 // `posix_spawn_file_actions`). Callers must reap the child via
 // `handle_wait`. Returns a handle whose `handle_id` is 0 on spawn
 // failure — call sites can branch on that to surface a typed error.
-fn spawn_with_env(args: string[], env: Env) -> ProcessHandle ![io] {
+//
+// `cwd` (#1167): `""` inherits the parent's working directory; a
+// non-empty path runs the child there (posix-only, no global `chdir`).
+fn spawn_with_env(args: string[], env: Env, cwd: string) -> ProcessHandle ![io] {
     let env_flat = env_to_flat(env);
-    let id = process.spawn_with_env(args, env_flat);
+    let id = process.spawn_with_env_cwd(args, env_flat, cwd);
     return ProcessHandle { handle_id: id };
 }
 

@@ -66,6 +66,13 @@ extern fn posix_spawn_file_actions_addclose(fa: * PosixSpawnFileActions, fd: i32
 
 extern fn posix_spawn_file_actions_adddup2(fa: * PosixSpawnFileActions, fd: i32, newfd: i32) -> i32;
 
+// Per-child working directory: the spawned child `chdir`s to `path`
+// (a NUL-terminated C string) before `exec`, with no process-global
+// `chdir` in the parent (#1167). Portability floor: glibc ≥2.29,
+// macOS ≥10.15, musl ≥1.1.24 — the `_np` (non-portable) suffix marks
+// it as a POSIX extension. Gated behind the posix-only spawn path.
+extern fn posix_spawn_file_actions_addchdir_np(fa: * PosixSpawnFileActions, path: * u8) -> i32;
+
 // ── Clock / sleep ─────────────────────────────────────────────
 // `clk_id` is one of POSIX's `CLOCK_*` constants (e.g.
 // `CLOCK_MONOTONIC = 1` on Linux). Adapters expose the constants

@@ -150,6 +150,13 @@ extern fn posix_spawn_file_actions_addclose(fa: * u8, fd: i32) -> i32;
 
 extern fn posix_spawn_file_actions_adddup2(fa: * u8, fd: i32, newfd: i32) -> i32;
 
+// Per-child cwd (#1167): child `chdir`s to `path` before `exec`, no
+// process-global `chdir`. Re-declared inline (typed `* u8`, not the
+// `* PosixSpawnFileActions` of `platform/posix.sfn`) per the #306
+// cross-module-extern limitation. Portability floor: glibc ≥2.29 /
+// macOS ≥10.15 / musl ≥1.1.24; called only on the posix spawn path.
+extern fn posix_spawn_file_actions_addchdir_np(fa: * u8, path: * u8) -> i32;
+
 // POSIX `EINTR` (4 on Linux and macOS) — the only `read`/`write`/
 // `poll` failure that warrants a resume. Read host-portably via the
 // `sailfin_intrinsic_errno_location` sentinel dereferenced by the
@@ -622,7 +629,7 @@ fn sfn_process_exit(code: float) -> void ![io] {
 // NULL makes `wait4` behave exactly like the former `waitpid` — the plain
 // `run_capture` wrapper passes NULL, so its behaviour is byte-for-byte
 // unchanged.
-fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8) -> i64 ![io] {
+fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8, cwd: * u8) -> i64 ![io] {
     if sfn_capture_stdout_addr != 0 {
         free(sfn_capture_stdout_addr as * u8);
         sfn_capture_stdout_addr = 0;
@@ -710,6 +717,20 @@ fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8) -> i6
     posix_spawn_file_actions_addclose(actions, out_wr);
     posix_spawn_file_actions_addclose(actions, err_wr);
 
+    // Per-child cwd (#1167): when a non-empty cwd was supplied, the
+    // child `chdir`s into it before `exec` via the spawn file actions —
+    // never a process-global `chdir`. `cwd` arrives as a NUL-terminated
+    // C string (the descriptor's trailing `i8*`; a Sailfin `string`
+    // coerces to a cstr at the builtin call site, exactly like
+    // `handle_write`'s `data`). A null cwd (the 2-arg builtin call
+    // injects a null operand) or an empty cwd (`os::run_capture` passing
+    // `""` to inherit) leaves the child in the parent's cwd.
+    if cwd as i64 != 0 {
+        if strlen(cwd) as i64 > 0 {
+            posix_spawn_file_actions_addchdir_np(actions, cwd);
+        }
+    }
+
     let mut pid: i32 = 0;
     let pid_ptr: * i32 = & pid;
     let first: string = argv[0];
@@ -792,9 +813,26 @@ fn _run_capture_impl(argv: string[], env_flat: string[], rusage_buf: * u8) -> i6
 }
 
 // Plain `process.run_capture`: the unmetered wrapper. Passes a NULL
-// `rusage` so `wait4` degrades to `waitpid` — behaviour-preserving.
+// `rusage` so `wait4` degrades to `waitpid` — behaviour-preserving. A
+// null `cwd` inherits the parent's working directory. This 2-arg form
+// is the one `compiler/src` and the hundreds of e2e tests call, so its
+// arity must stay stable for self-hosting (the pinned seed emits 2-arg
+// calls to it) — the per-child cwd lives in the separate `_cwd` variant
+// below (#1167), never by widening this signature.
 fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
-    return _run_capture_impl(argv, env_flat, 0 as * u8);
+    return _run_capture_impl(argv, env_flat, 0 as * u8, 0 as * u8);
+}
+
+// `process.run_capture_cwd` (#1167): `run_capture` with a per-child
+// working directory. `cwd` is a NUL-terminated C string (the
+// descriptor's trailing `i8*`; a Sailfin `string` coerces to a cstr at
+// the call site, exactly like `handle_write`'s `data`) — null/empty
+// inherits the parent cwd, non-empty `chdir`s the child before `exec`.
+// A NEW symbol rather than a wider `run_capture` so the existing 2-arg
+// builtin keeps its arity (no seed cut): only the freshly-built
+// compiler emits this 3-arg call, exclusively from `sfn/os`.
+fn sfn_process_run_capture_cwd(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![io] {
+    return _run_capture_impl(argv, env_flat, 0 as * u8, cwd);
 }
 
 // ── process.run_capture_metered ────────────────────────────────
@@ -820,7 +858,9 @@ fn sfn_process_run_capture_metered(argv: string[], env_flat: string[]) -> i64 ![
     if rusage_buf as i64 != 0 { memset(rusage_buf, 0, 256 as usize); }
 
     let start: i64 = _monotonic_nanos();
-    let rc: i64 = _run_capture_impl(argv, env_flat, rusage_buf);
+    // Metered capture keeps its 2-arg descriptor; the child inherits the
+    // parent cwd (null cwd → no per-child `chdir`).
+    let rc: i64 = _run_capture_impl(argv, env_flat, rusage_buf, 0 as * u8);
     let end: i64 = _monotonic_nanos();
 
     let mut elapsed: i64 = end - start;
@@ -891,7 +931,12 @@ fn sfn_process_capture_take_stderr() -> * u8 ![io] {
 // stdin(0)/stdout(1)/stderr(2), then closes the originals. Each pipe's
 // `(read, write)` pair is read through the `PollSlot` overlay
 // (`fd` = read end, `events_revents` = write end).
-fn sfn_process_spawn_with_env(argv: string[], env_flat: string[]) -> i64 ![io] {
+//
+// Shared impl behind the 2-arg `process.spawn_with_env` and the 3-arg
+// `process.spawn_with_env_cwd` (#1167). `cwd` is a NUL-terminated C
+// string (or null): non-empty `chdir`s the child before `exec` via the
+// spawn file actions; null/empty inherits the parent cwd.
+fn _spawn_with_env_impl(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![io] {
     let argc: i64 = argv.length;
     if argc <= 0 { return 0; }
 
@@ -1003,6 +1048,15 @@ fn sfn_process_spawn_with_env(argv: string[], env_flat: string[]) -> i64 ![io] {
     posix_spawn_file_actions_addclose(actions, out_wr);
     posix_spawn_file_actions_addclose(actions, err_wr);
 
+    // Per-child cwd (#1167): same contract as `_run_capture_impl` — a
+    // non-empty cwd (NUL-terminated `i8*`) `chdir`s the child before
+    // `exec` via the spawn file actions; null/empty inherits.
+    if cwd as i64 != 0 {
+        if strlen(cwd) as i64 > 0 {
+            posix_spawn_file_actions_addchdir_np(actions, cwd);
+        }
+    }
+
     let mut pid: i32 = 0;
     let pid_ptr: * i32 = & pid;
     let first: string = argv[0];
@@ -1051,6 +1105,26 @@ fn sfn_process_spawn_with_env(argv: string[], env_flat: string[]) -> i64 ![io] {
     h.stderr_len = 0;
     h.stderr_cap = 0;
     return h as i64;
+}
+
+// Plain `process.spawn_with_env`: the 2-arg form `compiler/src` (the
+// parallel test pool in `cli/commands/test.sfn`) and other callers use.
+// Its arity must stay stable for self-hosting — the pinned seed emits
+// 2-arg calls to this symbol — so the per-child cwd lives in the `_cwd`
+// variant below, never by widening this signature. Inherits the parent
+// cwd (null cwd → no per-child `chdir`).
+fn sfn_process_spawn_with_env(argv: string[], env_flat: string[]) -> i64 ![io] {
+    return _spawn_with_env_impl(argv, env_flat, 0 as * u8);
+}
+
+// `process.spawn_with_env_cwd` (#1167): `spawn_with_env` with a
+// per-child working directory (NUL-terminated `i8*`; null/empty
+// inherits). A NEW symbol, not a wider `spawn_with_env`, so the
+// existing 2-arg builtin keeps its arity (no seed cut) — only the
+// freshly-built compiler emits this 3-arg call, exclusively from
+// `sfn/os`.
+fn sfn_process_spawn_with_env_cwd(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![io] {
+    return _spawn_with_env_impl(argv, env_flat, cwd);
 }
 
 // ── process.handle_write ───────────────────────────────────────

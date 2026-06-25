@@ -802,6 +802,17 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.run_capture", symbol: "sfn_process_run_capture", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: "sfn_process_run_capture", c_abi_return_type: null
     });
+    // #1167: `process.run_capture_cwd` — `run_capture` plus a trailing
+    // per-child `cwd` (`i8*`; empty/null = inherit). A SEPARATE target
+    // from `process.run_capture` rather than a widened arity, because
+    // `compiler/src` calls the 2-arg `process.run_capture` and the pinned
+    // seed emits 2-arg calls to it — widening would desync the seed-built
+    // call sites from the 3-arg runtime body (a self-host crash). Only the
+    // freshly-built compiler emits this 3-arg call, exclusively from
+    // `sfn/os`, so no seed cut is required.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.run_capture_cwd", symbol: "sfn_process_run_capture_cwd", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*", "i8*"], effects: ["io"], native_signature: "sfn_process_run_capture_cwd", c_abi_return_type: null
+    });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.capture_take_stdout", symbol: "sfn_process_capture_take_stdout", return_type: "i8*", parameter_types: [], effects: ["io"], native_signature: "sfn_process_capture_take_stdout", c_abi_return_type: null
     });
@@ -826,6 +837,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.spawn_with_env", symbol: "sfn_process_spawn_with_env", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: ["io"], native_signature: "sfn_process_spawn_with_env", c_abi_return_type: null
+    });
+    // #1167: `process.spawn_with_env_cwd` — trailing per-child `cwd`
+    // (`i8*`; empty/null = inherit). Separate target, same rationale as
+    // `process.run_capture_cwd` above: keep the 2-arg `spawn_with_env`
+    // arity stable for the seed-built `compiler/src` call sites.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.spawn_with_env_cwd", symbol: "sfn_process_spawn_with_env_cwd", return_type: "i64", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*", "i8*"], effects: ["io"], native_signature: "sfn_process_spawn_with_env_cwd", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.handle_write", symbol: "sfn_process_handle_write", return_type: "i64", parameter_types: ["i64", "i8*"], effects: ["io"], native_signature: "sfn_process_handle_write", c_abi_return_type: null

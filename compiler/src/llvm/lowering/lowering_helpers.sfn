@@ -1093,6 +1093,9 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "env.get");
     helpers = append_unique_effect(helpers, "env.home");
     helpers = append_unique_effect(helpers, "process.run_capture");
+    // #1167: per-child-cwd variants carry the same `io` gate.
+    helpers = append_unique_effect(helpers, "process.run_capture_cwd");
+    helpers = append_unique_effect(helpers, "process.spawn_with_env_cwd");
     helpers = append_unique_effect(helpers, "process.capture_take_stdout");
     helpers = append_unique_effect(helpers, "process.capture_take_stderr");
     // #1520: metered-capture helpers (wall-clock + peak RSS) consumed by

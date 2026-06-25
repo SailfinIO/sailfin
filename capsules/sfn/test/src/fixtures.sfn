@@ -31,7 +31,7 @@
 // (`deleteFile` / `exists` / `listDirectory` / `removeDirectory`). No new
 // C runtime surface is introduced.
 import { remove_all } from "sfn/fs";
-import { Env, run_capture, ProcessOutput } from "sfn/os";
+import { Env, ProcessOutput, run_capture } from "sfn/os";
 
 // Create a fresh temporary directory, hand its absolute path to `body`,
 // and recursively remove the whole tree on scope exit — on both the
@@ -101,6 +101,9 @@ fn with_tmp_dir(body: fn (string) -> int) -> int ![io] {
 // no host resource to release — the override lived only in the child's
 // `environ`, which dies with the child.
 fn with_env(args: string[], env: Env, body: fn (ProcessOutput) -> int) -> int ![io] {
-    let out = run_capture(args, env);
+    // `""` cwd inherits the parent's working directory (#1167); a
+    // cwd-aware `with_env`/`with_cwd` ergonomic wrapper is the
+    // companion follow-up, not this change.
+    let out = run_capture(args, env, "");
     return body(out);
 }

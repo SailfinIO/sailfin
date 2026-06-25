@@ -619,6 +619,14 @@ fn sfn_process_run_capture(argv: string[], env_flat: string[]) -> i64 ![io] {
     return code as i64;
 }
 
+// `process.run_capture_cwd` (#1167): `cwd` is accepted for ABI parity
+// with the posix runtime but ignored — per-child cwd is a posix-only
+// feature (the issue scopes Windows cwd support Out). The child always
+// inherits the parent's working directory here.
+fn sfn_process_run_capture_cwd(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![io] {
+    return sfn_process_run_capture(argv, env_flat);
+}
+
 // Hand off the captured stream stashed by the preceding `run_capture`,
 // clearing the global so a second take yields empty. A fresh empty string
 // is returned when no capture is pending (mirrors `process.sfn`).
@@ -640,6 +648,13 @@ fn sfn_process_capture_take_stderr() -> * u8 ![io] {
 // `_WIN32` contract (`sailfin_runtime.c:8195`).
 fn sfn_process_spawn_with_env(argv: string[], env_flat: string[]) -> i64 ![io] {
     return 0;
+}
+
+// `process.spawn_with_env_cwd` (#1167): `cwd` accepted for ABI parity
+// but ignored (per-child cwd is posix-only); delegates to the 2-arg
+// stub, which returns the `0` failure sentinel on this platform.
+fn sfn_process_spawn_with_env_cwd(argv: string[], env_flat: string[], cwd: * u8) -> i64 ![io] {
+    return sfn_process_spawn_with_env(argv, env_flat);
 }
 
 fn sfn_process_handle_write(handle_id: i64, data: * u8) -> i64 ![io] {
