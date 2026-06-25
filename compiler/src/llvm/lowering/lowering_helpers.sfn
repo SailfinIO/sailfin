@@ -1108,6 +1108,10 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "process.handle_close_stdin");
     helpers = append_unique_effect(helpers, "process.handle_read_stdout");
     helpers = append_unique_effect(helpers, "process.handle_read_stderr");
+    // #1578: framed/length-aware child stdio (epic #1540 Track A A1+A4).
+    helpers = append_unique_effect(helpers, "process.handle_read_line_stdout");
+    helpers = append_unique_effect(helpers, "process.handle_read_bytes_stdout");
+    helpers = append_unique_effect(helpers, "process.handle_write_bytes");
     helpers = append_unique_effect(helpers, "process.handle_wait");
     helpers = append_unique_effect(helpers, "process.environ");
     // #1580: `io.poll_readable` lowers to the bare `sfn_io_poll_readable`

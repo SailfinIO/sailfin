@@ -1244,6 +1244,184 @@ fn sfn_process_handle_read_stderr(handle_id: i64) -> * u8 ![io] {
     return _handle_drain_one(h, false);
 }
 
+// ── framed stdout reads / exact-length stdin writes (#1578) ─────
+// Epic #1540 Track A, gaps A1 + A4: let a parent read one `\n`-framed
+// JSON-RPC message at a time from a live child's stdout (and write an
+// exact-length frame to its stdin) instead of draining to EOF /
+// `strlen`-truncating. These reuse the handle's stdout stash `GrowBuf`
+// (offset 16) as a persistent unconsumed-bytes buffer: `gb.addr[0..len)`
+// always holds the bytes read-ahead but not yet handed to the caller.
+// `handle_wait` already frees `gb.addr`, so no extra teardown is needed.
+//
+// Unlike `_handle_drain_one`, these poll only stdout — A3 (poll-based
+// fd multiplexing across stdout+stderr) is a separate issue (#1540 A3),
+// and the JSON-RPC use case keeps stderr low-volume (diagnostics). A
+// child flooding stderr while the parent frames stdout is out of scope.
+// Fill the tail of the stash buffer with one `read(2)` chunk (≤ 4096
+// bytes), growing first. Mirrors `_growbuf_read_from` but reserves +8
+// trailing slack (not +1) so the newline scan's i32 low-byte loads
+// (`_framed_find_newline`) never over-read past the allocation on the
+// final 1–3 bytes — there is no i8 load intrinsic. Returns the
+// `read(2)` result: `> 0` appended, `0` EOF, `< 0` error / OOM. EINTR
+// is retried in place. The invariant `gb.cap >= gb.len + 8` holds after
+// every successful fill and is preserved by `_framed_consume`'s compaction.
+fn _framed_fill(gb: * GrowBuf, fd: i32) -> i64 {
+    let chunk: i64 = 4096;
+    let needed: i64 = gb.len + chunk + 8;
+    if needed > gb.cap {
+        let mut new_cap: i64 = gb.cap;
+        if new_cap < 4096 { new_cap = 4096; }
+        loop {
+            if needed <= new_cap { break; }
+            new_cap = new_cap * 2;
+        }
+        let old: * u8 = gb.addr as * u8;
+        let r: * u8 = realloc(old, new_cap as usize);
+        if r as i64 == 0 { return -1; }
+        gb.addr = r as i64;
+        gb.cap = new_cap;
+    }
+    let dst: * u8 = (gb.addr + gb.len) as * u8;
+    loop {
+        let n: i64 = read(fd, dst, chunk as usize);
+        if n < 0 {
+            let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
+            if err == SFN_EINTR {
+                // Interrupted before any byte — retry the same read.
+            } else { return n; }
+        } else {
+            if n > 0 { gb.len = gb.len + n; }
+            return n;
+        }
+    }
+}
+
+// Index of the first `'\n'` (10) in `gb.addr[0..len)`, or `-1`. Bytes
+// are read via the i32 low-byte load (no i8 load exists); the +8 fill
+// slack keeps the load in-bounds for the final bytes.
+fn _framed_find_newline(gb: * GrowBuf) -> i64 {
+    let addr: i64 = gb.addr;
+    if addr == 0 { return -1; }
+    let len: i64 = gb.len;
+    let mut i: i64 = 0;
+    loop {
+        if i >= len { break; }
+        let b: i32 = sailfin_intrinsic_pointer_read_i32((addr + i) as * u8) & 255;
+        if b == 10 { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+// Hand `ret_len` bytes from the front of the stash to the caller as a
+// fresh NUL-terminated buffer, then drop `consume_len` bytes from the
+// front (`consume_len >= ret_len`: the line case returns `idx` bytes but
+// consumes `idx + 1` to swallow the newline). The unconsumed remainder
+// `[consume_len..len)` is compacted to the front via a temp buffer (two
+// non-overlapping `memcpy`s — there is no `memmove`). `gb.cap` is
+// unchanged, so the +8 slack invariant is preserved (`len` only shrinks).
+fn _framed_consume(gb: * GrowBuf, ret_len: i64, consume_len: i64) -> * u8 {
+    let addr: i64 = gb.addr;
+    let len: i64 = gb.len;
+    let res: * u8 = malloc((ret_len + 1) as usize);
+    if res as i64 == 0 { return _process_empty_cstr(); }
+    if ret_len > 0 { memcpy(res, addr as * u8, ret_len as usize); }
+    memset((res as i64 + ret_len) as * u8, 0, 1 as usize);
+    let rem: i64 = len - consume_len;
+    if rem > 0 {
+        let tmp: * u8 = malloc(rem as usize);
+        if tmp as i64 != 0 {
+            memcpy(tmp, (addr + consume_len) as * u8, rem as usize);
+            memcpy(addr as * u8, tmp, rem as usize);
+            free(tmp);
+        }
+        gb.len = rem;
+    } else { gb.len = 0; }
+    return res;
+}
+
+// ── process.handle_read_line_stdout ────────────────────────────
+// Return one `'\n'`-delimited line (without the trailing newline) from
+// the child's stdout, buffering any bytes past the newline in the stash
+// for the next call — symmetric with `io.read_line` (#1579). On EOF the
+// final unterminated partial line (if any) is returned, then the empty
+// string. Reads stdout only; closes the fd on EOF/error so a subsequent
+// call returns the buffered tail without re-reading a dead pipe.
+fn sfn_process_handle_read_line_stdout(handle_id: i64) -> * u8 ![io] {
+    if handle_id == 0 { return _process_empty_cstr(); }
+    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let gb: * GrowBuf = ((h as i64) + 16) as * GrowBuf;
+    loop {
+        let idx: i64 = _framed_find_newline(gb);
+        if idx >= 0 { return _framed_consume(gb, idx, idx + 1); }
+        let fd: i32 = h.stdout_fd;
+        if fd < 0 { return _framed_consume(gb, gb.len, gb.len); }
+        let n: i64 = _framed_fill(gb, fd);
+        if n <= 0 {
+            close(fd);
+            h.stdout_fd = -1;
+            return _framed_consume(gb, gb.len, gb.len);
+        }
+    }
+}
+
+// ── process.handle_read_bytes_stdout ───────────────────────────
+// Return at most `n` bytes from the child's stdout, preserving any
+// unconsumed remainder in the stash for the next call. When the stash
+// is empty, one `read(2)` chunk is pulled from the live fd first; a
+// short read returns fewer than `n`. On EOF the fd is closed and the
+// empty string is returned. `n <= 0` is the empty string.
+fn sfn_process_handle_read_bytes_stdout(handle_id: i64, n: i64) -> * u8 ![io] {
+    if handle_id == 0 { return _process_empty_cstr(); }
+    if n <= 0 { return _process_empty_cstr(); }
+    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let gb: * GrowBuf = ((h as i64) + 16) as * GrowBuf;
+    if gb.len == 0 {
+        let fd: i32 = h.stdout_fd;
+        if fd >= 0 {
+            let r: i64 = _framed_fill(gb, fd);
+            if r <= 0 {
+                close(fd);
+                h.stdout_fd = -1;
+            }
+        }
+    }
+    let mut take: i64 = n;
+    if take > gb.len { take = gb.len; }
+    if take <= 0 { return _process_empty_cstr(); }
+    return _framed_consume(gb, take, take);
+}
+
+// ── process.handle_write_bytes ─────────────────────────────────
+// Write exactly `len` bytes of `data` to the child's stdin, resuming
+// short writes and EINTR. Unlike `handle_write` (which `strlen`s a
+// NUL-terminated cstring), this honors an explicit length, so embedded
+// NULs in a binary frame are written verbatim. Returns bytes written
+// (`== len` on success), or `-1` on a dead handle / closed stdin /
+// write error. `len <= 0` writes nothing and returns 0.
+fn sfn_process_handle_write_bytes(handle_id: i64, data: * u8, len: i64) -> i64 ![io] {
+    if handle_id == 0 { return -1; }
+    if data as i64 == 0 { return -1; }
+    if len < 0 { return -1; }
+    let h: * SailfinProcessHandle = handle_id as * SailfinProcessHandle;
+    let fd: i32 = h.stdin_fd;
+    if fd < 0 { return -1; }
+    let mut written: i64 = 0;
+    loop {
+        if written >= len { break; }
+        let dst: * u8 = ((data as i64) + written) as * u8;
+        let remaining: i64 = len - written;
+        let nw: i64 = write(fd, dst, remaining as usize);
+        if nw < 0 {
+            let err: i32 = sailfin_intrinsic_pointer_read_i32(sailfin_intrinsic_errno_location());
+            if err == SFN_EINTR {
+                // Interrupted before any byte — retry the same span.
+            } else { return -1; }
+        } else { written = written + nw; }
+    }
+    return written;
+}
+
 // ── process.handle_wait ────────────────────────────────────────
 // Close any still-open fds, reap the child, free the stash buffers
 // and the handle itself, and return the exit code (0..255),
