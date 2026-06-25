@@ -15,7 +15,9 @@ import {
     get_number,
     get_bool,
     get_value,
-    has_key
+    has_key,
+    parse,
+    stringify
 } from "../src/mod";
 
 test "toml: string value construction" {
@@ -84,4 +86,42 @@ test "toml: deeply nested path" {
     let b = table_val(["b"], [c]);
     let root = table_val(["a"], [b]);
     assert strings_equal(get_string(root, "a.b.c"), "deep");
+}
+
+// -- Escape decode/encode coverage (#1619) --
+test "toml: 4-hex unicode escape decodes in basic string" {
+    let config = parse("k = \"\\u0041\"");
+    assert strings_equal(get_string(config, "k"), "A");
+}
+
+test "toml: 8-hex unicode escape decodes astral code point" {
+    // U+1F600 GRINNING FACE = UTF-8 F0 9F 98 80 (single \U, no surrogates).
+    let config = parse("k = \"\\U0001F600\"");
+    let expected = char_from_code(240) + char_from_code(159) + char_from_code(152)
+        + char_from_code(128);
+    assert strings_equal(get_string(config, "k"), expected);
+}
+
+test "toml: backspace and formfeed decode in basic string" {
+    let cb = parse("k = \"\\b\"");
+    assert strings_equal(get_string(cb, "k"), char_from_code(8));
+    let cf = parse("k = \"\\f\"");
+    assert strings_equal(get_string(cf, "k"), char_from_code(12));
+}
+
+test "toml: control chars escape on serialize and round-trip" {
+    let original = char_from_code(1);
+    let doc = stringify(table_val(["k"], [string_val(original)]));
+    // U+0001 has no shorthand escape, so it must emit a unicode escape.
+    assert strings_equal(doc, "k = \"\\u0001\"\n");
+    let back = parse(doc);
+    assert strings_equal(get_string(back, "k"), original);
+}
+
+test "toml: backspace serializes to shorthand and round-trips" {
+    let original = char_from_code(8);
+    let doc = stringify(table_val(["k"], [string_val(original)]));
+    assert strings_equal(doc, "k = \"\\b\"\n");
+    let back = parse(doc);
+    assert strings_equal(get_string(back, "k"), original);
 }
