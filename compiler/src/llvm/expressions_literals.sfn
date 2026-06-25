@@ -101,6 +101,7 @@ fn is_number_literal(text: string) -> boolean {
     let mut index: int = 0;
     let mut has_digit: boolean = false;
     let mut has_decimal: boolean = false;
+    let mut has_exp: boolean = false;
     let trimmed = trim_text(text);
     if trimmed.length == 0 { return false; }
     if substring(trimmed, 0, 1) == "-" {
@@ -128,8 +129,27 @@ fn is_number_literal(text: string) -> boolean {
         }
         if ch == "." {
             if has_decimal { return false; }
+            if has_exp { return false; }
             has_decimal = true;
             index += 1;
+            continue;
+        }
+        let mut _is_exp_marker: boolean = false;
+        if ch == "e" { _is_exp_marker = true; }
+        if ch == "E" { _is_exp_marker = true; }
+        if _is_exp_marker {
+            if has_exp { return false; }
+            if !has_digit { return false; }
+            has_exp = true;
+            index += 1;
+            if index < trimmed.length {
+                let sign = substring(trimmed, index, index + 1);
+                let mut _is_sign: boolean = false;
+                if sign == "+" { _is_sign = true; }
+                if sign == "-" { _is_sign = true; }
+                if _is_sign { index += 1; }
+            }
+            if index >= trimmed.length { return false; }
             continue;
         }
         return false;
