@@ -1,0 +1,117 @@
+// Regression: concurrent cold builds must not race on the runtime
+// object cache-key tmp file.
+//
+// Root cause (the macOS nightly self-host check, roaming build-and-run
+// failures): `_sha256_of_string` (compiler/src/build_cache.sfn) hashed
+// the runtime object cache key by writing to a SINGLE fixed tmp path
+// `/tmp/.sfn_build_cache_hash_<suffix>` and then `rm -f`-ing it. The
+// `<suffix>` (`cap_prefix + basename + opt_flag`, e.g.
+// `sfn__runtime-native__prelude_sfn-O2`) is IDENTICAL across concurrent
+// builds of the same runtime source, so two parallel `sfn run`/`sfn
+// build` workers collided on that path — one `rm`-ed the file out from
+// under the other's `sha256sum` (`No such file or directory`), and the
+// poisoned key flipped a cache hit into a partial/wrong result, ending
+// in a nested-build failure (assert abort, exit 134). The collision is
+// PROCESS-GLOBAL — it bites even when each test's nested build is
+// otherwise isolated via its own `SAILFIN_TEST_SCRATCH` (which is the
+// case under `make check`'s per-file `sub-<i>` scratch + `--jobs N`).
+//
+// The fix routes that tmp file through `mktemp` so every worker gets a
+// unique path. This test models the CI contention exactly: N concurrent
+// cold `sfn run`s, EACH with its own `SAILFIN_TEST_SCRATCH` (so the
+// per-invocation `run.ll`/`.o`/binary are isolated per child, mirroring
+// the per-file `sub-<i>`), all still sharing the one global tmp hash
+// path. Pre-fix this flakes; post-fix every child builds and prints its
+// own marker.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+fn _scratch_base() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = "/tmp"; }
+    dir = dir + "/objkey-race";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// One concurrent round: write N distinct fixtures, build+run them
+// concurrently (each with its OWN per-child scratch), and assert each
+// child exits 0 and prints its own marker with no cross-contamination.
+fn _race_round(base: string, round: int, n: int) -> boolean ![io] {
+    // Build the `bash -c` vehicle: launch N `sfn run`s in the background,
+    // each with a distinct SAILFIN_TEST_SCRATCH, then `wait`. The shared
+    // global /tmp hash path is what concurrency stresses.
+    let bin = _sfn_bin();
+    let mut script = "";
+    let mut k = 0;
+    loop {
+        if k >= n { break; }
+        let tag = number_to_string(round) + "_" + number_to_string(k);
+        let marker = "OBJKEY_MARK_" + tag;
+        let src = base + "/m_" + tag + ".sfn";
+        let outp = base + "/o_" + tag + ".txt";
+        let child_scratch = base + "/s_" + tag;
+        fs.createDirectory(child_scratch, true);
+        fs.writeFile(src, "fn main() ![io] {\n    print.info(\"" + marker
+            + "\");\n}\n");
+        // Each child gets its own scratch so run.ll/.o/binary are isolated;
+        // only the global cache-key tmp path is shared across children.
+        script = script + "( export SAILFIN_TEST_SCRATCH='" + child_scratch
+            + "'; '"
+            + bin
+            + "' run '"
+            + src
+            + "' > '"
+            + outp
+            + "' 2>&1 ) &\n";
+        k += 1;
+    }
+    script = script + "wait\n";
+
+    let exit = process.run_capture(["bash", "-c", script], process.environ());
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return false; }
+
+    // Verify every child produced exactly its own marker.
+    let mut ok = true;
+    let mut j = 0;
+    loop {
+        if j >= n { break; }
+        let tag = number_to_string(round) + "_" + number_to_string(j);
+        let marker = "OBJKEY_MARK_" + tag;
+        let outp = base + "/o_" + tag + ".txt";
+        if !fs.exists(outp) { ok = false; } else {
+            let got = fs.readFile(outp);
+            // Own marker present...
+            if !contains(got, marker) { ok = false; }
+            // ...and no sibling's marker leaked in (cross-contamination).
+            let mut s = 0;
+            loop {
+                if s >= n { break; }
+                if s != j {
+                    let other = "OBJKEY_MARK_" + number_to_string(round) + "_"
+                        + number_to_string(s);
+                    if contains(got, other) { ok = false; }
+                }
+                s += 1;
+            }
+        }
+        j += 1;
+    }
+    return ok;
+}
+
+test "concurrent cold builds do not race on the runtime objkey tmp file" ![io] {
+    let base = _scratch_base();
+    // 6 concurrent builds × 2 rounds = 12 cold runtime compiles hammering
+    // the shared cache-key tmp path. Modest fan-out keeps wall-time bounded
+    // while still reliably tripping the pre-fix race.
+    assert _race_round(base, 0, 6);
+    assert _race_round(base, 1, 6);
+}
