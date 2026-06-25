@@ -25,7 +25,7 @@ fn _count_matches(source: string) -> int ![io] {
     return count;
 }
 
-test "test filter: -k keeps only tests whose name contains the substring" {
+test "test filter: -k keeps only tests whose name contains the substring" ![io] {
     let source = "test \"auth login works\" { let _x: int = 1; }\n"
         + "test \"logout works\" { let _x: int = 1; }\n"
         + "test \"auth refresh works\" { let _x: int = 1; }";
@@ -35,7 +35,7 @@ test "test filter: -k keeps only tests whose name contains the substring" {
     assert matched == 2;
 }
 
-test "test filter: --tag keeps only tests carrying @tag(\"value\")" {
+test "test filter: --tag keeps only tests carrying @tag(\"value\")" ![io] {
     let source = "@tag(\"slow\")\ntest \"slow path\" { let _x: int = 1; }\n"
         + "test \"fast path\" { let _x: int = 1; }\n"
         + "@tag(\"slow\")\ntest \"another slow\" { let _x: int = 1; }";
@@ -45,7 +45,7 @@ test "test filter: --tag keeps only tests carrying @tag(\"value\")" {
     assert matched == 2;
 }
 
-test "test filter: -k and --tag compose (a test must satisfy both)" {
+test "test filter: -k and --tag compose (a test must satisfy both)" ![io] {
     let source = "@tag(\"slow\")\ntest \"auth slow\" { let _x: int = 1; }\n"
         + "@tag(\"slow\")\ntest \"db slow\" { let _x: int = 1; }\n"
         + "test \"auth fast\" { let _x: int = 1; }";
@@ -55,7 +55,7 @@ test "test filter: -k and --tag compose (a test must satisfy both)" {
     assert matched == 1;
 }
 
-test "test filter: a non-matching --tag value excludes every test" {
+test "test filter: a non-matching --tag value excludes every test" ![io] {
     let source = "@tag(\"slow\")\ntest \"slow path\" { let _x: int = 1; }\n"
         + "test \"fast path\" { let _x: int = 1; }";
     set_test_filters("", "nonexistent");

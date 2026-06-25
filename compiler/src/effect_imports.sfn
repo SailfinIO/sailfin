@@ -44,6 +44,16 @@ import { Program } from "./ast";
 struct ImportedFunctionSignature {
     name: string;
     effects: string[];
+    // Provenance of the resolved callee, so the effect checker can pick
+    // the right diagnostic code without a second table:
+    //   "import" — a cross-module imported function (renders `E0402`)
+    //   "local"  — a same-module top-level `fn` (renders `E0400`)
+    // The per-program table the checker threads (`effect_checker.
+    // validate_effects_with_imports`) merges both kinds into one
+    // `ImportSymbolTable`; `origin` is the only thing distinguishing
+    // them at lookup time. Existing import-resolution paths
+    // (`append_import_function`, the loader) always set "import".
+    origin: string;
 }
 
 // Aggregate of imported callable signatures exposed to a single
@@ -75,6 +85,20 @@ fn empty_import_symbols() -> ImportSymbolTable {
 // re-export carries identical effect annotations); a future
 // diagnostic for divergent effect lists can land in Phase G.
 fn append_import_function(table: ImportSymbolTable, name: string, effects: string[]) -> ImportSymbolTable {
+    return _append_function_with_origin(table, name, effects, "import");
+}
+
+// G1b (#1184): record a same-module top-level `fn` (name, effects) in the
+// per-program symbol table so the effect checker resolves local callees
+// (`foo()`) the same way it resolves imports — but flags them in-module
+// (`E0400`) rather than cross-module (`E0402`). The checker merges these
+// into the localized import table after `localize_import_symbols_for_program`
+// so a single threaded `ImportSymbolTable` carries both kinds.
+fn append_local_function(table: ImportSymbolTable, name: string, effects: string[]) -> ImportSymbolTable {
+    return _append_function_with_origin(table, name, effects, "local");
+}
+
+fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects: string[], origin: string) -> ImportSymbolTable {
     if name.length == 0 { return table; }
     let mut updated = table;
     let mut existing_index: int = -1;
@@ -96,7 +120,8 @@ fn append_import_function(table: ImportSymbolTable, name: string, effects: strin
     }
     let entry = ImportedFunctionSignature {
         name: name,
-        effects: effects_copy
+        effects: effects_copy,
+        origin: origin
     };
     if existing_index >= 0 {
         updated.functions[existing_index] = entry;
@@ -176,6 +201,7 @@ export {
     ImportSymbolTable,
     ImportedFunctionSignature,
     append_import_function,
+    append_local_function,
     empty_import_symbols,
     localize_import_symbols_for_program,
     lookup_imported_function

@@ -33,40 +33,40 @@ fn _e0420_for(source: string) -> int ![io] {
     return _count_e0420(diagnostics);
 }
 
-test "typecheck walker: bare call expression statement is reached (E0420)" {
+test "typecheck walker: bare call expression statement is reached (E0420)" ![io] {
     // `notarealfunction` is unbound; the walker reaches it and #812
     // surfaces the undefined-callee diagnostic.
     assert _e0420_for("fn main() { notarealfunction(\"hi\"); }") == 1;
 }
 
-test "typecheck walker: call inside return value is reached (E0420)" {
+test "typecheck walker: call inside return value is reached (E0420)" ![io] {
     let source = "fn main() -> number { return notarealfunction(); }";  // alias-coverage: legacy `-> number` retained until §3 reform lands
     assert _e0420_for(source) == 1;
 }
 
-test "typecheck walker: call in let initializer is reached (E0420)" {
+test "typecheck walker: call in let initializer is reached (E0420)" ![io] {
     assert _e0420_for("fn main() { let x = notarealfunction(\"hi\"); }") == 1;
 }
 
-test "typecheck walker: nested call in argument is reached (E0420)" {
+test "typecheck walker: nested call in argument is reached (E0420)" ![io] {
     // Exercises walker recursion into `Call.arguments` — both the outer
     // and the inner call are undefined, so two diagnostics fire.
     assert _e0420_for("fn main() { outer(inner(\"hi\")); }") == 2;
 }
 
-test "typecheck walker: call inside if condition is reached (E0420)" {
+test "typecheck walker: call inside if condition is reached (E0420)" ![io] {
     assert _e0420_for("fn main() { if notarealfunction() { } }") == 1;
 }
 
-test "typecheck walker: call inside match scrutinee is reached (E0420)" {
+test "typecheck walker: call inside match scrutinee is reached (E0420)" ![io] {
     assert _e0420_for("fn main() { match notarealfunction() { _ => {} } }") == 1;
 }
 
-test "typecheck walker: call inside for-iterable is reached (E0420)" {
+test "typecheck walker: call inside for-iterable is reached (E0420)" ![io] {
     assert _e0420_for("fn main() { for x in notarealfunction() { } }") == 1;
 }
 
-test "typecheck walker: match-arm destructured binding resolves as callee" {
+test "typecheck walker: match-arm destructured binding resolves as callee" ![io] {
     // `Other.Run { task }` is a colon-less shorthand destructure, which
     // parses to `Expression.Raw`. The match-arm binding registration
     // recovers `task` from the raw text and seeds it into arm scope, so
@@ -75,14 +75,14 @@ test "typecheck walker: match-arm destructured binding resolves as callee" {
     assert _e0420_for("fn main() { match shape { Other.Run { task }: task() } }") == 0;
 }
 
-test "typecheck walker: undefined callee in match arm still flagged" {
+test "typecheck walker: undefined callee in match arm still flagged" ![io] {
     // Counterpart to the above: a callee that is NOT a destructured
     // binding is still unresolved and must surface E0420 — proving the
     // registration narrows scope to the bound names, not everything.
     assert _e0420_for("fn main() { match shape { Other.Run { task }: notbound() } }") == 1;
 }
 
-test "typecheck walker: lambda body callee is flagged (E0420)" {
+test "typecheck walker: lambda body callee is flagged (E0420)" ![io] {
     // The deferred gap the #809 walker left open is now closed. Since
     // #520 the lambda parser delegates to the structured `parse_block`,
     // so `Expression.Lambda.body.statements` is populated and the

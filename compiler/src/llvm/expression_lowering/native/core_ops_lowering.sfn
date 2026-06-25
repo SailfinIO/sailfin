@@ -78,7 +78,7 @@ fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: int, lines: 
     };
 }
 
-fn lower_logical_not_result(result: ExpressionResult, base_diagnostics: string[]) -> ExpressionResult {
+fn lower_logical_not_result(result: ExpressionResult, base_diagnostics: string[]) -> ExpressionResult ![io] {
     let mut combined: string[] = base_diagnostics;
     let mut _ci0: int = 0;
     loop {

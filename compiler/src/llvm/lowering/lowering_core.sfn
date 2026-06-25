@@ -147,7 +147,7 @@ fn _hook_call_symbol(functions: NativeFunction[], kind: string, module_suffix: s
     return "";
 }
 
-fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult {
+fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult ![io] {
     let mut native_text_for_recovery: string = "";
     if native_module.artifacts != null {
         if native_module.artifacts.length > 0 {

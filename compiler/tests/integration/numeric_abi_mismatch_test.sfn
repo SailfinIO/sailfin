@@ -134,7 +134,7 @@ test "coerce_operand_to_type: recovers temp_index from existing emitted lines" !
     assert result.temp_index == 2;
 }
 
-test "harmonise_operands: recovers temp_index from existing emitted lines" {
+test "harmonise_operands: recovers temp_index from existing emitted lines" ![io] {
     let left = _make_operand("i64", "%t0");
     let right = _make_operand("i64", "%t1");
     let mut lines: string[] = [];

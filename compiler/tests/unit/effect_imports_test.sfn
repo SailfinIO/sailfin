@@ -28,6 +28,7 @@ import {
     ImportSymbolTable,
     ImportedFunctionSignature,
     append_import_function,
+    append_local_function,
     empty_import_symbols,
     localize_import_symbols_for_program,
     lookup_imported_function
@@ -331,5 +332,116 @@ test "validate_effects: legacy entry stays compatible (empty imports)" {
     let program = Program { statements: [import_stmt, routine_stmt] };
     // No import table → no cross-module propagation → no violation.
     let violations = validate_effects_with_imports(program, empty_import_symbols());
+    assert violations.length == 0;
+}
+
+// -------------------------------------------------------------------
+// G1b (#1184): local-fn origin tagging + member-callee scope
+// -------------------------------------------------------------------
+// Build a routine whose body calls `object.member(...)` once, with no
+// declared effects — the Member-callee path the G1b member resolution
+// walks.
+fn _routine_member_calling(routine_name: string, object: string, member: string, span_line: int) -> Statement {
+    let span = _span(span_line, 4);
+    let obj = Expression.Identifier {
+        name: object,
+        span: _span(span_line + 1, 9)
+    };
+    let member_expr = Expression.Member {
+        object: obj,
+        member: member,
+        span: _span(span_line + 1, 13)
+    };
+    let no_args: Expression[] = [];
+    let call_expr = Expression.Call {
+        callee: member_expr,
+        arguments: no_args,
+        span: null
+    };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: call_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: object + "." + member + "();",
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    let mut empty_effects: string[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(routine_name, empty_effects, span),
+        body: body_block,
+        decorators: empty_decorators,
+        is_unsafe: false
+    };
+}
+
+fn _fn_decl(name: string, effects: string[], span_line: int) -> Statement {
+    let mut empty_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, effects, _span(span_line, 4)),
+        body: _empty_block(),
+        decorators: empty_decorators,
+        is_unsafe: false
+    };
+}
+
+test "append_local_function: tags origin local; append_import_function tags import" {
+    let mut table = empty_import_symbols();
+    table = append_import_function(table, "fetch", ["net"]);
+    table = append_local_function(table, "load", ["io"]);
+    let imp = lookup_imported_function(table, "fetch");
+    assert imp != null;
+    let imp_e: ImportedFunctionSignature? = imp;
+    assert imp_e.origin == "import";
+    let loc = lookup_imported_function(table, "load");
+    assert loc != null;
+    let loc_e: ImportedFunctionSignature? = loc;
+    assert loc_e.origin == "local";
+}
+
+test "member resolution: a local-origin callee is excluded (no propagation)" {
+    // `mod.does_io()` where `does_io` is a same-module top-level fn (not
+    // an import) must NOT propagate — the member path only honors
+    // `origin == "import"`. The local `does_io` declares ![io], but
+    // reaching it as `mod.does_io()` is a coincidental name match.
+    let callee = _fn_decl("does_io", ["io"], 4);
+    let caller = _routine_member_calling("run", "mod", "does_io", 10);
+    let program = Program { statements: [callee, caller] };
+    let violations = validate_effects_with_imports(program, empty_import_symbols());
+    assert violations.length == 0;
+}
+
+test "member resolution: object-agnostic name match fires (pinned policy)" {
+    // Documents the conservative member-name policy (see
+    // `_propagate_imported_member_effects`): the object identifier is
+    // NOT resolved, so ANY `x.fetch()` whose member collides with an
+    // imported effectful `fetch` requires that effect. Here `buf` is an
+    // arbitrary local, not the imported namespace — yet `buf.fetch()`
+    // still requires ![net]. This is intentional (matches the `.send()/
+    // .receive()` precedent); pin it so a future narrowing is a
+    // deliberate, visible change.
+    let import_stmt = _import_decl("fetch", null, "remote");
+    let caller = _routine_member_calling("run", "buf", "fetch", 5);
+    let program = Program { statements: [import_stmt, caller] };
+    let table = append_import_function(empty_import_symbols(), "fetch", ["net"]);
+    let violations = validate_effects_with_imports(program, table);
+    assert violations.length == 1;
+    assert violations[0].routine_name == "run";
+}
+
+test "collision: a same-module local fn shadows a same-named import" {
+    // `import { fetch } from "remote"` (net) AND a local `fn fetch()`
+    // with no effects. Merge order localizes imports first, then appends
+    // locals last-write-wins, so the bare `fetch()` call resolves to the
+    // local (origin local, no effects) — no spurious ![net]. Matches the
+    // duplicate-symbol shadowing the typechecker would apply.
+    let import_stmt = _import_decl("fetch", null, "remote");
+    let local_fetch = _fn_decl("fetch", [], 4);
+    let caller = _routine_calling("run", "fetch", 10);
+    let program = Program { statements: [import_stmt, local_fetch, caller] };
+    let table = append_import_function(empty_import_symbols(), "fetch", ["net"]);
+    let violations = validate_effects_with_imports(program, table);
     assert violations.length == 0;
 }

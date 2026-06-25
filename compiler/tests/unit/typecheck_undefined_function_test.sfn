@@ -35,7 +35,7 @@ fn _e0420_for(source: string) -> int ![io] {
 // -------------------------------------------------------------------
 // Positive: a bare undefined callee fires exactly one E0420
 // -------------------------------------------------------------------
-test "E0420: undefined free-function callee is flagged" {
+test "E0420: undefined free-function callee is flagged" ![io] {
     assert _e0420_for("fn main() { notarealfunction(\"hi\"); }") == 1;
 }
 
@@ -59,7 +59,7 @@ test "E0420: carries the undefined-function message and code" ![io] {
     assert found;
 }
 
-test "E0420: undefined inner call in argument position is flagged" {
+test "E0420: undefined inner call in argument position is flagged" ![io] {
     // `print` is a builtin (outer call clean); the inner typo fires.
     assert _e0420_for("fn main() { print(notarealfunction()); }") == 1;
 }
@@ -67,41 +67,41 @@ test "E0420: undefined inner call in argument position is flagged" {
 // -------------------------------------------------------------------
 // Negatives: every resolvable callee stays silent
 // -------------------------------------------------------------------
-test "E0420: declared sibling function (declared before) resolves" {
+test "E0420: declared sibling function (declared before) resolves" ![io] {
     assert _e0420_for("fn greet() {} fn main() { greet(); }") == 0;
 }
 
-test "E0420: declared sibling function (declared after) resolves" {
+test "E0420: declared sibling function (declared after) resolves" ![io] {
     // Forward reference: `greet` is declared *after* `main`. The
     // resolution scope is collected up-front, so source order is
     // irrelevant — this is the case naive enforcement would break.
     assert _e0420_for("fn main() { greet(); } fn greet() {}") == 0;
 }
 
-test "E0420: extern function callee resolves" {
+test "E0420: extern function callee resolves" ![io] {
     assert _e0420_for("extern fn host_now() -> number; fn main() { host_now(); }") == 0;
 }
 
-test "E0420: parameter used as callee resolves" {
+test "E0420: parameter used as callee resolves" ![io] {
     assert _e0420_for("fn run(cb: number) { cb(); }") == 0;
 }
 
-test "E0420: local binding used as callee resolves" {
+test "E0420: local binding used as callee resolves" ![io] {
     assert _e0420_for("fn main() { let helper = 1; helper(); }") == 0;
 }
 
-test "E0420: builtin print is not flagged" {
+test "E0420: builtin print is not flagged" ![io] {
     assert _e0420_for("fn main() ![io] { print(\"hi\"); }") == 0;
 }
 
-test "E0420: method call on a member callee is not flagged" {
+test "E0420: method call on a member callee is not flagged" ![io] {
     // The callee is a `Member` (`s.unknownmethod`), not an `Identifier`,
     // so the member name is never resolved — member/method resolution is
     // out of #616 scope.
     assert _e0420_for("fn main() { let s = \"hi\"; s.unknownmethod(); }") == 0;
 }
 
-test "E0420: call inside a test body resolves top-level helper" {
+test "E0420: call inside a test body resolves top-level helper" ![io] {
     // Test bodies are seeded with the top-level scope too, so a `test`
     // calling a file-local helper must not false-positive.
     let source = "fn helper() -> int { return 1; } test \"t\" { let x = helper(); }";
@@ -126,7 +126,7 @@ test "E0420: imported callee resolves via effect table + specifier" ![io] {
     assert _count_e0420(diagnostics) == 0;
 }
 
-test "E0420: imported callee resolves on the empty-table path via specifier" {
+test "E0420: imported callee resolves on the empty-table path via specifier" ![io] {
     // Standalone `typecheck_diagnostics` path: the cross-module effect
     // table is empty, but the program's own `import { ... }` specifier
     // proves the name is in scope, so no false positive.
