@@ -23,7 +23,7 @@ fn _diagnostics(source: string) -> Diagnostic[] ![io] {
 }
 
 // ── Bare integer literal: no annotation needed ────────────────
-test "numeric: bare integer literal needs no annotation" {
+test "numeric: bare integer literal needs no annotation" ![io] {
     // The parser/typecheck must accept this without the
     // `let x: number = 1` workaround that the pre-E.1 default  // alias-coverage: numeric migration coverage
     // forced on every untyped integer.
@@ -31,7 +31,7 @@ test "numeric: bare integer literal needs no annotation" {
     assert diagnostics.length == 0;
 }
 
-test "numeric: bare integer addition reaches the emitter" {
+test "numeric: bare integer addition reaches the emitter" ![io] {
     // Native IR carries the expression through; LLVM lowering then
     // produces `add i64` (covered in the e2e test). The unit test
     // pins that the emitter sees both the assignment and the binop
@@ -42,7 +42,7 @@ test "numeric: bare integer addition reaches the emitter" {
 }
 
 // ── `: number` alias preserved ────────────────────────────────  // alias-coverage: numeric migration coverage
-test "numeric: ': number = 42' typechecks (alias-as-float)" {  // alias-coverage: numeric migration coverage
+test "numeric: ': number = 42' typechecks (alias-as-float)" ![io] {  // alias-coverage: numeric migration coverage
     // Existing `: number` annotations across the compiler source  // alias-coverage: numeric migration coverage
     // stay valid through this slice; E.2/E.3 migrate them to
     // `: int` / `: float`.
@@ -50,27 +50,27 @@ test "numeric: ': number = 42' typechecks (alias-as-float)" {  // alias-coverage
     assert diagnostics.length == 0;
 }
 
-test "numeric: ': float = 42' typechecks" {
+test "numeric: ': float = 42' typechecks" ![io] {
     // `float` is the new spelling and must accept integer literals
     // (which then widen to `double` via the literal-coercion path).
     let diagnostics = _diagnostics("fn main() { let x: float = 42; }");
     assert diagnostics.length == 0;
 }
 
-test "numeric: ': int = 42' typechecks" {
+test "numeric: ': int = 42' typechecks" ![io] {
     // `int` is the new spelling for `i64` integers.
     let diagnostics = _diagnostics("fn main() { let x: int = 42; }");
     assert diagnostics.length == 0;
 }
 
 // ── Mixed integer/decimal in same scope still typechecks ──────
-test "numeric: bare integer and decimal in same scope typecheck" {
+test "numeric: bare integer and decimal in same scope typecheck" ![io] {
     let diagnostics = _diagnostics("fn main() { let a = 1; let b = 3.14; let c = b + 0.5; }");
     assert diagnostics.length == 0;
 }
 
 // ── extern fn surface unchanged ───────────────────────────────
-test "numeric: extern fn with int + float parameter typechecks" {
+test "numeric: extern fn with int + float parameter typechecks" ![io] {
     // Closing the existing accept-list (covered in
     // numeric_int_float_test.sfn) is a prerequisite for this
     // slice; pin it here so a regression in the type-mapping

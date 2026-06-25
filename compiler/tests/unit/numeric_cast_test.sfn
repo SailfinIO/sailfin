@@ -62,17 +62,17 @@ fn _diagnostics(source: string) -> Diagnostic[] ![io] {
 }
 
 // ── Parser produces a structured Cast node for `expr as Type` ─────
-test "cast: int as float renders parens-wrapped operand" {
+test "cast: int as float renders parens-wrapped operand" ![io] {
     let asm = _emit("fn convert(x: int) -> float { return x as float; }");
     assert index_of(asm, "ret (x) as float") >= 0;
 }
 
-test "cast: float as int renders parens-wrapped operand" {
+test "cast: float as int renders parens-wrapped operand" ![io] {
     let asm = _emit("fn convert(x: float) -> int { return x as int; }");
     assert index_of(asm, "ret (x) as int") >= 0;
 }
 
-test "cast: chained casts left-associate" {
+test "cast: chained casts left-associate" ![io] {
     // `x as i32 as i64` parses as `((x as i32) as i64)` — each `as`
     // is consumed by the postfix loop iteration, naturally left-
     // associative. The format renders the chain with nested parens.
@@ -80,7 +80,7 @@ test "cast: chained casts left-associate" {
     assert index_of(asm, "((x) as i32) as i64") >= 0;
 }
 
-test "cast: cast binds tighter than `+`" {
+test "cast: cast binds tighter than `+`" ![io] {
     // `x + y as int` parses as `x + (y as int)` because `as` is
     // consumed inside parse_postfix_chain — postfix-position binds
     // tighter than the binary operator ladder. Matches Rust.
@@ -103,17 +103,17 @@ test "cast: cast binds tighter than `+`" {
 // The downstream LLVM lowering may emit "unsupported cast"
 // diagnostics for numeric pairs (deferred to follow-up), but the
 // front-end typecheck surface stays clean.
-test "cast: int as float typechecks with no diagnostics" {
+test "cast: int as float typechecks with no diagnostics" ![io] {
     let diagnostics = _diagnostics("fn convert(x: int) -> float { return x as float; }");
     assert diagnostics.length == 0;
 }
 
-test "cast: float as int typechecks with no diagnostics" {
+test "cast: float as int typechecks with no diagnostics" ![io] {
     let diagnostics = _diagnostics("fn convert(x: float) -> int { return x as int; }");
     assert diagnostics.length == 0;
 }
 
-test "cast: chained casts typecheck" {
+test "cast: chained casts typecheck" ![io] {
     let diagnostics = _diagnostics("fn widen(x: i32) -> i64 { return x as i32 as i64; }");
     assert diagnostics.length == 0;
 }
@@ -123,32 +123,32 @@ test "cast: chained casts typecheck" {
 // These exercise the parser/format paths for the integer-width
 // pairs that the LLVM lowering matrix covers (sext / trunc / zext).
 // LLVM-side pinning is in compiler/tests/e2e/test_numeric_cast.sh.
-test "cast: int as i32 narrowing renders parens-wrapped operand" {
+test "cast: int as i32 narrowing renders parens-wrapped operand" ![io] {
     let asm = _emit("fn narrow(x: int) -> i32 { return x as i32; }");
     assert index_of(asm, "ret (x) as i32") >= 0;
 }
 
-test "cast: i32 as i64 widening renders parens-wrapped operand" {
+test "cast: i32 as i64 widening renders parens-wrapped operand" ![io] {
     let asm = _emit("fn widen(x: i32) -> i64 { return x as i64; }");
     assert index_of(asm, "ret (x) as i64") >= 0;
 }
 
-test "cast: i8 as i64 widening renders parens-wrapped operand" {
+test "cast: i8 as i64 widening renders parens-wrapped operand" ![io] {
     let asm = _emit("fn widen(x: i8) -> i64 { return x as i64; }");
     assert index_of(asm, "ret (x) as i64") >= 0;
 }
 
-test "cast: bool as i64 (i1 → i64) renders parens-wrapped operand" {
+test "cast: bool as i64 (i1 → i64) renders parens-wrapped operand" ![io] {
     let asm = _emit("fn widen(x: bool) -> i64 { return x as i64; }");
     assert index_of(asm, "ret (x) as i64") >= 0;
 }
 
-test "cast: f32 as float widening renders parens-wrapped operand" {
+test "cast: f32 as float widening renders parens-wrapped operand" ![io] {
     let asm = _emit("fn widen(x: f32) -> float { return x as float; }");
     assert index_of(asm, "ret (x) as float") >= 0;
 }
 
-test "cast: float as f32 narrowing renders parens-wrapped operand" {
+test "cast: float as f32 narrowing renders parens-wrapped operand" ![io] {
     let asm = _emit("fn narrow(x: float) -> f32 { return x as f32; }");
     assert index_of(asm, "ret (x) as f32") >= 0;
 }
@@ -161,12 +161,12 @@ test "cast: float as f32 narrowing renders parens-wrapped operand" {
 // retiring `number`, so the `dominant_type` tightening rides on
 // Slice E rather than here. Slice D ships the `as` cast escape
 // valve so authors can spell the conversion explicitly today.
-test "cast: explicit int→float cast in binary op typechecks clean" {
+test "cast: explicit int→float cast in binary op typechecks clean" ![io] {
     let diagnostics = _diagnostics("fn add(x: int, y: float) -> float { return x as float + y; }");
     assert diagnostics.length == 0;
 }
 
-test "cast: explicit float→int cast in binary op typechecks clean" {
+test "cast: explicit float→int cast in binary op typechecks clean" ![io] {
     let diagnostics = _diagnostics("fn add(x: int, y: float) -> int { return x + y as int; }");
     assert diagnostics.length == 0;
 }

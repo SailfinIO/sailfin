@@ -1,44 +1,44 @@
 // compiler/src/llvm/expression_lowering/native/core_ops_lowering.sfn
 //
 // Lowering for operators and control-flow expressions (ternary, logical, arithmetic).
-import { lower_expression } from "./core";
+import { NativeFunction } from "../../../native_ir";
+import { substring } from "../../../string_utils";
+import { default_return_literal, format_temp_name } from "../../expressions_helpers";
+import { empty_string_constant_set, merge_string_constants } from "../../strings";
+import { resolve_enum_info_from_llvm_type } from "../../type_context_queries";
+import { ends_with_pointer_suffix, numeric_type_kind, strip_pointer_suffix } from "../../type_mapping";
 import {
+    ExpressionResult,
     LLVMOperand,
-    TypeContext,
     LocalBinding,
     OperatorMatch,
-    StringConstant,
-    ExpressionResult,
     ParameterBinding,
-    TernaryParseResult
+    StringConstant,
+    TernaryParseResult,
+    TypeContext
 } from "../../types";
 import {
-    char_code,
-    ends_with,
-    trim_text,
-    starts_with,
     append_string,
-    contains_text,
-    number_to_string,
+    char_code,
     char_code_at_text,
+    contains_text,
+    ends_with,
     extend_string_array,
     join_with_separator,
-    string_array_contains
+    number_to_string,
+    starts_with,
+    string_array_contains,
+    trim_text
 } from "../../utils";
-import { merge_string_constants, empty_string_constant_set } from "../../strings";
+import { lower_expression } from "./core";
 import { operation_name_for_symbol } from "./core_helpers";
-import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 import {
-    harmonise_operands,
     coerce_operand_to_type,
-    emit_comparison_instruction
+    emit_comparison_instruction,
+    harmonise_operands
 } from "./core_operands";
 import { lines_end_with_terminator, strip_enclosing_parentheses } from "./core_operators";
-import { NativeFunction } from "../../../native_ir";
-import { numeric_type_kind, strip_pointer_suffix, ends_with_pointer_suffix } from "../../type_mapping";
-import { substring } from "../../../string_utils";
-import { format_temp_name, default_return_literal } from "../../expressions_helpers";
-import { resolve_enum_info_from_llvm_type } from "../../type_context_queries";
+import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
 fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: int, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult ![io] {
     let coerced = coerce_operand_to_type(operand, "i1", temp_index, lines, true, null);
@@ -78,7 +78,7 @@ fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: int, lines: 
     };
 }
 
-fn lower_logical_not_result(result: ExpressionResult, base_diagnostics: string[]) -> ExpressionResult {
+fn lower_logical_not_result(result: ExpressionResult, base_diagnostics: string[]) -> ExpressionResult ![io] {
     let mut combined: string[] = base_diagnostics;
     let mut _ci0: int = 0;
     loop {

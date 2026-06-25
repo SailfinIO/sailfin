@@ -1,56 +1,56 @@
 // compiler/src/llvm/lowering/instructions_let.sfn
 //
 // Let binding instruction lowering.
-import {
-    LLVMOperand,
-    TypeContext,
-    LocalBinding,
-    LocalMutation,
-    OwnershipInfo,
-    StringConstant,
-    ParameterBinding,
-    LetLoweringResult,
-    LifetimeReleaseEvent,
-    OwnershipConsumption,
-    LifetimeRegionMetadata
-} from "../types";
-import {
-    trim_text,
-    starts_with,
-    number_to_string,
-    is_identifier_part_char,
-    is_identifier_start_char
-} from "../utils";
-import { merge_string_constants, empty_string_constant_set } from "../strings";
-import {
-    append_lifetime_region,
-    infer_borrow_base_scope,
-    append_lifetime_release_event,
-    make_lifetime_region_metadata
-} from "../lifetime";
-import { NativeFunction, NativeSourceSpan, NativeInstruction } from "../../native_ir";
-import { numeric_type_kind, ends_with_pointer_suffix } from "../type_mapping";
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { index_of } from "../../string_utils";
-import { find_function_by_name_or_import } from "../rendering_helpers";
-import { default_return_literal, format_local_pointer_name } from "../expressions_helpers";
-import { scope_id_inside_try_body } from "./instructions_helpers";
-import { find_local_binding, mark_parameter_consumed } from "../expressions_bindings";
-import { trace_lowering } from "../lowering_debug_state";
-import {
-    find_interface_info_by_name,
-    find_struct_info_by_llvm_type,
-    find_vtable_for_struct_interface
-} from "../type_context_queries";
-import { lower_expression, analyze_value_ownership, detect_borrow_conflicts } from "../expression_lowering/native/core";
+import { analyze_value_ownership, detect_borrow_conflicts, lower_expression } from "../expression_lowering/native/core";
+import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
 import {
     append_local_binding,
     mark_last_local_consumed,
     promote_escaping_locals_for_boundaries
 } from "../expression_lowering/native/core_scopes";
-import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
 import { is_heap_type } from "../expression_lowering/native/core_type_mapping";
 import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
 import { map_local_type } from "../expression_lowering/native/statement_type_mapping";
+import { find_local_binding, mark_parameter_consumed } from "../expressions_bindings";
+import { default_return_literal, format_local_pointer_name } from "../expressions_helpers";
+import {
+    append_lifetime_region,
+    append_lifetime_release_event,
+    infer_borrow_base_scope,
+    make_lifetime_region_metadata
+} from "../lifetime";
+import { trace_lowering } from "../lowering_debug_state";
+import { find_function_by_name_or_import } from "../rendering_helpers";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
+import {
+    find_interface_info_by_name,
+    find_struct_info_by_llvm_type,
+    find_vtable_for_struct_interface
+} from "../type_context_queries";
+import { ends_with_pointer_suffix, numeric_type_kind } from "../type_mapping";
+import {
+    LLVMOperand,
+    LetLoweringResult,
+    LifetimeRegionMetadata,
+    LifetimeReleaseEvent,
+    LocalBinding,
+    LocalMutation,
+    OwnershipConsumption,
+    OwnershipInfo,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
+} from "../types";
+import {
+    is_identifier_part_char,
+    is_identifier_start_char,
+    number_to_string,
+    starts_with,
+    trim_text
+} from "../utils";
+import { scope_id_inside_try_body } from "./instructions_helpers";
 
 // #537: true when a boolean (`i1`) initializer is being stored into a numeric
 // (`int`/`float`) binding — the silent `zext`/`uitofp` widening this slice

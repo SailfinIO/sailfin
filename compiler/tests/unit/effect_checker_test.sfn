@@ -11,20 +11,23 @@
 // check_tool_test.sfn preamble for the same dodge).
 import {
     Block,
-    Program,
     Decorator,
-    Statement,
     Expression,
-    SourceSpan,
-    TypeParameter,
-    TypeAnnotation,
     FieldDeclaration,
     FunctionSignature,
-    MethodDeclaration
+    ImportSpecifier,
+    MethodDeclaration,
+    Program,
+    SourceSpan,
+    Statement,
+    TypeAnnotation,
+    TypeParameter
 } from "../../src/ast";
-import { Token } from "../../src/token";
-import { EffectViolation, validate_effects } from "../../src/effect_checker";
+import { code_for_missing_effect } from "../../src/diagnostics_render";
+import { EffectViolation, validate_effects, validate_effects_with_imports } from "../../src/effect_checker";
+import { append_import_function, empty_import_symbols } from "../../src/effect_imports";
 import { canonical_effects, is_canonical_effect } from "../../src/effect_taxonomy";
+import { Token } from "../../src/token";
 
 // -------------------------------------------------------------------
 // Builder helpers
@@ -897,4 +900,100 @@ test "effect violation: body_open_token is null when block has no tokens" {
     let violations = validate_effects(program);
     assert violations.length == 1;
     assert violations[0].body_open_token == null;
+}
+
+// -------------------------------------------------------------------
+// G1b (#1184): local + member user-defined callee resolution
+// -------------------------------------------------------------------
+// Build a top-level `fn` declaration with an empty body and the given
+// declared effects. Stands in for a same-module callee whose signature
+// the checker resolves when another routine calls it by bare name.
+fn _fn_decl_with_effects(name: string, effects: string[], sig_line: int) -> Statement {
+    let mut empty_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, effects, _span(sig_line, 4)),
+        body: _empty_block(),
+        decorators: empty_decorators,
+        is_unsafe: false
+    };
+}
+
+// Build `import { <name> } from "<source>";` so the localizer keeps the
+// synthesized import-table entry for `<name>` in scope for the program.
+fn _import_decl(name: string, source: string) -> Statement {
+    let spec = ImportSpecifier { name: name, alias: null };
+    return Statement.ImportDeclaration {
+        import_specifiers: [spec],
+        source: source
+    };
+}
+
+test "effect violation: local callee propagates its declared effects (E0400)" {
+    // `fn does_io() ![io] {}` declared at line 4; `fn caller()` at line
+    // 10 calls it without declaring `![io]`. The transitive requirement
+    // surfaces on `caller` as an in-module E0400 (not the cross-module
+    // E0402 reserved for imported callees).
+    let callee = _fn_decl_with_effects("does_io", ["io"], 4);
+    let caller = _routine_with_bare_call("caller", [], 10, "does_io", 11, 9);
+    let program = Program { statements: [callee, caller] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.routine_name == "caller";
+    assert _effects_contains(v.missing_effects, "io");
+    // Trigger carets at the call site, not the callee declaration.
+    assert v.trigger != null;
+    let trig: Token? = v.trigger;
+    assert trig.line == 11;
+    assert trig.lexeme == "does_io";
+    // In-module callee → E0400, never the cross-module E0402.
+    assert code_for_missing_effect(v.missing_effects, v.requirements) == "E0400";
+}
+
+test "effect ok: caller declaring the local callee's effect is clean" {
+    let callee = _fn_decl_with_effects("does_io", ["io"], 4);
+    let caller = _routine_with_bare_call("caller", ["io"], 10, "does_io", 11, 9);
+    let program = Program { statements: [callee, caller] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+test "effect ok: a pure local callee requires nothing of its caller" {
+    let callee = _fn_decl_with_effects("pure_helper", [], 4);
+    let caller = _routine_with_bare_call("caller", [], 10, "pure_helper", 11, 9);
+    let program = Program { statements: [callee, caller] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+test "effect violation: member callee mod.fetch() requires imported net (E0402)" {
+    // `import { fetch } from "remote";` keeps the synthesized table
+    // entry in scope; `mod.fetch()` then requires `![net]` of the
+    // caller, carated at the member expression (`fetch`), as a
+    // cross-module E0402.
+    let import_stmt = _import_decl("fetch", "remote");
+    let caller = _routine_with_member_call("caller", [], 4, "mod", "fetch", 17, 9);
+    let program = Program { statements: [import_stmt, caller] };
+    let table = append_import_function(empty_import_symbols(), "fetch", ["net"]);
+    let violations = validate_effects_with_imports(program, table);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.routine_name == "caller";
+    assert _effects_contains(v.missing_effects, "net");
+    // Caret lands on the member expression token, not the `mod` object.
+    assert v.trigger != null;
+    let trig: Token? = v.trigger;
+    assert trig.line == 17;
+    assert trig.lexeme == "fetch";
+    // Imported callee → cross-module E0402.
+    assert code_for_missing_effect(v.missing_effects, v.requirements) == "E0402";
+}
+
+test "effect ok: caller declaring the imported member's effect is clean" {
+    let import_stmt = _import_decl("fetch", "remote");
+    let caller = _routine_with_member_call("caller", ["net"], 4, "mod", "fetch", 17, 9);
+    let program = Program { statements: [import_stmt, caller] };
+    let table = append_import_function(empty_import_symbols(), "fetch", ["net"]);
+    let violations = validate_effects_with_imports(program, table);
+    assert violations.length == 0;
 }

@@ -1,48 +1,48 @@
 // compiler/src/llvm/expression_lowering/native/core_call_lowering.sfn
 //
 // Call lowering extracted from core.sfn.
-import { lower_expression } from "./core";
-import { array_pointer_element_type } from "../arrays";
-import {
-    LLVMOperand,
-    TypeContext,
-    LocalBinding,
-    StringConstant,
-    EnumLiteralParse,
-    ExpressionResult,
-    ParameterBinding,
-    StructLiteralField
-} from "../../types";
-import {
-    ends_with,
-    trim_text,
-    starts_with,
-    number_to_string,
-    extend_string_array,
-    join_with_separator
-} from "../../utils";
-import { parse_member_access } from "./core_parse";
-import { merge_string_constants, empty_string_constant_set } from "../../strings";
-import { find_local_binding, replace_llvm_operand, find_parameter_binding } from "./core_scopes";
-import { load_local_operand, coerce_operand_to_type } from "./core_operands";
 import { NativeFunction } from "../../../native_ir";
-import { strip_pointer_suffix, ends_with_pointer_suffix } from "../../type_mapping";
-import { coerce_and_emit_call } from "./core_call_emission";
 import { index_of, substring } from "../../../string_utils";
-import { find_runtime_helper, make_concat_descriptor } from "../../runtime_helpers";
-import {
-    _ClosureSignatureParse,
-    resolve_call_signature,
-    resolve_call_method_target,
-    try_dispatch_atomic_builtin,
-    _parse_fn_pointer_annotation,
-    try_dispatch_byte_load_builtin
-} from "./core_call_resolution";
-import { lower_enum_literal } from "./core_literals_lowering";
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
 import { is_simple_identifier } from "../../expressions_helpers";
 import { trace_call_lowering } from "../../lowering_debug_state";
-import { resolve_enum_variant_info, resolve_enum_info_for_literal } from "../../type_context_queries";
+import { find_runtime_helper, make_concat_descriptor } from "../../runtime_helpers";
+import { empty_string_constant_set, merge_string_constants } from "../../strings";
+import { resolve_enum_info_for_literal, resolve_enum_variant_info } from "../../type_context_queries";
+import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
+import {
+    EnumLiteralParse,
+    ExpressionResult,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    StringConstant,
+    StructLiteralField,
+    TypeContext
+} from "../../types";
+import {
+    ends_with,
+    extend_string_array,
+    join_with_separator,
+    number_to_string,
+    starts_with,
+    trim_text
+} from "../../utils";
+import { array_pointer_element_type } from "../arrays";
+import { lower_expression } from "./core";
+import { coerce_and_emit_call } from "./core_call_emission";
+import {
+    _ClosureSignatureParse,
+    _parse_fn_pointer_annotation,
+    resolve_call_method_target,
+    resolve_call_signature,
+    try_dispatch_atomic_builtin,
+    try_dispatch_byte_load_builtin
+} from "./core_call_resolution";
+import { lower_enum_literal } from "./core_literals_lowering";
+import { coerce_operand_to_type, load_local_operand } from "./core_operands";
+import { parse_member_access } from "./core_parse";
+import { find_local_binding, find_parameter_binding, replace_llvm_operand } from "./core_scopes";
 
 // Helper to access a string array element.
 // The seed compiler (v0.1.1) has a bug where `arr[idx]` inside complex loops

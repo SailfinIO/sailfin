@@ -33,41 +33,41 @@
 // `cli_commands.sfn` and are imported in place; relocating them is Phase 4
 // (out of scope here).
 import {
-    get,
-    arg,
-    flag,
     Command,
     Matches,
+    arg,
     command,
+    flag,
+    get,
     has_flag,
     with_arg,
     with_flag
 } from "sfn/cli";
 
-import { CliContext } from "../context";
+import {
+    _is_safe_capsule_segment_cmd,
+    _is_safe_capsule_version_cmd,
+    _resolve_registry_url_cmd
+} from "../../cli_commands";
+import {
+    _curl_download_cmd,
+    _display_capsule_name_cmd,
+    _ensure_dir_recursive_cmd,
+    _extract_sfnpkg_cmd,
+    _get_home_cmd,
+    _resolve_capsule_name_cmd,
+    _sha256_of_file_cmd,
+    _shell_read_cmd
+} from "../../cli_commands_utils";
 import { lock_add_entry, lock_get_version } from "../../lock";
+import { find_char_local, substring } from "../../string_utils";
 import {
     toml_add_dependency,
     toml_add_dev_dependency,
     toml_get_capabilities_required,
     toml_merge_capabilities_required
 } from "../../toml_parser";
-import { substring, find_char_local } from "../../string_utils";
-import {
-    _resolve_registry_url_cmd,
-    _is_safe_capsule_segment_cmd,
-    _is_safe_capsule_version_cmd
-} from "../../cli_commands";
-import {
-    _get_home_cmd,
-    _shell_read_cmd,
-    _curl_download_cmd,
-    _extract_sfnpkg_cmd,
-    _sha256_of_file_cmd,
-    _resolve_capsule_name_cmd,
-    _display_capsule_name_cmd,
-    _ensure_dir_recursive_cmd
-} from "../../cli_commands_utils";
+import { CliContext } from "../context";
 
 // The `sfn/cli` definition for `add`, registered on the v2 root via
 // `with_subcommand`. Two boolean flags and one required `<capsule>`

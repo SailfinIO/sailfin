@@ -1,42 +1,42 @@
 // compiler/src/llvm/lowering/instructions_loops.sfn
 //
 // Control flow handler: loop instruction lowering (infinite loops with break/continue).
-import { collect_mutation_names, find_mutation_for_name } from "./phi";
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
+import { char_code, grapheme_at, substring } from "../../string_utils";
+import { lower_expression } from "../expression_lowering/native/core";
+import { find_local_binding } from "../expressions_bindings";
+import { format_temp_name } from "../expressions_helpers";
+import { make_child_scope_id } from "../lifetime";
+import { trace_lowering } from "../lowering_debug_state";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
+    BlockLoweringResult,
     LLVMOperand,
-    LoopContext,
-    TypeContext,
+    LifetimeRegionMetadata,
     LocalBinding,
     LocalMutation,
+    LoopContext,
     LoopStructure,
-    StringConstant,
     ParameterBinding,
-    BlockLoweringResult,
-    LifetimeRegionMetadata
+    StringConstant,
+    TypeContext
 } from "../types";
-import { trim_text, number_to_string, extend_string_array } from "../utils";
-import { merge_string_constants, empty_string_constant_set } from "../strings";
-import { make_child_scope_id } from "../lifetime";
+import { extend_string_array, number_to_string, trim_text } from "../utils";
 import { lower_instruction_range } from "./instructions";
-import { NativeFunction, NativeSourceSpan, NativeInstruction } from "../../native_ir";
-import { char_code, substring, grapheme_at } from "../../string_utils";
-import { format_temp_name } from "../expressions_helpers";
-import {
-    emit_scope_drops,
-    extend_mutations,
-    _parse_int_from_string,
-    extend_lifetime_regions,
-    loop_body_rewind_eligible
-} from "./instructions_helpers";
-import { find_local_binding } from "../expressions_bindings";
-import { trace_lowering } from "../lowering_debug_state";
 import {
     allocate_block_label,
     lower_condition_to_i1,
     sanitize_if_condition_text
 } from "./instructions_condition";
-import { get_instruction_tag, get_instruction_scan_text } from "./lowering_native_helpers";
-import { lower_expression } from "../expression_lowering/native/core";
+import {
+    _parse_int_from_string,
+    emit_scope_drops,
+    extend_lifetime_regions,
+    extend_mutations,
+    loop_body_rewind_eligible
+} from "./instructions_helpers";
+import { get_instruction_scan_text, get_instruction_tag } from "./lowering_native_helpers";
+import { collect_mutation_names, find_mutation_for_name } from "./phi";
 
 fn collect_loop_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> LoopStructure {
     let mut diagnostics: string[] = [];

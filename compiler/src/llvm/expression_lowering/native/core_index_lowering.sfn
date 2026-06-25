@@ -1,29 +1,29 @@
 // compiler/src/llvm/expression_lowering/native/core_index_lowering.sfn
 //
 // Indexing expression lowering extracted from core.sfn.
-import { lower_expression } from "./core";
-import {
-    LLVMOperand,
-    TypeContext,
-    LocalBinding,
-    StringConstant,
-    ExpressionResult,
-    ParameterBinding,
-    IndexExpressionParse
-} from "../../types";
-import {
-    trim_text,
-    starts_with,
-    append_string,
-    number_to_string
-} from "../../utils";
-import { merge_string_constants } from "../../strings";
-import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
-import { coerce_operand_to_type } from "./core_operands";
 import { NativeFunction } from "../../../native_ir";
-import { strip_pointer_suffix, ends_with_pointer_suffix } from "../../type_mapping";
 import { substring } from "../../../string_utils";
 import { format_temp_name } from "../../expressions_helpers";
+import { merge_string_constants } from "../../strings";
+import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
+import {
+    ExpressionResult,
+    IndexExpressionParse,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
+} from "../../types";
+import {
+    append_string,
+    number_to_string,
+    starts_with,
+    trim_text
+} from "../../utils";
+import { lower_expression } from "./core";
+import { coerce_operand_to_type } from "./core_operands";
+import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
 fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");

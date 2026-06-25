@@ -27,47 +27,36 @@
 // `sfn/cli` `EXIT_*` constants lower to 0 in an importing module — see the
 // `fmt.sfn` note).
 import {
-    has,
-    flag,
-    get_or,
-    command,
-    get_int,
     Command,
     Matches,
-    flag_int,
-    with_arg,
-    has_flag,
-    with_flag,
-    flag_value,
-    positionals,
     arg_variadic,
-    flag_value_short
+    command,
+    flag,
+    flag_int,
+    flag_value,
+    flag_value_short,
+    get_int,
+    get_or,
+    has,
+    has_flag,
+    positionals,
+    with_arg,
+    with_flag
 } from "sfn/cli";
 
+import { AssertFailure, _empty_assert_failure, _parse_assert_failure_record } from "../../assert_failure";
 import { Program, Statement } from "../../ast";
-import { CliContext } from "../context";
-import { module_name_from_path, compile_tests_to_llvm_file_with_module_imports } from "../../main";
-import { resolve_test_bin_identity_for_cache } from "../../version";
-import { assemble_runtime_capsule_link_inputs } from "../../cli_main";
-import { LayoutManifest } from "../../native_ir";
-import { number_to_string } from "../../num_format";
-import { parse_program } from "../../parser/mod";
 import {
     CacheKey,
-    canonicalize_flags,
-    test_bin_cache_key,
-    test_bin_cache_root,
-    cache_store_artifact,
-    cache_lookup_artifact,
     cache_copy_artifact_to,
-    runtime_link_inputs_identity
+    cache_lookup_artifact,
+    cache_store_artifact,
+    canonicalize_flags,
+    runtime_link_inputs_identity,
+    test_bin_cache_key,
+    test_bin_cache_root
 } from "../../build_cache";
-import { toml_get_name } from "../../toml_parser";
-import { _package_basename } from "../../cli_commands";
-import { index_of, substring, char_code_at_text } from "../../string_utils";
-import { AssertFailure, _empty_assert_failure, _parse_assert_failure_record } from "../../assert_failure";
-import { ImportSymbolTable, empty_import_symbols } from "../../effect_imports";
-import { parse_scope_name, is_safe_scope_name } from "../../capsule_artifact";
+import { is_safe_scope_name, parse_scope_name } from "../../capsule_artifact";
 import {
     ResolverConsumer,
     TestCapsuleResolution,
@@ -75,41 +64,52 @@ import {
     discover_workspace_root,
     prepare_project_capsules_for_test
 } from "../../capsule_resolver";
+import { _package_basename } from "../../cli_commands";
+import {
+    _collect_test_files_cmd,
+    _dirname_cmd,
+    _ends_with_cmd,
+    _ensure_dir_cmd,
+    _env_flag,
+    _get_env_cmd,
+    _has_prefix_cmd,
+    _legacy_flag_file,
+    _path_join_cmd,
+    _sanitize_filename_cmd,
+    _shell_read_cmd,
+    _sort_strings_cmd,
+    _strip_trailing_slashes_cmd,
+    _suite_name_from_path,
+    _write_text_cmd
+} from "../../cli_commands_utils";
+import { assemble_runtime_capsule_link_inputs } from "../../cli_main";
+import { ImportSymbolTable, empty_import_symbols } from "../../effect_imports";
+import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../main";
+import { LayoutManifest } from "../../native_ir";
+import { number_to_string } from "../../num_format";
+import { parse_program } from "../../parser/mod";
+import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
+import { char_code_at_text, index_of, substring } from "../../string_utils";
 import {
     TestEntry,
-    render_test_event,
-    render_start_event,
-    locate_failing_test,
     collect_test_entries,
-    render_summary_event
+    locate_failing_test,
+    render_start_event,
+    render_summary_event,
+    render_test_event
 } from "../../test_runner_json";
 import {
-    set_test_filters,
-    test_filters_active,
-    exit_test_runner_mode,
     enter_test_runner_mode,
+    exit_test_runner_mode,
+    set_test_filters,
+    test_decl_is_matching_test,
     test_decl_matches_filters,
-    test_decl_is_matching_test
+    test_filters_active
 } from "../../test_runner_state";
-import {
-    _env_flag,
-    _dirname_cmd,
-    _get_env_cmd,
-    _ends_with_cmd,
-    _path_join_cmd,
-    _ensure_dir_cmd,
-    _has_prefix_cmd,
-    _shell_read_cmd,
-    _write_text_cmd,
-    _legacy_flag_file,
-    _sort_strings_cmd,
-    _suite_name_from_path,
-    _sanitize_filename_cmd,
-    _collect_test_files_cmd,
-    _strip_trailing_slashes_cmd
-} from "../../cli_commands_utils";
+import { toml_get_name } from "../../toml_parser";
 import { load_imported_interfaces_from_paths } from "../../typecheck_import_loader";
-import { runtime_capsule_from_root } from "../../runtime_capsule_resolver";
+import { resolve_test_bin_identity_for_cache } from "../../version";
+import { CliContext } from "../context";
 
 // The `sfn/cli` definition for `test`, registered on the v2 root via
 // `with_subcommand`. Three boolean flags, two value flags, one int flag,

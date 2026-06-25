@@ -30,22 +30,22 @@
 // `zext` (not `sext`): the byte is unsigned (0..255), matching the C
 // `(int64_t)(unsigned char)s[idx]`. A `sext` would make bytes >= 0x80
 // negative and corrupt every UTF-8 comparison on the self-host path.
-import {
-    LLVMOperand,
-    TypeContext,
-    LocalBinding,
-    StringConstant,
-    ExpressionResult,
-    ParameterBinding
-} from "./types";
-import { trim_text, number_to_string, extend_string_array } from "./utils";
-import { merge_string_constants } from "./strings";
 import { NativeFunction } from "../native_ir";
-import { format_temp_name } from "./expressions_helpers";
 // Mutually recursive with `lower_expression` (which dispatches calls
 // back through the byte-load hook): the same cycle the atomic builtins
 // rely on — see `atomics.sfn`.
 import { lower_expression } from "./expression_lowering/native/core";
+import { format_temp_name } from "./expressions_helpers";
+import { merge_string_constants } from "./strings";
+import {
+    ExpressionResult,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
+} from "./types";
+import { extend_string_array, number_to_string, trim_text } from "./utils";
 
 // Predicate over the reserved `load_byte` name. Used by the
 // pre-resolution dispatch hook in `lower_call_expression` (see

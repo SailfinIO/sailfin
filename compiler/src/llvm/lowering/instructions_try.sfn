@@ -1,47 +1,47 @@
 // compiler/src/llvm/lowering/instructions_try.sfn
 //
 // Control flow handlers: try/catch/finally/throw instruction lowering.
-import {
-    LLVMOperand,
-    LoopContext,
-    TypeContext,
-    LocalBinding,
-    TryStructure,
-    LocalMutation,
-    OwnershipInfo,
-    ScopeMetadata,
-    StringConstant,
-    ParameterBinding,
-    LetLoweringResult,
-    BlockLoweringResult,
-    ThrowLoweringResult,
-    LifetimeReleaseEvent,
-    OwnershipConsumption,
-    LifetimeRegionMetadata
-} from "../types";
-import {
-    trim_text,
-    append_string,
-    number_to_string,
-    extend_string_array
-} from "../utils";
-import { merge_string_constants, empty_string_constant_set } from "../strings";
-import { make_child_scope_id } from "../lifetime";
-import { lower_instruction_range } from "./instructions";
-import { NativeFunction, NativeSourceSpan, NativeInstruction } from "../../native_ir";
-import { char_code, substring, grapheme_at } from "../../string_utils";
-import { format_temp_name, format_local_pointer_name } from "../expressions_helpers";
-import {
-    _parse_int_from_string,
-    extend_lifetime_regions,
-    emit_guarded_scope_drops
-} from "./instructions_helpers";
-import { allocate_block_label } from "./instructions_condition";
-import { get_instruction_tag } from "./lowering_native_helpers";
+import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
+import { char_code, grapheme_at, substring } from "../../string_utils";
 import { lower_expression } from "../expression_lowering/native/core";
+import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
 import { emit_runtime_call, empty_runtime_call_overrides } from "../expression_lowering/native/runtime_call";
-import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
+import { format_local_pointer_name, format_temp_name } from "../expressions_helpers";
+import { make_child_scope_id } from "../lifetime";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
+import {
+    BlockLoweringResult,
+    LLVMOperand,
+    LetLoweringResult,
+    LifetimeRegionMetadata,
+    LifetimeReleaseEvent,
+    LocalBinding,
+    LocalMutation,
+    LoopContext,
+    OwnershipConsumption,
+    OwnershipInfo,
+    ParameterBinding,
+    ScopeMetadata,
+    StringConstant,
+    ThrowLoweringResult,
+    TryStructure,
+    TypeContext
+} from "../types";
+import {
+    append_string,
+    extend_string_array,
+    number_to_string,
+    trim_text
+} from "../utils";
+import { lower_instruction_range } from "./instructions";
+import { allocate_block_label } from "./instructions_condition";
+import {
+    _parse_int_from_string,
+    emit_guarded_scope_drops,
+    extend_lifetime_regions
+} from "./instructions_helpers";
+import { get_instruction_tag } from "./lowering_native_helpers";
 
 fn collect_try_structure(instructions: NativeInstruction[], start_index: int, end: int, function_name: string) -> TryStructure {
     let mut diagnostics: string[] = [];

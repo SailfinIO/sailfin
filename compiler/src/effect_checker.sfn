@@ -28,28 +28,29 @@
 // transitives are out of scope for E1; see proposal §5 (Phase E).
 import {
     Block,
-    Program,
     Decorator,
-    MatchCase,
-    Statement,
     ElseBranch,
     Expression,
-    SourceSpan,
-    decorator_names,
     FunctionSignature,
-    MethodDeclaration
+    MatchCase,
+    MethodDeclaration,
+    Program,
+    SourceSpan,
+    Statement,
+    decorator_names
 } from "./ast";
-import { Token, TokenKind } from "./token";
-import { substring, char_code_at_text } from "./string_utils";
 import {
     ImportSymbolTable,
-    empty_import_symbols,
-    lookup_imported_function,
     ImportedFunctionSignature,
-    localize_import_symbols_for_program
+    append_local_function,
+    empty_import_symbols,
+    localize_import_symbols_for_program,
+    lookup_imported_function
 } from "./effect_imports";
 import { is_universally_allowed_effect } from "./effect_taxonomy";
 import { effects_for_callee_target } from "./llvm/runtime_helpers";
+import { char_code_at_text, substring } from "./string_utils";
+import { Token, TokenKind } from "./token";
 
 struct EffectRequirement {
     effect: string;
@@ -184,7 +185,14 @@ fn validate_effects(program: Program) -> EffectViolation[] {
 // `collect_effects_from_expression` keys directly off the local
 // identifier name.
 fn validate_effects_with_imports(program: Program, imports: ImportSymbolTable) -> EffectViolation[] {
-    let local_imports = localize_import_symbols_for_program(program, imports);
+    // G1b (#1184): the threaded table carries BOTH cross-module imports
+    // (localized + alias-rewritten) and same-module top-level `fn`s. The
+    // checker resolves an `Identifier` callee against this one table; the
+    // entry's `origin` decides whether a missing effect renders `E0402`
+    // (import) or `E0400` (local). Imports are localized first so a local
+    // `fn` shadowing an import wins (last-write-wins in `append_local_*`),
+    // matching the duplicate-symbol resolution the typechecker would apply.
+    let local_imports = _merge_local_functions(program, localize_import_symbols_for_program(program, imports));
     let mut violations: EffectViolation[] = [];
     let mut index: int = 0;
     loop {
@@ -193,6 +201,29 @@ fn validate_effects_with_imports(program: Program, imports: ImportSymbolTable) -
         index += 1;
     }
     return violations;
+}
+
+// G1b (#1184): fold every same-module top-level `fn` declaration's
+// `(name, declared effects)` into the per-program symbol table so a
+// local callee `foo()` propagates `foo`'s declared effects to its
+// caller. Only standalone top-level functions participate — struct
+// methods are dispatched through a receiver (`obj.method()`) and need
+// member-type resolution the checker doesn't have at 1.0; resolving
+// them here by bare member name would be unsound. Functions with no
+// declared effects are still recorded (harmless: an empty effect set
+// propagates nothing) so the table answers "is this a known local fn".
+fn _merge_local_functions(program: Program, table: ImportSymbolTable) -> ImportSymbolTable {
+    let mut merged = table;
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "FunctionDeclaration" {
+            merged = append_local_function(merged, statement.signature.name, statement.signature.effects);
+        }
+        index += 1;
+    }
+    return merged;
 }
 
 // Phase F entry: cross-check every function's *declared* effects
@@ -601,14 +632,63 @@ fn _propagate_imported_callee_effects(name: string, imports: ImportSymbolTable, 
     if entry_opt == null { return base; }
     let entry: ImportedFunctionSignature? = entry_opt;
     if entry.effects.length == 0 { return base; }
+    // G1b (#1184): the description prefix selects the diagnostic code in
+    // `diagnostics_render.code_for_missing_effect` — a description that
+    // starts with `imported \`` renders `E0402` (cross-module), anything
+    // else renders the in-module `E0400`. A same-module local `fn`
+    // (`origin == "local"`) therefore uses a `local \`…\`` prefix so its
+    // missing-effect diagnostic stays in-module.
+    let mut prefix = "imported `" + name + "` declares ![";
+    if entry.origin == "local" { prefix = "local `" + name + "` declares !["; }
     let mut required = base;
-    let prefix = "imported `" + name + "` declares ![";
     let mut e: int = 0;
     loop {
         if e >= entry.effects.length { break; }
         let effect = entry.effects[e];
         required = append_requirement(required, EffectRequirement {
             effect: effect, description: prefix + effect + "]", trigger: callee_trigger
+        });
+        e += 1;
+    }
+    return required;
+}
+
+// G1b (#1184): resolve a member callee `mod.fn()` against the
+// cross-module import table. The member name (`fn`) is looked up
+// directly — the object (`mod`) is a namespace binding the checker does
+// not type-resolve at 1.0, mirroring the conservative member-name policy
+// already used for channel `.send()/.receive()` and builtin `fs.*`.
+// Only `origin == "import"` entries fire here: a same-module top-level
+// `fn` reached as `obj.fn()` is a coincidental name match, not a real
+// call to that function, so locals are excluded. Imports always render
+// `E0402`, carated at the member expression.
+//
+// Scope caveat (wider than the `.send()/.receive()` allowlist): the
+// matched member-name set is NOT a fixed list — it is every effectful
+// function the enclosing module imports. So any `obj.<name>()` whose
+// `<name>` collides with an imported effectful free function would also
+// fire, regardless of `obj`. Two things keep this conservative-and-safe
+// rather than noisy: (1) the localized table only holds symbols this
+// module explicitly imports (`localize_import_symbols_for_program`), and
+// (2) the `effects.length == 0` guard means a colliding-but-pure import
+// contributes nothing. The compiler tree self-hosts clean under this
+// policy; the false-positive surface is pinned by regression tests in
+// `effect_imports_test.sfn`. Narrowing to a resolved namespace binding
+// is tracked for the type-directed pass (proposal §4.4 / G3).
+fn _propagate_imported_member_effects(member: string, imports: ImportSymbolTable, base: EffectRequirement[], member_trigger: Token?) -> EffectRequirement[] {
+    let entry_opt = lookup_imported_function(imports, member);
+    if entry_opt == null { return base; }
+    let entry: ImportedFunctionSignature? = entry_opt;
+    if entry.origin != "import" { return base; }
+    if entry.effects.length == 0 { return base; }
+    let prefix = "imported `" + member + "` declares ![";
+    let mut required = base;
+    let mut e: int = 0;
+    loop {
+        if e >= entry.effects.length { break; }
+        let effect = entry.effects[e];
+        required = append_requirement(required, EffectRequirement {
+            effect: effect, description: prefix + effect + "]", trigger: member_trigger
         });
         e += 1;
     }
@@ -767,6 +847,16 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
                     effect: "net", description: "network helper usage", trigger: object_trigger
                 });
             }
+            // G1b (#1184): cross-module member callee `mod.fetch()`. When
+            // the member name resolves to an imported function with
+            // declared effects, require them of the caller (`E0402`),
+            // carated at the member expression (`.fetch`). The builtin
+            // registry above keys on `root.member` (e.g. `fs.exists`);
+            // this keys on the bare member, so the two are disjoint for
+            // real builtins. Object-name agnostic by design — see
+            // `_propagate_imported_member_effects`.
+            let member_trigger = _token_from_span(expression.span, expression.member);
+            required = _propagate_imported_member_effects(expression.member, imports, required, member_trigger);
         }
         return required;
     }

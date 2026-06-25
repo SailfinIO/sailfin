@@ -33,17 +33,17 @@ fn _diagnostics(source: string) -> Diagnostic[] ![io] {
 // `emit_native.sfn::emit_variable` instead of the raw source text the
 // pre-fix `ExpressionStatement(Raw)` path leaked. Assertions pin the
 // structured shape (the type-annotation text is the load-bearing bit).
-test "numeric: let x: int = 42 carries int through native IR" {
+test "numeric: let x: int = 42 carries int through native IR" ![io] {
     let asm = _emit("fn main() { let x: int = 42; }");
     assert index_of(asm, ".let x : int") >= 0;
 }
 
-test "numeric: let x: float = 3.14 carries float through native IR" {
+test "numeric: let x: float = 3.14 carries float through native IR" ![io] {
     let asm = _emit("fn main() { let x: float = 3.14; }");
     assert index_of(asm, ".let x : float") >= 0;
 }
 
-test "numeric: function signature with int and float types" {
+test "numeric: function signature with int and float types" ![io] {
     let asm = _emit("fn add_int(x: int) -> int { return x + 1; }\n"
         + "fn double_float(x: float) -> float { return x + x; }\n");
     assert index_of(asm, ".fn add_int") >= 0;
@@ -51,22 +51,22 @@ test "numeric: function signature with int and float types" {
 }
 
 // ── Typecheck accepts int/float annotations cleanly ───────────
-test "numeric: int annotation typechecks with no diagnostics" {
+test "numeric: int annotation typechecks with no diagnostics" ![io] {
     let diagnostics = _diagnostics("fn main() { let x: int = 42; }");
     assert diagnostics.length == 0;
 }
 
-test "numeric: float annotation typechecks with no diagnostics" {
+test "numeric: float annotation typechecks with no diagnostics" ![io] {
     let diagnostics = _diagnostics("fn main() { let x: float = 3.14; }");
     assert diagnostics.length == 0;
 }
 
-test "numeric: int + int typechecks with no diagnostics" {
+test "numeric: int + int typechecks with no diagnostics" ![io] {
     let diagnostics = _diagnostics("fn add(x: int, y: int) -> int { return x + y; }");
     assert diagnostics.length == 0;
 }
 
-test "numeric: float + float typechecks with no diagnostics" {
+test "numeric: float + float typechecks with no diagnostics" ![io] {
     let diagnostics = _diagnostics("fn mul(x: float, y: float) -> float { return x * y; }");
     assert diagnostics.length == 0;
 }
@@ -75,17 +75,17 @@ test "numeric: float + float typechecks with no diagnostics" {
 // Pre-#281 these were rejected with E0805. Adding them to the
 // accept-list closes the gap between the language's canonical
 // numeric type names and the C-ABI extern surface.
-test "numeric: extern fn with int parameter and return typechecks" {
+test "numeric: extern fn with int parameter and return typechecks" ![io] {
     let diagnostics = _diagnostics("extern fn add_one(x: int) -> int;");
     assert diagnostics.length == 0;
 }
 
-test "numeric: extern fn with float parameter and return typechecks" {
+test "numeric: extern fn with float parameter and return typechecks" ![io] {
     let diagnostics = _diagnostics("extern fn double_it(x: float) -> float;");
     assert diagnostics.length == 0;
 }
 
-test "numeric: extern fn mixing int and float typechecks" {
+test "numeric: extern fn mixing int and float typechecks" ![io] {
     let diagnostics = _diagnostics("extern fn scale(value: int, factor: float) -> float;");
     assert diagnostics.length == 0;
 }
@@ -98,32 +98,32 @@ test "numeric: extern fn mixing int and float typechecks" {
 // (comparison/dominant_type for the wider widths in user-level
 // arithmetic; extern *signatures* don't compare on the boundary
 // itself, so this PR is sufficient for the libc skeleton's needs).
-test "numeric: extern fn with i16 parameter typechecks (Slice C)" {
+test "numeric: extern fn with i16 parameter typechecks (Slice C)" ![io] {
     let diagnostics = _diagnostics("extern fn narrow(x: i16) -> i64;");
     assert diagnostics.length == 0;
 }
 
-test "numeric: extern fn with u16 parameter typechecks (Slice C)" {
+test "numeric: extern fn with u16 parameter typechecks (Slice C)" ![io] {
     let diagnostics = _diagnostics("extern fn read_u16(buf: *u8) -> u16;");
     assert diagnostics.length == 0;
 }
 
-test "numeric: extern fn with u32 parameter typechecks (Slice C)" {
+test "numeric: extern fn with u32 parameter typechecks (Slice C)" ![io] {
     let diagnostics = _diagnostics("extern fn fchmod(fd: i32, mode: u32) -> i32;");
     assert diagnostics.length == 0;
 }
 
-test "numeric: extern fn with u64 parameter typechecks (Slice C)" {
+test "numeric: extern fn with u64 parameter typechecks (Slice C)" ![io] {
     let diagnostics = _diagnostics("extern fn ioctl(fd: i32, request: u64) -> i32;");
     assert diagnostics.length == 0;
 }
 
-test "numeric: extern fn with isize return typechecks (Slice C)" {
+test "numeric: extern fn with isize return typechecks (Slice C)" ![io] {
     let diagnostics = _diagnostics("extern fn read_bytes(fd: i32, buf: *u8, count: usize) -> isize;");
     assert diagnostics.length == 0;
 }
 
-test "numeric: extern fn with f32 typechecks (Slice C)" {
+test "numeric: extern fn with f32 typechecks (Slice C)" ![io] {
     let diagnostics = _diagnostics("extern fn fast_sin(x: f32) -> f32;");
     assert diagnostics.length == 0;
 }

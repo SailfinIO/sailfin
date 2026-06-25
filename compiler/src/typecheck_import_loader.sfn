@@ -28,8 +28,8 @@
 // artifact from looking like a benign module that just happened to
 // export only structs/functions.
 import { Statement } from "./ast";
+import { ImportSymbolTable, append_import_function, empty_import_symbols } from "./effect_imports";
 import { parse_native_artifact_for_import_context } from "./native_ir_api";
-import { ImportSymbolTable, empty_import_symbols, append_import_function } from "./effect_imports";
 import { interfaces_from_native } from "./typecheck_imports";
 
 // Result of parsing a single `.sfn-asm` buffer. `diagnostics` is

@@ -6,30 +6,30 @@
 // `find_local_binding`, `find_parameter_binding`, `append_local_binding`,
 // `infer_borrow_base_scope`, lifetime region creation/release, and scope ID
 // construction (`format_root_scope_id`, `make_child_scope_id`).
+import { NativeEnum, NativeStruct } from "../../../native_ir";
+import { char_at, substring } from "../../../string_utils";
 import {
     LLVMOperand,
+    LifetimeRegionMetadata,
+    LifetimeReleaseEvent,
     LocalBinding,
     OwnershipInfo,
-    ScopeMetadata,
     ParameterBinding,
-    StructLiteralField,
-    LifetimeReleaseEvent,
-    LifetimeRegionMetadata
+    ScopeMetadata,
+    StructLiteralField
 } from "../../types";
 import {
-    trim_text,
-    starts_with,
-    is_simple_identifier,
     is_identifier_part_char,
-    is_identifier_start_char
+    is_identifier_start_char,
+    is_simple_identifier,
+    starts_with,
+    trim_text
 } from "../../utils";
 import { bindings_find_parameter_binding } from "../bindings";
-import { sanitize_symbol } from "./core_text";
 import { find_call_site } from "./core_calls";
 import { parse_member_access } from "./core_parse";
-import { NativeEnum, NativeStruct } from "../../../native_ir";
+import { sanitize_symbol } from "./core_text";
 import { is_heap_type } from "./core_type_mapping";
-import { char_at, substring } from "../../../string_utils";
 
 fn find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {
     return bindings_find_parameter_binding(bindings, name);
