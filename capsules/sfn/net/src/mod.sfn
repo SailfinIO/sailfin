@@ -1,6 +1,6 @@
 // sfn/net — Low-level networking primitives for Sailfin.
 //
-// Provides TCP and UDP socket operations for building network protocols.
+// Provides TCP socket operations for building network protocols.
 // Higher-level protocols (HTTP, WebSocket) are built on top of this capsule.
 //
 // All operations require the `net` effect. Server and bind operations
@@ -14,8 +14,38 @@
 //   let response = read_all(conn);
 //   close(conn);
 //
-// Implementation status: API surface defined, pending runtime socket
-// intrinsics. All functions currently return zero-values.
+// Implementation status: the TCP client (`connect` / `write_all` /
+// `read_all` / `read_bytes` / `close`) and server (`listen` / `accept` /
+// `close_listener`) perform real socket I/O against the runtime socket
+// primitives in `runtime/sfn/adapters/net.sfn` (#1582, epic #1540 B6).
+// UDP (`udp_bind` / `send_to` / `recv_from`) and DNS (`resolve`) remain
+// stubbed pending follow-up waves; host resolution is the `localhost`
+// alias plus numeric dotted-quad IPv4 (no DNS), and bodies are text v0
+// (NUL-terminated; embedded-NUL binary payloads are a follow-up).
+//
+// Runtime ABI. The `sfn_net_*` externs below are defined in
+// `runtime/sfn/adapters/net.sfn` (linked into every Sailfin binary via
+// `runtime/capsule.toml`'s `sfn-sources`). Strings cross the boundary as
+// the raw `* u8` C-ABI (`s as * u8` out, `ptr as string` back) — the same
+// plain-pointer shape `sfn/http` uses for `sfn_http_request_raw`. Externs
+// carry no effect annotation (externs may not); enforcement rides on each
+// public function's own `![net]` / `![net, io]` annotation.
+extern fn sfn_net_connect(host: * u8, port: i64) -> i32;
+
+extern fn sfn_net_write_all(fd: i32, data: * u8) -> i32;
+
+extern fn sfn_net_read_all(fd: i32) -> * u8;
+
+extern fn sfn_net_read_bytes(fd: i32, max: i64) -> * u8;
+
+extern fn sfn_net_close(fd: i32) -> void;
+
+extern fn sfn_net_listen(host: * u8, port: i64) -> i32;
+
+extern fn sfn_net_listen_port(fd: i32) -> i64;
+
+extern fn sfn_net_accept(fd: i32) -> i32;
+
 // ---- Types ----
 struct Connection {
     id: int;  // opaque handle to the underlying socket
@@ -39,74 +69,84 @@ struct NetAddress {
 
 // ---- TCP Client ----
 fn connect(host: string, port: int) -> Connection ![net] {
-    // Open a TCP connection to host:port.
-    // Pending runtime socket intrinsics.
+    // Open a TCP connection to host:port. `id` carries the connected
+    // socket fd (>= 0 on success, -1 on failure); `is_open` reflects it.
+    let fd = sfn_net_connect(host as * u8, port as i64);
     return Connection {
-        id: -1,
+        id: fd as int,
         host: host,
         port: port,
         protocol: "tcp",
-        is_open: false
+        is_open: fd >= 0
     };
 }
 
 fn write_all(conn: Connection, data: string) -> void ![net] {
-    // Write all bytes to the connection.
-    // Blocks until the full payload is sent.
-    // Pending runtime socket intrinsics.
+    // Write all bytes to the connection. Blocks until the full payload is
+    // sent. Text v0 (length is the NUL-terminated `strlen`).
+    sfn_net_write_all(conn.id as i32, data as * u8);
 }
 
 fn read_all(conn: Connection) -> string ![net] {
-    // Read all available data from the connection until EOF.
-    // Pending runtime socket intrinsics.
-    return "";
+    // Read all available data from the connection until EOF (the peer
+    // closing its write half). Returns "" on a socket error.
+    let ptr = sfn_net_read_all(conn.id as i32);
+    if ptr as i64 == 0 { return ""; }
+    return ptr as string;
 }
 
 fn read_bytes(conn: Connection, max_bytes: int) -> string ![net] {
-    // Read up to max_bytes from the connection.
-    // Returns immediately with whatever data is available.
-    // Pending runtime socket intrinsics.
-    return "";
+    // Read up to max_bytes from the connection with a single recv. Returns
+    // immediately with whatever data is available (or "" on EOF / error).
+    let ptr = sfn_net_read_bytes(conn.id as i32, max_bytes as i64);
+    if ptr as i64 == 0 { return ""; }
+    return ptr as string;
 }
 
 fn close(conn: Connection) -> void ![net] {
     // Close the connection and release the socket.
-    // Pending runtime socket intrinsics.
+    sfn_net_close(conn.id as i32);
 }
 
 // ---- TCP Server ----
 fn listen(host: string, port: int) -> Listener ![net, io] {
-    // Bind and listen on host:port for incoming TCP connections.
-    // Pending runtime socket intrinsics.
+    // Bind and listen on host:port for incoming TCP connections. Pass
+    // port 0 to request an ephemeral port; the returned Listener's `port`
+    // reflects the actual bound port. `id` is the listening fd (-1 on
+    // failure).
+    let fd = sfn_net_listen(host as * u8, port as i64);
+    let mut bound_port = port;
+    if fd >= 0 { bound_port = sfn_net_listen_port(fd) as int; }
     return Listener {
-        id: -1,
+        id: fd as int,
         host: host,
-        port: port,
+        port: bound_port,
         protocol: "tcp"
     };
 }
 
 fn accept(listener: Listener) -> Connection ![net, io] {
-    // Accept the next incoming connection. Blocks until a client connects.
-    // Pending runtime socket intrinsics.
+    // Accept the next incoming connection. Blocks until a client connects
+    // (or the accept timeout fires, yielding a closed Connection).
+    let fd = sfn_net_accept(listener.id as i32);
     return Connection {
-        id: -1,
+        id: fd as int,
         host: listener.host,
         port: listener.port,
         protocol: "tcp",
-        is_open: false
+        is_open: fd >= 0
     };
 }
 
 fn close_listener(listener: Listener) -> void ![net, io] {
     // Stop listening and release the server socket.
-    // Pending runtime socket intrinsics.
+    sfn_net_close(listener.id as i32);
 }
 
 // ---- UDP ----
 fn udp_bind(host: string, port: int) -> Connection ![net, io] {
     // Create a UDP socket bound to host:port.
-    // Pending runtime socket intrinsics.
+    // Pending runtime socket intrinsics (follow-up wave).
     return Connection {
         id: -1,
         host: host,
@@ -118,20 +158,20 @@ fn udp_bind(host: string, port: int) -> Connection ![net, io] {
 
 fn send_to(conn: Connection, data: string, addr: NetAddress) -> void ![net] {
     // Send a UDP datagram to the given address.
-    // Pending runtime socket intrinsics.
+    // Pending runtime socket intrinsics (follow-up wave).
 }
 
 fn recv_from(conn: Connection, max_bytes: int) -> string ![net] {
     // Receive a UDP datagram. Returns the payload.
     // Full implementation will also return the sender address.
-    // Pending runtime socket intrinsics.
+    // Pending runtime socket intrinsics (follow-up wave).
     return "";
 }
 
 // ---- DNS ----
 fn resolve(hostname: string) -> string[] ![net] {
     // Resolve a hostname to one or more IP addresses.
-    // Pending runtime socket intrinsics.
+    // Pending runtime DNS (getaddrinfo) — follow-up wave (#1540 B2).
     return [];
 }
 

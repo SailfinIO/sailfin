@@ -1,0 +1,91 @@
+// Loopback round-trip tests for the sfn/net TCP client + server surface
+// (#1582, epic #1540 B6). These exercise the REAL socket primitives in
+// runtime/sfn/adapters/net.sfn end-to-end, in-process: a listener and a
+// client live in the same single-threaded test and talk over loopback.
+//
+// Why this works single-threaded: a `connect` to a listening loopback
+// socket completes the TCP handshake into the kernel's accept backlog
+// before `accept` is called, so the connect -> write -> accept -> read
+// sequence never deadlocks. The runtime arms SO_RCVTIMEO on the listening
+// and accepted sockets, so any unexpected ordering fails with a timeout
+// rather than hanging the suite.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and
+// cannot be called from a `![net, io]` test. Assert on captured bytes with
+// `sfn/strings::find` instead (the runtime_adapter_http exemplar pattern).
+import { find } from "sfn/strings";
+
+import {
+    accept,
+    close,
+    close_listener,
+    connect,
+    is_open,
+    listen,
+    read_all,
+    read_bytes,
+    write_all
+} from "../src/mod";
+
+test "net: loopback TCP round-trip (connect/write_all/accept/read)" ![net, io] {
+    // Bind a listener on an ephemeral loopback port (port 0 -> kernel
+    // assigns; the Listener's `port` reflects the resolved port).
+    let lst = listen("127.0.0.1", 0);
+    assert lst.id >= 0;
+    assert lst.port > 0;
+
+    // Connect a client to the listener's resolved port. On loopback the
+    // handshake completes into the accept backlog, so this does not block.
+    let cli = connect("127.0.0.1", lst.port);
+    assert is_open(cli);
+
+    // Client -> server.
+    write_all(cli, "ping");
+
+    // Accept the queued connection and read the request bytes.
+    let srv = accept(lst);
+    assert is_open(srv);
+    let got = read_bytes(srv, 64);
+    assert find(got, "ping", 0) >= 0;
+
+    // Server -> client.
+    write_all(srv, "pong");
+    let reply = read_bytes(cli, 64);
+    assert find(reply, "pong", 0) >= 0;
+
+    close(srv);
+    close(cli);
+    close_listener(lst);
+}
+
+test "net: read_all drains to EOF after the peer closes" ![net, io] {
+    let lst = listen("127.0.0.1", 0);
+    assert lst.id >= 0;
+    let cli = connect("127.0.0.1", lst.port);
+    assert is_open(cli);
+    let srv = accept(lst);
+    assert is_open(srv);
+
+    // Client writes then closes — the FIN signals EOF so the server's
+    // read_all (which drains until EOF) terminates with the full payload.
+    write_all(cli, "hello-eof");
+    close(cli);
+
+    let got = read_all(srv);
+    assert find(got, "hello-eof", 0) >= 0;
+
+    close(srv);
+    close_listener(lst);
+}
+
+test "net: connect to a non-listening port fails cleanly" ![net, io] {
+    // Grab an ephemeral port, then stop listening so nothing accepts;
+    // connecting to it must fail (id < 0, not open) rather than block.
+    let lst = listen("127.0.0.1", 0);
+    let port = lst.port;
+    close_listener(lst);
+
+    let cli = connect("127.0.0.1", port);
+    assert ! is_open(cli);
+    assert cli.id < 0;
+}
