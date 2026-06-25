@@ -892,8 +892,10 @@ declarations in `runtime/sfn/platform/pthread.sfn`. No C wrapper is involved.
 `PthreadMutex` and `PthreadCond` are declared as opaque byte arrays sized to
 the target platform's `sizeof(pthread_mutex_t)` / `sizeof(pthread_cond_t)`.
 
-**Pool size:** `min(available_cores, 4)` by default, overridable with
-`SAILFIN_THREADS=N`.
+**Pool size:** `min(available_cores, 32)` by default, overridable with
+`SAILFIN_THREADS=N` (raised from the original `4`-cap in #1584 so an I/O-bound
+proxy/server is not throttled to four in-flight connections; the `1024`
+explicit-override ceiling is unchanged).
 
 #### 2.6.2 Spawn
 
