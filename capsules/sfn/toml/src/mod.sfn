@@ -261,6 +261,49 @@ fn _parse_value(raw: string) -> TomlValue {
     return _parse_number(value);
 }
 
+// ---- Escape helpers (shared by parse + serialize) ----
+// Real UTF-8 encode of a single code point via the runtime helper
+// (rejects surrogates / out-of-range, returning ""). The `\uXXXX` /
+// `\UXXXXXXXX` decoders reuse this rather than hand-rolling UTF-8. Same
+// `* u8 as string` cast surface the prelude's `char_from_code` uses.
+extern fn sfn_str_from_codepoint(cp: i64) -> * u8;
+
+fn _from_codepoint(cp: int) -> string {
+    let bytes: * u8 = sfn_str_from_codepoint(cp);
+    return bytes as string;
+}
+
+fn _hex_val(ch: string) -> int {
+    let c = char_code(ch);
+    if c >= 48 && c <= 57 { return c - 48; }
+    if c >= 97 && c <= 102 { return c - 87; }
+    if c >= 65 && c <= 70 { return c - 55; }
+    return -1;
+}
+
+fn _read_hex(text: string, p: int, n: int) -> int {
+    if p + n > text.length { return -1; }
+    let mut val: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= n { break; }
+        let d = _hex_val(text[p + i]);
+        if d < 0 { return -1; }
+        val = val * 16 + d;
+        i += 1;
+    }
+    return val;
+}
+
+fn _hex_digit_char(n: int) -> string {
+    let digits = "0123456789ABCDEF";
+    return digits[n];
+}
+
+fn _hex2(code: int) -> string {
+    return _hex_digit_char((code / 16) % 16) + _hex_digit_char(code % 16);
+}
+
 fn _parse_basic_string(raw: string) -> string {
     // Parse a TOML basic string (double-quoted, with escape sequences).
     if raw.length < 2 { return ""; }
@@ -276,9 +319,23 @@ fn _parse_basic_string(raw: string) -> string {
             let esc = raw[i];
             if esc == "\"" { out = out + "\""; } else if esc == "\\" {
                 out = out + "\\";
+            } else if esc == "b" { out = out + _from_codepoint(8); } else if esc == "f" {
+                out = out + _from_codepoint(12);
             } else if esc == "n" { out = out + "\n"; } else if esc == "r" {
                 out = out + "\r";
-            } else if esc == "t" { out = out + "\t"; } else { out = out + esc; }
+            } else if esc == "t" { out = out + "\t"; } else if esc == "u" {
+                let cp = _read_hex(raw, i + 1, 4);
+                if cp < 0 { out = out + esc; } else {
+                    out = out + _from_codepoint(cp);
+                    i += 4;
+                }
+            } else if esc == "U" {
+                let cp = _read_hex(raw, i + 1, 8);
+                if cp < 0 { out = out + esc; } else {
+                    out = out + _from_codepoint(cp);
+                    i += 8;
+                }
+            } else { out = out + esc; }
         } else { out = out + ch; }
         i += 1;
     }
@@ -857,11 +914,16 @@ fn _escape_string(s: string) -> string {
     loop {
         if i >= s.length { break; }
         let ch = s[i];
+        let code = char_code(ch);
         if ch == "\"" { out = out + "\\\""; } else if ch == "\\" {
             out = out + "\\\\";
-        } else if ch == "\n" { out = out + "\\n"; } else if ch == "\r" {
-            out = out + "\\r";
-        } else if ch == "\t" { out = out + "\\t"; } else { out = out + ch; }
+        } else if code == 8 { out = out + "\\b"; } else if code == 9 {
+            out = out + "\\t";
+        } else if code == 10 { out = out + "\\n"; } else if code == 12 {
+            out = out + "\\f";
+        } else if code == 13 { out = out + "\\r"; } else if code >= 0 && code < 32 {
+            out = out + "\\u00" + _hex2(code);
+        } else { out = out + ch; }
         i += 1;
     }
     return out;

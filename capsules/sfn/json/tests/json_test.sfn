@@ -148,3 +148,48 @@ test "json: moderately-nested document within the cap parses unchanged" {
     assert strings_equal(cur.kind, "number");
     assert cur.number_value == 42;
 }
+
+// -- Escape decode/encode coverage (#1619) --
+test "json: unicode escape decodes to single char" {
+    let a: JsonValue = parse("\"\\u0041\"");
+    assert strings_equal(a.kind, "string");
+    assert a.string_value.length == 1;
+    assert strings_equal(a.string_value, "A");
+}
+
+test "json: backspace and formfeed decode to control chars" {
+    let b: JsonValue = parse("\"\\b\"");
+    assert strings_equal(b.string_value, char_from_code(8));
+    let f: JsonValue = parse("\"\\f\"");
+    assert strings_equal(f.string_value, char_from_code(12));
+}
+
+test "json: escaped slash decodes to slash" {
+    let s: JsonValue = parse("\"\\/\"");
+    assert strings_equal(s.string_value, "/");
+}
+
+test "json: surrogate pair combines to astral code point" {
+    // U+1F600 GRINNING FACE = UTF-8 F0 9F 98 80.
+    let s: JsonValue = parse("\"\\uD83D\\uDE00\"");
+    let expected = char_from_code(240) + char_from_code(159) + char_from_code(152)
+        + char_from_code(128);
+    assert strings_equal(s.string_value, expected);
+}
+
+test "json: control chars stringify to valid re-parseable JSON" {
+    // U+0001 has no shorthand escape, so it must emit a \u00XX escape.
+    let original = char_from_code(1);
+    let encoded = stringify(string_val(original));
+    assert strings_equal(encoded, "\"\\u0001\"");
+    let back: JsonValue = parse(encoded);
+    assert strings_equal(back.string_value, original);
+}
+
+test "json: backspace stringifies to shorthand and round-trips" {
+    let original = char_from_code(8);
+    let encoded = stringify(string_val(original));
+    assert strings_equal(encoded, "\"\\b\"");
+    let back: JsonValue = parse(encoded);
+    assert strings_equal(back.string_value, original);
+}
