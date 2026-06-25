@@ -1061,6 +1061,850 @@ fn _try_lower_channel_method(member_target: MemberAccessParse, argument_entries:
     };
 }
 
+// Typed spawn: `spawn:<kind> <operand>`. Extracted sibling of
+// `lower_expression` (peak-RSS scope split, issue context in CLAUDE.md) —
+// behaviour is identical; each `let` here lives in its own function scope
+// instead of accumulating into `lower_expression`'s 240+-local frame.
+fn lower_spawn_typed_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let diagnostics: string[] = [];
+    let colon_pos = index_of(stripped, ":");
+    let space_pos = index_of(stripped, " ");
+    let mut spawn_kind: string = "";
+    let mut spawn_operand_text: string = "";
+    if colon_pos >= 0 {
+        if space_pos > colon_pos {
+            spawn_kind = substring(stripped, colon_pos + 1, space_pos);
+            spawn_operand_text = trim_text(substring(stripped, space_pos + 1, stripped.length));
+        } else {
+            spawn_kind = substring(stripped, colon_pos + 1, stripped.length);
+        }
+    }
+    let spawn_sym = spawn_symbol_for_kind(spawn_kind);
+    // #1475: a capturing task lambda's env is `@sfn_env_alloc`'d and only
+    // the worker frees it — route through the `_owned_ctx` family whose
+    // trampoline `sfn_env_free`s it. The `owned_env` tag rides on the
+    // closure-pair operand text (set by the lift pass for spawn targets);
+    // non-capturing (null env) and async ctx paths keep the plain `_ctx`.
+    let mut spawn_ctx_sym = spawn_ctx_symbol_for_kind(spawn_kind);
+    // #1476: a capturing task lambda whose first capture is a moved
+    // `OwnedBuf` carries the `owned_buf` tag — route through the
+    // `_owned_buf_ctx` family whose trampoline reclaims the libc-backed
+    // buffer at env offset 0. Check `owned_buf` BEFORE `owned_env`: both
+    // markers contain `env_alloc`, and `owned_buf` is the more specific
+    // (env-free + buffer reclaim) selection.
+    if index_of(spawn_operand_text, "env_alloc owned_buf ") >= 0 {
+        spawn_ctx_sym = spawn_owned_buf_ctx_symbol_for_kind(spawn_kind);
+    } else if index_of(spawn_operand_text, "env_alloc owned_env ") >= 0 {
+        spawn_ctx_sym = spawn_owned_ctx_symbol_for_kind(spawn_kind);
+    }
+    let future_type = future_type_for_spawn_kind(spawn_kind);
+    let fn_ret_llvm = llvm_return_type_for_spawn_kind(spawn_kind);
+    let fn_ptr_type = fn_ret_llvm + " ()*";
+    let mut spawn_lines: string[] = lines;
+    let mut spawn_temp: int = temp_index;
+    let mut spawn_diag: string[] = diagnostics;
+    let empty_spawn_constants: StringConstant[] = [];
+    let mut have_operand: boolean = false;
+    let mut op_llvm_type: string = "";
+    let mut op_value: string = "";
+    if spawn_operand_text.length > 0 {
+        let lowered_op = lower_expression(spawn_operand_text, bindings, locals, spawn_temp, spawn_lines, functions, context, "");
+        spawn_diag = extend_string_array(spawn_diag, lowered_op.diagnostics);
+        spawn_lines = lowered_op.lines;
+        spawn_temp = lowered_op.temp_index;
+        if lowered_op.operand != null {
+            let raw_op = lowered_op.operand;
+            op_llvm_type = raw_op.llvm_type;
+            op_value = raw_op.value;
+            have_operand = true;
+        }
+    }
+    if !have_operand {
+        spawn_diag.push("llvm lowering: spawn:<kind>: could not lower operand for `"
+            + stripped
+            + "`");
+        return ExpressionResult {
+            lines: spawn_lines,
+            temp_index: spawn_temp,
+            operand: null,
+            diagnostics: spawn_diag,
+            string_constants: empty_spawn_constants
+        };
+    }
+    // The spawned task lowers to one of two operand shapes:
+    //   1. A lifted-lambda closure pair `{i8*, i8*}` = {fn_ptr, env}
+    //      (issue #686). The lifted worker is `fn(i8* env) -> <ret>` —
+    //      exactly the shape the runtime's `_ctx` trampoline calls — so
+    //      extract the fn_ptr + env and route through
+    //      `sfn_spawn_<kind>_ctx(fn_ptr, env)`. Non-capturing lambdas
+    //      carry a null env; capturing lambdas (follow-up) carry a heap
+    //      env. This is the path the surface `spawn fn() -> T { ... }`
+    //      takes, and it makes the task actually run on the pool (the
+    //      former `bitcast {i8*,i8*} to <ret> ()*` was invalid IR — an
+    //      aggregate cannot be bitcast to a function pointer — so the
+    //      task was never spawned).
+    //   2. A bare function reference (`i8*` or a typed `<ret> ()*`),
+    //      i.e. a zero-argument worker. Coerce to i8* and use the no-ctx
+    //      `sfn_spawn_<kind>(fn_ptr)` variant.
+    let mut spawn_raw_t: string = "";
+    if op_llvm_type == "{i8*, i8*}" {
+        let cp_fn_t = format_temp_name(spawn_temp);
+        spawn_temp += 1;
+        spawn_lines.push("  " + cp_fn_t + " = extractvalue {i8*, i8*} "
+            + op_value
+            + ", 0");
+        let cp_env_t = format_temp_name(spawn_temp);
+        spawn_temp += 1;
+        spawn_lines.push("  " + cp_env_t + " = extractvalue {i8*, i8*} "
+            + op_value
+            + ", 1");
+        spawn_raw_t = format_temp_name(spawn_temp);
+        spawn_temp += 1;
+        spawn_lines.push("  " + spawn_raw_t + " = call i8* @" + spawn_ctx_sym
+            + "(i8* "
+            + cp_fn_t
+            + ", i8* "
+            + cp_env_t
+            + ")");
+    } else {
+        let mut fn_ptr_i8: string = op_value;
+        if op_llvm_type != "i8*" {
+            let fn_ptr_cast_t = format_temp_name(spawn_temp);
+            spawn_temp += 1;
+            spawn_lines.push("  " + fn_ptr_cast_t + " = bitcast " + op_llvm_type
+                + " "
+                + op_value
+                + " to i8*");
+            fn_ptr_i8 = fn_ptr_cast_t;
+        }
+        spawn_raw_t = format_temp_name(spawn_temp);
+        spawn_temp += 1;
+        spawn_lines.push("  " + spawn_raw_t + " = call i8* @" + spawn_sym
+            + "(i8* "
+            + fn_ptr_i8
+            + ")");
+    }
+    // Bitcast raw i8* result back to typed future pointer for
+    // downstream IR type tracking (e.g. the await dispatch).
+    let spawn_result_t = format_temp_name(spawn_temp);
+    spawn_temp += 1;
+    spawn_lines.push("  " + spawn_result_t + " = bitcast i8* " + spawn_raw_t
+        + " to "
+        + future_type);
+    let spawn_operand = LLVMOperand {
+        llvm_type: future_type,
+        value: spawn_result_t
+    };
+    return ExpressionResult {
+        lines: spawn_lines,
+        temp_index: spawn_temp,
+        operand: spawn_operand,
+        diagnostics: spawn_diag,
+        string_constants: empty_spawn_constants
+    };
+}
+
+// Untyped spawn: `spawn <operand>`. Uses the generic `spawn_task` adapter
+// (i8* → i8*). Extracted sibling of `lower_expression`.
+fn lower_spawn_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let diagnostics: string[] = [];
+    let spawn_op_text = trim_text(substring(stripped, 6, stripped.length));
+    let mut spawn2_lines: string[] = lines;
+    let mut spawn2_temp: int = temp_index;
+    let mut spawn2_diag: string[] = diagnostics;
+    let empty_spawn2_constants: StringConstant[] = [];
+    if spawn_op_text.length > 0 {
+        let lowered2 = lower_expression(spawn_op_text, bindings, locals, spawn2_temp, spawn2_lines, functions, context, "");
+        spawn2_diag = extend_string_array(spawn2_diag, lowered2.diagnostics);
+        spawn2_lines = lowered2.lines;
+        spawn2_temp = lowered2.temp_index;
+        if lowered2.operand != null {
+            let op2 = lowered2.operand;
+            let mut task_ptr: string = op2.value;
+            if op2.llvm_type != "i8*" {
+                let cast2_t = format_temp_name(spawn2_temp);
+                spawn2_temp += 1;
+                spawn2_lines.push("  " + cast2_t + " = bitcast " + op2.llvm_type
+                    + " "
+                    + op2.value
+                    + " to i8*");
+                task_ptr = cast2_t;
+            }
+            let spawn2_result = format_temp_name(spawn2_temp);
+            spawn2_temp += 1;
+            spawn2_lines.push("  " + spawn2_result
+                + " = call i8* @sfn_spawn_task(i8* "
+                + task_ptr
+                + ")");
+            let spawn2_operand = LLVMOperand {
+                llvm_type: "i8*",
+                value: spawn2_result
+            };
+            return ExpressionResult {
+                lines: spawn2_lines,
+                temp_index: spawn2_temp,
+                operand: spawn2_operand,
+                diagnostics: spawn2_diag,
+                string_constants: empty_spawn2_constants
+            };
+        }
+    }
+    spawn2_diag.push("llvm lowering: spawn: could not lower operand for `"
+        + stripped
+        + "`");
+    return ExpressionResult {
+        lines: spawn2_lines,
+        temp_index: spawn2_temp,
+        operand: null,
+        diagnostics: spawn2_diag,
+        string_constants: empty_spawn2_constants
+    };
+}
+
+// Bare channel: `channel(<capacity>)`. Lowers to `sfn_channel_create` with
+// pointer-sized (8-byte) monomorphized elements and `owned` = 0. Extracted
+// sibling of `lower_expression`.
+fn lower_channel_capacity_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let diagnostics: string[] = [];
+    let chan_inner = trim_text(substring(stripped, 8, stripped.length));
+    // The end index is computed in a standalone statement (not a
+    // ternary inside the call argument): the inline form mis-lowered
+    // and produced an empty capacity text, dropping the capacity
+    // operand entirely (`channel(4)` emitted `i32 0`).
+    let mut chan_inner_end: int = 0;
+    if chan_inner.length > 0 { chan_inner_end = chan_inner.length - 1; }
+    let cap_text = trim_text(substring(chan_inner, 0, chan_inner_end));
+    let empty_chan_constants: StringConstant[] = [];
+    let mut chan_lines: string[] = lines;
+    let mut chan_temp: int = temp_index;
+    let mut chan_diag: string[] = diagnostics;
+    let mut cap_llvm: string = "i64 0";
+    if cap_text.length > 0 {
+        let cap_lowered = lower_expression(cap_text, bindings, locals, chan_temp, chan_lines, functions, context, "");
+        chan_diag = extend_string_array(chan_diag, cap_lowered.diagnostics);
+        chan_lines = cap_lowered.lines;
+        chan_temp = cap_lowered.temp_index;
+        if cap_lowered.operand != null {
+            let cap_op = cap_lowered.operand;
+            let mut cap_val: string = cap_op.value;
+            if cap_op.llvm_type == "i32" {
+                let cap_cast = format_temp_name(chan_temp);
+                chan_temp += 1;
+                chan_lines.push("  " + cap_cast + " = sext i32 " + cap_op.value
+                    + " to i64");
+                cap_val = cap_cast;
+            }
+            cap_llvm = "i64 " + cap_val;
+        }
+    }
+    let chan_result = format_temp_name(chan_temp);
+    chan_temp += 1;
+    chan_lines.push("  " + chan_result + " = call i8* @sfn_channel_create("
+        + cap_llvm
+        + ", i64 8, i64 0)");
+    let chan_operand = LLVMOperand { llvm_type: "i8*", value: chan_result };
+    return ExpressionResult {
+        lines: chan_lines,
+        temp_index: chan_temp,
+        operand: chan_operand,
+        diagnostics: chan_diag,
+        string_constants: empty_chan_constants
+    };
+}
+
+// Typed channel: `channel:<kind>(<capacity>)`. Sizes the ring slot to the
+// aggregate width and sets `owned` = 1 only for `channel:OwnedBuf`.
+// Extracted sibling of `lower_expression`.
+fn lower_channel_typed_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let diagnostics: string[] = [];
+    let paren_pos = index_of(stripped, "(");
+    let empty_chantyped_constants: StringConstant[] = [];
+    let mut chantyped_lines: string[] = lines;
+    let mut chantyped_temp: int = temp_index;
+    let mut chantyped_diag: string[] = diagnostics;
+    let mut typed_cap_llvm: string = "i64 0";
+    if paren_pos >= 0 {
+        let inner_start = paren_pos + 1;
+        let mut inner_end: int = 0;
+        if stripped.length > 0 { inner_end = stripped.length - 1; }
+        let typed_cap_text = trim_text(substring(stripped, inner_start, inner_end));
+        if typed_cap_text.length > 0 {
+            let typed_cap_lowered = lower_expression(typed_cap_text, bindings, locals, chantyped_temp, chantyped_lines, functions, context, "");
+            chantyped_diag = extend_string_array(chantyped_diag, typed_cap_lowered.diagnostics);
+            chantyped_lines = typed_cap_lowered.lines;
+            chantyped_temp = typed_cap_lowered.temp_index;
+            if typed_cap_lowered.operand != null {
+                let typed_cap_op = typed_cap_lowered.operand;
+                let mut typed_cap_val: string = typed_cap_op.value;
+                if typed_cap_op.llvm_type == "i32" {
+                    let typed_cap_cast = format_temp_name(chantyped_temp);
+                    chantyped_temp += 1;
+                    chantyped_lines.push("  " + typed_cap_cast + " = sext i32 "
+                        + typed_cap_op.value
+                        + " to i64");
+                    typed_cap_val = typed_cap_cast;
+                }
+                typed_cap_llvm = "i64 " + typed_cap_val;
+            }
+        }
+    }
+    // Element stride. The kind sits between "channel:" (8 chars) and
+    // "(". A struct element crosses the channel BY VALUE (#1466), so its
+    // ring slot must be the full LLVM width of the aggregate, computed
+    // with the well-defined `getelementptr null, i32 1` sizeof idiom —
+    // the same one the boxed-struct alloc uses, so the create stride and
+    // the send-side `alloca %T` spill agree by construction. Scalar /
+    // pointer-sized kinds keep the historical 8-byte monomorphized
+    // stride. A divergence over-writes or under-reads the ring slot
+    // (an #1205-class heap hazard under concurrent producers/consumers).
+    let mut typed_elem_size_llvm: string = "i64 8";
+    // `owned` flag (#1476): 1 only when the element kind is exactly
+    // `OwnedBuf`, so `sfn_channel_destroy`'s drain seam frees each
+    // abandoned element's `ptr_addr`. A generic struct element does not
+    // own heap by this convention, so it stays 0 (no drain).
+    let mut typed_owned_llvm: string = "i64 0";
+    if paren_pos > 8 {
+        let kind_text = trim_text(substring(stripped, 8, paren_pos));
+        if kind_text == "OwnedBuf" { typed_owned_llvm = "i64 1"; }
+        let kind_struct = resolve_struct_info_for_literal(context, kind_text);
+        if kind_struct != null {
+            let esz_ptr = format_temp_name(chantyped_temp);
+            chantyped_temp += 1;
+            chantyped_lines.push("  " + esz_ptr + " = getelementptr "
+                + kind_struct.llvm_name
+                + ", "
+                + kind_struct.llvm_name
+                + "* null, i32 1");
+            let esz_val = format_temp_name(chantyped_temp);
+            chantyped_temp += 1;
+            chantyped_lines.push("  " + esz_val + " = ptrtoint " + kind_struct.llvm_name
+                + "* "
+                + esz_ptr
+                + " to i64");
+            typed_elem_size_llvm = "i64 " + esz_val;
+        }
+    }
+    let chantyped_result = format_temp_name(chantyped_temp);
+    chantyped_temp += 1;
+    chantyped_lines.push("  " + chantyped_result
+        + " = call i8* @sfn_channel_create("
+        + typed_cap_llvm
+        + ", "
+        + typed_elem_size_llvm
+        + ", "
+        + typed_owned_llvm
+        + ")");
+    let chantyped_operand = LLVMOperand {
+        llvm_type: "i8*",
+        value: chantyped_result
+    };
+    return ExpressionResult {
+        lines: chantyped_lines,
+        temp_index: chantyped_temp,
+        operand: chantyped_operand,
+        diagnostics: chantyped_diag,
+        string_constants: empty_chantyped_constants
+    };
+}
+
+// Structured fan-out/join: `parallel [<task>, ...]` (#1474). Extracted
+// sibling of `lower_expression`. See the call-site comment for the full
+// runtime contract.
+fn lower_parallel_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let diagnostics: string[] = [];
+    let list_start = index_of(stripped, "[");
+    let list_end = find_last_index_of_char(stripped, "]");
+    let empty_par_constants: StringConstant[] = [];
+    let mut par_lines: string[] = lines;
+    let mut par_temp: int = temp_index;
+    let mut par_diag: string[] = diagnostics;
+    // Per-task fn-ptr / ctx values as i64 SSA temps (input order).
+    let mut par_fn_addrs: string[] = [];
+    let mut par_ctx_addrs: string[] = [];
+    if list_start >= 0 {
+        if list_end > list_start {
+            let tasks_text = trim_text(substring(stripped, list_start + 1, list_end));
+            if tasks_text.length > 0 {
+                let task_args = split_call_arguments(tasks_text);
+                let mut par_index: int = 0;
+                loop {
+                    if par_index >= task_args.length { break; }
+                    let task_expr = trim_text(task_args[par_index]);
+                    if task_expr.length > 0 {
+                        let task_lowered = lower_expression(task_expr, bindings, locals, par_temp, par_lines, functions, context, "");
+                        par_diag = extend_string_array(par_diag, task_lowered.diagnostics);
+                        par_lines = task_lowered.lines;
+                        par_temp = task_lowered.temp_index;
+                        if task_lowered.operand != null {
+                            let task_op = task_lowered.operand;
+                            if task_op.llvm_type == "{i8*, i8*}" {
+                                // Lifted-lambda closure pair {fn_ptr, env}.
+                                let cp_fn_t = format_temp_name(par_temp);
+                                par_temp += 1;
+                                par_lines.push("  " + cp_fn_t
+                                    + " = extractvalue {i8*, i8*} "
+                                    + task_op.value
+                                    + ", 0");
+                                let cp_env_t = format_temp_name(par_temp);
+                                par_temp += 1;
+                                par_lines.push("  " + cp_env_t
+                                    + " = extractvalue {i8*, i8*} "
+                                    + task_op.value
+                                    + ", 1");
+                                let fn_addr_t = format_temp_name(par_temp);
+                                par_temp += 1;
+                                par_lines.push("  " + fn_addr_t
+                                    + " = ptrtoint i8* "
+                                    + cp_fn_t
+                                    + " to i64");
+                                let env_addr_t = format_temp_name(par_temp);
+                                par_temp += 1;
+                                par_lines.push("  " + env_addr_t
+                                    + " = ptrtoint i8* "
+                                    + cp_env_t
+                                    + " to i64");
+                                par_fn_addrs.push(fn_addr_t);
+                                par_ctx_addrs.push(env_addr_t);
+                            } else {
+                                // Bare reference: zero-argument worker.
+                                let mut fn_ptr_i8: string = task_op.value;
+                                if task_op.llvm_type != "i8*" {
+                                    let par_cast = format_temp_name(par_temp);
+                                    par_temp += 1;
+                                    par_lines.push("  " + par_cast
+                                        + " = bitcast "
+                                        + task_op.llvm_type
+                                        + " "
+                                        + task_op.value
+                                        + " to i8*");
+                                    fn_ptr_i8 = par_cast;
+                                }
+                                let fn_addr_t = format_temp_name(par_temp);
+                                par_temp += 1;
+                                par_lines.push("  " + fn_addr_t
+                                    + " = ptrtoint i8* "
+                                    + fn_ptr_i8
+                                    + " to i64");
+                                par_fn_addrs.push(fn_addr_t);
+                                par_ctx_addrs.push("0");
+                            }
+                        }
+                    }
+                    par_index += 1;
+                }
+            }
+        }
+    }
+    let par_count = par_fn_addrs.length;
+    // Empty fan-out → null (matches `sfn_parallel(count <= 0) = null`).
+    if par_count == 0 {
+        let par_empty_operand = LLVMOperand {
+            llvm_type: "i8*",
+            value: "null"
+        };
+        return ExpressionResult {
+            lines: par_lines,
+            temp_index: par_temp,
+            operand: par_empty_operand,
+            diagnostics: par_diag,
+            string_constants: empty_par_constants
+        };
+    }
+    // Stack-allocate the fn-ptr and ctx arrays (one i64 per task).
+    let par_arr_ty = "[" + number_to_string(par_count) + " x i64]";
+    let par_fns_arr = format_temp_name(par_temp);
+    par_temp += 1;
+    par_lines.push("  " + par_fns_arr + " = alloca " + par_arr_ty);
+    let par_ctxs_arr = format_temp_name(par_temp);
+    par_temp += 1;
+    par_lines.push("  " + par_ctxs_arr + " = alloca " + par_arr_ty);
+    let mut par_store_i: int = 0;
+    loop {
+        if par_store_i >= par_count { break; }
+        let par_slot_text = number_to_string(par_store_i);
+        let par_fn_gep = format_temp_name(par_temp);
+        par_temp += 1;
+        par_lines.push("  " + par_fn_gep + " = getelementptr " + par_arr_ty
+            + ", "
+            + par_arr_ty
+            + "* "
+            + par_fns_arr
+            + ", i64 0, i64 "
+            + par_slot_text);
+        par_lines.push("  store i64 " + par_fn_addrs[par_store_i] + ", i64* "
+            + par_fn_gep);
+        let par_ctx_gep = format_temp_name(par_temp);
+        par_temp += 1;
+        par_lines.push("  " + par_ctx_gep + " = getelementptr " + par_arr_ty
+            + ", "
+            + par_arr_ty
+            + "* "
+            + par_ctxs_arr
+            + ", i64 0, i64 "
+            + par_slot_text);
+        par_lines.push("  store i64 " + par_ctx_addrs[par_store_i] + ", i64* "
+            + par_ctx_gep);
+        par_store_i += 1;
+    }
+    // Decay each array to an i8* base pointer for the call.
+    let par_fns_base = format_temp_name(par_temp);
+    par_temp += 1;
+    par_lines.push("  " + par_fns_base + " = getelementptr " + par_arr_ty + ", "
+        + par_arr_ty
+        + "* "
+        + par_fns_arr
+        + ", i64 0, i64 0");
+    let par_fns_i8 = format_temp_name(par_temp);
+    par_temp += 1;
+    par_lines.push("  " + par_fns_i8 + " = bitcast i64* " + par_fns_base
+        + " to i8*");
+    let par_ctxs_base = format_temp_name(par_temp);
+    par_temp += 1;
+    par_lines.push("  " + par_ctxs_base + " = getelementptr " + par_arr_ty
+        + ", "
+        + par_arr_ty
+        + "* "
+        + par_ctxs_arr
+        + ", i64 0, i64 0");
+    let par_ctxs_i8 = format_temp_name(par_temp);
+    par_temp += 1;
+    par_lines.push("  " + par_ctxs_i8 + " = bitcast i64* " + par_ctxs_base
+        + " to i8*");
+    let par_result = format_temp_name(par_temp);
+    par_temp += 1;
+    par_lines.push("  " + par_result + " = call i8* @sfn_parallel(i8* "
+        + par_fns_i8
+        + ", i8* "
+        + par_ctxs_i8
+        + ", i64 "
+        + number_to_string(par_count)
+        + ")");
+    let par_operand = LLVMOperand { llvm_type: "i8*", value: par_result };
+    return ExpressionResult {
+        lines: par_lines,
+        temp_index: par_temp,
+        operand: par_operand,
+        diagnostics: par_diag,
+        string_constants: empty_par_constants
+    };
+}
+
+// Builtin server accept loop: `serve(<handler>[, <port>])` (#1092).
+// Extracted sibling of `lower_expression`. The call-site guard ensures
+// only the *builtin* `serve` (no user/imported `serve` in scope) reaches
+// here (#1323).
+fn lower_serve_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let diagnostics: string[] = [];
+    let serve_inner_start = index_of(stripped, "(");
+    let serve_inner_end = find_last_index_of_char(stripped, ")");
+    let empty_serve_constants: StringConstant[] = [];
+    let mut serve_lines: string[] = lines;
+    let mut serve_temp: int = temp_index;
+    let mut serve_diag: string[] = diagnostics;
+    if serve_inner_start >= 0 {
+        if serve_inner_end > serve_inner_start {
+            let serve_args_text = trim_text(substring(stripped, serve_inner_start
+                + 1, serve_inner_end));
+            let serve_args = split_call_arguments(serve_args_text);
+            let mut handler_llvm: string = "i8* null";
+            let mut port_llvm: string = "i32 8080";
+            if serve_args.length > 0 {
+                let handler_text = trim_text(serve_args[0]);
+                if handler_text.length > 0 {
+                    let handler_lowered = lower_expression(handler_text, bindings, locals, serve_temp, serve_lines, functions, context, "");
+                    serve_diag = extend_string_array(serve_diag, handler_lowered.diagnostics);
+                    serve_lines = handler_lowered.lines;
+                    serve_temp = handler_lowered.temp_index;
+                    if handler_lowered.operand != null {
+                        let h_op = handler_lowered.operand;
+                        let mut h_val: string = h_op.value;
+                        if h_op.llvm_type != "i8*" {
+                            let h_cast = format_temp_name(serve_temp);
+                            serve_temp += 1;
+                            serve_lines.push("  " + h_cast + " = bitcast "
+                                + h_op.llvm_type
+                                + " "
+                                + h_op.value
+                                + " to i8*");
+                            h_val = h_cast;
+                        }
+                        handler_llvm = "i8* " + h_val;
+                    }
+                }
+            }
+            if serve_args.length > 1 {
+                let port_text = trim_text(serve_args[1]);
+                if port_text.length > 0 {
+                    let port_lowered = lower_expression(port_text, bindings, locals, serve_temp, serve_lines, functions, context, "");
+                    serve_diag = extend_string_array(serve_diag, port_lowered.diagnostics);
+                    serve_lines = port_lowered.lines;
+                    serve_temp = port_lowered.temp_index;
+                    if port_lowered.operand != null {
+                        let p_op = port_lowered.operand;
+                        let mut p_val: string = p_op.value;
+                        if p_op.llvm_type != "i32" {
+                            let p_cast = format_temp_name(serve_temp);
+                            serve_temp += 1;
+                            serve_lines.push("  " + p_cast + " = trunc i64 "
+                                + p_op.value
+                                + " to i32");
+                            p_val = p_cast;
+                        }
+                        port_llvm = "i32 " + p_val;
+                    }
+                }
+            }
+            serve_lines.push("  call void @sfn_serve(" + handler_llvm + ", "
+                + port_llvm
+                + ")");
+        }
+    }
+    return ExpressionResult {
+        lines: serve_lines,
+        temp_index: serve_temp,
+        operand: null,
+        diagnostics: serve_diag,
+        string_constants: empty_serve_constants
+    };
+}
+
+// `await <expr>` joins a thread-backed future and extracts its value.
+// Extracted sibling of `lower_expression` for the operand-present case
+// (the `await` prefix followed by space/tab/`(`); the no-operand and
+// fall-through cases stay inline at the call site.
+fn lower_await_expression(stripped: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
+    let mut diagnostics: string[] = [];
+    let empty_constants = empty_string_constant_set();
+    let remainder = trim_text(substring(stripped, 5, stripped.length));
+    if remainder.length == 0 {
+        diagnostics.push("llvm lowering: await expression missing operand");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
+    let lowered = lower_expression(remainder, bindings, locals, temp_index, lines, functions, context, expected_type);
+    let mut _ci0: int = 0;
+    loop {
+        if _ci0 >= lowered.diagnostics.length { break; }
+        diagnostics.push(lowered.diagnostics[_ci0]);
+        _ci0 += 1;
+    }
+    if lowered.operand == null {
+        return ExpressionResult {
+            lines: lowered.lines,
+            temp_index: lowered.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+
+    let future_operand = lowered.operand;
+    let await_symbol = await_symbol_for_future_pointer_type(future_operand.llvm_type);
+    if await_symbol.length == 0 {
+        let with_issue = append_string(diagnostics, "llvm lowering: await expects a Future pointer, got `"
+            + future_operand.llvm_type
+            + "`");
+        return ExpressionResult {
+            lines: lowered.lines,
+            temp_index: lowered.temp_index,
+            operand: null,
+            diagnostics: with_issue,
+            string_constants: lowered.string_constants
+        };
+    }
+
+    // Await returns a value whose type depends on the future kind.
+    // sfn_await_* accept i8* — bitcast from the typed future pointer
+    // (#1090). The result type is determined by the future kind.
+    if future_operand.llvm_type == "%SailfinFutureVoid*" {
+        let cast_fut_t = format_temp_name(lowered.temp_index);
+        let cast_fut_idx = lowered.temp_index + 1;
+        let mut awaited_lines = append_string(lowered.lines, "  " + cast_fut_t
+            + " = bitcast %SailfinFutureVoid* "
+            + future_operand.value
+            + " to i8*");
+        awaited_lines = append_string(awaited_lines, "  call void @"
+            + await_symbol
+            + "(i8* "
+            + cast_fut_t
+            + ")");
+        let out_operand = LLVMOperand { llvm_type: "void", value: "" };
+        return ExpressionResult {
+            lines: awaited_lines,
+            temp_index: cast_fut_idx,
+            operand: out_operand,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+
+    let mut result_type: string = "i8*";
+    if future_operand.llvm_type == "%SailfinFutureNumber*" {
+        result_type = "double";
+    } else if future_operand.llvm_type == "%SailfinFutureInt*" {
+        result_type = "i64";
+    } else if future_operand.llvm_type == "%SailfinFutureBool*" {
+        result_type = "i1";
+    }
+    // Bitcast typed future pointer to i8* for sfn_await_* (#1090).
+    let cast_fut_t2 = format_temp_name(lowered.temp_index);
+    let cast_fut_idx2 = lowered.temp_index + 1;
+    let cast_line = "  " + cast_fut_t2 + " = bitcast " + future_operand.llvm_type
+        + " "
+        + future_operand.value
+        + " to i8*";
+    let result_temp = format_temp_name(cast_fut_idx2);
+    let awaited_call = "  " + result_temp + " = call " + result_type + " @"
+        + await_symbol
+        + "(i8* "
+        + cast_fut_t2
+        + ")";
+    let mut awaited_lines2 = append_string(lowered.lines, cast_line);
+    awaited_lines2 = append_string(awaited_lines2, awaited_call);
+
+    // If we're awaiting an opaque pointer future in a typed context, try to unbox.
+    // This avoids leaking boxed aggregates (struct/enum values) returned as `i8*`.
+    //
+    // Two shapes are legitimate for an `%SailfinFuturePtr*` await:
+    //   - bitcast-then-load: the old by-value ABI stored the full
+    //     aggregate on the heap and the awaiter loaded the value.
+    //     Kept for primitives-embedded-as-value (currently none use
+    //     this path, but the structure stays for forward compat).
+    //   - bitcast-only: the 0.5.8+ boxed-struct ABI returns struct
+    //     and enum aggregates as `%T*` pointers already. Loading
+    //     here would materialise a by-value aggregate and lose the
+    //     pointer-shaped handle every subsequent member access and
+    //     function call is written to consume.
+    let mut trimmed_expected = trim_text(expected_type);
+    let mut inferred_boxed_type: string = "";
+    // When expected_type is empty (no annotation on the let), try to infer
+    // the concrete return type from the future's local binding.  The let
+    // lowerer stores the async function's Sailfin return type in
+    // type_annotation when it creates the future local.
+    if future_operand.llvm_type == "%SailfinFuturePtr*" {
+        if trimmed_expected.length == 0 || trimmed_expected == "i8*" {
+            let awaited_var = trim_text(remainder);
+            let future_local = find_local_binding(locals, awaited_var);
+            if future_local != null {
+                let ann = trim_text(future_local.type_annotation);
+                if ann.length > 0 {
+                    let mapped = map_return_type(context, ann);
+                    if mapped.length > 0 {
+                        if mapped != "i8*" {
+                            if !ends_with_pointer_suffix(mapped) {
+                                trimmed_expected = mapped;
+                            } else {
+                                // Boxed user aggregate return: keep
+                                // the pointer form; record it so the
+                                // cast-only path below emits a
+                                // bitcast to the typed handle.
+                                inferred_boxed_type = mapped;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if future_operand.llvm_type == "%SailfinFuturePtr*" {
+        if trimmed_expected.length > 0 {
+            if trimmed_expected != "i8*" {
+                if !ends_with_pointer_suffix(trimmed_expected) {
+                    // cast_fut_t2 = lowered.temp_index
+                    // result_temp  = lowered.temp_index + 1  (#1090 shift)
+                    let typed_ptr_temp = format_temp_name(lowered.temp_index + 2);
+                    let load_temp = format_temp_name(lowered.temp_index + 3);
+                    awaited_lines2.push("  " + typed_ptr_temp
+                        + " = bitcast i8* "
+                        + result_temp
+                        + " to "
+                        + trimmed_expected
+                        + "*");
+                    awaited_lines2.push("  " + load_temp + " = load "
+                        + trimmed_expected
+                        + ", "
+                        + trimmed_expected
+                        + "* "
+                        + typed_ptr_temp);
+                    // Arena-aware free: the impl function's return
+                    // box is allocated via `@sfn_alloc_struct`
+                    // (Phase 5a follow-up), so this must route through
+                    // the matching arena-aware free. Plain `@free` on
+                    // an arena pointer corrupts glibc chunk metadata.
+                    // M1.7.2a (#496): routes through `emit_runtime_call`
+                    // so the call shape is owned by the descriptor table.
+                    let free_operand = LLVMOperand {
+                        llvm_type: "i8*",
+                        value: result_temp
+                    };
+                    let free_operands: LLVMOperand[] = [free_operand];
+                    let free_result = emit_runtime_call("runtime.free", free_operands, empty_runtime_call_overrides(), lowered.temp_index
+                        + 4, awaited_lines2);
+                    let mut _free_di: int = 0;
+                    loop {
+                        if _free_di >= free_result.diagnostics.length { break; }
+                        diagnostics.push(free_result.diagnostics[_free_di]);
+                        _free_di += 1;
+                    }
+                    awaited_lines2 = free_result.lines;
+                    let out_operand_unboxed = LLVMOperand {
+                        llvm_type: trimmed_expected,
+                        value: load_temp
+                    };
+                    return ExpressionResult {
+                        lines: awaited_lines2,
+                        temp_index: lowered.temp_index + 4,
+                        operand: out_operand_unboxed,
+                        diagnostics: diagnostics,
+                        string_constants: lowered.string_constants
+                    };
+                }
+            }
+        }
+        // 0.5.8+ boxed-struct ABI: if we inferred a user aggregate
+        // return as `%T*`, emit a bitcast so the awaiter sees the
+        // typed pointer. The heap allocation is owned by the awaited
+        // value — do NOT free it here (it would dangle on the first
+        // field access).
+        if inferred_boxed_type.length > 0 {
+            // cast_fut_t2 = lowered.temp_index, result_temp = + 1 (#1090)
+            let typed_ptr_temp = format_temp_name(lowered.temp_index + 2);
+            awaited_lines2.push("  " + typed_ptr_temp + " = bitcast i8* "
+                + result_temp
+                + " to "
+                + inferred_boxed_type);
+            let out_operand_boxed = LLVMOperand {
+                llvm_type: inferred_boxed_type,
+                value: typed_ptr_temp
+            };
+            return ExpressionResult {
+                lines: awaited_lines2,
+                temp_index: lowered.temp_index + 3,
+                operand: out_operand_boxed,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+    }
+
+    let out_operand2 = LLVMOperand {
+        llvm_type: result_type,
+        value: result_temp
+    };
+    return ExpressionResult {
+        lines: awaited_lines2,
+        temp_index: lowered.temp_index + 2,
+        operand: out_operand2,
+        diagnostics: diagnostics,
+        string_constants: lowered.string_constants
+    };
+}
+
 fn lower_expression(expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
     let trimmed = trim_text(expression);
     let mut diagnostics: string[] = [];
@@ -1153,199 +1997,13 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     // Typed spawn: the kind tag selects spawn_<kind> / Future<kind>*.
     // The operand is a function reference that becomes a typed fn ptr.
     if starts_with(stripped, "spawn:") {
-        let colon_pos = index_of(stripped, ":");
-        let space_pos = index_of(stripped, " ");
-        let mut spawn_kind: string = "";
-        let mut spawn_operand_text: string = "";
-        if colon_pos >= 0 {
-            if space_pos > colon_pos {
-                spawn_kind = substring(stripped, colon_pos + 1, space_pos);
-                spawn_operand_text = trim_text(substring(stripped, space_pos + 1, stripped.length));
-            } else {
-                spawn_kind = substring(stripped, colon_pos + 1, stripped.length);
-            }
-        }
-        let spawn_sym = spawn_symbol_for_kind(spawn_kind);
-        // #1475: a capturing task lambda's env is `@sfn_env_alloc`'d and only
-        // the worker frees it — route through the `_owned_ctx` family whose
-        // trampoline `sfn_env_free`s it. The `owned_env` tag rides on the
-        // closure-pair operand text (set by the lift pass for spawn targets);
-        // non-capturing (null env) and async ctx paths keep the plain `_ctx`.
-        let mut spawn_ctx_sym = spawn_ctx_symbol_for_kind(spawn_kind);
-        // #1476: a capturing task lambda whose first capture is a moved
-        // `OwnedBuf` carries the `owned_buf` tag — route through the
-        // `_owned_buf_ctx` family whose trampoline reclaims the libc-backed
-        // buffer at env offset 0. Check `owned_buf` BEFORE `owned_env`: both
-        // markers contain `env_alloc`, and `owned_buf` is the more specific
-        // (env-free + buffer reclaim) selection.
-        if index_of(spawn_operand_text, "env_alloc owned_buf ") >= 0 {
-            spawn_ctx_sym = spawn_owned_buf_ctx_symbol_for_kind(spawn_kind);
-        } else if index_of(spawn_operand_text, "env_alloc owned_env ") >= 0 {
-            spawn_ctx_sym = spawn_owned_ctx_symbol_for_kind(spawn_kind);
-        }
-        let future_type = future_type_for_spawn_kind(spawn_kind);
-        let fn_ret_llvm = llvm_return_type_for_spawn_kind(spawn_kind);
-        let fn_ptr_type = fn_ret_llvm + " ()*";
-        let mut spawn_lines: string[] = lines;
-        let mut spawn_temp: int = temp_index;
-        let mut spawn_diag: string[] = diagnostics;
-        let empty_spawn_constants: StringConstant[] = [];
-        let mut have_operand: boolean = false;
-        let mut op_llvm_type: string = "";
-        let mut op_value: string = "";
-        if spawn_operand_text.length > 0 {
-            let lowered_op = lower_expression(spawn_operand_text, bindings, locals, spawn_temp, spawn_lines, functions, context, "");
-            spawn_diag = extend_string_array(spawn_diag, lowered_op.diagnostics);
-            spawn_lines = lowered_op.lines;
-            spawn_temp = lowered_op.temp_index;
-            if lowered_op.operand != null {
-                let raw_op = lowered_op.operand;
-                op_llvm_type = raw_op.llvm_type;
-                op_value = raw_op.value;
-                have_operand = true;
-            }
-        }
-        if !have_operand {
-            spawn_diag.push("llvm lowering: spawn:<kind>: could not lower operand for `"
-                + stripped
-                + "`");
-            return ExpressionResult {
-                lines: spawn_lines,
-                temp_index: spawn_temp,
-                operand: null,
-                diagnostics: spawn_diag,
-                string_constants: empty_spawn_constants
-            };
-        }
-        // The spawned task lowers to one of two operand shapes:
-        //   1. A lifted-lambda closure pair `{i8*, i8*}` = {fn_ptr, env}
-        //      (issue #686). The lifted worker is `fn(i8* env) -> <ret>` —
-        //      exactly the shape the runtime's `_ctx` trampoline calls — so
-        //      extract the fn_ptr + env and route through
-        //      `sfn_spawn_<kind>_ctx(fn_ptr, env)`. Non-capturing lambdas
-        //      carry a null env; capturing lambdas (follow-up) carry a heap
-        //      env. This is the path the surface `spawn fn() -> T { ... }`
-        //      takes, and it makes the task actually run on the pool (the
-        //      former `bitcast {i8*,i8*} to <ret> ()*` was invalid IR — an
-        //      aggregate cannot be bitcast to a function pointer — so the
-        //      task was never spawned).
-        //   2. A bare function reference (`i8*` or a typed `<ret> ()*`),
-        //      i.e. a zero-argument worker. Coerce to i8* and use the no-ctx
-        //      `sfn_spawn_<kind>(fn_ptr)` variant.
-        let mut spawn_raw_t: string = "";
-        if op_llvm_type == "{i8*, i8*}" {
-            let cp_fn_t = format_temp_name(spawn_temp);
-            spawn_temp += 1;
-            spawn_lines.push("  " + cp_fn_t + " = extractvalue {i8*, i8*} "
-                + op_value
-                + ", 0");
-            let cp_env_t = format_temp_name(spawn_temp);
-            spawn_temp += 1;
-            spawn_lines.push("  " + cp_env_t + " = extractvalue {i8*, i8*} "
-                + op_value
-                + ", 1");
-            spawn_raw_t = format_temp_name(spawn_temp);
-            spawn_temp += 1;
-            spawn_lines.push("  " + spawn_raw_t + " = call i8* @"
-                + spawn_ctx_sym
-                + "(i8* "
-                + cp_fn_t
-                + ", i8* "
-                + cp_env_t
-                + ")");
-        } else {
-            let mut fn_ptr_i8: string = op_value;
-            if op_llvm_type != "i8*" {
-                let fn_ptr_cast_t = format_temp_name(spawn_temp);
-                spawn_temp += 1;
-                spawn_lines.push("  " + fn_ptr_cast_t + " = bitcast "
-                    + op_llvm_type
-                    + " "
-                    + op_value
-                    + " to i8*");
-                fn_ptr_i8 = fn_ptr_cast_t;
-            }
-            spawn_raw_t = format_temp_name(spawn_temp);
-            spawn_temp += 1;
-            spawn_lines.push("  " + spawn_raw_t + " = call i8* @" + spawn_sym
-                + "(i8* "
-                + fn_ptr_i8
-                + ")");
-        }
-        // Bitcast raw i8* result back to typed future pointer for
-        // downstream IR type tracking (e.g. the await dispatch).
-        let spawn_result_t = format_temp_name(spawn_temp);
-        spawn_temp += 1;
-        spawn_lines.push("  " + spawn_result_t + " = bitcast i8* " + spawn_raw_t
-            + " to "
-            + future_type);
-        let spawn_operand = LLVMOperand {
-            llvm_type: future_type,
-            value: spawn_result_t
-        };
-        return ExpressionResult {
-            lines: spawn_lines,
-            temp_index: spawn_temp,
-            operand: spawn_operand,
-            diagnostics: spawn_diag,
-            string_constants: empty_spawn_constants
-        };
+        return lower_spawn_typed_expression(stripped, bindings, locals, temp_index, lines, functions, context);
     }
 
     // ── spawn <operand> ─────────────────────────────────────────────────
     // Untyped spawn: use the generic `spawn_task` adapter (i8* → i8*).
     if starts_with(stripped, "spawn ") {
-        let spawn_op_text = trim_text(substring(stripped, 6, stripped.length));
-        let mut spawn2_lines: string[] = lines;
-        let mut spawn2_temp: int = temp_index;
-        let mut spawn2_diag: string[] = diagnostics;
-        let empty_spawn2_constants: StringConstant[] = [];
-        if spawn_op_text.length > 0 {
-            let lowered2 = lower_expression(spawn_op_text, bindings, locals, spawn2_temp, spawn2_lines, functions, context, "");
-            spawn2_diag = extend_string_array(spawn2_diag, lowered2.diagnostics);
-            spawn2_lines = lowered2.lines;
-            spawn2_temp = lowered2.temp_index;
-            if lowered2.operand != null {
-                let op2 = lowered2.operand;
-                let mut task_ptr: string = op2.value;
-                if op2.llvm_type != "i8*" {
-                    let cast2_t = format_temp_name(spawn2_temp);
-                    spawn2_temp += 1;
-                    spawn2_lines.push("  " + cast2_t + " = bitcast " + op2.llvm_type
-                        + " "
-                        + op2.value
-                        + " to i8*");
-                    task_ptr = cast2_t;
-                }
-                let spawn2_result = format_temp_name(spawn2_temp);
-                spawn2_temp += 1;
-                spawn2_lines.push("  " + spawn2_result
-                    + " = call i8* @sfn_spawn_task(i8* "
-                    + task_ptr
-                    + ")");
-                let spawn2_operand = LLVMOperand {
-                    llvm_type: "i8*",
-                    value: spawn2_result
-                };
-                return ExpressionResult {
-                    lines: spawn2_lines,
-                    temp_index: spawn2_temp,
-                    operand: spawn2_operand,
-                    diagnostics: spawn2_diag,
-                    string_constants: empty_spawn2_constants
-                };
-            }
-        }
-        spawn2_diag.push("llvm lowering: spawn: could not lower operand for `"
-            + stripped
-            + "`");
-        return ExpressionResult {
-            lines: spawn2_lines,
-            temp_index: spawn2_temp,
-            operand: null,
-            diagnostics: spawn2_diag,
-            string_constants: empty_spawn2_constants
-        };
+        return lower_spawn_expression(stripped, bindings, locals, temp_index, lines, functions, context);
     }
 
     // ── channel(<capacity>) / channel:<kind>(<capacity>) ───────────────
@@ -1357,145 +2015,10 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     // sizes the ring slot to the aggregate width and sets `owned` = 1 only
     // for `channel:OwnedBuf`, so destroy can drain abandoned buffers.
     if starts_with(stripped, "channel(") {
-        let chan_inner = trim_text(substring(stripped, 8, stripped.length));
-        // The end index is computed in a standalone statement (not a
-        // ternary inside the call argument): the inline form mis-lowered
-        // and produced an empty capacity text, dropping the capacity
-        // operand entirely (`channel(4)` emitted `i32 0`).
-        let mut chan_inner_end: int = 0;
-        if chan_inner.length > 0 { chan_inner_end = chan_inner.length - 1; }
-        let cap_text = trim_text(substring(chan_inner, 0, chan_inner_end));
-        let empty_chan_constants: StringConstant[] = [];
-        let mut chan_lines: string[] = lines;
-        let mut chan_temp: int = temp_index;
-        let mut chan_diag: string[] = diagnostics;
-        let mut cap_llvm: string = "i64 0";
-        if cap_text.length > 0 {
-            let cap_lowered = lower_expression(cap_text, bindings, locals, chan_temp, chan_lines, functions, context, "");
-            chan_diag = extend_string_array(chan_diag, cap_lowered.diagnostics);
-            chan_lines = cap_lowered.lines;
-            chan_temp = cap_lowered.temp_index;
-            if cap_lowered.operand != null {
-                let cap_op = cap_lowered.operand;
-                let mut cap_val: string = cap_op.value;
-                if cap_op.llvm_type == "i32" {
-                    let cap_cast = format_temp_name(chan_temp);
-                    chan_temp += 1;
-                    chan_lines.push("  " + cap_cast + " = sext i32 " + cap_op.value
-                        + " to i64");
-                    cap_val = cap_cast;
-                }
-                cap_llvm = "i64 " + cap_val;
-            }
-        }
-        let chan_result = format_temp_name(chan_temp);
-        chan_temp += 1;
-        chan_lines.push("  " + chan_result + " = call i8* @sfn_channel_create("
-            + cap_llvm
-            + ", i64 8, i64 0)");
-        let chan_operand = LLVMOperand {
-            llvm_type: "i8*",
-            value: chan_result
-        };
-        return ExpressionResult {
-            lines: chan_lines,
-            temp_index: chan_temp,
-            operand: chan_operand,
-            diagnostics: chan_diag,
-            string_constants: empty_chan_constants
-        };
+        return lower_channel_capacity_expression(stripped, bindings, locals, temp_index, lines, functions, context);
     }
     if starts_with(stripped, "channel:") {
-        let paren_pos = index_of(stripped, "(");
-        let empty_chantyped_constants: StringConstant[] = [];
-        let mut chantyped_lines: string[] = lines;
-        let mut chantyped_temp: int = temp_index;
-        let mut chantyped_diag: string[] = diagnostics;
-        let mut typed_cap_llvm: string = "i64 0";
-        if paren_pos >= 0 {
-            let inner_start = paren_pos + 1;
-            let mut inner_end: int = 0;
-            if stripped.length > 0 { inner_end = stripped.length - 1; }
-            let typed_cap_text = trim_text(substring(stripped, inner_start, inner_end));
-            if typed_cap_text.length > 0 {
-                let typed_cap_lowered = lower_expression(typed_cap_text, bindings, locals, chantyped_temp, chantyped_lines, functions, context, "");
-                chantyped_diag = extend_string_array(chantyped_diag, typed_cap_lowered.diagnostics);
-                chantyped_lines = typed_cap_lowered.lines;
-                chantyped_temp = typed_cap_lowered.temp_index;
-                if typed_cap_lowered.operand != null {
-                    let typed_cap_op = typed_cap_lowered.operand;
-                    let mut typed_cap_val: string = typed_cap_op.value;
-                    if typed_cap_op.llvm_type == "i32" {
-                        let typed_cap_cast = format_temp_name(chantyped_temp);
-                        chantyped_temp += 1;
-                        chantyped_lines.push("  " + typed_cap_cast
-                            + " = sext i32 "
-                            + typed_cap_op.value
-                            + " to i64");
-                        typed_cap_val = typed_cap_cast;
-                    }
-                    typed_cap_llvm = "i64 " + typed_cap_val;
-                }
-            }
-        }
-        // Element stride. The kind sits between "channel:" (8 chars) and
-        // "(". A struct element crosses the channel BY VALUE (#1466), so its
-        // ring slot must be the full LLVM width of the aggregate, computed
-        // with the well-defined `getelementptr null, i32 1` sizeof idiom —
-        // the same one the boxed-struct alloc uses, so the create stride and
-        // the send-side `alloca %T` spill agree by construction. Scalar /
-        // pointer-sized kinds keep the historical 8-byte monomorphized
-        // stride. A divergence over-writes or under-reads the ring slot
-        // (an #1205-class heap hazard under concurrent producers/consumers).
-        let mut typed_elem_size_llvm: string = "i64 8";
-        // `owned` flag (#1476): 1 only when the element kind is exactly
-        // `OwnedBuf`, so `sfn_channel_destroy`'s drain seam frees each
-        // abandoned element's `ptr_addr`. A generic struct element does not
-        // own heap by this convention, so it stays 0 (no drain).
-        let mut typed_owned_llvm: string = "i64 0";
-        if paren_pos > 8 {
-            let kind_text = trim_text(substring(stripped, 8, paren_pos));
-            if kind_text == "OwnedBuf" { typed_owned_llvm = "i64 1"; }
-            let kind_struct = resolve_struct_info_for_literal(context, kind_text);
-            if kind_struct != null {
-                let esz_ptr = format_temp_name(chantyped_temp);
-                chantyped_temp += 1;
-                chantyped_lines.push("  " + esz_ptr + " = getelementptr "
-                    + kind_struct.llvm_name
-                    + ", "
-                    + kind_struct.llvm_name
-                    + "* null, i32 1");
-                let esz_val = format_temp_name(chantyped_temp);
-                chantyped_temp += 1;
-                chantyped_lines.push("  " + esz_val + " = ptrtoint "
-                    + kind_struct.llvm_name
-                    + "* "
-                    + esz_ptr
-                    + " to i64");
-                typed_elem_size_llvm = "i64 " + esz_val;
-            }
-        }
-        let chantyped_result = format_temp_name(chantyped_temp);
-        chantyped_temp += 1;
-        chantyped_lines.push("  " + chantyped_result
-            + " = call i8* @sfn_channel_create("
-            + typed_cap_llvm
-            + ", "
-            + typed_elem_size_llvm
-            + ", "
-            + typed_owned_llvm
-            + ")");
-        let chantyped_operand = LLVMOperand {
-            llvm_type: "i8*",
-            value: chantyped_result
-        };
-        return ExpressionResult {
-            lines: chantyped_lines,
-            temp_index: chantyped_temp,
-            operand: chantyped_operand,
-            diagnostics: chantyped_diag,
-            string_constants: empty_chantyped_constants
-        };
+        return lower_channel_typed_expression(stripped, bindings, locals, temp_index, lines, functions, context);
     }
 
     // ── parallel [<task>, ...] ──────────────────────────────────────────
@@ -1519,184 +2042,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     // This replaces the former per-task `sfn_spawn_task` stub call, which
     // allocated a Task but never enqueued it — the tasks never ran.
     if starts_with(stripped, "parallel [") {
-        let list_start = index_of(stripped, "[");
-        let list_end = find_last_index_of_char(stripped, "]");
-        let empty_par_constants: StringConstant[] = [];
-        let mut par_lines: string[] = lines;
-        let mut par_temp: int = temp_index;
-        let mut par_diag: string[] = diagnostics;
-        // Per-task fn-ptr / ctx values as i64 SSA temps (input order).
-        let mut par_fn_addrs: string[] = [];
-        let mut par_ctx_addrs: string[] = [];
-        if list_start >= 0 {
-            if list_end > list_start {
-                let tasks_text = trim_text(substring(stripped, list_start + 1, list_end));
-                if tasks_text.length > 0 {
-                    let task_args = split_call_arguments(tasks_text);
-                    let mut par_index: int = 0;
-                    loop {
-                        if par_index >= task_args.length { break; }
-                        let task_expr = trim_text(task_args[par_index]);
-                        if task_expr.length > 0 {
-                            let task_lowered = lower_expression(task_expr, bindings, locals, par_temp, par_lines, functions, context, "");
-                            par_diag = extend_string_array(par_diag, task_lowered.diagnostics);
-                            par_lines = task_lowered.lines;
-                            par_temp = task_lowered.temp_index;
-                            if task_lowered.operand != null {
-                                let task_op = task_lowered.operand;
-                                if task_op.llvm_type == "{i8*, i8*}" {
-                                    // Lifted-lambda closure pair {fn_ptr, env}.
-                                    let cp_fn_t = format_temp_name(par_temp);
-                                    par_temp += 1;
-                                    par_lines.push("  " + cp_fn_t
-                                        + " = extractvalue {i8*, i8*} "
-                                        + task_op.value
-                                        + ", 0");
-                                    let cp_env_t = format_temp_name(par_temp);
-                                    par_temp += 1;
-                                    par_lines.push("  " + cp_env_t
-                                        + " = extractvalue {i8*, i8*} "
-                                        + task_op.value
-                                        + ", 1");
-                                    let fn_addr_t = format_temp_name(par_temp);
-                                    par_temp += 1;
-                                    par_lines.push("  " + fn_addr_t
-                                        + " = ptrtoint i8* "
-                                        + cp_fn_t
-                                        + " to i64");
-                                    let env_addr_t = format_temp_name(par_temp);
-                                    par_temp += 1;
-                                    par_lines.push("  " + env_addr_t
-                                        + " = ptrtoint i8* "
-                                        + cp_env_t
-                                        + " to i64");
-                                    par_fn_addrs.push(fn_addr_t);
-                                    par_ctx_addrs.push(env_addr_t);
-                                } else {
-                                    // Bare reference: zero-argument worker.
-                                    let mut fn_ptr_i8: string = task_op.value;
-                                    if task_op.llvm_type != "i8*" {
-                                        let par_cast = format_temp_name(par_temp);
-                                        par_temp += 1;
-                                        par_lines.push("  " + par_cast
-                                            + " = bitcast "
-                                            + task_op.llvm_type
-                                            + " "
-                                            + task_op.value
-                                            + " to i8*");
-                                        fn_ptr_i8 = par_cast;
-                                    }
-                                    let fn_addr_t = format_temp_name(par_temp);
-                                    par_temp += 1;
-                                    par_lines.push("  " + fn_addr_t
-                                        + " = ptrtoint i8* "
-                                        + fn_ptr_i8
-                                        + " to i64");
-                                    par_fn_addrs.push(fn_addr_t);
-                                    par_ctx_addrs.push("0");
-                                }
-                            }
-                        }
-                        par_index += 1;
-                    }
-                }
-            }
-        }
-        let par_count = par_fn_addrs.length;
-        // Empty fan-out → null (matches `sfn_parallel(count <= 0) = null`).
-        if par_count == 0 {
-            let par_empty_operand = LLVMOperand {
-                llvm_type: "i8*",
-                value: "null"
-            };
-            return ExpressionResult {
-                lines: par_lines,
-                temp_index: par_temp,
-                operand: par_empty_operand,
-                diagnostics: par_diag,
-                string_constants: empty_par_constants
-            };
-        }
-        // Stack-allocate the fn-ptr and ctx arrays (one i64 per task).
-        let par_arr_ty = "[" + number_to_string(par_count) + " x i64]";
-        let par_fns_arr = format_temp_name(par_temp);
-        par_temp += 1;
-        par_lines.push("  " + par_fns_arr + " = alloca " + par_arr_ty);
-        let par_ctxs_arr = format_temp_name(par_temp);
-        par_temp += 1;
-        par_lines.push("  " + par_ctxs_arr + " = alloca " + par_arr_ty);
-        let mut par_store_i: int = 0;
-        loop {
-            if par_store_i >= par_count { break; }
-            let par_slot_text = number_to_string(par_store_i);
-            let par_fn_gep = format_temp_name(par_temp);
-            par_temp += 1;
-            par_lines.push("  " + par_fn_gep + " = getelementptr " + par_arr_ty
-                + ", "
-                + par_arr_ty
-                + "* "
-                + par_fns_arr
-                + ", i64 0, i64 "
-                + par_slot_text);
-            par_lines.push("  store i64 " + par_fn_addrs[par_store_i]
-                + ", i64* "
-                + par_fn_gep);
-            let par_ctx_gep = format_temp_name(par_temp);
-            par_temp += 1;
-            par_lines.push("  " + par_ctx_gep + " = getelementptr " + par_arr_ty
-                + ", "
-                + par_arr_ty
-                + "* "
-                + par_ctxs_arr
-                + ", i64 0, i64 "
-                + par_slot_text);
-            par_lines.push("  store i64 " + par_ctx_addrs[par_store_i]
-                + ", i64* "
-                + par_ctx_gep);
-            par_store_i += 1;
-        }
-        // Decay each array to an i8* base pointer for the call.
-        let par_fns_base = format_temp_name(par_temp);
-        par_temp += 1;
-        par_lines.push("  " + par_fns_base + " = getelementptr " + par_arr_ty
-            + ", "
-            + par_arr_ty
-            + "* "
-            + par_fns_arr
-            + ", i64 0, i64 0");
-        let par_fns_i8 = format_temp_name(par_temp);
-        par_temp += 1;
-        par_lines.push("  " + par_fns_i8 + " = bitcast i64* " + par_fns_base
-            + " to i8*");
-        let par_ctxs_base = format_temp_name(par_temp);
-        par_temp += 1;
-        par_lines.push("  " + par_ctxs_base + " = getelementptr " + par_arr_ty
-            + ", "
-            + par_arr_ty
-            + "* "
-            + par_ctxs_arr
-            + ", i64 0, i64 0");
-        let par_ctxs_i8 = format_temp_name(par_temp);
-        par_temp += 1;
-        par_lines.push("  " + par_ctxs_i8 + " = bitcast i64* " + par_ctxs_base
-            + " to i8*");
-        let par_result = format_temp_name(par_temp);
-        par_temp += 1;
-        par_lines.push("  " + par_result + " = call i8* @sfn_parallel(i8* "
-            + par_fns_i8
-            + ", i8* "
-            + par_ctxs_i8
-            + ", i64 "
-            + number_to_string(par_count)
-            + ")");
-        let par_operand = LLVMOperand { llvm_type: "i8*", value: par_result };
-        return ExpressionResult {
-            lines: par_lines,
-            temp_index: par_temp,
-            operand: par_operand,
-            diagnostics: par_diag,
-            string_constants: empty_par_constants
-        };
+        return lower_parallel_expression(stripped, bindings, locals, temp_index, lines, functions, context);
     }
 
     // ── serve(<handler>[, <port>]) ──────────────────────────────────────
@@ -1713,77 +2059,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     // `sfn_serve_framed`. The bare builtin (no `serve` in scope) is
     // unchanged, so `test_runtime_serve.sh` stays green.
     if starts_with(stripped, "serve(") && find_function_by_name_or_import(functions, "serve") == null {
-        let serve_inner_start = index_of(stripped, "(");
-        let serve_inner_end = find_last_index_of_char(stripped, ")");
-        let empty_serve_constants: StringConstant[] = [];
-        let mut serve_lines: string[] = lines;
-        let mut serve_temp: int = temp_index;
-        let mut serve_diag: string[] = diagnostics;
-        if serve_inner_start >= 0 {
-            if serve_inner_end > serve_inner_start {
-                let serve_args_text = trim_text(substring(stripped, serve_inner_start
-                    + 1, serve_inner_end));
-                let serve_args = split_call_arguments(serve_args_text);
-                let mut handler_llvm: string = "i8* null";
-                let mut port_llvm: string = "i32 8080";
-                if serve_args.length > 0 {
-                    let handler_text = trim_text(serve_args[0]);
-                    if handler_text.length > 0 {
-                        let handler_lowered = lower_expression(handler_text, bindings, locals, serve_temp, serve_lines, functions, context, "");
-                        serve_diag = extend_string_array(serve_diag, handler_lowered.diagnostics);
-                        serve_lines = handler_lowered.lines;
-                        serve_temp = handler_lowered.temp_index;
-                        if handler_lowered.operand != null {
-                            let h_op = handler_lowered.operand;
-                            let mut h_val: string = h_op.value;
-                            if h_op.llvm_type != "i8*" {
-                                let h_cast = format_temp_name(serve_temp);
-                                serve_temp += 1;
-                                serve_lines.push("  " + h_cast + " = bitcast "
-                                    + h_op.llvm_type
-                                    + " "
-                                    + h_op.value
-                                    + " to i8*");
-                                h_val = h_cast;
-                            }
-                            handler_llvm = "i8* " + h_val;
-                        }
-                    }
-                }
-                if serve_args.length > 1 {
-                    let port_text = trim_text(serve_args[1]);
-                    if port_text.length > 0 {
-                        let port_lowered = lower_expression(port_text, bindings, locals, serve_temp, serve_lines, functions, context, "");
-                        serve_diag = extend_string_array(serve_diag, port_lowered.diagnostics);
-                        serve_lines = port_lowered.lines;
-                        serve_temp = port_lowered.temp_index;
-                        if port_lowered.operand != null {
-                            let p_op = port_lowered.operand;
-                            let mut p_val: string = p_op.value;
-                            if p_op.llvm_type != "i32" {
-                                let p_cast = format_temp_name(serve_temp);
-                                serve_temp += 1;
-                                serve_lines.push("  " + p_cast + " = trunc i64 "
-                                    + p_op.value
-                                    + " to i32");
-                                p_val = p_cast;
-                            }
-                            port_llvm = "i32 " + p_val;
-                        }
-                    }
-                }
-                serve_lines.push("  call void @sfn_serve(" + handler_llvm + ", "
-                    + port_llvm
-                    + ")");
-            }
-        }
-        return ExpressionResult {
-            lines: serve_lines,
-            temp_index: serve_temp,
-            operand: null,
-            diagnostics: serve_diag,
-            string_constants: empty_serve_constants
-        };
+        return lower_serve_expression(stripped, bindings, locals, temp_index, lines, functions, context);
     }
 
     // Literal expressions.
@@ -1900,241 +2176,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         if next == "\t" { _if52 = true; }
         if next == "(" { _if52 = true; }
         if _if52 {
-            let remainder = trim_text(substring(stripped, 5, stripped.length));
-            if remainder.length == 0 {
-                diagnostics.push("llvm lowering: await expression missing operand");
-                return ExpressionResult {
-                    lines: lines,
-                    temp_index: temp_index,
-                    operand: null,
-                    diagnostics: diagnostics,
-                    string_constants: empty_constants
-                };
-            }
-            let lowered = lower_expression(remainder, bindings, locals, temp_index, lines, functions, context, expected_type);
-            let mut _ci0: int = 0;
-            loop {
-                if _ci0 >= lowered.diagnostics.length { break; }
-                diagnostics.push(lowered.diagnostics[_ci0]);
-                _ci0 += 1;
-            }
-            if lowered.operand == null {
-                return ExpressionResult {
-                    lines: lowered.lines,
-                    temp_index: lowered.temp_index,
-                    operand: null,
-                    diagnostics: diagnostics,
-                    string_constants: lowered.string_constants
-                };
-            }
-
-            let future_operand = lowered.operand;
-            let await_symbol = await_symbol_for_future_pointer_type(future_operand.llvm_type);
-            if await_symbol.length == 0 {
-                let with_issue = append_string(diagnostics, "llvm lowering: await expects a Future pointer, got `"
-                    + future_operand.llvm_type
-                    + "`");
-                return ExpressionResult {
-                    lines: lowered.lines,
-                    temp_index: lowered.temp_index,
-                    operand: null,
-                    diagnostics: with_issue,
-                    string_constants: lowered.string_constants
-                };
-            }
-
-            // Await returns a value whose type depends on the future kind.
-            // sfn_await_* accept i8* — bitcast from the typed future pointer
-            // (#1090). The result type is determined by the future kind.
-            if future_operand.llvm_type == "%SailfinFutureVoid*" {
-                let cast_fut_t = format_temp_name(lowered.temp_index);
-                let cast_fut_idx = lowered.temp_index + 1;
-                let mut awaited_lines = append_string(lowered.lines, "  "
-                    + cast_fut_t
-                    + " = bitcast %SailfinFutureVoid* "
-                    + future_operand.value
-                    + " to i8*");
-                awaited_lines = append_string(awaited_lines, "  call void @"
-                    + await_symbol
-                    + "(i8* "
-                    + cast_fut_t
-                    + ")");
-                let out_operand = LLVMOperand { llvm_type: "void", value: "" };
-                return ExpressionResult {
-                    lines: awaited_lines,
-                    temp_index: cast_fut_idx,
-                    operand: out_operand,
-                    diagnostics: diagnostics,
-                    string_constants: lowered.string_constants
-                };
-            }
-
-            let mut result_type: string = "i8*";
-            if future_operand.llvm_type == "%SailfinFutureNumber*" {
-                result_type = "double";
-            } else if future_operand.llvm_type == "%SailfinFutureInt*" {
-                result_type = "i64";
-            } else if future_operand.llvm_type == "%SailfinFutureBool*" {
-                result_type = "i1";
-            }
-            // Bitcast typed future pointer to i8* for sfn_await_* (#1090).
-            let cast_fut_t2 = format_temp_name(lowered.temp_index);
-            let cast_fut_idx2 = lowered.temp_index + 1;
-            let cast_line = "  " + cast_fut_t2 + " = bitcast " + future_operand.llvm_type
-                + " "
-                + future_operand.value
-                + " to i8*";
-            let result_temp = format_temp_name(cast_fut_idx2);
-            let awaited_call = "  " + result_temp + " = call " + result_type
-                + " @"
-                + await_symbol
-                + "(i8* "
-                + cast_fut_t2
-                + ")";
-            let mut awaited_lines2 = append_string(lowered.lines, cast_line);
-            awaited_lines2 = append_string(awaited_lines2, awaited_call);
-
-            // If we're awaiting an opaque pointer future in a typed context, try to unbox.
-            // This avoids leaking boxed aggregates (struct/enum values) returned as `i8*`.
-            //
-            // Two shapes are legitimate for an `%SailfinFuturePtr*` await:
-            //   - bitcast-then-load: the old by-value ABI stored the full
-            //     aggregate on the heap and the awaiter loaded the value.
-            //     Kept for primitives-embedded-as-value (currently none use
-            //     this path, but the structure stays for forward compat).
-            //   - bitcast-only: the 0.5.8+ boxed-struct ABI returns struct
-            //     and enum aggregates as `%T*` pointers already. Loading
-            //     here would materialise a by-value aggregate and lose the
-            //     pointer-shaped handle every subsequent member access and
-            //     function call is written to consume.
-            let mut trimmed_expected = trim_text(expected_type);
-            let mut inferred_boxed_type: string = "";
-            // When expected_type is empty (no annotation on the let), try to infer
-            // the concrete return type from the future's local binding.  The let
-            // lowerer stores the async function's Sailfin return type in
-            // type_annotation when it creates the future local.
-            if future_operand.llvm_type == "%SailfinFuturePtr*" {
-                if trimmed_expected.length == 0 || trimmed_expected == "i8*" {
-                    let awaited_var = trim_text(remainder);
-                    let future_local = find_local_binding(locals, awaited_var);
-                    if future_local != null {
-                        let ann = trim_text(future_local.type_annotation);
-                        if ann.length > 0 {
-                            let mapped = map_return_type(context, ann);
-                            if mapped.length > 0 {
-                                if mapped != "i8*" {
-                                    if !ends_with_pointer_suffix(mapped) {
-                                        trimmed_expected = mapped;
-                                    } else {
-                                        // Boxed user aggregate return: keep
-                                        // the pointer form; record it so the
-                                        // cast-only path below emits a
-                                        // bitcast to the typed handle.
-                                        inferred_boxed_type = mapped;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if future_operand.llvm_type == "%SailfinFuturePtr*" {
-                if trimmed_expected.length > 0 {
-                    if trimmed_expected != "i8*" {
-                        if !ends_with_pointer_suffix(trimmed_expected) {
-                            // cast_fut_t2 = lowered.temp_index
-                            // result_temp  = lowered.temp_index + 1  (#1090 shift)
-                            let typed_ptr_temp = format_temp_name(lowered.temp_index
-                                + 2);
-                            let load_temp = format_temp_name(lowered.temp_index
-                                + 3);
-                            awaited_lines2.push("  " + typed_ptr_temp
-                                + " = bitcast i8* "
-                                + result_temp
-                                + " to "
-                                + trimmed_expected
-                                + "*");
-                            awaited_lines2.push("  " + load_temp + " = load "
-                                + trimmed_expected
-                                + ", "
-                                + trimmed_expected
-                                + "* "
-                                + typed_ptr_temp);
-                            // Arena-aware free: the impl function's return
-                            // box is allocated via `@sfn_alloc_struct`
-                            // (Phase 5a follow-up), so this must route through
-                            // the matching arena-aware free. Plain `@free` on
-                            // an arena pointer corrupts glibc chunk metadata.
-                            // M1.7.2a (#496): routes through `emit_runtime_call`
-                            // so the call shape is owned by the descriptor table.
-                            let free_operand = LLVMOperand {
-                                llvm_type: "i8*",
-                                value: result_temp
-                            };
-                            let free_operands: LLVMOperand[] = [free_operand];
-                            let free_result = emit_runtime_call("runtime.free", free_operands, empty_runtime_call_overrides(), lowered.temp_index
-                                + 4, awaited_lines2);
-                            let mut _free_di: int = 0;
-                            loop {
-                                if _free_di >= free_result.diagnostics.length {
-                                    break;
-                                }
-                                diagnostics.push(free_result.diagnostics[_free_di]);
-                                _free_di += 1;
-                            }
-                            awaited_lines2 = free_result.lines;
-                            let out_operand_unboxed = LLVMOperand {
-                                llvm_type: trimmed_expected,
-                                value: load_temp
-                            };
-                            return ExpressionResult {
-                                lines: awaited_lines2,
-                                temp_index: lowered.temp_index + 4,
-                                operand: out_operand_unboxed,
-                                diagnostics: diagnostics,
-                                string_constants: lowered.string_constants
-                            };
-                        }
-                    }
-                }
-                // 0.5.8+ boxed-struct ABI: if we inferred a user aggregate
-                // return as `%T*`, emit a bitcast so the awaiter sees the
-                // typed pointer. The heap allocation is owned by the awaited
-                // value — do NOT free it here (it would dangle on the first
-                // field access).
-                if inferred_boxed_type.length > 0 {
-                    // cast_fut_t2 = lowered.temp_index, result_temp = + 1 (#1090)
-                    let typed_ptr_temp = format_temp_name(lowered.temp_index + 2);
-                    awaited_lines2.push("  " + typed_ptr_temp
-                        + " = bitcast i8* "
-                        + result_temp
-                        + " to "
-                        + inferred_boxed_type);
-                    let out_operand_boxed = LLVMOperand {
-                        llvm_type: inferred_boxed_type,
-                        value: typed_ptr_temp
-                    };
-                    return ExpressionResult {
-                        lines: awaited_lines2,
-                        temp_index: lowered.temp_index + 3,
-                        operand: out_operand_boxed,
-                        diagnostics: diagnostics,
-                        string_constants: lowered.string_constants
-                    };
-                }
-            }
-
-            let out_operand2 = LLVMOperand {
-                llvm_type: result_type,
-                value: result_temp
-            };
-            return ExpressionResult {
-                lines: awaited_lines2,
-                temp_index: lowered.temp_index + 2,
-                operand: out_operand2,
-                diagnostics: diagnostics,
-                string_constants: lowered.string_constants
-            };
+            return lower_await_expression(stripped, bindings, locals, temp_index, lines, functions, context, expected_type);
         }
     }
 

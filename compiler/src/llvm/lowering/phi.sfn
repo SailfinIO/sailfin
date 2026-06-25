@@ -117,6 +117,37 @@ fn find_last_label(lines: string[], fallback: string) -> string {
     return fallback;
 }
 
+// Like `find_last_label`, but scans only the tail `[start_index, length)` —
+// the lines appended since the caller captured `start_index`. Returns the
+// most recent label in that tail, else `fallback` (the active label that held
+// before the tail was appended).
+//
+// This is equivalent to a full `find_last_label(lines, fallback)` whenever the
+// prefix `[0, start_index)` is append-preserved — the invariant the
+// `lower_instruction_range` per-instruction loop maintains: every lowerer only
+// pushes/inserts at indices >= the pre-call line count and never inserts a
+// label line before that boundary nor removes the prior last label (proven per
+// instruction tag — Let/Expression push only; If/Loop/Match/Try/For insert
+// non-label load/store lines within their own appended region). Scanning the
+// tail makes label tracking O(tail) per instruction instead of O(length),
+// removing the per-instruction O(L^2) re-scan that dominated peak RSS/time in
+// long flat scopes (e.g. `lower_expression`'s 246-`let` body).
+fn find_last_label_in_tail(lines: string[], start_index: int, fallback: string) -> string {
+    let mut floor: int = start_index;
+    if floor < 0 { floor = 0; }
+    let mut index: int = lines.length;
+    loop {
+        if index <= floor { break; }
+        index -= 1;
+        let line = lines[index];
+        if line.length == 0 { continue; }
+        if substring(line, line.length - 1, line.length) == ":" {
+            return substring(line, 0, line.length - 1);
+        }
+    }
+    return fallback;
+}
+
 fn is_terminator_line(line: string) -> boolean {
     let trimmed = trim_text(line);
     if trimmed.length == 0 { return false; }
