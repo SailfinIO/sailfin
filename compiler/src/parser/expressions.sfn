@@ -12,6 +12,7 @@ import {
 import {
     char_at,
     char_code,
+    normalize_number_literal_value,
     strings_equal,
     substring
 } from "../string_utils";
@@ -285,7 +286,9 @@ fn expression_from_tokens(tokens: Token[]) -> Expression {
 
 fn expression_from_single_token(token: Token) -> Expression? {
     if token.kind.variant == "NumberLiteral" {
-        return Expression.NumberLiteral { value: token.lexeme };
+        return Expression.NumberLiteral {
+            value: normalize_number_literal_value(token.lexeme)
+        };
     }
     if token.kind.variant == "BooleanLiteral" {
         return Expression.BooleanLiteral { value: token.lexeme };
@@ -569,7 +572,9 @@ fn parse_primary_expression(state: ExpressionTokens) -> ExpressionParseResult {
     if token.kind.variant == "NumberLiteral" {
         return ExpressionParseResult {
             state: expression_tokens_advance(state),
-            expression: Expression.NumberLiteral { value: token.lexeme },
+            expression: Expression.NumberLiteral {
+                value: normalize_number_literal_value(token.lexeme)
+            },
             success: true
         };
     }
@@ -1604,7 +1609,9 @@ fn normalize_expression(tokens: Token[], expr: Expression) -> Expression {
                 return Expression.BooleanLiteral { value: token.lexeme };
             }
             if token.kind.variant == "NumberLiteral" {
-                return Expression.NumberLiteral { value: token.lexeme };
+                return Expression.NumberLiteral {
+                    value: normalize_number_literal_value(token.lexeme)
+                };
             }
         }
         let raw_text = trim_text(expr.text);
@@ -1623,7 +1630,9 @@ fn normalize_expression(tokens: Token[], expr: Expression) -> Expression {
             return Expression.BooleanLiteral { value: "false" };
         }
         if looks_like_number_expr(raw_text) {
-            return Expression.NumberLiteral { value: raw_text };
+            return Expression.NumberLiteral {
+                value: normalize_number_literal_value(raw_text)
+            };
         }
     }
     return expr;

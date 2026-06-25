@@ -23,6 +23,7 @@ import { infer_effects } from "../decorator_semantics";
 import {
     char_at,
     char_code,
+    normalize_number_literal_value,
     strings_equal,
     substring
 } from "../string_utils";
@@ -255,7 +256,9 @@ fn parse_decorator_argument(tokens: Token[]) -> DecoratorArgument? {
         } else if raw_text == "false" {
             expr = Expression.BooleanLiteral { value: "false" };
         } else if looks_like_number(raw_text) {
-            expr = Expression.NumberLiteral { value: raw_text };
+            expr = Expression.NumberLiteral {
+                value: normalize_number_literal_value(raw_text)
+            };
         }
     }
     return DecoratorArgument { name: name_text, expression: expr };

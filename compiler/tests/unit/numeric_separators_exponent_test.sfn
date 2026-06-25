@@ -1,0 +1,92 @@
+// compiler/tests/unit/numeric_separators_exponent_test.sfn
+//
+// Regression coverage for #1620: the lexer must accept `_` digit separators
+// (`1_000_000`) and scientific exponents (`1.0e6` / `1e6`) as single number
+// tokens, and the parser must normalise them into the plain decimal form the
+// codegen and int-vs-float classification paths already understand — strip
+// `_`, and ensure a `.` precedes any exponent (LLVM rejects `1e6` but accepts
+// `1.0e6`). Before the fix, a digit run that hit `_` ended the number token
+// and started an identifier (`1_000` -> `1`, `_000`), collapsing the RHS to
+// `Expression.Raw` — silently wrong.
+import { lex } from "../../src/lexer";
+import { normalize_number_literal_value, strings_equal } from "../../src/string_utils";
+
+// ---- normalisation contract (the literal -> value path) ----
+test "numeric: underscores are stripped from integers" {
+    assert strings_equal(normalize_number_literal_value("1_000"), "1000");
+    assert strings_equal(normalize_number_literal_value("1_000_000"), "1000000");
+}
+
+test "numeric: underscores are stripped from fractions" {
+    assert strings_equal(normalize_number_literal_value("3.141_592"), "3.141592");
+}
+
+test "numeric: an exponent without a dot gains one" {
+    assert strings_equal(normalize_number_literal_value("1e6"), "1.0e6");
+    assert strings_equal(normalize_number_literal_value("1E6"), "1.0e6");
+}
+
+test "numeric: dotted and signed exponents are preserved" {
+    assert strings_equal(normalize_number_literal_value("1.0e6"), "1.0e6");
+    assert strings_equal(normalize_number_literal_value("1.5e-3"), "1.5e-3");
+    assert strings_equal(normalize_number_literal_value("2.5E+4"), "2.5e+4");
+}
+
+test "numeric: plain literals pass through unchanged" {
+    assert strings_equal(normalize_number_literal_value("1000"), "1000");
+    assert strings_equal(normalize_number_literal_value("3.14"), "3.14");
+}
+
+// ---- the lexer scans each form as ONE number token (no split) ----
+fn _first_is_one_number(source: string, expected_lexeme: string) -> boolean ![io] {
+    let tokens = lex(source);
+    if tokens.length == 0 { return false; }
+    let tok = tokens[0];
+    if tok.kind.variant != "NumberLiteral" { return false; }
+    return strings_equal(tok.lexeme, expected_lexeme);
+}
+
+test "numeric: 1_000_000 lexes as a single number token" ![io] {
+    assert _first_is_one_number("1_000_000", "1_000_000");
+}
+
+test "numeric: 1.0e6 lexes as a single number token" ![io] {
+    assert _first_is_one_number("1.0e6", "1.0e6");
+}
+
+test "numeric: 1e6 lexes as a single number token" ![io] {
+    assert _first_is_one_number("1e6", "1e6");
+}
+
+test "numeric: 1.5e-3 lexes as a single number token" ![io] {
+    assert _first_is_one_number("1.5e-3", "1.5e-3");
+}
+
+test "numeric: a trailing e with no digit stays an identifier" ![io] {
+    // `1e` must NOT be misread: `1` is the number, `e` begins an identifier.
+    let tokens = lex("1e");
+    assert tokens.length >= 2;
+    assert tokens[0].kind.variant == "NumberLiteral";
+    assert strings_equal(tokens[0].lexeme, "1");
+    assert tokens[1].kind.variant == "Identifier";
+}
+
+test "numeric: a separator not between digits stops the run" ![io] {
+    // `_` is only a separator between two digits; `1__0` and a trailing `1_`
+    // end the number at the first `_` not flanked by digits.
+    let a = lex("1__0");
+    assert a.length >= 2;
+    assert a[0].kind.variant == "NumberLiteral";
+    assert strings_equal(a[0].lexeme, "1");
+    assert a[1].kind.variant == "Identifier";
+}
+
+test "numeric: a non-digit after e leaves the exponent unscanned" ![io] {
+    // `1.0e_3` has no digit after `e`, so the literal is `1.0` and `e_3`
+    // becomes an identifier rather than a malformed exponent.
+    let b = lex("1.0e_3");
+    assert b.length >= 2;
+    assert b[0].kind.variant == "NumberLiteral";
+    assert strings_equal(b[0].lexeme, "1.0");
+    assert b[1].kind.variant == "Identifier";
+}
