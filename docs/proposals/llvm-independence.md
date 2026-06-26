@@ -1,8 +1,13 @@
 # Proposal: Toolchain Independence — A Sailfin-Native Backend
 
-**Date:** 2026-06-05
-**Author:** Compiler architect (vision / design exploration)
-**Status:** Vision — long-horizon, post-1.0. Not scheduled. No issue scoped yet.
+**Date:** 2026-06-05 (status updated 2026-06-26)
+**Author:** Compiler architect (design)
+**Status:** **Split status.** The *seal-sufficient* backend (Axis 2 — correct +
+metadata-carrying + syscall-gating) is now on the **1.0 critical path** as a
+prerequisite of the capability seal (epic #1640, child of #1639); the owned
+syscall layer (Axis 3) likewise (epic #1641). The *perf-parity* backend (matching
+LLVM's optimizer) remains a **post-1.0 long tail** — see §5. Nothing here is built
+yet.
 **Companion docs:** `docs/proposals/capability-sealed-runtime.md` (the *why* —
 what this independence is ultimately for), `docs/build-performance.md` (perf
 analysis + Track registry, #339), `docs/runtime_audit.md` /
@@ -63,9 +68,9 @@ them produces confused roadmaps. This proposal is **only** about Axis 2.
 
 | Axis | Goal | Owner today | Status |
 |---|---|---|---|
-| **1. C-source elimination** | No `.c` in the runtime; every line we author is Sailfin | `runtime/native/src/*.c` (~9.4k LOC) | **In flight** — M0–M5 done, M3/M4 open (#390, #965) |
-| **2. Toolchain independence** | No LLVM/clang in the codegen + link path | `clang` + LLVM (the `.ll` printer feeds it) | **This proposal** — unclaimed |
-| **3. libc independence** | Talk to the kernel directly, not through libc | libc/POSIX via `extern fn` | **Explicitly out of scope** of the runtime architecture today |
+| **1. C-source elimination** | No `.c` in the runtime; every line we author is Sailfin | (was `runtime/native/src/*.c`) | **Done** — `runtime/native/` deleted (#390, #965, #822) |
+| **2. Toolchain independence** | No LLVM/clang in the codegen + link path | `clang` + LLVM (the `.ll` printer feeds it) | **Seal-sufficient slice now 1.0-critical** (#1640); perf-parity stays post-1.0 |
+| **3. libc independence** | Talk to the kernel directly, not through libc | libc/POSIX via `extern fn` | **Now 1.0-critical** for the seal's enforcement chokepoint (#1641) |
 
 Two clarifications that matter for alignment:
 
@@ -80,8 +85,11 @@ Two clarifications that matter for alignment:
 - **Axis 3 (drop libc) is what makes Go *Go*.** Go's hermeticity comes from its
   own per-arch syscall stubs, which is why its binaries are truly static.
   Dropping clang but still dynamically linking `libc.so` is only half the Go
-  story. Axis 3 is the deepest and least urgent; it is sketched in §8 Stage 4 as
-  optional, not required for Axis 2 to pay off.
+  story. Axis 3 is the deepest piece — and, since the capability seal became a
+  1.0 GA blocker (#1639), no longer the *least urgent*: it is the single
+  enforcement chokepoint the seal gates against (epic #1641). It is sketched in
+  §8 Stage 4; the "optional" framing there predates the seal decision and is
+  superseded for the tier-1 GA target.
 
 ---
 
@@ -238,10 +246,12 @@ Each stage is independently valuable and shippable. None requires a flag day.
   without surrendering release perf. Steal Cranelift's philosophy (fast, simple,
   good-enough), don't compete with LLVM's optimizer. `sfn build --release` stays
   on LLVM.
-- **Stage 4 — The dream.** Grow the native optimizer for the cases that matter,
-  co-design with the M4 concurrency runtime (safepoints, stack maps, escape
-  analysis feeding the arena allocator), and optionally add the syscall layer
-  (Axis 3) to drop libc. LLVM becomes optional, then legacy.
+- **Stage 4 — Syscall layer + perf tail.** Two threads, now split by priority:
+  (a) the **owned syscall layer (Axis 3)** to drop libc on tier-1 — **1.0-critical**
+  for the capability seal (#1641), not optional; (b) growing the native optimizer
+  for the cases that matter, co-designed with the concurrency runtime (safepoints,
+  stack maps, escape analysis feeding the arena allocator) — the **post-1.0** perf
+  tail. LLVM becomes optional, then legacy.
 
 ---
 
@@ -249,11 +259,17 @@ Each stage is independently valuable and shippable. None requires a flag day.
 
 - **Not** removing LLVM. The two-backend design keeps LLVM as the release-mode
   optimizer indefinitely; "independence" means "not *dependent*," not "absent."
-- **Not** blocking or competing with the 1.0 critical path, the runtime rewrite
-  (#390/#965), or #347. This is post-1.0.
-- **Not** matching `-O2` throughput in the native backend. Its job is iteration
-  speed and toolchain ownership, not beating LLVM at optimization.
-- **Not** dropping libc as a precondition. Axis 3 is optional and last.
+- **Not** *all* of this is post-1.0 anymore. The seal-sufficient backend (#1640)
+  and the owned syscall layer (#1641) are now on the 1.0 critical path as
+  prerequisites of the capability seal (#1639). The **perf-parity** backend below
+  is the part that stays post-1.0.
+- **Not** matching `-O2` throughput in the native backend for 1.0. Perf parity is
+  the post-1.0 long tail; the 1.0 job is a *correct, metadata-carrying,
+  syscall-gating* backend, not beating LLVM at optimization. LLVM stays the
+  release-mode optimizer indefinitely (the two-backend design holds).
+- **Not** dropping libc everywhere as a precondition. Axis 3 drops libc on the
+  **tier-1** target (Linux x86_64) for the seal; macOS/Windows keep a minimal
+  vendor-library shim the gate still mediates (no stable raw-syscall ABI there).
 
 ---
 

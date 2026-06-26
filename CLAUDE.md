@@ -329,8 +329,10 @@ When uncertain about feature status or semantics:
 5. **`docs/build-performance.md`** — build perf analysis + optimization plan
 6. **`docs/strategy/decision-brief.md`** — strategic overlay binding the internal
    vision (the capstone `docs/proposals/capability-sealed-runtime.md`) to the
-   market: what's *proven now* (compile-time effects) vs. the *long-horizon seal*,
-   the now/later positioning split, and the seal-sufficient-vs-perf-parity fork.
+   market: what's *enforced now* (compile-time effects) vs. the *runtime seal*
+   (built, not yet shipped), and the seal-sufficient-vs-perf-parity fork. As of
+   2026-06-26 the capability-sealed runtime is a **1.0 hallmark / GA blocker**
+   (epic #1639), not a post-1.0 capstone — see the brief's repositioning banner.
    Proposal docs win on architecture; the brief wins on positioning.
 
 Examples are compiler-only unless marked with future-syntax comments.
