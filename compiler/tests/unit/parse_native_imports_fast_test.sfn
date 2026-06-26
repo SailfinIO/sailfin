@@ -17,7 +17,7 @@
 // self-host build, which runs the shipping code on 121 modules
 // every `make compile`.
 //
-// See docs/build-performance.md "Import Discovery Fast-Path
+// See docs/proposals/0006-build-architecture.md "Import Discovery Fast-Path
 // Scanner" for the rationale.
 // ── Minimal types mirroring NativeImportSpecifier / NativeImport ──
 struct FastSpecifier {

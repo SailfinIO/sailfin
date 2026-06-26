@@ -8,7 +8,7 @@ name: Benchmark
 #
 # Use this to capture a fresh baseline (e.g. the Linux x86_64 runtime baseline
 # that the macOS dev host cannot produce — runtime wall/RSS are not
-# cross-platform comparable; see docs/runtime-performance.md). The setup mirrors
+# cross-platform comparable; see docs/perf/runtime-performance.md). The setup mirrors
 # nightly-selfhost.yml; the pinned seed lives in `.seed-version`.
 #
 # NOTE: workflow_dispatch workflows are only triggerable once the file exists on

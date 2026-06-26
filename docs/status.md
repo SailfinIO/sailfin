@@ -11,8 +11,9 @@ It is **not a changelog.** Per-change narrative lives in the merged PR, the
 linked issue, and the [GitHub Releases](https://github.com/SailfinIO/sailfin/releases)
 notes (auto-generated per tag). When a feature's status changes: flip the
 row, update the one-line note, link the PR/issue — do not append prose. If a
-detail matters long-term, it belongs in the spec, a `docs/proposals/*` design
-doc, or `docs/runtime_architecture.md`, not here.
+detail matters long-term, it belongs in the spec or a `docs/proposals/*`
+design doc (e.g. `docs/proposals/0025-native-runtime-architecture.md`), not
+here.
 
 ## Toolchain (Current)
 
@@ -233,13 +234,13 @@ Capsules ship under `capsules/sfn/` and are imported by bare name
   `spawn_await_concurrent_execution_test.sfn`, `serve_loopback_test.sfn`, and
   the whole-program ASAN-interleave gate over the moved-OwnedBuf surface
   (`concurrency_ownedbuf_asan_interleave_test.sfn`, #1567). Design:
-  `docs/runtime_architecture.md` §2.6.
+  `docs/proposals/0025-native-runtime-architecture.md` §3.7.
 
 ### Runtime Migration (C → Sailfin)
 
-Full plan and sequencing: `docs/runtime_audit.md` and
-`docs/runtime_architecture.md`. One row per migration unit; history in the
-linked issues.
+Design and subsystem detail: `docs/proposals/0025-native-runtime-architecture.md`
+(SFEP-0025). This table is the live migration record — one row per migration
+unit; history in the linked issues.
 
 | Unit | Status | Notes |
 |---|---|---|

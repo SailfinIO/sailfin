@@ -28,7 +28,7 @@
 #     under the various Windows shell wrappers
 #
 # Override at the call site by exporting BUILD_JOBS=N before invoking make.
-# See docs/build-performance.md → Phase 6 for rationale.
+# See docs/proposals/0006-build-architecture.md → Phase 6 for rationale.
 
 set -eu
 
@@ -72,7 +72,7 @@ case "$uname_s" in
 esac
 
 # Global upper bound. Matches the [1, 8] contract documented in
-# docs/build-performance.md → Phase 6. Without this, a 32-core / 256 GB
+# docs/proposals/0006-build-architecture.md → Phase 6. Without this, a 32-core / 256 GB
 # workstation would emit 32 — well past the point of diminishing returns
 # for a 121-module build, and risks I/O contention plus llvm-link
 # memory pressure dominating wall-time.

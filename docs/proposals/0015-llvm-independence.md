@@ -23,9 +23,9 @@ syscall layer (Axis 3) likewise (epic #1641). The *perf-parity* backend (matchin
 LLVM's optimizer) remains a **post-1.0 long tail** — see §5. Nothing here is built
 yet.
 **Companion docs:** `docs/proposals/0016-capability-sealed-runtime.md` (the *why* —
-what this independence is ultimately for), `docs/build-performance.md` (perf
-analysis + Track registry, #339), `docs/runtime_audit.md` /
-`docs/runtime_architecture.md` (C→Sailfin runtime migration),
+what this independence is ultimately for), `docs/proposals/0006-build-architecture.md` (perf
+analysis + Track registry, #339), `docs/proposals/0025-native-runtime-architecture.md`
+(C→Sailfin runtime migration and architecture),
 `site/src/content/docs/docs/reference/runtime-abi.md` (target ABI).
 
 > **Why this doc exists.** Sailfin's self-hosting story currently stops at the
@@ -89,7 +89,7 @@ them produces confused roadmaps. This proposal is **only** about Axis 2.
 Two clarifications that matter for alignment:
 
 - **The runtime rewrite (Axis 1) keeps LLVM and libc by design.**
-  `docs/runtime_architecture.md` states the contract explicitly: *"Every line of
+  `docs/proposals/0025-native-runtime-architecture.md` states the contract explicitly: *"Every line of
   source code we author is Sailfin. Platform syscalls are reached via `extern fn`
   declarations … the compiler emits LLVM `declare` directives; the linker
   resolves them against libc, libpthread."* Porting the C runtime to Sailfin
@@ -131,7 +131,7 @@ the LLVM path.
 
 The shallow reason is compile speed: LLVM dominates build cost in any
 Rust/Clang-style toolchain, and a bespoke fast backend is how Go gets sub-second
-iteration. That alone serves the `docs/build-performance.md` <5-min self-host
+iteration. That alone serves the `docs/proposals/0006-build-architecture.md` <5-min self-host
 target. But the durable reasons tie to Sailfin's three differentiators:
 
 1. **Concurrency (pillar 3) will eventually *demand* backend control.** The M4

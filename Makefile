@@ -24,7 +24,7 @@ NATIVE_OPT ?= -O2
 # never shipped, so the clang -O2 cost on its 121-module .ll → .o stage is
 # pure waste in the validation flow. Seedcheck and stage3 keep $(NATIVE_OPT)
 # because *they* are the ones that have to byte-fixed-point against each
-# other. See docs/build-performance.md → Phase 6 follow-ups.
+# other. See docs/proposals/0006-build-architecture.md → Phase 6 follow-ups.
 SELFHOST1_OPT ?= -O0
 
 # Extra flags used when compiling LLVM IR (.ll) with clang.
@@ -82,7 +82,7 @@ endif
 # Override explicitly with `BUILD_JOBS=N`; empty / unset uses auto-detect. The
 # driver (`sfn build -p compiler`) parallelises subprocess emits internally —
 # `BUILD_JOBS` only affects callers that still spawn module compiles directly.
-# See docs/build-performance.md → Phase 6 for the rollout history and the
+# See docs/proposals/0006-build-architecture.md → Phase 6 for the rollout history and the
 # per-job budget rationale.
 ifeq ($(strip $(BUILD_JOBS)),)
 BUILD_JOBS := $(shell bash scripts/detect_build_jobs.sh 2>/dev/null || echo 1)
@@ -462,7 +462,7 @@ bench-runtime:
 # Compiles a module twice (with and without SAILFIN_USE_ARENA=1) and diffs
 # the emitted LLVM IR. Until the arena allocator lands, the env var is a
 # no-op and the diff is trivially identical — the harness still validates.
-# Once M0.5 lands (see docs/runtime_architecture.md §4.4), this becomes the
+# Once M0.5 lands (see docs/proposals/0025-native-runtime-architecture.md #321-arenas), this becomes the
 # correctness gate: any divergence means the arena is corrupting output.
 #
 # Usage:

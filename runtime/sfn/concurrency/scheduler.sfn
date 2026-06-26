@@ -1,8 +1,8 @@
 // runtime/sfn/concurrency/scheduler.sfn
 //
 // Pure-Sailfin struct layouts plus the shared MPMC task queue for
-// the v0 scheduler described in `docs/runtime_architecture.md`
-// §2.6.1 ("Fixed Thread Pool, Not Work-Stealing"). The struct
+// the v0 scheduler described in `docs/proposals/0025-native-runtime-architecture.md`
+// `#37-scheduler-and-concurrency` ("Fixed Thread Pool, Not Work-Stealing"). The struct
 // section pins the `Scheduler`, `Task`, and `TaskQueue` byte
 // layouts plus the opaque pthread-handle storage types; the
 // `sfn_taskqueue_*` section below implements the mutex-guarded

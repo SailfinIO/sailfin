@@ -1,9 +1,8 @@
 // runtime/sfn/platform/posix.sfn
 //
 // Pure-Sailfin extern declarations for the POSIX surface used by
-// the runtime's process-spawn (`docs/runtime_architecture.md` §2.7
-// process adapter), clock adapter (§2.7.4), and sleep primitive
-// (§2.8). Companion to `runtime/sfn/platform/libc.sfn`; see that
+// the runtime's process-spawn (`docs/proposals/0025-native-runtime-architecture.md` `#38-capability-adapters-and-io-primitives`
+// process adapter, clock adapter, and sleep primitive). Companion to `runtime/sfn/platform/libc.sfn`; see that
 // file for the long-form rationale (type discipline, `unsafe`
 // policy, formatter pointer spelling, opaque-pointee rule). All
 // declarations here obey the v0 C-ABI accept-list enforced by
@@ -12,7 +11,7 @@
 //
 // Status: typecheck smoke test. Not imported anywhere yet; the
 // process / clock / sleep adapters that consume these land at M2
-// (`docs/runtime_architecture.md` §4.6). Today this file proves
+// (`docs/proposals/0025-native-runtime-architecture.md`). Today this file proves
 // the extern pipeline handles primitive-pointer out-parameters
 // (`* i32` for `posix_spawnp`'s `pid` and `waitpid`'s `status`)
 // alongside opaque-struct pointers and `* * u8` argv/envp arrays
@@ -23,7 +22,7 @@
 // pointees. Their platform-specific sizes will be encoded as
 // opaque byte arrays in a separate platform-conditional `.sfn`
 // file when the M2 adapter consumers land — see
-// `docs/runtime_architecture.md` §2.9 open question Q7. Adapters
+// `docs/proposals/0025-native-runtime-architecture.md` `#38-capability-adapters-and-io-primitives` open question Q7. Adapters
 // allocate the handles via `malloc` and pass the pointers through.
 // ── Process spawn / wait ──────────────────────────────────────
 // `pid` is an `int *` out-parameter (POSIX writes the child PID

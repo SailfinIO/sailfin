@@ -26,7 +26,7 @@
 // (make compile exercises it every run), and the doc comment at
 // lowering_helpers_mangling.sfn:424 cross-references this file.
 //
-// See docs/build-performance.md Phase 1b and the aliasing commentary at
+// See docs/proposals/0006-build-architecture.md Phase 1b and the aliasing commentary at
 // lowering_core.sfn:565-578 for the full rationale.
 test "runtime contract: mut binding shares storage with input (no copy)" {
     let original: int[] = [1, 2, 3];

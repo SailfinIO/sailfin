@@ -23,7 +23,7 @@
 # For more information: https://github.github.com/gh-aw/introduction/overview/
 #
 # Weekly strategy layer for the Sailfin agentic pipeline. Reads the roadmap,
-# status, build-performance data, and recent issue/PR activity, then writes a
+# status, build performance baseline, and recent issue/PR activity, then writes a
 # single "Focus: Week of YYYY-MM-DD" issue identifying 3-5 workstreams that
 # downstream agents (architect, grooming, engineer) act on for the week.
 # 
@@ -1328,7 +1328,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           WORKFLOW_NAME: "Sailfin Planner"
-          WORKFLOW_DESCRIPTION: "Weekly strategy layer for the Sailfin agentic pipeline. Reads the roadmap,\nstatus, build-performance data, and recent issue/PR activity, then writes a\nsingle \"Focus: Week of YYYY-MM-DD\" issue identifying 3-5 workstreams that\ndownstream agents (architect, grooming, engineer) act on for the week.\n\nThe Planner NEVER opens PRs, modifies code, or approves its own focus. A\nhuman must apply the `focus:approved` label before grooming and engineering\nwill act on the focus."
+          WORKFLOW_DESCRIPTION: "Weekly strategy layer for the Sailfin agentic pipeline. Reads the roadmap,\nstatus, build performance baseline, and recent issue/PR activity, then writes a\nsingle \"Focus: Week of YYYY-MM-DD\" issue identifying 3-5 workstreams that\ndownstream agents (architect, grooming, engineer) act on for the week.\n\nThe Planner NEVER opens PRs, modifies code, or approves its own focus. A\nhuman must apply the `focus:approved` label before grooming and engineering\nwill act on the focus."
           HAS_PATCH: ${{ needs.agent.outputs.has_patch }}
         with:
           script: |

@@ -48,7 +48,7 @@
 // `runtime/sfn/runtime_globals.sfn`) is seed-gated: the pinned seed still
 // emits `@runtime = external global` in every module it compiles, so
 // the definition must survive until a post-flip seed is cut. See
-// `docs/runtime_audit.md` for the full per-symbol table.
+// the Runtime Migration table in `docs/status.md` for the full per-symbol table.
 import { sfn_array_sfn_map } from "./sfn/array";
 import { sfn_sleep } from "./sfn/clock";
 import { sfn_throw } from "./sfn/exception";
@@ -133,7 +133,7 @@ struct TypeDescriptor {
 // `error` read by value rather than type-erasing to `i8*`. The `?` operator
 // (R.3 — #833) and emitter support (R.4 — #834) build on this declaration;
 // an `E: Error` bound / `From` coercion is deferred until generic
-// constraints land. See docs/runtime_architecture.md.
+// constraints land. See docs/proposals/0025-native-runtime-architecture.md.
 enum Result<T, E> {
     Ok { value: T },
     Err { error: E }

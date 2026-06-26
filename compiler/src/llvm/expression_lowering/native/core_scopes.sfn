@@ -243,7 +243,7 @@ fn promote_local_to_rc(locals: LocalBinding[], name: string) -> LocalBinding[] {
 // ── M4 (#1094): escape promotion at channel-send / spawn-capture ──────
 //
 // M1.5.5 (#329) promotes owned heap locals to `rc` only at function-return
-// boundaries; `docs/runtime_audit.md` §M1.5 explicitly deferred the
+// boundaries; the Runtime Migration table in `docs/status.md` (§M1.5) explicitly deferred the
 // closure-capture and channel-send boundaries until those features landed.
 // With the M4 scheduler (#1090) and channels (#1091) shipped, a value moved
 // across one of these boundaries crosses *threads*: the sender's scope-exit

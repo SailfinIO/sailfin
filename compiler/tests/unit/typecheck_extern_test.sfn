@@ -2,7 +2,7 @@
 //
 // Covers the contract added in `compiler/src/typecheck.sfn` and
 // `compiler/src/typecheck_types.sfn` for the runtime-rewrite Phase 1
-// prerequisite (see docs/runtime_architecture.md §3.6).
+// prerequisite (see docs/proposals/0025-native-runtime-architecture.md `#395-extern-function-lowering`).
 //
 // These tests parse a small `.sfn` source through `parse_program` and
 // run `typecheck_diagnostics` end-to-end. They assert on the

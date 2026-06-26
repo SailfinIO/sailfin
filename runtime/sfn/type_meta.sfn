@@ -1,7 +1,7 @@
 // runtime/sfn/type_meta.sfn
 //
 // M2.10 (#402): minimum-viable type metadata per
-// `docs/runtime_architecture.md` §2.5.3 — id, name, kind only.
+// `docs/proposals/0025-native-runtime-architecture.md` `#36-type-metadata-and-reflection` — id, name, kind only.
 // Replaces the seven C stubs that today all return false:
 //
 //   `sailfin_runtime_is_string` / `is_number` / `is_boolean`
@@ -12,8 +12,8 @@
 // Field descriptors with offsets, `get_field`, and structural
 // interface `instance_of` are deferred per issue #402 `Out:`.
 // `sfn_type_of(value)` returns null at v0 because values do not
-// yet carry a type tag in their first field (`docs/runtime_architecture.md`
-// §2.5.2 dynamic-dispatch path); the static-hint variant lands
+// yet carry a type tag in their first field (`docs/proposals/0025-native-runtime-architecture.md`
+// `#36-type-metadata-and-reflection` dynamic-dispatch path); the static-hint variant lands
 // in the follow-up PR that adds compiler-side intercept.
 //
 // Architecture. Every compiled module emits:
@@ -85,7 +85,7 @@ struct SfnTypeDescriptor {
 }
 
 // Type-kind tags. Match the architect spec at
-// `docs/runtime_architecture.md` §2.5.1 and the constants used
+// `docs/proposals/0025-native-runtime-architecture.md` `#36-type-metadata-and-reflection` and the constants used
 // by the emitter at
 // `compiler/src/llvm/lowering/type_descriptors.sfn`:
 //

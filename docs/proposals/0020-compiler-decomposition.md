@@ -788,7 +788,7 @@ Targeted checks:
   cut is FE/BE (not, say, by-pipeline-pass).
 - **Parallel builds.** Per-member cache keys + worker slots (build-architecture
   §4.10) become available once the members exist; the IPC-file bottleneck
-  (`docs/build-performance.md`) is orthogonal but per-member memory caps (the
+  (`docs/proposals/0006-build-architecture.md`) is orthogonal but per-member memory caps (the
   7 GB `lowering_core.sfn` is now isolated in BE) stop one member starving
   another.
 - **Dogfooding completion.** The `sfn/toml` getter API (§7.2) is the **one**

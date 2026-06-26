@@ -1,8 +1,8 @@
 // runtime/sfn/exception.sfn
 //
 // Sailfin-native exception frame primitives backed by libc
-// `setjmp`/`longjmp`. M2.7a per `docs/runtime_architecture.md`
-// §2.4 and issue #400 (epic #389). Part 1 of 3 of the M2.7
+// `setjmp`/`longjmp`. M2.7a per `docs/proposals/0025-native-runtime-architecture.md`
+// `#35-exception--unwind-subsystem` and issue #400 (epic #389). Part 1 of 3 of the M2.7
 // migration: primitives only. The compiler-emission migration
 // in `compiler/src/llvm/lowering/instructions_try.sfn` lands at
 // M2.7b; the legacy TLS-polling path (`sailfin_runtime_set/

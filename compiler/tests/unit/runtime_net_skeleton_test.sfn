@@ -1,6 +1,6 @@
 // Golden-IR test for the `runtime/sfn/platform/net.sfn` skeleton — the
 // BSD-sockets surface used by the v0 HTTP adapter and the `serve` accept
-// loop (see `docs/runtime_architecture.md` §2.7.2 / §2.6.6).
+// loop (see `docs/proposals/0025-native-runtime-architecture.md` `#38-capability-adapters-and-io-primitives`).
 //
 // Replaces `compiler/tests/e2e/test_runtime_net_skeleton.sh` as part of
 // the bash-collapse migration (epic #842, issue #1223). The `.sh` ran

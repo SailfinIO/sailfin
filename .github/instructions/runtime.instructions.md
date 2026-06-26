@@ -10,4 +10,4 @@ When working in the runtime directory:
 - `runtime/sfn/` contains the Sailfin-native runtime modules; `runtime/prelude.sfn` is the Sailfin-native runtime facade (collections, strings, type checks).
 - The runtime is linked into every compiled binary; keep it lean.
 - Document runtime ABI changes in `site/src/content/docs/docs/reference/runtime-abi.md` (published at [sailfin.dev/docs/reference/runtime-abi](https://sailfin.dev/docs/reference/runtime-abi)).
-- Track C→Sailfin migration progress in `docs/runtime_audit.md`.
+- Track C→Sailfin migration progress in the Runtime Migration table in `docs/status.md`.

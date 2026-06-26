@@ -1,8 +1,8 @@
 // runtime/sfn/platform/net.sfn
 //
 // Pure-Sailfin extern declarations for the BSD-sockets surface
-// used by the runtime's HTTP adapter (`docs/runtime_architecture.md`
-// §2.7.2) and the `serve` accept loop (§2.6.6). Companion to
+// used by the runtime's HTTP adapter (`docs/proposals/0025-native-runtime-architecture.md`
+// `#38-capability-adapters-and-io-primitives`) and the `serve` accept loop. Companion to
 // `runtime/sfn/platform/libc.sfn`; see that file for the long-form
 // rationale (type discipline, `unsafe` policy, formatter pointer
 // spelling, opaque-pointee rule). All declarations here obey the
@@ -10,8 +10,8 @@
 // `compiler/src/typecheck_types.sfn` (E0801–E0805).
 //
 // Status: typecheck smoke test. Not imported anywhere yet; the
-// HTTP / serve adapters that consume these land at M3
-// (`docs/runtime_architecture.md` §4.7) and M4 (§4.8). Today
+// HTTP / serve adapters that consume these land at M3/M4
+// (`docs/proposals/0025-native-runtime-architecture.md`). Today
 // this file proves the extern pipeline handles a primitive-pointer
 // out-parameter (`* i32` for `accept`'s `addrlen`) and validates
 // that opaque-struct pointers compose with the broader BSD socket
@@ -21,7 +21,7 @@
 // in libc.sfn's family of fd helpers (it isn't there today, but
 // the runtime's libc skeleton will eventually add it for the
 // stdio cleanup path). Until cross-module call-site resolution
-// lands (typecheck open follow-up — see `runtime_audit.md`
+// lands (typecheck open follow-up — see the Runtime Migration table in `docs/status.md`
 // §"`extern fn` shipped" status delta), declaring the same C
 // symbol in two files is fine: each file emits its own LLVM
 // `declare` and the linker resolves both to the single libc

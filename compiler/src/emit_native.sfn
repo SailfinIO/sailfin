@@ -346,7 +346,7 @@ fn emit_statement_control_flow(state: NativeState, statement: Statement) -> Nati
     }
     if statement.variant == "RoutineStatement" {
         // `routine { ... }` — structured-concurrency block scope (M4.0, epic
-        // #965; docs/runtime_architecture.md §2.6.7). The v0 surface is a bare
+        // #965; docs/proposals/0025-native-runtime-architecture.md §3.7 `#37-scheduler-and-concurrency`). The v0 surface is a bare
         // block scope that yields no value (ast.sfn:355), so emit an explicit
         // `.routine`/`.endroutine` scope. The native IR parser maps these to
         // the transparent always-true `If`/`EndIf` scope that `BlockStatement`

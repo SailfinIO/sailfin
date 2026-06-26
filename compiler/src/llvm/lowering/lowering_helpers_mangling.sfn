@@ -539,7 +539,7 @@ fn concat_native_functions(first: NativeFunction[], second: NativeFunction[]) ->
 // UNSAFE if another reference to `dst` expects the pre-call contents —
 // use `concat_native_functions` instead when the caller needs a pristine
 // snapshot of `dst`. Audited safe call sites as of Phase 1b: only two
-// sites in lowering_core.sfn:568, 576 (build-performance.md Phase 1b).
+// sites in lowering_core.sfn:568, 576 (docs/proposals/0006-build-architecture.md Phase 1b).
 //
 // The aliasing contract is locked in by the regression test at
 // compiler/tests/unit/extend_native_functions_inplace_test.sfn, which

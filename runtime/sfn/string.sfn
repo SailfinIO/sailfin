@@ -7,7 +7,7 @@
 // Sailfin bodies (the retired C runtime is deleted).
 //
 // Status: real Sailfin bodies. The architect plan in
-// `docs/runtime_architecture.md` §2.2 specifies these helpers
+// `docs/proposals/0025-native-runtime-architecture.md` `#33-string-subsystem` specifies these helpers
 // against the SfnString aggregate (`{i8*, i64}` by value) so
 // `sfn_str_len` is a single field load and `sfn_str_eq` is a length
 // compare + `memcmp`. The M1.A.2 type-mapping flip has landed —

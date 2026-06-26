@@ -37,7 +37,7 @@ Every feature must flow through all stages. A feature that only reaches stage 3 
 - Per-module: 1-2 GB RAM, 4-7 min for heavy modules
 - Primary bottleneck: filesystem IPC (structs serialized to temp files instead of returned)
 - Parallel builds blocked by shared IPC file paths
-- See `docs/build-performance.md` for the full root cause analysis
+- See `docs/proposals/0006-build-architecture.md` for the full root cause analysis
 
 ## Design Principles
 
@@ -96,7 +96,7 @@ Always consult these before designing:
 | `docs/status.md` | Current feature matrix — what ships, what's partial, what's missing |
 | `site/src/content/docs/docs/reference/spec/` | Language reference, chapter files (§1–§11) for current language |
 | `site/src/content/docs/docs/reference/preview/` | Design preview — planned but not yet shipped |
-| `docs/build-performance.md` | Build bottleneck root causes and optimization plan |
+| `docs/proposals/0006-build-architecture.md` | Build bottleneck root causes, optimization plan, and performance baseline |
 | `compiler/capsule.toml` | Current version and manifest |
 
 ## What You're Asked To Do

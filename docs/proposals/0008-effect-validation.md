@@ -1561,7 +1561,7 @@ ulimit -v 8388608 && timeout 30 build/native/sailfin check /tmp/cap_test/
   §"Pre-1.0 Syntax Reform" — effects are differentiator #1 and LLM
   adoption lever #1.
 - [`docs/status.md`](../status.md) — feature-status registry; updated each phase.
-- [`docs/proposals/build-performance.md`](../build-performance.md) — explains
+- [`docs/proposals/0006-build-architecture.md`](./0006-build-architecture.md) — explains
   why "now" — selfhost is fast enough that the audit work is tractable.
 - [`compiler/src/effect_checker.sfn`](../../compiler/src/effect_checker.sfn)
   — current checker source; modified by every pre-1.0 phase.

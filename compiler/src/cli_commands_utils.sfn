@@ -256,7 +256,7 @@ fn _env_flag(name: string) -> boolean ![io] {
 
 // Back-compat: scripts that still `touch build/sailfin/.foo` keep
 // working for one release. The deprecation note lives in
-// `docs/build-performance.md` rather than at runtime — printing on
+// `docs/proposals/0006-build-architecture.md` rather than at runtime — printing on
 // every probe would spam test runs that legitimately have the
 // file in place. Drop this helper (and the file probes) in the
 // next release.

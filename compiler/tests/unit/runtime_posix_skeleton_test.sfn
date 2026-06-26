@@ -1,6 +1,6 @@
 // Golden-IR test for the `runtime/sfn/platform/posix.sfn` skeleton — the
 // POSIX surface used by the v0 process / clock / sleep adapters (see
-// `docs/runtime_architecture.md` §2.7.4 and the §2.7 process adapter).
+// `docs/proposals/0025-native-runtime-architecture.md` `#38-capability-adapters-and-io-primitives` and the process adapter).
 //
 // Replaces `compiler/tests/e2e/test_runtime_posix_skeleton.sh` as part of
 // the bash-collapse migration (epic #842, issue #1223). The `.sh` ran

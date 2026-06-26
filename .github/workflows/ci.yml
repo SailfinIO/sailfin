@@ -13,7 +13,7 @@ env:
   # guard so a future change to the runtime default (formerly the
   # now-retired prior `scripts/build.sh` default) — or a caller that
   # scrubs env — can't silently regress CI onto the malloc path.
-  # See docs/build-performance.md → "Arena Allocator Default-On".
+  # See docs/proposals/0006-build-architecture.md → "Arena Allocator Default-On".
   SAILFIN_USE_ARENA: "1"
 
 permissions:

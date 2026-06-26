@@ -1683,7 +1683,7 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     }
 
     // Slice D (2026-05-03): numeric `as` cast lowering matrix. See
-    // docs/runtime_architecture.md §3.7. Both sides are non-pointer
+    // docs/proposals/0025-native-runtime-architecture.md §3.7 (`#396-numeric-types-int--float`). Both sides are non-pointer
     // at this point — pointer cases were handled above and the
     // identity case was filtered earlier.
     //   i1  → int (wider)      → zext      (true → 1, not -1)

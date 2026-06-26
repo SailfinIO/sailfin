@@ -195,7 +195,7 @@ The runtime is already pure Sailfin (`runtime/sfn/` + `runtime/prelude.sfn`):
 memory, strings, arrays, clock, process spawning, type metadata, filesystem
 adapters, and the concurrency scheduler all link into the compiler with no C.
 Remaining runtime work is hardening, tracked in
-[`docs/runtime_audit.md`](docs/runtime_audit.md).
+the [Runtime Migration table in `docs/status.md`](docs/status.md).
 
 After 1.0, focus shifts to ecosystem growth: an `sfn/ai` capsule for
 model invocation gated by `![model]`, taint types (`Secret<T>`, `PII<T>`)

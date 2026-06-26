@@ -24,8 +24,8 @@ epic **#1639** with five child epics (see §7). Depends on owning the backend
 critical path. **Not yet implemented or enforced** — the design below is the
 target, not a shipped claim (see the threat-model discipline in §8).
 **Companion docs:** `docs/proposals/0015-llvm-independence.md` (the *how* — owning the
-backend + syscall layer), `docs/runtime_architecture.md` (scheduler §2.6,
-extern-fn syscall model), `docs/runtime_audit.md` (C→Sailfin migration),
+backend + syscall layer), `docs/proposals/0025-native-runtime-architecture.md` (scheduler,
+extern-fn syscall model, C→Sailfin migration and architecture),
 `site/src/content/docs/docs/reference/runtime-abi.md` (target ABI).
 
 > **Why this doc exists.** `llvm-independence.md` answers *how* Sailfin stops
@@ -143,7 +143,7 @@ system cannot reason about.
 This is the part that makes the three pillars *multiply* rather than merely
 coexist. Sailfin is already building the scheduler:
 `runtime/sfn/concurrency/scheduler.sfn` (epic #965, v0 fixed thread pool per
-`runtime_architecture.md` §2.6; spawn/await/channel emit landed in #1153). That
+`docs/proposals/0025-native-runtime-architecture.md` `#37-scheduler-and-concurrency`; spawn/await/channel emit landed in #1153). That
 scheduler is the natural home for the capability context, which yields three
 properties that fall out *for free* once you own both the scheduler and the
 syscall layer:

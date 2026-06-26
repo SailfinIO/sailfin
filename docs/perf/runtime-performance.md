@@ -1,7 +1,7 @@
 # Runtime Performance: Execution Baseline
 
 **Date:** 2026-06-22 (initial baseline)
-**Companion:** `docs/build-performance.md` tracks *compiler* build performance
+**Companion:** `docs/proposals/0006-build-architecture.md` (Build performance section) tracks *compiler* build performance
 (how fast the compiler emits IR for its own modules). This doc tracks *runtime*
 performance — **how fast compiled Sailfin programs execute** — which is the
 dimension the C→Sailfin runtime rewrite (epic #1308 / #822, C runtime deleted)

@@ -30,7 +30,7 @@ Rust uses — not to a thread-local-storage (TLS) exception throw. This gives
 Sailfin a typed, effect-free error-handling path that complements (and over
 time supersedes) the existing `throw` / `try` / `catch` machinery, and it
 unblocks the runtime-migration work that already assumes `Result` exists
-(`docs/runtime_architecture.md:944`).
+(`docs/proposals/0025-native-runtime-architecture.md#1-summary`).
 
 ```sfn
 struct Error {
@@ -61,7 +61,7 @@ that marks a nullable type — they share a glyph and nothing else (see
 1. **Foundation first.** `Result<T, E>` + `?` is one of the four named
    pre-1.0 syntax-reform items in `CLAUDE.md` ("`Result<T, E>` + `?`
    operator — typed error handling to complement try/catch"). The runtime
-   audit (`docs/runtime_audit.md`) and `docs/runtime_architecture.md:944`
+   audit (Runtime Migration table in `docs/status.md`) and `docs/proposals/0025-native-runtime-architecture.md`
    both block on it: every OS call (`sfn_fs_read_file`, sockets, process
    spawn) can fail, and the C-to-Sailfin port needs a typed failure channel
    that does not depend on the exception runtime.
@@ -351,7 +351,7 @@ the dangling `Result<SfnString, Error>` reference in the runtime
 architecture doc becomes real (it is at line 944, not 864 as the epic
 states — see Cross-links).**
 
-Rationale (close the loop): `docs/runtime_architecture.md:944` already
+Rationale (close the loop): `docs/proposals/0025-native-runtime-architecture.md` already
 writes *"`sfn_fs_read_file(path: SfnString, Arena*) -> SfnString` (or
 `Result<SfnString, Error>` once `Result` lands)"*, committing the runtime
 port to a named `Error` type. Shipping that type now makes the reference
@@ -542,8 +542,8 @@ follow-up (Q6). The old seed compiles the new compiler unchanged.
 5. **R.5 — Docs + spec.** Update `docs/status.md`, add a spec chapter under
    `site/src/content/docs/docs/reference/spec/`, update `llms.txt`, and
    replace `result_types_test.sfn`'s union-return stopgap with real
-   `Result` tests. Make `docs/runtime_architecture.md:944`'s
-   `Result<SfnString, Error>` reference real (Q8).
+   `Result` tests. Make the runtime architecture
+   `Result<SfnString, Error>` reference real (Q8) — see `docs/proposals/0025-native-runtime-architecture.md`.
 
 **Follow-up (separate `/groom`, not in this epic):** migrate the
 compiler-internal `TryStatement` site and add `From<E>` coercion + `E: Error`
@@ -564,7 +564,7 @@ the file list is the implementation map for R.1–R.5.)
 | LLVM lowering | `compiler/src/llvm/lowering/lowering_phase_types.sfn`, `instructions_match.sfn` | per-instantiation `Result` layout (R.2); no change to `instructions_try.sfn` |
 | Effect checker | `compiler/src/effect_checker.sfn` | none (Q5) |
 | Tests | `compiler/tests/integration/result_types_test.sfn` (+ new unit tests) | replace union stopgap; add `?` round-trip + must-error cases |
-| Docs | `docs/status.md`, `site/.../reference/spec/`, `llms.txt`, `docs/runtime_architecture.md` (`:944`) | status, spec chapter, LLM ref, make `Result` reference real |
+| Docs | `docs/status.md`, `site/.../reference/spec/`, `llms.txt`, `docs/proposals/0025-native-runtime-architecture.md` | status, spec chapter, LLM ref, make `Result` reference real |
 
 ## Dependencies
 
@@ -647,10 +647,8 @@ These representative inputs must behave as stated end-to-end.
 - Migration sites:
   - `compiler/src/parser/expressions.sfn:495` (`parse_postfix_chain` — `?` postfix arm)
   - `runtime/prelude.sfn` (new `Result` enum + default `Error`)
-  - `docs/runtime_architecture.md:944` (the `Result<SfnString, Error>`
-    reference to make real — **note:** the epic cites `:864`, but the actual
-    reference is at line **944**; `:864` is the unrelated `SfnExceptionFrame`
-    comment in `instructions_try.sfn`)
+  - `docs/proposals/0025-native-runtime-architecture.md` (the `Result<SfnString, Error>`
+    reference to make real)
   - `compiler/src/ast.sfn:146` (`EnumVariant`), `:257` (`EnumDeclaration`
     with `type_parameters`), `:16` (`TypeParameter`)
   - `compiler/src/parser/statements.sfn:1107` (`parse_try_statement` —
@@ -671,7 +669,7 @@ These representative inputs must behave as stated end-to-end.
   may pick it up.
 - **Compiler-internal `try` → `Result` migration** (Q6): a self-hosting-
   sensitive follow-up gated on a seed that already contains `Result`.
-- **Runtime port** (`docs/runtime_audit.md`): every ported OS call returns
+- **Runtime port** (Runtime Migration table in `docs/status.md`): every ported OS call returns
   `Result<_, Error>`; this proposal is the prerequisite that unblocks that
   Phase-3 work.
 - **`throw` reduction**: long-term, `Result` subsumes recoverable-error

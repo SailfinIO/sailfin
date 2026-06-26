@@ -6,7 +6,7 @@
 // `sailfin_arena.c`) so downstream callers stay on the production
 // allocator until M3
 // flips the C namesakes to `static` and retires the C source. M2.2
-// per `docs/runtime_architecture.md` §2.1.1 and issue #477 (epic
+// per `docs/proposals/0025-native-runtime-architecture.md` `#321-arenas` and issue #477 (epic
 // #389 M2 — Core Runtime in Sailfin).
 //
 // API surface (mirrors the C arena's five core entry points):
@@ -46,7 +46,7 @@
 // the allocator falls back to fresh-alloc + memcpy. The old buffer
 // is "leaked" into the arena (reclaimed at the next reset/destroy),
 // matching the C arena's contract documented in
-// `runtime_architecture.md` §2.1.1.
+// `docs/proposals/0025-native-runtime-architecture.md` `#321-arenas`.
 //
 // Coexistence with the C arena. As of #1309 the arena *core* — the
 // process-global handle plus the hot bump path — is Sailfin-owned: the
@@ -85,7 +85,7 @@
 // `realloc` is deliberately NOT declared here — the arena's
 // `realloc` body uses fresh-alloc + `memcpy` for the not-at-tip
 // path (the old buffer "leaks" into the arena and is reclaimed at
-// reset/destroy per `runtime_architecture.md` §2.1.1), so no
+// reset/destroy per `docs/proposals/0025-native-runtime-architecture.md` `#321-arenas`), so no
 // libc-realloc call survives the lowering.
 //
 // Null handling. The C arena returns `NULL` on OOM and treats

@@ -418,7 +418,7 @@ The repository Makefile provides higher-level build orchestration for the self-h
 
 `<seed> build -p compiler` (the path `make rebuild` now routes through, as of Stage E PR2) runs `stage_capsule_imports` and `compile_capsule_modules` in parallel via the resolver's xargs fan-out (Stage E PR3 / #278). Cold builds measure **~2m27s** on a 4-core box with the parallel resolver — matching the historical ~2 min with `--jobs 4` that the prior (now retired) `bash scripts/build.sh` used to provide. Parallelism is controlled by `SAILFIN_BUILD_JOBS` (default: `nproc`, clamped to `[1, 8]`); `SAILFIN_BUILD_JOBS=1` keeps the pre-PR3 sequential path available as a regression-bisect escape hatch. The formerly-load-bearing `scripts/build.sh` was deleted in Stage E PR7 (#383); there is no longer a parallel-build escape hatch outside the driver.
 
-The `~2 GB-per-job` divisor reflects the per-module peak RSS documented in `docs/build-performance.md` → Phase 6 (heaviest module ~1.76 GB after the `lowering_core.sfn` decomposition). With 2 jobs running the heaviest pair concurrently, peak concurrent memory is ~3.5 GB — fits the macOS 7 GB ceiling with OS + Actions agent overhead. Hosts with more RAM are still capped by `nproc` first.
+The `~2 GB-per-job` divisor reflects the per-module peak RSS documented in `docs/proposals/0006-build-architecture.md` → Phase 6 (heaviest module ~1.76 GB after the `lowering_core.sfn` decomposition). With 2 jobs running the heaviest pair concurrently, peak concurrent memory is ~3.5 GB — fits the macOS 7 GB ceiling with OS + Actions agent overhead. Hosts with more RAM are still capped by `nproc` first.
 
 ---
 

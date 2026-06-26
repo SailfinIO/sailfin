@@ -1,5 +1,5 @@
 // Unit tests pinning the parser + emitter behaviour for `expr as Type`
-// casts (Slice D, docs/runtime_architecture.md §3.7).
+// casts (Slice D, docs/proposals/0025-native-runtime-architecture.md `#396-numeric-types-int--float`).
 //
 // Slice D ships parser + AST + native-IR rendering and the numeric
 // LLVM lowering matrix for `as` casts:
@@ -156,7 +156,7 @@ test "cast: float as f32 narrowing renders parens-wrapped operand" ![io] {
 // ── Explicit int↔float casts in binary ops typecheck clean ────────
 //
 // Pre-Slice-D, mixed `int` + `float` in a binary op lowered with a
-// silent fpext (see L2/L3 in `docs/runtime_architecture.md` §3.7);
+// silent fpext (see L2/L3 in `docs/proposals/0025-native-runtime-architecture.md` `#396-numeric-types-int--float`);
 // closing that hazard depends on Slice E's bare-literal defaulting
 // retiring `number`, so the `dominant_type` tightening rides on
 // Slice E rather than here. Slice D ships the `as` cast escape

@@ -1,6 +1,6 @@
 // Golden-IR test for the `runtime/sfn/platform/pthread.sfn` skeleton —
 // the pthread surface used by the v0 scheduler (see
-// `docs/runtime_architecture.md` §2.6 "Scheduler and Concurrency").
+// `docs/proposals/0025-native-runtime-architecture.md` `#37-scheduler-and-concurrency`).
 //
 // Replaces `compiler/tests/e2e/test_runtime_pthread_skeleton.sh` as part
 // of the bash-collapse migration (epic #842, issue #1223). The `.sh` ran

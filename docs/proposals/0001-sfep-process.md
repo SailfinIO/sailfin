@@ -51,7 +51,7 @@ existing locations:
 | A rule we already follow (import style, test envelope) | `docs/conventions/` |
 | A post-incident root-cause analysis | `docs/rca/` |
 | An operational playbook | `docs/runbooks/` |
-| A living migration/architecture tracker | root `docs/*.md` (e.g. `runtime_audit.md`) |
+| A living migration/architecture tracker | root `docs/*.md` or `docs/proposals/` (e.g. `docs/proposals/0025-native-runtime-architecture.md`) |
 | A single-issue implementation design gate | `docs/proposals/design-notes/` (see §9) |
 | User-facing reference for a *shipped* feature | `site/.../reference/spec/` |
 | User-facing preview of a *planned* feature | `site/.../reference/preview/` |

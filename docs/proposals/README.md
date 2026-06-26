@@ -47,6 +47,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0022](./0022-darwin-memory-governor.md) | Darwin (macOS arm64) Memory Governor | Draft | runtime |
 | [0023](./0023-capsule-decorators.md) | Capsule-Defined Decorators | Draft | language |
 | [0024](./0024-model-engines-and-training.md) | Model Engines, Adapters, Tensors, Training | Draft | informational |
+| [0025](./0025-native-runtime-architecture.md) | Native Runtime Architecture | Accepted | runtime |
 
 ## Subdirectories
 

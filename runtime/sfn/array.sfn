@@ -1,7 +1,7 @@
 // runtime/sfn/array.sfn
 //
 // Sailfin-native unified array primitive (M2.6, #399). Per
-// `docs/runtime_architecture.md` §2.3, the production `SfnArray<T>`
+// `docs/proposals/0025-native-runtime-architecture.md` `#34-array--slice-subsystem`, the production `SfnArray<T>`
 // layout is `{ data: T*, len: i64, cap: i64 }` — one shape for every
 // element type, replacing both the legacy `SailfinPtrArray` (with the
 // hidden 2-word header that backed `_recent_array_*` ring-buffer

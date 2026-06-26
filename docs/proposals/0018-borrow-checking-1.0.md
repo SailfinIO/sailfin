@@ -20,7 +20,7 @@ Authors: compiler-architect (Sailbot session)
 Closes: #1207
 Motivated by: [#1205](https://github.com/SailfinIO/sailfin/issues/1205) (systemic in-place-aliasing corruption, present in **both** the C runtime and its Sailfin-native port)
 Related: [#965](https://github.com/SailfinIO/sailfin/issues/965) (M4 structured concurrency / safe sharing), [#822](https://github.com/SailfinIO/sailfin/issues/822) (M4.7 C-runtime deletion), [#322](https://github.com/SailfinIO/sailfin/issues/322) (M1.5 conservative drop emission)
-Companion docs: [`docs/runtime_audit.md`](../runtime_audit.md), [`docs/proposals/0017-hierarchical-effects.md`](./0017-hierarchical-effects.md), [`docs/proposals/0012-result-and-question-operator.md`](./0012-result-and-question-operator.md)
+Companion docs: [Runtime Migration table in `docs/status.md`](../status.md), [`docs/proposals/0017-hierarchical-effects.md`](./0017-hierarchical-effects.md), [`docs/proposals/0012-result-and-question-operator.md`](./0012-result-and-question-operator.md)
 
 > **What this issue produces:** the proposal document and a recommended path.
 > It does **not** implement enforcement. A follow-up epic (#1209), spawned from
@@ -184,7 +184,7 @@ either **prove** the buffer is uniquely owned (making in-place mutation sound) o
 
 ### 1.3 Quantifying the surface — how much of `runtime/sfn/**` is exposed
 
-Precise per-site inventory: see [docs/runtime_aliasing_inventory.md](../runtime_aliasing_inventory.md) (#1210).
+Precise per-site inventory: see [docs/proposals/archive/runtime_aliasing_inventory.md](archive/runtime_aliasing_inventory.md) (#1210).
 
 The pattern is **systemic, not a one-off.** The Sailfin-native runtime is written
 in a raw-pointer / manual-lifetime dialect: `* u8` payloads, pointer arithmetic
@@ -218,8 +218,8 @@ M4 concurrency lands more sharing.
 
 ### 1.4 Why this is a 1.0 concern specifically
 
-Three of the four "hard prerequisites" for the runtime rewrite in
-`docs/runtime_audit.md` §"Compiler Prerequisites" are already shipped (integer
+Three of the four "hard prerequisites" for the runtime rewrite (per the Runtime
+Migration table in `docs/status.md` §"Compiler Prerequisites") are already shipped (integer
 types #556, `extern fn`, atomic intrinsics #323). The runtime is being written
 *now*, in raw pointers, **without** the one guarantee that would make its core
 optimizations sound. Every module added to `runtime/sfn/**` between now and 1.0
@@ -343,7 +343,7 @@ lexer → parser → ast → typecheck → effect_checker → [ownership_checker
 
 Rationale for a *separate* pass rather than folding into typecheck:
 
-- **Typecheck is duplicate-detection + conformance today** (per `runtime_audit.md`:
+- **Typecheck is duplicate-detection + conformance today** (per the Runtime Migration table in `docs/status.md`:
   "the typecheck symbol table is duplicate-detection-only"); it is not a
   full dataflow engine. Ownership analysis is fundamentally a **dataflow /
   liveness** problem (is this binding live at this use?), which wants its own
@@ -447,8 +447,8 @@ escape hatch is therefore **load-bearing, not optional.**
 
 ### 4.1 The `unsafe` boundary
 
-`extern fn` already parses with an optional `unsafe` prefix (per
-`runtime_audit.md` §"extern fn", shipped 2026-05-01: *"`extern fn` parses with
+`extern fn` already parses with an optional `unsafe` prefix (per the Runtime
+Migration table in `docs/status.md`, shipped 2026-05-01: *"`extern fn` parses with
 optional `unsafe` prefix"*). Extend that into a coherent boundary:
 
 - **Raw `* T` is "unsafe-typed."** Constructing, dereferencing, doing pointer
@@ -589,7 +589,7 @@ forward** — and that is a feature, not a conflict:
   sound. Sending an `OwnedBuf` across a channel is a **move**: the sender's
   binding is `Moved`/dead, the receiver gets unique ownership — no shared-mutable
   alias across threads, which is the classic data-race hazard. `spawn`'s closure
-  capture (a runtime prerequisite, `runtime_audit.md` §3) of an owned value is
+  capture (a runtime prerequisite; see `docs/proposals/0025-native-runtime-architecture.md#39-compiler-integration`) of an owned value is
   likewise a move.
 - So the ownership pass is a **shared dependency** of both runtime soundness
   (this proposal) and safe concurrent sharing (M4). Building it once, runtime-
@@ -728,7 +728,7 @@ clearly a *library/feature* concern, not a fourth pillar.
 - **Roadmap (`site/src/pages/roadmap.astro`)** — add the ownership-checking epic
   under the 1.0 critical path / runtime-hardening workstream, sequenced before
   #822 (§7.2). Cross-link #1205 and #965.
-- **`docs/runtime_audit.md`** — update the "in-place optimization notes" and the
+- **`docs/status.md` (Runtime Migration table)** — update the "in-place optimization notes" and the
   M1.5/ownership prerequisite discussion (§"Memory Management Crisis",
   §"Compiler Prerequisites" item 5) to reference enforced unique ownership as the
   structural fix, superseding the "ownership types deferred post-1.0; runtime
@@ -736,7 +736,7 @@ clearly a *library/feature* concern, not a fourth pillar.
 - **Spec vs. preview:** ship the user-facing description as a **preview** chapter
   (`site/src/content/docs/docs/reference/preview/ownership.md`) at 1.0, since
   user enforcement is Phase U. The *runtime-internal* enforcement is documented
-  in `runtime_audit.md` / `runtime_architecture.md`, not the marketed spec, until
+  in `docs/proposals/0025-native-runtime-architecture.md`, not the marketed spec, until
   it becomes user-facing — honoring "never market or document an unenforced
   feature" (it is enforced for the runtime, previewed for users). Promote to a
   numbered spec chapter (`reference/spec/`) only when Phase U enforcement ships.
@@ -761,7 +761,7 @@ safety"* — decomposed into pickable sub-issues. Sizes per the issue contract
 | E7 | **Enforce `Affine<T>`/`Linear<T>` single-use** — affine at-most-once is already covered by the E5 move rules (`is_owned_type`); E7 adds the linear *exactly-once* must-be-consumed sweep (`E0907`). The seven type-lowering strip-sites stay codegen-transparent (`Affine<T>`/`Linear<T>` are bit-identical to `T`); enforcement lives in `ownership_checker.sfn`, not the strip-sites. | feature | S | E5 | Option B substrate; opt-in |
 | E8 | **Migrate `memory/arena.sfn` + `string.sfn` to `OwnedBuf`** — grow-at-tip behind unique ownership; **Phase R1 enforcement on** | refactor | M | E3,E6 | #1205 determinism regression is the gate; land before #822 |
 | E9 | **Migrate `rc.sfn` / `mem.sfn` / `array.sfn`** | refactor | M | E8 | Rest of memory core |
-| E10 | **Diagnostics polish + docs** — `E09xx` fix-its, `CLAUDE.md`/roadmap/`runtime_audit.md` edits (§4-bis), preview chapter | docs | S | E6,E8 | The stance-reversal doc edits |
+| E10 | **Diagnostics polish + docs** — `E09xx` fix-its, `CLAUDE.md`/roadmap/`docs/status.md` edits (§4-bis), preview chapter | docs | S | E6,E8 | The stance-reversal doc edits |
 | E11 | **M4 coupling** — channel-send / spawn-capture as moves; concurrency modules to Phase R2 | feature | M | E8, #965 | Co-designed with M4; not before |
 
 **Ordering rationale:** E1 (inventory) → E2/E3 (escape hatch + owned type) →
@@ -793,5 +793,5 @@ blocker, satisfied by Phase R1" and must precede #822 per D4.
   `compiler/src/effect_taxonomy.sfn:18-22`.
 - Extern-ABI diagnostic family `E0801`–`E0806` (numbering precedent for `E09xx`):
   `compiler/src/typecheck_types.sfn:check_extern_signature`.
-- Runtime prerequisites + M1.5 drop emission: `docs/runtime_audit.md`
+- Runtime prerequisites + M1.5 drop emission: Runtime Migration table in `docs/status.md`
   §"Compiler Prerequisites", item 5 (#322).
