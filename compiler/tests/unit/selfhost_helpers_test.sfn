@@ -1,0 +1,67 @@
+// Unit coverage for the pure helpers in `compiler/src/cli_selfhost.sfn`
+// (issue #1502 — `sfn selfhost`). The fixed-point comparator itself is
+// covered by `build_report_determinism_test.sfn`; these target the
+// selfhost-specific string helpers that feed the smoke gate and the
+// `.ll`-dir snapshot loader.
+import { _selfhost_basename, _selfhost_contains, _selfhost_is_digits } from "../../src/cli_selfhost";
+
+// --------------------------------------------------------------
+// _selfhost_contains — substring scan (smoke-gate grep)
+// --------------------------------------------------------------
+test "selfhost_contains: finds greeting in combined output" {
+    assert _selfhost_contains("prefix\nHello, Sailfin!\nrest", "Hello, Sailfin!");
+}
+
+test "selfhost_contains: empty needle is vacuously present" {
+    assert _selfhost_contains("anything", "");
+}
+
+test "selfhost_contains: needle longer than haystack is absent" {
+    assert ! _selfhost_contains("hi", "hello");
+}
+
+test "selfhost_contains: match at the very start" {
+    assert _selfhost_contains("Hello, Sailfin!", "Hello");
+}
+
+test "selfhost_contains: match at the very end" {
+    assert _selfhost_contains("run: Hello, Sailfin!", "Sailfin!");
+}
+
+test "selfhost_contains: absent needle reports false" {
+    assert ! _selfhost_contains("goodbye world", "Sailfin");
+}
+
+// --------------------------------------------------------------
+// _selfhost_basename — slug for a `.ll` path
+// --------------------------------------------------------------
+test "selfhost_basename: strips directory components" {
+    assert _selfhost_basename("build/selfhost/native-seedcheck/scratch/capsules/sailfin__main.ll") == "sailfin__main.ll";
+}
+
+test "selfhost_basename: no slash returns the input" {
+    assert _selfhost_basename("sailfin__main.ll") == "sailfin__main.ll";
+}
+
+test "selfhost_basename: trailing slash yields empty basename" {
+    assert _selfhost_basename("a/b/") == "";
+}
+
+// --------------------------------------------------------------
+// _selfhost_is_digits — `--smoke-timeout` guard
+// --------------------------------------------------------------
+test "selfhost_is_digits: accepts a positive integer" {
+    assert _selfhost_is_digits("10");
+}
+
+test "selfhost_is_digits: accepts zero" { assert _selfhost_is_digits("0"); }
+
+test "selfhost_is_digits: rejects empty" { assert ! _selfhost_is_digits(""); }
+
+test "selfhost_is_digits: rejects non-digit characters (injection guard)" {
+    assert ! _selfhost_is_digits("10; rm -rf /");
+}
+
+test "selfhost_is_digits: rejects negative sign" {
+    assert ! _selfhost_is_digits("-5");
+}

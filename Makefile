@@ -537,99 +537,30 @@ check-impl:
 	fi
 	@echo "[check] running test suite on first-pass binary (early gate, jobs=$(CHECK_TEST_JOBS))..."
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
-	@echo "[check] first-pass tests passed — proceeding to seedcheck build..."
-	@echo "[check] verifying seed selfhost (stage2)..."
-	@# Stage2 routes through `sfn build -p compiler --work-dir <DIR>`
-	@# (the same path `make rebuild` uses for the first-pass binary).
-	@# The driver virtualises `<DIR>/native/import-context/` and the
-	@# default `<DIR>/native/sailfin` output, but the per-module `.ll`
-	@# scratch root is still the legacy `build/sailfin/capsules/`
-	@# unless `SAILFIN_TEST_SCRATCH` is set (see `_cr_scratch_root`
-	@# in `compiler/src/capsule_resolver.sfn`); without that override
-	@# stage3 would clobber stage2's `.ll` files and the fixed-point
-	@# hash-diff below would be vacuous. `--no-cache` keeps stage2
-	@# and stage3 truly independent (they're built by different
-	@# compiler binaries with potentially identical version stamps,
-	@# so a shared cache would let one stage's IR satisfy the
-	@# other's lookup and silently bypass the fresh emit). The driver
-	@# hardcodes `-O2` for the link step, so CI overrides of
-	@# `NATIVE_OPT` that lower the opt level for stage2/stage3 are
-	@# silently ignored until the driver grows an `--opt` flag.
-	@mkdir -p build/selfhost/native-seedcheck
-	@if [ -d build/selfhost/native-seedcheck/scratch/capsules ]; then \
-		find build/selfhost/native-seedcheck/scratch/capsules -type f -name '*.ll' -delete; \
-	fi
-	@SAILFIN_TEST_SCRATCH="build/selfhost/native-seedcheck/scratch" \
-		build/native/sailfin build --no-cache -p compiler \
-			--work-dir build/selfhost/native-seedcheck \
-			-o build/native/sailfin-seedcheck
-	@echo "[check] validating seedcheck binary can run programs..."
-	@sc="build/native/sailfin-seedcheck"; \
-	to="$(TIMEOUT_CMD)"; \
-	if [ -n "$$to" ]; then \
-		output=$$("$$to" 10 $$sc run examples/basics/hello-world.sfn 2>&1) || true; \
-	else \
-		output=$$($$sc run examples/basics/hello-world.sfn 2>&1) || true; \
-	fi; \
-	if ! echo "$$output" | grep -q "Hello, Sailfin!"; then \
-		echo "[check][FAIL] seedcheck binary cannot run hello-world.sfn (expected 'Hello, Sailfin!' in output)"; \
-		echo "[check][FAIL] got: $$output"; \
-		echo "[check][FAIL] the seedcheck compiler is NOT viable — fix the compiler, not the build script"; \
-		exit 1; \
-	fi; \
-	echo "[check] seedcheck binary runs hello-world.sfn OK"
+	@echo "[check] first-pass tests passed — validating self-host (stage2/stage3 fixed point)..."
+	@# #1502 (epic #513 Phase 1): the stage2/stage3 builds, per-stage `.ll`
+	@# scratch isolation (`SAILFIN_TEST_SCRATCH` so stage3 can't clobber
+	@# stage2's IR), `--no-cache` independence, the hello-world smoke gate,
+	@# the fixed-point IR hash-diff, and the seedcheck→canonical promotion
+	@# are now owned by the compiler (`sfn selfhost`,
+	@# compiler/src/cli_selfhost.sfn) instead of ~90 lines of shell. The
+	@# verb is internal — absent from `sfn --help`; `make check` and CI are
+	@# its only callers (Go keeps this in `cmd/dist`, Rust in `x.py`). A
+	@# non-fixed-point result warns and still promotes (parity with the
+	@# former shell, which exited 0 on `.ll` divergence); add `--strict` to
+	@# make a mismatch fatal. The driver hardcodes `-O2` for the link step,
+	@# so `NATIVE_OPT` overrides for stage2/stage3 are still ignored (no
+	@# regression — the prior shell had the same gap). The suite legs and
+	@# the first-pass `make compile` stay Make-driven (issue `Out:` scope).
+	@build/native/sailfin selfhost \
+		--work-dir build/selfhost \
+		--first-pass build/native/sailfin \
+		--seedcheck-out build/native/sailfin-seedcheck \
+		--stage3-out build/native/sailfin-stage3 \
+		--promote-to $(NATIVE_BIN) \
+		--smoke-timeout 10
 	@echo "[check] running test suite with seedcheck binary (no fallbacks, jobs=$(CHECK_TEST_JOBS))..."
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck TEST_BIN_CACHE_FLAGS=--no-test-cache TEST_JOBS=$(CHECK_TEST_JOBS)
-	@echo ""
-	@echo "[check] stage2 tests passed — building stage3 for fixed-point comparison..."
-	@# Same shape as stage2 — driver `--work-dir` with
-	@# `SAILFIN_TEST_SCRATCH` per-stage isolation and `--no-cache`
-	@# so stage3's IR is freshly emitted by the stage2 binary
-	@# rather than served from a cache that stage2 (or
-	@# `make compile`) populated. See the stage2 block above for
-	@# the rationale.
-	@mkdir -p build/selfhost/native-stage3
-	@if [ -d build/selfhost/native-stage3/scratch/capsules ]; then \
-		find build/selfhost/native-stage3/scratch/capsules -type f -name '*.ll' -delete; \
-	fi
-	@SAILFIN_TEST_SCRATCH="build/selfhost/native-stage3/scratch" \
-		build/native/sailfin-seedcheck build --no-cache -p compiler \
-			--work-dir build/selfhost/native-stage3 \
-			-o build/native/sailfin-stage3
-	@echo "[check] comparing stage2 vs stage3 LLVM IR (fixed-point check)..."
-	@s2="build/selfhost/native-seedcheck/scratch/capsules"; \
-	s3="build/selfhost/native-stage3/scratch/capsules"; \
-	s2_hashes=$$(find "$$s2" -name '*.ll' -exec $(HASH_CMD) {} + 2>/dev/null | awk '{print $$1}' | LC_ALL=C sort | $(HASH_CMD) | awk '{print $$1}'); \
-	s3_hashes=$$(find "$$s3" -name '*.ll' -exec $(HASH_CMD) {} + 2>/dev/null | awk '{print $$1}' | LC_ALL=C sort | $(HASH_CMD) | awk '{print $$1}'); \
-	if [ "$$s2_hashes" = "$$s3_hashes" ]; then \
-		echo "[check] stage2 == stage3: compiler is a fixed point ✓"; \
-	else \
-		echo "[check][WARN] stage2 != stage3: compiler output is not yet a fixed point"; \
-		echo "[check][WARN] differing modules:"; \
-		for f in $$s2/*.ll; do \
-			base=$$(basename "$$f"); \
-			s3f="$$s3/$$base"; \
-			if [ -f "$$s3f" ]; then \
-				h2=$$($(HASH_CMD) "$$f" | awk '{print $$1}'); \
-				h3=$$($(HASH_CMD) "$$s3f" | awk '{print $$1}'); \
-				if [ "$$h2" != "$$h3" ]; then \
-					echo "[check][WARN]   $$base (stage2=$$(printf '%.12s' "$$h2")... stage3=$$(printf '%.12s' "$$h3")...)"; \
-				fi; \
-			else \
-				echo "[check][WARN]   $$base (missing in stage3)"; \
-			fi; \
-		done; \
-		echo "[check][WARN] this may indicate intermittent IR corruption — rerun or investigate"; \
-	fi
-	@# Promote the fully-validated, $(NATIVE_OPT)-built seedcheck binary back
-	@# over the canonical $(NATIVE_BIN) path. The first-pass binary is built
-	@# with $(SELFHOST1_OPT) (default -O0) for speed; without this promotion
-	@# step a subsequent `make compile` would see a stale -O0 binary as
-	@# "up-to-date" and skip the rebuild.
-	@if [ -x "build/native/sailfin-seedcheck$(EXE_EXT)" ]; then \
-		cp -f "build/native/sailfin-seedcheck$(EXE_EXT)" "$(NATIVE_BIN)"; \
-		echo "[check] promoted seedcheck → $(NATIVE_BIN)"; \
-	fi
 
 # Fast PR-feedback gate: run `sfn check` against the compiler tree and
 # the runtime prelude. No codegen, no clang, just parse + typecheck +

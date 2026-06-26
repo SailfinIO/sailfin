@@ -1,0 +1,403 @@
+// compiler/src/cli_selfhost.sfn
+//
+// CLI handler for `sfn selfhost` — the triple-pass self-host
+// fixed-point validator that used to live as ~100 lines of bash in
+// `Makefile`'s `check-impl` (issue #1502, epic #513 Phase 1).
+//
+// `sfn selfhost` is an INTERNAL toolchain command: it is intentionally
+// NOT advertised in `_usage()` (the user-facing `sfn --help`). End
+// users compiling their own capsules never run it — it validates that
+// the compiler is a fixed point and is driven only by `make check` and
+// CI. This mirrors how Go (`cmd/dist`, reachable only as
+// `go tool dist`) and Rust (`x.py` / `src/bootstrap`) keep self-host
+// validation out of the public compiler CLI, while still honoring epic
+// #513's mandate that `sfn` (not bash) owns the logic. The verb is
+// reachable for anyone who types it; it is simply undocumented.
+//
+// Orchestration (a straight port of the former `Makefile:531-632`):
+//   1. stage2 (seedcheck): the first-pass binary builds `-p compiler`
+//      into an isolated scratch root, `--no-cache`.
+//   2. smoke gate: the seedcheck binary runs hello-world.
+//   3. stage3: the seedcheck binary builds `-p compiler` again into a
+//      second isolated scratch root.
+//   4. fixed-point diff: the per-module `.ll` digests of stage2 and
+//      stage3 are compared (reusing the `--check-determinism` diff
+//      structs/renderers from `build_report.sfn`).
+//   5. promotion: the validated seedcheck binary is copied over the
+//      canonical `build/native/sailfin`.
+//
+// Per-stage isolation is load-bearing: the per-module `.ll` scratch
+// root is resolved from `SAILFIN_TEST_SCRATCH` (not `--work-dir`) by
+// `capsule_resolver.sfn::_cr_scratch_root`. Without a distinct value
+// per stage, stage3 would clobber stage2's `.ll` and the diff would be
+// vacuous. We set it on each spawned child via the established
+// `sh -c "VAR=<quoted> <cmd>"` env-injection vehicle (the same pattern
+// `_emit_runtime_sfn_source` uses, `cli_main.sfn:1197`), keeping this a
+// pure-orchestration driver that post-processes no artifact.
+import {
+    DeterminismModule,
+    DeterminismSnapshot,
+    compare_for_determinism,
+    determinism_diff_to_json,
+    determinism_diff_to_text,
+    make_determinism_module
+} from "./build_report";
+import {
+    _ensure_dir_recursive_cmd,
+    _sha256_of_file_cmd,
+    _shell_read_cmd,
+    _shell_single_quote_arg
+} from "./cli_commands_utils";
+import { number_to_string } from "./main";
+import { substring } from "./string_utils";
+
+// Resolved configuration for one `sfn selfhost` invocation. Defaults
+// reproduce the former Makefile paths byte-for-byte.
+struct SelfhostConfig {
+    work_dir: string;
+    first_pass: string;
+    seedcheck_out: string;
+    stage3_out: string;
+    promote_to: string;
+    smoke_timeout: string;
+    json: boolean;
+    no_promote: boolean;
+    strict: boolean;
+}
+
+fn _selfhost_default_config() -> SelfhostConfig {
+    return SelfhostConfig {
+        work_dir: "build/selfhost",
+        first_pass: "build/native/sailfin",
+        seedcheck_out: "build/native/sailfin-seedcheck",
+        stage3_out: "build/native/sailfin-stage3",
+        promote_to: "build/native/sailfin",
+        smoke_timeout: "10",
+        json: false,
+        no_promote: false,
+        strict: false
+    };
+}
+
+fn _selfhost_usage() -> string {
+    return "usage: sfn selfhost [--work-dir DIR] [--first-pass BIN]\n"
+        + "                    [--seedcheck-out BIN] [--stage3-out BIN]\n"
+        + "                    [--promote-to BIN] [--smoke-timeout SECS]\n"
+        + "                    [--no-promote] [--strict] [--json]\n"
+        + "\n"
+        + "Internal: validate the compiler self-hosts to a fixed point\n"
+        + "(stage2 == stage3 LLVM IR) and promote the validated binary.\n";
+}
+
+// Whether `needle` occurs in `haystack`. `_string_contains_cmd` in
+// cli_commands_utils only tests single-character membership, so the
+// smoke gate needs a real substring scan.
+fn _selfhost_contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if needle.length > haystack.length { return false; }
+    let limit = haystack.length - needle.length;
+    let mut i: int = 0;
+    loop {
+        if i > limit { break; }
+        if substring(haystack, i, i + needle.length) == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Basename of a `/`-separated path (no trailing-slash handling needed —
+// callers pass file paths produced by `fs.listDirectory`).
+fn _selfhost_basename(path: string) -> string {
+    let mut last_slash: int = -1;
+    let mut i: int = 0;
+    loop {
+        if i >= path.length { break; }
+        if substring(path, i, i + 1) == "/" { last_slash = i; }
+        i += 1;
+    }
+    if last_slash < 0 { return path; }
+    return substring(path, last_slash + 1, path.length);
+}
+
+// Whether `value` is one or more ASCII digits. Guards `--smoke-timeout`
+// before it is interpolated into the shell `timeout` prefix.
+fn _selfhost_is_digits(value: string) -> boolean {
+    if value.length == 0 { return false; }
+    let digits = "0123456789";
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let ch = substring(value, i, i + 1);
+        if !_selfhost_contains(digits, ch) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Recursively collect `*.ll` files under `root`. For the compiler
+// self-host the `.ll` files land flat at `<scratch>/capsules/*.ll`
+// (the `name = "sailfin"` single-segment legacy path), but the BFS
+// matches the Makefile's recursive `find ... -name '*.ll'` so nested
+// layouts stay covered.
+fn _selfhost_collect_ll_files(root: string) -> string[] ![io] {
+    let mut results: string[] = [];
+    if !fs.exists(root) { return results; }
+    let mut queue: string[] = [root];
+    let mut guard: int = 0;
+    loop {
+        if queue.length == 0 { break; }
+        if guard > 4096 { break; }
+        guard += 1;
+        let mut next_queue: string[] = [];
+        let mut qi: int = 0;
+        loop {
+            if qi >= queue.length { break; }
+            let dir = queue[qi];
+            if fs.exists(dir) {
+                let entries = fs.listDirectory(dir);
+                let mut ei: int = 0;
+                loop {
+                    if ei >= entries.length { break; }
+                    let entry = entries[ei];
+                    let full_path = dir + "/" + entry;
+                    if entry.length >= 3 && substring(entry, entry.length - 3, entry.length) == ".ll" {
+                        results.push(full_path);
+                    } else {
+                        let child_entries = fs.listDirectory(full_path);
+                        if child_entries.length > 0 {
+                            next_queue.push(full_path);
+                        }
+                    }
+                    ei += 1;
+                }
+            }
+            qi += 1;
+        }
+        queue = next_queue;
+    }
+    return results;
+}
+
+// Build a determinism snapshot from a stage's `.ll` scratch dir plus
+// its linked binary. The `.ll` digests carry the fixed-point check (the
+// Makefile compared only these); the binary sha is folded in as a
+// strictly-stronger signal (a benign binary-only divergence is a
+// non-fatal warning in the default mode, so `make check` stays green).
+fn _selfhost_snapshot(capsules_dir: string, binary_path: string) -> DeterminismSnapshot ![io] {
+    let files = _selfhost_collect_ll_files(capsules_dir);
+    let mut modules: DeterminismModule[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= files.length { break; }
+        let slug = _selfhost_basename(files[i]);
+        let sha = _sha256_of_file_cmd(files[i]);
+        modules.push(make_determinism_module(slug, sha));
+        i += 1;
+    }
+    let binary_sha = _sha256_of_file_cmd(binary_path);
+    return DeterminismSnapshot {
+        binary_path: binary_path,
+        binary_sha256: binary_sha,
+        modules: modules
+    };
+}
+
+// Spawn one stage build: `<driver> build --no-cache -p compiler
+// --work-dir <work_subdir> -o <out_bin>`, with `SAILFIN_TEST_SCRATCH`
+// pinned to this stage's scratch root so its `.ll` files do not collide
+// with the other stage's. Clears any stale `.ll` first (port of the
+// Makefile's pre-build `find ... -delete`). Returns the child exit code.
+fn _selfhost_build_stage(driver_bin: string, scratch_dir: string, work_subdir: string, out_bin: string) -> int ![io] {
+    _ensure_dir_recursive_cmd(work_subdir);
+    // Fresh scratch: drop any prior `.ll` so a stale module can't poison
+    // the fixed-point comparison.
+    process.run(["rm", "-rf", scratch_dir + "/capsules"]);
+    let cmd = "SAILFIN_TEST_SCRATCH=" + _shell_single_quote_arg(scratch_dir)
+        + " "
+        + _shell_single_quote_arg(driver_bin)
+        + " build --no-cache -p compiler --work-dir "
+        + _shell_single_quote_arg(work_subdir)
+        + " -o "
+        + _shell_single_quote_arg(out_bin);
+    return process.run(["sh", "-c", cmd]);
+}
+
+// Smoke gate: run hello-world with the seedcheck binary and confirm the
+// expected greeting appears (port of `Makefile:566-580`). Output is
+// captured combined (stdout+stderr); the exit code is intentionally
+// ignored, exactly as the Makefile's `|| true` did — the greeting
+// substring is the contract. Wrapped in `timeout` when one is present.
+fn _selfhost_smoke(seedcheck_bin: string, smoke_timeout: string) -> boolean ![io] {
+    let base = _shell_single_quote_arg(seedcheck_bin) + " run "
+        + _shell_single_quote_arg("examples/basics/hello-world.sfn")
+        + " 2>&1";
+    let mut smoke_cmd = base;
+    if _selfhost_is_digits(smoke_timeout) && smoke_timeout != "0" {
+        smoke_cmd = "if command -v timeout >/dev/null 2>&1; then timeout "
+            + smoke_timeout
+            + " "
+            + base
+            + "; else "
+            + base
+            + "; fi";
+    }
+    let out = _shell_read_cmd(smoke_cmd);
+    return _selfhost_contains(out, "Hello, Sailfin!");
+}
+
+fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
+    let mut cfg = _selfhost_default_config();
+
+    let mut argi: int = 1;
+    loop {
+        if argi >= args.length { break; }
+        let arg = args[argi];
+        if strings_equal(arg, "-h") || strings_equal(arg, "--help") {
+            print(_selfhost_usage());
+            return 0;
+        } else if strings_equal(arg, "--json") { cfg.json = true; } else if strings_equal(arg, "--no-promote") {
+            cfg.no_promote = true;
+        } else if strings_equal(arg, "--strict") { cfg.strict = true; } else if strings_equal(arg, "--work-dir") {
+            argi += 1;
+            if argi >= args.length {
+                print.err("[selfhost] --work-dir requires a value");
+                return 2;
+            }
+            cfg.work_dir = args[argi];
+        } else if strings_equal(arg, "--first-pass") {
+            argi += 1;
+            if argi >= args.length {
+                print.err("[selfhost] --first-pass requires a value");
+                return 2;
+            }
+            cfg.first_pass = args[argi];
+        } else if strings_equal(arg, "--seedcheck-out") {
+            argi += 1;
+            if argi >= args.length {
+                print.err("[selfhost] --seedcheck-out requires a value");
+                return 2;
+            }
+            cfg.seedcheck_out = args[argi];
+        } else if strings_equal(arg, "--stage3-out") {
+            argi += 1;
+            if argi >= args.length {
+                print.err("[selfhost] --stage3-out requires a value");
+                return 2;
+            }
+            cfg.stage3_out = args[argi];
+        } else if strings_equal(arg, "--promote-to") {
+            argi += 1;
+            if argi >= args.length {
+                print.err("[selfhost] --promote-to requires a value");
+                return 2;
+            }
+            cfg.promote_to = args[argi];
+        } else if strings_equal(arg, "--smoke-timeout") {
+            argi += 1;
+            if argi >= args.length {
+                print.err("[selfhost] --smoke-timeout requires a value");
+                return 2;
+            }
+            cfg.smoke_timeout = args[argi];
+        } else {
+            print.err("[selfhost] unknown argument: " + arg);
+            print(_selfhost_usage());
+            return 2;
+        }
+        argi += 1;
+    }
+
+    // Derived per-stage roots under `--work-dir`. `SAILFIN_TEST_SCRATCH`
+    // points at `<stage>/scratch`; the per-module `.ll` then land at
+    // `<stage>/scratch/capsules` (capsule_resolver legacy flat path).
+    let s2_work = cfg.work_dir + "/native-seedcheck";
+    let s2_scratch = s2_work + "/scratch";
+    let s2_capsules = s2_scratch + "/capsules";
+    let s3_work = cfg.work_dir + "/native-stage3";
+    let s3_scratch = s3_work + "/scratch";
+    let s3_capsules = s3_scratch + "/capsules";
+
+    if !fs.exists(cfg.first_pass) {
+        print.err("[selfhost] first-pass binary missing: " + cfg.first_pass
+            + " (run: make compile)");
+        return 1;
+    }
+
+    // ---- stage2 (seedcheck): built by the first-pass binary ----
+    if !cfg.json { print("[selfhost] building stage2 (seedcheck)..."); }
+    let s2_rc = _selfhost_build_stage(cfg.first_pass, s2_scratch, s2_work, cfg.seedcheck_out);
+    if s2_rc != 0 {
+        print.err("[selfhost] stage2 build failed (exit=" + number_to_string(s2_rc)
+            + ")");
+        return s2_rc;
+    }
+
+    // ---- smoke gate: seedcheck binary runs a real program ----
+    if !cfg.json {
+        print("[selfhost] validating seedcheck binary runs hello-world...");
+    }
+    if !_selfhost_smoke(cfg.seedcheck_out, cfg.smoke_timeout) {
+        print.err("[selfhost] seedcheck binary cannot run hello-world.sfn"
+            + " (expected 'Hello, Sailfin!')");
+        print.err("[selfhost] the seedcheck compiler is NOT viable — fix the compiler");
+        return 1;
+    }
+
+    // ---- stage3: built by the stage2 (seedcheck) binary ----
+    if !cfg.json {
+        print("[selfhost] building stage3 (driven by seedcheck) for fixed-point check...");
+    }
+    let s3_rc = _selfhost_build_stage(cfg.seedcheck_out, s3_scratch, s3_work, cfg.stage3_out);
+    if s3_rc != 0 {
+        print.err("[selfhost] stage3 build failed (exit=" + number_to_string(s3_rc)
+            + ")");
+        return s3_rc;
+    }
+
+    // ---- fixed-point diff: stage2 vs stage3 ----
+    let snap2 = _selfhost_snapshot(s2_capsules, cfg.seedcheck_out);
+    let snap3 = _selfhost_snapshot(s3_capsules, cfg.stage3_out);
+    let diff = compare_for_determinism(snap2, snap3);
+
+    if cfg.json { print(determinism_diff_to_json(diff)); } else {
+        if diff.matched {
+            print("[selfhost] stage2 == stage3: compiler is a fixed point");
+        } else {
+            print("[selfhost] stage2 != stage3: compiler output is not yet a fixed point");
+        }
+        print(determinism_diff_to_text(diff));
+    }
+
+    // ---- exit / promotion policy ----
+    // Default (warn): a mismatch is non-fatal — promote the validated
+    // seedcheck binary and exit 0, exactly as the Makefile did. Strict:
+    // a mismatch fails (exit 1) and we do NOT promote a non-fixed-point
+    // binary.
+    if !diff.matched && cfg.strict {
+        print.err("[selfhost] --strict: fixed-point mismatch is fatal");
+        return 1;
+    }
+
+    if !cfg.no_promote {
+        let promote_rc = process.run(["cp", "-f", cfg.seedcheck_out, cfg.promote_to]);
+        if promote_rc != 0 {
+            print.err("[selfhost] failed to promote seedcheck → " + cfg.promote_to);
+            return promote_rc;
+        }
+        if !cfg.json {
+            print("[selfhost] promoted seedcheck → " + cfg.promote_to);
+        }
+    }
+
+    return 0;
+}
+
+export {
+    handle_selfhost_command,
+    // Exported for regression coverage (compiler/tests/{unit,integration}).
+    _selfhost_basename,
+    _selfhost_collect_ll_files,
+    _selfhost_contains,
+    _selfhost_is_digits,
+    _selfhost_snapshot
+};

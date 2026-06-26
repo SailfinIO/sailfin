@@ -71,6 +71,7 @@ import {
     _shell_read_cmd,
     _shell_single_quote_arg
 } from "./cli_commands_utils";
+import { handle_selfhost_command } from "./cli_selfhost";
 import { emit_llvm_with_retry, emit_parse_nonneg_int } from "./emit_helpers";
 import { resolve_import_module_slug_for_module } from "./llvm/imports";
 import {
@@ -1994,6 +1995,9 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     let is_lock = strings_equal(cmd, "lock");
     let is_config = strings_equal(cmd, "config");
     let is_check = strings_equal(cmd, "check");
+    // #1502: internal self-host validator. Intentionally absent from
+    // `_usage()` — driven by `make check` / CI, not end users.
+    let is_selfhost = strings_equal(cmd, "selfhost");
     if trace_argv {
         if is_emit { print.err("cli: cmd_is_emit=true"); }
     }
@@ -2825,6 +2829,9 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
     // `sfn fmt` migrated to `sfn/cli` (epic #351, Issue 3.4) — handled
     // by `sailfin_cli_main_v2` before reaching the legacy dispatch.
     if is_check { return handle_check_command(args, binary_dir); }
+
+    // #1502: internal self-host fixed-point validator (undocumented).
+    if is_selfhost { return handle_selfhost_command(args, binary_dir); }
 
     // Bare-file dispatch: `sailfin <file.sfn>` (no subcommand) compiles
     // and runs the file, matching the convention `python script.py` /
