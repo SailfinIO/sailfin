@@ -477,7 +477,22 @@ macOS gets a smaller win because the heuristic picks `BUILD_JOBS=1` to fit the 7
 
 **Rejected approach — per-function arena mark/rewind.** A prototype marked the arena before each `emit_llvm_function` and rewound after evacuating the function's output into a survivor arena. It was abandoned: (a) it bought `core` only ~0.4 GB (the loop scratch is small), and (b) it caused **use-after-rewind corruption** — `runtime/sfn/process.sfn` and ~9 other modules emitted garbage, non-deterministic call symbols (`@H�Xos` vs `@H�X=z` across runs; clean with `SAILFIN_USE_ARENA=0`, i.e. rewind no-op), because some lowering output escapes the rewound region by reference. The mangling fixes alone clear the `< 2 GB` AC, so the rewind was dropped. Per-function (and intra-function) rewind for the loop remains a possible future lever **only** with a complete escape audit + a real second allocator for the accumulators.
 
-**Not addressed (tracked follow-ups):** `runtime_helpers.sfn` (3.91 → unchanged) is bound by one ~17k-line function (the descriptor registry, 96% of the module); reducing it needs *intra-function* work or a registry restructure. `core` at 1.64 GB clears `< 2 GB` but not the #340 `< 800 MB` stretch — the floor is the front-end residue (parse/typecheck/emit_native + type context) plus the loop's working set. The `index_of`/`starts_with` substring-allocation is compiler-wide and worth a dedicated allocation-free rewrite.
+**Not addressed (tracked follow-ups):** `core` at 1.64 GB clears `< 2 GB` but not the #340 `< 800 MB` stretch — the floor is the front-end residue (parse/typecheck/emit_native + type context) plus the loop's working set. The `index_of`/`starts_with` substring-allocation is compiler-wide and worth a dedicated allocation-free rewrite. (`runtime_helpers.sfn`, previously flagged here as the worst module at ~4 GB, was fixed by the registry split below.)
+
+### Runtime-Helper Registry Split (June 25, #1512)
+
+**Status: Implemented.** Cut `compiler/src/llvm/runtime_helpers.sfn`'s single-module `emit llvm` peak RSS from **4058 MB → 1062 MB (−74%)** and compile time **12.2s → 3.2s (−74%)**, byte-identical runtime output, self-hosting preserved. This was the heaviest module after the `core` fix and the binding constraint on raising CI `BUILD_JOBS` (7 GB macOS runner / 2 GB-per-job gate).
+
+The module is 96% one function — `runtime_helper_descriptors()`, ~1400 lines of 197 `RuntimeHelperDescriptor` struct-literal appends. A controlled experiment (synthetic modules of K identical struct-literal appends in one function) showed LLVM-lowering peak RSS is **super-linear, ≈O(K^1.8)**, in the number of construction sites *in a single function body* (IR line count itself scales linearly at ~85 lines/descriptor):
+
+| K (appends in one fn) | IR lines | peak RSS |
+|---|---|---|
+| 64 | 5,677 | 466 MB |
+| 128 | 11,053 | 1,483 MB |
+| 256 | 21,805 | 5,494 MB |
+| 256 **split 8×32** | 21,893 | **1,122 MB** |
+
+Doubling the descriptors in one function more than triples RSS; partitioning the same appends across functions collapses it (cost ∝ chunks × chunksize^1.8). The fix partitions the registry into 12 `_rh_descriptors_NN` chunk functions (~17 appends each) called in order by a thin `runtime_helper_descriptors()` orchestrator — every append line preserved verbatim, runtime descriptor table identical (guarded by `runtime_helper_declare_integrity_test`, `runtime_call_dispatch_test`, `lowering_no_bare_runtime_emissions_test`, `runtime_helper_abi_coercion_test`, and the self-host fixed point). A header comment warns against recombining. The underlying super-linear per-function lowering cost is unfixed (a compiler-pass issue, separate lever); chunking is the structural workaround.
 
 ### String Concat Allocation Reduction (April 11)
 

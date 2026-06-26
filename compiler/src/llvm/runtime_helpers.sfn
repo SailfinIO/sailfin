@@ -134,8 +134,18 @@ fn make_push_descriptor(return_type: string, params: string[]) -> RuntimeHelperD
 // =============================================================================
 // Runtime Helper Registry
 // =============================================================================
-fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
-    let mut descriptors: RuntimeHelperDescriptor[] = [];
+//
+// PERFORMANCE: the registry is partitioned into `_rh_descriptors_NN` chunk
+// functions (each appending ~17 descriptors) rather than one ~1400-line
+// function. LLVM-lowering peak RSS is super-linear (~O(n^1.8)) in the number
+// of descriptor struct-literal construction sites in a *single* function body,
+// so one monolithic builder cost ~4 GB to compile (#1512); chunking the same
+// 197 appends across 12 functions cuts that to ~1 GB (−74%) with byte-identical
+// runtime output (the orchestrator `runtime_helper_descriptors()` calls the
+// chunks in order). Do NOT recombine these into one function — it reintroduces
+// the multi-GB regression and pushes this module back over the CI memory gate.
+fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
     // Raw print: writes to stdout with no prefix, no decoration.
     // Used by the compiler itself for artifact output and CLI messages.
     // M2.8 (#401): flipped to the Sailfin-native sfn_print symbol via
@@ -282,6 +292,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "intrinsic.errno_location.mingw", symbol: "_errno", return_type: "i32*", parameter_types: [], effects: [], native_signature: null, c_abi_return_type: null
     });
+    return descriptors;
+}
+
+fn _rh_descriptors_01(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
 
     // clock-monotonic clk_id sentinel (#908, epic #763). Resolves the
     // `CLOCK_MONOTONIC` `clk_id` immediate, which POSIX leaves
@@ -495,6 +510,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "clock_gettime", symbol: "clock_gettime", return_type: "i32", parameter_types: ["i32", "i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    return descriptors;
+}
+
+fn _rh_descriptors_02(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
 
     // Monotonic clock for profiling/timing.
     // Support both the prelude binding name and direct calls.
@@ -585,6 +605,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "await_void", symbol: "sfn_await_void", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    return descriptors;
+}
+
+fn _rh_descriptors_03(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "spawn_string", symbol: "sfn_spawn_string", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
@@ -659,6 +684,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "nursery_register", symbol: "sfn_nursery_register", return_type: "i64", parameter_types: ["i64", "i64"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    return descriptors;
+}
+
+fn _rh_descriptors_04(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "nursery_exit", symbol: "sfn_nursery_exit", return_type: "i64", parameter_types: ["i64"], effects: [], native_signature: null, c_abi_return_type: null
     });
@@ -751,6 +781,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_char_code_fn", symbol: "sfn_str_codepoint", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: "sfn_str_codepoint", c_abi_return_type: "double"
     });
+    return descriptors;
+}
+
+fn _rh_descriptors_05(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
 
     // Process helpers
     // M1.B (#393): SfnArray ABI — heap-boxed `{ T*, i64, i64 }*` with
@@ -869,6 +904,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.handle_read_bytes_stdout", symbol: "sfn_process_handle_read_bytes_stdout", return_type: "i8*", parameter_types: ["i64", "i64"], effects: ["io"], native_signature: "sfn_process_handle_read_bytes_stdout", c_abi_return_type: null
     });
+    return descriptors;
+}
+
+fn _rh_descriptors_06(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.handle_write_bytes", symbol: "sfn_process_handle_write_bytes", return_type: "i64", parameter_types: ["i64", "i8*", "i64"], effects: ["io"], native_signature: "sfn_process_handle_write_bytes", c_abi_return_type: null
     });
@@ -971,6 +1011,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs_delete_file", symbol: "sfn_fs_delete", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_delete", c_abi_return_type: null
     });
+    return descriptors;
+}
+
+fn _rh_descriptors_07(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs.deleteFile", symbol: "sfn_fs_delete", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_delete", c_abi_return_type: null
     });
@@ -1074,6 +1119,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "websocket.close", symbol: "sfn_websocket_unbridged", return_type: "void", parameter_types: [], effects: ["net"], native_signature: null, c_abi_return_type: null
     });
+    return descriptors;
+}
+
+fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "websocket.connect", symbol: "sfn_websocket_unbridged", return_type: "void", parameter_types: [], effects: ["net"], native_signature: null, c_abi_return_type: null
     });
@@ -1204,6 +1254,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "number.to_string", symbol: "sfn_number_to_str", return_type: "i8*", parameter_types: ["double"], effects: [], native_signature: "sfn_number_to_str", c_abi_return_type: null
     });
+    return descriptors;
+}
+
+fn _rh_descriptors_09(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "string.to_number", symbol: "sfn_str_to_number", return_type: "double", parameter_types: ["i8*"], effects: [], native_signature: "sfn_str_to_number", c_abi_return_type: null
     });
@@ -1307,6 +1362,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "string.repeat", symbol: "sfn_str_repeat", return_type: "i8*", parameter_types: ["{i8*, i64}", "i64"], effects: [], native_signature: "sfn_str_repeat", c_abi_return_type: null
     });
+    return descriptors;
+}
+
+fn _rh_descriptors_10(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
 
     // Array/collection helpers (generic using i8* for element type).
     // M2.6 (#399): the three array descriptors below carry a
@@ -1464,6 +1524,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "crypto.sha256", symbol: "sha256__capsules__sfn__crypto__src__mod", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: null, c_abi_return_type: null
     });
+    return descriptors;
+}
+
+fn _rh_descriptors_11(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelperDescriptor[] {
+    let mut descriptors = descriptors_in;
 
     // Base64 encode. M3 (#817): base64 encode now lives in pure Sailfin under
     // `capsules/sfn/crypto/src/mod.sfn`; the `base64.encode` intrinsic resolves
@@ -1530,6 +1595,23 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "record_eq_flag_message", symbol: "record_eq_flag_message", return_type: "i1", parameter_types: ["i1", "{i8*, i64}", "i1", "{i8*, i64}"], effects: [], native_signature: null, c_abi_return_type: null
     });
 
+    return descriptors;
+}
+
+fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
+    let mut descriptors: RuntimeHelperDescriptor[] = [];
+    descriptors = _rh_descriptors_00(descriptors);
+    descriptors = _rh_descriptors_01(descriptors);
+    descriptors = _rh_descriptors_02(descriptors);
+    descriptors = _rh_descriptors_03(descriptors);
+    descriptors = _rh_descriptors_04(descriptors);
+    descriptors = _rh_descriptors_05(descriptors);
+    descriptors = _rh_descriptors_06(descriptors);
+    descriptors = _rh_descriptors_07(descriptors);
+    descriptors = _rh_descriptors_08(descriptors);
+    descriptors = _rh_descriptors_09(descriptors);
+    descriptors = _rh_descriptors_10(descriptors);
+    descriptors = _rh_descriptors_11(descriptors);
     return descriptors;
 }
 
