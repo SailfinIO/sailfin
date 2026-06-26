@@ -5,7 +5,7 @@
 // feeds a synthetic `Capture[]` through the public API exported by
 // `compiler/src/llvm/closures.sfn` and pins the rendered LLVM IR
 // against the canonical shape documented in
-// `docs/runtime_architecture.md` §3.4 "Typed Closures".
+// `docs/proposals/0025-native-runtime-architecture.md` `#393-typed-closures`.
 //
 // Coverage matrix (matches the acceptance criteria on #459):
 //   - empty captures            — no struct, no lines, no bindings

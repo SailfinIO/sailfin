@@ -7,7 +7,7 @@ Take a high-level roadmap item and decompose it into session-sized GitHub issues
 The argument can be:
 - A roadmap section name (e.g., "syntax reform", "compiler stabilization")
 - A specific bullet from the [roadmap](https://sailfin.dev/roadmap) (e.g., "Implement await expression parsing")
-- A document to mine for work items (e.g., `docs/build-performance.md`)
+- A document to mine for work items (e.g., `docs/proposals/0006-build-architecture.md`)
 - A free-form description of work that needs breaking down
 
 ---

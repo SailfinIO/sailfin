@@ -1,7 +1,7 @@
 // runtime/sfn/concurrency/channel.sfn
 //
 // Pure-Sailfin bounded MPMC channel and `spawn_task` shim for the v0
-// scheduler described in `docs/runtime_architecture.md` §2.6.4.
+// scheduler described in `docs/proposals/0025-native-runtime-architecture.md` `#37-scheduler-and-concurrency`.
 // Implements the `sfn_channel_*` surface and `sfn_spawn_task` that
 // the compiler emits calls to after the issue-#1091 flip.
 //

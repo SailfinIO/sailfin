@@ -1,6 +1,6 @@
 // End-to-end test for bitwise + shift operators on integer types
 // (Slice B of the int/float numeric types migration —
-// `docs/runtime_architecture.md` §3.7 L4).
+// `docs/proposals/0025-native-runtime-architecture.md` `#396-numeric-types-int--float` L4).
 //
 // Native replacement for the former `test_numeric_bitwise.sh` (test-infra
 // Phase 3, epic #842; ratchet #1327). Pre-Slice-B, `x & y` parsed and

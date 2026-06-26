@@ -45,7 +45,7 @@ fn operation_name_for_symbol(symbol: string, llvm_type: string) -> string {
         // binary-op caller's diagnostic path; Slice D's `as`
         // casts plus the planned typecheck rejection will
         // surface a clean error before lowering reaches here
-        // (L2/L3/L4 in `docs/runtime_architecture.md` §3.7).
+        // (L2/L3/L4 in `docs/proposals/0025-native-runtime-architecture.md` §3.7 `#396-numeric-types-int--float`).
         if symbol == "&" { return ""; }
         if symbol == "|" { return ""; }
         if symbol == "^" { return ""; }

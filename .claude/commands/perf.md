@@ -43,7 +43,7 @@ If the bottleneck is named in the issue/argument, skip to Phase 3.
 Otherwise, spawn the **seed-stabilizer** agent (Opus). Give it:
 - The baseline numbers
 - The target subsystem or symptom
-- `docs/build-performance.md` as context
+- `docs/proposals/0006-build-architecture.md` as context
 
 The stabilizer identifies the hot path: which functions, which patterns (filesystem IPC, O(n²), import re-parsing, string explosion), and produces a focused fix proposal.
 

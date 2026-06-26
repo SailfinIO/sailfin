@@ -7,7 +7,7 @@
 // `.claude/rules/no-bash-e2e.md`).
 //
 // The module pins the struct byte layouts for the v0 fixed thread pool (see
-// `docs/runtime_architecture.md` §2.6.1) — `Scheduler`, `Task`, `TaskQueue`,
+// `docs/proposals/0025-native-runtime-architecture.md` `#37-scheduler-and-concurrency`) — `Scheduler`, `Task`, `TaskQueue`,
 // and the opaque `PthreadMutex`/`PthreadCond` byte-storage types — and
 // implements the MPMC ring queue + the fixed worker pool. The spawn/await
 // surface that imports this module lands in a follow-up M4 issue, so

@@ -796,8 +796,8 @@ The runtime subsystems are pinned by `compiler/tests/{unit,integration,e2e}/`:
   ABI contract this architecture confirms (struct layouts, typed closures).
 - `docs/status.md` — what ships today (per-subsystem status, the numeric slice
   history).
-- `docs/runtime_audit.md` — the C→Sailfin migration tracker (historical context).
-- `docs/build-performance.md` — perf analysis; the arena directly addressed its
+- `docs/status.md` (Runtime Migration table) — the C→Sailfin migration tracker.
+- `docs/proposals/0006-build-architecture.md` — perf analysis; the arena directly addressed its
   early phases.
 - `SFEP-0005` — Colon Type Annotations (the `int`/`float`/`as`/`number` reform that
   the runtime ABI's integer fields depend on).

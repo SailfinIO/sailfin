@@ -77,7 +77,7 @@ architect-approved issue, within a budget gate.
 
 - **Workflow:** `.github/workflows/planner.md`
 - **Cadence:** weekly on Mondays (off-peak minute; see workflow cron) + manual dispatch
-- **Reads:** roadmap, `docs/status.md`, `docs/build-performance.md`, open issues, recent merges, CI health
+- **Reads:** roadmap, `docs/status.md`, `docs/proposals/0006-build-architecture.md`, open issues, recent merges, CI health
 - **Writes:** exactly ONE GitHub issue titled `Focus: Week of YYYY-MM-DD`, labeled `focus:proposed`, pinned via comment
 - **Must NOT:** open PRs, modify code, close issues, label other issues, run the compiler
 - **Human gate:** a human applies `focus:approved` to activate downstream agents

@@ -13,9 +13,10 @@ documentation lives on the docs site.**
 - **Keywords** → [sailfin.dev/docs/reference/keywords](https://sailfin.dev/docs/reference/keywords)
 - **Runtime ABI** → [sailfin.dev/docs/reference/runtime-abi](https://sailfin.dev/docs/reference/runtime-abi)
 - **Roadmap** → [sailfin.dev/roadmap](https://sailfin.dev/roadmap) (source: `site/src/pages/roadmap.astro`)
-- **Runtime migration tracker** → `docs/runtime_audit.md`
-- **Runtime architecture notes** → `docs/runtime_architecture.md`
-- **Build performance plan** → `docs/build-performance.md`
+- **Runtime migration tracker** → `docs/status.md` (Runtime Migration table)
+- **Native runtime architecture** → `docs/proposals/0025-native-runtime-architecture.md` (SFEP-0025)
+- **Build architecture and performance baseline** → `docs/proposals/0006-build-architecture.md` (SFEP-0006)
+- **Runtime execution perf baseline** → `docs/perf/runtime-performance.md`
 - **Repository style guide** → `docs/style-guide.md`
 - **Proposals (SFEPs)** → `docs/proposals/` — numbered design records;
   index + process in [`docs/proposals/README.md`](proposals/README.md) and

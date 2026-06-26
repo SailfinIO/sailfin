@@ -150,7 +150,7 @@ build.** All fixes land in `compiler/src/*.sfn`. The driver is pure
 orchestration; add no fixups or post-processing. The seedcheck binary must be a
 fully functional standalone compiler.
 
-Build performance plan and target (<5 min) live in `docs/build-performance.md`.
+Build performance plan and target (<5 min) live in `docs/proposals/0006-build-architecture.md` (Build performance section).
 
 ## Stage1 Readiness Checklist
 
@@ -264,7 +264,7 @@ Prefer the new forms where the parser already accepts them. Full plan:
 - No concurrency runtime (`routine`, `spawn`, `channel`, `await`)
 
 The 1.0 critical path (runtime enablement phases, effect-system hardening) and
-the LLM-adoption strategy live in the roadmap and `docs/runtime_audit.md` — those
+the LLM-adoption strategy live in the roadmap and `docs/status.md` — those
 are the source of truth and change too often to mirror here.
 
 ## Workflows & Agents
@@ -338,8 +338,8 @@ When uncertain about feature status or semantics:
    `.../reference/preview/` (design previews); rendered at
    [sailfin.dev/docs/reference/spec/](https://sailfin.dev/docs/reference/spec/)
 3. **[sailfin.dev/roadmap](https://sailfin.dev/roadmap)** — active workstreams (`site/src/pages/roadmap.astro`)
-4. **`docs/runtime_audit.md`** — C→Sailfin runtime migration tracker
-5. **`docs/build-performance.md`** — build perf analysis + optimization plan
+4. **`docs/status.md` (Runtime Migration table)** — C→Sailfin runtime migration tracker
+5. **`docs/proposals/0006-build-architecture.md`** — build architecture and perf baseline
 6. **`docs/strategy/decision-brief.md`** — strategic overlay binding the internal
    vision (the capstone `docs/proposals/0016-capability-sealed-runtime.md`) to the
    market: what's *enforced now* (compile-time effects) vs. the *runtime seal*

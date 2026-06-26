@@ -2,13 +2,13 @@
 //
 // Pure-Sailfin extern declarations for a curated subset of libc.
 // This is the **first** file in the path toward a pure-Sailfin
-// runtime — see `docs/runtime_architecture.md` §2.9 ("Platform
-// Extern Declarations").
+// runtime — see `docs/proposals/0025-native-runtime-architecture.md`
+// `#38-capability-adapters-and-io-primitives` ("Platform Extern Declarations").
 //
 // Status: typecheck smoke test. Not imported anywhere yet; the
 // runtime continues to reach libc through the retired C runtime
 // (formerly `sailfin_runtime.c`) until the Sailfin-native runtime lands at M2
-// (per the milestone plan in `docs/runtime_architecture.md` §4).
+// (per the milestone plan in `docs/proposals/0025-native-runtime-architecture.md`).
 // Once `int`/`float` numeric types and `Result<T, E>` ship, this
 // file becomes the seed for `runtime/sfn/memory.sfn`,
 // `runtime/sfn/io.sfn`, and `runtime/sfn/adapters/filesystem.sfn`.
@@ -166,7 +166,7 @@ extern fn getenv(name: * u8) -> * u8;
 // (`runtime/sfn/exception.sfn`) wrap these into a frame-chain
 // push/pop API. The buffer is opaque to Sailfin — sizes vary per
 // platform (200 bytes Linux x86_64, 192 bytes macOS arm64; see
-// `docs/runtime_architecture.md` §2.4 and §2.9 Q5 for the
+// `docs/proposals/0025-native-runtime-architecture.md` `#35-exception--unwind-subsystem` and `#38-capability-adapters-and-io-primitives` Q5 for the
 // per-platform consolidation plan once a third platform appears).
 // The exception module allocates the buffer via libc `malloc`
 // today; a future `runtime/sfn/platform/sizes_*.sfn` constants

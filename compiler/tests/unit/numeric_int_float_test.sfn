@@ -94,7 +94,7 @@ test "numeric: extern fn mixing int and float typechecks" ![io] {
 // Slice C (2026-05-02) admitted `i16`, `u16`, `u32`, `u64`, `isize`,
 // and `f32` after teaching `map_primitive_type` to lower them. The
 // accept-list now spans the practical libc surface — see L5 in
-// `docs/runtime_architecture.md` §3.7 for the deferred bits
+// `docs/proposals/0025-native-runtime-architecture.md` `#396-numeric-types-int--float` for the deferred bits
 // (comparison/dominant_type for the wider widths in user-level
 // arithmetic; extern *signatures* don't compare on the boundary
 // itself, so this PR is sufficient for the libc skeleton's needs).

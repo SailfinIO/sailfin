@@ -19,7 +19,7 @@
 // introduced `emit_runtime_call` ahead of any caller migration.
 //
 // Render shape (matches the documented closure ABI in
-// `docs/runtime_architecture.md` §3.4 "Typed Closures"):
+// `docs/proposals/0025-native-runtime-architecture.md` §3.4 "Typed Closures" (`#393-typed-closures`)):
 //
 //   ; type declaration — emitted once per (lambda_id, capture-shape)
 //   %sfn_closure_env_<id> = type { <field0>, <field1>, ... }

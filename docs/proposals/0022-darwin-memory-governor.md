@@ -400,7 +400,7 @@ Mirror `mem_limit_selfcap_test.sfn` and the sanitizer-skip discipline. All
   to a proper background watchdog thread — but the *fan-out governor stays* as
   the primary mechanism; structured concurrency does not give Darwin a hard
   memory cap.
-- The build-performance plan (`docs/build-performance.md`, <5 min target) wants
+- The build-performance plan (`docs/proposals/0006-build-architecture.md`, <5 min target) wants
   *more* parallelism; the RAM-aware governor is the safety valve that lets the
   parallel emit path raise its clamp on big hosts without endangering small
   ones — they are complementary, not opposed.

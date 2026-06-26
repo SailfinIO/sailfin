@@ -1,6 +1,6 @@
 # Phase 5a — Arena reset for in-process multi-module tools
 
-> Append target for `docs/build-performance.md`. Pre-1.0 scoped fix
+> Work note for `docs/proposals/0006-build-architecture.md`. Pre-1.0 scoped fix
 > that reclaims arena memory between iterations of any in-process
 > per-file analysis loop. Unblocks `sfn check <dir>`, `sfn test`, and
 > future `sfn vet` / `sfn fix` / `sfn lsp` without touching
@@ -29,7 +29,7 @@ only reclaimed at process exit.
   It is **not** default-on for installed binaries — end users running
   `sfn check` get malloc unless they export the env var. (The
   "default does not set the flag" prose at
-  `docs/build-performance.md:83` is stale; fix it in the same PR.)
+  `docs/proposals/0006-build-architecture.md` §2.4 is stale; fix it in the same PR.)
 - Cross-iteration state in `cli_check.sfn:handle_check_command` —
   the central correctness question — is all populated **before** the
   per-file loop starts: `groups[].interfaces`,
@@ -163,7 +163,7 @@ Each step lands as a self-hosting commit; run `make compile` between.
    Verify with §6.
 5. **Sailfin: call from `cli_commands.sfn:handle_test_command`.**
    Run `make test`.
-6. **Doc fix.** Update `docs/build-performance.md` line 83 and add
+6. **Doc fix.** Update `docs/proposals/0006-build-architecture.md` §2.4 arena notes and add
    a Phase 5a section between Phase 0 and Phase 5.
 7. **Followup PR — arena default-on for installed binary.** Either
    default `_arena_enabled` to 1 in `sfn_arena.c` (with
@@ -182,7 +182,7 @@ Each step lands as a self-hosting commit; run `make compile` between.
 | Sailfin CLI | `compiler/src/cli_check.sfn` | mark + rewind around per-file loop, gated on `!json` |
 | Sailfin CLI | `compiler/src/cli_commands.sfn` | mark + rewind around per-test loop |
 | Tests | `compiler/tests/integration/check_directory_test.sfn` (new) | run `sfn check` over a multi-file fixture; assert exit 0 |
-| Docs | `docs/build-performance.md` | fix stale arena text; add Phase 5a section |
+| Docs | `docs/proposals/0006-build-architecture.md` | fix stale arena text; add Phase 5a section |
 
 ## 7. Risks
 

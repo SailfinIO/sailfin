@@ -291,8 +291,8 @@ Path (ordered, each step self-hosts — see §5/§7):
 So the runtime body/alias/row cannot be deleted until the seed used by
 `make compile` is the step-4 seed. This mirrors the `@runtime` magic-namespace
 seed-gating documented at `runtime/prelude.sfn:46-51` and tracked in
-`docs/runtime_audit.md`. Step 5 is therefore **blocked on the step-4 seed pin**
-and carries the `seed-blocker` label until then. Add a `runtime_audit.md` row
+the Runtime Migration table in `docs/status.md`. Step 5 is therefore **blocked on the step-4 seed pin**
+and carries the `seed-blocker` label until then. Add a `docs/status.md` Runtime Migration row
 for `sfn_log_execution` so the deletion is tracked with the other seed-gated
 runtime symbols.
 
@@ -358,7 +358,7 @@ runtime symbols.
 - `capsules/sfn/log/src/mod.sfn` — add `@decorator` `logExecution`/`trace`.
 - `runtime/prelude.sfn:52,71` — delete `sfn_log_execution` import + alias (step F).
 - `runtime/sfn/io.sfn:447` — delete `sfn_log_execution` body (step F).
-- `docs/runtime_audit.md` — add `sfn_log_execution` seed-gated deletion row.
+- `docs/status.md` (Runtime Migration table) — add `sfn_log_execution` seed-gated deletion row.
 
 **Tests**
 - `compiler/tests/unit/` — resolution (import → resolve; unimported → error),
@@ -399,7 +399,7 @@ with the lowering consumer that exercises it.
 5. **[S] Delete built-in decorator string-match + `sfn_log_execution` runtime**
    (step F) — remove the string-match registry, prelude alias
    (`runtime/prelude.sfn:71`), helper row (`runtime_helpers.sfn:673-675`), and
-   runtime body (`runtime/sfn/io.sfn:447`); `runtime_audit.md` row.
+   runtime body (`runtime/sfn/io.sfn:447`); `docs/status.md` Runtime Migration row.
    `seed-blocker` until #4. Depends on #4.
    *`sfn_log_execution` is Sailfin-defined (`runtime/sfn/io.sfn`) and reached
    only through the helper-registry emission, so this is a clean Sailfin-side
@@ -408,8 +408,8 @@ with the lowering consumer that exercises it.
 ## 8. Risks & mitigations
 
 - **Seed still emits the old helper.** Mitigated by the explicit seed pin (#4)
-  gating the runtime deletion (#5); `seed-blocker` label + `runtime_audit.md`
-  row.
+  gating the runtime deletion (#5); `seed-blocker` label + `docs/status.md`
+  Runtime Migration row.
 - **`Decorator` struct layout / opaque-seed hazard.** Mitigated by *not* editing
   the `Decorator` struct — all new data rides a sidecar like `ImportSymbolTable`.
 - **Effect drift / unenforced claim.** Mitigated by routing decorator effects

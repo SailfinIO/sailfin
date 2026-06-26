@@ -2,7 +2,7 @@
 //
 // Public sfn_spawn / sfn_await futures built on the v0 scheduler
 // (`runtime/sfn/concurrency/scheduler.sfn`, issues #1088 + #1089).
-// Implements `docs/runtime_architecture.md` §2.6.2–§2.6.3.
+// Implements `docs/proposals/0025-native-runtime-architecture.md` `#37-scheduler-and-concurrency`.
 // Resolves issue #1090 (M4 Wave 2).
 //
 // ── Public surface ────────────────────────────────────────────

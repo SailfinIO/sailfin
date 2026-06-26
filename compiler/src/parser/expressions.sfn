@@ -679,7 +679,7 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
         if expression_tokens_is_at_end(current_state) { break; }
         let token = expression_tokens_peek(current_state);
 
-        // `as` casts (Slice D, docs/runtime_architecture.md §3.7).
+        // `as` casts (Slice D, docs/proposals/0025-native-runtime-architecture.md §3.7 `#396-numeric-types-int--float`).
         // `as` is a soft keyword (lexes as Identifier; same convention
         // as the import-alias precedent at parser/declarations.sfn:625).
         // Postfix-binding so `x + y as int` parses as `x + (y as int)`,

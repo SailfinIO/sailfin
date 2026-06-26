@@ -43,7 +43,7 @@ env:
   # Mirrors `.github/workflows/ci.yml`. Belt-and-suspenders pin so a
   # future change to the runtime default — or a caller that scrubs
   # env — can't silently regress this gate onto the malloc path.
-  # See docs/build-performance.md → "Arena Allocator Default-On".
+  # See docs/proposals/0006-build-architecture.md → "Arena Allocator Default-On".
   SAILFIN_USE_ARENA: "1"
 
 permissions:

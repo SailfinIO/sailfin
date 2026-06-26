@@ -147,7 +147,7 @@ Update documents in this order when behaviour changes:
 | `docs/status.md` | What ships today (Stage0/1/2 breakdown) |
 | `site/src/content/docs/docs/reference/spec/` | Language reference, chapter files §1–§11 (current language); `.../reference/preview/` holds planned features |
 | [sailfin.dev/roadmap](https://sailfin.dev/roadmap) | Active workstreams and sequencing (source: `site/src/pages/roadmap.astro`) |
-| `docs/runtime_audit.md` | Python→Sailfin migration tracker |
+| `docs/status.md` (Runtime Migration table) | C→Sailfin migration tracker |
 
 ## Important Constraints
 

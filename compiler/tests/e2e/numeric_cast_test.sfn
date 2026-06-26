@@ -1,5 +1,5 @@
 // End-to-end test for the numeric `as` cast LLVM lowering matrix
-// (Slice D, docs/runtime_architecture.md §3.7).
+// (Slice D, docs/proposals/0025-native-runtime-architecture.md `#396-numeric-types-int--float`).
 //
 // Native replacement for the former `test_numeric_cast.sh` (test-infra
 // Phase 3, epic #842; ratchet #1327). PR #289 shipped the parser + AST +

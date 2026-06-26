@@ -44,7 +44,7 @@ import {
 // nesting level. The former `parent = prefix + format(child) + suffix` style
 // allocated a fresh memcpy'd buffer (`sfn_str_concat`, runtime/sfn/string.sfn)
 // per level — O(depth^2) bytes, all retained by the never-free compile arena
-// (docs/build-performance.md Root Cause 5) — and was the dominant emit-native
+// (docs/proposals/0006-build-architecture.md) — and was the dominant emit-native
 // peak-RSS driver. Output is byte-identical to the old return-and-concat form.
 fn _format_binary_operand(operand: Expression) -> string {
     let mut out: string[] = [];
@@ -210,7 +210,7 @@ fn format_expression_into(expression: Expression, out: string[]) -> string[] {
         return out;
     }
     if expression.variant == "Spawn" {
-        // `spawn[:<kind>] <operand>` (docs/runtime_architecture.md §2.6.2).
+        // `spawn[:<kind>] <operand>` (docs/proposals/0025-native-runtime-architecture.md §3.7 `#37-scheduler-and-concurrency`).
         // `kind` is "" when not statically derivable (#829); rendered as a
         // `spawn:<kind>` qualifier so the LLVM lowering (#1085) selects the
         // matching helper. Fails closed downstream until that lands.

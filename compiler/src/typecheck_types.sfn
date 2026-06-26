@@ -813,7 +813,7 @@ fn check_function_signature(signature: FunctionSignature) -> Diagnostic[] {
 
 // Validate an `extern fn` declaration's signature.
 //
-// Per docs/runtime_architecture.md §3.6 ("extern fn lowering"), only
+// Per docs/proposals/0025-native-runtime-architecture.md §3.6 (`#395-extern-function-lowering`), only
 // C-ABI-compatible types may cross the extern boundary. Aggregate
 // Sailfin types (`string`, `T[]`, structs, RC'd values) must be
 // decomposed by an adapter layer before the call. This validator
@@ -1035,7 +1035,7 @@ fn _is_c_abi_type_inner(normalized: string, allow_bare_void: boolean) -> boolean
 //
 // `int` and `float` are accepted as the canonical Sailfin spelling
 // for sized integer (i64) and floating-point (double) values
-// respectively — see `docs/runtime_architecture.md` Phase 1 #2.
+// respectively — see `docs/proposals/0025-native-runtime-architecture.md` §3.7 (`#396-numeric-types-int--float`).
 // They lower through `map_primitive_type` to `i64` / `double` so a
 // `declare` directive emitted from this surface is well-formed.
 //

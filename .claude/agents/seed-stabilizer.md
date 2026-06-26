@@ -44,7 +44,7 @@ When a build fails or produces a broken binary, the bug is in the compiler sourc
 | Import re-parsing | Same `.sfn-asm`/`.layout-manifest` parsed repeatedly without caching | `compiler/src/llvm/imports.sfn` |
 | String constant explosion | Duplicate string constants across modules | `compiler/src/llvm/strings.sfn`, `rendering.sfn` |
 
-See `docs/build-performance.md` for the full root cause analysis and optimization plan.
+See `docs/proposals/0006-build-architecture.md` for the full root cause analysis and optimization plan.
 
 ## Investigation Workflow
 
@@ -82,7 +82,7 @@ See `docs/build-performance.md` for the full root cause analysis and optimizatio
 | `compiler/src/llvm/rendering.sfn` | LLVM IR text output |
 | `compiler/src/llvm/imports.sfn` | Import resolution and artifact loading |
 | `compiler/src/llvm/lowering/lowering_io.sfn` | IR line accumulation helpers |
-| `docs/build-performance.md` | Full build performance root cause analysis |
+| `docs/proposals/0006-build-architecture.md` | Full build performance root cause analysis |
 
 ## Safety Rules
 

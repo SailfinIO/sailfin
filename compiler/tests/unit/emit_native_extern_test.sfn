@@ -1,7 +1,7 @@
 // End-to-end test for `extern fn` emission through the native IR.
 //
 // Confirms the architect's M1 fast-fail criterion (see
-// docs/runtime_architecture.md §3.6 "Fast-fail criterion"): an
+// docs/proposals/0025-native-runtime-architecture.md `#395-extern-function-lowering` "Fast-fail criterion"): an
 // `extern fn` declaration in `.sfn` source produces a properly-shaped
 // `.fn` block with `.meta extern` in the emitted `.sfn-asm`. The LLVM
 // `declare` lowering downstream of this point is already in place

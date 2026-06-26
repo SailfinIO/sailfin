@@ -412,7 +412,7 @@ module — currently 121 — and each pays:
 - A full import-context directory copy (121 × ~1 MB of `.sfn-asm`).
 - Re-parsing every transitively-imported `.layout-manifest` from scratch.
 
-`docs/build-performance.md` identifies this as Root Cause 6. The only
+`docs/proposals/0006-build-architecture.md` §2.4 identifies this as Root Cause 6. The only
 reason it is still Phase 5 on the fix plan is that every earlier phase
 requires a memory manager that the runtime doesn't have yet.
 
@@ -1527,9 +1527,9 @@ structured pipeline either succeeds or fails.
 
 ### Stage E — Long-lived process, arena, incremental builds
 
-**Goal:** Hit the <5 min build target from `docs/build-performance.md`.
+**Goal:** Hit the <5 min build target (see build performance baseline in this document).
 
-- Arena allocator from `docs/runtime_architecture.md` §4.4 lands. The
+- Arena allocator from `docs/proposals/0025-native-runtime-architecture.md` `#321-arenas` lands. The
   driver resets the arena between modules rather than exiting the
   process.
 - In-process import-context cache: parsed `.layout-manifest` structs
@@ -1548,7 +1548,7 @@ determinism gate in CI.
 is fully declarative.
 
 - The Sailfin-native runtime lands as `sfn/runtime-sailfin`
-  (per `docs/runtime_architecture.md` M2/M3). The compiler workspace
+  (per `docs/proposals/0025-native-runtime-architecture.md`). The compiler workspace
   depends on it instead of `sfn/runtime-native`.
 - The driver's link phase loses its `c-sources` branch — or keeps it
   only for C FFI capsules users might ship (e.g., a `sfn/zlib` binding).
@@ -1618,13 +1618,42 @@ actual split is an ecosystem-maturity cleanup.
 
 ---
 
+## Build performance
+
+**Target:** clean build of the compiler in under 5 minutes (Stage E exit criterion).
+
+### 0.7.0 baseline (2026-06-22, post C-runtime deletion)
+
+First per-module compile baseline since the C runtime was deleted and the runtime
+became pure Sailfin. Captured with `make bench` (all 166 `compiler/src` modules,
+isolated `emit llvm` per module, Darwin arm64, compiler `sfn 0.7.0-alpha.47+dev.64ed8a6d`).
+Raw CSV: `docs/baselines/compile-0.7.0-darwin-arm64.csv`.
+
+| Metric (per-module emit, isolated) | 0.7.0-alpha.47 (Darwin arm64) |
+| --- | --- |
+| Modules | 166 (all `ok`, within budget) |
+| Slowest module | `cli_commands` 22.30 s |
+| Next slowest | `cli_main` 19.76 s, `llvm__expression_lowering__native__core` 16.71 s |
+| Peak RSS (heaviest) | **4389 MB** (`llvm__expression_lowering__native__core`) |
+| Sum of isolated per-module emits | 566.73 s (serial; not the parallel build wall-time) |
+
+These are *isolated per-module* emit timings (each module emitted alone against
+`build/native/import-context`). Peak RSS of ~4.4 GB on a single module is under the
+8 GiB self-cap but is the standout regression candidate to watch — the heaviest
+emitters are the `llvm/expression_lowering/native/core*` family and the two CLI
+modules.
+
+Runtime execution performance (the dimension most affected by C-runtime deletion) is
+tracked separately in `docs/perf/runtime-performance.md` with its own `make bench-runtime`
+harness and 0.7.0 baseline.
+
+---
+
 ## Cross-references
 
-- `docs/build-performance.md` — root-cause analysis of the current build's
-  performance ceiling. Phase 5 in that plan is "long-lived compiler
-  process", which is what Stage E implements.
-- `docs/runtime_architecture.md` — the Sailfin-native runtime rewrite.
-  Stage F of this proposal consumes M2/M3 from that plan.
+- `docs/proposals/0025-native-runtime-architecture.md` — the Sailfin-native runtime rewrite.
+  Stage F of this proposal consumes M2/M3 from that plan; Stage E implements
+  the long-lived process with arena resets between modules.
 - `docs/proposals/0002-package-management.md` — user-facing registry and
   `sfn add` semantics. This proposal extends the manifest schema it
   defines.

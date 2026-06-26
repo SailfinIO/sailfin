@@ -116,7 +116,7 @@ In LLVM IR the entry symbol is spelled `@main`; after linking, tools
 like `nm` show it without the `@` sigil. `nm build/native/sailfin |
 grep -E ' T main$'` shows exactly one `T main` row, sourced from the
 Sailfin-emitted definition in `compiler/src/llvm/lowering/` (see
-`runtime_audit.md` for the pipeline trace).
+the Runtime Migration table in `docs/status.md` for the pipeline trace).
 `SAILFIN_TRACE_ARGV` prints the argv vector observed by
 `sailfin_cli_main` for entry-point debugging.
 
@@ -231,7 +231,7 @@ it wraps a loop body in `sfn_arena_sfn_mark` at body entry and
 `sfn_arena_sfn_rewind` at iteration close, so a hot allocation loop
 stops growing RSS linearly (the `arena_alloc` benchmark drops from
 ~691 MB to a flat ~1.7 MB — see
-[`docs/runtime-performance.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/runtime-performance.md)).
+[`docs/perf/runtime-performance.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/perf/runtime-performance.md)).
 This is **gated** on a non-escape proof
 (`loop_body_rewind_eligible`, `instructions_helpers.sfn`) and fires
 only when the body allocates via a real `@sfn_alloc_struct`, every
@@ -355,7 +355,7 @@ deterministic owner (it can be copied into spawn handlers, channels,
 or returned upward). Arena reclaim covers the arena case; the off-
 arena case leaks until process exit. Per-capture RC retain/release
 and a deterministic env drop are deferred to a post-M1 issue. See
-[`docs/runtime_architecture.md` §3.4](https://github.com/SailfinIO/sailfin/blob/main/docs/runtime_architecture.md#34-typed-closures)
+[`docs/proposals/0025-native-runtime-architecture.md` §3.4 "Typed Closures"](https://github.com/SailfinIO/sailfin/blob/main/docs/proposals/0025-native-runtime-architecture.md#393-typed-closures)
 for the design rationale.
 
 ## Exception / Unwind ABI
@@ -420,8 +420,8 @@ undefined — FFI boundaries trap at the C body.
 
 ---
 
-*The runtime is actively migrating from C to Sailfin. See the
-[runtime audit](https://github.com/SailfinIO/sailfin/blob/main/docs/runtime_audit.md)
+*The runtime has migrated from C to Sailfin. See the
+[Runtime Migration table in `docs/status.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/status.md)
 for current status, and Epic
 [#450](https://github.com/SailfinIO/sailfin/issues/450) (M1 — ABI lock +
 codegen switch) for the lock-in sequencing this doc reflects.*

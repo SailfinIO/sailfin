@@ -100,7 +100,7 @@ enum Expression {
     // Concurrency frontend nodes (M4.0, epic #965, issue #1079). Parse-only
     // targets for the structured-concurrency surface; parsing, type rules,
     // effect-checking, and lowering land in follow-up issues. Runtime
-    // semantics are specified in docs/runtime_architecture.md §2.6. Spans
+    // semantics are specified in docs/proposals/0025-native-runtime-architecture.md §3.7 (`#37-scheduler-and-concurrency`). Spans
     // are appended last per the variant convention above so positional GEP
     // indexing stays stable. `spawn`/`await` are prefix operators over an
     // expression (mirroring Unary/TryOperator's `operand`); `channel`,
@@ -380,7 +380,7 @@ enum Statement {
     },
     // `routine { ... }` — structured-concurrency block scope (M4.0, epic
     // #965, issue #1079). Parse-only target; the runtime nursery semantics
-    // land in follow-up issues (docs/runtime_architecture.md §2.6.7).
+    // land in follow-up issues (docs/proposals/0025-native-runtime-architecture.md `#37-scheduler-and-concurrency`).
     // Shaped like LoopStatement (block body + decorators) since the v0
     // surface is a bare block scope that yields no value.
     RoutineStatement {

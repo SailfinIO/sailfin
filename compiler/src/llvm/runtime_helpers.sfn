@@ -89,7 +89,7 @@
 //   * Run `make compile && make test` per batch.
 //   * Update the prioritization list above as waves land.
 //
-// See `docs/runtime_audit.md` for the C→Sailfin migration tracker
+// See the Runtime Migration table in `docs/status.md` for the C→Sailfin migration tracker
 // and Epic #450 for the milestone-level sequencing.
 //
 import { RuntimeHelperDescriptor } from "./types";

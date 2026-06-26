@@ -1,7 +1,7 @@
 ---
 description: |
   Weekly strategy layer for the Sailfin agentic pipeline. Reads the roadmap,
-  status, build-performance data, and recent issue/PR activity, then writes a
+  status, build performance baseline, and recent issue/PR activity, then writes a
   single "Focus: Week of YYYY-MM-DD" issue identifying 3-5 workstreams that
   downstream agents (architect, grooming, engineer) act on for the week.
 
@@ -88,8 +88,8 @@ over creating a new one.
 
 1. **Roadmap** — `site/src/pages/roadmap.astro` (rendered at sailfin.dev/roadmap). Lists epics and active workstreams.
 2. **Status** — `docs/status.md`. What ships today vs. what's partial vs. what's deferred.
-3. **Build performance** — `docs/build-performance.md`. Current vs. target build times.
-4. **Runtime audit** — `docs/runtime_audit.md`. Python/C → Sailfin migration tracker.
+3. **Build performance** — `docs/proposals/0006-build-architecture.md` (Build performance section). Current vs. target build times.
+4. **Runtime audit** — `docs/status.md` (Runtime Migration table). C → Sailfin migration tracker.
 5. **Issue queue** — open issues grouped by label (`priority:critical`, `priority:high`, `needs-design`, `design-approved`, `blocked`, `type:bug`).
 6. **Recent merges** — PRs merged in the last 7 days. Use the titles + PR bodies to infer what's progressed.
 7. **Previous focus** — the most recent `focus:approved` or `focus:proposed` issue. Continuity matters; don't redirect the ship every week.

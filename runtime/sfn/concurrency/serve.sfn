@@ -8,7 +8,7 @@
 // every-module convention) that dispatches each accepted connection
 // to the M4.1 fixed thread pool in `scheduler.sfn`.
 //
-// Design: `docs/runtime_architecture.md` §2.6.6 (serve accept loop)
+// Design: `docs/proposals/0025-native-runtime-architecture.md` `#37-scheduler-and-concurrency` (serve accept loop)
 // over the §2.6.1 fixed pool + shared MPMC queue. The accept loop
 // runs on the caller's thread and never returns; each connection
 // becomes a `Task` enqueued on the shared queue, run by a pool
