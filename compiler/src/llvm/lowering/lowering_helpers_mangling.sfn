@@ -30,13 +30,18 @@ import {
 } from "../utils";
 import {
     DeclareSignature,
+    HeaderIndex,
     MangledModuleResult,
     apply_symbol_substitutions,
+    build_header_index,
     collect_available_import_module_names,
     collect_defined_function_symbols,
     extract_module_name_from_native_text,
     find_declare_signature,
+    find_signature_in_index,
+    has_declare_or_define_in_index,
     insert_before_llvm_footer,
+    pretrim_lines,
     render_function_shim,
     resolve_import_provider_module_name,
     sanitize_module_suffix,
@@ -363,6 +368,15 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
     // 3) Append shims before the LLVM footer (attributes/metadata).
     //    Also inject `declare` for any target symbol that is referenced
     //    but has no existing declare or define in the module.
+    //
+    // #1512: the shim + imm-declare loops below probe `rewritten` for many
+    // symbols (285 shims on `core`). `rewritten` is not mutated again until
+    // the final `insert_before_llvm_footer`, so trim every line once here
+    // and use the `_t` (pre-trimmed) probe variants — turning the per-symbol
+    // `trim_text` of all ~16k lines (core's +2.7 GB mangling peak) into a
+    // single O(lines) trim.
+    let trimmed_rewritten = pretrim_lines(rewritten);
+    let header_index = build_header_index(trimmed_rewritten);
     let mut shim_lines: string[] = [];
     let mut injected_declares: string[] = [];
     let mut shim_index: int = 0;
@@ -373,7 +387,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
         if _if274 { break; }
         let export_sym = shim_exports[shim_index];
         let target_sym = shim_targets[shim_index];
-        let signature = find_declare_signature(rewritten, target_sym);
+        let signature = find_signature_in_index(header_index, target_sym);
         if signature == null {
             // Not a function import (e.g. struct/enum type), or declaration not emitted.
             shim_index += 1;
@@ -381,7 +395,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
         }
         // If the target symbol has no declare/define line, inject a declare
         // so the shim (and any other call sites) can reference it.
-        if !_has_declare_or_define(rewritten, target_sym) {
+        if !has_declare_or_define_in_index(header_index, target_sym) {
             if !string_array_contains(injected_declares, target_sym) {
                 let decl = _render_declare_line(target_sym, signature);
                 shim_lines.push(decl);
@@ -410,7 +424,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
         let imm_sig = imm_signatures[imm_di];
         imm_di += 1;
         if string_array_contains(injected_declares, imm_target) { continue; }
-        if _has_declare_or_define(rewritten, imm_target) { continue; }
+        if has_declare_or_define_in_index(header_index, imm_target) { continue; }
         shim_lines.push(_render_declare_line(imm_target, imm_sig));
         shim_lines.push("");
         injected_declares.push(imm_target);
@@ -421,23 +435,6 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
     }
 
     return MangledModuleResult { lines: rewritten, diagnostics: diagnostics };
-}
-
-fn _has_declare_or_define(lines: string[], symbol: string) -> boolean {
-    let at_sym = "@" + symbol + "(";
-    let mut index: int = 0;
-    loop {
-        if index >= lines.length { break; }
-        let trimmed = trim_text(lines[index]);
-        let mut _is_hdr: boolean = false;
-        if starts_with(trimmed, "declare ") { _is_hdr = true; }
-        if starts_with(trimmed, "define ") { _is_hdr = true; }
-        if _is_hdr {
-            if index_of(trimmed, at_sym) >= 0 { return true; }
-        }
-        index += 1;
-    }
-    return false;
 }
 
 fn _render_declare_line(symbol: string, signature: DeclareSignature) -> string {

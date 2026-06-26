@@ -1,0 +1,81 @@
+// Regression coverage for the symbol-mangling memory/algorithm fixes in
+// #1512. `apply_module_symbol_mangling`
+// (compiler/src/llvm/lowering/lowering_helpers_mangling.sfn) and its helpers
+// in `lowering_helpers.sfn` were the dominant allocator of the whole LLVM
+// lowering pass on large modules (`core.sfn`: +2.9 GB, ~70% of a 4.35 GiB
+// peak). Three changes removed it without altering output:
+//
+//   1. `replace_symbol_refs_in_line` rewrites `@local` → `@local__<module>`
+//      via a token sink (verbatim runs by index + one join) instead of the
+//      previous O(L^2) character-by-character concatenation.
+//   2. A declare/define symbol index replaces per-shim O(16k-line) scans.
+//   3. A call-site signature index replaces the per-shim call-site fallback
+//      scan (the residual; `index_of`/`starts_with` allocate per position).
+//
+// All three must be output-preserving. This test lowers a multi-function
+// module whose functions call each other and share a string literal — so
+// local-symbol rewriting and string-constant handling both run — and asserts
+// (1) every function and literal reaches the IR and (2) lowering the same
+// source twice in one process is byte-identical (determinism guard; the
+// macOS arm64 IR pipeline has a history of intermittent symbol corruption,
+// so a repeatability check is the load-bearing assertion).
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+fn _count(haystack: string, needle: string) -> int {
+    if needle.length == 0 { return 0; }
+    let mut n: int = 0;
+    let mut from: int = 0;
+    loop {
+        let hit = index_of(substring(haystack, from, haystack.length), needle);
+        if hit < 0 { break; }
+        n += 1;
+        from = from + hit + needle.length;
+        if from >= haystack.length { break; }
+    }
+    return n;
+}
+
+fn _lower_sample() -> string ![io] {
+    // `a` and `b` share the literal "shared_lit"; `c` calls `a` and `b`
+    // (local-symbol call sites that get mangled to `@a__...` / `@b__...`).
+    let source = "fn a() -> int {\n" + "    let s = \"shared_lit\";\n"
+        + "    return s.length;\n"
+        + "}\n"
+        + "fn b() -> int {\n"
+        + "    let t = \"shared_lit\";\n"
+        + "    return t.length;\n"
+        + "}\n"
+        + "fn c() -> int {\n"
+        + "    let u = \"unique_lit\";\n"
+        + "    return a() + b() + u.length;\n"
+        + "}";
+    let program = parse_program(source);
+    let native = emit_native_text_with_module_name(program, "symbol_mangle_test");
+    return lower_to_llvm_ir_from_text(native, "symbol_mangle_test");
+}
+
+// ── All three functions + both literals reach the IR ──
+test "lowering(#1512): multi-fn module lowers fully after mangle fixes" ![io] {
+    let ir = _lower_sample();
+    assert _count(ir, "define ") >= 3;
+    assert _contains(ir, "shared_lit");
+    assert _contains(ir, "unique_lit");
+}
+
+// ── Two lowerings in one process are byte-identical ──
+// The load-bearing guard: the token sink + symbol indexes must be fully
+// deterministic and output-preserving, so a second in-process lowering of
+// the same source reproduces the first exactly.
+test "lowering(#1512): repeated in-process lowering is byte-identical" ![io] {
+    let first = _lower_sample();
+    let second = _lower_sample();
+    assert first.length > 0;
+    assert first == second;
+}

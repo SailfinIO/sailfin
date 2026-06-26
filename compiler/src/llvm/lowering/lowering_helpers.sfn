@@ -438,32 +438,42 @@ fn find_substitution_index(olds: string[], news: string[], symbol: string) -> in
 fn replace_symbol_refs_in_line(line: string, olds: string[], news: string[]) -> string {
     if olds.length == 0 { return line; }
     if line.length == 0 { return line; }
-    let mut out: string = "";
+    // Token-sink rewrite (#1512). The previous body built `out` one
+    // character at a time (`out = out + ch`), which is O(L^2) bytes under
+    // the no-free compile arena: a handful of long IR lines (large struct
+    // initializers, long GEP chains) made this the dominant allocator of
+    // the whole lowering pass — +2.9 GB on `core`'s mangling phase alone.
+    // Instead, advance over verbatim runs by index and only materialize a
+    // chunk at each *substituted* `@symbol`, then join once. Output is
+    // byte-identical to the char-by-char form (non-substituted symbols,
+    // `@.str`-style names, quoted regions, and a trailing bare `@` all stay
+    // inside the verbatim run). A line with no substitution returns
+    // unchanged with zero allocation.
+    let mut chunks: string[] = [];
+    let mut chunk_start: int = 0;
     let mut index: int = 0;
     let mut in_string: boolean = false;
+    let mut substituted: boolean = false;
     loop {
         if index >= line.length { break; }
         let ch = line[index];
         if ch == "\"" {
             in_string = !in_string;
-            out = out + ch;
             index += 1;
             continue;
         }
         if in_string {
-            out = out + ch;
             index += 1;
             continue;
         }
         if ch != "@" {
-            out = out + ch;
             index += 1;
             continue;
         }
 
         let start = index + 1;
         if start >= line.length {
-            out = out + ch;
+            // Trailing bare `@` — leave it in the verbatim run.
             index += 1;
             continue;
         }
@@ -475,8 +485,7 @@ fn replace_symbol_refs_in_line(line: string, olds: string[], news: string[]) -> 
             end += 1;
         }
         if end == start {
-            // Not a function symbol (e.g. @.str), leave it untouched.
-            out = out + ch;
+            // `@` not followed by a symbol char (e.g. `@.str`) — verbatim.
             index += 1;
             continue;
         }
@@ -484,11 +493,23 @@ fn replace_symbol_refs_in_line(line: string, olds: string[], news: string[]) -> 
         let sym = substring(line, start, end);
         let replacement_index = find_substitution_index(olds, news, sym);
         if replacement_index >= 0 {
-            out = out + "@" + news[replacement_index];
-        } else { out = out + "@" + sym; }
+            // Flush the verbatim run up to (excluding) this `@`, then emit
+            // the rewritten `@<new>`. Non-substituted `@sym` stays in the
+            // run untouched.
+            if index > chunk_start {
+                chunks.push(substring(line, chunk_start, index));
+            }
+            chunks.push("@" + news[replacement_index]);
+            chunk_start = end;
+            substituted = true;
+        }
         index = end;
     }
-    return out;
+    if !substituted { return line; }
+    if chunk_start < line.length {
+        chunks.push(substring(line, chunk_start, line.length));
+    }
+    return join_with_separator(chunks, "");
 }
 
 fn apply_symbol_substitutions(lines: string[], olds: string[], news: string[]) -> string[] {
@@ -639,15 +660,248 @@ fn _extract_type_from_arg(raw: string) -> string {
     return raw;
 }
 
+// Pre-trim every line once into a fresh array. `find_declare_signature_t`
+// / `_has_declare_or_define_t` operate on the result without re-trimming,
+// so a caller scanning for many symbols (the mangling shim loop, #1512)
+// pays the per-line `trim_text` allocation once rather than once per
+// symbol — the difference between O(symbols × lines) and O(lines)
+// transient strings under the no-free arena (it was core's +2.7 GB peak).
+fn pretrim_lines(lines: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        out.push(trim_text(lines[i]));
+        i += 1;
+    }
+    return out;
+}
+
 fn find_declare_signature(lines: string[], symbol: string) -> DeclareSignature? {
+    return find_declare_signature_t(pretrim_lines(lines), symbol);
+}
+
+// Symbol → header-line index over pre-trimmed module lines (#1512). The
+// mangling shim loop probes hundreds of symbols against the module; doing
+// that with `find_declare_signature` / `_has_declare_or_define` re-scans
+// (and re-`index_of`s, which allocates a substring per scan position) all
+// ~16k lines per symbol — core's residual +1.4 GB. Building this index in
+// ONE pass turns each probe into an O(declares) name compare with no
+// per-line allocation. `decl_*`/`def_*` are parallel arrays; first
+// occurrence wins, matching `find_declare_signature`'s declare-before-
+// define, first-match order.
+struct HeaderIndex {
+    decl_syms: string[];
+    decl_lines: string[];
+    def_syms: string[];
+    def_lines: string[];
+    call_syms: string[];
+    call_sigs: DeclareSignature[];
+}
+
+// One extracted call-site signature: the called symbol plus its
+// DeclareSignature, recovered from a `call <ret> @sym(<args>)` line.
+struct CallEntry {
+    sym: string;
+    sig: DeclareSignature;
+}
+
+// Generic form of `find_declare_signature`'s call-site pass: extract the
+// called symbol and its signature from a single line, without a target to
+// match. Mirrors that pass exactly (same ret-type / param parsing via
+// `_extract_type_from_arg`) so a call-site index built from this yields
+// byte-identical lookups. Returns null when the line is not a usable
+// `call ... @sym(...)` site.
+fn _extract_call_entry(line: string) -> CallEntry? {
+    let call_kw = index_of(line, "call ");
+    if call_kw < 0 { return null; }
+    let scan_from = call_kw + 5;
+    let at_rel = index_of(substring(line, scan_from, line.length), "@");
+    if at_rel < 0 { return null; }
+    let at_index = scan_from + at_rel;
+    // Mirror the pass-3 `call_pos > 0` guard.
+    if at_index <= 0 { return null; }
+    let sym_start = at_index + 1;
+    let mut sym_end = sym_start;
+    loop {
+        if sym_end >= line.length { break; }
+        if !is_llvm_symbol_char(line[sym_end]) { break; }
+        sym_end += 1;
+    }
+    if sym_end == sym_start { return null; }
+    if sym_end >= line.length { return null; }
+    if line[sym_end] != "(" { return null; }
+    let sym = substring(line, sym_start, sym_end);
+
+    let call_needle = "@" + sym + "(";
+    let ret_type = trim_text(substring(line, scan_from, at_index));
+    if ret_type.length == 0 { return null; }
+    let params_start = at_index + call_needle.length;
+    let close_paren = index_of(substring(line, params_start, line.length), ")");
+    if close_paren < 0 { return null; }
+    let params_text = substring(line, params_start, params_start + close_paren);
+
+    let mut call_parts: string[] = [];
+    let mut ps: int = 0;
+    let mut sc: int = 0;
+    let mut cd: int = 0;
+    let mut pd: int = 0;
+    loop {
+        if sc >= params_text.length { break; }
+        let pch = params_text[sc];
+        if pch == "{" { cd += 1; }
+        if pch == "}" {
+            if cd > 0 { cd -= 1; }
+        }
+        if pch == "(" { pd += 1; }
+        if pch == ")" {
+            if pd > 0 { pd -= 1; }
+        }
+        if pch == "," {
+            if cd == 0 {
+                if pd == 0 {
+                    let raw_part = trim_text(substring(params_text, ps, sc));
+                    call_parts.push(_extract_type_from_arg(raw_part));
+                    ps = sc + 1;
+                }
+            }
+        }
+        sc += 1;
+    }
+    let last_raw = trim_text(substring(params_text, ps, params_text.length));
+    if last_raw.length > 0 {
+        call_parts.push(_extract_type_from_arg(last_raw));
+    }
+    return CallEntry {
+        sym: sym,
+        sig: DeclareSignature {
+            return_type: ret_type,
+            param_types: call_parts
+        }
+    };
+}
+
+// Extract the function symbol from a `declare`/`define` header line — the
+// first `@<name>` token, read with the same char rule
+// `_extract_signature_from_header` uses, so the index key matches what a
+// signature lookup would match.
+fn _header_symbol(trimmed_line: string) -> string {
+    let at_index = index_of(trimmed_line, "@");
+    if at_index < 0 { return ""; }
+    let start = at_index + 1;
+    let mut end = start;
+    loop {
+        if end >= trimmed_line.length { break; }
+        if !is_llvm_symbol_char(trimmed_line[end]) { break; }
+        end += 1;
+    }
+    if end == start { return ""; }
+    return substring(trimmed_line, start, end);
+}
+
+// First index of `target` in `arr` by `==`, or -1. No allocation.
+fn _index_in(arr: string[], target: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= arr.length { break; }
+        if arr[i] == target { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// Build the declare/define symbol index from pre-trimmed lines in one pass.
+fn build_header_index(trimmed: string[]) -> HeaderIndex {
+    let mut decl_syms: string[] = [];
+    let mut decl_lines: string[] = [];
+    let mut def_syms: string[] = [];
+    let mut def_lines: string[] = [];
+    let mut call_syms: string[] = [];
+    let mut call_sigs: DeclareSignature[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= trimmed.length { break; }
+        let line = trimmed[i];
+        if starts_with(line, "declare ") {
+            let s = _header_symbol(line);
+            if s.length > 0 {
+                if _index_in(decl_syms, s) < 0 {
+                    decl_syms.push(s);
+                    decl_lines.push(line);
+                }
+            }
+        } else if starts_with(line, "define ") {
+            let s = _header_symbol(line);
+            if s.length > 0 {
+                if _index_in(def_syms, s) < 0 {
+                    def_syms.push(s);
+                    def_lines.push(line);
+                }
+            }
+        } else {
+            // Call-site index: first `call ... @sym(...)` per symbol, the
+            // pass-3 fallback of `find_declare_signature` made O(1).
+            let entry = _extract_call_entry(line);
+            if entry != null {
+                if _index_in(call_syms, entry.sym) < 0 {
+                    call_syms.push(entry.sym);
+                    call_sigs.push(entry.sig);
+                }
+            }
+        }
+        i += 1;
+    }
+    return HeaderIndex {
+        decl_syms: decl_syms,
+        decl_lines: decl_lines,
+        def_syms: def_syms,
+        def_lines: def_lines,
+        call_syms: call_syms,
+        call_sigs: call_sigs
+    };
+}
+
+// Indexed equivalent of `find_declare_signature_t`: resolve via the
+// declare index, then the define index (parsing the single matched line
+// with the trusted `_extract_signature_from_header`), then fall back to
+// the call-site scan for the rare symbol that is neither declared nor
+// defined. Byte-identical results for well-formed module IR.
+fn find_signature_in_index(idx: HeaderIndex, symbol: string) -> DeclareSignature? {
+    if symbol.length == 0 { return null; }
+    let di = _index_in(idx.decl_syms, symbol);
+    if di >= 0 {
+        return _extract_signature_from_header(idx.decl_lines[di], 8, symbol);
+    }
+    let fi = _index_in(idx.def_syms, symbol);
+    if fi >= 0 {
+        return _extract_signature_from_header(idx.def_lines[fi], 7, symbol);
+    }
+    let ci = _index_in(idx.call_syms, symbol);
+    if ci >= 0 { return idx.call_sigs[ci]; }
+    return null;
+}
+
+// Indexed equivalent of `_has_declare_or_define`: a declare/define line's
+// only `@sym(` is its own header symbol (params are types), so index
+// membership is exactly the original line-scan predicate.
+fn has_declare_or_define_in_index(idx: HeaderIndex, symbol: string) -> boolean {
+    if _index_in(idx.decl_syms, symbol) >= 0 { return true; }
+    if _index_in(idx.def_syms, symbol) >= 0 { return true; }
+    return false;
+}
+
+// Pre-trimmed core of `find_declare_signature`: `trimmed` must already be
+// the output of `pretrim_lines` (every element left-/right-trimmed).
+// Byte-identical results to the lazy-trim form.
+fn find_declare_signature_t(trimmed: string[], symbol: string) -> DeclareSignature? {
     if symbol.length == 0 { return null; }
     // First pass: check declare lines.
     let mut index: int = 0;
     loop {
-        if index >= lines.length { break; }
-        let trimmed = trim_text(lines[index]);
-        if starts_with(trimmed, "declare ") {
-            let result = _extract_signature_from_header(trimmed, 8, symbol);
+        if index >= trimmed.length { break; }
+        let line = trimmed[index];
+        if starts_with(line, "declare ") {
+            let result = _extract_signature_from_header(line, 8, symbol);
             if result != null { return result; }
         }
         index += 1;
@@ -656,10 +910,10 @@ fn find_declare_signature(lines: string[], symbol: string) -> DeclareSignature? 
     // no separate declare, e.g. re-exported runtime functions).
     index = 0;
     loop {
-        if index >= lines.length { break; }
-        let trimmed = trim_text(lines[index]);
-        if starts_with(trimmed, "define ") {
-            let result = _extract_signature_from_header(trimmed, 7, symbol);
+        if index >= trimmed.length { break; }
+        let line = trimmed[index];
+        if starts_with(line, "define ") {
+            let result = _extract_signature_from_header(line, 7, symbol);
             if result != null { return result; }
         }
         index += 1;
@@ -671,18 +925,18 @@ fn find_declare_signature(lines: string[], symbol: string) -> DeclareSignature? 
     let call_needle = "@" + symbol + "(";
     index = 0;
     loop {
-        if index >= lines.length { break; }
-        let trimmed = trim_text(lines[index]);
-        let call_pos = index_of(trimmed, call_needle);
+        if index >= trimmed.length { break; }
+        let line = trimmed[index];
+        let call_pos = index_of(line, call_needle);
         if call_pos > 0 {
             // Extract return type: look for "call <type> @symbol("
-            let call_kw = index_of(trimmed, "call ");
+            let call_kw = index_of(line, "call ");
             if call_kw >= 0 {
                 let ret_start = call_kw + 5;
-                let ret_type = trim_text(substring(trimmed, ret_start, call_pos));
+                let ret_type = trim_text(substring(line, ret_start, call_pos));
                 // Extract params from after the opening paren.
                 let params_start = call_pos + call_needle.length;
-                let close_paren = index_of(substring(trimmed, params_start, trimmed.length), ")");
+                let close_paren = index_of(substring(line, params_start, line.length), ")");
                 if close_paren >= 0 {
                     let params_text = substring(trimmed, params_start, params_start
                         + close_paren);
