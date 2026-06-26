@@ -102,6 +102,11 @@ a size entirely (no label AND no `## Size`).
 - **TYPE-FIX** — GitHub native Type field is `null` (always fix, silently).
 - **STALE-GROOM** — `needs-grooming` 14+ days that is NOT a promote candidate
   (still incomplete) → flag for `/groom` or closure review (no label change).
+- **MAP-REFRESH** — `claude-ready` (or just-promoted) issue whose Goal + semantic
+  `In:`/`Out:` scope are intact but whose `## Files Affected` **advisory map** has
+  missing/renamed paths → re-derive and rewrite the advisory map (still
+  non-binding; no line numbers/counts), and note the refresh. A stale map is
+  expected entropy on a semantically-scoped issue — never a DEMOTE trigger.
 
 ---
 
@@ -193,6 +198,24 @@ gh issue comment <N> --body "Auto-triage: this issue is L-sized; the canonical s
 Apply to all issues with a null type regardless of other state. No label edit,
 no comment, no board sync.
 
+### MAP-REFRESH — rewrite a stale advisory map (the one allowed body edit)
+
+When an issue's Goal + semantic `In:`/`Out:` scope are intact but its
+`## Files Affected` **advisory map** lists missing/renamed paths, re-derive the
+current surface for each `In:` unit (grep/glob the named symbols/units) and
+**rewrite the advisory map** to the current paths. Keep it non-binding and
+**free of line numbers and exact counts**; do not touch Goal, Scope, Acceptance,
+or Verification. Leave a comment recording the refresh:
+
+```bash
+# Edit ONLY the `## Files Affected (advisory map …)` block of the body.
+gh issue edit <N> --body "<updated body with the refreshed advisory map>"
+gh issue comment <N> --body "Auto-triage map refresh: re-derived the advisory \`## Files Affected\` map from the current tree (\`old/path\` → \`new/path\`; added in-unit sibling \`x\`). Map only — Goal and semantic In/Out scope unchanged. The map is non-binding; \`/pickup\` reconciles any remaining drift."
+```
+
+This is the **sole** exception to "don't modify issue bodies" — it edits only
+the advisory map, never the contract. A stale map is never a DEMOTE trigger.
+
 If a sync call exits non-zero, capture the issue number under "Concerns" in the
 report — the label flip stands but the board is out of sync.
 
@@ -219,6 +242,7 @@ Actions taken:
   - Stripped claude-ready from <N> incomplete issues
   - Released <N> orphaned in-progress issues back to queue
   - Unblocked <N> issues whose blockers closed
+  - Refreshed <N> stale advisory maps (Goal/scope intact)
   - Flagged <N> stale claude-ready issues for human review
   - Flagged <N> L-sized issues for breakdown
 
@@ -241,7 +265,10 @@ Concerns:
 ## Constraints
 
 - **Don't close issues automatically.** Closing is a human decision.
-- **Don't modify issue bodies.** Only labels and comments.
+- **Don't modify issue bodies, except the advisory map.** Only labels and
+  comments — with the single MAP-REFRESH exception, which rewrites *only* the
+  `## Files Affected` advisory map (never Goal, Scope, Acceptance, or
+  Verification) and always leaves a comment recording the refresh.
 - **Promote conservatively.** A complete-looking body is necessary but not
   sufficient — the promotion guards (open decision / unmet precondition /
   deferred-by-design) exist because they bit us before. When a guard fires,

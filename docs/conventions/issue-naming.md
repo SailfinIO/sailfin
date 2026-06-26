@@ -203,6 +203,73 @@ checks at least one of them:
 
 ---
 
+## Intent-authoritative issues (contract vs. advisory map)
+
+A groomed issue's **contract** is its **Goal** plus a **semantic `In:`/`Out:`
+scope**. The `## Files Affected` block is an **advisory map** — a navigation aid
+that is *expected to drift* and is reconciled at pickup, never a checklist that
+gates correctness. This is the convention of record; `/groom`, `/pickup`,
+`/sweep`, and `/triage` all cite it rather than each restating the rule.
+
+**Why.** Between grooming and pickup the codebase moves — files split, get
+renamed, gain siblings in the same module. If the file map is treated as binding,
+`/pickup` halts on cosmetic drift it cannot distinguish from real scope growth,
+and `/sweep` flags decaying precision as a defect. Making *intent* authoritative
+and the *map* advisory removes that failure mode instead of fighting its entropy.
+
+### Express scope as semantic units, not files
+
+`In:`/`Out:` lines name **semantic units of change**, not paths — e.g. "the
+effect-checker diagnostic emission for missing `![io]`", not "`effect_checker.sfn`
+lines X-Y". A new sibling file *inside* that unit (after a split that moved the
+emission into `effect_checker/diagnostics.sfn`) is then **in scope by
+construction** — the unit, not the path, defines the boundary.
+
+### Banned in any groomed issue body
+
+- **Line numbers** anywhere (`L142`, `~L100-135`) — they rot fastest and carry
+  no semantic weight.
+- **Exact file counts** ("edit these 3 files", "two call sites") — a count turns
+  an in-unit Nth sibling into a phantom scope violation.
+- **Closed file enumerations presented as exhaustive** — `## Files Affected`
+  lists paths as *likely-relevant starting points*, explicitly non-exhaustive.
+
+### The In/Out semantic boundary contract (what `/pickup` applies)
+
+At pickup, before implementing, the agent re-derives the current surface for each
+`In:` unit and compares it against the advisory map:
+
+- **In-scope — reconcile, proceed, and record in the PR (never halt):**
+  - a `## Files Affected` path was **renamed/moved** → use the new path;
+  - an `In:` unit is now spread across **additional sibling files** in the same
+    module → touch them all;
+  - a map file **no longer exists** because its content merged into a sibling
+    already covered by the same `In:` unit → follow the content;
+  - the **same public surface** is reached through a refactored internal call
+    path → follow it.
+- **Out-of-scope — PAUSE, comment, do not proceed:**
+  - a **new acceptance criterion** the issue did not list is required;
+  - a **new public/user-facing surface** (CLI flag, exported symbol, diagnostic
+    code) not implied by the Goal;
+  - the change must reach a **different semantic unit** than `In:` names;
+  - honoring `Out:` becomes **impossible**.
+
+The discriminator is one question: **does the Goal plus the semantic `In:`/`Out:`
+still hold?** If yes, the drift is cosmetic — reconcile and record it (the
+`/pickup` PR-body "Map reconciliation" line). If a new criterion or surface is
+required, that is real growth — pause for human input.
+
+### Command responsibilities
+
+- **`/groom`** emits `## Files Affected` as an advisory, non-exhaustive map and
+  `In:`/`Out:` as semantic units; never line numbers or counts.
+- **`/pickup`** reconciles cosmetic map drift and records it; pauses only on
+  semantic scope growth (the Out-of-scope list above).
+- **`/sweep`** reports a missing `## Files Affected` path as a **soft note**
+  ("advisory map may be stale — `/triage` can refresh"), not a defect flag.
+- **`/triage`** refreshes a stale advisory map (re-derives paths, no line
+  numbers/counts) when Goal + semantic scope are intact.
+
 ## Project board
 
 Every open issue is tracked on the **Sailfin Tracker** project
