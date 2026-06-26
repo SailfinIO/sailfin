@@ -1840,43 +1840,6 @@ fn check_fn_reference_raw(text: string, symbols: SymbolEntry[], span: SourceSpan
     return [make_fn_value_position_diagnostic(head, span)];
 }
 
-// #1627: classify a STRUCTURED `<fn> as <type>` cast whose operand resolves
-// to a function. Before #1627 a pointer cast target (`as * u8`) degraded the
-// whole expression to `Raw` and the rule lived in `check_fn_reference_raw`
-// (above); the parser lift in #1627 now structures `as * T` into a `Cast`
-// node, so the pointer-target half of that rule moves here while the `Raw`
-// arm keeps the `& fn` form and any other degraded spellings. The blessed
-// C-ABI code-pointer forms (`* u8`, `* fn(...)`) are valid only for a
-// concrete C-ABI function (#1146): a generic or non-C-ABI function is E0809;
-// any other target — a non-pointer (`as i64`) or a typed data pointer
-// (`as * i32`, which would reinterpret a code address as a data pointer) —
-// is the unsupported value use E0808. The caller pre-resolves the operand to
-// a function symbol, so `is_generic` / `is_c_abi` come straight from the
-// `SymbolEntry`; `name`/`span` caret the diagnostic at the function head.
-fn check_fn_reference_cast(name: string, target_text: string, is_generic: boolean, is_c_abi: boolean, span: SourceSpan?) -> Diagnostic[] {
-    let target = trim_text(target_text);
-    if starts_with(target, "*") {
-        let pointee = trim_text(strip_prefix(target, "*"));
-        let mut blessed: boolean = false;
-        if strings_equal(pointee, "u8") { blessed = true; }
-        if starts_with(pointee, "fn ") { blessed = true; }
-        if starts_with(pointee, "fn(") { blessed = true; }
-        if blessed {
-            if is_generic {
-                return [make_fn_address_unsupported_diagnostic(name, "it is generic", span)];
-            }
-            if !is_c_abi {
-                return [make_fn_address_unsupported_diagnostic(name, "its signature is not C-ABI-compatible", span)];
-            }
-            return [];
-        }
-        // Typed data pointer (`as * i32`) — not a code-pointer form.
-        return [make_fn_value_position_diagnostic(name, span)];
-    }
-    // Non-pointer target (`as i64`) — unsupported value use.
-    return [make_fn_value_position_diagnostic(name, span)];
-}
-
 fn has_symbol_in_range(symbols: SymbolEntry[], name: string, start: int) -> boolean {
     let mut _si: int = start;
     loop {

@@ -707,18 +707,31 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             // structures into `Cast` and stays effect-visible (#1627)
             // instead of degrading the whole expression to an effect-blind
             // `Raw`. Before #1627 the cast arm accepted only a bare
-            // `Identifier` target, so every `as * T` form (the dominant
-            // in-source cast spelling) fell through to a `Raw` the effect
-            // checker never walked. The target text is captured verbatim
-            // into `TypeAnnotation.text` — `"* i64"` — which the Cast
-            // formatter renders back as `(operand) as * i64`, byte-equivalent
-            // to the prior `Raw` text, so emit/lowering is unchanged.
-            // Generic / fn-pointer cast targets (`Result<T, E>`,
+            // `Identifier` target, so every `as * T` form fell through to a
+            // `Raw` the effect checker never walked. The target text is
+            // captured verbatim into `TypeAnnotation.text` — `"* i64"` —
+            // which the Cast formatter renders back as `(operand) as * i64`,
+            // byte-equivalent to the prior `Raw` text, so emit/lowering is
+            // unchanged. Generic / fn-pointer cast targets (`Result<T, E>`,
             // `fn(A) -> B`) stay `Raw` for now (rare; tracked as a #1180
             // follow-up); only the pointer prefix is lifted here.
+            //
+            // CRUCIAL: lift a pointer target ONLY when the operand is NOT a
+            // bare `Identifier`. A bare identifier carries no effect, so the
+            // #1627 effect escapes (whose operands are calls/members) lose
+            // nothing — but `<fn> as * u8` (#1147 function references) and
+            // `<ptr-value> as * u8` (the dominant in-source spelling, e.g.
+            // `out as * u8`) keep their exact legacy `Raw` behavior:
+            // `check_fn_reference_raw`'s E0808/E0809 classification and the
+            // shadow-parser lowering are untouched. This avoids regressing
+            // the http-server trampoline `_sfn_http_trampoline as * u8`
+            // (concrete-but-struct-ABI fn, which the prior Raw path passed
+            // through) while still closing every effectful-operand escape.
             let mut cast_cursor = after_as;
             let mut cast_target_text: string = "";
+            let lift_pointer_target = current_expression.variant != "Identifier";
             loop {
+                if !lift_pointer_target { break; }
                 if expression_tokens_is_at_end(cast_cursor) {
                     return expression_parse_failure(state);
                 }

@@ -21,21 +21,31 @@ split below). Delivered:
 1. **`Cast` effect arm** (`effect_checker.sfn::collect_effects_from_expression`)
    — walks the cast operand, so `<effectful> as <type>` surfaces the operand's
    effects. Closes the `as int` escape alone.
-2. **Pointer cast-target parsing** (`parser/expressions.sfn`, the `as` postfix
-   arm) — `<operand> as * T` / `* * T` now structures into `Cast` with
-   `target_type.text = "* T"` instead of degrading to `Raw`. The formatter emits
-   the identical `(operand) as * T` text the lowering shadow parser already
-   consumes, so the **745 in-source `as *T` casts lower unchanged** (proven by
-   `make compile`).
-3. **fn-reference-cast migration** (`typecheck.sfn` `Cast` arm +
-   `typecheck_types.sfn::check_fn_reference_cast`) — *required* by (2): once
-   `<fn> as * u8` structures into `Cast`, the E0808/E0809 classification that
-   lived in the `Raw` arm (`check_fn_reference_raw`) had to move onto the `Cast`
-   arm and run **before** the operand recurse, else the blessed concrete-C-ABI
-   form (`worker as * u8`, #1146) is mis-flagged E0808. Verified against the full
-   `fn_reference_typecheck_test` matrix.
+2. **Pointer cast-target parsing, gated to effect-bearing operands**
+   (`parser/expressions.sfn`, the `as` postfix arm) — `<operand> as * T` / `* * T`
+   structures into `Cast` (with `target_type.text = "* T"`, which the formatter
+   renders back to the identical `(operand) as * T` text the shadow parser
+   already lowers) **only when the operand is NOT a bare `Identifier`**. A bare
+   identifier carries no effect, so the #1627 escapes (operands are calls/members)
+   lose nothing, while `<fn> as * u8` and the dominant in-source `<ptr-value> as
+   * u8` spelling keep their exact legacy `Raw` path — fn-reference diagnostics
+   and lowering untouched.
+3. **The gate (item 2) replaced an earlier fn-reference-cast migration.** First
+   attempt structured *every* `<operand> as * T` into `Cast` and moved the
+   E0808/E0809 classification onto the `Cast` arm (`check_fn_reference_cast`).
+   CI surfaced a regression: the shipped http-server trampoline
+   `_sfn_http_trampoline as * u8` (`capsules/sfn/http/src/server.sfn:142`) is a
+   **concrete** function whose `fn(OwnedBuf) -> OwnedBuf` signature is struct-ABI,
+   not C-ABI-primitive — so `signature_is_c_abi` is false and the migrated check
+   newly flagged it E0809. The prior `Raw` path had never flagged it (it sits as
+   a call argument, so the whole call was `Raw` and `check_fn_reference_raw`'s
+   `head == left` guard bailed). Rather than relax the C-ABI rule (broad blast
+   radius) or replicate call-position, the gate keeps bare-identifier fn casts on
+   the untouched `Raw` path entirely — zero fn-reference behavior change, and the
+   `typecheck.sfn`/`typecheck_types.sfn` migration was reverted.
 4. Regression coverage: `compiler/tests/unit/effect_cast_operand_test.sfn`
-   (structural lift + effect attribution + the effect-free 745-canary).
+   (structural lift over a call operand + effect attribution + the effect-free
+   bare-pointer-cast canary + a guard pinning the bare-identifier `Raw` gate).
 
 **Not shipped here — filed as #1180 sub-issues:** prefix `*`/`&` → `Unary`,
 ternary → `Conditional`, the blanket `E0818` `Raw` backstop (it requires

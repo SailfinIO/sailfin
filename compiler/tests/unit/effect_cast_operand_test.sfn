@@ -54,24 +54,37 @@ fn _cast_reqs(snippet: string) -> EffectRequirement[] ![io] {
 }
 
 // -------------------------------------------------------------------
-// Structural lift: `<operand> as * T` parses to a `Cast`, not a `Raw`.
+// Structural lift: a pointer cast over an EFFECT-BEARING operand
+// (a call/member) parses to a `Cast`, not a `Raw`.
 // -------------------------------------------------------------------
-test "cast: pointer-typed target structures into Cast (not Raw)" ![io] {
-    let expr = _probe_expr("p as * i64");
+test "cast: pointer-typed target over a call structures into Cast (not Raw)" ![io] {
+    let expr = _probe_expr("fs.read(p) as * i64");
     assert expr.variant == "Cast";
     assert expr.target_type.text == "* i64";
 }
 
-test "cast: double-pointer target structures into Cast" ![io] {
-    let expr = _probe_expr("p as * * u8");
+test "cast: double-pointer target over a call structures into Cast" ![io] {
+    let expr = _probe_expr("fs.read(p) as * * u8");
     assert expr.variant == "Cast";
     assert expr.target_type.text == "* * u8";
 }
 
-test "cast: identifier-typed target is a Cast" ![io] {
+test "cast: identifier-typed target is a Cast (any operand)" ![io] {
     let expr = _probe_expr("p as int");
     assert expr.variant == "Cast";
     assert expr.target_type.text == "int";
+}
+
+// The pointer-cast lift is deliberately gated to NON-identifier operands so
+// `<fn> as * u8` / `<ptr-value> as * u8` keep their legacy `Raw` path — this
+// preserves the #1147 function-reference diagnostics and the shipped
+// http-server trampoline (`_sfn_http_trampoline as * u8`, a concrete fn with
+// a struct-ABI signature the prior `Raw` path passed through). A bare
+// identifier carries no effect, so nothing is lost for #1627. Pin the gate so
+// a future change can't silently lift it and re-break the trampoline.
+test "cast: bare-identifier pointer cast stays Raw (fn-reference gate)" ![io] {
+    let expr = _probe_expr("p as * i64");
+    assert expr.variant == "Raw";
 }
 
 // -------------------------------------------------------------------
@@ -91,7 +104,9 @@ test "cast: pointer-typed cast surfaces operand net" ![io] {
 
 // -------------------------------------------------------------------
 // No false positive: an effect-free cast requires nothing. The bare
-// pointer-cast case is the self-host canary — hundreds of in-source sites.
+// pointer-cast `p as * i64` is the dominant in-source spelling (hundreds
+// of sites); it stays `Raw` (effect-blind) and is left exactly as before
+// #1627 — so it contributes no effect and lowers unchanged (self-host).
 // -------------------------------------------------------------------
 test "cast: effect-free pointer cast requires nothing (self-host canary)" ![io] {
     let reqs = _cast_reqs("p as * i64");

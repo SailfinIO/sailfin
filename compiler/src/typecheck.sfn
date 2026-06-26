@@ -32,7 +32,6 @@ import {
     check_enum_variants,
     check_extern_signature,
     check_extern_var,
-    check_fn_reference_cast,
     check_fn_reference_raw,
     check_function_signature,
     check_interface_members,
@@ -1014,26 +1013,12 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         return diagnostics;
     }
     if expression.variant == "Cast" {
-        // #1147 / #1627: `<fn> as * u8` (and `<fn> as * fn(...) -> T`) is the
-        // one supported spelling that materializes a function's address as a
-        // C-ABI code pointer (#1146). Before #1627 a pointer cast target
-        // degraded the whole expression to `Raw`, so this classification ran
-        // in the `Raw` arm (`check_fn_reference_raw`); the #1627 parser lift
-        // now structures `as * T` into `Cast`, so it moves here. It MUST run
-        // before the operand recurse below — otherwise a bare function operand
-        // falls through to the `Identifier` arm and is mis-flagged E0808 even
-        // for the blessed concrete-C-ABI form. Only a bare function-identifier
-        // operand is a function reference; every other operand (an effectful
-        // call, a member access, …) recurses normally so its own diagnostics
-        // and effect attribution still fire.
-        if expression.operand.variant == "Identifier" {
-            let cast_fn_entry = find_symbol(bindings, expression.operand.name);
-            if cast_fn_entry != null {
-                if is_function_kind(cast_fn_entry.kind) {
-                    return check_fn_reference_cast(expression.operand.name, expression.target_type.text, cast_fn_entry.is_generic, cast_fn_entry.is_c_abi, expression.operand.span);
-                }
-            }
-        }
+        // The #1627 parser lift only structures a pointer cast target into
+        // `Cast` when the operand is NOT a bare identifier (effect-bearing
+        // operands only). A bare `<fn> as * u8` therefore stays `Raw` and is
+        // still classified by `check_fn_reference_raw` (E0808/E0809) below,
+        // so this arm needs no function-reference logic — it just recurses
+        // so the operand's own diagnostics still fire.
         return walk_expression(expression.operand, bindings, imports);
     }
     if expression.variant == "TryOperator" {
