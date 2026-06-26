@@ -180,6 +180,60 @@ no body edits, no comments).
 
 ---
 
+## Phase 2c: RECOMMEND CLOSING COMPLETED TRACKERS
+
+GitHub does not cascade-close a parent tracking issue when its sub-issues
+finish, and the slash commands never close issues (closing is a human
+decision). So a tracker whose every sub-issue is done sits open unnoticed
+(e.g. #1657 stayed open after all four of its sub-issues completed). This
+phase surfaces those completed parents as a **recommendation to close** —
+it never closes them.
+
+Work off **native sub-issue state** (the WS-C-2 rollup; SFEP-0026), not
+markdown checklists. Each issue carries a `sub_issues_summary` with
+`total`, `completed`, and `percent_completed`.
+
+1. Build the candidate parent set — open tracking issues, preferring the
+   parents of the issues just closed by the anchor merges:
+   ```bash
+   # Open trackers. A tracker may carry `tracking` and/or `epic`; union
+   # both pools, de-duped by number.
+   gh issue list --label tracking --state open --json number --jq '.[].number'
+   gh issue list --label epic     --state open --json number --jq '.[].number'
+   ```
+   The event-driven trigger is the anchor set: an open tracker is a parent
+   of a newly-closed issue `#N` when its native sub-issue list contains
+   `#N`. Prioritise those parents, but scanning every open tracker's
+   rollup (next step) is cheap and also catches stragglers like #1657 that
+   completed in an earlier sweep.
+2. For each candidate tracker, read the **native** rollup:
+   ```bash
+   TRACKER=<tracking-issue-number>
+   gh api repos/SailfinIO/sailfin/issues/$TRACKER \
+     --jq '.sub_issues_summary | "\(.completed)/\(.total)"'
+   ```
+3. Recommend closing the tracker when it has **at least one** native
+   sub-issue and **all** of them are closed (`total > 0` and
+   `completed == total`). Confirm against the live sub-issue list rather
+   than trusting a cached summary:
+   ```bash
+   gh api /repos/SailfinIO/sailfin/issues/$TRACKER/sub_issues --paginate \
+     --jq '[.[] | select(.state == "open")] | length'   # 0 ⇒ all closed
+   ```
+   A tracker with `total == 0` (no native sub-issues attached) is **not** a
+   close candidate — there is nothing to roll up. If such a tracker
+   visibly relies on a markdown checklist instead, surface it under
+   "Concerns" so a human can attach native sub-issues (or close it
+   manually); never infer completion from checkboxes.
+4. **Recommend only — never close.** Add each completed tracker to the
+   "Trackers ready to close" section of the Phase 6 report with its rollup
+   (`#N — <title> (4/4 sub-issues closed)`). Closing stays a human
+   decision, consistent with the `/sweep` and `/triage` "Don't close
+   issues" constraint. This phase makes **no writes**, so `--dry-run`
+   behaviour is identical (recommendations only, either way).
+
+---
+
 ## Phase 3: AUDIT CLAUDE-READY
 
 For each issue in the `claude-ready` pool:
@@ -265,6 +319,9 @@ Unblocked (label flipped):
 Still blocked:
   ⏸ #<N> — <title>      (waiting on: #<X> open, "Slice E" ambiguous)
 
+Trackers ready to close (recommendation — not auto-closed):
+  ✓ #<N> — <title>      (all <K>/<K> sub-issues closed)
+
 Audit findings (claude-ready hygiene):
   · #<N> — <title>      (advisory map may be stale: <path> — /triage can refresh)
   ⚠ #<N> — <title>      (symbol "<name>" appears removed — verify scope)
@@ -290,7 +347,7 @@ Dry run: changes <previewed | applied>
 ## Constraints
 
 - **Don't dispatch work.** This command is a coordination layer. Dispatch happens via `/pickup` in separate sessions.
-- **Don't close issues.** Same convention as `/triage`. Closing is a human decision.
+- **Don't close issues.** Same convention as `/triage`. Closing is a human decision — Phase 2c only *recommends* closing a completed parent tracker; it never closes one.
 - **Don't modify issue bodies.** Only labels and comments.
 - **Be conservative with prose blockers.** Anything not a hard `#N` reference stays blocked until a human confirms.
 - **Always leave a comment when flipping a label.** Future-you needs the audit trail.
