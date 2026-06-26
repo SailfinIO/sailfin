@@ -268,7 +268,7 @@ Read the full issue body to extract:
 
 ## Phase 3: DISPATCH TO WORKFLOW
 
-Based on the issue's `type:*` label, follow the appropriate workflow. Use the issue body as the brief — don't redo the design work the architect already produced during grooming.
+Based on the issue's `type:*` label, follow the appropriate workflow. Use the issue body as the brief — don't redo the design work the architect already produced during grooming. **If the body's `## Design` line cites an SFEP** (`docs/proposals/NNNN-*.md`), read it for the full design rationale — the SFEP is the durable record (the *why*); the issue is the session-sized slice (the *what to do now*). Do not duplicate or re-derive the design.
 
 | Type | Workflow |
 |---|---|
@@ -381,6 +381,13 @@ EOF
 ```
 
 The merge will auto-close the linked issue.
+
+**If this PR fully delivers the cited SFEP** (the feature now clears the Stage1
+bar end-to-end and self-hosts), advance the SFEP in the same PR: `/sfep graduate
+<N>` to flip it to `Implemented`, set `graduates-to`, and sync the registry. If
+the PR only implements one slice of a multi-issue SFEP, leave the SFEP
+`Accepted` and note remaining work in the Phase 6 report. Never mark an SFEP
+`Implemented` for "parsed but not enforced".
 
 ---
 

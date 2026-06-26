@@ -152,6 +152,29 @@ Structure every architectural plan as:
 9. **Verification** — Exact commands to confirm each step and the final result
 10. **Future considerations** — How this design interacts with upcoming 1.0 work
 
+## Persisting the design as an SFEP
+
+When the design is a substantive forward-looking decision — a new language
+feature, a runtime/ABI design, a toolchain design, or the design behind a
+roadmap epic you are grooming — **persist it as an SFEP** under `docs/proposals/`,
+not just as transient plan text. SFEPs are the durable design record (the *why*)
+that issues cite and `/pickup` reads as its brief. Follow `.claude/rules/proposals.md`
+and `docs/proposals/0001-sfep-process.md`:
+
+- Use `Write` to create `docs/proposals/draft-<slug>.md` from `template.md`
+  (you already produce only markdown design docs). Your 10-section output maps
+  directly onto the SFEP required sections — Goal→Summary/Motivation,
+  Design→Design, Constraints/Risks→Alternatives & Self-hosting impact,
+  Verification→Test plan, etc.
+- Set `status: Draft`, `author: "agent:compiler-architect"`, and fill the
+  effect/capability-impact and self-hosting-impact sections explicitly.
+- Leave `sfep: TBD` and the `draft-` filename; the number is assigned at merge
+  (next = registry `max + 1`). The orchestrator flips it to `Accepted` at the
+  design gate via `/sfep status`.
+- Skip the SFEP only for genuinely small/mechanical work (a bounded bug fix, a
+  localized refactor) — there, the issue body is the record. When unsure, see
+  the decision tree in SFEP-0001 §1.
+
 ## Anti-patterns to Avoid
 
 - **Don't design features in isolation.** Every feature interacts with self-hosting, the effect system, and the 1.0 timeline.

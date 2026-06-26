@@ -182,6 +182,10 @@ Use `/add-feature <name>` for the orchestrated workflow. The pipeline stages:
 7. `docs/status.md` — implementation status
 8. `sfn fmt --write` on every touched `.sfn` file
 
+The design behind a non-trivial feature is recorded as an **SFEP** under
+`docs/proposals/` (the architect drafts it; it's `Accepted` at the design gate
+and graduated to `Implemented` when it ships). See `.claude/rules/proposals.md`.
+
 Writing a regression test:
 
 ```sfn
@@ -278,6 +282,7 @@ them instead of hand-driving each step. Agent definitions live in
 | `/perf <subsystem>` | Performance hot path |
 | `/release`, `/release-plan` | Cutting / planning a release |
 | `/groom`, `/triage`, `/pickup`, `/sweep` | Issue lifecycle (see Task Tracking) |
+| `/sfep <new\|status\|list\|graduate>` | Create/transition a design proposal (SFEP) — see `.claude/rules/proposals.md` |
 
 **Approval gates** — pause for explicit user approval before: the design gate in
 `/add-feature` (after the architect's plan, before code), destructive ops
@@ -304,6 +309,14 @@ roadmap (epics) ──/groom──▶ Issues (claude-ready) ──/triage──�
 **Issue contract** (template: `.github/ISSUE_TEMPLATE/claude-task.md`): Goal,
 Scope (`In:`/`Out:`), Acceptance Criteria, Files Affected, Verification, Size
 (XS/S/M — never L), Type, Blocked by. Missing or vague → not pickable.
+
+**Design records (SFEPs).** A substantive epic's design lives in an **SFEP** —
+a numbered proposal under `docs/proposals/` (`docs/proposals/README.md` is the
+registry; process in `.claude/rules/proposals.md`). `/groom` creates or links the
+epic's SFEP and sub-issues cite it (`## Design: SFEP-NNNN`) instead of
+duplicating the design; `/pickup` reads it as the brief; it graduates to
+`Implemented` when the feature ships. The SFEP is the durable *why*; the issue is
+the session-sized *what*.
 
 **Labels** are registered in `.github/labels.yml`; conventions and the lifecycle
 diagram are in `docs/conventions/issue-naming.md`. Key ones: `claude-ready`,

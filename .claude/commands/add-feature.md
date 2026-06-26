@@ -13,8 +13,9 @@ Spawn the **compiler-architect** agent to produce a design plan for this feature
 - Trace the current compiler pipeline to identify every file that needs changes
 - Produce a concrete plan covering: AST representation, type rules, IR representation, LLVM lowering, self-hosting migration strategy, and test cases
 - Identify dependencies and risks
+- **Persist the design as an SFEP** — for any non-trivial feature, the architect writes the plan to `docs/proposals/draft-<slug>.md` (status `Draft`) per `.claude/rules/proposals.md`. This is the durable design record; later phases and `/pickup` read it instead of redoing design.
 
-**Present the architect's plan to the user and wait for approval before proceeding.** Do not write any code until the user approves the design. If the user requests changes to the plan, iterate on the design before moving on.
+**Present the architect's plan to the user and wait for approval before proceeding.** Do not write any code until the user approves the design. If the user requests changes to the plan, iterate on the design (and the draft SFEP) before moving on. **On approval, the design gate is the SFEP's `Accepted` transition** — run `/sfep status <slug-or-N> Accepted` (assigns the number, adds the registry row) before implementation begins.
 
 ---
 
@@ -83,6 +84,7 @@ Spawn the **docs-updater** agent to update documentation in this order:
    - If fully shipped: update or add content in the appropriate `site/src/content/docs/docs/reference/spec/NN-*.md` chapter
    - If partial/planned: update or add a page under `site/src/content/docs/docs/reference/preview/`
 3. `site/src/pages/roadmap.astro` — update progress markers on the [roadmap](https://sailfin.dev/roadmap)
+4. **Graduate the SFEP** — if the feature fully shipped and clears the Stage1 bar, run `/sfep graduate <N>` to flip the proposal to `Implemented`, set `graduates-to`, and sync the registry. If only partially shipped, leave it `Accepted`.
 
 ---
 
