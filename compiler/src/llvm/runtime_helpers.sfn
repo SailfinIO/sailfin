@@ -1131,9 +1131,30 @@ fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
         target: "serve", symbol: "sfn_serve_unbridged", return_type: "void", parameter_types: [], effects: ["io", "net"], native_signature: null, c_abi_return_type: null
     });
 
-    // Concurrency adapters — flipped to sfn_* symbols (#1091)
+    // Concurrency adapters — flipped to sfn_* symbols (#1091).
+    //
+    // `effects: ["io"]` (#1655): the four concurrency-primitive rows
+    // (`spawn_task`, `parallel`, `channel_send`, `channel_receive`) carry
+    // `io` so the effect checker's spawn/parallel/channel arms can derive
+    // their requirement from this registry — the single source of truth —
+    // instead of hardcoding the literal (mirrors the `serve` row above,
+    // #1629). `io` here is a deliberate CONSERVATIVE PLACEHOLDER: the v0
+    // scheduler primitives (`runtime/sfn/concurrency/channel.sfn`,
+    // `nursery.sfn`) are pure pthread mutex/condvar/MPMC queue and touch no
+    // fs/net/console/clock, so under the canonical taxonomy none actually
+    // exercises `io`. The principled end state is effect-transparency (the
+    // spawned body's own effects propagate, the primitive adds nothing),
+    // deferred to the structured-concurrency redesign (#1702, gated on #829).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "spawn_task", symbol: "sfn_spawn_task", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: "sfn_spawn_task", c_abi_return_type: null
+        target: "spawn_task", symbol: "sfn_spawn_task", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_spawn_task", c_abi_return_type: null
+    });
+    // `parallel` is a metadata-only effect row (no runtime-helper call —
+    // `parallel [...]` lowers via `core.sfn`, not a `call @sfn_parallel`),
+    // mirroring the `serve` row's `sfn_*_unbridged`/`native_signature: null`
+    // shape. It exists solely so the `Parallel`-node checker arm routes
+    // through `effects_for_callee_target("parallel")` (#1655).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "parallel", symbol: "sfn_parallel_unbridged", return_type: "void", parameter_types: [], effects: ["io"], native_signature: null, c_abi_return_type: null
     });
     // Channel rows match `runtime/sfn/concurrency/channel.sfn` exactly
     // (#1266): create takes (capacity: i64, elem_size: i64); send takes a
@@ -1142,14 +1163,19 @@ fn _rh_descriptors_08(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
     // copy of the element bytes (null when closed+empty). The bespoke
     // channel-method lowering in `core.sfn` (`_try_lower_channel_method`)
     // emits the spill/load sequences around these signatures.
+    // `channel_create`/`channel_close` stay `effects: []` (#1655): no checker
+    // arm consults them today — only `.send`/`.receive` are detected as
+    // channel ops — so flipping them to `io` would be dead encoding. The
+    // channel-op generalization (the #1184 direction) revisits this
+    // asymmetry when it scope-resolves channel-typed receivers.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "channel_create", symbol: "sfn_channel_create", return_type: "i8*", parameter_types: ["i64", "i64", "i64"], effects: [], native_signature: "sfn_channel_create", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "channel_send", symbol: "sfn_channel_send", return_type: "i64", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_channel_send", c_abi_return_type: null
+        target: "channel_send", symbol: "sfn_channel_send", return_type: "i64", parameter_types: ["i8*", "i8*"], effects: ["io"], native_signature: "sfn_channel_send", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "channel_receive", symbol: "sfn_channel_recv", return_type: "i8*", parameter_types: ["i8*"], effects: [], native_signature: "sfn_channel_recv", c_abi_return_type: null
+        target: "channel_receive", symbol: "sfn_channel_recv", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_channel_recv", c_abi_return_type: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "channel_close", symbol: "sfn_channel_close", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: "sfn_channel_close", c_abi_return_type: null

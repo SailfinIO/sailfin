@@ -24,6 +24,9 @@
 //   http.get("…")        net    Member  (descriptor + namespace union)
 //   websocket.send("…")  net    Member  (explicit net, #1601)
 //   spawn(task)          io     Spawn   (parser → Spawn node; Call arm also covered)
+//   parallel [task]      io     Parallel(parser → Parallel node; registry `parallel` row)
+//   ch.send(v)           io     Member  (registry `channel_send` row, #1655)
+//   ch.receive()         io     Member  (registry `channel_receive` row, #1655)
 //   serve(handler)       net    Serve   (parser → Serve node; Call arm also covered)
 //   sleep(1.0)           clock  Call    (descriptor)
 //
@@ -149,6 +152,25 @@ test "detect: spawn(...) -> io (defensive Call+Identifier arm)" ![io] {
     // silently drop it.
     let reqs = collect_effects_from_expression(_bare_call("spawn"), empty_import_symbols());
     assert _reqs_contain(reqs, "io");
+}
+
+test "detect: parallel [...] -> io (Parallel node, registry-driven, #1655)" ![io] {
+    // Pin parser routing AND the registry-driven effect: `parallel [...]`
+    // becomes a `Parallel` node whose arm derives `io` from the `parallel`
+    // descriptor row. A future row edit flows through here with no checker
+    // change — guarding the unified source of truth #1655 established.
+    assert _probe_expr("parallel [task]").variant == "Parallel";
+    _assert_detects("parallel [task]", "io");
+}
+
+test "detect: channel .send(...) -> io (Member arm, registry-driven, #1655)" ![io] {
+    // `ch.send(v)` is a Member-callee call; the arm maps `send` ->
+    // `channel_send` and derives `io` from that row.
+    _assert_detects("ch.send(v)", "io");
+}
+
+test "detect: channel .receive() -> io (Member arm, registry-driven, #1655)" ![io] {
+    _assert_detects("ch.receive()", "io");
 }
 
 test "detect: serve(...) -> net (Serve node, real source)" ![io] {
