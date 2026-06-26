@@ -23,7 +23,15 @@ here.
   Python fixup script `selfhost_native.py` are retired.
 - **Deterministic self-hosting.** The compiler is a verified fixed point —
   stage2 and stage3 produce byte-identical LLVM IR across all modules;
-  `make check` enforces this.
+  `make check` enforces this. The triple-pass validation (stage2 + stage3
+  builds with per-stage `.ll` scratch isolation, hello-world smoke gate,
+  fixed-point IR diff, and seedcheck→canonical promotion) is owned by the
+  compiler as the internal `sfn selfhost` command (`compiler/src/cli_selfhost.sfn`,
+  #1502, epic #513 Phase 1) — `make check`'s `check-impl` is now a one-line
+  invocation of it rather than ~90 lines of shell. The verb is internal
+  (absent from `sfn --help`; CI / `make check` are its only callers, mirroring
+  Go's `cmd/dist` and Rust's `x.py`). A non-fixed-point result warns by default
+  (parity with the former shell); `sfn selfhost --strict` makes it fatal.
 - **Unified resolver.** `sfn build` / `sfn run` / `sfn check` / `sfn test`
   all resolve dependencies through `capsule_resolver.sfn`
   (`prepare_project_capsules*`): relative imports, manifest `[dependencies]`,

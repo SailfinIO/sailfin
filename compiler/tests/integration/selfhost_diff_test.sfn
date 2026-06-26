@@ -1,0 +1,125 @@
+// compiler/tests/integration/selfhost_diff_test.sfn
+//
+// Regression coverage for the I/O surface of `sfn selfhost`
+// (issue #1502, epic #513 Phase 1): the `.ll`-dir snapshot loader
+// (`_selfhost_collect_ll_files` + `_selfhost_snapshot`) feeding the
+// reused determinism comparator, plus `handle_selfhost_command`'s
+// early-return arg handling. The pure comparator is covered by
+// `unit/build_report_determinism_test.sfn`; the pure string helpers by
+// `unit/selfhost_helpers_test.sfn`. This test exercises the real
+// filesystem enumeration + sha256 path on hand-built fixtures.
+import { compare_for_determinism } from "../../src/build_report";
+import {
+    _selfhost_collect_ll_files,
+    _selfhost_snapshot,
+    handle_selfhost_command
+} from "../../src/cli_selfhost";
+
+// Write `<caps_dir>/<name>` with `content`, creating `caps_dir`.
+fn _write_ll(caps_dir: string, name: string, content: string) ![io] {
+    process.run(["mkdir", "-p", caps_dir]);
+    fs.writeFile(caps_dir + "/" + name, content);
+}
+
+// --------------------------------------------------------------
+// _selfhost_collect_ll_files — enumeration
+// --------------------------------------------------------------
+test "selfhost_collect_ll_files: finds only .ll files" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-collect-");
+    assert root.length > 0;
+    let caps = root + "/capsules";
+    _write_ll(caps, "mod_a.ll", "; a\n");
+    _write_ll(caps, "mod_b.ll", "; b\n");
+    // A non-.ll sibling must be ignored.
+    fs.writeFile(caps + "/notes.txt", "ignore me");
+
+    let files = _selfhost_collect_ll_files(caps);
+    assert files.length == 2;
+}
+
+test "selfhost_collect_ll_files: missing dir yields empty list" ![io] {
+    let files = _selfhost_collect_ll_files("/definitely/not/a/real/capsules/dir");
+    assert files.length == 0;
+}
+
+// --------------------------------------------------------------
+// _selfhost_snapshot + compare_for_determinism — fixed-point path
+// --------------------------------------------------------------
+test "selfhost_snapshot: identical .ll sets + same binary => fixed point" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-match-");
+    let bin = root + "/fakebin";
+    fs.writeFile(bin, "ELF-ish bytes");
+
+    let s2 = root + "/s2/capsules";
+    let s3 = root + "/s3/capsules";
+    _write_ll(s2, "mod_a.ll", "; identical a\n");
+    _write_ll(s2, "mod_b.ll", "; identical b\n");
+    _write_ll(s3, "mod_a.ll", "; identical a\n");
+    _write_ll(s3, "mod_b.ll", "; identical b\n");
+
+    // Point both snapshots at the same binary so binary_sha256 agrees;
+    // the `.ll` digests then carry the fixed-point decision.
+    let snap2 = _selfhost_snapshot(s2, bin);
+    let snap3 = _selfhost_snapshot(s3, bin);
+    let diff = compare_for_determinism(snap2, snap3);
+    assert diff.matched;
+    assert diff.binary_match;
+    assert diff.module_diffs.length == 0;
+}
+
+test "selfhost_snapshot: one differing .ll surfaces as a module diff" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-differ-");
+    let bin = root + "/fakebin";
+    fs.writeFile(bin, "same binary");
+
+    let s2 = root + "/s2/capsules";
+    let s3 = root + "/s3/capsules";
+    _write_ll(s2, "mod_a.ll", "; a\n");
+    _write_ll(s2, "mod_b.ll", "; b original\n");
+    _write_ll(s3, "mod_a.ll", "; a\n");
+    _write_ll(s3, "mod_b.ll", "; b PERTURBED\n");
+
+    let diff = compare_for_determinism(_selfhost_snapshot(s2, bin), _selfhost_snapshot(s3, bin));
+    assert ! diff.matched;
+    assert diff.binary_match;
+    assert diff.module_diffs.length == 1;
+    assert diff.module_diffs[0].slug == "mod_b.ll";
+    assert diff.module_diffs[0].kind == "differ";
+}
+
+test "selfhost_snapshot: module missing in stage3 surfaces as only_in_a" ![io] {
+    let root = fs.mkdtemp("sfn-selfhost-missing-");
+    let bin = root + "/fakebin";
+    fs.writeFile(bin, "same binary");
+
+    let s2 = root + "/s2/capsules";
+    let s3 = root + "/s3/capsules";
+    _write_ll(s2, "mod_a.ll", "; a\n");
+    _write_ll(s2, "mod_b.ll", "; b\n");
+    _write_ll(s3, "mod_a.ll", "; a\n");
+
+    let diff = compare_for_determinism(_selfhost_snapshot(s2, bin), _selfhost_snapshot(s3, bin));
+    assert ! diff.matched;
+    assert diff.module_diffs.length == 1;
+    assert diff.module_diffs[0].slug == "mod_b.ll";
+    assert diff.module_diffs[0].kind == "only_in_a";
+}
+
+// --------------------------------------------------------------
+// handle_selfhost_command — early-return arg handling (no build)
+// --------------------------------------------------------------
+test "selfhost cmd: -h returns 0 without building" ![io] {
+    assert handle_selfhost_command(["selfhost", "-h"], "") == 0;
+}
+
+test "selfhost cmd: unknown flag returns usage exit 2" ![io] {
+    assert handle_selfhost_command(["selfhost", "--bogus"], "") == 2;
+}
+
+test "selfhost cmd: flag missing its value returns exit 2" ![io] {
+    assert handle_selfhost_command(["selfhost", "--work-dir"], "") == 2;
+}
+
+test "selfhost cmd: missing first-pass binary returns exit 1" ![io] {
+    assert handle_selfhost_command(["selfhost", "--first-pass", "/no/such/sailfin/binary"], "") == 1;
+}
