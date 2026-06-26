@@ -1,0 +1,143 @@
+// Regression for #1637: `lower_enum_member_access` must not return a pointer
+// into a function-local `alloca` for the escaping-field-address coercion case.
+//
+// When a by-value enum base (`pointer_available == false`) is accessed for a
+// field that unifies to a pointer across variants (`pointer_coercion`) while at
+// least one variant stores the field as an INLINE aggregate (storage_type not
+// pointer-suffixed), that variant's arm takes NO load and yields the ADDRESS of
+// the field inside the spilled enum. Spilling the enum to `alloca` dangles that
+// address the moment the emitting function returns — a below-stack-pointer read
+// that x86 tolerates but arm64 SIGBUSes on (the `macos-arm64 / unit-b` shard,
+// exit 138). The fix (PR #1634) spills to a PERSISTENT HEAP BOX (`alloc_struct`
+// -> `@sfn_alloc_struct`, then `mark_persistent` ->
+// `@sailfin_runtime_mark_persistent`) so the field address outlives the
+// function. The value-returning paths (no coercion, or pointer-suffixed
+// storage that loads the field VALUE before return) keep the cheaper `alloca`.
+//
+// `enum_mixed_field_types_test.sfn` covers the same shape behaviorally, but
+// passes on x86 even when buggy (the over-read is tolerated). These tests drive
+// `lower_enum_member_access` directly with `pointer_available == false` and pin
+// the spill MECHANISM at IR level, so a revert to the dangling `alloca` spill is
+// caught at unit speed on every platform.
+import { lower_enum_member_access } from "../../src/llvm/expression_lowering/native/core_member_lowering";
+import {
+    EnumTypeInfo,
+    EnumVariantInfo,
+    LLVMOperand,
+    MemberAccessParse,
+    StringConstant,
+    StructFieldInfo
+} from "../../src/llvm/types";
+import { index_of } from "../../src/string_utils";
+
+fn _any_line_contains(lines: string[], needle: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        if index_of(lines[i], needle) >= 0 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _payload_field(llvm_type: string, annotation: string) -> StructFieldInfo {
+    return StructFieldInfo {
+        name: "payload",
+        llvm_type: llvm_type,
+        type_annotation: annotation,
+        index: 0,
+        offset: 0
+    };
+}
+
+fn _variant(name: string, tag: int, field: StructFieldInfo) -> EnumVariantInfo {
+    return EnumVariantInfo {
+        name: name,
+        tag: tag,
+        offset: 0,
+        size: 16,
+        align: 8,
+        fields: [field]
+    };
+}
+
+// `Node` mirrors `enum_mixed_field_types_test.sfn`: a `payload` field that is
+// `Cell?` (-> %Cell*, pointer depth 1) on one variant and `Cell` (-> %Cell
+// inline, depth 0) on another. With `expected_type = "%Cell*"` the depth-1
+// mismatch drives `pointer_coercion`, and the `Direct` (inline) arm escapes the
+// field ADDRESS.
+fn _coercion_enum() -> EnumTypeInfo {
+    return EnumTypeInfo {
+        name: "Node",
+        type_parameters: [],
+        llvm_name: "%Node",
+        tag_type: "i32",
+        tag_size: 4,
+        tag_align: 4,
+        max_payload_size: 16,
+        size: 24,
+        align: 8,
+        variants: [_variant("Optional", 0, _payload_field("%Cell*", "Cell?")), _variant("Direct", 1, _payload_field("%Cell", "Cell"))]
+    };
+}
+
+// A consistent-type enum: `payload` is `%Cell*` on every variant, so there is
+// NO pointer coercion. The access loads the field VALUE before return — nothing
+// points into the spill afterwards — so the cheaper `alloca` is sound.
+fn _value_enum() -> EnumTypeInfo {
+    return EnumTypeInfo {
+        name: "Node",
+        type_parameters: [],
+        llvm_name: "%Node",
+        tag_type: "i32",
+        tag_size: 4,
+        tag_align: 4,
+        max_payload_size: 16,
+        size: 24,
+        align: 8,
+        variants: [_variant("Optional", 0, _payload_field("%Cell*", "Cell?")), _variant("Direct", 1, _payload_field("%Cell*", "Cell?"))]
+    };
+}
+
+fn _access() -> MemberAccessParse {
+    return MemberAccessParse {
+        success: true,
+        base: "node",
+        field: "payload"
+    };
+}
+
+fn _by_value_base() -> LLVMOperand {
+    // `%Node` with no pointer suffix => `pointer_available == false`.
+    return LLVMOperand { llvm_type: "%Node", value: "%node_val" };
+}
+
+test "lowering: escaping enum-by-value field spills to a persistent heap box, not alloca (#1637)" ![io] {
+    let empty_lines: string[] = [];
+    let empty_diags: string[] = [];
+    let empty_consts: StringConstant[] = [];
+    let result = lower_enum_member_access(_access(), _coercion_enum(), _by_value_base(), false, 0, empty_lines, empty_diags, empty_consts, "%Cell*", "");
+
+    // The escaping coercion spill heap-boxes the by-value enum and marks the
+    // box persistent so the returned field address outlives the function.
+    assert _any_line_contains(result.lines, "@sfn_alloc_struct");
+    assert _any_line_contains(result.lines, "@sailfin_runtime_mark_persistent");
+    assert _any_line_contains(result.lines, "store %Node");
+    // The defect: spilling the by-value enum to a function-local `alloca` whose
+    // field address then dangles after return. Must never reappear here.
+    assert ! _any_line_contains(result.lines, "= alloca");
+}
+
+test "lowering: non-escaping enum-by-value field keeps the cheaper alloca spill (#1637)" ![io] {
+    let empty_lines: string[] = [];
+    let empty_diags: string[] = [];
+    let empty_consts: StringConstant[] = [];
+    let result = lower_enum_member_access(_access(), _value_enum(), _by_value_base(), false, 0, empty_lines, empty_diags, empty_consts, "%Cell*", "");
+
+    // No coercion: the field VALUE is loaded before return, so nothing escapes
+    // the spill and the heap box is unnecessary. The fix must stay scoped to
+    // the escaping path — this leg keeps the `alloca` (no perf/heap regression).
+    assert _any_line_contains(result.lines, "= alloca %Node");
+    assert ! _any_line_contains(result.lines, "@sfn_alloc_struct");
+    assert ! _any_line_contains(result.lines, "@sailfin_runtime_mark_persistent");
+}
