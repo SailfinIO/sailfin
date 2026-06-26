@@ -1,7 +1,7 @@
 ---
-sfep: TBD
+sfep: 0029
 title: First-Class Function Values
-status: Draft
+status: Accepted
 type: language
 created: 2026-06-26
 updated: 2026-06-26
@@ -19,11 +19,13 @@ graduates-to:
 > The epic was filed 2026-06-24, before the SFEP process (SFEP-0001) landed
 > 2026-06-26; this SFEP is its durable design record, required because the work
 > is a language feature that needs an architect pass before fan-out. See
-> [`0001-sfep-process.md`](./0001-sfep-process.md) for the process. This is a
-> `Draft`: only the v0 baseline (item 2) is built — everything else is designed,
-> not shipped. The four design forks the architect originally flagged for the
-> design gate are **resolved and committed** in §3.5 below (and reflected in
-> §3.1, §4, §5, §7, §8); there are no remaining open forks.
+> [`0001-sfep-process.md`](./0001-sfep-process.md) for the process. **Status:
+> `Accepted`** — the design gate is passed (owner approval, 2026-06-26) and the
+> four forks the architect flagged are **resolved and committed** in §3.5 below
+> (reflected in §3.1, §4, §5, §7, §8); there are no remaining open forks.
+> Implementation has not landed: only the v0 baseline (item 2) is built, so this
+> stays `Accepted` (not `Implemented`) until the work clears the Stage1 Readiness
+> Checklist end-to-end and self-hosts.
 
 ## 1. Summary
 
