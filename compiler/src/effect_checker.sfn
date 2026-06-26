@@ -976,9 +976,13 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             required = merge_requirements(required, collect_effects_from_expression(expression.tasks[task_index], imports));
             task_index += 1;
         }
-        // Registry-driven (#1655): `parallel` metadata row -> [io]
-        // (conservative placeholder; effect-transparency successor #1702).
-        required = _append_builtin_effects(required, "parallel", parallel_trigger);
+        // Registry-driven (#1655): parallel is fan-out of spawns, so derive
+        // its effect from the `spawn_task` row -> [io]. No dedicated
+        // `parallel` descriptor row exists: the paren-call `parallel(...)` of
+        // the unimplemented `sfn/sync` surface must stay fail-closed in
+        // lowering, which a row would break (conservative placeholder;
+        // effect-transparency successor #1702).
+        required = _append_builtin_effects(required, "spawn_task", parallel_trigger);
         return required;
     }
     if expression.variant == "Serve" {
