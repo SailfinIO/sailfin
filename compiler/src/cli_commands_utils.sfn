@@ -42,7 +42,10 @@ export {
     _word_matches_cmd,
     _string_list_contains_cmd,
     _parse_jobs_value,
-    _resolve_linker
+    _resolve_linker,
+    _parse_shard_index,
+    _parse_shard_total,
+    _shard_keeps_index
 };
 
 fn _ends_with_cmd(value: string, suffix: string) -> boolean {
@@ -710,4 +713,90 @@ fn _parse_jobs_value(text: string) -> int {
     }
     if n < 1 { return -1; }
     return n;
+}
+
+// `sailfin test --shard I/N` partitioning (issue #1237, test-infra
+// Phase 4 Track A). Moves shard partitioning out of `scripts/test_shards.sh`'s
+// awk stride into the runner: one tested home for the shard map, reusable
+// by the Makefile / CI / nightly. The partition mirrors that script's
+// `(NR - 1) % n == (i - 1)` stride over the sorted file list, so the
+// runner's `--shard` and the legacy bash shard map agree byte-for-byte
+// over the same discovery surface.
+//
+// API shape note: these helpers return only `int` / `boolean` so their
+// signatures resolve across modules in the pinned seed. A struct-valued
+// `_parse_shard_value(...) -> ShardSpec` and an array-valued
+// `_shard_select_indices(...) -> int[]` were the natural first cut, but a
+// *cross-module* call to a function returning a freshly-declared struct or
+// an `int[]` cannot resolve its return type in the seed
+// (`llvm lowering [fatal]: ... callee signature is not known`) — `int[]`
+// was, in fact, the only such return type in the whole compiler. Tracked
+// as a separate compiler-robustness follow-up; the `int`/`boolean` surface
+// below is exactly as testable.
+// Parse one positive decimal field (the `I` or `N` of `I/N`). Returns -1
+// on an empty string or any non-digit byte, matching `_parse_jobs_value`.
+// No 256 ceiling: a shard total is bounded by the discovered file surface,
+// not by per-child memory like `--jobs`.
+fn _parse_shard_field(text: string) -> int {
+    if text.length == 0 { return -1; }
+    let mut i: int = 0;
+    let mut n: int = 0;
+    loop {
+        if i >= text.length { break; }
+        let c = char_code_at_text(text, i);
+        if c < 48 { return -1; }
+        if c > 57 { return -1; }
+        n = n * 10 + (c - 48);
+        i += 1;
+    }
+    if n < 1 { return -1; }
+    return n;
+}
+
+// Parse and fully validate a `--shard I/N` value, returning the field
+// selected by `which` (0 = I, 1 = N), or -1 when the spec is malformed.
+// A valid spec is exactly one '/', both sides positive integers, and
+// `1 <= I <= N`; any deviation ("", "2", "0/3", "4/3", "a/3", "1/2/3")
+// yields -1. The two public wrappers below expose the I and N fields.
+fn _parse_shard_field_at(text: string, which: int) -> int {
+    let slash = find_char_local(text, "/", 0);
+    if slash < 0 { return -1; }
+    let lhs = substring(text, 0, slash);
+    let rhs = substring(text, slash + 1, text.length);
+    // A second '/' (e.g. "1/2/3") is malformed: the right field must
+    // contain no further slash.
+    if find_char_local(rhs, "/", 0) >= 0 { return -1; }
+    let index = _parse_shard_field(lhs);
+    let total = _parse_shard_field(rhs);
+    if index < 1 { return -1; }
+    if total < 1 { return -1; }
+    if index > total { return -1; }
+    if which == 0 { return index; }
+    return total;
+}
+
+// The shard index I of a valid `--shard I/N`, or -1 if the spec is
+// malformed. The caller treats either field returning -1 as a usage error.
+fn _parse_shard_index(text: string) -> int {
+    return _parse_shard_field_at(text, 0);
+}
+
+// The shard total N of a valid `--shard I/N`, or -1 if the spec is
+// malformed.
+fn _parse_shard_total(text: string) -> int {
+    return _parse_shard_field_at(text, 1);
+}
+
+// Does the 0-based `item_index` belong to shard `shard_index`/`shard_total`?
+// The stable stride `item_index % shard_total == shard_index - 1`
+// (`shard_index` is 1-based) mirrors `scripts/test_shards.sh`'s
+// `(NR - 1) % n == (i - 1)`. `1/1` keeps every index. Over
+// `shard_index = 1..shard_total` each item lands in exactly one residue
+// class mod `shard_total`, so the shards are disjoint, their union is the
+// whole surface, and their sizes differ by at most one (file-count
+// balanced). Deterministic: depends only on its three integer arguments,
+// so it is stable across runs and platforms for a fixed sorted file list.
+fn _shard_keeps_index(item_index: int, shard_index: int, shard_total: int) -> boolean {
+    if shard_total < 1 { return false; }
+    return (item_index % shard_total) == (shard_index - 1);
 }
