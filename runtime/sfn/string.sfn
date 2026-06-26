@@ -992,6 +992,75 @@ fn _num_emit_uint(base: i64, pos: i64, value: i64, min_digits: i64) -> i64 {
     return p;
 }
 
+// `_num_emit_int_cstr(base, value)` formats a signed i64 as decimal text
+// (optional `-`, digits most-significant-first, trailing NUL) into the
+// 8-aligned scratch buffer at `base`, returning the byte length (NUL
+// excluded). It is the batched-store fast path for the two integer
+// hot paths (`sfn_int_to_str` and the exact-integer arm of
+// `sfn_number_to_str`).
+//
+// Perf (#1511): the per-byte emitters (`_num_emit_char` /
+// `_num_emit_uint` → `_num_put_byte`) pay a seq_cst `atomic_load` +
+// `atomic_store` for *every* digit, so a 6-digit format costs ~7 full
+// memory barriers. This emitter instead streams output bytes into one
+// i64 accumulator and flushes a whole 8-byte word with a single
+// `atomic_store` each time the accumulator fills (and once more at the
+// end) — ~1 barrier per 8 bytes, and no read-back at all. The read is
+// unnecessary because the scratch buffer is 8-aligned with a capacity
+// that is a multiple of 8 (`owned_buf_new` discipline) and every byte of
+// each word is authored sequentially from offset 0: the store overwrites
+// all 8 bytes, and the unwritten high bytes are zero, so the trailing
+// NUL and word padding are emitted for free.
+//
+// INT64_MIN is safe without a magnitude (whose positive has no i64
+// form): digit extraction stays in the operand's own sign domain
+// (`value / divisor` and `% 10` truncate toward zero; negative
+// remainders are negated per digit). Any i64 has at most 19 digits, so
+// the leading divisor `10^(nd-1)` never exceeds `10^18`, which is
+// i64-representable.
+fn _num_emit_int_cstr(base: i64, value: i64) -> i64 {
+    let mut neg: bool = false;
+    if value < 0 { neg = true; }
+    let nd: i64 = _num_count_digits(value);
+    let mut total: i64 = nd;
+    if neg { total = total + 1; }
+
+    let mut word_acc: i64 = 0;
+    let mut word_off: i64 = 0;
+    let mut k: i64 = 0;
+
+    if neg {
+        word_acc = word_acc + (45 << ((k & 7) * 8));
+        k = k + 1;
+    }
+
+    let mut divisor: i64 = _num_pow10_i64(nd - 1);
+    let mut di: i64 = 0;
+    loop {
+        if di >= nd { break; }
+        let mut d: i64 = (value / divisor) % 10;
+        if d < 0 { d = 0 - d; }
+        word_acc = word_acc + ((48 + d) << ((k & 7) * 8));
+        k = k + 1;
+        if (k & 7) == 0 {
+            let slot: * i64 = (base + word_off) as * i64;
+            atomic_store(slot, word_acc);
+            word_off = word_off + 8;
+            word_acc = 0;
+        }
+        divisor = divisor / 10;
+        di = di + 1;
+    }
+
+    // Flush the word holding the final digits and the NUL terminator.
+    // The NUL at position `total` is the zero high byte already present
+    // in `word_acc`; any bytes past it are zero padding inside the owned
+    // scratch buffer, so a single full-word store completes the string.
+    let slot2: * i64 = (base + word_off) as * i64;
+    atomic_store(slot2, word_acc);
+    return total;
+}
+
 // `sfn_number_to_str(value)` — the bare emission target (#1314), render
 // `value` as a `%.15g`-style decimal string into arena/libc storage. See
 // the family comment above for the algorithm and its correctness ceiling.
@@ -1050,9 +1119,12 @@ fn sfn_number_to_str(value: f64) -> * u8 {
     if m < 1000000000000000.0 {
         let ip: i64 = m as i64;
         if (ip as f64) == m {
-            if neg { pos = _num_emit_char(base, pos, 45); }
-            pos = _num_emit_uint(base, pos, ip, 1);
-            return _num_finish(base, pos);
+            // `ip` is the non-negative magnitude (m = |value|); restore
+            // the sign and emit via the batched whole-word fast path.
+            let mut signed_ip: i64 = ip;
+            if neg { signed_ip = 0 - ip; }
+            let _len: i64 = _num_emit_int_cstr(base, signed_ip);
+            return base as * u8;
         }
     }
 
@@ -1231,40 +1303,12 @@ fn sfn_int_to_str(value: i64) -> * u8 {
     let buf: OwnedBuf = owned_buf_new(arena_addr, 32);
     let base: i64 = buf.ptr_addr;
     if base == 0 { return null; }
-    let mut pos: i64 = 0;
 
-    if value == 0 {
-        pos = _num_emit_char(base, pos, 48);
-        return _num_finish(base, pos);
-    }
-
-    let mut neg: bool = false;
-    if value < 0 { neg = true; }
-
-    // Count digits (loop toward zero works for either sign).
-    let mut nd: i64 = 0;
-    let mut t: i64 = value;
-    loop {
-        if t == 0 { break; }
-        t = t / 10;
-        nd = nd + 1;
-    }
-
-    if neg { pos = _num_emit_char(base, pos, 45); }
-
-    // Write digits least-significant first into the reserved span.
-    let mut wp: i64 = pos + nd - 1;
-    let mut x: i64 = value;
-    loop {
-        if x == 0 { break; }
-        let mut d: i64 = x % 10;
-        if d < 0 { d = 0 - d; }
-        _num_put_byte(base + wp, 48 + d);
-        wp = wp - 1;
-        x = x / 10;
-    }
-    pos = pos + nd;
-    return _num_finish(base, pos);
+    // Batched whole-word emit (#1511): one `atomic_store` per 8 bytes
+    // instead of a per-digit read-modify-write. `_num_emit_int_cstr`
+    // handles the zero case, the sign, and the NUL terminator.
+    let _len: i64 = _num_emit_int_cstr(base, value);
+    return base as * u8;
 }
 
 // #925 (sub-issue of #390): Cat-C char-predicate ports. The legacy C
