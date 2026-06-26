@@ -89,25 +89,23 @@ instead of as a planned predecessor). If the probe fails, the prerequisite
 is a **frontend issue that must be groomed first** — make it an explicit
 `Blocked by` / `Required in pinned seed` predecessor, not a surprise.
 
-### Don't over-decompose: bundle a capability with its single consumer
+### Don't over-decompose: bundle a capability with its single consumer (default)
 
-Splitting is not free. Prefer **one issue/PR** for a compiler capability plus
-its first consumer when they are tightly coupled and one agent will work them
-together; only split when the work is genuinely independent **or** the
-capability has multiple consumers that each justify standalone shipping.
+**Bundling is the groom-time default, not a split-time afterthought.** When you
+identify a compiler capability that is tightly coupled to exactly one consumer
+that will be worked in the same session, **produce one issue** (one PR), not two.
+Split only when the capability has **multiple consumers** that each justify
+standalone shipping, or the work is **genuinely independent**. Any split that
+creates a seed-cut gate for a single consumer must be **explicitly justified** in
+the issue body — the default answer is bundle.
 
-The decisive sub-rule — **the seed-cut tax**: when a compiler-source change
-(lowering / parsing / typecheck / intrinsics) and its runtime/consumer change
-land as **separate releases**, the consumer cannot self-host until the
-capability is in the **pinned seed** — forcing a seed cut + `/pin-seed`
-between them (see "Seed dependencies" below). Bundling the capability and its
-consumer in **one PR avoids the seed cut entirely**: `make compile` builds the
-new compiler from the old seed, and that freshly-built compiler then compiles
-the consumer that uses the new capability — all in one self-hosting pass. So
-**splitting a capability away from its only consumer actively manufactures a
-release cycle that bundling would not need.** Factor this into every split
-decision: if a proposed split creates a seed-cut gate and there is a single
-consumer, prefer bundling.
+The full decision tree and the seed-cut-tax rationale live in the shared rule
+**`.claude/rules/seed-dependency.md`** (cited by `/pickup` too, so both apply it
+identically — design record SFEP-0026 WS-B). Apply that rule here rather than
+re-deriving it. When a split is justified, follow "Seed dependencies" below:
+label the predecessor `seed-blocker`, give the consumer
+`## Required in pinned seed: #<predecessor>`, and queue the seed advance against
+the next cadence bump rather than cutting reactively.
 
 ---
 
