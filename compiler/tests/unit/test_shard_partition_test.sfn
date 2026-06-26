@@ -1,0 +1,183 @@
+// #1237: unit coverage for `sailfin test --shard I/N`, which moves shard
+// partitioning out of `scripts/test_shards.sh`'s awk stride into the
+// runner. Two surfaces are pinned here:
+//   * `_parse_shard_index` / `_parse_shard_total` — accept exactly a
+//     well-formed `I/N` with both sides positive integers and `1 <= I <= N`
+//     (returning the I or N field), and return -1 for any malformed spec;
+//     `run` maps a -1 to a usage error (exit 2).
+//   * `_shard_keeps_index` — the stable stride predicate
+//     `i % total == index - 1`. The headline acceptance criterion is that
+//     `1/N .. N/N` partition the full surface: disjoint (no file in two
+//     shards), complete (their union is the whole surface), and
+//     file-count-balanced (sizes differ by at most one). The predicate is
+//     deterministic, so the same query always yields the same answer
+//     across runs/platforms.
+import { _parse_shard_index, _parse_shard_total, _shard_keeps_index } from "../../src/cli_commands_utils";
+
+// --- Parse + validation ---
+test "shard: well-formed 1/3 parses to fields" {
+    assert _parse_shard_index("1/3") == 1;
+    assert _parse_shard_total("1/3") == 3;
+}
+
+test "shard: last shard 3/3 parses" {
+    assert _parse_shard_index("3/3") == 3;
+    assert _parse_shard_total("3/3") == 3;
+}
+
+test "shard: 1/1 (whole surface) parses" {
+    assert _parse_shard_index("1/1") == 1;
+    assert _parse_shard_total("1/1") == 1;
+}
+
+test "shard: multi-digit fields parse" {
+    assert _parse_shard_index("7/12") == 7;
+    assert _parse_shard_total("7/12") == 12;
+}
+
+test "shard: index 0 rejected" {
+    assert _parse_shard_index("0/3") == -1;
+    assert _parse_shard_total("0/3") == -1;
+}
+
+test "shard: total 0 rejected" {
+    assert _parse_shard_index("1/0") == -1;
+    assert _parse_shard_total("1/0") == -1;
+}
+
+test "shard: index greater than total rejected" {
+    assert _parse_shard_index("4/3") == -1;
+    assert _parse_shard_total("4/3") == -1;
+}
+
+test "shard: missing slash rejected" {
+    assert _parse_shard_index("2") == -1;
+    assert _parse_shard_total("2") == -1;
+}
+
+test "shard: empty rejected" {
+    assert _parse_shard_index("") == -1;
+    assert _parse_shard_total("") == -1;
+}
+
+test "shard: non-numeric field rejected" {
+    assert _parse_shard_index("a/3") == -1;
+}
+
+test "shard: extra slash rejected" {
+    assert _parse_shard_index("1/2/3") == -1;
+}
+
+test "shard: negative field rejected" {
+    assert _parse_shard_index("-1/3") == -1;
+}
+
+// --- Partition: disjoint + complete (union == full surface) ---
+test "shard: 1/3..3/3 cover every index exactly once" {
+    let count = 20;
+    let total = 3;
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        // Tally how many shards keep index i; a correct partition keeps it
+        // in exactly one.
+        let mut kept: int = 0;
+        let mut s: int = 1;
+        loop {
+            if s > total { break; }
+            if _shard_keeps_index(i, s, total) { kept += 1; }
+            s += 1;
+        }
+        assert kept == 1;
+        i += 1;
+    }
+}
+
+test "shard: 1/4..4/4 cover every index exactly once" {
+    let count = 37;
+    let total = 4;
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        let mut kept: int = 0;
+        let mut s: int = 1;
+        loop {
+            if s > total { break; }
+            if _shard_keeps_index(i, s, total) { kept += 1; }
+            s += 1;
+        }
+        assert kept == 1;
+        i += 1;
+    }
+}
+
+test "shard: more shards than files leaves no index uncovered or doubled" {
+    // total > count: the surplus shards keep nothing; each remaining index
+    // is still kept by exactly one shard.
+    let count = 3;
+    let total = 7;
+    let mut i: int = 0;
+    loop {
+        if i >= count { break; }
+        let mut kept: int = 0;
+        let mut s: int = 1;
+        loop {
+            if s > total { break; }
+            if _shard_keeps_index(i, s, total) { kept += 1; }
+            s += 1;
+        }
+        assert kept == 1;
+        i += 1;
+    }
+}
+
+test "shard: 1/1 keeps the whole surface" {
+    let mut i: int = 0;
+    loop {
+        if i >= 6 { break; }
+        assert _shard_keeps_index(i, 1, 1);
+        i += 1;
+    }
+}
+
+// --- Partition: file-count-balanced (sizes differ by at most one) ---
+test "shard: per-shard counts differ by at most one" {
+    let count = 20;
+    let total = 3;
+    let mut min_n: int = count + 1;
+    let mut max_n: int = -1;
+    let mut s: int = 1;
+    loop {
+        if s > total { break; }
+        // Count how many of the `count` indices this shard keeps.
+        let mut n: int = 0;
+        let mut i: int = 0;
+        loop {
+            if i >= count { break; }
+            if _shard_keeps_index(i, s, total) { n += 1; }
+            i += 1;
+        }
+        if n < min_n { min_n = n; }
+        if n > max_n { max_n = n; }
+        s += 1;
+    }
+    // 20 over 3 → sizes {7, 7, 6}: spread is exactly 1.
+    assert max_n - min_n <= 1;
+}
+
+// --- Partition: deterministic stride ---
+test "shard: predicate is stable across calls" {
+    let a = _shard_keeps_index(7, 2, 3);
+    let b = _shard_keeps_index(7, 2, 3);
+    assert a == b;
+}
+
+test "shard: stride residue is correct (2/3 keeps indices 1,4,7,...)" {
+    // Shard 2/3 keeps index i iff i % 3 == 1.
+    assert _shard_keeps_index(1, 2, 3);
+    assert _shard_keeps_index(4, 2, 3);
+    assert _shard_keeps_index(7, 2, 3);
+    assert ! _shard_keeps_index(0, 2, 3);
+    assert ! _shard_keeps_index(2, 2, 3);
+    assert ! _shard_keeps_index(3, 2, 3);
+}

@@ -8,9 +8,10 @@
 //
 // `test` carries a real flag surface plus a variadic positional:
 //   sfn test [--json] [-k NAME] [--tag TAG] [--update-snapshots]
-//            [--no-test-cache] [--jobs N] <suite...>
+//            [--no-test-cache] [--jobs N] [--shard I/N] <suite...>
 // `--json` / `--update-snapshots` / `--no-test-cache` are boolean flags;
-// `-k` (name substring) and `--tag` (tag filter) are value flags; `--jobs`
+// `-k` (name substring), `--tag` (tag filter), and `--shard` (I/N
+// partition, issue #1237) are value flags; `--jobs`
 // is a `flag_int` (Issue 1.5, #794) so `parse()` rejects a non-integer
 // value as a `type_error` before `run` is reached; `suite` is a variadic
 // positional (Issue 1.11, #800) collecting one or more suite paths (zero
@@ -74,8 +75,11 @@ import {
     _get_env_cmd,
     _has_prefix_cmd,
     _legacy_flag_file,
+    _parse_shard_index,
+    _parse_shard_total,
     _path_join_cmd,
     _sanitize_filename_cmd,
+    _shard_keeps_index,
     _shell_read_cmd,
     _sort_strings_cmd,
     _strip_trailing_slashes_cmd,
@@ -112,10 +116,11 @@ import { resolve_test_bin_identity_for_cache } from "../../version";
 import { CliContext } from "../context";
 
 // The `sfn/cli` definition for `test`, registered on the v2 root via
-// `with_subcommand`. Three boolean flags, two value flags, one int flag,
-// and a variadic `suite` positional.
+// `with_subcommand`. Three boolean flags, three value flags (`-k`,
+// `--tag`, `--shard`), one int flag (`--jobs`), and a variadic `suite`
+// positional.
 fn command_def() -> Command {
-    return with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("test", "Run Sailfin tests"), flag("json", "Emit a JSONL event stream")), flag("update-snapshots", "Re-baseline snapshot golden files this run")), flag("no-test-cache", "Bypass the per-test linked-binary cache")), flag_value_short("k", "k", "Only run tests whose name contains this substring")), flag_value("tag", "Only run tests carrying @tag(\"<value>\")")), flag_int("jobs", "Run up to N per-file children concurrently")), arg_variadic("suite", "One or more suite paths (default: .)"));
+    return with_arg(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(with_flag(command("test", "Run Sailfin tests"), flag("json", "Emit a JSONL event stream")), flag("update-snapshots", "Re-baseline snapshot golden files this run")), flag("no-test-cache", "Bypass the per-test linked-binary cache")), flag_value_short("k", "k", "Only run tests whose name contains this substring")), flag_value("tag", "Only run tests carrying @tag(\"<value>\")")), flag_int("jobs", "Run up to N per-file children concurrently")), flag_value("shard", "Run only the I-th of N file-count-balanced shards (e.g. 1/3)")), arg_variadic("suite", "One or more suite paths (default: .)"));
 }
 
 fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
@@ -151,6 +156,30 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
             return 2;
         }
     }
+    // `--shard I/N` (issue #1237): run only the I-th of N file-count-
+    // balanced shards of the discovered surface. Absent → no sharding
+    // (the whole surface). A malformed spec (not `I/N` with both sides
+    // positive integers and `1 <= I <= N`) exits 2, mirroring the
+    // `--jobs` range-guard convention. The stable stride partition is
+    // applied to `test_files` after discovery/filtering, below.
+    let mut shard_active: boolean = false;
+    let mut shard_index: int = 1;
+    let mut shard_total: int = 1;
+    let shard_spec_raw: string = get_or(matches, "shard", "");
+    if shard_spec_raw.length > 0 {
+        let s_index: int = _parse_shard_index(shard_spec_raw);
+        let s_total: int = _parse_shard_total(shard_spec_raw);
+        if s_index < 0 || s_total < 0 {
+            print("sfn test: --shard requires I/N with 1 <= I <= N (got '"
+                + shard_spec_raw
+                + "')");
+            return 2;
+        }
+        shard_active = true;
+        shard_index = s_index;
+        shard_total = s_total;
+    }
+
     // Variadic suite positionals: zero or more. Zero defaults to a single
     // "." suite below (the legacy `positional.length == 0` branch).
     let positional: string[] = positionals(matches, "suite");
@@ -268,6 +297,32 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
         }
         test_files = kept_files;
         file_suite_index = kept_suite_index;
+    }
+
+    // `--shard I/N` partition (issue #1237). Keep only the I-th of N
+    // file-count-balanced shards using the stable stride
+    // `i % total == index - 1` over the deterministic (sorted within each
+    // suite) discovery order — mirroring `scripts/test_shards.sh`'s awk
+    // stride so the runner and the legacy bash shard map agree over the
+    // same file list. Applied after the `-k`/`--tag` cut so a shard
+    // partitions exactly the surface that would otherwise run. The
+    // `file_suite_index` parallel array is partitioned in lockstep so
+    // per-suite banner attribution stays aligned. An empty shard (more
+    // shards than files) falls through to the benign 0/0/0 path below.
+    if shard_active {
+        let mut sharded_files: string[] = [];
+        let mut sharded_suite_index: int[] = [];
+        let mut shi: int = 0;
+        loop {
+            if shi >= test_files.length { break; }
+            if _shard_keeps_index(shi, shard_index, shard_total) {
+                sharded_files.push(test_files[shi]);
+                sharded_suite_index.push(file_suite_index[shi]);
+            }
+            shi += 1;
+        }
+        test_files = sharded_files;
+        file_suite_index = sharded_suite_index;
     }
 
     if test_files.length == 0 {
