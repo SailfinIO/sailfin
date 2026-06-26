@@ -1,0 +1,69 @@
+// compiler/tests/unit/runtime_helper_metadata_only_test.sfn
+//
+// Standing guard for #1631 (epic #1180, Phase G). The effect-metadata-only
+// descriptor rows #1601 registered — so the effect checker can derive the
+// `websocket.*` and Call-form `serve` capabilities from the registry — must
+// NEVER produce a `declare` line. Their `symbol`s are deliberately fake
+// (`sfn_websocket_unbridged` / `sfn_serve_unbridged`): no runtime is bridged,
+// and `render_runtime_helper_declarations` sentinel-skips them in
+// `rendering.sfn` (the `_preamble_inlined` cascade).
+//
+// Today the only guard is `make compile`: if a sentinel-skip is removed, the
+// source-text walker (`filter_runtime_helper_targets`) can surface the target
+// into `used_targets`, the declare loop emits `declare ... @sfn_serve_unbridged(...)`,
+// and the LINK fails with an undefined symbol — a slow, indirect signal. This
+// test calls `render_runtime_helper_declarations` directly with the sentinel
+// targets present and asserts none of the emitted lines reference the unbridged
+// symbols, locking #1601's acceptance criterion #4 ("metadata-only rows must
+// NOT emit spurious declare lines") at unit speed.
+import { find } from "sfn/strings";
+
+import { render_runtime_helper_declarations } from "../../src/llvm/rendering";
+import { NativeFunction } from "../../src/native_ir";
+
+// The five effect-metadata-only targets #1601 registered (Call-form `serve`
+// plus the `websocket.*` op surface).
+fn _metadata_only_targets() -> string[] {
+    return ["serve", "websocket.serve", "websocket.send", "websocket.close", "websocket.connect"];
+}
+
+// True if any emitted line contains `needle` as a substring.
+fn _any_line_contains(lines: string[], needle: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        if find(lines[i], needle, 0) >= 0 { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "metadata-only rows (#1631): sentinel targets emit no declare for the unbridged symbols" {
+    // All five metadata-only targets present in `used_targets`. Each is
+    // sentinel-skipped, so the fake symbols must never reach a `declare`.
+    // Removing any one of the `_preamble_inlined` skips in `rendering.sfn`
+    // makes the corresponding row emit `declare void @sfn_*_unbridged()`,
+    // tripping these assertions at unit speed instead of as a link failure.
+    let no_locals: NativeFunction[] = [];
+    let no_imports: NativeFunction[] = [];
+    let lines = render_runtime_helper_declarations(_metadata_only_targets(), no_locals, no_imports);
+
+    assert ! _any_line_contains(lines, "sfn_serve_unbridged");
+    assert ! _any_line_contains(lines, "sfn_websocket_unbridged");
+}
+
+test "metadata-only rows (#1631): the real serve_start row still declares (skip is narrow)" {
+    // Negative control: the sentinel-skip must not over-reach. The real
+    // `serve_start` row is a distinct target backed by the genuine
+    // `sfn_serve` symbol (via `native_signature`); it MUST still emit its
+    // declare, otherwise the link would lose the real serve runtime
+    // entrypoint. `@sfn_serve(` is a distinct token from the unbridged
+    // `@sfn_serve_unbridged(`, so this also pins that the skip keys on the
+    // metadata-only target, not a `sfn_serve` prefix.
+    let no_locals: NativeFunction[] = [];
+    let no_imports: NativeFunction[] = [];
+    let lines = render_runtime_helper_declarations(["serve_start"], no_locals, no_imports);
+
+    assert _any_line_contains(lines, "@sfn_serve(");
+    assert ! _any_line_contains(lines, "sfn_serve_unbridged");
+}
