@@ -300,8 +300,8 @@ capturing lambda exercises. The method forms `arr.map` / `arr.filter` /
 surface only**: callback ABIs are `iN(i8* env, i64 …)`, so element/accumulator types
 are `i64` (`int[]`). Generic / non-pointer-width element types (`float[]`,
 `string[]`, struct arrays) require generic constraints and are rejected with a
-diagnostic rather than mis-mapped (post-1.0). Closures with capture (the gating
-prerequisite, epic #1118) are what unblocked these bodies.
+diagnostic rather than mis-mapped — designed in SFEP-0028. Closures with capture
+(the gating prerequisite, epic #1118) are what unblocked these bodies.
 
 ### 3.5 Exception / unwind subsystem
 
