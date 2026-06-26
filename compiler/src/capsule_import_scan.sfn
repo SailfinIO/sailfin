@@ -1,0 +1,774 @@
+// capsule_import_scan.sfn — source-level import-spec scanning.
+//
+// Extracted from capsule_resolver.sfn (#1512 build-memory work). These are
+// the comment-aware character-level scanners that walk a `.sfn` source for
+// `import`/`export { ... } from "spec"` statements. They are pure (no
+// `![io]`), depend only on `string_utils`, and carry no coupling back to the
+// resolver — which is exactly why they were the highest-IR-weight, lowest-
+// risk cluster to lift out of capsule_resolver.sfn (the only module still
+// over the 2 GB CI per-job gate). capsule_resolver re-imports and re-exports
+// the public entry points so its consumers are unchanged.
+import { strings_equal, substring } from "./string_utils";
+
+// ---- Source-level import scanning ----
+// These helpers replace the cli_commands.sfn `_collect_relative_import_spans_cmd`
+// state machine so the resolver owns the only import-spec scanner. Skip-aware
+// of string literals, line comments, and block comments — must stay in sync
+// with the legacy implementation until that is deleted.
+fn _cr_byte_at(text: string, index: int) -> string {
+    if text.length == 0 { return ""; }
+    if index < 0 { return ""; }
+    if index >= text.length { return ""; }
+    return substring(text, index, index + 1);
+}
+
+fn _cr_is_ident_char(ch: string) -> boolean {
+    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    if ch.length == 0 { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= allowed.length { break; }
+        if substring(allowed, i, i + 1) == ch { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _cr_word_matches(source: string, index: int, word: string) -> boolean {
+    if word.length == 0 { return false; }
+    if index < 0 { return false; }
+    let end_pos = index + word.length;
+    if end_pos > source.length { return false; }
+    if substring(source, index, end_pos) != word { return false; }
+    if index > 0 {
+        if _cr_is_ident_char(_cr_byte_at(source, index - 1)) { return false; }
+    }
+    if end_pos < source.length {
+        if _cr_is_ident_char(_cr_byte_at(source, end_pos)) { return false; }
+    }
+    return true;
+}
+
+// Walk the source for `import { ... } from "spec"` statements and return
+// every spec string that begins with `./` or `../`. The walker is
+// string-, line-comment-, and block-comment-aware so it doesn't trip on
+// import-shaped strings inside comments or string literals.
+// Walks `import { ... } from "spec"` AND
+// `export { ... } from "spec"` — the latter is needed so barrel
+// modules' inline re-export targets get staged into the
+// import-context (#508). Bare `export { X };` produces an empty
+// spec, which the `if spec.length > 0` guard inside silently drops,
+// matching pre-#508 behavior.
+fn collect_relative_import_specs(source: string) -> string[] {
+    let mut out: string[] = [];
+    let source_len = source.length;
+    if source_len == 0 { return out; }
+    let mut steps: int = 0;
+    let max_steps = source_len * 6 + 1000;
+    let mut i: int = 0;
+    let mut in_string: boolean = false;
+    let mut escaping: boolean = false;
+    let mut in_line_comment: boolean = false;
+    let mut in_block_comment: boolean = false;
+    loop {
+        if i >= source_len { break; }
+        steps += 1;
+        if steps > max_steps { break; }
+        let ch = _cr_byte_at(source, i);
+        if in_line_comment {
+            if ch == "\n" { in_line_comment = false; }
+            i += 1;
+            continue;
+        }
+        if in_block_comment {
+            if ch == "*" {
+                if i + 1 < source_len {
+                    if _cr_byte_at(source, i + 1) == "/" {
+                        in_block_comment = false;
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            if escaping {
+                escaping = false;
+                i += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaping = true;
+                i += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+                i += 1;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == "/" {
+            if i + 1 < source_len {
+                let next = _cr_byte_at(source, i + 1);
+                if next == "/" {
+                    in_line_comment = true;
+                    i += 2;
+                    continue;
+                }
+                if next == "*" {
+                    in_block_comment = true;
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        let mut _is_dep_keyword: boolean = false;
+        if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
+        if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
+        if _is_dep_keyword {
+            let mut j: int = i;
+            let mut s_in_string: boolean = false;
+            let mut s_escaping: boolean = false;
+            let mut s_in_line_comment: boolean = false;
+            let mut s_in_block_comment: boolean = false;
+            let mut spec: string = "";
+            let mut stmt_end: int = -1;
+            loop {
+                if j >= source_len { break; }
+                steps += 1;
+                if steps > max_steps { break; }
+                let cj = _cr_byte_at(source, j);
+                if s_in_line_comment {
+                    if cj == "\n" { s_in_line_comment = false; }
+                    j += 1;
+                    continue;
+                }
+                if s_in_block_comment {
+                    if cj == "*" {
+                        if j + 1 < source_len {
+                            if _cr_byte_at(source, j + 1) == "/" {
+                                s_in_block_comment = false;
+                                j += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    j += 1;
+                    continue;
+                }
+                if s_in_string {
+                    if s_escaping {
+                        s_escaping = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\\" {
+                        s_escaping = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\"" {
+                        s_in_string = false;
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if cj == "/" {
+                    if j + 1 < source_len {
+                        let nj = _cr_byte_at(source, j + 1);
+                        if nj == "/" {
+                            s_in_line_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                        if nj == "*" {
+                            s_in_block_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                    }
+                }
+                if cj == "\"" {
+                    s_in_string = true;
+                    j += 1;
+                    continue;
+                }
+                if spec.length == 0 {
+                    if _cr_word_matches(source, j, "from") {
+                        let mut k = j + 4;
+                        loop {
+                            if k >= source_len { break; }
+                            let wk = _cr_byte_at(source, k);
+                            let mut ws: boolean = false;
+                            if wk == " " { ws = true; }
+                            if wk == "\t" { ws = true; }
+                            if wk == "\n" { ws = true; }
+                            if wk == "\r" { ws = true; }
+                            if !ws { break; }
+                            k += 1;
+                        }
+                        if k < source_len {
+                            if _cr_byte_at(source, k) == "\"" {
+                                k += 1;
+                                let start = k;
+                                let mut esc: boolean = false;
+                                loop {
+                                    if k >= source_len { break; }
+                                    let sk = _cr_byte_at(source, k);
+                                    if esc {
+                                        esc = false;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\\" {
+                                        esc = true;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\"" {
+                                        spec = substring(source, start, k);
+                                        break;
+                                    }
+                                    k += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if cj == ";" {
+                    stmt_end = j + 1;
+                    break;
+                }
+                j += 1;
+            }
+            if stmt_end > 0 {
+                if spec.length > 0 {
+                    let mut is_relative: boolean = false;
+                    if spec.length >= 2 {
+                        if substring(spec, 0, 2) == "./" { is_relative = true; }
+                    }
+                    if spec.length >= 3 {
+                        if substring(spec, 0, 3) == "../" { is_relative = true; }
+                    }
+                    if is_relative { out.push(spec); }
+                }
+                i = stmt_end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Find the first occurrence of `needle` in `haystack`, or -1. Local
+// to the resolver so we don't pull in `string_utils.sfn`'s richer
+// `index_of` (which would broaden the diamond) for a single use.
+fn _cr_find_substring(haystack: string, needle: string) -> int {
+    if needle.length == 0 { return 0; }
+    if haystack.length < needle.length { return -1; }
+    let limit = haystack.length - needle.length;
+    let mut i: int = 0;
+    loop {
+        if i > limit { break; }
+        if substring(haystack, i, i + needle.length) == needle { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+// ---- Scoped (capsule) import scanning ----
+// Sibling of `collect_relative_import_specs` that returns specs containing
+// `/` and not starting with `./`, `../`, or `runtime/`. These are the
+// candidate inputs for capsule resolution: either declared in the project
+// manifest's `[dependencies]` (handled by `enumerate_capsule_sources`) or
+// resolved against workspace members (handled by
+// `enumerate_workspace_implicit_sources`).
+fn collect_scoped_import_specs(source: string) -> string[] {
+    let mut out: string[] = [];
+    let source_len = source.length;
+    if source_len == 0 { return out; }
+    let mut steps: int = 0;
+    let max_steps = source_len * 6 + 1000;
+    let mut i: int = 0;
+    let mut in_string: boolean = false;
+    let mut escaping: boolean = false;
+    let mut in_line_comment: boolean = false;
+    let mut in_block_comment: boolean = false;
+    loop {
+        if i >= source_len { break; }
+        steps += 1;
+        if steps > max_steps { break; }
+        let ch = _cr_byte_at(source, i);
+        if in_line_comment {
+            if ch == "\n" { in_line_comment = false; }
+            i += 1;
+            continue;
+        }
+        if in_block_comment {
+            if ch == "*" {
+                if i + 1 < source_len {
+                    if _cr_byte_at(source, i + 1) == "/" {
+                        in_block_comment = false;
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            if escaping {
+                escaping = false;
+                i += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaping = true;
+                i += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+                i += 1;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == "/" {
+            if i + 1 < source_len {
+                let next = _cr_byte_at(source, i + 1);
+                if next == "/" {
+                    in_line_comment = true;
+                    i += 2;
+                    continue;
+                }
+                if next == "*" {
+                    in_block_comment = true;
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        let mut _is_dep_keyword: boolean = false;
+        if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
+        if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
+        if _is_dep_keyword {
+            let mut j: int = i;
+            let mut s_in_string: boolean = false;
+            let mut s_escaping: boolean = false;
+            let mut s_in_line_comment: boolean = false;
+            let mut s_in_block_comment: boolean = false;
+            let mut spec: string = "";
+            let mut stmt_end: int = -1;
+            loop {
+                if j >= source_len { break; }
+                steps += 1;
+                if steps > max_steps { break; }
+                let cj = _cr_byte_at(source, j);
+                if s_in_line_comment {
+                    if cj == "\n" { s_in_line_comment = false; }
+                    j += 1;
+                    continue;
+                }
+                if s_in_block_comment {
+                    if cj == "*" {
+                        if j + 1 < source_len {
+                            if _cr_byte_at(source, j + 1) == "/" {
+                                s_in_block_comment = false;
+                                j += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    j += 1;
+                    continue;
+                }
+                if s_in_string {
+                    if s_escaping {
+                        s_escaping = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\\" {
+                        s_escaping = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\"" {
+                        s_in_string = false;
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if cj == "/" {
+                    if j + 1 < source_len {
+                        let nj = _cr_byte_at(source, j + 1);
+                        if nj == "/" {
+                            s_in_line_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                        if nj == "*" {
+                            s_in_block_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                    }
+                }
+                if cj == "\"" {
+                    s_in_string = true;
+                    j += 1;
+                    continue;
+                }
+                if spec.length == 0 {
+                    if _cr_word_matches(source, j, "from") {
+                        let mut k = j + 4;
+                        loop {
+                            if k >= source_len { break; }
+                            let wk = _cr_byte_at(source, k);
+                            let mut ws: boolean = false;
+                            if wk == " " { ws = true; }
+                            if wk == "\t" { ws = true; }
+                            if wk == "\n" { ws = true; }
+                            if wk == "\r" { ws = true; }
+                            if !ws { break; }
+                            k += 1;
+                        }
+                        if k < source_len {
+                            if _cr_byte_at(source, k) == "\"" {
+                                k += 1;
+                                let start = k;
+                                let mut esc: boolean = false;
+                                loop {
+                                    if k >= source_len { break; }
+                                    let sk = _cr_byte_at(source, k);
+                                    if esc {
+                                        esc = false;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\\" {
+                                        esc = true;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\"" {
+                                        spec = substring(source, start, k);
+                                        break;
+                                    }
+                                    k += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if cj == ";" {
+                    stmt_end = j + 1;
+                    break;
+                }
+                j += 1;
+            }
+            if stmt_end > 0 {
+                if spec.length > 0 {
+                    let mut is_relative: boolean = false;
+                    if spec.length >= 2 {
+                        if substring(spec, 0, 2) == "./" { is_relative = true; }
+                    }
+                    if spec.length >= 3 {
+                        if substring(spec, 0, 3) == "../" { is_relative = true; }
+                    }
+                    let mut is_runtime: boolean = false;
+                    if spec.length >= 8 {
+                        if substring(spec, 0, 8) == "runtime/" {
+                            is_runtime = true;
+                        }
+                    }
+                    let mut has_slash: boolean = false;
+                    let mut si: int = 0;
+                    loop {
+                        if si >= spec.length { break; }
+                        if substring(spec, si, si + 1) == "/" {
+                            has_slash = true;
+                            break;
+                        }
+                        si += 1;
+                    }
+                    if !is_relative {
+                        if !is_runtime {
+                            if has_slash { out.push(spec); }
+                        }
+                    }
+                }
+                i = stmt_end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// P1 (#363): scan one source file for `import { ... } from "<spec>";`
+// (and the `export { ... } from "..."` re-export shape) and return
+// true if any spec equals `target` or starts with `target + "/"`. Used
+// by `_cr_resolve_and_dedupe` to decide whether the host-capsule
+// enumeration is needed. Cheap: collected specs go through the same
+// comment-aware scanner that `collect_scoped_import_specs` shares with
+// the existing relative-import / workspace-implicit walks; the only
+// difference here is the post-filter (the existing scanner drops bare-
+// name specs like `"my-app"` because those don't have a `/`).
+//
+// `target` should be the manifest's `[capsule].name`. `target/sub`
+// matches the same prefix-relationship the import resolver applies
+// when it canonicalises a scoped import down to its `scope/name`
+// slug, so an `import { ... } from "<host>/util"` also gates the
+// host enumeration on (a future submodule layout would land under
+// `<host>/util.sfn` or `<host>/util/mod.sfn`, both of which the host
+// walker captures).
+fn _cr_source_imports_host(source: string, target: string) -> boolean {
+    if target.length == 0 { return false; }
+    let source_len = source.length;
+    if source_len == 0 { return false; }
+    let mut steps: int = 0;
+    let max_steps = source_len * 6 + 1000;
+    let mut i: int = 0;
+    let mut in_string: boolean = false;
+    let mut escaping: boolean = false;
+    let mut in_line_comment: boolean = false;
+    let mut in_block_comment: boolean = false;
+    loop {
+        if i >= source_len { break; }
+        steps += 1;
+        if steps > max_steps { break; }
+        let ch = _cr_byte_at(source, i);
+        if in_line_comment {
+            if ch == "\n" { in_line_comment = false; }
+            i += 1;
+            continue;
+        }
+        if in_block_comment {
+            if ch == "*" {
+                if i + 1 < source_len {
+                    if _cr_byte_at(source, i + 1) == "/" {
+                        in_block_comment = false;
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            if escaping {
+                escaping = false;
+                i += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaping = true;
+                i += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+                i += 1;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == "/" {
+            if i + 1 < source_len {
+                let next = _cr_byte_at(source, i + 1);
+                if next == "/" {
+                    in_line_comment = true;
+                    i += 2;
+                    continue;
+                }
+                if next == "*" {
+                    in_block_comment = true;
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        let mut _is_dep_keyword: boolean = false;
+        if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
+        if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
+        if _is_dep_keyword {
+            // Walk forward to the `from "..."` token and pull the spec.
+            // Mirrors `collect_scoped_import_specs`'s tokenising loop —
+            // duplicated here to avoid running the broader scanner
+            // (allocates a string array) when a single literal-match
+            // probe is all we need.
+            let mut j: int = i;
+            let mut s_in_string: boolean = false;
+            let mut s_escaping: boolean = false;
+            let mut s_in_line_comment: boolean = false;
+            let mut s_in_block_comment: boolean = false;
+            let mut spec: string = "";
+            let mut stmt_end: int = -1;
+            loop {
+                if j >= source_len { break; }
+                steps += 1;
+                if steps > max_steps { break; }
+                let cj = _cr_byte_at(source, j);
+                if s_in_line_comment {
+                    if cj == "\n" { s_in_line_comment = false; }
+                    j += 1;
+                    continue;
+                }
+                if s_in_block_comment {
+                    if cj == "*" {
+                        if j + 1 < source_len {
+                            if _cr_byte_at(source, j + 1) == "/" {
+                                s_in_block_comment = false;
+                                j += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    j += 1;
+                    continue;
+                }
+                if s_in_string {
+                    if s_escaping {
+                        s_escaping = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\\" {
+                        s_escaping = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\"" {
+                        s_in_string = false;
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if cj == "/" {
+                    if j + 1 < source_len {
+                        let nj = _cr_byte_at(source, j + 1);
+                        if nj == "/" {
+                            s_in_line_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                        if nj == "*" {
+                            s_in_block_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                    }
+                }
+                if cj == "\"" {
+                    s_in_string = true;
+                    j += 1;
+                    continue;
+                }
+                if spec.length == 0 {
+                    if _cr_word_matches(source, j, "from") {
+                        let mut k = j + 4;
+                        loop {
+                            if k >= source_len { break; }
+                            let wk = _cr_byte_at(source, k);
+                            let mut ws: boolean = false;
+                            if wk == " " { ws = true; }
+                            if wk == "\t" { ws = true; }
+                            if wk == "\n" { ws = true; }
+                            if wk == "\r" { ws = true; }
+                            if !ws { break; }
+                            k += 1;
+                        }
+                        if k < source_len {
+                            if _cr_byte_at(source, k) == "\"" {
+                                k += 1;
+                                let start = k;
+                                let mut esc: boolean = false;
+                                loop {
+                                    if k >= source_len { break; }
+                                    let sk = _cr_byte_at(source, k);
+                                    if esc {
+                                        esc = false;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\\" {
+                                        esc = true;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\"" {
+                                        spec = substring(source, start, k);
+                                        break;
+                                    }
+                                    k += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if cj == ";" {
+                    stmt_end = j + 1;
+                    break;
+                }
+                j += 1;
+            }
+            if stmt_end > 0 {
+                if spec.length > 0 {
+                    if strings_equal(spec, target) { return true; }
+                    if spec.length > target.length {
+                        if substring(spec, 0, target.length) == target {
+                            if substring(spec, target.length, target.length + 1) == "/" {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                i = stmt_end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return false;
+}
+
+export {
+    _cr_find_substring,
+    _cr_source_imports_host,
+    collect_relative_import_specs,
+    collect_scoped_import_specs
+};
