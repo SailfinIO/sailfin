@@ -1,0 +1,447 @@
+// capsule_emit_parallel.sfn — parallel `sfn emit` orchestration + job sizing.
+//
+// Extracted from capsule_resolver.sfn (#1512 build-memory work). Holds the
+// parallel-emit fan-out (`_cr_run_parallel_emit`) and the job-count / RAM-
+// budget resolution it depends on. Lifting this ~390-line shell-script-
+// building block out of capsule_resolver.sfn was the second cut (after
+// capsule_import_scan.sfn) to bring that module under the 2 GB CI per-job
+// gate. capsule_resolver re-imports the public entry points.
+//
+// `_cr_shell_read` + its extern are intentionally duplicated here (a private
+// copy) rather than imported from capsule_resolver: capsule_resolver imports
+// THIS module, so importing back would form a cycle. The original copy stays
+// in capsule_resolver for its own `_cr_get_home`/`_cr_scratch_root` callers.
+import { _atomic_rename_into_place, _mktemp_sibling_cmd } from "./cli_commands_utils";
+import { number_to_string } from "./main";
+import { substring } from "./string_utils";
+
+extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+
+// Private copy of capsule_resolver's `_cr_shell_read` — see header for why
+// it is duplicated rather than imported.
+fn _cr_shell_read(cmd: string) -> string ![io] {
+    let captured = sailfin_runtime_shell_capture(cmd);
+    if captured.length == 0 { return ""; }
+    let mut start: int = 0;
+    let mut end: int = captured.length;
+    loop {
+        if start >= end { break; }
+        let c = substring(captured, start, start + 1);
+        let mut ws: boolean = false;
+        if c == " " { ws = true; }
+        if c == "\n" { ws = true; }
+        if c == "\r" { ws = true; }
+        if c == "\t" { ws = true; }
+        if !ws { break; }
+        start += 1;
+    }
+    loop {
+        if end <= start { break; }
+        let c = substring(captured, end - 1, end);
+        let mut ws: boolean = false;
+        if c == " " { ws = true; }
+        if c == "\n" { ws = true; }
+        if c == "\r" { ws = true; }
+        if c == "\t" { ws = true; }
+        if !ws { break; }
+        end -= 1;
+    }
+    return substring(captured, start, end);
+}
+
+// Shell single-quote a string so it can be embedded safely in a
+// `sh -c '...'` invocation. Escapes embedded single-quotes via the
+// classic `'\''` dance. Inlined here rather than imported from
+// `cli_commands_utils` to keep the resolver's dep diamond shallow.
+fn _cr_shell_quote(value: string) -> string {
+    let mut out: string = "'";
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let ch = substring(value, i, i + 1);
+        if ch == "'" { out = out + "'\\''"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out + "'";
+}
+
+// Resolve the per-build job count for parallel subprocess emits.
+// Reads `SAILFIN_BUILD_JOBS` first; falls back to `nproc` (clamped
+// to [1, 8] for system-memory safety — each worker subprocess
+// holds its own arena + parser state, so 8 workers × ~500 MB ≈
+// 4 GB peak total memory across the parent + worker processes,
+// keeping us under the compiler's self-applied 8 GiB memory budget
+// even when the parent's own resolver state is at peak; each worker
+// inherits that RLIMIT_AS). Returns 1 on any read failure or
+// when nproc isn't on PATH, which keeps the legacy serial
+// behavior as the safe default.
+//
+// Stage E PR3: `_cr_run_parallel_emit` honours this. The architect's
+// plan is to default to `nproc`, with `SAILFIN_BUILD_JOBS=1`
+// available as a regression-bisect escape hatch (mirrors the
+// `BUILD_JOBS=1` knob the prior `scripts/build.sh` historically
+// exposed; the script was retired in Stage E PR7 / #383).
+fn _cr_resolve_jobs() -> int ![io] {
+    let env_jobs = _cr_shell_read("printf '%s' \"$SAILFIN_BUILD_JOBS\"");
+    if env_jobs.length > 0 {
+        let parsed = _cr_parse_positive_int(env_jobs);
+        if parsed > 0 {
+            if parsed > 8 { return 8; }
+            return parsed;
+        }
+    }
+    // Wrap in `{ ...; }` so the `> tmp` redirect that
+    // `_cr_shell_read` appends applies to the WHOLE
+    // `||`-chain, not just the trailing `echo 1`. Without the
+    // braces, `nproc` prints to the terminal (every build run)
+    // and only the fallback's output gets captured — observed
+    // as stray "4" lines leaking into `make rebuild` output.
+    let nproc = _cr_shell_read("{ nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1; }");
+    let mut parsed_nproc = _cr_parse_positive_int(nproc);
+    if parsed_nproc <= 0 { parsed_nproc = 1; }
+    if parsed_nproc > 8 { parsed_nproc = 8; }
+    // Memory-aware clamp (#1532): cap the CPU-derived fan-out by how
+    // many ~3 GiB emit workers fit in physical RAM. On macOS this is
+    // the *only* emit backpressure — `RLIMIT_AS` is a no-op on Darwin
+    // (`runtime/sfn/platform/rlimit.sfn`), so 8 uncapped concurrent
+    // emits OOM a ~7 GiB CI runner (Jetsam SIGKILL — the #1532
+    // failure). On Linux the clamp is a strictly-better default that
+    // the inherited `RLIMIT_AS` floor still backstops. `hw.memsize`
+    // is the Darwin RAM source; `/proc/meminfo` MemTotal (kB) is the
+    // Linux one. `printf "%d"` keeps awk from emitting scientific
+    // notation that `_cr_parse_positive_int` would reject.
+    let memsize = _cr_shell_read("{ sysctl -n hw.memsize 2>/dev/null || awk '/MemTotal/{printf \"%d\", $2*1024; exit}' /proc/meminfo 2>/dev/null || echo 0; }");
+    let memsize_bytes = _cr_parse_positive_int(memsize);
+    return _cr_ram_budget_jobs(memsize_bytes, parsed_nproc);
+}
+
+// Memory-aware fan-out ceiling for `_cr_resolve_jobs`. Returns how
+// many concurrent `sfn emit` workers fit in RAM, each reserving
+// `per_job_reserve` bytes out of a 66% slice of physical memory
+// (headroom for the parent, the `clang`/`llvm-link` grandchildren,
+// and the OS). Pure arithmetic so it is unit-testable apart from the
+// host RAM probe. `memsize_bytes <= 0` means "unknown" — return
+// `nproc` unchanged (fail-open: never starve a build on a host we
+// cannot measure). The clamp only ever *lowers* the CPU-derived
+// count, never raises it.
+fn _cr_ram_budget_jobs(memsize_bytes: int, nproc: int) -> int {
+    if memsize_bytes <= 0 { return nproc; }
+    // 3 GiB — the measured peak RSS of the heaviest compiler-module
+    // emit (`capsule_resolver.sfn` ~3.23 GiB); see
+    // `docs/proposals/darwin-memory-governor.md` §2.4.
+    let per_job_reserve: int = 3221225472;
+    let usable: int = memsize_bytes * 66 / 100;
+    let mut budget: int = usable / per_job_reserve;
+    if budget < 1 { budget = 1; }
+    if budget >= nproc { return nproc; }
+    return budget;
+}
+
+// Parse a non-negative integer from a string. Returns 0 on any
+// non-digit or empty input. Local to the resolver so we don't
+// pull in a richer parser for a single-use helper.
+fn _cr_parse_positive_int(value: string) -> int {
+    if value.length == 0 { return 0; }
+    let mut n: int = 0;
+    let mut i: int = 0;
+    let mut any_digit: boolean = false;
+    loop {
+        if i >= value.length { break; }
+        let ch = substring(value, i, i + 1);
+        let mut digit: int = -1;
+        if ch == "0" { digit = 0; }
+        if ch == "1" { digit = 1; }
+        if ch == "2" { digit = 2; }
+        if ch == "3" { digit = 3; }
+        if ch == "4" { digit = 4; }
+        if ch == "5" { digit = 5; }
+        if ch == "6" { digit = 6; }
+        if ch == "7" { digit = 7; }
+        if ch == "8" { digit = 8; }
+        if ch == "9" { digit = 9; }
+        if digit < 0 {
+            // Allow trailing whitespace (e.g. nproc's trailing newline
+            // already stripped, but be defensive against printf "%s"
+            // wrappers).
+            if ch == " " {
+                i += 1;
+                continue;
+            }
+            if ch == "\t" {
+                i += 1;
+                continue;
+            }
+            if ch == "\n" {
+                i += 1;
+                continue;
+            }
+            return 0;
+        }
+        any_digit = true;
+        n = n * 10 + digit;
+        i += 1;
+    }
+    if !any_digit { return 0; }
+    return n;
+}
+
+// One emit task for `_cr_run_parallel_emit`. The helper invokes
+// `<sailfin_exe> emit --module-name <slug> -o <output_path> <mode>
+// <source_path>` for each task, fanning across `jobs` workers.
+struct ParallelEmitTask {
+    slug: string;
+    output_path: string;
+    source_path: string;
+}
+
+// Run a list of `<sailfin> emit` invocations in parallel via
+// `tr '\n' '\0' | xargs -0 -P N -n 3`. Each worker subprocess
+// is independent (fresh arena, no shared state), so memory
+// stays per-worker rather than scaling with `tasks.length`.
+//
+// The implementation writes 3 newline-delimited lines per task
+// (slug, output, source) to a `mktemp`-allocated file, then
+// pipes through `tr` to convert the newlines into NULs that
+// POSIX xargs accepts via `-0`. (`-d '\n'` is a GNU xargs
+// extension; macOS / BSD xargs only supports `-0`, so the `tr`
+// translation is what keeps us portable.)
+//
+// Each xargs invocation pulls 3 NUL-separated args and runs
+// the per-worker shell script with them as $1, $2, $3. The
+// script emits via `<seed> emit --module-name "$1" -o "$2"
+// "$mode" "$3"`, then (for `llvm` mode only) runs the
+// validator cascade — `llvm-as` → `llvm-as-18` →
+// `clang -c -emit-llvm` → `clang-18` — and retries the emit
+// up to 3 times if validation rejects the IR. Same shape as
+// the serial `_cr_compile_one` retry loop, just inlined into
+// shell so each parallel worker is self-contained. Cache
+// stores happen AFTER xargs returns (in
+// `compile_capsule_modules`), so a worker that retries to
+// success won't poison the cache with a transient bad emit.
+//
+// Seed binary path and mode are passed via env vars rather
+// than inlined in the worker script — that sidesteps shell-
+// escaping pitfalls when the seed path contains spaces or
+// quotes (which it shouldn't, but defensive).
+//
+// Returns true iff every task exited zero. xargs's default
+// behavior is to terminate the rest of the queue on a non-zero
+// exit; we keep that semantics so a single bad emit fails the
+// whole build fast (matches the serial loop's `return false`
+// on the first failure).
+//
+// Stage E PR3: this is the helper that closes the parallelism
+// gap with the prior `scripts/build.sh`'s historical
+// `xargs -P "$JOBS"` pattern (formerly at build.sh:819, 853;
+// the script was retired in Stage E PR7 / #383). With
+// `jobs == 1`, the helper sequentialises to keep the
+// regression-bisect path simple.
+fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: string, jobs: int, import_context_root: string) -> boolean ![io] {
+    if tasks.length == 0 { return true; }
+    let mut effective_jobs = jobs;
+    if effective_jobs <= 0 { effective_jobs = 1; }
+
+    // #957: when an import-context root is supplied (llvm-emit path),
+    // each worker passes `--import-context <root>` so the emit
+    // subprocess loads the cross-module effect table. Native staging
+    // emits pass "" and skip the flag.
+    let use_import_context = import_context_root.length > 0;
+
+    // Sequential fallback: keeps regression bisects (and any
+    // SAILFIN_BUILD_JOBS=1 invocations) on the simple
+    // process.run-per-task path. No xargs overhead, no temp file.
+    if effective_jobs == 1 {
+        let mut i: int = 0;
+        loop {
+            if i >= tasks.length { break; }
+            let t = tasks[i];
+            // #515: `--attempts 1 --no-validate` pins the child to a
+            // single bare emit. `sfn emit`'s new default (3 attempts +
+            // validate) is owned at the resolver layer, not delegated
+            // to the child — this serial fallback preserves its
+            // pre-#515 single-shot contract exactly. `sailfin_exe` is
+            // the same-generation binary, so it accepts the flags.
+            // `--no-resolve-gate` (#906): this is a per-module
+            // intermediate emit. For the `native` stage it carries no
+            // cross-module import context, so the lowering dry-run gate
+            // would falsely reject legitimate imported calls; suppress it
+            // here and let the build's LLVM lowering stage (#631) own
+            // fail-closed. The `llvm` stage ignores the flag. Mirrors
+            // `emit_helpers.emit_subprocess_with_retry`.
+            // #1011: emit to a sibling temp + atomic rename so a peer
+            // reader never sees a partial `.sfn-asm`/`.ll`. Mirrors
+            // `emit_subprocess_with_retry`; falls back to in-place when
+            // `mktemp` is unavailable.
+            let staged = _mktemp_sibling_cmd(t.output_path);
+            let mut emit_target: string = t.output_path;
+            if staged.length > 0 { emit_target = staged; }
+            let mut emit_args: string[] = [sailfin_exe, "emit", "--module-name", t.slug, "--attempts", "1", "--no-validate", "--no-resolve-gate", "-o", emit_target];
+            if use_import_context {
+                emit_args.push("--import-context");
+                emit_args.push(import_context_root);
+            }
+            emit_args.push(mode);
+            emit_args.push(t.source_path);
+            let rc = process.run(emit_args);
+            if rc != 0 {
+                if staged.length > 0 {
+                    process.run(["rm", "-f", staged]);
+                }
+                return false;
+            }
+            if staged.length > 0 {
+                if !_atomic_rename_into_place(staged, t.output_path) {
+                    return false;
+                }
+            }
+            i += 1;
+        }
+        return true;
+    }
+
+    // Parallel: write 3 lines per task (slug / output / source)
+    // to a `mktemp`-allocated file, then pipe through `tr` →
+    // `xargs -0`. `tr '\n' '\0'` translates the newline-separated
+    // file into NUL-separated input that POSIX xargs accepts via
+    // `-0` (the `-d '\n'` flag is GNU-only and breaks on macOS /
+    // BSD). `mktemp PATTERN` with at least 6 X's is portable
+    // across Linux GNU coreutils and macOS BSD; failure yields an
+    // empty path which we surface as a build error rather than
+    // writing to a predictable location.
+    let tmp = _cr_shell_read("mktemp /tmp/sfn_parallel_emit.XXXXXX 2>/dev/null");
+    if tmp.length == 0 {
+        print.err("capsule-resolver: mktemp failed; cannot run parallel emit");
+        return false;
+    }
+    let mut content: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= tasks.length { break; }
+        let t = tasks[i];
+        content = content + t.slug + "\n" + t.output_path + "\n" + t.source_path
+            + "\n";
+        i += 1;
+    }
+    fs.writeFile(tmp, content);
+
+    // Per-worker shell script: emit + (for `llvm` mode) validator
+    // cascade + up to 3 retries, mirroring the serial
+    // `_cr_compile_one` loop so the parallel path doesn't
+    // regress robustness vs the alpha.6 seed's known IR-
+    // corruption flake. `native` mode (used by
+    // `stage_capsule_imports`) skips validation — the staged
+    // `.sfn-asm` doesn't need to round-trip through llvm-as.
+    // #957: when an import-context root is set, the worker passes
+    // `--import-context "$SAILFIN_PE_IMPORT_CTX"` to the emit; the env
+    // var is only exported below when `use_import_context` holds, so
+    // the native staging path (root == "") emits the flag-free form.
+    //
+    // #515 chose option (b) for this path: the inlined cascade below
+    // is a deliberate hand mirror of `emit_helpers.validate_llvm_ir`,
+    // NOT a shell-out to `sfn emit --validate`. The child emit is
+    // pinned to `--attempts 1 --no-validate` so this worker's own
+    // `while [ $attempt -lt 3 ]` + cascade stays the single retry/
+    // validate authority; without those flags the child's new default
+    // (3 attempts + validate) would compound to 9 attempts and a
+    // double `llvm-as` per task on the hottest (fanned-out) build
+    // path. The tradeoff: any change to the tool-discovery order in
+    // `validate_llvm_ir` MUST be mirrored here (and vice versa). A
+    // follow-up could unify via `sfn emit --attempts 1 --validate` if
+    // the per-task overhead proves acceptable.
+    let mut worker_import_arg = "";
+    if use_import_context {
+        worker_import_arg = "--import-context \"$SAILFIN_PE_IMPORT_CTX\" ";
+    }
+    // `--no-resolve-gate` (#906): per-module intermediate emit; the
+    // `native` stage carries no cross-module import context, so the
+    // lowering dry-run gate would falsely reject legitimate imported
+    // calls. Suppress it here and let the build's LLVM lowering stage
+    // (#631) own fail-closed; the `llvm` stage ignores the flag. Mirrors
+    // `emit_helpers.emit_subprocess_with_retry` and the serial fallback
+    // above — without it, multi-job builds fail closed on every
+    // cross-module callee.
+    // #1011: each attempt emits to a `mktemp` temp BESIDE the output
+    // (same dir → atomic same-filesystem `mv`), validates the temp, and
+    // only renames it onto `$2` on success. A peer worker reading this
+    // module's staged `.sfn-asm` (cross-module signatures) or `.ll`
+    // therefore never observes the truncate+rewrite the seed performs
+    // on each emit attempt. `pub` publishes (no-op if mktemp degraded to
+    // `tmp == $2`); `clean` drops a failed-attempt temp so retries don't
+    // litter the staging dir.
+    let pub = "if [ \"$tmp\" != \"$2\" ]; then mv -f \"$tmp\" \"$2\"; fi; ";
+    let clean = "if [ \"$tmp\" != \"$2\" ]; then rm -f \"$tmp\"; fi; ";
+    let worker_script = "attempt=0; while [ $attempt -lt 3 ]; do "
+        + "attempt=$((attempt + 1)); "
+        + "tmp=$(mktemp \"$(dirname \"$2\")/.sfn_stage.XXXXXX\" 2>/dev/null) || tmp=\"$2\"; "
+        + "\"$SAILFIN_PE_SEED\" emit --module-name \"$1\" --attempts 1 --no-validate --no-resolve-gate -o \"$tmp\" "
+        + worker_import_arg
+        + "\"$SAILFIN_PE_MODE\" \"$3\" || { "
+        + clean
+        + "continue; }; "
+        + "[ -s \"$tmp\" ] || { "
+        + clean
+        + "continue; }; "
+        + "if [ \"$SAILFIN_PE_MODE\" != llvm ]; then "
+        + pub
+        + "exit 0; fi; "
+        + "if (command -v llvm-as >/dev/null 2>&1 && llvm-as < \"$tmp\" >/dev/null 2>&1) "
+        + "|| (command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < \"$tmp\" >/dev/null 2>&1) "
+        + "|| (command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir \"$tmp\" -o /dev/null >/dev/null 2>&1) "
+        + "|| (command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir \"$tmp\" -o /dev/null >/dev/null 2>&1); "
+        + "then "
+        + pub
+        + "exit 0; fi; "
+        + clean
+        + "done; exit 1";
+
+    // Write the worker script + the pipeline driver to two temp
+    // files. Splitting them sidesteps two layers of shell
+    // escaping — the worker script body (multi-statement) and
+    // the outer pipeline (`tr | xargs sh worker`). Both are
+    // sourced as files; `process.run` passes the env vars
+    // directly via the `env` command without going through
+    // shell parsing.
+    let worker_path = _cr_shell_read("mktemp /tmp/sfn_parallel_worker.XXXXXX 2>/dev/null");
+    if worker_path.length == 0 {
+        print.err("capsule-resolver: mktemp failed; cannot run parallel emit");
+        process.run(["rm", "-f", tmp]);
+        return false;
+    }
+    fs.writeFile(worker_path, "#!/bin/sh\n" + worker_script + "\n");
+
+    let driver_path = _cr_shell_read("mktemp /tmp/sfn_parallel_driver.XXXXXX 2>/dev/null");
+    if driver_path.length == 0 {
+        print.err("capsule-resolver: mktemp failed; cannot run parallel emit");
+        process.run(["rm", "-f", tmp]);
+        process.run(["rm", "-f", worker_path]);
+        return false;
+    }
+    let driver_script = "#!/bin/sh\n" + "tr '\\n' '\\0' < " + _cr_shell_quote(tmp)
+        + " | xargs -0 -P "
+        + number_to_string(effective_jobs)
+        + " -n 3 sh "
+        + _cr_shell_quote(worker_path)
+        + "\n";
+    fs.writeFile(driver_path, driver_script);
+
+    // `env VAR=value cmd` exports the env vars into the entire
+    // process tree (including xargs-spawned worker shells).
+    // `process.run` doesn't take an env map; routing through
+    // `env` keeps the env propagation explicit + visible.
+    let rc = process.run(["env", "SAILFIN_PE_SEED=" + sailfin_exe, "SAILFIN_PE_MODE="
+        + mode, "SAILFIN_PE_IMPORT_CTX="
+        + import_context_root, "sh", driver_path]);
+
+    process.run(["rm", "-f", driver_path]);
+    process.run(["rm", "-f", worker_path]);
+
+    process.run(["rm", "-f", tmp]);
+    return rc == 0;
+}
+
+export {
+    ParallelEmitTask,
+    _cr_ram_budget_jobs,
+    _cr_resolve_jobs,
+    _cr_run_parallel_emit
+};

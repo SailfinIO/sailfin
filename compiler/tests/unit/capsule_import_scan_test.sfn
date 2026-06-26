@@ -1,0 +1,40 @@
+// Contract coverage for the capsule_import_scan.sfn extraction (#1512
+// build-memory work). The import-spec scanners were lifted out of
+// capsule_resolver.sfn to cut that module's LLVM-lowering peak RSS. This test
+// imports the *real* public functions from their new home and asserts they
+// still resolve and behave — so a future move (or a dropped re-export) can't
+// silently break the scanner contract. Behavior parity with the in-resolver
+// versions is otherwise covered by relative_import_resolver_test.sfn (which
+// keeps its own local copy) and the resolver e2e tests.
+import { collect_relative_import_specs, collect_scoped_import_specs } from "../../src/capsule_import_scan";
+import { strings_equal } from "../../src/string_utils";
+
+fn _eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
+
+test "capsule_import_scan: relative specs resolve from new module" {
+    let src = "import { a } from \"./foo\";\nimport { b } from \"../bar/baz\";\n";
+    let specs = collect_relative_import_specs(src);
+    assert specs.length == 2;
+    assert _eq(specs[0], "./foo");
+    assert _eq(specs[1], "../bar/baz");
+}
+
+test "capsule_import_scan: relative scanner skips scoped and bare specs" {
+    let src = "import { h } from \"sfn/http\";\nimport { x } from \"bare\";\n";
+    let specs = collect_relative_import_specs(src);
+    assert specs.length == 0;
+}
+
+test "capsule_import_scan: scoped specs resolve from new module" {
+    let src = "import { a } from \"scope/name\";\nimport { b } from \"./local\";\n";
+    let specs = collect_scoped_import_specs(src);
+    assert specs.length == 1;
+    assert _eq(specs[0], "scope/name");
+}
+
+test "capsule_import_scan: scoped scanner ignores commented imports" {
+    let src = "// import { a } from \"scope/ignored\";\nimport { b } from \"scope/real\";\n";
+    let specs = collect_scoped_import_specs(src);
+    assert specs.length == 1;
+    assert _eq(specs[0], "scope/real");
+}
