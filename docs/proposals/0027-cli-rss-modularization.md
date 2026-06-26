@@ -98,9 +98,19 @@ epic is stuck at a stable but unfinished midpoint with no tracking.
 
 ### 2.3 Dead weight for the compiler-decomposition epic (#345 / SFEP-0020)
 
-SFEP-0020 §3.4 asserts CLI dogfooding is "already done — not an open swap,"
-which is over-optimistic about the *modularization* state. Decomposing the
-compiler into `sfn/compiler-common` + a binary capsule (#345) would inherit
+**Dogfooding is real but partial — and SFEP-0020 §3.4 is right in the narrow
+sense it means.** The compiler *does* consume `sfn/cli` today:
+`compiler/capsule.toml:35` declares `"sfn/cli" = "*"` (the Issue 2.1 R1 gate),
+and **9 files** import its builders/types — `compiler/src/cli/main.sfn` plus the
+8 migrated commands under `cli/commands/`. So §3.4 is correct that there is **no
+private CLI-*library* copy to swap out** (unlike `string_utils`→`sfn/strings`);
+that DRY box is genuinely closed. What "already done" *elides* is the
+**modularization** state: the 7 remaining commands and all legacy flag parsing
+still bypass `sfn/cli`. The legacy `cli_main.sfn` imports the capsule for a
+single `bold` symbol only (`cli_main.sfn:4` — the R1 link-feasibility canary,
+not parsing) and otherwise walks argv by hand (44 `strings_equal` comparisons);
+`cli_commands.sfn` imports nothing from `sfn/cli`. Decomposing the compiler into
+`sfn/compiler-common` + a binary capsule (#345) would therefore inherit
 **3,067 + 1,075 + 713 = 4,855 lines** of un-migrated `cli_*` (`cli_main` +
 `cli_commands` + `cli_commands_utils`) — including the build driver and the
 937-line legacy function — as dead weight in the `sfn/compiler` binary capsule.
