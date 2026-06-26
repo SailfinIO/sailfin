@@ -1,9 +1,11 @@
 // Unit tests for concurrency-node effect requirements (issue #1083,
 // epic #965 M4). The effect checker must produce an `io` violation for
 // `spawn`, channel-send, and channel-receive operations inside a
-// function that does not declare `![io]`, and a `net` violation for
-// `serve` without `![net]`. With the matching effect declared, the
-// checker produces zero violations.
+// function that does not declare `![io]`, and an `io`+`net` violation
+// for `serve` without `![io, net]` (the live `Serve`-node arm is
+// registry-driven off the `serve` descriptor row -> [io, net]; #1601,
+// #1629). With the matching effect(s) declared, the checker produces
+// zero violations.
 //
 // `spawn` and `serve` are first-class AST nodes (Expression.Spawn /
 // Expression.Serve, added in #1079). Channel send/receive are
@@ -25,6 +27,16 @@ import { EffectViolation, validate_effects } from "../../src/effect_checker";
 // -------------------------------------------------------------------
 // Builder helpers
 // -------------------------------------------------------------------
+fn _missing_contains(effects: string[], target: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= effects.length { break; }
+        if effects[i] == target { return true; }
+        i += 1;
+    }
+    return false;
+}
+
 fn _span(line: int, column: int) -> SourceSpan {
     return SourceSpan {
         start_line: line,
@@ -85,7 +97,7 @@ fn _make_spawn_fn(name: string, effects: string[], span_line: int) -> Statement 
 }
 
 // Build a FunctionDeclaration whose body contains a single `serve(handler)`
-// expression node (Expression.Serve). Requires `net`.
+// expression node (Expression.Serve). Requires `io` and `net`.
 fn _make_serve_fn(name: string, effects: string[], span_line: int) -> Statement {
     let handler = Expression.Identifier { name: "my_handler", span: null };
     let serve_expr = Expression.Serve {
@@ -200,20 +212,49 @@ test "concurrency: spawn with ![io] is clean" {
 }
 
 // -------------------------------------------------------------------
-// serve — requires net
+// serve — requires io + net (#1629: live Serve-node arm tightened to
+// match the prelude/capsule `fn serve(...) ![io, net]` signatures and
+// the registry, closing an effect false-negative on the marquee path)
 // -------------------------------------------------------------------
-test "concurrency: serve without ![net] is diagnosed" {
+test "concurrency: serve without any effects is diagnosed for io and net" {
     let mut no_effects: string[] = [];
-    let stmt = _make_serve_fn("server_without_net", no_effects, 1);
+    let stmt = _make_serve_fn("server_without_effects", no_effects, 1);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 1;
-    assert violations[0].routine_name == "server_without_net";
+    assert violations[0].routine_name == "server_without_effects";
+    assert _missing_contains(violations[0].missing_effects, "io");
+    assert _missing_contains(violations[0].missing_effects, "net");
 }
 
-test "concurrency: serve with ![net] is clean" {
+// The headline #1629 case: a `serve(...)` under `[net]` alone must now
+// report the missing `io` effect (previously a false-negative).
+test "concurrency: serve with only ![net] reports missing io" {
     let mut net_effects: string[] = ["net"];
-    let stmt = _make_serve_fn("server_with_net", net_effects, 1);
+    let stmt = _make_serve_fn("server_with_net_only", net_effects, 1);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert violations[0].routine_name == "server_with_net_only";
+    assert _missing_contains(violations[0].missing_effects, "io");
+    assert ! _missing_contains(violations[0].missing_effects, "net");
+}
+
+// Symmetric guard: `[io]` alone must still flag the missing `net`.
+test "concurrency: serve with only ![io] reports missing net" {
+    let mut io_effects: string[] = ["io"];
+    let stmt = _make_serve_fn("server_with_io_only", io_effects, 1);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert violations[0].routine_name == "server_with_io_only";
+    assert _missing_contains(violations[0].missing_effects, "net");
+    assert ! _missing_contains(violations[0].missing_effects, "io");
+}
+
+test "concurrency: serve with ![io, net] is clean" {
+    let mut io_net_effects: string[] = ["io", "net"];
+    let stmt = _make_serve_fn("server_with_io_net", io_net_effects, 1);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 0;
