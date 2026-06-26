@@ -1,0 +1,127 @@
+// End-to-end regression for inline `export <declaration>` across modules
+// (SFEP-0031, issue #1681 / PR #1680).
+//
+// A producer module declares an `export struct` (first struct in the module)
+// and two inline-`export fn`s returning that struct and an `int[]`. A consumer
+// imports all three, calls them, and uses the results. Before SFEP-0031 this
+// failed at LLVM lowering with `cannot resolve return type for call to
+// \`make_spec\`` because inline `export fn`/`export struct` never reached the
+// producer's export manifest. After the fix the binary builds and runs.
+//
+// Native replacement style per `.claude/rules/no-bash-e2e.md`: assert on the
+// subprocess result, thread PATH + SAILFIN_TEST_SCRATCH into the nested build.
+import { contains } from "sfn/strings";
+
+fn _sfn_bin() -> string ![io] {
+    let configured = env.get("SAILFIN_BIN");
+    if configured.length > 0 { return configured; }
+    return "build/native/sailfin";
+}
+
+// The nested `sfn build` spawns clang + a linker, so the child needs PATH;
+// SAILFIN_TEST_SCRATCH routes the program.ll build-cache per invocation so
+// the parallel pool does not collide on the fixed build/sailfin.
+fn _child_env() -> string[] ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { e.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return e;
+}
+
+fn _scratch_base() -> string ![io] {
+    let base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length > 0 { return base; }
+    return "/tmp";
+}
+
+fn _capsule_root() -> string ![io] {
+    return _scratch_base() + "/sfn-inline-export-xmod";
+}
+
+// Materialize a 2-module capsule whose producer uses the inline export form
+// exclusively (no `export { ... }` block).
+fn _ensure_fixture() ![io] {
+    let root = _capsule_root();
+    fs.createDirectory(root + "/src", true);
+    fs.writeFile(root + "/capsule.toml", "[capsule]\n"
+        + "name = \"inline-export-xmod\"\n"
+        + "version = \"0.1.0\"\n"
+        + "description = \"E2E regression for SFEP-0031 inline export (#1681)\"\n\n"
+        + "[capabilities]\n"
+        + "required = [\"io\"]\n\n"
+        + "[build]\n"
+        + "entry = \"src/main.sfn\"\n");
+    fs.writeFile(root + "/src/producer.sfn", "export struct ShardSpec { valid: boolean, index: int, total: int }\n\n"
+        + "export fn make_spec(i: int, t: int) -> ShardSpec {\n"
+        + "    return ShardSpec{ valid: true, index: i, total: t };\n"
+        + "}\n\n"
+        + "export fn select_indices(count: int) -> int[] {\n"
+        + "    let mut out: int[] = [];\n"
+        + "    let mut k = 0;\n"
+        + "    loop {\n"
+        + "        if k >= count { break; }\n"
+        + "        out.push(k);\n"
+        + "        k = k + 1;\n"
+        + "    }\n"
+        + "    return out;\n"
+        + "}\n");
+    // Consumer: index=2, total=5, select_indices(4)=[0,1,2,3] (sum 6, len 4).
+    // Expected total 2+5+6+4 = 17 → exit 0 + marker on the correct path.
+    fs.writeFile(root + "/src/main.sfn", "import { make_spec, select_indices } from \"./producer\";\n\n"
+        + "fn main() -> int ![io] {\n"
+        + "    let spec = make_spec(2, 5);\n"
+        + "    let xs = select_indices(4);\n"
+        + "    let mut sum = 0;\n"
+        + "    let mut i = 0;\n"
+        + "    loop {\n"
+        + "        if i >= xs.length { break; }\n"
+        + "        sum = sum + xs[i];\n"
+        + "        i = i + 1;\n"
+        + "    }\n"
+        + "    let result = spec.index + spec.total + sum + xs.length;\n"
+        + "    if result == 17 {\n"
+        + "        print.info(\"INLINE_EXPORT_XMOD_OK\");\n"
+        + "        return 0;\n"
+        + "    }\n"
+        + "    print.err(\"INLINE_EXPORT_XMOD_BAD\");\n"
+        + "    return 1;\n"
+        + "}\n");
+}
+
+fn _bin_path() -> string ![io] {
+    return _scratch_base() + "/sfn-inline-export-xmod-prog";
+}
+
+test "inline export xmod: producer using only inline `export` builds across modules" ![io] {
+    _ensure_fixture();
+    let out_bin = _bin_path();
+    let exit = process.run_capture([_sfn_bin(), "build", "-p", _capsule_root(), "-o", out_bin], _child_env());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+
+    // The #1681 symptom is a lowering fatal in the importer; assert it is gone.
+    assert ! contains(out + err, "cannot resolve return type");
+    assert exit == 0;
+    assert fs.exists(out_bin);
+}
+
+test "inline export xmod: the linked binary runs and computes the right result" ![io] {
+    _ensure_fixture();
+    let out_bin = _bin_path();
+    let build_exit = process.run_capture([_sfn_bin(), "build", "-p", _capsule_root(), "-o", out_bin], _child_env());
+    let _bo = process.capture_take_stdout();
+    let _be = process.capture_take_stderr();
+    assert build_exit == 0;
+
+    let run_exit = process.run_capture([out_bin], _child_env());
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+    assert contains(run_out + run_err, "INLINE_EXPORT_XMOD_OK");
+}

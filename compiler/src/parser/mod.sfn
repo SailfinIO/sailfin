@@ -9,7 +9,12 @@
 //   - expressions.sfn:  Expression parsing (Pratt parser, literals, lambdas)
 //   - statements.sfn:   Block statement parsing (control flow, return, match)
 //   - declarations.sfn: Top-level declarations (fn, struct, enum, import, etc.)
-import { Program, Statement } from "../ast";
+import {
+    Decorator,
+    ExportSpecifier,
+    Program,
+    Statement
+} from "../ast";
 import { lex } from "../lexer";
 import { substring } from "../string_utils";
 import { Token, TokenKind } from "../token";
@@ -31,14 +36,16 @@ import {
     parse_variable_with_storage
 } from "./declarations";
 import {
+    consume_keyword,
     identifier_matches,
     is_end_of_file,
     parser_advance_raw,
     parser_peek_raw,
-    skip_trivia
+    skip_trivia,
+    symbol_matches
 } from "./token_utils";
 // Import types from submodules
-import { Parser, StatementParseResult } from "./types";
+import { Parser, ProgramUnitResult, StatementParseResult } from "./types";
 
 // ============================================================================
 // Main Entry Points
@@ -75,9 +82,14 @@ fn parse_tokens(tokens: Token[]) -> Program ![io] {
         if is_end_of_file(parser, token) { break; }
 
         let prev_index = parser.index;
-        let result = parse_statement(parser);
+        let result = parse_program_unit(parser);
         parser = result.parser;
-        statements = append_statement(statements, result.statement);
+        let mut _si: int = 0;
+        loop {
+            if _si >= result.statements.length { break; }
+            statements = append_statement(statements, result.statements[_si]);
+            _si += 1;
+        }
         parser = skip_trivia(parser);
         if parser.index == prev_index {
             print.err("parser: no progress; aborting to avoid infinite loop");
@@ -86,6 +98,151 @@ fn parse_tokens(tokens: Token[]) -> Program ![io] {
     }
 
     return Program { statements: statements };
+}
+
+// A single top-level parse step. The ordinary path wraps `parse_statement`'s
+// one statement in a one-element list; the inline `export <declaration>` form
+// (SFEP-0031) yields two: the declaration plus a synthesized `ExportDeclaration`
+// naming it. Inline-vs-block is decided on the token *after* `export` —
+// `{` keeps the existing block/re-export path untouched; a declaration
+// introducer routes to `parse_inline_export`.
+fn parse_program_unit(initial_parser: Parser) -> ProgramUnitResult {
+    let probe = skip_trivia(initial_parser);
+    let lead = parser_peek_raw(probe);
+    if identifier_matches(lead, "export") {
+        let after_export = skip_trivia(parser_advance_raw(probe));
+        let next = parser_peek_raw(after_export);
+        if !symbol_matches(next, "{") {
+            // Skip any decorators (`export @deco fn ...`) before deciding
+            // whether a declaration introducer follows.
+            let after_decorators = skip_trivia(parse_decorators(after_export).parser);
+            if is_inline_export_introducer(after_decorators) {
+                return parse_inline_export(probe);
+            }
+        }
+    }
+    let result = parse_statement(initial_parser);
+    return ProgramUnitResult {
+        parser: result.parser,
+        statements: [result.statement]
+    };
+}
+
+// True when the parser is positioned at a declaration that may be inline-
+// exported (`export fn`, `export struct`, …). Mirrors the declaration arms of
+// `parse_statement`; `let`/`thread_local`/`async`/`unsafe`/`extern` are handled
+// by their respective declaration parsers in `parse_inline_declaration`.
+fn is_inline_export_introducer(parser: Parser) -> boolean {
+    let token = parser_peek_raw(parser);
+    if identifier_matches(token, "fn") { return true; }
+    if identifier_matches(token, "async") { return true; }
+    if identifier_matches(token, "unsafe") { return true; }
+    if identifier_matches(token, "extern") { return true; }
+    if identifier_matches(token, "struct") { return true; }
+    if identifier_matches(token, "type") { return true; }
+    if identifier_matches(token, "interface") { return true; }
+    if identifier_matches(token, "enum") { return true; }
+    if identifier_matches(token, "let") { return true; }
+    if identifier_matches(token, "thread_local") { return true; }
+    return false;
+}
+
+// Parse `export <declaration>` (SFEP-0031). Consumes `export`, re-enters
+// decorator collection (so `export @deco fn` attaches the decorator to the
+// declaration), parses the declaration with its existing parser, then
+// synthesizes a `Statement.ExportDeclaration` naming the declared symbol —
+// exactly equivalent to `<declaration> export { name };`.
+fn parse_inline_export(initial_parser: Parser) -> ProgramUnitResult {
+    let mut parser: Parser = consume_keyword(initial_parser, "export");
+    parser = skip_trivia(parser);
+    let decorator_result = parse_decorators(parser);
+    parser = skip_trivia(decorator_result.parser);
+    let decl = parse_inline_declaration(parser, decorator_result.decorators);
+    let name = declared_export_name(decl.statement);
+    let export_statement = Statement.ExportDeclaration {
+        export_specifiers: [ExportSpecifier { name: name, alias: null }],
+        source: ""
+    };
+    return ProgramUnitResult {
+        parser: decl.parser,
+        statements: [decl.statement, export_statement]
+    };
+}
+
+// Dispatch the declaration following an inline `export`. Mirrors the
+// declaration arms of `parse_statement` for the exportable forms.
+//
+// `is_inline_export_introducer` has already confirmed `parser` is positioned
+// at one of these forms, so the `async`/`unsafe` arms here are deliberately
+// laxer than `parse_statement`'s (which guard on a following `fn`): a
+// well-formed `export async fn` / `export unsafe fn` / `export unsafe extern`
+// parses identically, and the laxity only affects ill-formed input (e.g.
+// `export async struct`), which the no-progress guard still terminates.
+fn parse_inline_declaration(parser: Parser, decorators: Decorator[]) -> StatementParseResult {
+    let token = parser_peek_raw(parser);
+    if identifier_matches(token, "fn") {
+        return parse_function(parser, false, decorators, false);
+    }
+    if identifier_matches(token, "async") {
+        return parse_function(parser, true, decorators, false);
+    }
+    if identifier_matches(token, "unsafe") {
+        let lookahead = skip_trivia(parser_advance_raw(parser));
+        if identifier_matches(parser_peek_raw(lookahead), "extern") {
+            let after_extern = skip_trivia(parser_advance_raw(lookahead));
+            if identifier_matches(parser_peek_raw(after_extern), "var") {
+                return parse_extern_var(parser, true, decorators);
+            }
+            return parse_extern_function(parser, true, decorators);
+        }
+        return parse_function(parser, false, decorators, true);
+    }
+    if identifier_matches(token, "extern") {
+        let after_extern = skip_trivia(parser_advance_raw(parser));
+        if identifier_matches(parser_peek_raw(after_extern), "var") {
+            return parse_extern_var(parser, false, decorators);
+        }
+        return parse_extern_function(parser, false, decorators);
+    }
+    if identifier_matches(token, "struct") {
+        return parse_struct(parser, decorators);
+    }
+    if identifier_matches(token, "type") {
+        return parse_type_alias(parser, decorators);
+    }
+    if identifier_matches(token, "interface") {
+        return parse_interface(parser, decorators);
+    }
+    if identifier_matches(token, "enum") {
+        return parse_enum(parser, decorators);
+    }
+    if identifier_matches(token, "thread_local") {
+        let after_keyword = skip_trivia(parser_advance_raw(parser));
+        if identifier_matches(parser_peek_raw(after_keyword), "let") {
+            return parse_variable_with_storage(after_keyword, true);
+        }
+        return parse_variable(parser);
+    }
+    return parse_variable(parser);
+}
+
+// Extract the symbol a declaration statement introduces, for synthesizing its
+// inline-export manifest entry. Returns "" for a statement that names nothing
+// (the synthesized export then names nothing and is a harmless no-op).
+fn declared_export_name(statement: Statement) -> string {
+    if statement.variant == "FunctionDeclaration" {
+        return statement.signature.name;
+    }
+    if statement.variant == "ExternFunctionDeclaration" {
+        return statement.signature.name;
+    }
+    if statement.variant == "StructDeclaration" { return statement.name; }
+    if statement.variant == "EnumDeclaration" { return statement.name; }
+    if statement.variant == "InterfaceDeclaration" { return statement.name; }
+    if statement.variant == "TypeAliasDeclaration" { return statement.name; }
+    if statement.variant == "VariableDeclaration" { return statement.name; }
+    if statement.variant == "ExternVarDeclaration" { return statement.name; }
+    return "";
 }
 
 // ============================================================================

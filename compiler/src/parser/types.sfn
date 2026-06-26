@@ -42,6 +42,15 @@ struct StatementParseResult {
     statement: Statement;
 }
 
+// A single top-level parse step that may yield more than one statement.
+// Used by the inline `export <declaration>` form (SFEP-0031), which emits
+// the declaration statement plus a synthesized `ExportDeclaration` naming
+// it. The ordinary path wraps its single statement in a one-element list.
+struct ProgramUnitResult {
+    parser: Parser;
+    statements: Statement[];
+}
+
 struct BlockStatementParseResult {
     parser: Parser;
     statement: Statement?;

@@ -146,6 +146,7 @@ here.
 | Interfaces | Shipped | Trait-style method signatures |
 | Enums / ADTs | Shipped | Payload variants; generic payloads monomorphise per instantiation (#830). >8-byte by-value payload layouts not yet emitted |
 | Type aliases | Shipped | Including generic params |
+| Module exports | **Shipped** | Block form `export { name };` / `export { x } from "./m";` and inline `export <declaration>` (`export fn`/`export struct`/`export enum`/`export interface`/`export type`/`export let`/`export extern …`/`export thread_local let mut`). Inline form added in SFEP-0031 (#1681); equivalent to `<decl> export { name };` |
 | `if`/`else`, `for` | Shipped | |
 | `loop` / `break` / `continue` | Shipped | `while` is intentionally not a keyword (`E0411` with a `loop` fix-it) |
 | `match` | Shipped | Literals, `_`, guards, enum-variant destructuring |
