@@ -467,6 +467,18 @@ macOS gets a smaller win because the heuristic picks `BUILD_JOBS=1` to fit the 7
 
 ## Completed Work
 
+### Symbol-Mangling O(n²) Memory Fixes (June 25, #1512)
+
+**Status: Implemented.** Cut `compiler/src/llvm/expression_lowering/native/core.sfn`'s single-module `emit llvm` peak RSS from **4.35 GiB → 1.64 GiB (−62%)**, byte-identical output, self-hosting preserved. Found by instrumenting the global arena's live `used` total at each phase/sub-phase boundary: the peak is **not** in the per-function lowering loop (the issue's original premise — that loop's cumulative scratch is only ~0.9 GB) but almost entirely in the **symbol-mangling pass** (`apply_module_symbol_mangling`), which was +2.9 GB on `core`. Three output-preserving fixes remove it:
+
+1. **`replace_symbol_refs_in_line` O(L²)→O(L)** (`lowering_helpers.sfn`): was building output one character at a time (`out = out + ch`), which under the no-free arena is O(L²) bytes per line — a handful of long IR lines dominated. Now copies verbatim runs by index and only materializes a chunk at each substituted `@symbol`, joining once.
+2. **Declare/define symbol index** (`build_header_index` + `find_signature_in_index` / `has_declare_or_define_in_index`): the shim + imm-declare loops probed the module for ~285 symbols, each call re-scanning (and re-`trim_text`-ing) all ~16k lines. A one-pass index turns each probe into an O(declares) name compare.
+3. **Call-site signature index**: the dominant residual. Shim targets are imported provider-qualified symbols with no declare/define line in the module, so `find_declare_signature`'s call-site fallback re-scanned all ~16k lines per target — and **`index_of` / `starts_with` allocate a substring per scan position** (the underlying systemic O(n²)-memory hazard). Extracting every call site's signature in one pass (`_extract_call_entry`) collapsed the mangling phase from +2.9 GB to +0.03 GB.
+
+**Rejected approach — per-function arena mark/rewind.** A prototype marked the arena before each `emit_llvm_function` and rewound after evacuating the function's output into a survivor arena. It was abandoned: (a) it bought `core` only ~0.4 GB (the loop scratch is small), and (b) it caused **use-after-rewind corruption** — `runtime/sfn/process.sfn` and ~9 other modules emitted garbage, non-deterministic call symbols (`@H�Xos` vs `@H�X=z` across runs; clean with `SAILFIN_USE_ARENA=0`, i.e. rewind no-op), because some lowering output escapes the rewound region by reference. The mangling fixes alone clear the `< 2 GB` AC, so the rewind was dropped. Per-function (and intra-function) rewind for the loop remains a possible future lever **only** with a complete escape audit + a real second allocator for the accumulators.
+
+**Not addressed (tracked follow-ups):** `runtime_helpers.sfn` (3.91 → unchanged) is bound by one ~17k-line function (the descriptor registry, 96% of the module); reducing it needs *intra-function* work or a registry restructure. `core` at 1.64 GB clears `< 2 GB` but not the #340 `< 800 MB` stretch — the floor is the front-end residue (parse/typecheck/emit_native + type context) plus the loop's working set. The `index_of`/`starts_with` substring-allocation is compiler-wide and worth a dedicated allocation-free rewrite.
+
 ### String Concat Allocation Reduction (April 11)
 
 **Status: Implemented.** LLVM lowering emits `sailfin_runtime_string_append` (realloc-based in-place extend) instead of `sailfin_runtime_string_concat` (malloc+copy) for chained `+` concatenation. Eliminates 2 dead intermediate allocations per 4-way concat.
