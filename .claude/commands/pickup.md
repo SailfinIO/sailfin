@@ -465,7 +465,8 @@ If anything was deferred or scope was adjusted mid-flight, surface it explicitly
 - The compiler self-caps memory (8 GiB on Linux); see `.claude/rules/compiler-safety.md`.
 - **Never skip Phase 1.5.** The `## Required in pinned seed` precheck (and its legacy fallback) prevents the failure mode that broke the original #489 attempt — a compiler-source migration picked up against a seed that predated its dependency. If the precheck fails, halt and comment; do not attempt to triple-bootstrap a workaround binary.
 - **One issue per session.** Don't try to bundle multiple issues — they were sized to be standalone.
-- **Every label flip must be paired with a board sync.** Run
-  `.claude/scripts/sync-project-status.sh <N> --from-labels` after any
-  `gh issue edit ... --add-label/--remove-label` so the Sailfin Tracker
-  board (Project #4) stays in sync with the labels.
+- **The label flip *is* the board update.** CI (`sync-project.yml`) syncs the
+  Sailfin Tracker (Project #4) from labels on every label event. Optionally
+  nudge sooner with `.claude/scripts/sync-project-status.sh <N> --from-labels`
+  after a `gh issue edit ... --add-label/--remove-label`; it self-skips with a
+  `note:` where `gh` can't reach the API (e.g. remote containers).

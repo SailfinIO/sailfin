@@ -32,6 +32,24 @@ fi
 issue_number="$1"
 shift
 
+# Skip cleanly when gh cannot reach the GitHub API.
+#
+# In sandboxed / proxied environments (e.g. Claude Code remote containers) git
+# is rewritten through a localhost proxy but api.github.com is gated behind the
+# Claude GitHub App — repo REST and GraphQL calls 403 regardless of any
+# GITHUB_TOKEN. The org project board is reconciled from labels by CI
+# (.github/workflows/sync-project.yml → scripts/sync-issue-to-project.sh) on
+# every label event, so a local sync here is best-effort, not required. Probe
+# once; if the repo isn't readable, no-op (label remains the source of truth)
+# instead of aborting under `set -e` and surfacing a scary "couldn't update the
+# board" failure. A working gh with an under-scoped token still proceeds and
+# surfaces the real permission error.
+if ! gh api "repos/$REPO" -q .id >/dev/null 2>&1; then
+  echo "note: gh cannot reach $REPO here (sandboxed/proxied env); skipping local board sync." >&2
+  echo "      Status is reconciled from labels by CI (sync-project.yml) on label events." >&2
+  exit 0
+fi
+
 mode="from-labels"
 forced_status=""
 while [[ $# -gt 0 ]]; do

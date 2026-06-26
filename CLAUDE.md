@@ -321,9 +321,17 @@ the session-sized *what*.
 **Labels** are registered in `.github/labels.yml`; conventions and the lifecycle
 diagram are in `docs/conventions/issue-naming.md`. Key ones: `claude-ready`,
 `needs-grooming`, `in-progress`, `blocked`, `type:*`, `size:*`, `priority:*`,
-`area:*`, `epic`/`tracking`. Slash commands that flip labels must follow with
-`.claude/scripts/sync-project-status.sh <N> --from-labels` to move the
-Sailfin Tracker (org project SailfinIO/4) card.
+`area:*`, `epic`/`tracking`. **Labels are the source of truth**; the Sailfin
+Tracker (org project SailfinIO/4) is *derived*. CI owns the board:
+`.github/workflows/sync-project.yml` (→ `scripts/sync-issue-to-project.sh`) runs
+on every `labeled`/`unlabeled` event and reconciles the Priority, Size, and
+Status fields from labels with a project-scoped PAT. So flipping the label *is*
+the board update — no extra step is required. `.claude/scripts/sync-project-status.sh
+<N> --from-labels` remains a **best-effort local nudge** (it just sets Status
+sooner than the next CI run); it self-skips with a `note:` when `gh` can't reach
+the API — e.g. in remote containers, where api.github.com is gated behind the
+Claude GitHub App and only the GitHub MCP tools work — so a "couldn't update the
+board" message there is expected and benign, not a failure to chase.
 
 **Anti-patterns:** don't pick up `needs-grooming` (groom first); don't expand
 scope mid-session (comment and pause); don't bundle issues into one PR; don't

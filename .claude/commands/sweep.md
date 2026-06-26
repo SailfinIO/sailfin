@@ -351,9 +351,12 @@ Dry run: changes <previewed | applied>
 - **Don't modify issue bodies.** Only labels and comments.
 - **Be conservative with prose blockers.** Anything not a hard `#N` reference stays blocked until a human confirms.
 - **Always leave a comment when flipping a label.** Future-you needs the audit trail.
-- **Every label flip must be paired with a board sync** via
-  `.claude/scripts/sync-project-status.sh <N> --from-labels`. Surface any
-  non-zero exit under "Concerns" so a human can reconcile the column.
+- **The label flip *is* the board update.** CI (`sync-project.yml`) reconciles
+  the board from labels on every label event. Optionally nudge Status sooner
+  with `.claude/scripts/sync-project-status.sh <N> --from-labels`; it self-skips
+  (exit 0, `note:`) where `gh` can't reach the API (e.g. remote containers).
+  Surface only a genuine non-zero exit under "Concerns" so a human can reconcile
+  the column — a self-skip is not one.
 - **In `--dry-run` mode, make zero writes.** No labels, no comments, no
   board syncs. Print intended actions only.
 - **Read `.github/AGENTS.md` for cap context.** Default budget = 2 matches the autonomous-pipeline cap; `--greedy` raises it for human-coordinated parallel sessions.
