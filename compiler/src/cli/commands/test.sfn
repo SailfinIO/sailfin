@@ -86,7 +86,7 @@ import {
     _suite_name_from_path,
     _write_text_cmd
 } from "../../cli_commands_utils";
-import { assemble_runtime_capsule_link_inputs } from "../../cli_main";
+import { assemble_runtime_capsule_link_inputs, link_test_objects } from "../../cli_main";
 import { ImportSymbolTable, empty_import_symbols } from "../../effect_imports";
 import { compile_tests_to_llvm_file_with_module_imports, module_name_from_path } from "../../main";
 import { LayoutManifest } from "../../native_ir";
@@ -1260,11 +1260,14 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
     // triple`, which clang's link overrides — matching the suppression on
     // every other clang invocation in cli_main.sfn so the test path is not
     // the lone source of `[-Woverride-module]` noise.
-    let mut args: string[] = ["clang", "-O0", "-Wno-override-module", "-o", out_path, ll_path];
+    // Test link layout (`-o` before inputs; test source `.ll` then dep
+    // `.ll` as IR inputs). The driver assembles the semantic pieces and
+    // `LlvmTextBackend.link` reproduces the exact clang argv.
+    let mut ir_inputs: string[] = [ll_path];
     let mut di: int = 0;
     loop {
         if di >= dep_ll_paths.length { break; }
-        args.push(dep_ll_paths[di]);
+        ir_inputs.push(dep_ll_paths[di]);
         di += 1;
     }
     // Issue #940: resolve the implicit runtime capsule
@@ -1300,17 +1303,12 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
     // scoped to the build/run path that feeds the build-quality gate.
     let rt = assemble_runtime_capsule_link_inputs(runtime_caps, rt_cache_dir, "-O0", binary_dir, "");
     if !rt.success { return 1; }
-    let mut roi: int = 0;
-    loop {
-        if roi >= rt.object_paths.length { break; }
-        args.push(rt.object_paths[roi]);
-        roi += 1;
-    }
     // The runtime capsule's `link-libs` (runtime/capsule.toml) already
     // carries `-lm` / `-lpthread`. Track which math/thread libs flow
     // through so the defensive push below does not re-add a lib the
     // capsule supplied — a duplicate `-lm` makes the macOS linker emit
     // `ld: warning: ignoring duplicate libraries: '-lm'`.
+    let mut libs: string[] = [];
     let mut has_lm: boolean = false;
     let mut has_pthread: boolean = false;
     let mut lli: int = 0;
@@ -1320,14 +1318,17 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         if strings_equal(lib, "-lm") { has_lm = true; }
         if strings_equal(lib, "-lpthread") { has_pthread = true; }
         if strings_equal(lib, "-pthread") { has_pthread = true; }
-        args.push(lib);
+        libs.push(lib);
         lli += 1;
     }
     // Fallback for configurations where the runtime capsule did not supply
     // them (keeps the link complete without double-adding).
-    if !has_lm { args.push("-lm"); }
-    if !has_pthread { args.push("-pthread"); }
-    return process.run(args);
+    if !has_lm { libs.push("-lm"); }
+    if !has_pthread { libs.push("-pthread"); }
+    // Dispatch through the `Backend` seam via the cli_main entry point
+    // (kept there to avoid a cross-dir `../../backend` import; see
+    // `link_test_objects`). Reproduces the prior test-link argv exactly.
+    return link_test_objects(rt.object_paths, ir_inputs, out_path, libs);
 }
 
 // Resolve the per-test scratch root used for the test runner's

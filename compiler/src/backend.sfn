@@ -1,0 +1,171 @@
+// compiler/src/backend.sfn
+//
+// Stage 0 of the toolchain-independence arc (SFEP-15,
+// `docs/proposals/0015-llvm-independence.md` §6/§8/§11): a `Backend`
+// interface that hides the driver's `process.run(["clang", …])` codegen
+// and link call sites behind a single seam. Today's textual-LLVM-IR +
+// clang path is the sole implementation (`LlvmTextBackend`); it
+// reproduces every existing clang invocation byte-for-byte (zero
+// behaviour change — `--check-determinism` must still pass with no
+// rebaseline).
+//
+// Later codegen/link work plugs in here instead of re-hardcoding LLVM
+// assumptions across the driver: the LLVM C-API binding (#347) lands as
+// an `LlvmApiBackend`, and the seal-sufficient native backend (#1640) as
+// a `NativeBackend`. The driver stays pure orchestration: it keeps
+// computing the runtime objects, the linker selection, the dead-strip
+// decision (and its diagnostic), and the link-lib dedup, then hands the
+// already-ordered pieces to the backend, which owns only the final argv
+// assembly + `process.run`.
+//
+// Dispatch note: `compiler/src/` has never exercised interface-typed
+// *values* in its own source (it can lower trait objects but does not
+// self-host any), so the driver constructs `LlvmTextBackend {}` directly
+// and calls methods on the concrete type. The `Backend` interface is
+// declared for conformance + documentation, not dynamic dispatch.
+//
+// Self-host note: the argv-assembly bodies (which call the array builtin
+// `.push`) live in module-level free functions, not in the struct method
+// bodies. Calling `.push` from inside a struct method is a lowering path
+// the self-hosting compiler does not resolve ("cannot resolve return type
+// for call to `args.push`"), even though `sfn check` accepts it — a
+// build-only failure of the #1389 class. The methods are thin delegators
+// to the free functions, which is the proven self-hosting shape.
+// Reserved opaque object-file handle for later backend stages (#347 /
+// #1640 produce these in-process). Stage 0's `LlvmTextBackend` returns
+// the clang exit code directly, so this is unused today but pins the
+// shape the semantic seam will grow into.
+struct ObjectArtifact {
+    path: string;
+}
+
+// The semantic inputs to a final link, computed by the driver. The two
+// link sites (program/run/build vs. `sfn test`) emit genuinely
+// different clang argv layouts — `-o` position, input ordering, and the
+// section/strip/linker flag set all differ — so `test_mode` selects the
+// layout `LlvmTextBackend` reproduces. A non-clang backend ignores
+// `link_flags` (clang-driver-specific) and uses `objects` / `ir_inputs`
+// / `libs` directly.
+struct LinkPlan {
+    // Pre-compiled `.o` inputs (runtime objects).
+    objects: string[];
+    // `.ll` inputs compiled inline by the clang link (program/capsule
+    // modules in build mode; the test source + dependency `.ll` in test
+    // mode).
+    ir_inputs: string[];
+    out_path: string;
+    opt_flag: string;
+    // Clang-driver flags the program link interleaves between
+    // `-Wno-override-module` and the inputs: linker selection
+    // (`-fuse-ld=…`), `-ffunction-sections`/`-fdata-sections`, the
+    // dead-strip flag (when safe), and the runtime retain-root flags.
+    // Empty in test mode.
+    link_flags: string[];
+    // Linker libraries appended after `-o <out>` (e.g. `-lm`,
+    // `-lpthread`), already deduped/back-filled by the driver.
+    libs: string[];
+    // Selects the `sfn test` link layout (see above).
+    test_mode: boolean;
+}
+
+interface Backend {
+    // Compile a single IR/C source to an object file (`clang -c`).
+    fn assemble(self, src: string, out: string, opt_flag: string, include_flags: string[]) -> int ![io];
+    // Link pre-compiled objects + IR inputs into a binary.
+    fn link(self, plan: LinkPlan) -> int ![io];
+}
+
+// Build the `clang -c` argv for a single object compile. Mirrors the
+// runtime c-source / ll-source / sfn-source object compiles and the
+// `--no-link` library build: section split so the link's dead-strip can
+// GC unreferenced sections (#1047).
+fn _llvm_text_assemble_argv(src: string, out: string, opt_flag: string, include_flags: string[]) -> string[] {
+    let mut args: string[] = ["clang", opt_flag, "-Wno-override-module", "-ffunction-sections", "-fdata-sections"];
+    let mut i: int = 0;
+    loop {
+        if i >= include_flags.length { break; }
+        args.push(include_flags[i]);
+        i += 1;
+    }
+    args.push("-c");
+    args.push(src);
+    args.push("-o");
+    args.push(out);
+    return args;
+}
+
+// Build the clang link argv for the `sfn test` layout:
+// `clang -O0 -Wno-override-module -o OUT <test.ll> <dep.ll…> <runtime.o…> <libs…>`.
+fn _llvm_text_link_test_argv(plan: LinkPlan) -> string[] {
+    let mut args: string[] = ["clang", plan.opt_flag, "-Wno-override-module"];
+    args.push("-o");
+    args.push(plan.out_path);
+    let mut ii: int = 0;
+    loop {
+        if ii >= plan.ir_inputs.length { break; }
+        args.push(plan.ir_inputs[ii]);
+        ii += 1;
+    }
+    let mut oi: int = 0;
+    loop {
+        if oi >= plan.objects.length { break; }
+        args.push(plan.objects[oi]);
+        oi += 1;
+    }
+    let mut li: int = 0;
+    loop {
+        if li >= plan.libs.length { break; }
+        args.push(plan.libs[li]);
+        li += 1;
+    }
+    return args;
+}
+
+// Build the clang link argv for the program/build layout:
+// `clang <opt> -Wno-override-module <link_flags…> <runtime.o…> <ir.ll…> -o OUT <libs…>`.
+fn _llvm_text_link_program_argv(plan: LinkPlan) -> string[] {
+    let mut args: string[] = ["clang", plan.opt_flag, "-Wno-override-module"];
+    let mut fi: int = 0;
+    loop {
+        if fi >= plan.link_flags.length { break; }
+        args.push(plan.link_flags[fi]);
+        fi += 1;
+    }
+    let mut roi: int = 0;
+    loop {
+        if roi >= plan.objects.length { break; }
+        args.push(plan.objects[roi]);
+        roi += 1;
+    }
+    let mut ri: int = 0;
+    loop {
+        if ri >= plan.ir_inputs.length { break; }
+        args.push(plan.ir_inputs[ri]);
+        ri += 1;
+    }
+    args.push("-o");
+    args.push(plan.out_path);
+    let mut lli: int = 0;
+    loop {
+        if lli >= plan.libs.length { break; }
+        args.push(plan.libs[lli]);
+        lli += 1;
+    }
+    return args;
+}
+
+// The current behaviour: emit textual LLVM IR and drive `clang` for
+// assembly and linking. The methods delegate argv construction to the
+// free functions above (see the self-host note in the file header).
+struct LlvmTextBackend {
+    fn assemble(self, src: string, out: string, opt_flag: string, include_flags: string[]) -> int ![io] {
+        return process.run(_llvm_text_assemble_argv(src, out, opt_flag, include_flags));
+    }
+
+    fn link(self, plan: LinkPlan) -> int ![io] {
+        if plan.test_mode {
+            return process.run(_llvm_text_link_test_argv(plan));
+        }
+        return process.run(_llvm_text_link_program_argv(plan));
+    }
+}

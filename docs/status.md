@@ -79,6 +79,14 @@ here.
 - `compiler/src/` is the primary toolchain; `make compile` produces
   `build/native/sailfin`. Pipeline: Lexer → Parser → Type Checker →
   Effect Checker → Native Emitter (`.sfn-asm`) → LLVM Lowering.
+- **Backend seam** (`compiler/src/backend.sfn`, #1112; SFEP-15 Stage 0):
+  every codegen/link `clang` invocation routes through a `Backend` interface
+  whose sole impl is `LlvmTextBackend` (today's textual-LLVM-IR + clang path).
+  Zero behavior change — the driver still computes runtime objects, linker
+  selection, dead-strip, and link-libs; the backend owns only the final argv +
+  `process.run`. The seam is the prerequisite for the LLVM C-API backend (#347)
+  and the seal-sufficient native backend (#1640) to plug in without
+  re-hardcoding LLVM across the driver.
 - **Effect enforcement is a build gate** (Phases A–F, shipped 2026-04-26):
   `validate_effects()` runs from every `compile_to_*` entry and fails the
   build on undeclared effects. `SAILFIN_EFFECT_ENFORCE=warning|off` are the
