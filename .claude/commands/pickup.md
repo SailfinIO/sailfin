@@ -332,25 +332,28 @@ an in-unit sibling is **not** scope growth — reconcile it and keep going.
 Sometimes the issue isn't mis-scoped — it depends on a capability that does
 not exist yet (e.g. a runtime issue that needs a frontend primitive the
 compiler can't emit). Before defaulting to a multi-issue chain (file a
-predecessor → groom → separate PR → seed cut → re-pickup), weigh the cheaper
-path:
+predecessor → groom → separate PR → seed cut → re-pickup), apply the shared
+**`.claude/rules/seed-dependency.md`** decision tree (the same rule `/groom`
+uses — design record SFEP-0026 WS-B). Do not re-derive the tree here; the rule
+is the source of truth. The mid-pickup outcomes it dictates:
 
-- **Single consumer + tightly coupled → propose ONE cohesive PR** that lands
-  the prerequisite *and* the original issue together, and surface the
-  **seed-cut tradeoff** to the user. Bundling a compiler-capability change
-  with its only consumer in one PR avoids the seed cut a split would force
-  (the freshly-built compiler compiles the consumer in the same self-host
-  pass — see `groom.md` "Don't over-decompose"). This is usually faster and
-  cheaper than the file/groom/PR/seed/re-pickup ceremony.
-- **Multiple consumers, or genuinely independent, or large blast radius →**
-  file the predecessor and split (the standard path). A compiler primitive
-  several future issues will want *is* worth shipping standalone.
+- **Single consumer + tightly coupled → BUNDLE:** propose ONE cohesive PR that
+  lands the prerequisite *and* the original issue together. `make compile`
+  builds the new compiler from the old seed, and that compiler compiles the
+  consumer in the same self-host pass — so bundling avoids the seed cut a split
+  would force. This is the default and is usually faster than the
+  file/groom/PR/seed/re-pickup ceremony.
+- **Multiple consumers, or genuinely independent, or large blast radius →
+  SPLIT:** file the predecessor as a standalone `seed-blocker` issue. **A split
+  forces a seed cut — do NOT cut reactively. Queue the seed advance against the
+  next cadence bump** (SFEP-0026 WS-C); the consumer carries
+  `## Required in pinned seed: #<predecessor>` and waits for that bump.
 
-Either way, **pause and present the choice to the user** rather than silently
-picking the heavier multi-issue route — the original #1088 pickup fanned out
-into separate issues/PRs + a seed-cut gate when one bundled PR would have
-delivered the same result with less overhead. State the tradeoff; let the user
-decide.
+Either way, **pause and present the bundle-vs-split choice to the user,
+defaulting to bundle** — do not silently pick the heavier multi-issue route. The
+original #1088 pickup fanned out into separate issues/PRs + a seed-cut gate when
+one bundled PR would have delivered the same result with less overhead. State the
+tradeoff; let the user decide.
 
 ---
 
