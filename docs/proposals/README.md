@@ -31,7 +31,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0006](./0006-build-architecture.md) | Unified Build Architecture | Implemented | tooling |
 | [0007](./0007-fmt-architecture.md) | `sfn fmt` — Canonical Formatter | Implemented | tooling |
 | [0008](./0008-effect-validation.md) | Effect Validation as Build Gate | Accepted | language |
-| [0009](./0009-cli-modularization-epic.md) | CLI Modularization | Accepted | tooling |
+| [0009](./0009-cli-modularization-epic.md) | CLI Modularization | Superseded | tooling |
 | [0010](./0010-test-infra/00-overview.md) | Sailfin-Native Test Infrastructure | Accepted | tooling |
 | [0011](./0011-ci-test-speed.md) | CI Test-Speed Plan | Accepted | tooling |
 | [0012](./0012-result-and-question-operator.md) | `Result<T, E>` and the `?` Operator | Accepted | language |
@@ -49,6 +49,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0024](./0024-model-engines-and-training.md) | Model Engines, Adapters, Tensors, Training | Draft | informational |
 | [0025](./0025-native-runtime-architecture.md) | Native Runtime Architecture | Accepted | runtime |
 | [0026](./0026-delivery-process.md) | Delivery Process — Drift-Tolerant Issues, Seed Discovery, Release Cadence | Accepted | process |
+| [0027](./0027-cli-rss-modularization.md) | CLI Modularization — Per-Worker RSS Relief First, Then Migration | Draft | tooling |
 
 ## Subdirectories
 

@@ -1,16 +1,24 @@
 ---
 sfep: 9
 title: CLI Modularization
-status: Accepted
+status: Superseded
 type: tooling
 created: 2026-05-06
-updated: 2026-05-06
+updated: 2026-06-26
 author: "agent:compiler-architect"
-tracking: "#345"
+tracking: "#351"
 supersedes:
-superseded-by:
+superseded-by: 27
 graduates-to:
 ---
+
+> **Superseded by SFEP-0027** (`0027-cli-rss-modularization.md`), 2026-06-26.
+> This proposal predates the runtime migration (#822); its inventory
+> (`cli_main.sfn` = 1,534 lines) and `tracking: "#345"` pointer are stale — the
+> CLI epic is #351, and `cli_main.sfn` has since grown to 3,067 lines as build/
+> link orchestration bled in. SFEP-0027 re-anchors the epic on per-worker peak
+> RSS (the live CI `--jobs` blocker) and sequences RSS-relief first. Retained
+> for historical context.
 
 # CLI Modularization Epic
 
