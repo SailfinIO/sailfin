@@ -103,9 +103,21 @@ here.
   and the runtime descriptor registry — not text heuristics. The legacy
   text-pattern fallback (`collect_effects_from_text`) was proven redundant by
   a parity harness (#1185) and **deleted in #1186**; parse-failure `Raw`/
-  `Unknown` nodes are now effect-blind by design (they carry no resolvable
-  call). Effect polymorphism (`!E` variables, polymorphic HOFs) remains
-  post-1.0.
+  `Unknown` nodes are effect-blind by design (they carry no resolvable call).
+  A #1627 audit confirmed that invariant held *except* for `<operand> as <type>`
+  casts: an identifier-typed cast parsed as a structured `Cast` the checker never
+  walked, and a pointer-typed cast (`as * T`) over an effectful operand degraded
+  the whole expression to `Raw` — so `print.info(x) as * i64` reached codegen with
+  no `![io]`. #1627 adds a `Cast` effect-checker arm (walks the operand) and lifts
+  pointer cast targets into `Cast` **for effect-bearing (non-identifier) operands**,
+  so a cast can no longer hide its operand's effects (`E0400`). Bare-identifier
+  pointer casts (`<fn>`/`<ptr-value> as * u8`) intentionally stay `Raw` — they
+  carry no effect, and this preserves the #1147 function-reference diagnostics and
+  the shadow-parser lowering unchanged. The remaining
+  Raw-degraded effect-escapes (ternary `? :`, prefix `*`/`&`, assignment-as-
+  expression) are tracked under epic #1180 (#1180-a/c) behind a blanket
+  fail-closed `Raw` backstop. Effect polymorphism (`!E` variables, polymorphic
+  HOFs) remains post-1.0.
 - **Undefined free-function rejection** (`E0420`, #616/#812): unresolvable
   bare-identifier callees fail typecheck.
 - **Function references**: a bare fn name in value position lowers to the

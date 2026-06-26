@@ -870,6 +870,17 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
     if expression.variant == "Unary" {
         return collect_effects_from_expression(expression.operand, imports);
     }
+    if expression.variant == "Cast" {
+        // A cast's operand is the effectful surface: `fs.read(p) as * u8`
+        // performs the io of `fs.read` before the (zero-cost) reinterpret.
+        // Before #1627 a pointer/fn-typed cast target degraded the whole
+        // expression to `Raw` (effect-blind) and an identifier-typed cast
+        // (`... as int`) parsed as a structured `Cast` the checker never
+        // walked — both silently dropped the operand's effects. Walk the
+        // operand so the requirement surfaces; the target type carries no
+        // effect of its own.
+        return collect_effects_from_expression(expression.operand, imports);
+    }
     if expression.variant == "Binary" {
         let mut required = collect_effects_from_expression(expression.left, imports);
         required = merge_requirements(required, collect_effects_from_expression(expression.right, imports));

@@ -1,0 +1,119 @@
+// #1627 — a cast must not hide its operand's effects.
+//
+// After #1186 deleted `collect_effects_from_text`, the two AST nodes the
+// effect checker cannot resolve structurally (`Expression.Raw`,
+// `Statement.Unknown`) contribute ZERO effects. A cast `<operand> as <type>`
+// is a zero-cost reinterpret whose OPERAND is the effectful surface:
+// `print.info(x) as int` performs the `io` of `print.info` before the cast.
+// Two pre-#1627 holes let that effect escape silently:
+//
+//   1. An identifier-typed cast (`... as int`) parsed as a structured
+//      `Cast` node the effect checker never walked (no `Cast` arm) — so the
+//      operand's effects were dropped.
+//   2. A pointer-typed cast (`... as * u8`) was rejected by the cast arm
+//      (which accepted only a bare `Identifier` target) and degraded the
+//      WHOLE expression to an effect-blind `Raw`.
+//
+// Confirmed live before the fix: `print.info(x) as * i64` passed `sfn check`
+// with no `![io]` declared AND fired the side effect at runtime.
+//
+// This pins both halves: (a) the parser now structures `as * T` into `Cast`
+// (no `Raw` degradation), and (b) `collect_effects_from_expression` walks a
+// `Cast` operand so the requirement surfaces. The effect-free canary guards
+// against a false positive on the dominant in-source spelling — bare pointer
+// casts (`p as * i64`), of which the compiler/runtime source has hundreds; a
+// false positive there would break self-host.
+import { Expression } from "../../src/ast";
+import { EffectRequirement, collect_effects_from_expression } from "../../src/effect_checker";
+import { empty_import_symbols } from "../../src/effect_imports";
+import { parse_program } from "../../src/parser/mod";
+
+fn _probe_expr(snippet: string) -> Expression ![io] {
+    let program = parse_program("fn probe() { " + snippet + "; }");
+    assert program.statements.length >= 1;
+    let fn_stmt = program.statements[0];
+    assert fn_stmt.variant == "FunctionDeclaration";
+    assert fn_stmt.body.statements.length >= 1;
+    let stmt = fn_stmt.body.statements[0];
+    assert stmt.variant == "ExpressionStatement";
+    return stmt.expression;
+}
+
+fn _reqs_contain(reqs: EffectRequirement[], effect: string) -> boolean {
+    let mut index: int = 0;
+    loop {
+        if index >= reqs.length { break; }
+        if reqs[index].effect == effect { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+fn _cast_reqs(snippet: string) -> EffectRequirement[] ![io] {
+    return collect_effects_from_expression(_probe_expr(snippet), empty_import_symbols());
+}
+
+// -------------------------------------------------------------------
+// Structural lift: a pointer cast over an EFFECT-BEARING operand
+// (a call/member) parses to a `Cast`, not a `Raw`.
+// -------------------------------------------------------------------
+test "cast: pointer-typed target over a call structures into Cast (not Raw)" ![io] {
+    let expr = _probe_expr("fs.read(p) as * i64");
+    assert expr.variant == "Cast";
+    assert expr.target_type.text == "* i64";
+}
+
+test "cast: double-pointer target over a call structures into Cast" ![io] {
+    let expr = _probe_expr("fs.read(p) as * * u8");
+    assert expr.variant == "Cast";
+    assert expr.target_type.text == "* * u8";
+}
+
+test "cast: identifier-typed target is a Cast (any operand)" ![io] {
+    let expr = _probe_expr("p as int");
+    assert expr.variant == "Cast";
+    assert expr.target_type.text == "int";
+}
+
+// The pointer-cast lift is deliberately gated to NON-identifier operands so
+// `<fn> as * u8` / `<ptr-value> as * u8` keep their legacy `Raw` path — this
+// preserves the #1147 function-reference diagnostics and the shipped
+// http-server trampoline (`_sfn_http_trampoline as * u8`, a concrete fn with
+// a struct-ABI signature the prior `Raw` path passed through). A bare
+// identifier carries no effect, so nothing is lost for #1627. Pin the gate so
+// a future change can't silently lift it and re-break the trampoline.
+test "cast: bare-identifier pointer cast stays Raw (fn-reference gate)" ![io] {
+    let expr = _probe_expr("p as * i64");
+    assert expr.variant == "Raw";
+}
+
+// -------------------------------------------------------------------
+// Effect attribution: a cast walks its operand.
+// -------------------------------------------------------------------
+test "cast: identifier-typed cast surfaces operand io" ![io] {
+    assert _reqs_contain(_cast_reqs("print.info(\"x\") as int"), "io");
+}
+
+test "cast: pointer-typed cast surfaces operand io" ![io] {
+    assert _reqs_contain(_cast_reqs("fs.read(p) as * u8"), "io");
+}
+
+test "cast: pointer-typed cast surfaces operand net" ![io] {
+    assert _reqs_contain(_cast_reqs("http.get(\"u\") as * u8"), "net");
+}
+
+// -------------------------------------------------------------------
+// No false positive: an effect-free cast requires nothing. The bare
+// pointer-cast `p as * i64` is the dominant in-source spelling (hundreds
+// of sites); it stays `Raw` (effect-blind) and is left exactly as before
+// #1627 — so it contributes no effect and lowers unchanged (self-host).
+// -------------------------------------------------------------------
+test "cast: effect-free pointer cast requires nothing (self-host canary)" ![io] {
+    let reqs = _cast_reqs("p as * i64");
+    assert reqs.length == 0;
+}
+
+test "cast: effect-free numeric cast requires nothing" ![io] {
+    let reqs = _cast_reqs("5 as int");
+    assert reqs.length == 0;
+}

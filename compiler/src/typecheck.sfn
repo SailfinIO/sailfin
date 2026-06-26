@@ -1013,6 +1013,12 @@ fn walk_expression(expression: Expression?, bindings: SymbolEntry[], imports: Im
         return diagnostics;
     }
     if expression.variant == "Cast" {
+        // The #1627 parser lift only structures a pointer cast target into
+        // `Cast` when the operand is NOT a bare identifier (effect-bearing
+        // operands only). A bare `<fn> as * u8` therefore stays `Raw` and is
+        // still classified by `check_fn_reference_raw` (E0808/E0809) below,
+        // so this arm needs no function-reference logic — it just recurses
+        // so the operand's own diagnostics still fire.
         return walk_expression(expression.operand, bindings, imports);
     }
     if expression.variant == "TryOperator" {
