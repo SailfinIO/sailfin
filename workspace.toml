@@ -1,7 +1,7 @@
 # Sailfin workspace manifest
 #
 # Stage A of the unified-build proposal
-# (docs/proposals/build-architecture.md). Parse-only — Stage A ships the
+# (docs/proposals/0006-build-architecture.md). Parse-only — Stage A ships the
 # schema; Stage B is when the resolver starts consuming this file.
 #
 # Glob expansion of "capsules/sfn/*" is a Stage B concern; today the

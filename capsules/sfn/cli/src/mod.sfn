@@ -56,7 +56,7 @@
 // `export {}` block, so Sailfin's default "export everything" rule made
 // these symbols technically importable from `sfn/cli`; in practice they
 // are not part of the public API surface listed in
-// `docs/proposals/cli-modularization-epic.md` §4.1, and no in-tree
+// `docs/proposals/0009-cli-modularization-epic.md` §4.1, and no in-tree
 // consumer imports them. This barrel narrows the published surface to
 // match the documented contract.
 // ---- Types ----

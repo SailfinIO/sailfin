@@ -1,7 +1,7 @@
 // Unit tests for `compiler/src/build_cache.sfn`.
 //
 // The cache module is the foundation for incremental builds in
-// Stage C of `docs/proposals/build-architecture.md`. PR1 ships
+// Stage C of `docs/proposals/0006-build-architecture.md`. PR1 ships
 // the module parse-only / unwired; these tests gate the
 // invariants the wiring (PR1b) will rely on:
 //

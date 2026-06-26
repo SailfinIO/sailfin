@@ -5,7 +5,7 @@
 
 This document is the **per-site refinement** of section 1.3 ("Quantifying the
 surface") of the borrow-checking proposal
-([docs/proposals/borrow-checking-1.0.md](proposals/borrow-checking-1.0.md)).
+([docs/proposals/0018-borrow-checking-1.0.md](proposals/0018-borrow-checking-1.0.md)).
 Where the proposal gives a structural census (which modules use the hazardous
 raw-pointer / manual-lifetime dialect), this inventory enumerates **every
 individual hazard site** with file, line range, symbol, and hazard class. It is

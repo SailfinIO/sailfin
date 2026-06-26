@@ -377,7 +377,7 @@ test-capsules-impl:
 	fi
 
 # Sharded test execution for parallel CI legs. Phase 1 of
-# docs/proposals/ci-test-speed.md (#843 Track A): the test suite is
+# docs/proposals/0011-ci-test-speed.md (#843 Track A): the test suite is
 # ~90% of PR CI wall time and runs serially, so we fan it across
 # concurrent CI legs. `scripts/test_shards.sh` owns the shard -> file
 # mapping (single source of truth); `test-shard-cover` asserts the union

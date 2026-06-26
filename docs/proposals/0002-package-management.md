@@ -1,3 +1,17 @@
+---
+sfep: 2
+title: Sailfin Capsule & Model Management
+status: Draft
+type: tooling
+created: 2025-10-01
+updated: 2025-10-01
+author: "Tooling / Registry Working Group"
+tracking:
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # Proposal: Sailfin Capsule & Model Management
 
 Status: Draft (Design)  

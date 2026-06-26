@@ -1,6 +1,6 @@
 # `make` Verdict Block Schema (`sailfin-make/1`)
 
-Status: epic #1056 of `docs/proposals/agent-output-orchestration.md`. The
+Status: epic #1056 of `docs/proposals/0014-agent-output-orchestration.md`. The
 always-last verdict block ships now (Phase 1, #1059). The opt-in per-target
 full report file (`build/agent-report.<target>.json`, #1119) carries a composed
 `phases[]`: a single entry built from the matching tool JSON for the

@@ -1,3 +1,17 @@
+---
+sfep: 10
+title: Sailfin-Native Test Infrastructure
+status: Accepted
+type: tooling
+created: 2026-05-06
+updated: 2026-05-06
+author: "agent:compiler-architect"
+tracking: "#965, #842, #840"
+supersedes:
+superseded-by:
+graduates-to: reference/spec/11-testing.md
+---
+
 # Epic: Sailfin-native test infrastructure
 
 **Status:** proposed (planning only — no code changes in this PR)

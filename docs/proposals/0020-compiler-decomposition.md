@@ -1,3 +1,17 @@
+---
+sfep: 20
+title: Compiler Decomposition
+status: Accepted
+type: tooling
+created: 2026-06-22
+updated: 2026-06-22
+author: "agent:compiler-architect"
+tracking: "#345"
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # Compiler Decomposition — Two-Way Split + Shared Common
 
 **Status:** Design (epic #345, sub-issue 1 of 9). Rewritten 2026-06-22.

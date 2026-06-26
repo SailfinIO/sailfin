@@ -1559,7 +1559,7 @@ to `alloca i64`, `add i64`. **Slice E.3a — integer-shaped
 `: number` / `-> number` site in `compiler/src/*.sfn` and
 `runtime/prelude.sfn` either flipped to its semantic `: int` /
 `: float` shape (per the decision artifact at
-`docs/proposals/slice-e3a-semantic-audit.md`) or carries a
+`docs/proposals/archive/slice-e3a-semantic-audit.md`) or carries a
 trailing `// alias-coverage:` marker documenting the opt-out
 (prelude shadows, C-ABI boundaries, the runtime `is_number`
 predicate, literal-text predicates in `core_text.sfn`, and the
@@ -1775,7 +1775,7 @@ those residual descriptors.
        `compiler/src/*.sfn`, `runtime/prelude.sfn`, and
        `compiler/tests/**/*.sfn` migrated to explicit `: int` or
        `: float` per the decision artifact at
-       `docs/proposals/slice-e3a-semantic-audit.md`. Site-level
+       `docs/proposals/archive/slice-e3a-semantic-audit.md`. Site-level
        opt-outs are tagged with trailing `// alias-coverage:`
        markers: prelude shadows in
        `compiler/src/cli_commands_utils.sfn` (`find_char`) and

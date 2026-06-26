@@ -1,0 +1,56 @@
+# Sailfin Enhancement Proposals (SFEPs)
+
+This directory holds **SFEPs** — the design records for Sailfin's language,
+runtime, and toolchain. An SFEP captures a forward-looking design decision: the
+*why* behind a change, cited from code, commits, and the spec.
+
+- **New to the process?** Read [SFEP-0001 — SFEP Purpose and Process](./0001-sfep-process.md).
+- **Writing one?** Copy [`template.md`](./template.md), fill every section, open a PR.
+- **What is *not* an SFEP** (conventions, RCAs, runbooks, living trackers): see
+  the decision tree in SFEP-0001 §1.
+
+This table is the **registry** — the source of truth for which numbers are taken.
+The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
+
+## Status legend
+
+`Draft` (in review) · `Accepted` (approved, may be partially built) ·
+`Implemented` (shipped end-to-end + self-hosting) · `Withdrawn` · `Rejected` ·
+`Superseded`. See SFEP-0001 §4 for the full lifecycle and the bar for
+`Implemented`.
+
+## Index
+
+| SFEP | Title | Status | Type |
+|---|---|---|---|
+| [0001](./0001-sfep-process.md) | SFEP Purpose and Process | Accepted | process |
+| [0002](./0002-package-management.md) | Sailfin Capsule & Model Management | Draft | tooling |
+| [0003](./0003-tooling.md) | Built-in Tooling | Accepted | informational |
+| [0004](./0004-check-architecture.md) | `sfn check` — Fast Analysis Without Codegen | Implemented | tooling |
+| [0005](./0005-colon-type-annotations.md) | Colon Type Annotations | Implemented | language |
+| [0006](./0006-build-architecture.md) | Unified Build Architecture | Implemented | tooling |
+| [0007](./0007-fmt-architecture.md) | `sfn fmt` — Canonical Formatter | Implemented | tooling |
+| [0008](./0008-effect-validation.md) | Effect Validation as Build Gate | Accepted | language |
+| [0009](./0009-cli-modularization-epic.md) | CLI Modularization | Accepted | tooling |
+| [0010](./0010-test-infra/00-overview.md) | Sailfin-Native Test Infrastructure | Accepted | tooling |
+| [0011](./0011-ci-test-speed.md) | CI Test-Speed Plan | Accepted | tooling |
+| [0012](./0012-result-and-question-operator.md) | `Result<T, E>` and the `?` Operator | Accepted | language |
+| [0013](./0013-host-aware-exe-path-intrinsic.md) | Host-Aware `exe_path` Intrinsic | Accepted | runtime |
+| [0014](./0014-agent-output-orchestration.md) | Agent-Legible Build/Test Output | Draft | tooling |
+| [0015](./0015-llvm-independence.md) | Toolchain Independence — Sailfin-Native Backend | Accepted | runtime |
+| [0016](./0016-capability-sealed-runtime.md) | The Capability-Sealed Runtime | Accepted | runtime |
+| [0017](./0017-hierarchical-effects.md) | Hierarchical Sub-Effects as Subsumption | Accepted | language |
+| [0018](./0018-borrow-checking-1.0.md) | Borrow / Ownership Checking for the Native Runtime | Accepted | runtime |
+| [0019](./0019-sfn-http-capsule.md) | `sfn/http` — Typed HTTP Surface | Accepted | tooling |
+| [0020](./0020-compiler-decomposition.md) | Compiler Decomposition | Accepted | tooling |
+| [0021](./0021-windows-native-selfhost.md) | Native Windows Self-Host (MSVC ABI) | Accepted | runtime |
+| [0022](./0022-darwin-memory-governor.md) | Darwin (macOS arm64) Memory Governor | Draft | runtime |
+| [0023](./0023-capsule-decorators.md) | Capsule-Defined Decorators | Draft | language |
+| [0024](./0024-model-engines-and-training.md) | Model Engines, Adapters, Tensors, Training | Draft | informational |
+
+## Subdirectories
+
+- [`design-notes/`](./design-notes/) — single-issue implementation design gates.
+  Not SFEPs; kept for the record (see SFEP-0001 §9).
+- [`archive/`](./archive/) — superseded, rejected, or stale historical notes.
+  Nothing here is a live SFEP.

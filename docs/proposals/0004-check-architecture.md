@@ -1,8 +1,22 @@
+---
+sfep: 4
+title: "sfn check — Fast Analysis Without Codegen"
+status: Implemented
+type: tooling
+created: 2026-04-15
+updated: 2026-04-26
+author: "agent:compiler-architect"
+tracking:
+supersedes:
+superseded-by:
+graduates-to: reference/cli.md
+---
+
 # Architecture: `sfn check` — Fast Analysis Without Codegen
 
 Status: Shipped (initial v1 — parse + typecheck + effect-check, default stderr rendering, `--quiet`); Track A complete (A1–A4 all shipped); Track B designed (B1–B7), in progress
 Date: April 15, 2026 (design); shipped April 18, 2026; A1 (cross-module conformance hookup) shipped April 25, 2026; A2 (resolver wiring) shipped April 25, 2026; A3 (Phase 1 diagnostic infrastructure — severity + file_path on Diagnostic, structured load warnings) shipped April 25, 2026; A4 (legacy helper deletion) shipped April 26, 2026 alongside Stage B PR2's `sfn test` migration; Track B (production hardening) designed April 26, 2026
-Parent: [docs/proposals/tooling.md](../proposals/tooling.md)
+Parent: [docs/proposals/0003-tooling.md](../proposals/0003-tooling.md)
 
 ## Implementation Status
 
@@ -13,7 +27,7 @@ into the CLI as `sfn check`. Covered by `compiler/tests/unit/check_tool_test.sfn
 
 Track A migrates `sfn check` off the legacy textual inliner so it can share
 the unified resolver introduced in Stage B PR1 of the build architecture
-(`docs/proposals/build-architecture.md`). The track splits into four
+(`docs/proposals/0006-build-architecture.md`). The track splits into four
 sub-PRs:
 
 - **A1 — typechecker hookup (shipped April 25, 2026).**
@@ -1011,7 +1025,7 @@ a dependency isn't installed, the import is stripped (same as missing files).
 
 Status: Designed (April 26, 2026); B1 in flight.
 Parent: Track A (A1–A4, all shipped April 25–26, 2026)
-Sibling: `docs/proposals/effect-validation.md` Phases A–F (shipped 2026-04-26)
+Sibling: `docs/proposals/0008-effect-validation.md` Phases A–F (shipped 2026-04-26)
 
 Track A retired the textual import inliner and got `Diagnostic` carrying
 `severity` + `file_path`. Track B closes the deferred items from Track A's
@@ -1358,7 +1372,7 @@ The schema is locked in Q1 above. This PR ships:
   struct is the canonical re-export RCA hot spot.
 - `docs/reference/check-json-schema.md` (new) — The locked schema
   document. Each field, type, allowed values, semver bump rules.
-  Linked from `docs/proposals/check-architecture.md` and
+  Linked from `docs/proposals/0004-check-architecture.md` and
   `tools/mcp-server/README.md`.
 - `compiler/tests/unit/diagnostics_json_test.sfn` (new) — Unit test
   the encoder on a curated set of `Diagnostic` literal cases (one per
@@ -1739,7 +1753,7 @@ doesn't reinvent it.
 
 **Files affected.**
 
-- This document (`docs/proposals/check-architecture.md`) — Q4 above
+- This document (`docs/proposals/0004-check-architecture.md`) — Q4 above
   contains the analysis; B7 ships when Track C is drafted and links
   the deferral from there.
 
@@ -1755,7 +1769,7 @@ doesn't reinvent it.
 
 | Consumer | Needs |
 |---|---|
-| `sfn fix` (`docs/proposals/tooling.md`) | B1 (call-site spans), B3 (FixSuggestion infra) |
+| `sfn fix` (`docs/proposals/0003-tooling.md`) | B1 (call-site spans), B3 (FixSuggestion infra) |
 | `sfn lsp` Phase 1 | B2 (JSON envelope, can shell out) |
 | `sfn lsp` Phase 2 (quick-fix) | B3 (FixSuggestion → LSP code action) |
 | MCP `sailfin_diagnostics` | B2 (JSON envelope) |
@@ -1765,7 +1779,7 @@ doesn't reinvent it.
 
 #### What Track B does *not* change
 
-- The effect-validation gate (`docs/proposals/effect-validation.md`
+- The effect-validation gate (`docs/proposals/0008-effect-validation.md`
   Phases A–F) — already shipped; B1 only refines where the caret
   lands.
 - The capsule resolver pipeline introduced in A2 — Track B consumes

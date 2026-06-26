@@ -5,7 +5,7 @@
 // wiring, and so that `cli_commands.sfn` does not grow past the size
 // the seed compiler can emit within its per-module timeout.
 //
-// See docs/proposals/check-architecture.md for the end-to-end design.
+// See docs/proposals/0004-check-architecture.md for the end-to-end design.
 // Track A2 wires this through the unified resolver: each invocation
 // groups its files by `(project_root, workspace_root)`, runs a single
 // `prepare_project_capsules_for_check` pass per group, loads the
@@ -96,7 +96,7 @@ fn _emit_check_diagnostics(result: CheckResult, quiet: boolean) ![io] {
 // typecheck and effect errors so downstream consumers (the upcoming
 // `--json` output, `sfn lsp`, and CI scrapers) see one diagnostic
 // shape across every severity. `W01xx` is reserved for load/staging
-// warnings; see docs/proposals/check-architecture.md.
+// warnings; see docs/proposals/0004-check-architecture.md.
 fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean) ![io] {
     if quiet { return; }
     let empty_lines: string[] = [];
@@ -357,7 +357,7 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
     let mut total_warnings: int = 0;
     let mut files_checked: int = 0;
 
-    // Phase 5a (`docs/proposals/phase-5a-arena-reset.md`): take an
+    // Phase 5a (`docs/proposals/archive/phase-5a-arena-reset.md`): take an
     // arena mark immediately before the per-file loop. Every value
     // the loop body reads from outside the loop — `groups[]`,
     // `aggregate_*`, `file_group_index`, `files` — is allocated

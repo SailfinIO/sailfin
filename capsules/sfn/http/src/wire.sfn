@@ -11,7 +11,7 @@
 // the Wave 2 `serve` trampoline but ships and tests standalone — it touches
 // no runtime, compiler, or socket code.
 //
-// v0 scope (matches docs/proposals/sfn-http-capsule.md §3.4): text bodies
+// v0 scope (matches docs/proposals/0019-sfn-http-capsule.md §3.4): text bodies
 // only, no percent-decoding of paths/queries, no chunked decoding, no
 // multi-line (obs-fold) header continuation. Header names are matched
 // case-insensitively (RFC 7230 §3.2); values are returned trimmed.

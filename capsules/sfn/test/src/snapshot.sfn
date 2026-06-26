@@ -28,7 +28,7 @@
 // helper for why) to report the first divergent line — the "line-by-line"
 // diff the proposal calls for until the `sfn/diff` capsule (post-1.0)
 // supplies a unified diff. See
-// `docs/proposals/test-infra-epic/03-capsule-api.md` (Snapshots).
+// `docs/proposals/0010-test-infra/03-capsule-api.md` (Snapshots).
 //
 // Like the rest of the capsule, this is a free function rather than a
 // fluent `expect(out).to_match_snapshot(key)` builder: the method form

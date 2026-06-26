@@ -2,7 +2,7 @@
 // `error[Exxxx]: --> file:line:col` shape, not the legacy `[typecheck]
 // --> line N, column N` shape.
 //
-// Track B B4 (`docs/proposals/check-architecture.md`) deleted the
+// Track B B4 (`docs/proposals/0004-check-architecture.md`) deleted the
 // in-`main.sfn` renderer chain and routed every `compile_to_*` entry's
 // typecheck-error sites through `diagnostics_render.render_diagnostic` —
 // the same renderer `sfn check` already uses (since A3). This test locks

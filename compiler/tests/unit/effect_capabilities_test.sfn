@@ -1,5 +1,5 @@
 // Unit tests for compiler/src/effect_checker.sfn's Phase F
-// (`docs/proposals/effect-validation.md` §5) capability cross-check
+// (`docs/proposals/0008-effect-validation.md` §5) capability cross-check
 // path: `validate_capsule_capabilities(program, capabilities) ->
 // CapabilityViolation[]`.
 //

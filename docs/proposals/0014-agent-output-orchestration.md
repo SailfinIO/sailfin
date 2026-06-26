@@ -1,10 +1,24 @@
+---
+sfep: 14
+title: Agent-Legible Build/Test Output
+status: Draft
+type: tooling
+created: 2026-06-05
+updated: 2026-06-05
+author: "agent:compiler-architect"
+tracking:
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # Proposal: Agent-legible build/test output orchestration
 
 Status: proposed (planning only — no code in this PR)
 Date: 2026-06-05
 Author: Sailbot (main-session orchestrator)
-Parent: [docs/proposals/build-architecture.md](./build-architecture.md) §4.11 (structured link diagnostics),
-[docs/proposals/test-infra-epic/00-overview.md](./test-infra-epic/00-overview.md)
+Parent: [docs/proposals/0006-build-architecture.md](./0006-build-architecture.md) §4.11 (structured link diagnostics),
+[docs/proposals/0010-test-infra/00-overview.md](./0010-test-infra/00-overview.md)
 
 ## Problem
 

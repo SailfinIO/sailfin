@@ -1,3 +1,17 @@
+---
+sfep: 18
+title: Borrow / Ownership Checking for the Native Runtime
+status: Accepted
+type: runtime
+created: 2026-06-09
+updated: 2026-06-09
+author: "agent:compiler-architect"
+tracking: "#1207, #1209"
+supersedes:
+superseded-by:
+graduates-to: reference/preview/ownership.md
+---
+
 # Proposal: Borrow / Ownership Checking as a 1.0 Memory-Safety Requirement for the Native Runtime
 
 Status: **Approved — decisions D1–D9 locked 2026-06-09 (repo owner)**. See "Decisions Locked" below. Implementation tracked by epic #1209.
@@ -6,7 +20,7 @@ Authors: compiler-architect (Sailbot session)
 Closes: #1207
 Motivated by: [#1205](https://github.com/SailfinIO/sailfin/issues/1205) (systemic in-place-aliasing corruption, present in **both** the C runtime and its Sailfin-native port)
 Related: [#965](https://github.com/SailfinIO/sailfin/issues/965) (M4 structured concurrency / safe sharing), [#822](https://github.com/SailfinIO/sailfin/issues/822) (M4.7 C-runtime deletion), [#322](https://github.com/SailfinIO/sailfin/issues/322) (M1.5 conservative drop emission)
-Companion docs: [`docs/runtime_audit.md`](../runtime_audit.md), [`docs/proposals/hierarchical-effects.md`](./hierarchical-effects.md), [`docs/proposals/result-and-question-operator.md`](./result-and-question-operator.md)
+Companion docs: [`docs/runtime_audit.md`](../runtime_audit.md), [`docs/proposals/0017-hierarchical-effects.md`](./0017-hierarchical-effects.md), [`docs/proposals/0012-result-and-question-operator.md`](./0012-result-and-question-operator.md)
 
 > **What this issue produces:** the proposal document and a recommended path.
 > It does **not** implement enforcement. A follow-up epic (#1209), spawned from
@@ -407,7 +421,7 @@ They share infrastructure (scope/CFG walking, span-anchored diagnostics) but not
 semantics. A function can be effect-correct and ownership-unsound, or vice versa;
 both must pass. Crucially, ownership does **not** introduce a new effect atom —
 the taxonomy stays locked at the canonical six (`clock`, `gpu`, `io`, `model`,
-`net`, `rand`; see `effect_taxonomy.sfn` and `docs/proposals/hierarchical-effects.md`).
+`net`, `rand`; see `effect_taxonomy.sfn` and `docs/proposals/0017-hierarchical-effects.md`).
 Ownership is a separate axis, exactly as the three-pillars line in §0 requires.
 
 ### 3.5 What it deliberately does *not* do (1.0 scope fence)

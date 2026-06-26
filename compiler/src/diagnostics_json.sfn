@@ -13,7 +13,7 @@
 // `sfn lsp`, CI scrapers) hard-fail on unknown versions rather than
 // silently misinterpret unknown fields.
 //
-// Track B PR2 (B2) — see `docs/proposals/check-architecture.md`.
+// Track B PR2 (B2) — see `docs/proposals/0004-check-architecture.md`.
 //
 // Note: `_dj_number_to_string` is duplicated from `main.sfn` rather
 // than imported, mirroring `diagnostics_render.sfn`'s precedent for
@@ -238,7 +238,7 @@ fn render_check_json_envelope(events: CheckJsonEvent[], summary: CheckJsonSummar
 }
 
 // Producer classifier for diagnostic codes. Mirrors the code-space
-// allocation locked in `docs/proposals/check-architecture.md`:
+// allocation locked in `docs/proposals/0004-check-architecture.md`:
 //   E00xx, E03xx -> typecheck
 //   E04xx        -> effect
 //   E05xx        -> parse

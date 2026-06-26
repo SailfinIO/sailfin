@@ -19,4 +19,4 @@ stay valid unchanged.
 The owner-approved model — dotted-name representation, the subsumption rule
 (`io.fs ⊑ io`), capsule-manifest interaction, and the G6/G7 implementation
 gating — is specified in the RFC:
-[`docs/proposals/hierarchical-effects.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/proposals/hierarchical-effects.md).
+[`docs/proposals/0017-hierarchical-effects.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/proposals/0017-hierarchical-effects.md).

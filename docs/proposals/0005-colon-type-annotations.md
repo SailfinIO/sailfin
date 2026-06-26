@@ -1,3 +1,17 @@
+---
+sfep: 5
+title: Colon Type Annotations
+status: Implemented
+type: language
+created: 2026-04-15
+updated: 2026-04-15
+author: "agent:compiler-architect"
+tracking:
+supersedes:
+superseded-by:
+graduates-to: reference/spec/06-types.md
+---
+
 # Colon Type Annotations Migration Plan
 
 **Status:** Phases 1–6 implemented (migration complete).

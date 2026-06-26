@@ -22,8 +22,8 @@
 //   helper and the on-disk loader live alongside the eventual
 //   `cli_check`/resolver integration in A2.
 //
-// See docs/proposals/check-architecture.md and
-// docs/proposals/build-architecture.md (Stage B PR2) for the design
+// See docs/proposals/0004-check-architecture.md and
+// docs/proposals/0006-build-architecture.md (Stage B PR2) for the design
 // rationale.
 import {
     Decorator,

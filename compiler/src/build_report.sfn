@@ -7,7 +7,7 @@
 //   - `sfn lsp` (future) for editor integrations.
 //   - CI cache-hit-rate gates ("fail PR if hits drop below 80%").
 //   - Future structured link-error parsing
-//     (`docs/proposals/build-architecture.md` §4.11).
+//     (`docs/proposals/0006-build-architecture.md` §4.11).
 //
 // Schema is documented inline below and gated by
 // `compiler/tests/e2e/test_build_json_schema.sh`. Bumping

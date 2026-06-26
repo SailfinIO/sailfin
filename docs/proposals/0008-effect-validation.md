@@ -1,9 +1,23 @@
+---
+sfep: 8
+title: Effect Validation as Build Gate
+status: Accepted
+type: language
+created: 2026-04-26
+updated: 2026-04-26
+author: "agent:compiler-architect"
+tracking:
+supersedes:
+superseded-by:
+graduates-to: reference/spec/07-effects.md
+---
+
 # Proposal: Effect Validation as Build Gate
 
 Status: Approved for implementation (gating decisions §7.1, §7.2, §7.4 resolved 2026-04-26 by repo owner)
 Date: April 26, 2026 (drafted) · 2026-04-26 (gating decisions locked)
 Authors: compiler-architect (drafted via `/architect` invocation)
-Parent: [docs/proposals/build-architecture.md](./build-architecture.md), [docs/proposals/check-architecture.md](./check-architecture.md)
+Parent: [docs/proposals/0006-build-architecture.md](./0006-build-architecture.md), [docs/proposals/0004-check-architecture.md](./0004-check-architecture.md)
 Related spec: [`site/src/content/docs/docs/reference/spec/07-effects.md`](../../site/src/content/docs/docs/reference/spec/07-effects.md)
 
 ## Summary
@@ -82,7 +96,7 @@ polymorphism + name-resolution-driven detection) is post-1.0.
   (`compile_to_llvm`, `compile_to_llvm_with_module`,
   `compile_to_llvm_file_with_module`, etc.).
 - Source spans on `EffectViolation` (acknowledged tech debt in
-  `docs/proposals/check-architecture.md` §3).
+  `docs/proposals/0004-check-architecture.md` §3).
 - Capability cross-check against `capsule.toml [capabilities] required`.
 - Cross-module effect propagation (caller required to declare imported
   callee's effects).
@@ -96,7 +110,7 @@ Three forcing functions have aligned:
 
 1. **Build performance is no longer the bottleneck.** Selfhost dropped from
    13–45 minutes to ~2 minutes after the parallel-build work landed (see
-   `docs/proposals/build-architecture.md`). Iterating on the checker against
+   `docs/proposals/0006-build-architecture.md`). Iterating on the checker against
    the live compiler tree was previously prohibitive; it now costs two minutes
    per audit pass. This proposal would not have been tractable six months ago.
 2. **Effect-as-gate is LLM Adoption Strategy lever #1** in
@@ -300,7 +314,7 @@ error[E0210]: ...
   [kind: typecheck]
 ```
 
-This is acknowledged tech debt (`docs/proposals/check-architecture.md` §3).
+This is acknowledged tech debt (`docs/proposals/0004-check-architecture.md` §3).
 At soft-hint scale it's tolerable; flipping to a build gate makes it a
 blocker — users will face thousands of pointer-less effect errors during
 audit.
@@ -1534,10 +1548,10 @@ ulimit -v 8388608 && timeout 30 build/native/sailfin check /tmp/cap_test/
 
 ## Part 11 — Cross-References
 
-- [`docs/proposals/build-architecture.md`](./build-architecture.md) — parent
+- [`docs/proposals/0006-build-architecture.md`](./0006-build-architecture.md) — parent
   build infrastructure proposal; effects-as-gate is a downstream consumer
   of its `--json` and parallel-build groundwork.
-- [`docs/proposals/check-architecture.md`](./check-architecture.md) — `sfn check`
+- [`docs/proposals/0004-check-architecture.md`](./0004-check-architecture.md) — `sfn check`
   design; this proposal generalizes the check-path effect validation to
   the build path. Phase A closes the §3 deferred-token tech debt.
 - [`site/src/content/docs/docs/reference/spec/07-effects.md`](../../site/src/content/docs/docs/reference/spec/07-effects.md)

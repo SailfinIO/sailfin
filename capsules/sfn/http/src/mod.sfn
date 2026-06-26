@@ -11,7 +11,7 @@
 //   - server.sfn  serve (typed HTTP server on the M4 runtime)
 //   - mod.sfn     client (get, post, fetch)
 //
-// Build-out tracked by epic #1321; design in docs/proposals/sfn-http-capsule.md.
+// Build-out tracked by epic #1321; design in docs/proposals/0019-sfn-http-capsule.md.
 // ---- Types ----
 export { Request, Response, ServerConfig } from "./types";
 

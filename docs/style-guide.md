@@ -129,7 +129,7 @@ import { parse_expression } from "./parser/mod";
 
 ### Syntax Reform (Pre-1.0)
 
-The following syntax changes are active. See `docs/proposals/colon-type-annotations.md` and the [roadmap](https://sailfin.dev/roadmap) for rationale.
+The following syntax changes are active. See `docs/proposals/0005-colon-type-annotations.md` and the [roadmap](https://sailfin.dev/roadmap) for rationale.
 
 - **Type annotations**: Use `:` (colon) for parameter, variable, and struct
   field types. Function return types use `->`. The parser still accepts `->`

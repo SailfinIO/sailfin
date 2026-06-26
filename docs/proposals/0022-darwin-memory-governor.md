@@ -1,3 +1,17 @@
+---
+sfep: 22
+title: Darwin (macOS arm64) Memory Governor
+status: Draft
+type: runtime
+created: 2026-06-20
+updated: 2026-06-20
+author: "agent:compiler-architect"
+tracking:
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # Darwin (macOS arm64) memory governor for the Sailfin toolchain
 
 Status: proposal (design only). Spike measurements below were run on this

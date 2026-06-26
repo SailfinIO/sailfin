@@ -1,3 +1,17 @@
+---
+sfep: 21
+title: Native Windows Self-Host (MSVC ABI)
+status: Accepted
+type: runtime
+created: 2026-06-22
+updated: 2026-06-22
+author: "agent:compiler-architect"
+tracking:
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # Epic Design: Native Windows Self-Host (MSVC ABI)
 
 Status: DESIGN GATE — not implemented. Decomposition / sequencing for review.

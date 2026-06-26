@@ -197,7 +197,7 @@ fn _rh_descriptors_00(descriptors_in: RuntimeHelperDescriptor[]) -> RuntimeHelpe
         target: "fs.exists", symbol: "sfn_fs_exists", return_type: "i1", parameter_types: ["i8*"], effects: ["io"], native_signature: "sfn_fs_exists", c_abi_return_type: null
     });
 
-    // Arena mark / rewind. Phase 5a (`docs/proposals/phase-5a-arena-reset.md`)
+    // Arena mark / rewind. Phase 5a (`docs/proposals/archive/phase-5a-arena-reset.md`)
     // exposes the existing C bump-allocator's mark/rewind primitive
     // to Sailfin code so in-process multi-module tools (`sfn check`,
     // `sfn test`'s test-discovery loop) can reclaim per-iteration

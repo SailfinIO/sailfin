@@ -26,7 +26,7 @@ struct Response {
 
 // Server bind configuration. v0 honors `port` only — the runtime binds
 // `INADDR_ANY`, so `host` is carried for forward-compatibility but not yet
-// enforced (see docs/proposals/sfn-http-capsule.md §2).
+// enforced (see docs/proposals/0019-sfn-http-capsule.md §2).
 struct ServerConfig {
     port: int;
     host: string;

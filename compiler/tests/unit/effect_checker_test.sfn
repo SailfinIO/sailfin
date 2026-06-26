@@ -2,7 +2,7 @@
 // Phase-A enrichments to compiler/src/effect_checker.sfn:
 // `EffectViolation` now carries `signature_token`, `trigger`, and
 // `severity` fields, populated from the routine's signature span.
-// See docs/proposals/effect-validation.md (Part 5, Phase A) for the
+// See docs/proposals/0008-effect-validation.md (Part 5, Phase A) for the
 // full design.
 //
 // The tests construct AST values via small helper functions to stay

@@ -14,7 +14,7 @@
 //
 // Why free functions and not a fluent `expect(x).to_be(y)` builder:
 //   1. The generic `Expectation<T>` surface in
-//      `docs/proposals/test-infra-epic/03-capsule-api.md` needs generic
+//      `docs/proposals/0010-test-infra/03-capsule-api.md` needs generic
 //      monomorphization + `where` clauses, which the frontend lacks.
 //   2. A concrete per-type `struct Expectation { fn to_be(self, ...) }`
 //      builder needs cross-module struct-method dispatch — and that is

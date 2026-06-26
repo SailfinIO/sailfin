@@ -25,7 +25,7 @@
 //     are deleted.
 //
 // See docs/conventions/unit-test-import-envelope.md for the supported
-// test-import envelope, and docs/proposals/unit-test-import-envelope.md
+// test-import envelope, and docs/proposals/design-notes/unit-test-import-envelope.md
 // for the full root-cause analysis (#619, #986).
 // -------------------------------------------------------------------
 // Imports — real exported symbols (light closure via diagnostics_render)

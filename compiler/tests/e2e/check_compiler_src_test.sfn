@@ -5,7 +5,7 @@
 // `.claude/rules/no-bash-e2e.md`).
 //
 // This is the headline test for Phase 5a
-// (`docs/proposals/phase-5a-arena-reset.md`) — the runtime arena
+// (`docs/proposals/archive/phase-5a-arena-reset.md`) — the runtime arena
 // mark/rewind primitive plus the path-normalization fix in
 // `_collect_sfn_files_cmd` make the in-process multi-module loop
 // reclaimable. Pre-Phase-5a, `sfn check compiler/src/` SIGSEGVed at

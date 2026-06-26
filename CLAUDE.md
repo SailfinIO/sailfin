@@ -228,7 +228,7 @@ When adding features or making design choices:
 ## Pre-1.0 Syntax Reform (Active)
 
 Prefer the new forms where the parser already accepts them. Full plan:
-`docs/proposals/colon-type-annotations.md` and the roadmap.
+`docs/proposals/0005-colon-type-annotations.md` and the roadmap.
 
 1. **Type annotations: `:` not `->`** — `x: number`, not `x -> number`, for params,
    vars, fields. Return types keep `->`. Parser accepts both (`TypeSep = "->" | ":"`).
@@ -328,7 +328,7 @@ When uncertain about feature status or semantics:
 4. **`docs/runtime_audit.md`** — C→Sailfin runtime migration tracker
 5. **`docs/build-performance.md`** — build perf analysis + optimization plan
 6. **`docs/strategy/decision-brief.md`** — strategic overlay binding the internal
-   vision (the capstone `docs/proposals/capability-sealed-runtime.md`) to the
+   vision (the capstone `docs/proposals/0016-capability-sealed-runtime.md`) to the
    market: what's *enforced now* (compile-time effects) vs. the *runtime seal*
    (built, not yet shipped), and the seal-sufficient-vs-perf-parity fork. As of
    2026-06-26 the capability-sealed runtime is a **1.0 hallmark / GA blocker**

@@ -15,7 +15,7 @@
 // field and called");
 // (b) trade #975's static direct calls for indirect dispatch; and (c) make hook
 // order depend on runtime registration sequence instead of static module order.
-// See `docs/proposals/test-infra-epic/03-capsule-api.md` (Lifecycle hooks) for
+// See `docs/proposals/0010-test-infra/03-capsule-api.md` (Lifecycle hooks) for
 // the full architecture decision.
 //
 // A module-scoped mutable accumulator records hook/body execution order.

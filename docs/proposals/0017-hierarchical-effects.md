@@ -1,9 +1,23 @@
+---
+sfep: 17
+title: Hierarchical Sub-Effects as Subsumption
+status: Accepted
+type: language
+created: 2026-06-07
+updated: 2026-06-07
+author: "agent:compiler-architect"
+tracking: "#1180, #1182"
+supersedes:
+superseded-by:
+graduates-to: reference/preview/hierarchical-effects.md
+---
+
 # Proposal: Hierarchical Sub-Effects as Subsumption Within the Locked Six
 
 Status: Approved for implementation (gating decisions §D1–D5 locked 2026-06-07 by repo owner)
 Date: June 7, 2026 (drafted) · 2026-06-07 (gating decisions locked)
 Authors: compiler-architect (drafted via `/pickup #1182`)
-Parent: [docs/proposals/effect-validation.md](./effect-validation.md)
+Parent: [docs/proposals/0008-effect-validation.md](./0008-effect-validation.md)
 Related spec: [`site/src/content/docs/docs/reference/spec/07-effects.md`](../../site/src/content/docs/docs/reference/spec/07-effects.md)
 Related preview: [`site/src/content/docs/docs/reference/preview/hierarchical-effects.md`](../../site/src/content/docs/docs/reference/preview/hierarchical-effects.md)
 Tracks: Effect-system hardening / Phase G (epic #1180), gates G6/G7
@@ -348,8 +362,8 @@ deliverables exist:
 
 ```bash
 # RFC exists and states the lock / subsumption / no-seventh-atom premise
-test -f docs/proposals/hierarchical-effects.md && \
-  grep -i "seventh\|subsum\|lock" docs/proposals/hierarchical-effects.md
+test -f docs/proposals/0017-hierarchical-effects.md && \
+  grep -i "seventh\|subsum\|lock" docs/proposals/0017-hierarchical-effects.md
 
 # Preview points at the RFC
 grep -q "proposals/hierarchical-effects" \

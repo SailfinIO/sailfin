@@ -1,6 +1,6 @@
 // End-to-end test for `sfn check` effect-violation call-site carets.
 //
-// B1 (Track B in docs/proposals/check-architecture.md) plumbs source
+// B1 (Track B in docs/proposals/0004-check-architecture.md) plumbs source
 // spans through `Expression.Identifier` and `Expression.Member` so the
 // effect checker can attribute violations to the offending call site
 // rather than the function declaration. This test exercises the full

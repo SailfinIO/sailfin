@@ -5,7 +5,7 @@
 // declarations on the function signature and emits one
 // `EffectViolation` per under-declared routine.
 //
-// Phase A (Stage B+1 — `docs/proposals/effect-validation.md`)
+// Phase A (Stage B+1 — `docs/proposals/0008-effect-validation.md`)
 // extended `EffectViolation` with source-span attribution
 // (`signature_token`, `trigger`) and a `severity` slot. The renderer
 // in `tools/check.sfn` consumes those fields to produce
@@ -105,7 +105,7 @@ struct EffectViolation {
     body_open_token: Token?;
 }
 
-// Phase F (`docs/proposals/effect-validation.md` §5): a function
+// Phase F (`docs/proposals/0008-effect-validation.md` §5): a function
 // declared an effect outside the surrounding capsule's
 // `[capabilities] required = [...]` set. Distinct from
 // `EffectViolation` because the failure shape is different:

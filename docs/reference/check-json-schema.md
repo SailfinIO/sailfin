@@ -1,7 +1,7 @@
 # `sfn check --json` Schema (`sailfin-check/1`)
 
 Status: Locked at `sailfin-check/1`. Shipped April 27, 2026 in Track B PR2 of
-`docs/proposals/check-architecture.md`.
+`docs/proposals/0004-check-architecture.md`.
 
 `sfn check --json [path...]` emits a single UTF-8 JSON document on stdout. The
 human-readable stderr stream is suppressed in this mode. Exit codes match the

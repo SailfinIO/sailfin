@@ -799,7 +799,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
     // by the resolver pass above and reused across every test in the
     // group.
     //
-    // Phase 5a (`docs/proposals/phase-5a-arena-reset.md`): mark the
+    // Phase 5a (`docs/proposals/archive/phase-5a-arena-reset.md`): mark the
     // arena before the loop and rewind at the bottom of each
     // iteration. Cross-iteration state — `test_files`, `groups[]`,
     // `file_group_index`, `runtime_root` — is allocated above this
@@ -1198,7 +1198,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io, clock] {
 // normalization in place (`_collect_test_files_cmd` now calls
 // `_strip_trailing_slashes_cmd`), the resolver produces every
 // symbol tests need, and the backstop became dead code. See
-// `docs/proposals/build-architecture.md` Stage B for the full
+// `docs/proposals/0006-build-architecture.md` Stage B for the full
 // trail.
 fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[], cache_dir: string, binary_dir: string) -> int ![io] {
     // `-Wno-override-module`: every emitted `.ll` carries its own `target

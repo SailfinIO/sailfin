@@ -17,7 +17,9 @@ documentation lives on the docs site.**
 - **Runtime architecture notes** → `docs/runtime_architecture.md`
 - **Build performance plan** → `docs/build-performance.md`
 - **Repository style guide** → `docs/style-guide.md`
-- **Proposals** → `docs/proposals/` (future-facing designs)
+- **Proposals (SFEPs)** → `docs/proposals/` — numbered design records;
+  index + process in [`docs/proposals/README.md`](proposals/README.md) and
+  [SFEP-0001](proposals/0001-sfep-process.md)
 - **Root-cause analyses** → `docs/rca/`
 - **Perf notes** → `docs/perf/`
 - **Examples** → `examples/` (category index in `examples/README.md`)

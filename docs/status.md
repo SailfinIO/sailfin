@@ -155,10 +155,10 @@ doc, or `docs/runtime_architecture.md`, not here.
 | Currency / time literals | Not implemented | Use numeric literals |
 | `unsafe` / `extern` | Boundary enforced (locally-declared externs) | `extern fn` declarations are fully shipped (see Runtime Migration); `unsafe { }` blocks and `unsafe fn` carry an `is_unsafe` AST marker (#1211). The ownership checker skips `unsafe` interiors and treats the boundary as load-bearing: a bare owned value escaping into an `extern fn` outside `unsafe` raises `E0906` (#1215). Scope at E6: only externs **declared in the same compilation unit** are recognized; implicitly-linked prelude/runtime externs (e.g. `memcpy`) are not yet matched — a deliberate, self-host-safe false negative widened in a follow-up. Raw-pointer ops *inside* `unsafe` stay author-asserted |
 | Policy decorators (`@policy`) | Parsed only | No compiler or runtime effect |
-| `sfn fmt` | **Shipped** | Zero-config token-stream formatter, `--check`/`--write`, CI-enforced; architecture + limitations in `docs/proposals/fmt-architecture.md` |
+| `sfn fmt` | **Shipped** | Zero-config token-stream formatter, `--check`/`--write`, CI-enforced; architecture + limitations in `docs/proposals/0007-fmt-architecture.md` |
 | `sfn check` | **Shipped** | Parse + typecheck + effect-check, no codegen; `--json` envelope; cross-module conformance; directory mode completes the full 156-file tree (~295 s — perf, not stability, is the open item) |
 | `sfn test` | **Shipped** | Discovery, `-k`/`--tag` filtering (#849), lifecycle hooks (#975, ordering only), snapshots + `--update-snapshots` (#977), `--jobs N` parallel runner (#1236), per-test binary cache (#1230/#1233) |
-| `sfn vet` / `sfn lsp` / `sfn doc` / `sfn fix` | Planned | See `docs/proposals/tooling.md` |
+| `sfn vet` / `sfn lsp` / `sfn doc` / `sfn fix` | Planned | See `docs/proposals/0003-tooling.md` |
 | Package registry (`sfn init/add/publish`) | Shipped | Default registry `pkg.sfn.dev`; `SFN_REGISTRY` / `sfn config set registry` override |
 | `workspace.lock` (`sfn lock` write + resolver consume) | **Shipped** | Explicit `sfn lock` writes the root lockfile (#1070); `sfn lock --work-dir DIR` sets the workspace-discovery start dir so the command can run against a workspace without `cd`. Resolver prefers `workspace → workspace.lock → capsule.lock → cache → registry` for external deps, sibling-first untouched (#1071). Roots own lockfiles; library capsules don't commit them. Committing the root `workspace.lock` is #1050, gated on a seed embedding #1071 (satisfied at `v0.7.0-alpha.31`) |
 | Notebook support | Not started | Post-1.0 |
@@ -282,7 +282,7 @@ linked issues.
 ## Known Design Issues (Pre-1.0 Syntax Reform)
 
 Tracked in the [roadmap](https://sailfin.dev/roadmap) and
-`docs/proposals/colon-type-annotations.md`. This section records the
+`docs/proposals/0005-colon-type-annotations.md`. This section records the
 *problem*; the roadmap records the *plan*.
 
 - **Type annotations (`:` vs `->`)** — **migrated.** `:` for params, vars,
@@ -319,4 +319,4 @@ will ship as ordinary library APIs in the post-1.0 `sfn/ai` capsule. The
 `![model]` effect remains as the language-level capability gate; once the
 capsule ships, its functions carry `![model]` and effect checking propagates
 transitively as it does for `io`/`net`/`clock`. Design discussion:
-`docs/proposals/model-engines-and-training.md`.
+`docs/proposals/0024-model-engines-and-training.md`.

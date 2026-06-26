@@ -54,7 +54,7 @@ capsules/sfn/test/
 > struct-method dispatch is miscompiled — `self` is passed incorrectly when a
 > method call crosses a module boundary. The generic surface below is aspirational
 > until both gaps close. Track progress in
-> `docs/proposals/test-infra-epic/02-phases.md` issue 1.4.
+> `docs/proposals/0010-test-infra/02-phases.md` issue 1.4.
 
 ```sfn
 fn expect<T>(value: T) -> Expectation<T>;

@@ -18,9 +18,9 @@ proposal docs) to the external market. Referenced from `CLAUDE.md`.
 > as "post-1.0." Read "long-horizon half / deferred / post-1.0 capstone" below as
 > "the 1.0 capstone that takes the longest to build."
 **Canonical architecture docs (these win on architecture; this brief wins on
-market positioning):** `docs/proposals/capability-sealed-runtime.md`,
-`docs/proposals/llvm-independence.md`, `docs/proposals/hierarchical-effects.md`,
-`docs/proposals/effect-validation.md`, `docs/proposals/model-engines-and-training.md`.
+market positioning):** `docs/proposals/0016-capability-sealed-runtime.md`,
+`docs/proposals/0015-llvm-independence.md`, `docs/proposals/0017-hierarchical-effects.md`,
+`docs/proposals/0008-effect-validation.md`, `docs/proposals/0024-model-engines-and-training.md`.
 
 > **What this is.** A strategic overlay for the Sailfin repo, written to be read
 > by a Claude Code agent operating in-tree. It does **not**
@@ -31,10 +31,10 @@ market positioning):** `docs/proposals/capability-sealed-runtime.md`,
 > architecture; this brief wins on market positioning.
 >
 > **Canonical internal docs (read these first; do not duplicate them):**
-> - `docs/proposals/capability-sealed-runtime.md` — the capstone thesis (effects + capabilities + owned backend + owned syscall layer = a sealed binary). **This is the strategy.**
-> - `docs/proposals/llvm-independence.md` — the *how* of backend/syscall ownership.
-> - `docs/proposals/hierarchical-effects.md`, `docs/proposals/effect-validation.md` — effect-system depth.
-> - `docs/proposals/model-engines-and-training.md` — model-engine surface (relevant to the `![model]` gap below).
+> - `docs/proposals/0016-capability-sealed-runtime.md` — the capstone thesis (effects + capabilities + owned backend + owned syscall layer = a sealed binary). **This is the strategy.**
+> - `docs/proposals/0015-llvm-independence.md` — the *how* of backend/syscall ownership.
+> - `docs/proposals/0017-hierarchical-effects.md`, `docs/proposals/0008-effect-validation.md` — effect-system depth.
+> - `docs/proposals/0024-model-engines-and-training.md` — model-engine surface (relevant to the `![model]` gap below).
 > - `CLAUDE.md` — agent operating rules incl. the safety-claim discipline ("nothing is enforced today" unless it is).
 
 ---
@@ -126,7 +126,7 @@ For untrusted code running in *other* processes/runtimes (true foreign execution
 
 **Goal.** Promote `model` from reserved-in-taxonomy to a first-class enforced effect, at parity with `![io]`/`![net]`/`![clock]`, with no dependency on backend/seal work.
 
-**Context / files.** `compiler/src/effect_taxonomy.sfn` (already lists `model`), `compiler/src/typecheck_types.sfn` (partial `model` handling + `![model]` capability-gate diagnostic), the io/net/clock call-site detectors (the pattern to mirror), `capsule.toml` capability cross-check (`E0403`, should accept `model`), cross-module propagation (`E0402`, should propagate `model`). Read `docs/proposals/model-engines-and-training.md` for the intended model-invoking surface before fixing entry points.
+**Context / files.** `compiler/src/effect_taxonomy.sfn` (already lists `model`), `compiler/src/typecheck_types.sfn` (partial `model` handling + `![model]` capability-gate diagnostic), the io/net/clock call-site detectors (the pattern to mirror), `capsule.toml` capability cross-check (`E0403`, should accept `model`), cross-module propagation (`E0402`, should propagate `model`). Read `docs/proposals/0024-model-engines-and-training.md` for the intended model-invoking surface before fixing entry points.
 
 **Scope.**
 1. Define the model-invoking surface (inference/engine entry points per `model-engines-and-training.md`). If no such surface ships yet, land a minimal one behind `![model]` so the detector has real call sites.
