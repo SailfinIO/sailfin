@@ -6,7 +6,7 @@
 // is regression-tested directly, apart from the host RAM probe.
 //
 // Reserve = 3 GiB = 3221225472 B; usable = memsize * 66 / 100.
-import { _cr_ram_budget_jobs } from "../../src/capsule_resolver";
+import { _cr_ram_budget_jobs } from "../../src/capsule_emit_parallel";
 
 // 7 GiB runner (the ~7 GiB macOS CI box that OOMed in #1532):
 // usable = 7516192768*0.66 = 4.96 GiB; 4.96/3 = 1 -> serial emit.

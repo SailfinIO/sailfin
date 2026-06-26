@@ -467,6 +467,21 @@ macOS gets a smaller win because the heuristic picks `BUILD_JOBS=1` to fit the 7
 
 ## Completed Work
 
+### Capsule-Resolver File Decomposition (June 26, #1512)
+
+**Status: Implemented.** Cut `compiler/src/capsule_resolver.sfn`'s single-module `emit llvm` peak RSS from **2436 MB → 1687 MB (−31%)** (IR 25154 → 17051 lines), byte-identical behavior, self-hosting preserved (`make check` triple-pass fixed point). After the runtime_helpers split below, `capsule_resolver` was the only module still over the 2 GB CI per-job gate (and the constraint on raising the macOS runner's `BUILD_JOBS`). Unlike runtime_helpers (one pathological function), `capsule_resolver`'s cost was **distributed** across 82 functions / 4710 lines — so the lever was the `lowering_core` file-decomposition precedent (move cohesive function clusters into leaf sub-modules to shrink the per-module import-closure + emission-buffer budget), not chunking.
+
+Two extractions (pure code motion, measured between):
+
+1. **`capsule_import_scan.sfn`** (Step 1, −549 MB → 1887 MB): the three comment-aware import-spec scanner state machines (`collect_relative_import_specs`, `collect_scoped_import_specs`, `_cr_source_imports_host`) + 4 helpers — ~710 lines of the densest branch-heavy IR. Pure (no `![io]`), depends only on `string_utils`, acyclic by construction. New module peak: 257 MB.
+2. **`capsule_emit_parallel.sfn`** (Step 2, −200 MB → 1687 MB): the parallel-`emit` fan-out (`_cr_run_parallel_emit`) + job-count/RAM-budget resolution (`_cr_resolve_jobs`, `_cr_ram_budget_jobs`, `_cr_parse_positive_int`, `_cr_shell_quote`, `ParallelEmitTask`) — ~390 lines of shell-script-building `![io]` IR. New module peak: 436 MB.
+
+**Implementation notes / landmines hit:**
+- **Sailfin rejects implicit re-export of imported symbols (E0600).** The plan's "re-import then re-export" to keep `capsule_resolver`'s public face unchanged does *not* work — the emitter produces no `.fn` signature for a re-exported import, so consumers fall back to `i8*` and miscompile (see `docs/rca/2026-04-18-reexport-diagnostic-gep.md`). Resolved by auditing: the moved public symbols (`collect_*`, `_cr_ram_budget_jobs`) had **no** external importers except one test (`cr_ram_budget_jobs_test.sfn`), so they were dropped from `capsule_resolver`'s export block and now export from their new home; the one test was re-pointed.
+- **`_cr_shell_read` cycle wrinkle.** Used by both moved (`_cr_resolve_jobs`, `_cr_run_parallel_emit`) and staying (`_cr_get_home`, `_cr_scratch_root`) functions. Since `capsule_resolver` imports `capsule_emit_parallel`, importing `_cr_shell_read` back would form a cycle — so `capsule_emit_parallel` carries a private copy + its own `extern` re-declaration (a 35-line helper; duplication is the acyclic resolution).
+
+Coverage: new `capsule_import_scan_test.sfn` pins the scanner contract from its new home; `cr_ram_budget_jobs_test.sfn` re-pointed; existing resolver e2e + the self-host fixed point guard behavior. **Next ceiling:** `cli_main.sfn` (1837 MB) is now the co-limiting module — raising the macOS `BUILD_JOBS` clamp needs it (and `core` 1690 MB) under ~1.7 GB too, then the Darwin clamp in `detect_build_jobs.sh` lifted.
+
 ### Symbol-Mangling O(n²) Memory Fixes (June 25, #1512)
 
 **Status: Implemented.** Cut `compiler/src/llvm/expression_lowering/native/core.sfn`'s single-module `emit llvm` peak RSS from **4.35 GiB → 1.64 GiB (−62%)**, byte-identical output, self-hosting preserved. Found by instrumenting the global arena's live `used` total at each phase/sub-phase boundary: the peak is **not** in the per-function lowering loop (the issue's original premise — that loop's cumulative scratch is only ~0.9 GB) but almost entirely in the **symbol-mangling pass** (`apply_module_symbol_mangling`), which was +2.9 GB on `core`. Three output-preserving fixes remove it:
