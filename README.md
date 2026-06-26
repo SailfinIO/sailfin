@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  Every function declares the capabilities it uses — IO, network, clock, and more — and the compiler rejects code that exceeds its declaration. No hidden side effects, no surprises at runtime.
+  Every function declares the capabilities it uses — IO, network, clock, and more — and the compiler rejects code that exceeds its declaration.
 </p>
 
 <p align="center">
@@ -30,11 +30,11 @@
 </p>
 
 > **Status:** Pre-1.0, active development. The self-hosted native compiler is
-> stable enough for daily use. The v0 structured-concurrency surface
-> (`routine`, `channel`, `spawn`/`await`, `parallel`) works end-to-end today;
-> the pure-Sailfin runtime is still being completed. See
+> stable enough for daily use, and the runtime is now pure Sailfin — no C. The
+> v0 structured-concurrency surface (`routine`, `channel`, `spawn`/`await`,
+> `parallel`) works end-to-end today and is still maturing. See
 > [What Works Today](#what-works-today) and the
-> [roadmap](https://sailfin.dev/roadmap) for the unvarnished picture.
+> [roadmap](https://sailfin.dev/roadmap).
 
 ---
 
@@ -52,11 +52,10 @@
   or opening sockets you didn't grant it.
 - **Pragmatic ergonomics.** Conventional syntax (TypeScript/Rust-like), a
   zero-configuration formatter, structured diagnostics with fix-it hints,
-  and `--json` output for tooling and agents. Designed to be readable by
-  humans and machines.
-- **Self-hosted native compiler.** Sailfin compiles itself to LLVM IR — a
-  real native toolchain, not an interpreter wrapper. Releases ship per
-  OS/arch as a `sailfin` / `sfn` binary alongside the runtime bundle
+  and `--json` output for tooling and agents.
+- **Self-hosted native compiler.** Sailfin compiles itself to LLVM IR and
+  links a pure-Sailfin runtime — no C runtime, no interpreter. Releases ship
+  per OS/arch as a `sailfin` / `sfn` binary alongside the runtime bundle
   (`sfn run` / `sfn build` resolve runtime sources from it).
 - **Structured concurrency (v0).** `routine { }` blocks, `channel`, `spawn`/`await`,
   and `parallel` are first-class language constructs with deterministic scoping.
@@ -191,14 +190,12 @@ and a pure Sailfin runtime. The critical path:
   annotations.
 - **Capability auditing (`sfn audit`)** — recursive capability analysis of
   a dependency tree before deployment.
-- **Sailfin-native runtime** — the binary's entry point is the
-  Sailfin-emitted `@main`; the remaining C helpers under
-  `runtime/native/src/` are being replaced module-by-module with Sailfin
-  (`runtime/sfn/`). Memory (arena, refcounting), clock, process spawning,
-  type metadata, filesystem adapters, and the concurrency scheduler are
-  already Sailfin modules linked into the compiler; the full rewrite is a
-  hard 1.0 prerequisite. Progress is tracked in
-  [`docs/runtime_audit.md`](docs/runtime_audit.md).
+
+The runtime is already pure Sailfin (`runtime/sfn/` + `runtime/prelude.sfn`):
+memory, strings, arrays, clock, process spawning, type metadata, filesystem
+adapters, and the concurrency scheduler all link into the compiler with no C.
+Remaining runtime work is hardening, tracked in
+[`docs/runtime_audit.md`](docs/runtime_audit.md).
 
 After 1.0, focus shifts to ecosystem growth: an `sfn/ai` capsule for
 model invocation gated by `![model]`, taint types (`Secret<T>`, `PII<T>`)
@@ -250,8 +247,8 @@ Set `GITHUB_TOKEN` to raise the GitHub API rate limit if you hit throttling.
 
 - **Compiler** — `compiler/src/*.sfn`. Pipeline: lexer → parser → AST →
   typecheck → effect-check → native IR (`.sfn-asm`) → LLVM IR.
-- **Runtime** — `runtime/native/` (C, current) and `runtime/sfn/` (Sailfin,
-  migration in progress). The Sailfin-native runtime is the 1.0 milestone.
+- **Runtime** — `runtime/sfn/` and `runtime/prelude.sfn`, all Sailfin. The
+  compiler links a pure-Sailfin runtime; there is no C runtime.
 - **Standard library** — `capsules/sfn/*`. Every capsule ships a
   `capsule.toml` manifest declaring its capability requirements.
 - **MCP server** — `tools/mcp-server/`, registered via `.mcp.json`. Wraps
