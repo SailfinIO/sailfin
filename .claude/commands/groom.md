@@ -149,7 +149,8 @@ gh issue create \
 
 ## Scope
 **In:**
-- ...
+- <semantic unit of change — not a file path; e.g. "the effect-checker
+  diagnostic emission for missing ![io]">
 
 **Out:**
 - ...
@@ -159,8 +160,8 @@ gh issue create \
 - [ ] make compile passes
 - [ ] make test passes
 
-## Files Affected
-- compiler/src/... — ...
+## Files Affected (advisory map — non-binding, expected to drift)
+- compiler/src/... — ...   # likely-relevant starting points; non-exhaustive, no line numbers/counts
 
 ## Verification
 \`\`\`bash
@@ -193,6 +194,32 @@ value is `None`. `/pickup` Phase 1.5 treats a missing section as legacy
 and falls back to walking `## Blocked by` against the seed tag — which
 produces false-positive seed-cut requirements on routine work. An
 explicit `None` value is the contract that says "no seed dependency."
+
+### Intent authoritative, file map advisory
+
+A groomed issue's **contract** is its **Goal** plus a **semantic
+`In:`/`Out:` scope**. The `## Files Affected` block is a **non-binding map** —
+a navigation aid that is *expected to drift* and is reconciled at pickup, not
+a checklist that gates correctness. This is the convention of record in
+`docs/conventions/issue-naming.md` ("Intent-authoritative issues"); all four
+issue-lifecycle commands cite it. When emitting an issue body:
+
+- **Express `In:`/`Out:` as semantic units of change, not file paths.** Write
+  "the effect-checker diagnostic emission for missing `![io]`", not
+  "`effect_checker.sfn` lines X-Y". A new sibling file inside that unit (e.g.
+  a split that moved diagnostic emission into `effect_checker/diagnostics.sfn`)
+  is then **in scope by construction** — the unit, not the path, is the boundary.
+- **Mark `## Files Affected` advisory** (the header reword above) and list paths
+  as *likely-relevant starting points*, explicitly non-exhaustive.
+- **Forbid line numbers anywhere** (`L142`, `~L100-135`) and **exact file
+  counts** ("edit these 3 files", "two call sites") in any emitted body. Line
+  numbers rot fastest; a count turns an in-unit Nth sibling into a phantom
+  scope violation.
+
+`/pickup` reconciles cosmetic map drift (a renamed path, an in-unit sibling)
+and pauses only on **semantic** scope growth (a new acceptance criterion or new
+public surface). Grooming a precise-but-brittle map only manufactures pickup
+halts on entropy `/triage` would otherwise refresh.
 
 Capture the issue numbers. After each `gh issue create`:
 

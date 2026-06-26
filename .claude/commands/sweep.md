@@ -159,8 +159,14 @@ For each issue in the `claude-ready` pool:
 1. Parse `## Files Affected` from the body. Extract path-shaped tokens.
 2. For each path not marked "New:", verify it exists in the working tree:
    ```bash
-   test -f <path> || flag "missing-file"
+   test -f <path> || note "stale-map"   # soft note, NOT a defect flag
    ```
+   `## Files Affected` is an **advisory map** (`docs/conventions/issue-naming.md`,
+   "Intent-authoritative issues") that is *expected to drift* — a missing path is
+   not an issue defect. Surface it as a **soft, non-blocking note** ("advisory map
+   may be stale — `/triage` can refresh") and do **not** imply the issue is broken.
+   The semantic `In:`/`Out:` scope is the contract; a stale map on a
+   semantically-scoped issue is expected entropy, not rot.
 3. Sanity-check for "appears already shipped" signals (heuristic only):
    - If the issue's goal mentions a symbol/function to delete or remove, `grep` to confirm it still exists.
    - If the issue describes adding a file/feature, `grep` for evidence the work shipped under a different name.
@@ -232,7 +238,7 @@ Still blocked:
   ⏸ #<N> — <title>      (waiting on: #<X> open, "Slice E" ambiguous)
 
 Audit findings (claude-ready hygiene):
-  ⚠ #<N> — <title>      (missing file: <path>)
+  · #<N> — <title>      (advisory map may be stale: <path> — /triage can refresh)
   ⚠ #<N> — <title>      (symbol "<name>" appears removed — verify scope)
 
 Top picks for free slots:

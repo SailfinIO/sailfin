@@ -277,7 +277,41 @@ Based on the issue's `type:*` label, follow the appropriate workflow. Use the is
 | `type:perf` | Follow `/perf` phases — profile baseline, implement, bench after, verify. |
 | `type:refactor` | Implement directly (one self-hosting step at a time), spawn `code-reviewer`, run `test-runner`. No architect needed if issue body has the plan. |
 
-**During implementation, respect the Scope section.** If you discover the issue's `In:` scope is wrong (missing a needed file, or `Out:` is impossible to honor), STOP and comment on the issue:
+### Reconcile the advisory map, then check for real scope growth
+
+A groomed issue's **contract** is its **Goal** plus the semantic `In:`/`Out:`
+scope. `## Files Affected` is a **non-binding map** (`docs/conventions/issue-naming.md`,
+"Intent-authoritative issues") that is *expected to drift* between grooming and
+pickup. **Before** implementing, re-derive the current surface for each `In:`
+unit (grep/glob for the named symbols/units), compare it against the advisory
+map, and apply the **In/Out semantic boundary contract**:
+
+- **In-scope — reconcile and proceed (do not pause):**
+  - A path in `## Files Affected` was **renamed/moved** → use the new path.
+  - A semantic unit named in `In:` is now spread across **additional sibling
+    files** in the same module/directory → touch them all.
+  - A map file **no longer exists** because its content merged into a sibling
+    already covered by the same `In:` unit → follow the content.
+  - The **same public surface** is reached through a refactored internal call
+    path → follow it.
+- **Out-of-scope — PAUSE, comment, do not proceed:**
+  - A **new acceptance criterion** the issue did not list is required.
+  - A **new public/user-facing surface** (new CLI flag, exported symbol,
+    diagnostic code) not implied by the Goal.
+  - The change must reach a **different semantic unit** than `In:` names (e.g.
+    the issue is scoped to the effect checker but the fix belongs in the parser).
+  - Honoring `Out:` becomes **impossible**.
+
+The discriminator is one question: **does the Goal plus the semantic
+`In:`/`Out:` still hold?** If yes, the drift is cosmetic — **reconcile and
+record it in the PR** (the Phase 5 "Map reconciliation" line); never halt on a
+renamed or missing map path. If a *new* criterion or surface is required, that is
+real scope growth — pause per the guard below.
+
+**During implementation, the semantic scope is the line.** If the work genuinely
+needs a **new acceptance criterion or new public surface** (real growth, per the
+Out-of-scope list above), or `Out:` is **impossible** to honor, STOP and comment
+on the issue:
 
 ```bash
 gh issue comment <N> --body "Scope adjustment needed: <reason>. Pausing for human input."
@@ -291,7 +325,8 @@ gh issue edit <N> --add-label "needs-grooming" --remove-label "in-progress"
 .claude/scripts/sync-project-status.sh <N> --from-labels
 ```
 
-Do not silently expand scope.
+Do not silently expand the *semantic* scope. A renamed/moved/merged map path or
+an in-unit sibling is **not** scope growth — reconcile it and keep going.
 
 **When the blocker is a missing _prerequisite_ (not just a wrong scope line).**
 Sometimes the issue isn't mis-scoped — it depends on a capability that does
@@ -367,6 +402,10 @@ Closes #<N>
 ## Acceptance Criteria
 <copy from issue, with all boxes checked>
 
+## Map reconciliation
+<advisory-map drift reconciled at pickup, or "None — map matched the tree".
+e.g. "`old/path.sfn` → `new/path.sfn` (renamed); added sibling `x.sfn` (same In: unit)">
+
 ## Verification
 \`\`\`bash
 <commands run, with results>
@@ -410,7 +449,13 @@ If anything was deferred or scope was adjusted mid-flight, surface it explicitly
 
 ## Constraints
 
-- **Never expand scope silently.** If the issue's scope is wrong, pause and ask.
+- **Never expand *semantic* scope silently.** A new acceptance criterion, new
+  public surface, or a different `In:` unit means pause and ask. Cosmetic map
+  drift (a renamed/moved/merged path, an in-unit sibling) is **not** scope
+  growth — reconcile it and proceed.
+- **Always record map reconciliation, never silently.** When the advisory
+  `## Files Affected` map drifted from the tree, capture the reconciliation in
+  the PR body's "Map reconciliation" line so the drift is visible and auditable.
 - **Never declare done with unchecked acceptance criteria.** If a criterion can't be met, comment and pause.
 - **Never push to main directly.** Always work on the `claude/<N>-<slug>` branch and open a PR.
 - **Always link the issue in the PR.** `Closes #N` ensures auto-close on merge.

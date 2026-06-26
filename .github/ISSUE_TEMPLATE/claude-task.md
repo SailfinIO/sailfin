@@ -32,11 +32,21 @@ optional `area:*`).
 ## Scope
 
 **In:**
-<!-- Bullet list of exactly what this issue changes. Be specific. -->
+<!--
+Name the semantic UNITS of change, not file paths — e.g. "the effect-checker
+diagnostic emission for missing ![io]", not "effect_checker.sfn lines X-Y".
+The unit, not the path, defines the boundary: a new sibling file inside that
+unit (after a split) is in scope by construction. Be specific about behaviour;
+never cite line numbers.
+-->
 -
 
 **Out:**
-<!-- Bullet list of what this issue explicitly does NOT touch. Prevents scope creep. -->
+<!--
+What this issue explicitly does NOT touch. Prevents scope creep. A new
+acceptance criterion or a new public/user-facing surface is out of scope by
+definition — if the work needs one, that is real scope growth, not drift.
+-->
 -
 
 ## Acceptance Criteria
@@ -46,9 +56,19 @@ optional `area:*`).
 - [ ] `make compile` passes (compiler self-hosts)
 - [ ] `make test` passes (no regressions)
 
-## Files Affected
+## Files Affected (advisory map — non-binding, expected to drift)
 
-<!-- Every file the implementation will touch, with a short note on what changes. -->
+<!--
+A NON-EXHAUSTIVE navigation aid: likely-relevant starting points, NOT a
+binding checklist. The codebase moves between grooming and pickup (files
+split, get renamed, gain siblings), so this map is expected to drift and is
+reconciled at pickup — it never gates correctness. The authoritative contract
+is the Goal plus the semantic In/Out scope above.
+
+Do NOT write line numbers (`L142`, `~L100-135`) or exact file counts ("these
+3 files", "two call sites"): both rot fastest and turn an in-unit sibling into
+a phantom scope violation. List paths as starting points only.
+-->
 - `compiler/src/...` —
 - `compiler/tests/...` —
 
