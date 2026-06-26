@@ -349,11 +349,13 @@ Suggest: `/pickup` to start working the queue, or `/triage` to verify hygiene.
 - **Title format follows `docs/conventions/issue-naming.md`** — Conventional Commit shape for sub-tasks, `Epic:` prefix for epics, `Tracking:` for trackers.
 - **Don't create issues for work that's already in progress** — check `gh issue list` first to avoid duplicates.
 - **When grooming an existing epic issue, attach every created issue as a native sub-issue of that epic** via the REST `/sub_issues` endpoint. Body cross-references do not populate the parent's Sub-issues panel and leave the roadmap UI incomplete. Use `-F sub_issue_id=<int>` (not `-f`) — the field must be typed.
-- **Every created or relabeled issue must end Phase 4 with a board sync.** Run
-  `.claude/scripts/sync-project-status.sh <N> --from-labels` after each
-  `gh issue create` and after any follow-up `gh issue edit` that adds
-  `blocked`. The Sailfin Tracker (Project #4) must reflect the labels.
-- **Every created issue must have its GitHub native Type field set.** Run
-  `.claude/scripts/set-issue-type.sh <N> <Feature|Task|Bug>` immediately after
-  the board sync. Derive the type from the `type:*` label: `type:feature` →
-  `Feature`, `type:bug` → `Bug`, everything else → `Task`.
+- **Labels drive the board; CI reconciles it.** `sync-project.yml` mirrors
+  Priority/Size/Status from labels on every label event, so creating/relabeling
+  an issue *is* the board update. Optionally nudge sooner with
+  `.claude/scripts/sync-project-status.sh <N> --from-labels` after a
+  `gh issue create` or a `gh issue edit` that adds `blocked`; it self-skips with
+  a `note:` where `gh` can't reach the API (e.g. remote containers).
+- **Set the GitHub native Type field** with
+  `.claude/scripts/set-issue-type.sh <N> <Feature|Task|Bug>` (best-effort; it
+  self-skips when `gh` is unavailable). Derive the type from the `type:*` label:
+  `type:feature` → `Feature`, `type:bug` → `Bug`, everything else → `Task`.

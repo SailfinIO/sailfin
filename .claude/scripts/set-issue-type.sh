@@ -42,6 +42,20 @@ case "$type_name" in
     ;;
 esac
 
+# Skip cleanly when gh cannot reach the GitHub API. In sandboxed / proxied
+# environments (e.g. Claude Code remote containers) api.github.com is gated
+# behind the Claude GitHub App and repo/GraphQL calls 403 regardless of any
+# GITHUB_TOKEN. Setting the native issue Type is best-effort; rather than abort
+# under `set -e` with a scary failure, probe once and no-op when the repo isn't
+# readable — the type:* label persists and the Type can be reconciled from a
+# session where gh works. A working gh with an under-scoped token still proceeds
+# and surfaces the real permission error.
+if ! gh api "repos/$REPO" -q .id >/dev/null 2>&1; then
+  echo "note: gh cannot reach $REPO here (sandboxed/proxied env); skipping issue-type set." >&2
+  echo "      The type:* label persists; set the native Type later from a session where gh works." >&2
+  exit 0
+fi
+
 node_id="$(gh api "repos/$REPO/issues/$issue_number" --jq '.node_id')"
 
 gh api graphql -f query="

@@ -279,6 +279,11 @@ Concerns:
   fail an issue on `### In` vs `In:` or a body-only `## Size`. Brittle matching
   is the bug that this pass exists to fix.
 - **If you change a label, leave a comment explaining why.** Audit trail.
-- **Every label flip must be paired with a board sync** via
-  `.claude/scripts/sync-project-status.sh <N> --from-labels`.
-- **Always fix a null GitHub Type field** via `set-issue-type.sh`.
+- **The label flip *is* the board update.** CI (`sync-project.yml`) reconciles
+  Priority/Size/Status from labels on every label event, so no extra step is
+  required. Optionally nudge Status sooner with
+  `.claude/scripts/sync-project-status.sh <N> --from-labels`; it self-skips with
+  a `note:` where `gh` can't reach the API (e.g. remote containers) — expected,
+  not a failure to chase.
+- **Fix a null GitHub Type field** via `set-issue-type.sh` (best-effort; it too
+  self-skips when `gh` is unavailable, so set it from a session where `gh` works).
