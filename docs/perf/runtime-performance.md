@@ -118,6 +118,44 @@ nested-loop mark stacking are post-1.0. A re-run of the full suite to refresh
 the frozen darwin-arm64 CSV (and the pending Linux x86_64 baseline) will fold
 this number into a stamped baseline.
 
+## Post-fix: int→string + `find_char` fast paths (#1511, Linux x86_64)
+
+`string_find_format` was the slowest per-op workload in the 0.7.0 baseline.
+Profiling on Linux x86_64 isolated the cost: the workload bundles a string scan
+(`find_char`) and an integer format (`i as string`), and the **scan dominated**
+— `find_char` allocated a fresh grapheme string at every scanned byte
+(`grapheme_at` → `runtime_grapheme_at_fn`), ~84 allocations per iteration, which
+is the source of both the CPU cost and the intermediate-string churn. The
+integer format was a distant second (~3% of the loop), though it still paid a
+seq_cst `atomic_load`+`atomic_store` read-modify-write per digit.
+
+Two changes (one PR):
+
+- **`find_char` ASCII fast path** (`runtime/prelude.sfn`): a single-byte ASCII
+  needle now resolves via a non-allocating raw byte scan (the `load_byte`
+  builtin) instead of the grapheme loop. Exact for an ASCII needle (an ASCII
+  byte `< 0x80` can only match a standalone ASCII grapheme in UTF-8).
+- **Batched integer emit** (`runtime/sfn/string.sfn`): `_num_emit_int_cstr`
+  streams digits into an i64 word accumulator and flushes whole 8-byte words
+  with one `atomic_store` each (no per-byte read), used by `sfn_int_to_str` and
+  the exact-integer fast path of `sfn_number_to_str`.
+
+Before/after on this Linux x86_64 host (K=7; baseline `sfn 0.7.0-alpha.49+dev.a7a1599`,
+after `+dev.4eec565`). This is also the first **Linux x86_64** `string_find_format`
+measurement (the prior table is Darwin arm64, not cross-platform comparable):
+
+| Metric | Before | After | Change |
+|---|---|---|---|
+| inner ms (median) | 1567 | 66 | **23.7× faster** |
+| ops/ms | 140.4 | 3333.3 | **23.7×** |
+| peak RSS | 224,676 KB | 30,244 KB | **7.4× lower** |
+| B/op (peak RSS / ops) | ~1,046 | ~141 | **7.4× less garbage** |
+
+The `int as string` cast itself was fixed earlier in #1505 (+ narrow-width
+follow-ups #1587/#1605); #1511 is the performance half of that surface. RSS and
+op-rate numbers vary by host, so treat the table as a same-host before/after, not
+an absolute baseline.
+
 ## Known runtime limitations exercised here
 
 The workloads were written against what the 0.7.0 compiler actually lowers. Two
@@ -133,11 +171,12 @@ regressions):
 - `sfn/strings::find` fails the same way; `string_find_format` uses the prelude
   `find_char` instead.
 
-A third, **untracked** issue surfaced while authoring the workloads and is *not*
-worked around in-language: the `int as string` cast silently produces `0`
-(e.g. `let s = "x" + (n as string)` yields `0`, not `x42`), while `{{ }}`
-interpolation lowers correctly. The workloads use interpolation throughout. See
-the benchmarking notes / open issue.
+A third issue surfaced while authoring the workloads: the `int as string` cast
+silently produced `0` (e.g. `let s = "x" + (n as string)` yields `0`, not `x42`),
+while `{{ }}` interpolation lowered correctly — so the workloads used
+interpolation throughout. This is now **fixed** (#1505, with narrow-width
+follow-ups #1587/#1605); its performance half is #1511 (see the post-fix section
+above).
 
 ## Follow-ups
 

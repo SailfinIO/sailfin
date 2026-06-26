@@ -1,0 +1,47 @@
+// Regression tests for the #1511 runtime fast paths. Both run in-process —
+// the test binary links the prelude, so `find_char` and the `int as string`
+// cast exercise the real runtime bodies directly (no subprocess build).
+//
+//   * `find_char`'s single-byte ASCII scan (`runtime/prelude.sfn`) must return
+//     byte-index parity with the grapheme loop it replaced — including the
+//     absent-needle, mid-string start, escape-shorthand, and end-of-string
+//     cases.
+//   * the batched whole-word integer formatter `_num_emit_int_cstr`
+//     (`runtime/sfn/string.sfn`), reached via `int as string`, must format
+//     zero, negatives, multi-digit values, and widths that straddle the
+//     8-byte word-flush boundary.
+import { find_char } from "runtime/prelude";
+
+test "1511: find_char ASCII fast path returns byte-index parity" {
+    let h = "the quick brown fox";
+    // Absent needle (the `string_find_format` benchmark case): full scan, -1.
+    assert find_char(h, "z", 0) == -1;
+    // Present needles at known byte offsets.
+    assert find_char(h, "q", 0) == 4;
+    assert find_char(h, "t", 0) == 0;
+    assert find_char(h, " ", 0) == 3;
+    // `start` is honoured: no second 't' after index 1.
+    assert find_char(h, "t", 1) == -1;
+    // Match at the final byte.
+    assert find_char("abx", "x", 0) == 2;
+    // Empty haystack.
+    assert find_char("", "a", 0) == -1;
+}
+
+test "1511: find_char escape shorthand still resolves via fast path" {
+    // The "\\n" → "\n" normalization yields a 1-byte ASCII target, so it
+    // takes the fast path too.
+    assert find_char("a\nb", "\\n", 0) == 1;
+    assert find_char("a\tb", "\\t", 0) == 1;
+}
+
+test "1511: int as string batched emit formats edge cases" {
+    assert(0 as string) == "0";
+    assert(7 as string) == "7";
+    assert((0 - 42) as string) == "-42";
+    assert(123456789 as string) == "123456789";
+    // Exactly 8 digits — fills one accumulator word before the final flush.
+    assert(12345678 as string) == "12345678";
+    // 9 digits — straddles the 8-byte word-flush boundary.
+    assert(123456789 as string) == "123456789";
+}
