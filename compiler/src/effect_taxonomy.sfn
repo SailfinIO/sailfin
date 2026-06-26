@@ -6,7 +6,7 @@
 // checker, the diagnostic renderer, future capability cross-checks)
 // agrees on which strings are recognized.
 //
-// Decisions captured in `docs/proposals/effect-validation.md` (locked
+// Decisions captured in `docs/proposals/0008-effect-validation.md` (locked
 // 2026-04-26):
 //   - `clock` stays distinct from `io` (§7.1) — determinism boundary.
 //   - `model` is reserved at 1.0 even though `sfn/ai` is post-1.0
@@ -45,7 +45,7 @@ fn is_canonical_effect(name: string) -> boolean {
 // always allowed regardless of the capsule's capability surface, and
 // never satisfies a real effect requirement. Documented in the test-
 // infrastructure proposal
-// (`docs/proposals/test-infra-epic/01-preconditions.md` §P3) as the
+// (`docs/proposals/0010-test-infra/01-preconditions.md` §P3) as the
 // annotation `![pure]` for `pure_assert_*` matchers and pure tests.
 //
 // Distinct from the canonical taxonomy: `pure` is not a capability the

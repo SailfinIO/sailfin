@@ -1,6 +1,6 @@
 // Stage B regression tests for the relative-import scanner and resolver
 // helpers added to `compiler/src/capsule_resolver.sfn` to back the
-// unified import path (docs/proposals/build-architecture.md, Part 5,
+// unified import path (docs/proposals/0006-build-architecture.md, Part 5,
 // Stage B).
 //
 // Helpers are inline-duplicated (mirroring `stdlib_capsule_allowlist_test.sfn`)

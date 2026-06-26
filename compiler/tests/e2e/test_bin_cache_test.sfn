@@ -1,5 +1,5 @@
 // End-to-end test for the per-test binary cache (#1230, Lever 2 of
-// docs/proposals/ci-test-speed.md).
+// docs/proposals/0011-ci-test-speed.md).
 //
 // Native (no-bash) replacement for the former `test_test_bin_cache.sh`
 // (test-infra Phase 3, epic #842; `.claude/rules/no-bash-e2e.md`).

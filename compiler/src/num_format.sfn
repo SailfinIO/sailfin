@@ -8,7 +8,7 @@
 // summary helpers (`render_summary`, `number_to_string`) impossible to link
 // from a standalone unit test, forcing `check_tool_test.sfn` to keep
 // hand-mirrored `_local_*` copies (see #619, #613, and
-// `docs/proposals/unit-test-import-envelope.md`).
+// `docs/proposals/design-notes/unit-test-import-envelope.md`).
 //
 // This module's only dependency is `substring` from the runtime prelude,
 // which the test runner links into every test via

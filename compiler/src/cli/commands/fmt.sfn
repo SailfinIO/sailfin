@@ -98,7 +98,7 @@ fn run(matches: Matches, ctx: CliContext) -> int ![io] {
     let mut would_change = 0;
     let mut fi = 0;
 
-    // Phase 5a (`docs/proposals/phase-5a-arena-reset.md`): take an arena
+    // Phase 5a (`docs/proposals/archive/phase-5a-arena-reset.md`): take an arena
     // mark immediately before the per-file loop and rewind to it at the
     // end of every iteration. Each file's `source`/`formatted` token and
     // string buffers (allocated below the mark by `fs.readFile` /

@@ -43,6 +43,29 @@ The architect produces an ordered list of issues. Each issue must:
 
 If the architect produces any L-sized item, push back: "this needs further breakdown."
 
+### Capture the epic's design as an SFEP
+
+An epic with real design surface needs a durable **design record** so the
+sub-issues don't each re-litigate the *why*, and so `/pickup` has a brief to
+read. Before creating issues:
+
+- **Check for an existing SFEP** for this epic (`grep` `docs/proposals/` and the
+  registry `docs/proposals/README.md`). Many epics already have one (e.g. the
+  effect-system, ownership, and test-infra epics).
+- **If one exists**, the sub-issues reference it (see the `## Design` line in the
+  body skeleton below); update its `tracking:` to list the epic + new issues.
+- **If none exists and the epic embodies a substantive design** (a language,
+  runtime/ABI, or toolchain decision — not just a bag of mechanical tasks), have
+  the architect write it as an SFEP first (`/sfep new <slug>`, or it writes
+  `docs/proposals/draft-<slug>.md` directly per `.claude/rules/proposals.md`).
+  Accept it at the grooming gate (`/sfep status <slug-or-N> Accepted`) so the
+  sub-issues can cite a numbered SFEP.
+- **If the epic is purely mechanical** (no design decision — e.g. "migrate N call
+  sites"), no SFEP is needed; the issues stand on their own.
+
+Each sub-issue then **cites the SFEP rather than duplicating its design** — the
+SFEP is the *why*, the issue is the *what to do this session*.
+
 ### Feasibility-probe FFI / "no frontend dependency" claims (gate)
 
 Before any issue that touches `runtime/` or crosses the C-ABI / `extern fn`
@@ -155,6 +178,9 @@ timeout 60 build/native/sailfin run path/to/example.sfn
 
 ## Required in pinned seed
 <#N or "None" — see "Seed dependencies" below for when to populate this>
+
+## Design
+<SFEP-NNNN (docs/proposals/NNNN-<slug>.md) — the design record this issue implements, or "None" for purely mechanical work>
 
 ## Context
 <links to roadmap, code, prior PRs>

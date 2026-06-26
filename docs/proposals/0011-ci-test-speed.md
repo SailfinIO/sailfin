@@ -1,3 +1,17 @@
+---
+sfep: 11
+title: "CI Test-Speed Plan"
+status: Accepted
+type: tooling
+created: 2026-05-01
+updated: 2026-05-01
+author: "agent:compiler-architect"
+tracking: "#1012"
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # CI Test-Speed Plan: cutting PR feedback time
 
 Status: Phase 1 (CI sharding + shard-cover lint) implemented in PR #1012;

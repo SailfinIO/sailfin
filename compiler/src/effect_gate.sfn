@@ -1,7 +1,7 @@
 // compiler/src/effect_gate.sfn
 //
 // Phase B/C/D build-path effect gate
-// (`docs/proposals/effect-validation.md` §5, locked 2026-04-26).
+// (`docs/proposals/0008-effect-validation.md` §5, locked 2026-04-26).
 //
 // Wires `validate_effects` from `effect_checker.sfn` into every
 // `compile_to_*` entry point in `main.sfn` and lets operators steer

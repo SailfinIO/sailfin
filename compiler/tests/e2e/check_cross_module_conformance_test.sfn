@@ -2,7 +2,7 @@
 //
 // Native replacement for the former `test_check_cross_module_conformance.sh`
 // (test-infra Phase 3, epic #842). Verifies that A2 (Track A in
-// docs/proposals/check-architecture.md) wires `sfn check` through the
+// docs/proposals/0004-check-architecture.md) wires `sfn check` through the
 // unified resolver: an interface declared in module A and consumed by an
 // `implements` clause in module B is conformance-checked end-to-end, with
 // E0301 fired when a required member is missing from the implementing struct.

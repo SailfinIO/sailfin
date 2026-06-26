@@ -1,3 +1,17 @@
+---
+sfep: 6
+title: Unified Build Architecture
+status: Implemented
+type: tooling
+created: 2026-04-17
+updated: 2026-04-28
+author: "agent:compiler-architect"
+tracking:
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # Proposal: Unified Build Architecture for Sailfin
 
 > **Note (2026-05-08).** The prior `scripts/build.sh` orchestrator was
@@ -77,7 +91,7 @@ one remains as a follow-up workstream:
    all link and run via the resolver-driven path.
 
 2. **`sfn check` migration — shipped via Track A2 (2026-04-25).** See
-   the A2 notes in `docs/proposals/check-architecture.md`. The
+   the A2 notes in `docs/proposals/0004-check-architecture.md`. The
    typechecker-side hookup (A1) and the resolver wiring (A2) shipped
    together; cross-module `implements` conformance (E0301) is now
    live for end users without any textual import inlining.
@@ -170,7 +184,7 @@ Unchanged from the original plan (Part 5):
   / 5:28 CI Linux (was ~13 min serial). Phase 5 (long-lived process)
   is no longer urgent for the wall-time target.
 - **`sfn check` shipped** (April 18 — see
-  `docs/proposals/check-architecture.md`). Provides the parser /
+  `docs/proposals/0004-check-architecture.md`). Provides the parser /
   typecheck / effect surface the unified driver reuses.
 
 ### Build-script fixups historically load-bearing (now retired)
@@ -1245,7 +1259,7 @@ the resolver-driven path for both, and A4 deleted the legacy helpers.
   `resolve_import_module_slug_for_module`.
 
 - **`sfn check` migration — shipped via Track A (A1 + A2 + A3,
-  2026-04-25):** see `docs/proposals/check-architecture.md` for
+  2026-04-25):** see `docs/proposals/0004-check-architecture.md` for
   the staged details. Cross-module `implements` conformance (E0301)
   is now live without textual import inlining.
 
@@ -1611,9 +1625,9 @@ actual split is an ecosystem-maturity cleanup.
   process", which is what Stage E implements.
 - `docs/runtime_architecture.md` — the Sailfin-native runtime rewrite.
   Stage F of this proposal consumes M2/M3 from that plan.
-- `docs/proposals/package-management.md` — user-facing registry and
+- `docs/proposals/0002-package-management.md` — user-facing registry and
   `sfn add` semantics. This proposal extends the manifest schema it
   defines.
-- `docs/proposals/tooling.md` — `sfn check`, `sfn doc`, `sfn fix` all
+- `docs/proposals/0003-tooling.md` — `sfn check`, `sfn doc`, `sfn fix` all
   depend on the in-process driver landing in Stage C. `sfn lsp`
   specifically benefits from the Stage G sub-capsule decomposition.

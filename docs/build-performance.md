@@ -1123,7 +1123,7 @@ Pre-existing dead imports of the retained symbols in `lowering_core.sfn` and `lo
 
 **Scope:**
 
-- 6 source files modified (`entrypoints.sfn`, `entrypoints_tests.sfn`, `entrypoints_tests_writer.sfn`, `lowering_phase_sanitize.sfn`, `lowering_recovery.sfn`, `native_ir_api.sfn`) + this entry in `docs/build-performance.md` + `docs/proposals/phase-4-eliminate-light-recovery.md` (architect's Phase 4 migration plan, dropped in the same PR so the next session can pick it up).
+- 6 source files modified (`entrypoints.sfn`, `entrypoints_tests.sfn`, `entrypoints_tests_writer.sfn`, `lowering_phase_sanitize.sfn`, `lowering_recovery.sfn`, `native_ir_api.sfn`) + this entry in `docs/build-performance.md` + `docs/proposals/archive/phase-4-eliminate-light-recovery.md` (architect's Phase 4 migration plan, dropped in the same PR so the next session can pick it up).
 - Net: approximately −70 lines across the 6 source files (wrapper deletion + 5 projection deletions + dead-import pruning). No signature changes, no new wrapper structs, no new tests (the self-host itself exercises every live path on every `make check`).
 
 **Determinism:** No new cross-phase or cross-process state. The parse result flowing into every downstream lowering phase is produced by the same single-pass `parse_native_artifact_impl` invocation as before; the only change is whether it routes through a trivial wrapper or not. CI determinism sweep on macOS-arm64 should show no regression.
@@ -1141,7 +1141,7 @@ Pre-existing dead imports of the retained symbols in `lowering_core.sfn` and `lo
 - `lowering_phase_sanitize.sfn::sanitize_lowering_inputs`: deleted the `_rfns`/`_rsts`/`_rens` override-reparse block (formerly lines 58-83). The structured `parse_in` is now authoritative end-to-end. Function body collapses from ~40 lines to 8.
 - `lowering_phase_sanitize.sfn` imports: dropped `recover_native_enums_light` and `recover_native_imports_light` (both were only used by the deleted override-reparse block). `recover_native_functions_light` and `recover_native_structs_light` remain in the import list — they still feed the defensive `sanitize_functions` and `recover_structs_if_corrupt` fallbacks, which only fire on empty/corrupt primary parse.
 - `entrypoints.sfn` imports: dropped `recover_native_functions_light`, `recover_native_imports_light`, `recover_native_structs_light` (all three were imported but never referenced in the file — dead imports left over from earlier pipeline passes). `recover_functions_for_lowering` retained as a single-symbol import block.
-- `docs/proposals/phase-4-eliminate-light-recovery.md`: Section 3 (Scope) and Section 4 (PR 1 Step 2) rewritten to match the actual PR 1 endpoint — `build_parse_result_from_text` deletion and its light-recovery import drops are explicitly moved to PR 2.
+- `docs/proposals/archive/phase-4-eliminate-light-recovery.md`: Section 3 (Scope) and Section 4 (PR 1 Step 2) rewritten to match the actual PR 1 endpoint — `build_parse_result_from_text` deletion and its light-recovery import drops are explicitly moved to PR 2.
 
 **Per-module overhead removed (non-test primary path):**
 
@@ -1174,7 +1174,7 @@ The fix is not to guess at the ABI corner; the fix is to not rely on the cross-m
 
 **Scope:**
 
-- 3 compiler source files modified (`lowering_core.sfn`, `lowering_phase_sanitize.sfn`, `entrypoints.sfn`) + 2 docs files (this entry + `docs/proposals/phase-4-eliminate-light-recovery.md` scope rewrite).
+- 3 compiler source files modified (`lowering_core.sfn`, `lowering_phase_sanitize.sfn`, `entrypoints.sfn`) + 2 docs files (this entry + `docs/proposals/archive/phase-4-eliminate-light-recovery.md` scope rewrite).
 - Net approximately −40 lines in `lowering_phase_sanitize.sfn` (override-reparse block gone), −10 lines across `lowering_core.sfn` (call-site simplification + import additions), −8 lines in `entrypoints.sfn` (dead-import cleanup). No signature changes, no new wrapper structs, no new tests (the self-host itself exercises every live path on every `make check`; the defensive fallbacks at `sanitize_functions:267` / `recover_structs_if_corrupt:350` / `recover_functions_for_lowering:773` catch regressions).
 
 **Determinism:** The deleted override-reparse block was a cross-module reparse that fed back into the primary pipeline's `parse`. Removing it shrinks the set of per-module operations that can non-determinize output on macOS-arm64. Post-change emit-sweep measurements to land in the PR body once CI completes on all platforms.

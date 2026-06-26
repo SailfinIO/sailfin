@@ -1,5 +1,5 @@
 // Unit tests for compiler/src/effect_imports.sfn and the Phase E
-// (`docs/proposals/effect-validation.md` §5) cross-module
+// (`docs/proposals/0008-effect-validation.md` §5) cross-module
 // propagation path through compiler/src/effect_checker.sfn.
 //
 // Phase E lets the effect checker resolve `Identifier` callees at

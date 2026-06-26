@@ -262,7 +262,7 @@ struct CheckCapsuleResolution {
     asm_paths: string[];  // build/native/import-context/<slug>.sfn-asm
     capsule_count: int;  // post-dedupe count, for diagnostic output
     staging_failed: boolean;  // true on slug collision or stage-write failure
-    // Phase F (`docs/proposals/effect-validation.md` §5): the
+    // Phase F (`docs/proposals/0008-effect-validation.md` §5): the
     // project manifest's `[capabilities] required = [...]`. Empty
     // when no manifest is present (standalone .sfn files outside
     // any capsule). The effect-checker treats empty as "skip
@@ -2805,7 +2805,7 @@ fn _cr_dep_specs_from_text(deps_text: string) -> string[] {
 struct ResolverDedupeResult {
     sources: CapsuleSource[];
     has_collision: boolean;
-    // Phase F (`docs/proposals/effect-validation.md` §5): the
+    // Phase F (`docs/proposals/0008-effect-validation.md` §5): the
     // project manifest's `[capabilities] required = [...]` list.
     // Empty when no manifest is present (standalone .sfn files
     // outside any capsule) — the effect-checker treats that as

@@ -128,7 +128,7 @@ fn _cr_ram_budget_jobs(memsize_bytes: int, nproc: int) -> int {
     if memsize_bytes <= 0 { return nproc; }
     // 3 GiB — the measured peak RSS of the heaviest compiler-module
     // emit (`capsule_resolver.sfn` ~3.23 GiB); see
-    // `docs/proposals/darwin-memory-governor.md` §2.4.
+    // `docs/proposals/0022-darwin-memory-governor.md` §2.4.
     let per_job_reserve: int = 3221225472;
     let usable: int = memsize_bytes * 66 / 100;
     let mut budget: int = usable / per_job_reserve;

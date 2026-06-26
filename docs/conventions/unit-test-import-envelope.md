@@ -6,7 +6,7 @@ mirrored locally. It exists because the original
 `check_tool_test.sfn` header misattributed the constraint to the
 `char_code` / `string_utils → runtime` chain; the real constraint is
 import-closure size. The full root-cause analysis lives in
-[`docs/proposals/unit-test-import-envelope.md`](../proposals/unit-test-import-envelope.md)
+[`docs/proposals/design-notes/unit-test-import-envelope.md`](../proposals/design-notes/unit-test-import-envelope.md)
 (#619).
 
 ---

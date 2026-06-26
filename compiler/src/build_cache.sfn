@@ -1,7 +1,7 @@
 // compiler/src/build_cache.sfn
 //
 // Content-addressed build artifact cache for the unified build
-// driver — Stage C of `docs/proposals/build-architecture.md`.
+// driver — Stage C of `docs/proposals/0006-build-architecture.md`.
 //
 // This module is the foundation for incremental builds. PR1 ships
 // the pure cache surface (key derivation, layout, lookup, store)
@@ -267,7 +267,7 @@ fn _filename_for_kind(kind: string) -> string {
     // keys are already disjoint.
     if kind == "runtime-obj" { return "runtime.o"; }
     // Per-test linked binary cache (#1230, Lever 2 of
-    // `docs/proposals/ci-test-speed.md`). A distinct filename keeps
+    // `docs/proposals/0011-ci-test-speed.md`). A distinct filename keeps
     // the test-binary layer from ever aliasing the per-module `.o`
     // `obj` kind in a shared entry directory, mirroring the
     // `runtime-obj` precedent.
@@ -840,7 +840,7 @@ fn cache_compiler_identity(compiler_version: string, compiler_binary_path: strin
 // ----------------------------------------------------------------
 // Per-test binary cache (#1230)
 // ----------------------------------------------------------------
-// Lever 2 (variant 2a) of `docs/proposals/ci-test-speed.md`: content-
+// Lever 2 (variant 2a) of `docs/proposals/0011-ci-test-speed.md`: content-
 // address each test's linked native executable so an unchanged test
 // skips LLVM lowering + the clang link (the dominant per-test cost)
 // and just re-runs the cached binary. This is a *second consumer* of

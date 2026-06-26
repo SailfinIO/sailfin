@@ -706,7 +706,7 @@ fn compile_to_llvm_file_with_module_imports(source: string, module_name: string,
 // helper so the build path and `sfn check` produce the same caret
 // rendering — single source of truth in `diagnostics_render.sfn`.
 //
-// Track B B4 (`docs/proposals/check-architecture.md`) deleted the
+// Track B B4 (`docs/proposals/0004-check-architecture.md`) deleted the
 // previous in-module renderer chain (`format_typecheck_diagnostic`,
 // `format_typecheck_diagnostics`, `report_typecheck_errors`,
 // `split_source_lines`, `build_pointer_line`, `join_lines` — ~150

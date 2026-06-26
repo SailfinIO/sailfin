@@ -1,3 +1,17 @@
+---
+sfep: 3
+title: Built-in Tooling
+status: Accepted
+type: informational
+created: 2026-04-14
+updated: 2026-04-18
+author: "agent:compiler-architect"
+tracking:
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # Proposal: Sailfin Built-in Tooling
 
 Status: Draft
@@ -161,7 +175,7 @@ the formatter is a token-stream printer with indentation tracking.
 
 ### 2. `sfn check` — Fast Analysis Without Codegen
 
-**Status:** Shipped (v1 — April 18, 2026). See [check-architecture.md](./check-architecture.md)
+**Status:** Shipped (v1 — April 18, 2026). See [check-architecture.md](./0004-check-architecture.md)
 and `compiler/src/tools/check.sfn`.
 
 **What it does:** Runs the front-end passes (parse, typecheck, effect check)

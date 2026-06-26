@@ -3,7 +3,7 @@
 // Single source of truth for diagnostic rendering shared between
 // `sfn check` (`tools/check.sfn`) and the build path
 // (`main.sfn` via `effect_gate.sfn`). Phase B
-// (`docs/proposals/effect-validation.md` §5, locked 2026-04-26)
+// (`docs/proposals/0008-effect-validation.md` §5, locked 2026-04-26)
 // extracts this code from `tools/check.sfn` so the build pipeline
 // can render effect diagnostics in the same shape — same headers,
 // same caret pointers, same `[kind: effect]` suffix — without

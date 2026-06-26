@@ -1,3 +1,17 @@
+---
+sfep: 12
+title: "Result<T, E> and the ? Operator"
+status: Accepted
+type: language
+created: 2026-05-27
+updated: 2026-05-27
+author: "agent:compiler-architect"
+tracking: "#321, #323"
+supersedes:
+superseded-by:
+graduates-to: reference/spec/12-result-and-errors.md
+---
+
 # `Result<T, E>` and the Postfix `?` Error-Propagation Operator
 
 **Status:** Proposed (design only — no code changes in this issue).

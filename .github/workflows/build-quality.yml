@@ -284,7 +284,7 @@ jobs:
           retention-days: 14
 
   # Per-test binary cache baseline producer (#1233, sequencing step 5 of
-  # docs/proposals/ci-test-speed.md). The PR build action
+  # docs/proposals/0011-ci-test-speed.md). The PR build action
   # (.github/actions/sailfin-build) restores `build/cache/test-bin` under
   # the `sailfin-testbin-...` key, but until this job nothing populated
   # it: the `build-quality` gate above runs no tests, and the nightly

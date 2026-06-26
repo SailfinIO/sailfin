@@ -78,7 +78,7 @@ For the `roadmapV1Tooling` (or whichever pre-1.0 tooling section) entry:
 {
   label: "Native test framework (Phases 0–3) — sfn/test capsule, expect()/lifecycle/fixtures, --json output, bash collapse",
   status: "planned",
-  link: "/docs/proposals/test-infra-epic/",
+  link: "/docs/proposals/0010-test-infra/",
 }
 ```
 
@@ -88,7 +88,7 @@ For the post-1.0 follow-up entry (replacing line 163):
 {
   label: "Test framework — Phase 4 (property, fuzz, replay, adversarial)",
   status: "planned",
-  link: "/docs/proposals/test-infra-epic/02-phases#phase-4",
+  link: "/docs/proposals/0010-test-infra/02-phases#phase-4",
 }
 ```
 

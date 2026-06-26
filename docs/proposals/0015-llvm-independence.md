@@ -1,3 +1,17 @@
+---
+sfep: 15
+title: "Toolchain Independence — Sailfin-Native Backend"
+status: Accepted
+type: runtime
+created: 2026-06-05
+updated: 2026-06-26
+author: "agent:compiler-architect"
+tracking: "#1640, #1641"
+supersedes:
+superseded-by:
+graduates-to: reference/runtime-abi.md
+---
+
 # Proposal: Toolchain Independence — A Sailfin-Native Backend
 
 **Date:** 2026-06-05 (status updated 2026-06-26)
@@ -8,7 +22,7 @@ prerequisite of the capability seal (epic #1640, child of #1639); the owned
 syscall layer (Axis 3) likewise (epic #1641). The *perf-parity* backend (matching
 LLVM's optimizer) remains a **post-1.0 long tail** — see §5. Nothing here is built
 yet.
-**Companion docs:** `docs/proposals/capability-sealed-runtime.md` (the *why* —
+**Companion docs:** `docs/proposals/0016-capability-sealed-runtime.md` (the *why* —
 what this independence is ultimately for), `docs/build-performance.md` (perf
 analysis + Track registry, #339), `docs/runtime_audit.md` /
 `docs/runtime_architecture.md` (C→Sailfin runtime migration),

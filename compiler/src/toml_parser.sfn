@@ -13,7 +13,7 @@ struct SailToml {
     dev_dependencies: TomlDependency[];
     capabilities: string[];
     // Stage A additions (parse-only; no consumers yet — see
-    // docs/proposals/build-architecture.md, Part 5, Stage A).
+    // docs/proposals/0006-build-architecture.md, Part 5, Stage A).
     build_kind: string;  // "binary" | "library" | "runtime" | ""
     build_implicit: boolean;  // [build] implicit = true
     workspace_members: string[];  // [workspace] members = [...]
@@ -271,7 +271,7 @@ fn toml_get_description(text: string) -> string {
 
 // ---- Stage A getters (parse-only; no consumers yet) ----
 // These getters expose manifest fields the unified-build proposal
-// (docs/proposals/build-architecture.md, Stage A) adds to the schema.
+// (docs/proposals/0006-build-architecture.md, Stage A) adds to the schema.
 // Stage B will start consuming them; Stage A only verifies round-trip.
 fn toml_get_build_kind(text: string) -> string {
     let t = _parse_toml_internal(text);

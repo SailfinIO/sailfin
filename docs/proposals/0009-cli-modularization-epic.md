@@ -1,3 +1,17 @@
+---
+sfep: 9
+title: CLI Modularization
+status: Accepted
+type: tooling
+created: 2026-05-06
+updated: 2026-05-06
+author: "agent:compiler-architect"
+tracking: "#345"
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # CLI Modularization Epic
 
 **Status:** Draft

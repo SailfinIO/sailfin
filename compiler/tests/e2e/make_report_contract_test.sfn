@@ -15,7 +15,7 @@
 //                            default-off invariant).
 //
 // Schema/design: docs/reference/make-result-schema.md,
-// docs/proposals/agent-output-orchestration.md §3.
+// docs/proposals/0014-agent-output-orchestration.md §3.
 //
 // Cases (cheap, deterministic, network-free):
 //   - off:   gate cleared -> no file, verdict `report` null.

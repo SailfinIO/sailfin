@@ -21,7 +21,7 @@ Cross-module call-graph propagation is enforced: if A imports B and
 calls it, A must declare every effect B declares (diagnostic code
 `E0402`). Aliased imports (`import { foo as bar }`) resolve under the
 local name. `Member`-callee resolution (`mod.fn()`) is a follow-up
-(Phase E2 in `docs/proposals/effect-validation.md`).
+(Phase E2 in `docs/proposals/0008-effect-validation.md`).
 
 Capsule manifests are a compile-time contract: every function's
 declared effects must be a subset of the capsule's

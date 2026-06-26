@@ -24,7 +24,7 @@ Always update in this order: status → spec → roadmap.
 
 ## When to Update
 
-- **New feature implemented**: Add to status.md, document in the appropriate `spec/NN-*.md` chapter, update `site/src/pages/roadmap.astro` progress. If the feature was previously a preview, remove its `preview/*.md` page.
+- **New feature implemented**: Add to status.md, document in the appropriate `spec/NN-*.md` chapter, update `site/src/pages/roadmap.astro` progress. If the feature was previously a preview, remove its `preview/*.md` page. **If the feature has an SFEP** (`docs/proposals/NNNN-*.md`), flip its front-matter `status:` to `Implemented`, bump `updated:`, point `graduates-to:` at the shipped chapter, and update its row in the `docs/proposals/README.md` registry — but only once it clears the full Stage1 bar (don't mark Implemented for "parsed but not enforced"). See `.claude/rules/proposals.md`.
 - **Feature partially implemented**: Update status.md with current stage, keep or add a page under `reference/preview/`.
 - **Bug fixed**: Update status.md if it changes feature status, no spec/roadmap change needed.
 - **Feature removed or deferred**: Remove from status.md, remove from the spec chapter and (if still planned) add a `preview/*.md` page, update `site/src/pages/roadmap.astro`.

@@ -5,7 +5,7 @@
 // describing the mismatch. It mirrors the `present`/`message` shape of
 // `AssertFailure` in `mod.sfn` (just inverted: `ok` is the success
 // discriminator, `present` is the failure discriminator) and the
-// `MatchResult` sketched in `docs/proposals/test-infra-epic/
+// `MatchResult` sketched in `docs/proposals/0010-test-infra/
 // 03-capsule-api.md`. When `Result<T, E>` lands (1.0 critical path
 // Phase 1) the matcher tier folds into `Result<(), AssertFailure>`
 // alongside the `pure_assert_*` tier — `ok == true` maps to `Ok(())`

@@ -1,3 +1,17 @@
+---
+sfep: 13
+title: "Host-Aware exe_path Intrinsic"
+status: Accepted
+type: runtime
+created: 2026-06-02
+updated: 2026-06-02
+author: "agent:compiler-architect"
+tracking:
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # Host-Aware `exe_path` Intrinsic — Self-Path Resolution on macOS arm64
 
 Status: proposal (design only — no implementation in this doc)

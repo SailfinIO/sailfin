@@ -1,6 +1,6 @@
 // compiler/src/effect_imports.sfn
 //
-// Phase E (`docs/proposals/effect-validation.md` §5) data shapes that
+// Phase E (`docs/proposals/0008-effect-validation.md` §5) data shapes that
 // let the effect checker resolve cross-module call sites against the
 // effects declared on imported callees.
 //

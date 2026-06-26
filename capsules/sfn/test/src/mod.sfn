@@ -6,7 +6,7 @@
 //
 // Requires ![io] for diagnostic printing on failure.
 //
-// Two API tiers (per `docs/proposals/test-infra-epic/03-capsule-api.md`):
+// Two API tiers (per `docs/proposals/0010-test-infra/03-capsule-api.md`):
 //
 //   1. Legacy `assert_*` — `![io]`. Prints diagnostics on mismatch via
 //      `print.err`, then `assert false` to fail the test.

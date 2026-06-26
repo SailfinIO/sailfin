@@ -224,7 +224,7 @@ fn binary_dir(exe: * u8) -> * u8 {
 // `GetModuleFileNameA(…)` on Windows — so this single body
 // resolves the path on every platform without referencing a
 // non-host symbol that would break the cross-platform link.
-// See `docs/proposals/host-aware-exe-path-intrinsic.md` §4.7.
+// See `docs/proposals/0013-host-aware-exe-path-intrinsic.md` §4.7.
 //
 // The sentinel's uniform contract (the Linux shape): it writes
 // up to `size` bytes of the path into `buf` and returns the

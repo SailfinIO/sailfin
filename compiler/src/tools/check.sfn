@@ -8,7 +8,7 @@
 // in `compiler/src/diagnostics_render.sfn`. No new analysis logic is
 // introduced here.
 //
-// Phase B (`docs/proposals/effect-validation.md` §5) extracted the
+// Phase B (`docs/proposals/0008-effect-validation.md` §5) extracted the
 // effect-violation → Diagnostic conversion and `render_diagnostic`
 // out into `diagnostics_render.sfn` so the build path
 // (`main.sfn` via `effect_gate.sfn`) renders effect violations in
@@ -19,7 +19,7 @@
 // `sfn check` green for the duration of the audit, while `=error`
 // reproduces the post-Phase-D gate locally for contributors.
 //
-// See docs/proposals/check-architecture.md for the broader design.
+// See docs/proposals/0004-check-architecture.md for the broader design.
 import { Statement } from "../ast";
 import { collect_bare_assert_findings } from "../bare_assert_check";
 import {

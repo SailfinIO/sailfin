@@ -1,11 +1,25 @@
+---
+sfep: 23
+title: Capsule-Defined Decorators
+status: Draft
+type: language
+created: 2026-06-15
+updated: 2026-06-15
+author: "agent:compiler-architect"
+tracking:
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # Capsule-Defined Decorators
 
 Status: proposal (design gate)
 Author: compiler architecture
-Related: `docs/proposals/effect-validation.md`,
-`docs/proposals/check-architecture.md`,
-`docs/proposals/compiler-decomposition.md` §7 (stdlib dogfooding),
-`docs/proposals/tooling.md` (deprecated-api lint).
+Related: `docs/proposals/0008-effect-validation.md`,
+`docs/proposals/0004-check-architecture.md`,
+`docs/proposals/0020-compiler-decomposition.md` §7 (stdlib dogfooding),
+`docs/proposals/0003-tooling.md` (deprecated-api lint).
 
 ## 1. Goal
 

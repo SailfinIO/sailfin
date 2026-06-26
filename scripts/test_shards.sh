@@ -2,7 +2,7 @@
 #
 # Single source of truth for the CI test-shard map.
 #
-# Phase 1 of docs/proposals/ci-test-speed.md (#843 Track A): the PR test
+# Phase 1 of docs/proposals/0011-ci-test-speed.md (#843 Track A): the PR test
 # suite is the long pole (~90% of CI wall time, serial). We fan it across
 # parallel CI legs. This script owns the shard -> file-set mapping so the
 # runner, the Makefile, and the cover lint can never drift apart.

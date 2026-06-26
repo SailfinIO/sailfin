@@ -182,7 +182,7 @@ fn apply_default_mem_limit() -> i32 ![io] {
 
     // Darwin: `setrlimit(RLIMIT_AS)` returns EINVAL, so there is NO
     // inheritable hard cap (confirmed by spike — see
-    // `docs/proposals/darwin-memory-governor.md` §2.2). The memory
+    // `docs/proposals/0022-darwin-memory-governor.md` §2.2). The memory
     // floor on macOS is therefore the RAM-aware emit fan-out governor
     // in `capsule_resolver.sfn::_cr_resolve_jobs` (#1532). This branch
     // is the scaffolding for a best-effort in-process footprint

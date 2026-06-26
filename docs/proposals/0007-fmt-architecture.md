@@ -1,8 +1,22 @@
+---
+sfep: 7
+title: "sfn fmt — Canonical Formatter"
+status: Implemented
+type: tooling
+created: 2026-04-15
+updated: 2026-04-20
+author: "agent:compiler-architect"
+tracking:
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # Architecture: `sfn fmt` — Canonical Formatter
 
 Status: In Progress (Steps 1-2 complete)  
 Date: April 15, 2026  
-Parent: [docs/proposals/tooling.md](../proposals/tooling.md)
+Parent: [docs/proposals/0003-tooling.md](../proposals/0003-tooling.md)
 
 ## Overview
 

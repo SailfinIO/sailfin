@@ -1,3 +1,17 @@
+---
+sfep: 19
+title: "sfn/http — Typed HTTP Surface"
+status: Accepted
+type: tooling
+created: 2026-06-13
+updated: 2026-06-13
+author: "agent:compiler-architect"
+tracking: "#1321"
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # Proposal: `sfn/http` — typed HTTP server/client surface
 
 Status: **approved** (design gate cleared 2026-06-13) — groomed into a tracking epic + Wave 1–4 issues

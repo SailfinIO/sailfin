@@ -1,3 +1,17 @@
+---
+sfep: 24
+title: Model Engines, Adapters, Tensors, Training
+status: Draft
+type: informational
+created: 2025-12-01
+updated: 2026-06-15
+author: "agent:compiler-architect"
+tracking:
+supersedes:
+superseded-by:
+graduates-to: reference/preview/model-execution.md
+---
+
 # Sailfin Proposal: Model Engines, Adapters, Tensors, and Training
 
 Status: Draft Proposal — **superseded in part**. The `model` / `prompt` /

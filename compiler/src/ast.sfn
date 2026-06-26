@@ -54,7 +54,7 @@ struct Capture {
 enum Expression {
     // Per-expression source spans land on the variants the effect
     // checker needs for call-site attribution (B1, see
-    // docs/proposals/check-architecture.md). Spans are appended as
+    // docs/proposals/0004-check-architecture.md). Spans are appended as
     // the last field so the seed compiler's positional GEP indexing
     // doesn't shift for existing field reads. Variants without a
     // span field stay layout-stable.

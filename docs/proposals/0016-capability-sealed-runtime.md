@@ -1,3 +1,17 @@
+---
+sfep: 16
+title: The Capability-Sealed Runtime
+status: Accepted
+type: runtime
+created: 2026-06-07
+updated: 2026-06-26
+author: "agent:compiler-architect; project owner (repositioning)"
+tracking: "#1639"
+supersedes:
+superseded-by:
+graduates-to:
+---
+
 # Proposal: The Capability-Sealed Runtime — Effects Enforced to the Syscall
 
 **Date:** 2026-06-07 (repositioned 2026-06-26)
@@ -9,7 +23,7 @@ epic **#1639** with five child epics (see §7). Depends on owning the backend
 (Axis 2) and the syscall layer (Axis 3), which this decision pulls onto the 1.0
 critical path. **Not yet implemented or enforced** — the design below is the
 target, not a shipped claim (see the threat-model discipline in §8).
-**Companion docs:** `docs/proposals/llvm-independence.md` (the *how* — owning the
+**Companion docs:** `docs/proposals/0015-llvm-independence.md` (the *how* — owning the
 backend + syscall layer), `docs/runtime_architecture.md` (scheduler §2.6,
 extern-fn syscall model), `docs/runtime_audit.md` (C→Sailfin migration),
 `site/src/content/docs/docs/reference/runtime-abi.md` (target ABI).

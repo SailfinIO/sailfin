@@ -14,7 +14,7 @@
 # first-error} from a tail-truncated log, with zero upthread scrolling.
 # Schema: docs/reference/make-result-schema.md (`sailfin-make/1`).
 #
-# Design: docs/proposals/agent-output-orchestration.md §1 (tail contract),
+# Design: docs/proposals/0014-agent-output-orchestration.md §1 (tail contract),
 # §2 (failure taxonomy), Phase 1.
 #
 # Usage:

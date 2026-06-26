@@ -122,7 +122,7 @@ jobs:
             build/seed/bin/sailfin check compiler/src/
 
   # One compiler build per OS, shared by every shard leg below (#1234,
-  # "Lever 1 step 1b" of docs/proposals/ci-test-speed.md §6 step 2).
+  # "Lever 1 step 1b" of docs/proposals/0011-ci-test-speed.md §6 step 2).
   # Previously each of the ~14 Build + Test legs ran `make rebuild` from
   # seed (~1.5 min Linux / ~3 min macOS even warm); now the build runs
   # once per OS and the legs download the result. The tree is tarred
@@ -377,7 +377,7 @@ jobs:
 
   # The PR test suite is ~90% of CI wall time and runs serially, so we
   # fan it across per-OS shard legs that run concurrently (Phase 1 of
-  # docs/proposals/ci-test-speed.md, #843 Track A). Each leg downloads
+  # docs/proposals/0011-ci-test-speed.md, #843 Track A). Each leg downloads
   # the shared per-OS compiler tree from its build-compiler-* job
   # (#1234 — no per-leg `make rebuild`) then runs only its shard.
   # `primary: true` designates the one leg per OS that also runs the
@@ -723,7 +723,7 @@ jobs:
     # `test_shards.sh run`), but each fixture build fans out internally
     # to `_cr_resolve_jobs()` emit workers. `RLIMIT_AS` is a no-op on
     # Darwin, so that fan-out is the only memory backpressure on macOS;
-    # it is now RAM-aware (#1532, `docs/proposals/darwin-memory-governor.md`)
+    # it is now RAM-aware (#1532, `docs/proposals/0022-darwin-memory-governor.md`)
     # and self-selects a small N on the ~7 GiB runner instead of the
     # blind 8 that previously OOMed the int-e2e-caps shard.
     runs-on: macos-26
