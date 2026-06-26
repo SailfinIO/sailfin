@@ -232,6 +232,38 @@ markdown checklists. Each issue carries a `sub_issues_summary` with
    issues" constraint. This phase makes **no writes**, so `--dry-run`
    behaviour is identical (recommendations only, either way).
 
+### Phased epics: surface the next wave to groom
+
+A multi-phase epic groomed per `/groom`'s two-level structure is **Epic →
+one `tracking` sub-issue per phase → leaf issues under each phase tracker**.
+That changes what "completed" means at each level, and adds a coordination
+move this phase owns:
+
+1. **A completed *phase tracker* is the trigger to groom the next phase, not
+   to close the epic.** When a phase tracker's leaves are all closed
+   (`completed == total`), recommend closing **that phase tracker**, then look
+   for the next sibling phase tracker under the same epic that still carries
+   `needs-grooming`:
+   ```bash
+   EPIC=<epic-number>
+   gh api /repos/SailfinIO/sailfin/issues/$EPIC/sub_issues --paginate \
+     --jq '.[] | select(.state=="open") | "\(.number) \(.title)"'
+   # the next open phase tracker labeled needs-grooming is the one to groom
+   ```
+   Surface it in the report under **"Next phase to groom"** as
+   `Phase <X> of epic #<E> complete → run /groom on Phase <Y> (#<tracker>)`.
+   This is the timely-groom signal that keeps a wave-groomed epic from
+   stalling silently between phases.
+2. **Never recommend closing an epic that still has an open child phase
+   tracker.** The native rollup already enforces this (an open tracker keeps
+   `completed < total`), but state it so a partially-groomed epic is never a
+   close candidate. A `needs-grooming` phase tracker with **no leaves yet**
+   (`total == 0`) is likewise not a close candidate — report it under
+   "Awaiting grooming," not "ready to close."
+
+This phase still makes **no writes** beyond the existing label flips; the
+next-phase recommendation is report-only and identical under `--dry-run`.
+
 ---
 
 ## Phase 3: AUDIT CLAUDE-READY
@@ -321,6 +353,12 @@ Still blocked:
 
 Trackers ready to close (recommendation — not auto-closed):
   ✓ #<N> — <title>      (all <K>/<K> sub-issues closed)
+
+Next phase to groom (wave-groomed epics):
+  → Phase <X> of epic #<E> complete → /groom Phase <Y> (#<tracker>, needs-grooming)
+
+Awaiting grooming (phase tracker, no leaves yet):
+  · #<N> — <title>      (epic #<E> Phase <X>; total == 0 — not a close candidate)
 
 Audit findings (claude-ready hygiene):
   · #<N> — <title>      (advisory map may be stale: <path> — /triage can refresh)

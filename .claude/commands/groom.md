@@ -325,6 +325,39 @@ gh api /repos/SailfinIO/sailfin/issues/$PARENT/sub_issues \
 Skip this step only when the grooming target was a roadmap section, a free-form
 prompt, or a document — i.e. when no parent epic issue exists.
 
+### Phased epics: use a two-level phase-tracker structure
+
+When an epic is **inherently multi-phase** — sequential phases where later phases
+depend on earlier ones (e.g. SFEP-0027's Phase A → B → C → D, where B can't start
+until A's modules land) — do **not** attach leaf issues directly to the epic and
+groom them in undocumented "waves." That is the structure that lost #351's Phase 3
+(it went 8/13-done with no sub-issues ever filed). Use two levels instead:
+
+1. **One `tracking` sub-issue per phase, all attached to the epic up front.** Title
+   `Tracking: <epic-id> Phase <X> — <noun phrase>`; label `tracking` (never `epic`
+   — they are mutually exclusive). The phase you are grooming leaves for now is a
+   bare `tracking` issue; **every future phase also gets `needs-grooming`** (its
+   leaves don't exist yet). Body = that phase's checklist + the SFEP `## Design`
+   cite; leaves attach **under the phase tracker, not the epic**.
+2. **Groom each phase's leaf issues wave-by-wave under its phase tracker** — attach
+   the leaves as native sub-issues of the *phase tracker*, and only when that
+   phase's wave is actually being opened.
+
+Why this is load-bearing (not bookkeeping): `/sweep` Phase 2c recommends closing a
+parent from its **native sub-issue rollup** (`completed == total`), and ignores the
+markdown `## Phases` checklist entirely. With leaves attached directly to the epic,
+the rollup hits 100% the moment Phase A's wave closes and `/sweep` recommends
+**closing the whole epic** before B/C/D are even groomed. With phase trackers
+attached up front, the epic rollup reads "phases-complete / total-phases" — it
+**cannot** reach 100% until every phase is groomed and done, and the open
+`needs-grooming` next-phase tracker is the visible *"groom me next"* card. Each
+phase is also independently focusable and closable, which a single epic issue is
+not.
+
+**When NOT to use this:** a single-phase epic, or a flat bag of genuinely
+independent issues with no phase ordering — attach the leaves directly to the epic
+as above. The two-level structure is for *sequential, wave-groomed* phases only.
+
 ---
 
 ## Phase 5: REPORT
