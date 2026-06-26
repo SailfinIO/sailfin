@@ -48,6 +48,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0023](./0023-capsule-decorators.md) | Capsule-Defined Decorators | Draft | language |
 | [0024](./0024-model-engines-and-training.md) | Model Engines, Adapters, Tensors, Training | Draft | informational |
 | [0025](./0025-native-runtime-architecture.md) | Native Runtime Architecture | Accepted | runtime |
+| [0026](./0026-delivery-process.md) | Delivery Process — Drift-Tolerant Issues, Seed Discovery, Release Cadence | Accepted | process |
 
 ## Subdirectories
 
