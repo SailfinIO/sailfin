@@ -50,6 +50,7 @@ The next number is `max + 1`. Add a row in the same PR that introduces an SFEP.
 | [0025](./0025-native-runtime-architecture.md) | Native Runtime Architecture | Accepted | runtime |
 | [0026](./0026-delivery-process.md) | Delivery Process — Drift-Tolerant Issues, Seed Discovery, Release Cadence | Accepted | process |
 | [0027](./0027-cli-rss-modularization.md) | CLI Modularization — Per-Worker RSS Relief First, Then Migration | Accepted | tooling |
+| [0028](./0028-typed-array-higher-order-fns.md) | Typed / Generic-Element Array Higher-Order Functions (map / filter / reduce) | Draft | language |
 
 ## Subdirectories
 

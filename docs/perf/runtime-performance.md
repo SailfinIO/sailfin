@@ -126,8 +126,10 @@ regressions):
 
 - `.map`/`.filter`/`.reduce` and the prelude `array_map`/`array_filter`/
   `array_reduce` free functions fail with `llvm lowering [fatal]: cannot resolve
-  return type for call` — gated on the runtime-callable closure primitive
-  (tracking #766, epic #1118). `array_map_filter` uses manual loops instead.
+  return type for call` — the runtime-callable closure primitive (epic #1118)
+  has since shipped for pointer-width `int` (#1507/#1508), so `int[]` now lowers;
+  generic / non-pointer-width element types are tracked in SFEP-0028.
+  `array_map_filter` uses manual loops instead.
 - `sfn/strings::find` fails the same way; `string_find_format` uses the prelude
   `find_char` instead.
 
