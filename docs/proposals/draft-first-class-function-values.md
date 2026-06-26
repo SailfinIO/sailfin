@@ -21,7 +21,9 @@ graduates-to:
 > is a language feature that needs an architect pass before fan-out. See
 > [`0001-sfep-process.md`](./0001-sfep-process.md) for the process. This is a
 > `Draft`: only the v0 baseline (item 2) is built — everything else is designed,
-> not shipped.
+> not shipped. The four design forks the architect originally flagged for the
+> design gate are **resolved and committed** in §3.5 below (and reflected in
+> §3.1, §4, §5, §7, §8); there are no remaining open forks.
 
 ## 1. Summary
 
@@ -40,10 +42,13 @@ allowed; the #1147 `E0808` guard rejects every other value-position use), (3)
 `string` is `{i8*, i64}`). This SFEP designs all four items so that *every*
 function value — named or closure, in a parameter, a local, or a struct field —
 materializes the same `{fn_ptr, env}` pair and dispatches through the **one**
-existing seam, and it states precisely where generics gate the ABI. It records
-design and tradeoffs only; it commits to no release window. Sequencing is decided
-at grooming once the shared generics dependency (with SFEP-0012 and SFEP-0028)
-has a plan.
+existing seam, and it states precisely where generics gate the ABI. The
+governing bar is a **performant, production-ready compiler/runtime/capsule
+ecosystem competitive with Go and Rust**: the design is optimized so that
+function-value dispatch matches Go's uniform-closure and Rust's zero-cost
+`fn`-item/branchless-`Fn` cost models, not for minimal implementation effort.
+It commits to no release window; sequencing is decided at grooming once the
+shared generics dependency (with SFEP-0012 and SFEP-0028) has a plan.
 
 ## 2. Motivation
 
@@ -133,62 +138,102 @@ introduced.
 ### Item 1 — Named function → `fn(...)` value
 
 **Goal.** A bare `worker` (a name that resolves to a top-level function, not a
-call) used in `fn(...)` value position becomes a callable `{fn_ptr, null-env}`
-pair, so call sites dispatch through the same seam as a closure.
+call) used in `fn(...)` value position becomes a callable function value that
+dispatches through the same seam as a closure — **with zero overhead relative to
+Go/Rust on both the materialized-value path and the statically-known-callee
+path.**
 
-**Lowering.** A named function has no captured environment, so its closure pair
-is `{ bitcast(@<fn> to i8*), null }`:
+**Lowering — committed: the two-path hybrid (decision D1, §3.5).** The deciding
+factor is **hot-path dispatch cost**, not codegen simplicity. Go gives function
+values produced from named functions (and method values) a *uniform closure
+representation* so the indirect call is a single branchless `CALL` through the
+func value; Rust coerces a `fn`-item to a `fn`-pointer **zero-cost** and keeps
+`Fn`-trait dispatch uniform and branchless. A production-grade Sailfin must match
+both — so this SFEP commits to a hybrid that is branchless on the common indirect
+path **and** zero-indirection when the callee is statically a named function:
 
-```
-; materialize `worker` as a fn(int)->int value
-%fp   = bitcast i64 (i64)* @worker to i8*
-%pair = insertvalue {i8*, i8*} { i8* undef, i8* null }, i8* %fp, 0
-; %pair is the {i8*, i8*} closure pair; env slot stays null
-```
+- **Path A — statically-known named callee → direct call (zero indirection).**
+  When the call target *is* a bare named function at the call site (the callee is
+  monomorphically known, no `fn(...)` value is materialized — e.g. `worker(5)`,
+  the overwhelmingly common case), lowering emits a **direct** `call <ret>
+  @worker(<args>)` with **no** pair, **no** env, **no** indirection. This is the
+  existing direct-call path and is unchanged; it is the Rust `fn`-item-call
+  equivalent (the value is never reified). The only new work is ensuring the
+  narrowed #1147 guard (below) does not divert this case into value
+  materialization.
 
-This is the env-less sibling of the closure pair, and it reuses the seam exactly:
-`core_call_emission.sfn:430-445` extracts `fn_ptr` and `env*` (here `null`), and
-the bitcast at `:458-462` reconstructs the typed signature. The hidden `env*`
-first argument is passed as `null` — **but the named function's real LLVM
-signature has no env parameter.** Two ways to reconcile this, in the order the
-implementer should try them:
+- **Path B — named fn materialized into a `fn(...)` value → trampoline pair
+  `{trampoline_ptr, null}` (branchless indirect).** When a named function *flows
+  as a value* through the seam (passed to `apply(worker, …)`, stored in a struct
+  field, assigned to a `fn(...)` local), it is reified as the closure pair
+  `{ bitcast(@worker__fnval_adapter to i8*), null }`, where
+  `@worker__fnval_adapter(i8* env, <args>)` ignores `env` and **tail-calls**
+  `@worker(<args>)`:
 
-- **(1a) Reuse the env-less indirect-call path (preferred).** The plain
-  `* fn (A) -> R` code-pointer call already lowers to an **env-LESS** indirect
-  call — `bitcast` to the typed fn-ptr type, then `call <ret> %fp(<args>)` with
-  **no** hidden env argument (proven by `plain_fn_ptr_call_test.sfn:120-142`,
-  which asserts the IR contains a typed-fn-ptr bitcast, an env-less `call`, and
-  *no* `extractvalue {i8*, i8*}`). A named-function value is exactly that case
-  with a `{i8*, i8*}`-typed *carrier*: store the address in the pair's slot 0,
-  and at dispatch select the **env-less** call shape when slot 1 is statically
-  `null`. This keeps the named function's real signature intact (no synthesized
-  env parameter) and reuses an already-shipped emission path.
+  ```
+  ; emitted once per named fn materialized as a value (deduplicated by symbol)
+  define i64 @worker__fnval_adapter(i8* %env, i64 %n) {
+    %r = musttail call i64 @worker(i64 %n)
+    ret i64 %r
+  }
+  ; at the materialization site
+  %fp   = bitcast i64 (i8*, i64)* @worker__fnval_adapter to i8*
+  %pair = insertvalue {i8*, i8*} { i8* undef, i8* null }, i8* %fp, 0
+  ```
 
-- **(1b) Generate a forwarding trampoline.** Emit `@worker__closure_adapter(i8*
-  env, i64 n)` that ignores `env` and tail-calls `@worker(n)`, and point slot 0
-  at the adapter. Uniform with the closure ABI (every pair is called the same
-  way) but adds one emitted function per referenced named function and an extra
-  call frame. Kept as the fallback if (1a)'s static-null discrimination proves
-  fragile across the seam.
+  This makes **every** value flowing through the dispatch seam — closure or
+  named-fn — carry the *identical* `(i8* env, <args>)` calling convention, so the
+  seam at `core_call_emission.sfn:430-503` stays a **single, branchless** indirect
+  `call` with the env passed unconditionally. There is **no per-call static-null
+  branch** on the hot indirect path. The `musttail` tail-call is collapsed by
+  LLVM (the adapter is a thin forwarding shim in guaranteed tail position), so
+  Path B's steady-state cost is one indirect call — the same instruction count Go
+  pays for a func value and Rust pays for `Fn` dispatch. The adapter is emitted
+  **once per named function actually materialized as a value** (deduplicated by
+  symbol, like a monomorphization cache), not once per call site, so binary-size
+  growth is bounded by the count of distinct named functions used as values.
 
-The recommendation is **(1a)**: it composes the two emission paths the compiler
-already has (closure-pair carrier + env-less indirect call) rather than minting
-trampolines.
+**Why the trampoline pair, not the env-less `{ptr, null}` carrier.** An earlier
+draft considered carrying `@worker` directly in slot 0 and selecting an *env-less*
+call shape when slot 1 is statically `null` (the "1a carrier"). That is **rejected
+on the performance bar.** "Statically `null`" is only knowable when the pair's
+provenance is visible at the call site; once a `fn(...)` value crosses an
+abstraction boundary (a struct field, a function parameter, a collection element)
+the seam **cannot** prove slot 1 is null, so it would have to emit a **runtime**
+null-check + two call sites (env-less and env-ful) on *every* indirect closure
+call — a conditional branch and duplicated call that Go and Rust pay nowhere.
+That is precisely the hot-path tax this SFEP exists to avoid. The trampoline pair
+makes the convention uniform so the check disappears entirely. The env-less
+carrier survives **only** as a fused special case of Path A (a named callee whose
+value never escapes), where it degenerates to the direct call and no pair is built
+— that is exactly the existing `plain_fn_ptr_call` env-less indirect path
+(`plain_fn_ptr_call_test.sfn:120-142`), which remains the lowering for an
+explicit `* fn (A) -> R` C-ABI code pointer and is untouched.
+
+**Verification probe (decided direction, not an open fork).** The trampoline-pair
+representation is committed. One implementation-time measurement gates a possible
+*optimization*, not the design: confirm LLVM elides the `@worker__fnval_adapter`
+frame under `musttail` + `-O2` so Path B is a single indirect call with no extra
+frame in the linked binary. Probe: build
+`compiler/tests/e2e/fixtures/named_fn_value/main.sfn`, disassemble the dispatch
+site, assert no surviving adapter prologue/epilogue between the indirect `call`
+and `@worker`'s body. If a frame survives on a target, the fallback is to inline
+the adapter at emission (open-code the forwarding) — still branchless, still a
+single representation; the *design* (uniform trampoline pair, no per-call null
+branch) does not change. This is a codegen-quality check, not a representation
+fork.
 
 **The #1147 guard change.** `check_fn_reference_raw`
 (`typecheck_types.sfn:1785-1841`) and `make_fn_value_position_diagnostic`
-(`:1733`) must be **narrowed, not deleted**. Today they fire `E0808` for a bare
-function name in value position, `& fn`, and `<fn> as <non-* u8>`. The change:
+(`:1733`), plus the structured-`Identifier` arm at `typecheck.sfn:1058-1066`
+(which today unconditionally fires `E0808` for any bare identifier resolving to a
+function), must be **narrowed, not deleted**. The change:
 
-- A bare function name used where a `fn(...)`-typed value is expected (parameter
-  whose annotation maps to `{i8*, i8*}`, a `let f: fn(...) = name`, a struct-field
-  initializer of `fn(...)` type) is now **legal** — the typechecker records the
-  function reference as a closure-pair-producing value instead of emitting
-  `E0808`. This requires the value-position check to know the **expected type**
-  at the use site; the guard currently keys only off "the head identifier
-  resolves to a function" without consulting the expected type, so it must gain
-  an expected-type parameter (the same context the assignment/param-binding
-  typecheck already has).
+- A bare function name used where a `fn(...)`-typed value is expected becomes
+  **legal** — the typechecker records the function reference as a
+  closure-pair-producing value (Path B) instead of emitting `E0808`. This is
+  driven by the **expected type** at the use site, threaded to the check per
+  decision D2 (§3.5).
 - Still **rejected** (E0808 / E0809 unchanged): a generic function used as a
   value (`is_generic == true`, `typecheck_types.sfn:1830-1831`) — monomorphizing
   a function-reference value is out of scope here and shares the SFEP-0028/0012
@@ -236,7 +281,9 @@ The residual constraints are entirely item-4 (the *callback signature* ABI:
 `fn(int) -> int` works; `fn(string) -> string` does not) — those are not item-2
 gaps, they are the shared generics gate. Item 2 is the proof that the seam is
 **source-agnostic on the env side**; items 1 and 3 extend it to be
-source-agnostic on the *carrier* side.
+source-agnostic on the *carrier* side. Under decision D1, a closure value and a
+named-fn value now present the *same* `(i8* env, <args>)` convention to this
+parameter path, so item 2 dispatches both with no per-call discrimination.
 
 ### Item 3 — fn-typed struct fields
 
@@ -250,14 +297,16 @@ struct's LLVM layout already reserves the closure-pair slot. The gap is purely
 
 - **Population.** A struct literal `Router { handler: <fn-or-closure-value> }`
   must store a `{i8*, i8*}` pair into the `handler` field. The right-hand side is
-  produced by item 1 (named function → pair) or by the existing lambda lowering
-  (closure → pair). The struct-initializer emission must accept a closure-pair
-  operand for a `fn(...)`-typed field with **no coercion** (mirroring the
-  slot-0 bypass at `core_call_emission.sfn:111-114`) — the pair is already the
-  field's representation. The aggregate→pointer boxing fallback in
+  produced by item 1 Path B (named function → trampoline pair) or by the existing
+  lambda lowering (closure → pair). The struct-initializer emission must accept a
+  closure-pair operand for a `fn(...)`-typed field with **no coercion** (mirroring
+  the slot-0 bypass at `core_call_emission.sfn:111-114`) — the pair is already
+  the field's representation. The aggregate→pointer boxing fallback in
   `core_operands.sfn:1290-1346` must **not** fire on a `{i8*, i8*}` field value
   (that path boxes a by-value aggregate into a heap `i8*`; a closure pair stored
-  into a struct field is stored directly, not boxed).
+  into a struct field is stored directly, not boxed). Because every field value —
+  named or closure — is the same convention under D1, the field stores one shape
+  and dispatch reads one shape.
 - **Field-dispatch.** `r.handler(5)` must (a) load the `{i8*, i8*}` pair from the
   field via GEP+load, then (b) route that operand into the closure-dispatch seam.
   Mechanically this is `try_resolve_closure_callee`
@@ -288,14 +337,14 @@ value of a fixed width and the bitcast-to-fn-ptr is faithful.
 **Where it gates.** A signature whose argument or return is a **non-pointer-width
 aggregate** is *not* safe through v0. The canonical case is `fn(string) ->
 string`: `string` is the two-word `{i8*, i64}` value. The seam would synthesize
-`i8* ({i8*,i8*}-derived)*` parameter types from whatever the call-site operand
-happens to be, and a by-value `{i8*, i64}` argument crossing an indirect call
-needs the **callee's real ABI** (by-value aggregate passing / sret) to match —
-which the call-site-derived signature does not guarantee. This is the **same
-class of constraint** SFEP-0028 §3 identifies for array HOFs: the callback ABI is
-fixed at pointer width, and typed/aggregate element shapes need either
-**monomorphization** (specialize the body per concrete type, giving each the
-*natural* ABI for its shape) or a **width-aware ABI** (explicit width/kind tags).
+parameter types from whatever the call-site operand happens to be, and a by-value
+`{i8*, i64}` argument crossing an indirect call needs the **callee's real ABI**
+(by-value aggregate passing / sret) to match — which the call-site-derived
+signature does not guarantee. This is the **same class of constraint** SFEP-0028
+§3 identifies for array HOFs: the callback ABI is fixed at pointer width, and
+typed/aggregate element shapes need either **monomorphization** (specialize the
+body per concrete type, giving each the *natural* ABI for its shape) or a
+**width-aware ABI** (explicit width/kind tags).
 
 **Verdict for v0 (this SFEP):**
 
@@ -335,29 +384,168 @@ foundation — generic type constraints + monomorphization:
   defers the non-pointer-width function-value surface to whenever the shared
   generics work lands.
 
+### 3.5 Resolved design decisions
+
+The four forks flagged during the architect pass are resolved here as committed
+decisions, each justified against the **Go/Rust-competitive performance +
+production-readiness** bar. None remains an open fork; the two that carry an
+implementation-time check are recorded as *decided directions with a named
+verification step*, not alternatives to choose between later.
+
+**D1 — Named-fn lowering: committed to the two-path hybrid (Path A direct call +
+Path B trampoline pair `{trampoline_ptr, null}`).** Rationale: the decision is
+made on **hot-path dispatch cost**, not codegen simplicity. The rejected env-less
+carrier ("1a") forces a *runtime* slot-1 null-check and a duplicated call site on
+**every** indirect closure call once a value escapes its definition site, because
+the seam cannot statically prove the env is null across an abstraction boundary —
+a conditional branch Go and Rust pay nowhere (Go: uniform closure representation
+for func-values-from-funcs and method values; Rust: zero-cost `fn`-item→`fn`-ptr
+coercion + branchless `Fn` dispatch). The trampoline pair makes the calling
+convention **uniform** (`i8* env, <args>` for every value, env passed
+unconditionally), so the common indirect path is a single branchless `call`; and
+Path A keeps the statically-known-named-callee case at a **direct call, zero
+indirection** — matching Rust's `fn`-item call. Net: Sailfin pays exactly the
+Go/Rust cost on both paths. Verification step (codegen quality, not design):
+confirm `musttail` + `-O2` elides the adapter frame; fallback is to open-code the
+forwarding at emission — same representation, still branchless. Committed in §3.1
+Item 1. Full text and the IR shape live there.
+
+**D2 — Expected-type plumbing: committed to complete coverage at every
+function-reference use site.** Production-ready means *no partial coverage* — a
+named-fn value must be accepted (and effect-checked) wherever a `fn(...)` value
+is expected, never only in some positions. The `fn(...)`-value-position check
+(today the structured-`Identifier` arm at `typecheck.sfn:1058-1066` and the
+`Raw`-form `check_fn_reference_raw` at `:1072-1073`, both of which currently take
+no expected type) is threaded an **expected-type argument** and exercised at all
+of:
+
+  1. **Variable / `let` binding with annotation** — `let f: fn (int) -> int =
+     worker;` (the annotation supplies the expected type).
+  2. **Assignment to a typed lvalue** — `f = worker;` where `f`'s declared type
+     is `fn(...)`.
+  3. **Function-call argument position** — `apply(worker, 5)` (the callee's
+     parameter type `cb: fn (int) -> int` supplies the expected type; this is the
+     #1172 path).
+  4. **Struct-literal field initializer** — `Router { handler: worker }` (the
+     field's declared type supplies the expected type; the item-3 population path).
+  5. **Array / collection literal element** — `let hs: (fn (int) -> int)[] =
+     [worker, doubler];` (the element type supplies the expected type; #1172's
+     handler *table* needs this).
+  6. **Return position** — `fn pick() -> fn (int) -> int { return worker; }` (the
+     enclosing function's declared return type supplies the expected type).
+
+  Reach confirmation: the value-position check is reached from the typecheck
+  expression walk (`typecheck.sfn`, the `Identifier`/`Raw` arms above). Sites
+  (1)–(4) and (6) flow through statement/argument/field/return typechecks that
+  **already carry the declared target type** in their local context, so threading
+  it to the walk is mechanical (add the expected type as a walk parameter,
+  defaulting to "none" → preserve today's `E0808` when there is genuinely no
+  `fn(...)` expectation). Site (5) is the one that needs the array/collection
+  literal element type propagated into the element walk; in current typecheck the
+  collection-literal element type is available at the literal node but is not
+  always pushed down per element. **Scoped sub-task:** if pushing the element type
+  down per element is not already wired, it lands as a small predecessor within
+  the same epic ("thread collection-literal element type into element typecheck")
+  — it is *not* deferred or made best-effort; complete coverage includes (5).
+  Committed in §3.1 Item 1 (guard change) and §5.
+
+**D3 — Effect-row preservation: committed as a hard soundness invariant.** This
+is non-negotiable for the effect-system pillar. The effect row is **part of the
+`fn(...)` type's identity**, not metadata that may be dropped or widened when a
+function becomes a value. The committed rules:
+
+  - **Type identity.** `fn (A) -> R ![E]` and `fn (A) -> R ![E']` are the *same*
+    function-value type only when `E` and `E'` denote the same effect set under
+    the canonical taxonomy. The effect row participates in `fn(...)` type
+    equality.
+  - **Subtyping / coercion (subsumption, consistent with SFEP-0017).** A value of
+    type `fn (A) -> R ![E]` is assignable to an expected `fn (A) -> R ![F]` iff
+    `E ⊆ F` (the value promises *at most* `F`'s effects). Because SFEP-0017 models
+    hierarchical sub-effects as **subsumption within the locked six** (`io.fs ⊑
+    io`), set membership here is computed under that refinement order: a value
+    declared `![io.fs]` satisfies an expected `![io]` (a refinement is ⊑ its
+    parent), but a value declared `![io]` does **not** satisfy an expected
+    `![io.fs]`. Effect rows are thus contravariant-by-subsumption in the
+    value-coercion direction (a function value may be *more* restricted than the
+    slot it fills, never less). Function-value parameter/return types compose this
+    rule structurally.
+  - **Materialization.** When a named function (or a closure) is materialized into
+    a `fn(...)` value at any of the D2 sites, the materialized value's type
+    carries the source function's declared effect row; the checker **unifies it
+    against the expected `fn(...)` type's effect row under the ⊆ rule** and
+    rejects (a new diagnostic, not a silent widen) if the source's effects exceed
+    the expected row. A function value can never *launder* an effect by becoming a
+    value.
+  - **Call-site soundness rule (stated explicitly).** Calling a `fn (...) ![E]`
+    value requires the caller's own declared effect row to **⊇ E** — exactly as a
+    direct call to a function declaring `![E]` would. Dispatch through the seam
+    does not relax this; the effect obligation is discharged at the call site
+    against the value's *type-level* effect row, independent of which concrete
+    function the pair points at.
+
+  Mechanically the effect row already lives on the `fn(...)` annotation and on
+  function signatures; D3 commits that the value-coercion check (D2's
+  expected-type unification) and the call-site effect check **both** consult it,
+  and adds the confirming effect-checker test in §8. The dispatch *mechanics*
+  (`core_call_emission.sfn`) stay effect-agnostic — correctly, because the
+  contract is enforced in the checker, not at emission. Committed in §4.
+
+**D4 — Bundle-vs-split for #1172: committed grooming directive.** Per
+`.claude/rules/seed-dependency.md`, named-fn-value lowering (item 1) and the
+fn-typed-field capability (item 3) are **compiler-source capabilities** their
+consumers need present in the **pinned seed**. The directive `/groom` applies
+deterministically:
+
+  - **Default — BUNDLE.** Items 1 + 3 (the capability) land in **one PR together
+    with #1172's adoption** of them (the first and, at this time, only consumer).
+    `make compile` builds the new compiler from the old seed; that freshly-built
+    compiler then compiles #1172's named-fn + closure callback table in the same
+    self-host pass → **no seed cut, no `/pin-seed`.** This is the production-
+    efficient path: it avoids manufacturing a release cycle between capability and
+    consumer.
+  - **Exact split condition (the only thing that overrides the default).** Split
+    the capability into a standalone `seed-blocker` predecessor **iff** *either*:
+    (a) **multiple independent consumers** of the capability land before or
+    alongside #1172 (so the capability genuinely serves more than its first
+    consumer and merits standalone shipping), *or* (b) the **combined blast radius
+    of items 1 + 3 + #1172 exceeds one reviewable PR** (an honest S/M ceiling —
+    never bundle into an L). On a split, the capability PR carries `seed-blocker`,
+    #1172 carries `## Required in pinned seed: #<capability>`, and the seed advance
+    **queues against the next cadence seed bump** (it does **not** trigger a
+    reactive cut). Item 4's negative diagnostic is frontend-only and may ride
+    either PR.
+
+  Committed in §5.
+
 ## 4. Effect & capability impact
 
 **The seam is effect-agnostic, and that is correct.** A closure carries its
 body's effects through the call: when a `fn (...) ![io]` value is dispatched, the
-effect requirement is a property of the **closure's body**, enforced by
-`effect_checker.sfn` at the lambda/function definition site and propagated to the
-caller through the existing closure-call effect propagation (the same path that
-already makes `closure_mixed_capture` and the array-HOF `![io]` lambda-as-param
-cases type-check). The dispatch mechanics in `core_call_emission.sfn` do not
-inspect or alter effects — they emit the indirect call; the effect contract is
-established upstream in the checker.
+effect requirement is a property of the **function's type-level effect row**,
+enforced by `effect_checker.sfn` and the value-coercion check, not by the
+dispatch mechanics. `core_call_emission.sfn` does not inspect or alter effects —
+it emits the indirect call; the effect contract is established upstream.
 
-Items 1–3 do **not** change this. A named-function value carries the named
-function's declared effects; a fn-typed struct field carries the effect row of
-its declared `fn (...) ![...]` type; dispatch through either propagates effects
-identically to the v0 closure-param path. There is **no new capability surface**:
-no new effect, no new way to escape an effect annotation. A function value cannot
-launder effects — calling it requires the caller to satisfy the value's declared
-effect row, exactly as a direct call would. The one thing to verify during
-implementation (not change): that the narrowed #1147 guard does not let a
-function reference *drop* its effect annotation when materialized as a value —
-the `fn(...)` annotation that the field/param/let carries must include the effect
-row, and the checker must unify against it.
+**D3 (§3.5) is the committed hard invariant for this section.** Restating the
+load-bearing rules so they are normative here, not advisory:
+
+- The effect row is **part of `fn(...)` type identity** — never dropped or
+  silently widened when a function (named or closure) is materialized as a value,
+  stored in a field, passed as a param, put in a collection, or returned.
+- **Coercion is by subsumption:** `fn (A) -> R ![E]` is assignable to an expected
+  `fn (A) -> R ![F]` iff `E ⊆ F` under the SFEP-0017 sub-effect order (`io.fs ⊑
+  io`), so a *more* restricted value fills a *broader* slot but never the reverse.
+  Materialization at every D2 site unifies the source row against the expected row
+  under this rule and **rejects** (diagnostic, not widen) on exceedance.
+- **Call-site soundness:** calling a `fn (...) ![E]` value requires the caller to
+  declare **⊇ E** — identical to a direct call to an `![E]` function. A function
+  value cannot launder an effect by becoming a value.
+
+There is **no new capability surface**: no new effect atom (the taxonomy stays the
+locked six, SFEP-0017), no new way to escape an effect annotation. Items 1–3 do
+not change the effect *model*; they extend its enforcement to the new
+function-value carriers and commit that enforcement is total, which is what a
+capability-security pillar requires. The confirming effect-checker test is in §8.
 
 ## 5. Self-hosting impact
 
@@ -368,50 +556,59 @@ Passes touched, in pipeline order:
   call targets already parse. No new syntax.
 - **AST** — **no change.** Function-value references are existing identifier /
   member-access nodes; closure values are existing lambda nodes.
-- **Typecheck** (`typecheck_types.sfn`) — **narrow the #1147 guard**
-  (`check_fn_reference_raw` `:1785-1841`, `make_fn_value_position_diagnostic`
+- **Typecheck** (`typecheck.sfn` + `typecheck_types.sfn`) — **narrow the #1147
+  guard** (the `Identifier`/`Raw` arms at `typecheck.sfn:1058-1073`,
+  `check_fn_reference_raw` `:1785-1841`, `make_fn_value_position_diagnostic`
   `:1733`) to accept a named function in `fn(...)`-value position by consulting
-  the expected type, while still rejecting generic functions, `& fn`, and
-  non-`* u8` casts. Add the non-pointer-width-signature diagnostic for item 4.
-- **Effect checker** — **no change** (§4); verify, don't modify.
+  the **expected type threaded to every D2 use site** (variable/let, assignment,
+  call argument, struct-field initializer, collection-literal element, return),
+  while still rejecting generic functions, `& fn`, and non-`* u8` casts. Add the
+  **D3 effect-row unification** to the value-coercion check (reject on `E ⊄ F`
+  under the SFEP-0017 sub-effect order) and the **item-4 non-pointer-width
+  diagnostic**. The one possibly-not-yet-wired piece (D2 site 5) is the scoped
+  collection-literal-element-type push-down sub-task noted in §3.5.
+- **Effect checker** (`effect_checker.sfn`) — **call-site rule unchanged in
+  mechanism, extended in reach:** the existing "caller must declare ⊇ callee
+  effects" check now also fires on a closure-pair call whose type-level effect row
+  is `![E]`; confirm it already walks closure-dispatch call sites (it does for the
+  v0 closure-param path) and that the value-coercion check feeds it the right row.
 - **Emitter / LLVM lowering** —
-  - *Item 1:* materialize a named function as `{fn_ptr, null-env}` and dispatch
-    via the env-less indirect-call path (`plain_fn_ptr_call` shape) — reuse, no
-    new IR shape.
+  - *Item 1 (D1):* Path A is the unchanged direct call; Path B emits a
+    deduplicated `@<fn>__fnval_adapter` (`musttail` forward to `@<fn>`) and the
+    `{adapter_ptr, null}` pair at the materialization site. The seam
+    (`core_call_emission.sfn:386-504`) is **unchanged** — it dispatches the
+    uniform `(i8* env, <args>)` convention with no per-call null branch.
   - *Item 3:* generalize `try_resolve_closure_callee`
-    (`core_call_resolution.sfn:358-376`) to recognize a member-access call
-    target whose field maps to `{i8*, i8*}`; teach struct-literal emission to
-    store a closure pair into a `fn(...)` field without firing the
+    (`core_call_resolution.sfn:358-376`) to recognize a member-access call target
+    whose field maps to `{i8*, i8*}`; teach struct-literal emission to store a
+    closure pair into a `fn(...)` field without firing the
     `core_operands.sfn:1290-1346` boxing fallback.
-  - The **dispatch seam itself** (`core_call_emission.sfn:386-504`) does **not
-    change** — it stays the single place closures dispatch.
+  - The **dispatch seam itself** stays the single place closures dispatch.
 - **Runtime** — **no change.** Unlike SFEP-0028, this feature touches no
   `runtime/sfn/array.sfn` body; it is purely a frontend/lowering capability.
 
-**Self-hosting invariant + seed dependency.** Named-fn-value lowering and the
-narrowed guard are **compiler-source capabilities**: a consumer that writes
-`apply(worker, 5)` or a fn-typed struct field cannot self-host until that
-capability is in the **pinned seed**. Per `.claude/rules/seed-dependency.md`, the
-default is **bundle the capability with its single consumer in one PR**, so
-`make compile` builds the new compiler from the old seed and that compiler
-compiles the consumer in the same pass — **no seed cut, no `/pin-seed`**. The
-named consumer here is **#1172** (the test runner's named-fn + closure callback
-table). Concretely:
+**Performance consequence of D1 on self-host.** The trampoline-pair adapters are
+emitted **only** when a named function is materialized *as a value* (Path B),
+deduplicated per symbol. The compiler's own hot call paths are ordinary direct
+calls (Path A) and existing closure dispatch — neither materializes a named-fn
+value today — so D1 adds **zero** adapters and zero indirect-call overhead to the
+current self-host; the compiler keeps its present codegen. Adapters appear only in
+modules that adopt the new surface (e.g. #1172's test runner), bounded by the
+distinct named functions they use as values. There is no build-time or
+runtime-speed regression to the self-hosting build.
 
-- Items 1 + 3 (the new capabilities) should land **bundled with #1172's
-  adoption** of them in one PR where feasible, per the seed-dependency rule —
-  this avoids manufacturing a seed-cut gate between "capability" and "the test
-  runner that uses it."
-- If grooming splits a capability away from #1172 (e.g. because item 1 and item 3
-  are large enough to ship independently, or because #1172 lands in stages), the
-  capability PR carries `seed-blocker`, #1172 carries `## Required in pinned
-  seed: #<capability>`, and the seed advance **queues against the next cadence
-  bump** — it does not trigger a reactive cut.
-
-The compiler does **not** currently use named-fn-as-value or fn-typed struct
-fields in its own source (it uses the `<fn> as * u8` C-ABI form for concurrency
-trampolines, which is unchanged), so landing items 1/3 incrementally does not
-regress the existing self-host.
+**Self-hosting invariant + seed dependency (D4).** Named-fn-value lowering and the
+narrowed guard are compiler-source capabilities a consumer needs in the **pinned
+seed**. The committed grooming directive (D4, §3.5): **default to bundling items
+1 + 3 with #1172's adoption in one PR** → `make compile` builds the new compiler
+from the old seed and that compiler compiles #1172 in the same pass → **no seed
+cut, no `/pin-seed`.** Split into a standalone `seed-blocker` predecessor **only**
+if (a) multiple independent consumers land before/with #1172, or (b) the combined
+blast radius exceeds one reviewable PR; on a split the seed advance **queues
+against the next cadence bump**, never a reactive cut. The compiler does **not**
+currently use named-fn-as-value or fn-typed struct fields in its own source (it
+uses the `<fn> as * u8` C-ABI form for concurrency trampolines, unchanged), so
+landing items 1/3 does not regress the existing self-host.
 
 ## 6. Alternatives considered
 
@@ -420,24 +617,39 @@ regress the existing self-host.
   wrap named functions in trivial forwarding lambdas, and it leaves "function as
   a value" — a baseline expectation for any language — unsupported. The C-ABI
   cast is a code-pointer escape hatch, not a callable `fn(...)` value.
+- **Env-less `{ptr, null}` carrier with a per-call static-null branch (the "1a"
+  carrier) as the named-fn representation.** Rejected on the performance bar
+  (D1): once a value escapes its definition site the seam cannot prove the env is
+  null, forcing a runtime null-check + duplicated call site on every indirect
+  call — a branch Go's uniform closure rep and Rust's branchless `Fn` dispatch
+  pay nowhere. The env-less indirect call survives only as the existing
+  `plain_fn_ptr_call` lowering for an explicit `* fn (A) -> R` C-ABI pointer, and
+  as the degenerate Path A direct call. The committed answer is the uniform
+  trampoline pair.
 - **Fat pointer instead of the `{fn_ptr, env}` pair.** Rejected: the
   `{i8*, i8*}` pair is already the shipped, self-hosting closure representation
   (`type_mapping.sfn:440`, `closures.sfn`), already dispatched by the one seam,
-  and already proven across captures of mixed shapes. Introducing a different
-  fat-pointer encoding would fork the representation and re-implement the seam
-  for no gain. The whole design leans on **one** representation.
-- **Trampoline-per-named-function (1b) as the primary path.** Rejected as the
-  default in favor of (1a): the env-less indirect call already exists
-  (`plain_fn_ptr_call`), so a named-fn value composes two shipped paths rather
-  than minting an adapter function (and an extra call frame) per reference.
-  (1b) is kept as the documented fallback if static-null env discrimination is
-  fragile.
+  and already proven across captures of mixed shapes. A different fat-pointer
+  encoding would fork the representation and re-implement the seam for no gain.
+  The whole design leans on **one** representation.
+- **Partial expected-type coverage (accept named-fn values in only some
+  positions).** Rejected (D2): a production language must accept a function value
+  wherever a `fn(...)` is expected, including collection literals and return
+  position (both of which #1172's handler table needs). Partial coverage teaches
+  users the feature is unreliable. Full coverage is committed; the one
+  not-yet-wired propagation (collection-literal element type) is a scoped
+  sub-task, not a deferral.
+- **Treat the effect row as droppable/wideneable metadata on materialization.**
+  Rejected (D3): silently dropping or widening a function value's effects breaks
+  the capability-security pillar — it is exactly the "parsed but not enforced"
+  anti-pattern. The effect row is committed as part of `fn(...)` type identity,
+  unified by subsumption (SFEP-0017) at every materialization and call site.
 - **Require explicit closure-construction syntax** (e.g. `closure(worker)` to
   lift a named function to a value). Rejected: it violates "boring syntax wins"
   — TypeScript/Rust/Python all let a bare function name be a value with no
   ceremony, and LLMs (per the AI-agents-are-users principle) expect that. The
-  conversion should be implicit at a `fn(...)`-typed use site, driven by the
-  expected type, not a keyword.
+  conversion is implicit at a `fn(...)`-typed use site, driven by the expected
+  type, not a keyword.
 - **Support non-pointer-width signatures now via uniform boxing.** Rejected for
   the same reasons SFEP-0028 §3(B) rejects it (allocation storm, the
   number-boxing-into-`any` hazard, value-type unsoundness) and because it would
@@ -453,19 +665,26 @@ regress the existing self-host.
 
 Only the **v0 baseline (item 2)** is built and self-hosting today. Items 1, 3,
 and the item-4 verdict are designed, not shipped — every box below is for the
-*new* surface (items 1/3/4):
+*new* surface (items 1/3/4), now reflecting the committed decisions:
 
 - [ ] Parses (no new syntax — `fn(...)` annotations and member-access calls
-      already parse; this is a no-op box, listed for completeness)
-- [ ] Type-checks / effect-checks (narrowed #1147 guard + expected-type-driven
-      named-fn-value acceptance; non-pointer-width diagnostic)
+      already parse; no-op box, listed for completeness)
+- [ ] Type-checks / effect-checks — narrowed #1147 guard with **expected type
+      threaded to all six D2 use sites** (incl. the scoped collection-literal
+      element-type push-down) + **D3 effect-row unification by subsumption** +
+      item-4 non-pointer-width diagnostic
 - [ ] Emits valid `.sfn-asm`
-- [ ] Lowers to LLVM IR (named-fn → `{fn_ptr, null}`; struct-field load → seam)
-- [ ] Regression coverage (§8)
-- [ ] Self-hosts
+- [ ] Lowers to LLVM IR — **D1 hybrid:** Path A direct call; Path B deduplicated
+      `musttail` trampoline pair `{adapter_ptr, null}`; struct-field load → seam.
+      Includes the D1 codegen-quality probe (adapter-frame elision under
+      `musttail` + `-O2`)
+- [ ] Regression coverage (§8) — incl. the dispatch-cost / branchless-seam check
+      and the effect-row-preservation test
+- [ ] Self-hosts (bundled with #1172 per D4 → no seed cut)
 - [ ] `sfn fmt --check` clean
-- [ ] Documented in `docs/status.md` + spec (function-value section; mark the
-      non-pointer-width signature gate as pending generics)
+- [ ] Documented in `docs/status.md` + spec (function-value section; record the
+      D1 cost model, D3 effect-subsumption rule, and the non-pointer-width gate
+      as pending generics)
 
 (Item 2 — capturing closure as a general `fn(...)` param — is already
 end-to-end and self-hosting via #1610; its boxes are effectively checked but it
@@ -477,16 +696,22 @@ E2e fixtures + tests mirroring the established
 `compiler/tests/e2e/closure_capture_test.sfn` /
 `compiler/tests/e2e/array_{map,filter,reduce}_closure_test.sfn` pattern (drive
 the compiler-under-test as a subprocess with `process.run_capture`, assert on
-captured stdout / emitted IR). One per item, each distinguishing the real
-behavior from the current diagnostic:
+captured stdout / emitted IR). One per item plus the decision-specific tests:
 
-- **Item 1 — named-fn-as-value.**
+- **Item 1 — named-fn-as-value (D1).**
   `compiler/tests/e2e/fixtures/named_fn_value/main.sfn`: `fn worker(n: int) ->
   int { return n + 1; }` + `fn apply(cb: fn (int) -> int, x: int) -> int { return
-  cb(x); }` + `print(apply(worker, 5))` → `6`. Companion IR assertion mirroring
-  `plain_fn_ptr_call_test.sfn`: the materialized value bitcasts `@worker` to
-  `i8*` and dispatches env-less (slot-1 `null`), and `sfn check` exits 0 (no
-  `E0808`).
+  cb(x); }` + `print(apply(worker, 5))` → `6`. IR assertions: (a) a deduplicated
+  `@worker__fnval_adapter` with a `musttail call @worker`; (b) the materialization
+  builds a `{adapter_ptr, null}` pair; (c) the **dispatch seam is branchless** —
+  a single indirect `call` through the pair with **no** per-call null-check /
+  duplicated call site (the D1 hot-path guarantee); (d) `sfn check` exits 0 (no
+  `E0808`). **Dispatch-cost probe** (decided-direction verification): disassemble
+  the linked dispatch site and assert no surviving adapter prologue/epilogue
+  between the indirect `call` and `@worker` under `-O2`.
+- **D1 Path A direct-call pin.** A fixture where `worker(5)` is called directly
+  (no value materialized) asserts the IR emits a **direct** `call @worker` with
+  no pair and no `@worker__fnval_adapter` reference — the zero-indirection path.
 - **Item 3 — fn-typed struct field dispatch.**
   `compiler/tests/e2e/fixtures/fn_field_dispatch/main.sfn`: `struct Router {
   handler: fn (int) -> int; }` populated with **both** a named function and a
@@ -494,15 +719,31 @@ behavior from the current diagnostic:
   → expected sums. Asserts the field-load engages the closure seam
   (`extractvalue {i8*, i8*}` present) and does **not** box the field
   (`core_operands.sfn` boxing fallback not fired).
+- **D2 — expected-type coverage.** A multi-site fixture exercising each of the
+  six use sites — `let f: fn(int)->int = worker`; assignment; call argument
+  (`apply(worker,…)`); struct-field initializer; **collection literal**
+  (`[worker, doubler]` typed `(fn(int)->int)[]`, dispatched in a loop); and
+  **return position** (`fn pick() -> fn(int)->int { return worker; }`) — each
+  `sfn check`s clean and runs to the expected result, proving no position is
+  left rejecting a valid named-fn value.
+- **D3 — effect-row preservation (effect-checker test).**
+  `compiler/tests/e2e/fn_value_effect_row_test.sfn` (+ a `compiler/tests/unit`
+  peer): (a) a `fn (...) ![io]` named function materialized into a `fn(...) ![io]`
+  slot type-checks; (b) materializing it into a `fn(...) ![]` (pure) slot is
+  **rejected** (effect exceedance, not silently widened); (c) a `![io.fs]` value
+  satisfies an expected `![io]` slot (SFEP-0017 subsumption) but a `![io]` value
+  does **not** satisfy an expected `![io.fs]` slot; (d) calling a stored
+  `fn (...) ![io]` value from a caller that does **not** declare `![io]` is
+  rejected (call-site ⊇ E rule).
 - **Item 2 — regression pin (already shipped).** Keep the existing
   `closure_higher_order` / `closure_two_int_capture` / `closure_mixed_capture` /
   `closure_inferred_capture` cases green as the v0 baseline guard.
 - **Item 4 — ABI boundary negative test.**
-  `compiler/tests/e2e/fn_value_abi_boundary_test.sfn`: assert that a `fn(string)
-  -> string` value (named or closure) used as a function value is **rejected
-  with a diagnostic** (not miscompiled), so the non-pointer-width gate never
-  silently mis-dispatches before generics land. Mirrors SFEP-0028's
-  "diagnostic-not-mis-map" negative test.
+  `compiler/tests/e2e/fn_value_abi_boundary_test.sfn`: a `fn(string) -> string`
+  value (named or closure) used as a function value is **rejected with a
+  diagnostic** (not miscompiled), so the non-pointer-width gate never silently
+  mis-dispatches before generics land. Mirrors SFEP-0028's "diagnostic-not-mis-map"
+  negative test.
 - **Guard-preservation unit test** in `compiler/tests/unit/`: the narrowed
   #1147 guard still rejects a **generic** function used as a value, `& fn`, and
   `<fn> as * i32` (typed-data-ptr), and still accepts `<fn> as * u8` /
@@ -517,11 +758,13 @@ behavior from the current diagnostic:
   the prior miscompile, fixed and closed 2026-06-25; covered by
   `closure_two_int_capture`).
 - **#1172** — the native test runner consumer that needs named compiler fns +
-  capturing closures as typed callbacks (the concrete blocked motivation).
+  capturing closures as typed callbacks (the concrete blocked motivation, and the
+  bundle target for D4).
 - **#1142 / #1146** — `<fn> as * u8` C-ABI code-pointer address-taking (the only
   currently-blessed function-value form; unchanged by this SFEP).
 - **#1147** — the `E0808`/`E0809` value-position guard
-  (`typecheck_types.sfn:1729-1841`) that this SFEP narrows.
+  (`typecheck_types.sfn:1729-1841`, `typecheck.sfn:1058-1073`) that this SFEP
+  narrows.
 - **#1118** — runtime-callable closure application primitive (the foundation the
   seam is built on).
 - **#1507 / #1508** — the closure-apply seam + pointer-width array
@@ -530,6 +773,9 @@ behavior from the current diagnostic:
 - **#688 / #689** — `fn(...)` type-annotation parsing and the original
   closure-callee dispatch (`closure_higher_order`).
 - **SFEP-0012** (`Result<T, E>` + `?`) — shares the generic-constraint dependency.
+- **SFEP-0017** (`0017-hierarchical-effects.md`, Accepted) — hierarchical
+  sub-effects as subsumption within the locked six; the effect-set order D3 uses
+  for function-value effect-row coercion (`io.fs ⊑ io`).
 - **SFEP-0025 §3.4** (`0025-native-runtime-architecture.md`, "Typed Closures") —
   the documented `{fn_ptr, env*}` closure ABI this design builds on.
 - **SFEP-0028** (`0028-typed-array-higher-order-fns.md`) — the typed-array HOF
@@ -544,8 +790,10 @@ behavior from the current diagnostic:
   `…/core_operands.sfn:1290-1346` (boxing fallback to avoid for fn-typed fields),
   `compiler/src/llvm/closures.sfn` (env-struct + pair ABI),
   `compiler/src/llvm/type_mapping.sfn:440-441` (`fn(...)` → `{i8*, i8*}`),
+  `compiler/src/typecheck.sfn:1058-1073` (the `Identifier`/`Raw` value-position
+  arms D2 threads expected type into),
   `compiler/src/typecheck_types.sfn:1729-1841` (the #1147 guard),
-  `compiler/tests/e2e/plain_fn_ptr_call_test.sfn` (env-less indirect-call IR
-  shape item 1 reuses),
+  `compiler/tests/e2e/plain_fn_ptr_call_test.sfn` (the env-less C-ABI indirect
+  call that remains the `* fn (A) -> R` lowering),
   `compiler/tests/e2e/fixtures/closure_two_int_capture/main.sfn` (the #1610 v0
   baseline).
