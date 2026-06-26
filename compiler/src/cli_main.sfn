@@ -3,6 +3,7 @@
 // Sailfin-native CLI entrypoint invoked by the native C shim.
 import { bold } from "sfn/cli";
 
+import { LinkPlan, LlvmTextBackend } from "./backend";
 import {
     BuildCacheConfig,
     CacheKey,
@@ -949,23 +950,11 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                 stats.hits = stats.hits + 1;
             } else {
                 stats.misses = stats.misses + 1;
-                let mut args: string[] = ["clang", opt_flag, "-Wno-override-module"];
-                // Per-function/per-datum sections so the final link's
-                // dead-strip (`--gc-sections` / `-dead_strip`) can drop
-                // functions no consumer references (#1047).
-                args.push("-ffunction-sections");
-                args.push("-fdata-sections");
-                let mut fi: int = 0;
-                loop {
-                    if fi >= include_flags.length { break; }
-                    args.push(include_flags[fi]);
-                    fi += 1;
-                }
-                args.push("-c");
-                args.push(src);
-                args.push("-o");
-                args.push(obj);
-                let rc = process.run(args);
+                // Per-function/per-datum sections (in `assemble`) so the
+                // final link's dead-strip (`--gc-sections` / `-dead_strip`)
+                // can drop functions no consumer references (#1047).
+                let backend = LlvmTextBackend { };
+                let rc = backend.assemble(src, obj, opt_flag, include_flags);
                 if rc != 0 {
                     print("sfn build: failed to compile runtime c-source " + src);
                     return _failed_runtime_link_inputs();
@@ -998,7 +987,9 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                 stats.hits = stats.hits + 1;
             } else {
                 stats.misses = stats.misses + 1;
-                let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", src, "-o", obj]);
+                let backend = LlvmTextBackend { };
+                let no_includes: string[] = [];
+                let rc = backend.assemble(src, obj, opt_flag, no_includes);
                 if rc != 0 {
                     print("sfn build: failed to assemble runtime ll-source "
                         + src);
@@ -1212,7 +1203,9 @@ fn _emit_runtime_sfn_to_obj(self_path: string, cap_prefix: string, src: string, 
             + ")");
         return RuntimeEmitResult { obj_path: "", stats: stats };
     }
-    let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", ll_path, "-o", obj_path]);
+    let backend = LlvmTextBackend { };
+    let no_includes: string[] = [];
+    let rc2 = backend.assemble(ll_path, obj_path, opt_flag, no_includes);
     if rc2 != 0 {
         print("sfn build: failed to compile runtime sfn-source object "
             + obj_path);
@@ -1722,19 +1715,22 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     runtime_objs = inputs.object_paths;
     runtime_link_libs = inputs.link_libs;
 
-    let mut args: string[] = ["clang", opt_flag, "-Wno-override-module"];
+    // Driver computes the clang-driver flag interleave; `LlvmTextBackend`
+    // owns the final argv + `process.run`. Flag order is load-bearing for
+    // byte-identical output (#1112 zero-behaviour gate).
+    let mut link_flags: string[] = [];
     // Opportunistic faster-linker selection (#343): prefer mold/lld when
     // present, honour the `SAILFIN_LINKER` override, else fall back to the
     // platform default. Empty string = no `-fuse-ld=` flag (system linker).
     let linker_flag = _resolve_linker();
-    if linker_flag.length > 0 { args.push(linker_flag); }
+    if linker_flag.length > 0 { link_flags.push(linker_flag); }
     // `.ll` inputs are compiled inline by this same clang invocation, so
     // they need the section split here; pre-compiled runtime `.o`s already
     // carry it from `_clang_compile_runtime_capsule_objects` /
     // `_emit_runtime_sfn_to_obj`. The dead-strip flag then GCs every
     // section unreferenced from the entry point (#1047).
-    args.push("-ffunction-sections");
-    args.push("-fdata-sections");
+    link_flags.push("-ffunction-sections");
+    link_flags.push("-fdata-sections");
     // Root the runtime provider surface, then GC unreferenced sections
     // (#1047). The order matters for correctness: if symbol enumeration
     // yields nothing while runtime objects are present (`nm`/`awk`
@@ -1747,38 +1743,52 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     // `sfn_*` family, so the happy path is unaffected.
     let retain_flags = _runtime_retain_root_flags(runtime_objs);
     let strip_safe = runtime_objs.length == 0 || retain_flags.length > 0;
-    if strip_safe { args.push(_dead_strip_link_flag()); } else {
+    if strip_safe { link_flags.push(_dead_strip_link_flag()); } else {
         print("sfn: dead-code strip disabled — could not enumerate runtime");
         print("     provider symbols (is `nm` on PATH?); linking unstripped");
     }
     let mut rfi: int = 0;
     loop {
         if rfi >= retain_flags.length { break; }
-        args.push(retain_flags[rfi]);
+        link_flags.push(retain_flags[rfi]);
         rfi += 1;
     }
-    let mut roi: int = 0;
-    loop {
-        if roi >= runtime_objs.length { break; }
-        args.push(runtime_objs[roi]);
-        roi += 1;
-    }
-    let mut i: int = 0;
-    loop {
-        if i >= ll_paths.length { break; }
-        args.push(ll_paths[i]);
-        i += 1;
-    }
-    args.push("-o");
-    args.push(out_path);
-    let mut lli: int = 0;
-    loop {
-        if lli >= runtime_link_libs.length { break; }
-        args.push(runtime_link_libs[lli]);
-        lli += 1;
-    }
-    let rc = process.run(args);
+    let backend = LlvmTextBackend { };
+    let plan = LinkPlan {
+        objects: runtime_objs,
+        ir_inputs: ll_paths,
+        out_path: out_path,
+        opt_flag: opt_flag,
+        link_flags: link_flags,
+        libs: runtime_link_libs,
+        test_mode: false
+    };
+    let rc = backend.link(plan);
     return LinkResult { rc: rc, stats: inputs.stats };
+}
+
+// Test-binary link entry point for the `sfn test` command. Lives here
+// (sibling to `backend.sfn`) rather than in `cli/commands/test.sfn`
+// because lowering a cross-directory `../../backend` import of the
+// method-bearing `LlvmTextBackend` under the build's import-context fails
+// (a separate compiler limitation; standalone emit and same-dir
+// `./backend` imports both lower fine). The test command threads the
+// already-ordered pieces (runtime objects, IR inputs, deduped libs) and
+// this helper builds the test-layout `LinkPlan` and dispatches through the
+// `Backend` seam.
+fn link_test_objects(objects: string[], ir_inputs: string[], out_path: string, libs: string[]) -> int ![io] {
+    let backend = LlvmTextBackend { };
+    let no_link_flags: string[] = [];
+    let plan = LinkPlan {
+        objects: objects,
+        ir_inputs: ir_inputs,
+        out_path: out_path,
+        opt_flag: "-O0",
+        link_flags: no_link_flags,
+        libs: libs,
+        test_mode: true
+    };
+    return backend.link(plan);
 }
 
 fn _clang_link(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> LinkResult ![io] {
@@ -2563,7 +2573,9 @@ fn sailfin_cli_main_legacy(argv: string[]) -> int ![io, clock] {
         // dep object files will compile them on demand once Stage C lands
         // the in-process driver.
         if no_link {
-            let rc_obj = process.run(["clang", "-O2", "-Wno-override-module", "-ffunction-sections", "-fdata-sections", "-c", ll_path, "-o", out_path,]);
+            let backend = LlvmTextBackend { };
+            let no_includes: string[] = [];
+            let rc_obj = backend.assemble(ll_path, out_path, "-O2", no_includes);
             if rc_obj != 0 {
                 if !json_flag {
                     print("library build failed (clang exit=" + number_to_string(rc_obj)
