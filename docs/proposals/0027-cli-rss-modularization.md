@@ -1,12 +1,12 @@
 ---
 sfep: 27
 title: CLI Modularization — Per-Worker RSS Relief First, Then Migration
-status: Draft
+status: Accepted
 type: tooling
 created: 2026-06-26
 updated: 2026-06-26
 author: "agent:compiler-architect; human review"
-tracking: "#351"
+tracking: "#1671"
 supersedes: 9
 superseded-by:
 graduates-to:
