@@ -7,11 +7,7 @@
 <h1 align="center">Sailfin</h1>
 
 <p align="center">
-  <strong>A systems language with compile-time capability enforcement.</strong>
-</p>
-
-<p align="center">
-  Every function declares the capabilities it uses — IO, network, clock, and more — and the compiler rejects code that exceeds its declaration.
+  <strong>A self-hosted systems language with compile-time capability checks.</strong>
 </p>
 
 <p align="center">
@@ -29,114 +25,71 @@
   <a href="https://github.com/SailfinIO/sailfin/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/SailfinIO/sailfin?style=flat"></a>
 </p>
 
-> **Status:** Pre-1.0, active development. The self-hosted native compiler is
-> stable enough for daily use, and the runtime is now pure Sailfin — no C. The
-> v0 structured-concurrency surface (`routine`, `channel`, `spawn`/`await`,
-> `parallel`) works end-to-end today and is still maturing. See
-> [What Works Today](#what-works-today) and the
-> [roadmap](https://sailfin.dev/roadmap).
+> **Status:** Sailfin is pre-1.0 and under active development. The native
+> compiler is self-hosted and the runtime is written in Sailfin. The current
+> backend still lowers through LLVM and links with the platform toolchain;
+> LLVM/clang independence is a project goal, not the current shipping state. For
+> the exact feature matrix, see [`docs/status.md`](docs/status.md).
 
----
+## What is Sailfin?
 
-## Why Sailfin
+Sailfin is a systems programming language built around explicit capabilities.
+Functions spell the effects they use, such as `![io]`, `![net]`, or
+`![clock]`, and capsules declare which capabilities they require. The compiler
+checks both levels, so capability use is visible in source and rejected when it
+exceeds the declared surface.
 
-- **Effect types, enforced at compile time.** Capabilities like `io`, `net`,
-  and `clock` are explicit in function signatures, propagate across module
-  boundaries, and are checked against each capsule's declared capability
-  surface. A function that calls `print` without declaring `![io]` does not
-  compile. A capsule that uses `![net]` without declaring it in
-  `capsule.toml` does not compile.
-- **Capability-based security.** Capsules declare their capabilities in
-  `capsule.toml`. The compiler cross-checks every function's effects against
-  that surface, so a dependency cannot quietly start reading the filesystem
-  or opening sockets you didn't grant it.
-- **Pragmatic ergonomics.** Conventional syntax (TypeScript/Rust-like), a
-  zero-configuration formatter, structured diagnostics with fix-it hints,
-  and `--json` output for tooling and agents.
-- **Self-hosted native compiler.** Sailfin compiles itself to LLVM IR and
-  links a pure-Sailfin runtime — no C runtime, no interpreter. Releases ship
-  per OS/arch as a `sailfin` / `sfn` binary alongside the runtime bundle
-  (`sfn run` / `sfn build` resolve runtime sources from it).
-- **Structured concurrency (v0).** `routine { }` blocks, `channel`, `spawn`/`await`,
-  and `parallel` are first-class language constructs with deterministic scoping.
-  The v0 surface works end-to-end on Linux x86_64; the surface is still maturing
-  pre-1.0 (full `async fn` semantics, typed `Channel<T>`, and richer sync
-  primitives are coming).
+The long-term goal is a production-ready compiler, runtime, and capsule
+ecosystem with a capability-sealed runtime. The repository is already
+self-hosting: the compiler is written in Sailfin, compiles itself from a
+released seed, and links a Sailfin runtime from `runtime/sfn/` and
+`runtime/prelude.sfn`.
 
-## What Works Today
+## Repository Layout
 
-The self-hosted native compiler (`build/native/sailfin`, installed as
-`sailfin` / `sfn`) supports:
+- `compiler/src/` - the Sailfin compiler, written in Sailfin.
+- `runtime/` - the Sailfin runtime capsule, including platform adapters,
+  memory, strings, process, clock, and concurrency support.
+- `capsules/sfn/` - standard library capsules such as `strings`, `json`,
+  `fs`, `http`, `net`, `cli`, `test`, and numeric/ML-oriented capsules.
+- `compiler/tests/` - unit, integration, and end-to-end compiler tests.
+- `examples/` - small language and library examples.
+- `docs/` - engineering docs, status matrices, proposals, performance notes,
+  and RCAs.
+- `site/` - the public website and user-facing language documentation.
+- `tools/mcp-server/` - MCP integration backed by compiler diagnostics.
 
-**Language**
+## Current Capabilities
 
-- Functions, structs, enums (with payloads), interfaces, type aliases, and
-  generics (type-parameter capture; full inference is partial)
-- `let` / `let mut`, pattern matching (`match` with guards and
-  destructuring), `if` / `else`, `for`, `loop` / `break` / `continue`,
-  `try` / `catch` / `finally`
-- `int` (i64) and `float` (f64) numeric types, alongside `bool`, `string`,
-  and arrays. `number` remains as an alias for `float`. Mixed int/float
-  arithmetic is rejected at compile time; disambiguate with explicit `as`
-  casts.
-- `Result<T, E>` and the postfix `?` operator — the canonical
-  `Result<T, E>` enum and `Error` struct ship in the prelude, `?` is
-  type-checked (operand and enclosing function must agree on `E`) and
-  desugars to pure control flow with no exception-runtime cost
-- Closures with capture — lambdas capture enclosing variables (including
-  multiple and mixed-type captures) and compile to `{fn_ptr, env}` pairs
-  callable through higher-order functions
-- Bitwise and shift operators (`&`, `|`, `^`, `<<`, `>>`) and explicit
-  numeric `as` casts with a typed lowering matrix (`sitofp`, `fptosi`,
-  `sext`, `trunc`, …)
-- Atomic intrinsics: `atomic_load`, `atomic_store`, `atomic_add`,
-  `atomic_sub`, `atomic_cas`, `atomic_fence` (sequential consistency at v0)
-- `extern fn` declarations for C-ABI interop (parser + typecheck +
-  LLVM `declare` emission)
-- Decorators, `async fn` parsing (structural only; use `spawn fn() -> T { ... }` + `await` for concurrency today), string
-  interpolation (`{{ expression }}` — migrating to `${ expression }` before
-  1.0)
+The current self-hosted compiler supports the core language: functions,
+structs, enums with payloads, interfaces, type aliases, arrays, generics with
+partial inference, closures with capture, pattern matching, `Result<T, E>` and
+`?`, `unsafe` / `extern fn`, atomic intrinsics, and explicit numeric casts.
 
-**Effect system (enforced)**
+The effect system is enforced for `io`, `net`, and `clock`, including
+cross-module propagation and capsule capability checks. Ownership enforcement
+is active for the owned-buffer family and affine / linear bindings, with
+broader borrow checking still in development.
 
-- `![io]`, `![net]`, `![clock]` are real compile-time gates. Undeclared use
-  of `print.*` / `console.*` / `fs.*` (io), `http.*` / `websocket.*` /
-  `serve` (net), or `sleep` (clock) fails the build with structured
-  diagnostics and a fix-it that inserts the missing annotation.
-- **Cross-module effect propagation:** a function inherits the declared
-  effects of any imported function it calls; missing propagation fails the
-  build with `E0402`.
-- **Capsule capability cross-check:** `[capabilities] required = [...]` in
-  `capsule.toml` is a real contract. A function declaring an effect outside
-  the capsule's surface fails with `E0403`.
-- `![model]`, `![gpu]`, and `![rand]` are reserved in the effect taxonomy;
-  call-site detectors land alongside the libraries that use them.
+The tooling includes:
 
-**Tooling**
+- `sfn build` and `sfn run`
+- `sfn check` with structured JSON diagnostics
+- `sfn fmt --check` / `sfn fmt --write`
+- `sfn test` with filtering, snapshots, parallel execution, and a per-test
+  binary cache
+- `sfn init`, `sfn add`, `sfn lock`, `sfn package`, and `sfn publish`
 
-- `sfn build` / `sfn run` — content-addressed build cache with `--no-cache`,
-  `--clean`, `--cache-trace`, and `--json` output
-- `sfn check` — fast parse + typecheck + effect-check without codegen;
-  `--json` emits the `sailfin-check/1` envelope consumed by the MCP server
-- `sfn fmt --check` / `sfn fmt --write` — zero-configuration token-stream
-  formatter, enforced in CI
-- `sfn test` — discovers and runs `*_test.sfn` files, with name/tag
-  filtering (`-k`, `--tag`), lifecycle hooks, snapshot testing, parallel
-  multi-file runs (`--jobs N`), and a content-addressed per-test binary
-  cache
-- `sfn init` / `sfn add` / `sfn publish` — package registry at
-  `pkg.sfn.dev` (configurable via `sfn config set registry <url>` or
-  `SFN_REGISTRY` for private/enterprise registries)
+Structured concurrency is available as a v0 surface: `routine`, `channel`,
+`spawn` / `await`, and `parallel` work end-to-end, with typed channel
+constructors, richer result collection, and the post-1.0 async I/O runtime
+still planned.
 
-**Standard library capsules** (under `capsules/sfn/`, imported by bare name):
+For the detailed current-state matrix, use [`docs/status.md`](docs/status.md).
+For language semantics, use the
+[specification](https://sailfin.dev/docs/reference/spec/).
 
-`strings`, `json`, `crypto`, `math`, `path`, `toml`, `fs`, `os`, `log`,
-`time`, `cli`, `test`, `http` (partial), `tensor` / `layers` / `nn` /
-`losses` (CPU). `net` is a stub pending TCP/UDP socket intrinsics. `sync`
-is a stub whose capsule API is not yet built; use the language constructs
-`channel`, `spawn`, `parallel`, and `routine` directly. See
-[`docs/status.md`](docs/status.md) for the full feature matrix and effect
-requirements per capsule.
+## Example
 
 ```sfn
 struct User {
@@ -157,60 +110,16 @@ test "greet produces correct output" {
 }
 ```
 
-`greet` calls `print`, so it must declare `![io]`. A capsule that exposes
-`greet` must list `io` in its `[capabilities] required = [...]` surface, or
-the compiler rejects it. Drop the `![io]` and `sfn check` reports `E0400`
-with a fix-it that splices the annotation in for you.
+`greet` calls `print`, so it declares `![io]`. If the annotation is removed,
+`sfn check` reports a compile-time effect error. If a capsule exposes code that
+uses `io`, its `capsule.toml` must include `io` in `[capabilities].required`.
 
-## What's Coming
-
-Sailfin is working toward a 1.0 release with a fully self-hosted toolchain
-and a pure Sailfin runtime. The critical path:
-
-- **`${expression}` string interpolation** — replacing `{{ }}` to align
-  with mainstream conventions and reduce confusion for both humans and LLMs.
-- **Raw pointer type enforcement (`*T`)** — pointer-typed struct fields,
-  C-ABI function pointers (`* fn`), and extern declarations already lower;
-  full typecheck-level enforcement for OS handles and buffer interop is
-  next.
-- **Generic type constraints** — `fn sort<T: Comparable>(…)`, real
-  `Array<T>` / `HashMap<K, V>` / `Channel<T>`, and `From<E>` coercion for
-  the `?` operator.
-- **Deterministic drop emission** (in flight) — compiler-emitted scope-exit
-  drops for owned values. Unblocks memory reclamation in the Sailfin-native
-  runtime.
-- **Structured concurrency hardening** — the v0 surface (`routine`, `channel`,
-  `spawn`/`await`, `parallel`) works end-to-end today. Remaining pre-1.0 work:
-  full `async fn` return-value `await` wired into the live typecheck walk,
-  typed `Channel<T>` generic constructor (#829), and typed result-array
-  collection from `parallel`. Richer sync primitives and a non-blocking event
-  loop are post-1.0.
-- **Effect system hardening** — hierarchical effects (`io.fs`, `net.http`),
-  effect polymorphism for generics, and `sfn fix` for auto-inserting missing
-  annotations.
-- **Capability auditing (`sfn audit`)** — recursive capability analysis of
-  a dependency tree before deployment.
-
-The runtime is already pure Sailfin (`runtime/sfn/` + `runtime/prelude.sfn`):
-memory, strings, arrays, clock, process spawning, type metadata, filesystem
-adapters, and the concurrency scheduler all link into the compiler with no C.
-Remaining runtime work is hardening, tracked in
-the [Runtime Migration table in `docs/status.md`](docs/status.md).
-
-After 1.0, focus shifts to ecosystem growth: an `sfn/ai` capsule for
-model invocation gated by `![model]`, taint types (`Secret<T>`, `PII<T>`)
-with enforced data-flow tracking, ownership enforcement (move semantics
-and borrow checking), and a WebAssembly target.
-
-See [`docs/status.md`](docs/status.md) for the detailed feature matrix and
-[`sailfin.dev/roadmap`](https://sailfin.dev/roadmap) for sequencing.
-
-## Installing the Compiler
+## Installing
 
 Releases are published as per-OS/arch tarballs containing `bin/sailfin` (or
-`bin/sailfin.exe` on Windows). The installer script defaults to the latest
-release and places binaries in `~/.local/bin` on Linux/macOS (override with
-`GLOBAL_BIN_DIR`) or `%LOCALAPPDATA%\sailfin\bin` on Windows.
+`bin/sailfin.exe` on Windows). The installer defaults to the latest release
+and installs to `~/.local/bin` on Linux/macOS, or
+`%LOCALAPPDATA%\sailfin\bin` on Windows.
 
 ### Linux / macOS
 
@@ -218,73 +127,74 @@ release and places binaries in `~/.local/bin` on Linux/macOS (override with
 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 ```
 
-To pin a specific version:
+To pin a specific release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | VERSION=0.7.0-alpha.31 bash
+curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | VERSION=<version> bash
 ```
 
-### Windows (PowerShell)
+### Windows PowerShell
 
 ```powershell
 irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
 ```
 
-To pin a specific version:
+To pin a specific release:
 
 ```powershell
-$env:VERSION = "0.7.0-alpha.31"
+$env:VERSION = "<version>"
 irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
 ```
-
-The PowerShell installer adds the install directory to your user `PATH`
-automatically. On Windows you can also run `install.sh` from WSL or Git Bash.
 
 Release assets follow the pattern `sailfin_<version>_<os>_<arch>.tar.gz`.
-Set `GITHUB_TOKEN` to raise the GitHub API rate limit if you hit throttling.
+Set `GITHUB_TOKEN` to raise the GitHub API rate limit if release lookup is
+throttled.
 
-## Architecture Overview
+## Building From Source
 
-- **Compiler** — `compiler/src/*.sfn`. Pipeline: lexer → parser → AST →
-  typecheck → effect-check → native IR (`.sfn-asm`) → LLVM IR.
-- **Runtime** — `runtime/sfn/` and `runtime/prelude.sfn`, all Sailfin. The
-  compiler links a pure-Sailfin runtime; there is no C runtime.
-- **Standard library** — `capsules/sfn/*`. Every capsule ships a
-  `capsule.toml` manifest declaring its capability requirements.
-- **MCP server** — `tools/mcp-server/`, registered via `.mcp.json`. Wraps
-  the compiler so any agent can call `sailfin_check`, `sailfin_emit_llvm`,
-  `sailfin_diagnostics`, and friends.
-
-## Local Development
+The compiler self-hosts from a released seed binary. `make compile` fetches
+the seed if needed and builds `build/native/sailfin`.
 
 ```sh
-make compile          # Build the native compiler by self-hosting from a released seed
-make test             # Run unit + integration + e2e tests
-make check            # Compile (if needed), build a seedcheck, and run the full suite on it
-make install          # Install the built compiler to PREFIX/bin (default: ~/.local/bin)
+make compile          # Build the self-hosted native compiler
+make test             # Run the test suite with an existing build
+make check            # Build as needed, build seedcheck, and run the full gate
+make install          # Install to PREFIX/bin, defaulting to ~/.local/bin
+make clean            # Remove packaged artifacts under dist/
 ```
 
-After `make compile`, invoke the compiler directly or via the installed binary:
+After compiling:
 
 ```sh
 build/native/sailfin --version
 build/native/sailfin run examples/basics/hello-world.sfn
 build/native/sailfin check compiler/src/
+```
 
-# Or, if installed via `make install`:
+If installed:
+
+```sh
 sfn --version
 sfn run examples/basics/hello-world.sfn
 sfn fmt --check compiler/src/ runtime/
 ```
 
-The compiler self-hosts from a released seed binary; `make compile` fetches
-the seed automatically. See [`CLAUDE.md`](CLAUDE.md) for the full developer
-workflow, branch strategy, and release process.
+## Development Notes
+
+- The current backend emits Sailfin native IR (`.sfn-asm`), lowers to LLVM IR,
+  and links with the platform toolchain.
+- The compiler has deterministic self-hosting coverage: the full verification
+  gate checks that successive compiler stages produce byte-identical LLVM IR.
+- `docs/status.md` is the source of truth for shipped, partial, and planned
+  behavior.
+- User-facing docs live in `site/src/content/docs/` and are published at
+  [sailfin.dev/docs](https://sailfin.dev/docs/).
+- The public roadmap is generated from GitHub milestones at
+  [sailfin.dev/roadmap](https://sailfin.dev/roadmap).
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the contribution guide, and the
-[issue tracker](https://github.com/SailfinIO/sailfin/issues) for groomed,
-ready-to-pick-up work tagged `claude-ready`. The roadmap at
-[sailfin.dev/roadmap](https://sailfin.dev/roadmap) tracks the epics that
-feed into it.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution guidelines. Groomed
+work is tracked in the [issue tracker](https://github.com/SailfinIO/sailfin/issues),
+and the roadmap at [sailfin.dev/roadmap](https://sailfin.dev/roadmap) tracks
+the larger milestones.
