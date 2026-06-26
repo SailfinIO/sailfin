@@ -702,16 +702,50 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             if expression_tokens_is_at_end(after_as) {
                 return expression_parse_failure(state);
             }
-            let type_token = expression_tokens_peek(after_as);
+            // Collect a leading pointer prefix (`* T`, `** T`) so an
+            // effectful operand under a pointer cast (`fs.read(p) as * u8`)
+            // structures into `Cast` and stays effect-visible (#1627)
+            // instead of degrading the whole expression to an effect-blind
+            // `Raw`. Before #1627 the cast arm accepted only a bare
+            // `Identifier` target, so every `as * T` form (the dominant
+            // in-source cast spelling) fell through to a `Raw` the effect
+            // checker never walked. The target text is captured verbatim
+            // into `TypeAnnotation.text` — `"* i64"` — which the Cast
+            // formatter renders back as `(operand) as * i64`, byte-equivalent
+            // to the prior `Raw` text, so emit/lowering is unchanged.
+            // Generic / fn-pointer cast targets (`Result<T, E>`,
+            // `fn(A) -> B`) stay `Raw` for now (rare; tracked as a #1180
+            // follow-up); only the pointer prefix is lifted here.
+            let mut cast_cursor = after_as;
+            let mut cast_target_text: string = "";
+            loop {
+                if expression_tokens_is_at_end(cast_cursor) {
+                    return expression_parse_failure(state);
+                }
+                let star_token = expression_tokens_peek(cast_cursor);
+                if star_token.kind.variant != "Symbol" { break; }
+                if !strings_equal(star_token.lexeme, "*") { break; }
+                if cast_target_text.length > 0 {
+                    cast_target_text = cast_target_text + " ";
+                }
+                cast_target_text = cast_target_text + "*";
+                cast_cursor = expression_tokens_advance(cast_cursor);
+            }
+            if expression_tokens_is_at_end(cast_cursor) {
+                return expression_parse_failure(state);
+            }
+            let type_token = expression_tokens_peek(cast_cursor);
             if type_token.kind.variant != "Identifier" {
                 return expression_parse_failure(state);
             }
-            current_state = expression_tokens_advance(after_as);
+            if cast_target_text.length > 0 {
+                cast_target_text = cast_target_text + " ";
+            }
+            cast_target_text = cast_target_text + identifier_text(type_token);
+            current_state = expression_tokens_advance(cast_cursor);
             current_expression = Expression.Cast {
                 operand: current_expression,
-                target_type: TypeAnnotation {
-                    text: identifier_text(type_token)
-                }
+                target_type: TypeAnnotation { text: cast_target_text }
             };
             continue;
         }
