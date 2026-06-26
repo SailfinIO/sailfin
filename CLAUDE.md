@@ -242,6 +242,11 @@ Prefer the new forms where the parser already accepts them. Full plan:
    (`number` becomes an alias for `float`). Not yet in parser.
 4. **`Result<T, E>` + `?` operator** — typed error handling. Not yet in parser.
 5. **Closures with capture** — lambdas must capture enclosing variables.
+6. **Lambda short form: `fn(x) => expr`** — an additive expression-bodied lambda
+   alongside the block form `fn(x) -> T { ... }`; the `fn` lead-in stays (keeps
+   zero-lookahead dispatch and avoids the match-arm `=>` collision). Accepted in
+   `docs/proposals/0029-lambda-syntax.md`; parser change pending — keep the block
+   form until it ships.
 
 ## Deferred / Not Yet Shipped
 
