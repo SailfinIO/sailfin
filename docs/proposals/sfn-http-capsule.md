@@ -84,9 +84,9 @@ int = 8080)`; `ServerConfig { port, host }` returns when host binding is real.
   handler's return is the **full pre-framed HTTP response** (status line + headers +
   body) sent verbatim; `null` → `500`. This is what makes `Response.status` and
   `Response.headers` real instead of parsed-but-ignored (today `_serve_send_response`
-  always frames `200 OK`). It is a **new Sailfin-only symbol** — migration-mechanism 3
-  (additive), no C definition, no header, no shared-struct layout, no
-  `c-sailfin-migration` coexistence audit needed.
+  always frames `200 OK`). It is a **new Sailfin-only symbol** — purely additive,
+  with no C definition, header, or shared-struct layout to consider (the runtime
+  is pure Sailfin).
 - **One small compiler change** (`compiler/src/llvm/expression_lowering/native/core.sfn:1415`):
   the bespoke `serve(` lowering text-matches **any** call spelled `serve(...)` and
   lowers it straight to `@sfn_serve(handler, port)`. An imported capsule `serve` would

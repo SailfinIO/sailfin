@@ -19,7 +19,7 @@ The build flow is:
 2. Seed compiler lowers each module's `.sfn-asm` to LLVM IR (`.ll`)
 3. `clang` compiles each `.ll` → `.o`
 4. `llvm-link` combines modules → linked bitcode
-5. C runtime (`runtime/native/`) is compiled and linked
+5. The Sailfin runtime modules (`runtime/sfn/` + `runtime/prelude.sfn`) are emitted and linked
 6. Final binary is produced
 
 When a build fails or produces a broken binary, the bug is in the compiler source — never in `build.sh`.

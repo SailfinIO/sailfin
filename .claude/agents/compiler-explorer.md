@@ -30,7 +30,7 @@ The Sailfin compiler follows this flow. When tracing a feature, check each stage
 | `compiler/src/native_ir.sfn` | `.sfn-asm` IR structure definitions |
 | `compiler/src/cli_main.sfn` | CLI commands and argument parsing |
 | `runtime/prelude.sfn` | Standard library (collections, strings, type checks) |
-| `runtime/native/` | C runtime implementation |
+| `runtime/sfn/` | Sailfin-native runtime modules (memory, string, io, concurrency) |
 | `site/src/content/docs/docs/reference/spec/` | Language specification, split by chapter |
 | `docs/status.md` | Feature implementation status |
 

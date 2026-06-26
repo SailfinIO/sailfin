@@ -387,12 +387,9 @@ with the lowering consumer that exercises it.
    (`runtime/prelude.sfn:71`), helper row (`runtime_helpers.sfn:673-675`), and
    runtime body (`runtime/sfn/io.sfn:447`); `runtime_audit.md` row.
    `seed-blocker` until #4. Depends on #4.
-   *Run the `.claude/rules/c-sailfin-migration.md` audit on `sfn_log_execution`
-   before scoping: it is Sailfin-defined (`runtime/sfn/io.sfn`), not C, and is
-   reached only through the helper-registry emission — so this is a clean
-   Sailfin-side deletion (mechanism class 2), not a C link-ownership flip. Verify
-   no `runtime/native/src/*.c` defines or calls it (expected: none) and confirm
-   the `nm -u` relink gate stays clean after deletion.*
+   *`sfn_log_execution` is Sailfin-defined (`runtime/sfn/io.sfn`) and reached
+   only through the helper-registry emission, so this is a clean Sailfin-side
+   deletion — the runtime is pure Sailfin, so there is no C body to retire.*
 
 ## 8. Risks & mitigations
 
