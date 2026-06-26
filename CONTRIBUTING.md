@@ -10,7 +10,7 @@ repository.
   navigation map.
 - Review `docs/status.md` to understand which features ship today vs what is
   planned.
-- Check the [roadmap](https://sailfin.dev/roadmap) for current tasks and sequencing.
+- Check the [roadmap](https://sfn.dev/roadmap) for current tasks and sequencing.
 - Familiarise yourself with `docs/style-guide.md` for Sailfin module layout,
   file naming, and doc/test mirroring conventions.
 - Ensure you have `bash` and the LLVM toolchain available, including `clang`
@@ -65,7 +65,7 @@ When behaviour, coverage, or roadmap status changes:
 2. Sync the language spec at `site/src/content/docs/docs/reference/spec/`
    (update the relevant §N chapter) and add/amend design notes under
    `.../reference/preview/` if the feature is not yet shipped.
-3. Adjust the [roadmap](https://sailfin.dev/roadmap) (source: `site/src/pages/roadmap.astro`) for sequencing changes.
+3. Adjust the [roadmap](https://sfn.dev/roadmap) (source: `site/src/pages/roadmap.astro`) for sequencing changes.
 4. Touch the relevant folder README (e.g., `compiler/README.md`,
    `runtime/README.md`, `examples/README.md`) so local guidance stays accurate.
 5. For future-facing designs, add or amend proposals under `docs/proposals/`.
@@ -100,8 +100,6 @@ Reviewers will check for:
 
 ## 6. Code Style
 
-- Python: PEP 8, four-space indentation, prefer shared helpers in bootstrap
-  compiler modules.
 - Sailfin (`.sfn`): explicit effect lists, `CamelCase` for models/capsules,
   `snake_case` locals, and comment future syntax when used for illustration.
   Follow the module and file conventions in `docs/style-guide.md` (one concern
@@ -112,7 +110,7 @@ Reviewers will check for:
 ## 7. Questions & Help
 
 For questions about design direction or roadmap priorities, start with
-`docs/status.md` and the [roadmap](https://sailfin.dev/roadmap). If additional context is required, open
+`docs/status.md` and the [roadmap](https://sfn.dev/roadmap). If additional context is required, open
 an issue referencing the relevant section or proposal.
 
 Welcome aboard, and thanks for advancing Sailfin! \*\*\*!
