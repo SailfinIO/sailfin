@@ -1,7 +1,7 @@
 ---
-sfep: TBD
+sfep: 0030
 title: First-Class Function Values
-status: Draft
+status: Accepted
 type: language
 created: 2026-06-26
 updated: 2026-06-26
@@ -12,18 +12,20 @@ superseded-by:
 graduates-to:
 ---
 
-# SFEP-0029 — First-Class Function Values
+# SFEP-0030 — First-Class Function Values
 
 > Retroactive design record for epic **#1609** — "First-class function values
 > (named fns, fn-typed struct fields, capturing closures as general params)".
 > The epic was filed 2026-06-24, before the SFEP process (SFEP-0001) landed
 > 2026-06-26; this SFEP is its durable design record, required because the work
 > is a language feature that needs an architect pass before fan-out. See
-> [`0001-sfep-process.md`](./0001-sfep-process.md) for the process. This is a
-> `Draft`: only the v0 baseline (item 2) is built — everything else is designed,
-> not shipped. The four design forks the architect originally flagged for the
-> design gate are **resolved and committed** in §3.5 below (and reflected in
-> §3.1, §4, §5, §7, §8); there are no remaining open forks.
+> [`0001-sfep-process.md`](./0001-sfep-process.md) for the process. **Status:
+> `Accepted`** — the design gate is passed (owner approval, 2026-06-26) and the
+> four forks the architect flagged are **resolved and committed** in §3.5 below
+> (reflected in §3.1, §4, §5, §7, §8); there are no remaining open forks.
+> Implementation has not landed: only the v0 baseline (item 2) is built, so this
+> stays `Accepted` (not `Implemented`) until the work clears the Stage1 Readiness
+> Checklist end-to-end and self-hosts.
 
 ## 1. Summary
 
@@ -369,10 +371,10 @@ foundation — generic type constraints + monomorphization:
   reads the monomorphization-vs-width-tag tradeoff in its §3 (recommended end
   state (A) monomorphized bodies; (C) width-tagged descriptors as a no-generics
   interim).
-- **SFEP-0029** (this SFEP) shares the **closure-dispatch seam** with SFEP-0028
+- **SFEP-0030** (this SFEP) shares the **closure-dispatch seam** with SFEP-0028
   but is a **distinct feature**: SFEP-0028 is about array **element-type
   discipline** (threading typed elements through `sfn_array_sfn_*` runtime
-  bodies); SFEP-0029 is the **general function-value surface** (named fns,
+  bodies); SFEP-0030 is the **general function-value surface** (named fns,
   struct fields, general params) independent of arrays. They intersect at one
   point — both want non-pointer-width signatures through the seam — and that
   intersection is the shared generics gate. The width verdict here is
