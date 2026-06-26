@@ -165,7 +165,10 @@ labels:
     description: "Must close before the next seed binary is cut"
   - name: needs-seed-cut
     color: "fbca04"
-    description: "Auto-flagged by seed-cut-advisor: a required-in-seed predecessor merged; cut a new seed before pickup"
+    description: "Auto-flagged by seed-cut-advisor: a required-in-seed predecessor merged; queued for the next cadence seed bump"
+  - name: release-critical-seed
+    color: "b60205"
+    description: "Seed need that breaks the cadence batch: clears the release-critical bar; off-cadence cut may be warranted"
   - name: build-quality-regression
     color: "b60205"
     description: "Auto-filed by build-quality.yml on gate failure; dedup anchor"

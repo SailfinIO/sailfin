@@ -3,9 +3,15 @@ name: Seed-cut Advisor
 # Surfaces stale-seed risk on PR merge. When a PR merges to `main` and the
 # issue(s) it closes are listed as a required-in-seed predecessor by an open,
 # release-gated, compiler-touching downstream issue, this workflow comments on
-# the active `Release: vX.Y.Z` tracker and applies `needs-seed-cut` so a human
-# knows to cut a fresh alpha + `/pin-seed` before those downstream issues are
-# picked up.
+# the active `Release: vX.Y.Z` tracker and applies `needs-seed-cut`.
+#
+# Seeds advance on the release cadence (SFEP-0026 WS-C), so by default that flag
+# means "queued for the next cadence seed bump" — NOT "cut now." The one thing
+# that breaks the batch is the `release-critical-seed` marker: when a flagged
+# dependent (or one of the just-closed predecessors) carries it, the advisory
+# comment escalates to "off-cadence seed cut may be warranted" (it clears the
+# release-critical bar, SFEP-0026 §3.3). The marker is applied by grooming/humans;
+# the advisor only READS it to decide wording — it stays flag-only.
 #
 # This is the third leg of the #489 stale-seed mitigation, complementing the
 # `## Required in pinned seed` issue-template section and the `/pickup`
@@ -88,10 +94,18 @@ jobs:
               owner, repo, state: 'open', labels: 'release:next-minor', per_page: 100,
             });
 
+            // The `release-critical-seed` marker is the ONLY thing that breaks
+            // the cadence batch (SFEP-0026 §3.3). `listForRepo`/`issues.get`
+            // return labels as objects; a bare-string fallback keeps this robust.
+            const CRIT = 'release-critical-seed';
+            const hasCrit = issue =>
+              (issue.labels || []).some(l => (typeof l === 'string' ? l : l.name) === CRIT);
+
             // 3. Keep those that reference a just-closed issue under
             //    "## Required in pinned seed" or "## Blocked by" AND whose
             //    "## Files Affected" touches compiler-source.
             const dependents = [];
+            const critDependents = [];
             for (const d of downstream) {
               if (d.pull_request) continue; // listForRepo includes PRs
               const body = d.body || '';
@@ -102,12 +116,38 @@ jobs:
               const files = section(body, 'Files Affected');
               if (!/compiler\/src\/|runtime\/prelude\.sfn/.test(files)) continue;
               dependents.push(d.number);
+              if (hasCrit(d)) critDependents.push(d.number);
             }
             if (dependents.length === 0) {
               core.info('No required-in-seed dependents among release:next-minor issues.');
               return;
             }
             core.info(`Dependents needing a seed cut: ${dependents.map(n => '#' + n).join(', ')}`);
+
+            // A just-closed predecessor may itself carry the marker (e.g. a
+            // miscompilation seed-bug that blocks the gate — release-critical by
+            // construction). Fetch the closing issues' labels to catch that case.
+            const critPredecessors = [];
+            for (const n of closing) {
+              try {
+                const { data: iss } = await github.rest.issues.get({
+                  owner, repo, issue_number: n,
+                });
+                if (hasCrit(iss)) critPredecessors.push(n);
+              } catch (e) {
+                core.warning(`Could not fetch labels for #${n}: ${e.message}`);
+              }
+            }
+            const releaseCritical = critDependents.length > 0 || critPredecessors.length > 0;
+            if (releaseCritical) {
+              const who = [
+                ...critDependents.map(n => 'dependent #' + n),
+                ...critPredecessors.map(n => 'predecessor #' + n),
+              ].join(', ');
+              core.info(`Release-critical seed need (${who}) — escalating advisory.`);
+            } else {
+              core.info('No release-critical marker — advisory queues for the next cadence bump.');
+            }
 
             // 4. Resolve the ACTIVE release tracker dynamically: open, labeled
             //    `tracking`, title `Release: vX.Y.Z`. Never hardcoded.
@@ -140,9 +180,17 @@ jobs:
               core.info(`Advisory for PR #${prNumber} already on #${tracker.number}; skipping comment.`);
             } else {
               const depList = dependents.map(n => '#' + n).join(', ');
-              const body =
-                `Auto-advisor: PR #${prNumber} just merged and is required-in-seed by ` +
-                `${depList}. Cut a new alpha and \`/pin-seed\` before pickup of those issues.`;
+              const head =
+                `Auto-advisor: PR #${prNumber} just merged and is required-in-seed by ${depList}.`;
+              const body = releaseCritical
+                ? `${head} This need carries \`${CRIT}\` — it **breaks the cadence batch**: ` +
+                  `an off-cadence seed cut may be warranted. If it clears the release-critical ` +
+                  `bar (SFEP-0026 §3.3), cut a fresh alpha and \`/pin-seed\` now; otherwise it ` +
+                  `queues for the next cadence bump. See docs/conventions/issue-naming.md ` +
+                  `"Seed pinning".`
+                : `${head} **Queued for the next cadence seed bump** (tracker #${tracker.number}); ` +
+                  `\`/pin-seed\` runs on the next train cut — no off-cadence cut needed unless this ` +
+                  `is marked \`${CRIT}\`. See docs/conventions/issue-naming.md "Seed pinning".`;
               await github.rest.issues.createComment({ owner, repo, issue_number: tracker.number, body });
               core.info(`Posted advisory on #${tracker.number}.`);
             }

@@ -384,6 +384,13 @@ cutting a release** — `release.yml` deliberately doesn't touch
 `.seed-version` because the new binary doesn't exist at tag-creation
 time and most alpha releases shouldn't be pinned.
 
+**Seeds advance on the cadence, batched.** Per SFEP-0026 WS-C, the pin is
+**not** chased reactively per-need (the `0.7.0-alpha.49` treadmill). Routine
+seed needs are collected and the pin advances **once per release cadence
+cycle**, against that cycle's alpha cut — collapsing the N reactive cuts of a
+cycle into ~1 scheduled bump. The one exception is a **release-critical** seed
+need (see below), which may break the batch.
+
 ### `seed-blocker` label
 
 Apply `seed-blocker` to any issue whose fix or feature must land
@@ -397,6 +404,52 @@ Apply `seed-blocker` to any issue whose fix or feature must land
 release-gating set when opening a tracking issue. `/sweep` auto-ticks
 matching checklist items when a `seed-blocker` issue closes via a
 merged PR.
+
+A `seed-blocker` issue does **not** trigger a reactive cut on its own.
+Its seed advance is **batched onto the next cadence bump** (below) unless
+the need clears the release-critical bar.
+
+### Batched-cadence seeds and the `release-critical-seed` marker
+
+Mid-flight seed needs — a `needs-seed-cut` flag from the advisor, or a
+`seed-blocker` issue closing — **queue against the next scheduled cadence
+seed bump** by default. `/pin-seed` runs **once per cadence** against that
+cycle's alpha cut; it is not run reactively for each individual need. This
+is the SFEP-0026 §3.3 batching policy: trade a small latency on
+non-critical seed needs for a large reduction in cut/`pin-seed` overhead.
+
+**The release-critical bar (the only thing that breaks the batch).** A
+mid-flight seed need may force an **off-cadence** seed cut only if **all
+three** hold (SFEP-0026 §3.3):
+
+1. It **unblocks an item on the current `release:next-minor` / `release:1.0`
+   hard gate** — the train cannot ship its committed scope without it; **and**
+2. **No bundle path exists** — per `.claude/rules/seed-dependency.md`, it is a
+   genuine multi-consumer or independent capability that cannot be folded into
+   one PR with its consumer; **and**
+3. Waiting for the next cadence bump would **slip the train's committed scope**
+   (not merely defer a nice-to-have to the next train).
+
+A need that fails **any** clause queues for the next cadence bump. A
+miscompilation / seed-bug that breaks *active* downstream work clears the bar
+by construction — it is release-critical because it blocks the gate.
+
+**`release-critical-seed` marker lifecycle.** Apply `release-critical-seed`
+to a seed need (the dependent issue or, for a seed-bug, the predecessor) that
+clears the bar above. It is the signal that distinguishes "break the batch"
+from "queue for cadence":
+
+- **Applied by** grooming or a human when the three-clause bar is met — never
+  auto-applied. It is orthogonal to `needs-seed-cut`/`seed-blocker` and
+  typically co-exists with them.
+- **Read by** the seed-cut advisor, which escalates its advisory comment from
+  "queued for the next cadence bump" to "off-cadence seed cut may be warranted"
+  when a flagged dependent (or a just-closed predecessor) carries it. The
+  advisor only reads the marker — it stays flag-only and never dispatches a cut.
+- **Consumed by** `/release-plan`, which surfaces release-critical seed needs
+  separately from the batched queue.
+- **Cleared** when the off-cadence cut lands and `/pin-seed` runs, or when the
+  need is reclassified as non-critical (then it rejoins the cadence batch).
 
 ### `## Required in pinned seed` issue section
 
@@ -440,15 +493,27 @@ advisor:
 - applies the `needs-seed-cut` label to the tracker and the dependent
   issues.
 
+By default the advisory comment reads **"queued for the next cadence seed
+bump"** — the `needs-seed-cut` flag means the seed advance is batched onto
+the cadence, not cut now. **Only** when a flagged dependent (or one of the
+just-closed predecessors) carries `release-critical-seed` does the comment
+escalate to **"off-cadence seed cut may be warranted"** (it clears the
+release-critical bar above).
+
 It is idempotent (one advisory per PR per tracker) and **only flags** —
-it never dispatches `release.yml` or bumps `.seed-version`. `/release-plan`
-consumes the `needs-seed-cut` label, surfacing a "Seed cut required"
-checklist section on the per-cycle tracking issue. Clear the flag by
-cutting a fresh alpha and running `/pin-seed`, then removing the label.
+it never dispatches `release.yml` or bumps `.seed-version`, and it never
+applies `release-critical-seed` (that marker is human/grooming-applied; the
+advisor only reads it). `/release-plan` consumes the `needs-seed-cut` label,
+surfacing a "Seed cut required" checklist section on the per-cycle tracking
+issue. A queued flag clears when the cadence `/pin-seed` lands; a
+release-critical flag clears when its off-cadence `/pin-seed` lands. Remove
+the label once pinned.
 
 ### When to bump the pin
 
-Run `/pin-seed [vX.Y.Z]`:
+The routine bump rides the cadence (one batched `/pin-seed` per cycle, above).
+Run `/pin-seed [vX.Y.Z]` off-cadence only when the need clears the
+release-critical bar:
 
 - A `seed-blocker` issue just closed and the fix shipped in the latest
   alpha.
