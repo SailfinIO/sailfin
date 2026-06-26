@@ -1,8 +1,22 @@
 # Sailfin — Strategic Decision Brief
 
-**Date:** 2026-06-14
+**Date:** 2026-06-14 (status update 2026-06-26)
 **Status:** Strategic overlay — agent context. Binds the internal vision (the
 proposal docs) to the external market. Referenced from `CLAUDE.md`.
+
+> **⚠️ Repositioning (2026-06-26).** The capability-sealed runtime is now a **1.0
+> hallmark feature and a hard GA blocker** (epic #1639), not a post-1.0 capstone.
+> It delivers pillar 2 (capability security) end-to-end; a compile-time-only check
+> erased at codegen does not. **What this changes:** the seal's *scheduling* — it
+> is on the 1.0 critical path, pulling backend (Axis 2, #1640) and syscall-layer
+> (Axis 3, #1641) ownership with it. **What this does NOT change:** the
+> safety-claim discipline below. The seal is still **not enforced today**; "now vs
+> later" still distinguishes *compile-time proof (real now)* from *runtime seal
+> (built, not yet shipped)*. The brief's "decouple timely AI positioning from the
+> seal" argument (Gaps 2–3, §8 fork) still holds as **engineering sequencing** —
+> the seal takes real backend+syscall work to build — but it is no longer framed
+> as "post-1.0." Read "long-horizon half / deferred / post-1.0 capstone" below as
+> "the 1.0 capstone that takes the longest to build."
 **Canonical architecture docs (these win on architecture; this brief wins on
 market positioning):** `docs/proposals/capability-sealed-runtime.md`,
 `docs/proposals/llvm-independence.md`, `docs/proposals/hierarchical-effects.md`,
@@ -40,7 +54,7 @@ market positioning):** `docs/proposals/capability-sealed-runtime.md`,
 - **Enforced today (compile time):** `![io]`, `![net]`, `![clock]` are real gates; cross-module effect propagation (`E0402`); capsule capability cross-check via `capsule.toml` (`E0403`); structured diagnostics + fix-its; `sfn check --json` → `sailfin-check/1` envelope for the MCP server.
 - **Codegen:** still LLVM (`compiler/src/llvm`). No native backend in-tree beyond a test fixture. LLVM independence is a documented vision with a Stage-0 branch.
 - **Runtime:** C→Sailfin migration nearly complete (`runtime/sfn` ≈ 27 Sailfin files vs ~2 remaining C files). AOT-native execution, not a VM.
-- **Enforcement locus today:** compile-time only. Per `capability-sealed-runtime.md`, the manifest is currently "a lint, not a cage" — erased at codegen. Runtime/syscall enforcement is the **post-1.0 capstone vision**, gated on owning the backend then the syscall layer.
+- **Enforcement locus today:** compile-time only. Per `capability-sealed-runtime.md`, the manifest is currently "a lint, not a cage" — erased at codegen. Runtime/syscall enforcement is the **1.0 capstone (GA blocker, epic #1639)** — repositioned from post-1.0 on 2026-06-26 — gated on owning the backend then the syscall layer. Still unenforced today.
 
 **Discipline:** distinguish *compile-time proof* (real now) from *runtime seal* (vision). Never blur them externally.
 

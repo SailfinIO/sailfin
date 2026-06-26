@@ -1,9 +1,14 @@
 # Proposal: The Capability-Sealed Runtime — Effects Enforced to the Syscall
 
-**Date:** 2026-06-07
-**Author:** Compiler architect (vision / design exploration)
-**Status:** Vision — capstone, post-1.0. Depends on multiple in-flight tracks
-(see §7). Not scheduled. No issue scoped.
+**Date:** 2026-06-07 (repositioned 2026-06-26)
+**Author:** Compiler architect (design); repositioned by project-owner decision
+**Status:** **1.0 hallmark feature — hard GA blocker.** This delivers pillar 2
+(capability security) end-to-end; a compile-time-only capability check that is
+erased at codegen does not deliver the pillar. Scheduled as the umbrella tracking
+epic **#1639** with five child epics (see §7). Depends on owning the backend
+(Axis 2) and the syscall layer (Axis 3), which this decision pulls onto the 1.0
+critical path. **Not yet implemented or enforced** — the design below is the
+target, not a shipped claim (see the threat-model discipline in §8).
 **Companion docs:** `docs/proposals/llvm-independence.md` (the *how* — owning the
 backend + syscall layer), `docs/runtime_architecture.md` (scheduler §2.6,
 extern-fn syscall model), `docs/runtime_audit.md` (C→Sailfin migration),
@@ -14,10 +19,12 @@ extern-fn syscall model), `docs/runtime_audit.md` (C→Sailfin migration),
 > independence is for*. It is the capstone that unifies Sailfin's three pillars
 > — effects, capabilities, concurrency — into a single capability none of them
 > delivers alone: a native binary whose declared effects are enforced at
-> runtime, down to the syscall boundary. It is a long-horizon dream, filed as a
-> vision, deliberately separate from any scheduled work. **Nothing here is
-> enforced today** (see the threat model in §8 — this is the opposite of a
-> shipped safety claim).
+> runtime, down to the syscall boundary. As of 2026-06-26 this is a **1.0
+> hallmark feature and a hard GA blocker**, scheduled as epic #1639 — not a
+> post-1.0 dream. The scheduling changed; the engineering honesty does not:
+> **nothing here is enforced today** (see the threat model in §8 — this is the
+> opposite of a shipped safety claim, and stays unmarketed until enforced
+> end-to-end).
 
 ---
 
@@ -162,28 +169,32 @@ Language-level capability sealing is permanent infrastructure.
 
 ## 7. The dependency chain (honest distance)
 
-This is further out than `llvm-independence.md` — it *depends* on it. The chain,
-in order:
+This *depends* on `llvm-independence.md` — and because the seal is now a 1.0 GA
+blocker (#1639), that dependency pulls Axes 2 and 3 onto the 1.0 critical path
+with it. The chain, in order:
 
-1. **Finish C→Sailfin runtime** (Axis 1; M3 #390, M4 #965) — *in flight.*
-2. **Own the backend — the *seal-sufficient* one** (Track 8; `llvm-independence.md`)
-   — vision; Stage 0 is small. Note the timeline correction in
+1. **Finish C→Sailfin runtime** (Axis 1; M3 #390, M4 #965) — **done** (`runtime/native/` deleted, #822).
+2. **Own the backend — the *seal-sufficient* one** (Track 8; `llvm-independence.md`;
+   epic **#1640**) — on the 1.0 critical path. Note the timeline correction in
    `llvm-independence.md` §5: the seal needs a *correct, metadata-carrying,
    syscall-gating* backend, **not** the perf-parity optimizer that is the genuine
    long tail. The seal-sufficient target is agent-amenable and de-riskable by
    differential testing against the existing LLVM backend, so this dependency is
    plausibly quarters-scale, not the decade-scale arc the pre-LLM literature
    assumed.
-3. **Own the syscall layer** (Axis 3; `llvm-independence.md` §8 Stage 4) — deepest piece.
-4. **Land the runtime object-capability model** (#934) — currently `priority:low`, post-1.0.
-5. **Carry capabilities through the scheduler** (extends #965) — the per-task context.
-6. **Then** the capability seal is buildable end-to-end.
+3. **Own the syscall layer** (Axis 3; `llvm-independence.md` §8 Stage 4; epic
+   **#1641**) — deepest piece; now GA-blocking, not "optional and last."
+4. **Land the runtime object-capability model** (**#934**) — re-scoped from
+   `priority:low`/post-1.0 to `priority:critical`, the seal's policy-enforcement
+   keystone.
+5. **Carry capabilities through the scheduler** (extends #965; epic **#1642**) —
+   the per-task context (scoped / inherited / revocable).
+6. **Then** the capability seal is buildable end-to-end (**#1643**).
 
-Every step is already on the board or in this proposal set. The roadmap is
-*already pointed here* — this doc names the destination so the steps read as a
-journey rather than a pile. The agentic era compresses the long pole (step 2):
-the perf tail is off this critical path; only correctness + metadata + the gate
-are.
+Every step is now an `epic`-labeled child of #1639 on the board — this doc names
+the destination so the steps read as a journey rather than a pile. The agentic
+era compresses the long pole (step 2): the perf tail is off this critical path;
+only correctness + metadata + the gate are.
 
 ---
 
@@ -242,10 +253,11 @@ is a vision, labeled as one.
   at runtime where static proof can't reach*.
 - **Not** a sandbox VM / container substitute for all threats — it is
   language-level capability sealing, complementary to OS sandboxing.
-- **Not** scheduled, and **not** a safety claim to market until enforced
-  end-to-end (§8).
-- **Not** a blocker on the 1.0 critical path. This is the post-independence
-  capstone.
+- **Not** a safety claim to market until enforced end-to-end (§8) — repositioning
+  it as a 1.0 GA blocker raises its *priority*, not its *readiness*.
+- **Not** off the 1.0 critical path. As of 2026-06-26 it *is* the 1.0 critical
+  path's capstone (epic #1639): GA does not ship until the seal is enforced
+  end-to-end on all tier-1 platforms.
 
 ---
 

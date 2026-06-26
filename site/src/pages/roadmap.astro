@@ -171,8 +171,8 @@ const postV1Platform: RoadmapCategory = {
 };
 
 const exploration: RoadmapItem[] = [
-  { label: "Capability-sealed runtime — effects enforced to the syscall boundary, scoped/revocable per-task capabilities (post-1.0 capstone vision)", status: "planned" },
-  { label: "Toolchain independence — seal-sufficient Sailfin-native backend (correct + metadata-carrying + syscall-gating), perf-parity backend as a separate long tail", status: "planned" },
+  { label: "Capability-sealed runtime — effects enforced to the syscall boundary, scoped/revocable per-task capabilities. 1.0 hallmark feature and hard GA blocker (delivers pillar 2 end-to-end); tracked as epic #1639. Not yet enforced.", status: "in-progress" },
+  { label: "Toolchain & syscall independence — seal-sufficient Sailfin-native backend (#1640) + owned syscall layer (#1641), prerequisites of the seal now on the 1.0 critical path; perf-parity backend remains a separate post-1.0 long tail", status: "in-progress" },
   { label: "Structured concurrency (v0 shipped) — routine, channel, spawn/await, parallel, scheduler work today; atomics beyond channel-send and richer sync primitives are post-1.0", status: "in-progress" },
   { label: "Effect system hardening — wire validate_effects() into compilation gate, hierarchical effects, polymorphism", status: "planned" },
   { label: "Phase 2 containers — closures with capture, generic constraints, drop emission", status: "planned" },
