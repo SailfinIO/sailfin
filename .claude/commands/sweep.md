@@ -118,8 +118,12 @@ For each issue in the `blocked` pool:
 
 If any of the issues newly closed by the anchor merges carries a
 `release:*` or `seed-blocker` label, the corresponding `Release: vX.Y.Z`
-tracking issue needs its checklist updated. This is a passive sync —
-`/release-plan` is the active equivalent for cycle bookkeeping.
+tracking issue needs its rollup reconciled. The tracker uses
+**GitHub-native sub-issues** as the source of truth (SFEP-0026 WS-C;
+`/release-plan` attaches them) — so this sync reconciles **native
+sub-issue state**, not a string-matched markdown checklist. This is a
+passive sync — `/release-plan` is the active equivalent for cycle
+bookkeeping.
 
 For each newly-closed issue:
 
@@ -135,20 +139,44 @@ For each newly-closed issue:
    Map `release:<gate>` to the matching tracking issue title — typically
    the one whose target version corresponds to the gate. If multiple
    match (e.g. an item gates both `release:beta` and `release:1.0`),
-   update each. Tick the matching `## Must close before cut` line.
-3. For `seed-blocker`, tick the matching line in the `## Seed blockers`
-   section of the same tracking issue (if present). Also surface in
-   the report so the user knows a `/pin-seed` may be appropriate.
-4. Edit the body and post a one-line comment:
+   reconcile each.
+3. **Reconcile native sub-issue state** rather than hand-ticking markdown:
+   ```bash
+   TRACKER=<tracking-issue-number>
+   # Is the just-closed issue attached as a native sub-issue?
+   gh api /repos/SailfinIO/sailfin/issues/$TRACKER/sub_issues --paginate \
+     --jq '.[].number' | grep -qx <N> && echo attached || echo missing
    ```
-   Auto-sweep: #<N> closed via PR #<M> — ticked (release:<gate>, seed-blocker).
+   - **Attached** → its closed state shows in the GitHub "Sub-issues"
+     rollup automatically; no body edit needed. If `/release-plan` renders
+     a summary section, re-render the matching `☐`→`☑` line from the
+     native state (don't store closed-ness in the body).
+   - **Missing (closed item carries a gating/`seed-blocker` label but is
+     not a sub-issue)** → attach it so the rollup is complete, mirroring
+     `/release-plan` (typed `-F sub_issue_id`):
+     ```bash
+     child_id=$(gh api repos/SailfinIO/sailfin/issues/<N> --jq '.id')
+     gh api -X POST /repos/SailfinIO/sailfin/issues/$TRACKER/sub_issues \
+       -F sub_issue_id=$child_id --jq '.number'
+     ```
+4. For `seed-blocker`, keep the auto-tick behaviour: ensure the closed
+   item is reflected in the tracker's `## Seed blockers` / `## Seed bump
+   (this cadence)` rollup, and surface in the report so the user knows the
+   **cadence `/pin-seed`** will pick it up (a plain `seed-blocker` /
+   `needs-seed-cut` close queues for the next cadence bump — it does **not**
+   warrant a reactive cut unless the item carries `release-critical-seed`;
+   SFEP-0026 §3.3).
+5. Post a one-line comment:
    ```
-5. If the closed issue isn't in any checklist, mention it in the report
-   under "Concerns" (likely means it was labeled after the tracking
-   issue was created without `/release-plan` re-running).
+   Auto-sweep: #<N> closed via PR #<M> — sub-issue rollup reconciled (release:<gate>, seed-blocker).
+   ```
+6. If the closed issue is neither attached nor labeled on any tracker,
+   mention it in the report under "Concerns" (likely means it was labeled
+   after the tracking issue was created without `/release-plan` re-running).
 
 If no newly-closed issue carries either label, skip this phase
-entirely. **In `--dry-run`, make zero writes.**
+entirely. **In `--dry-run`, make zero writes** (no sub-issue attachments,
+no body edits, no comments).
 
 ---
 

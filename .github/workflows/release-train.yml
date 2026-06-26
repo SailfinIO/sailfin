@@ -1,0 +1,258 @@
+name: Release Train (cadence)
+
+# Hybrid time-box + train release cadence (SFEP-0026 WS-C, execution item 11).
+#
+# A scheduled, deterministic workflow that runs on the project's 2-week
+# Monday-start cadence (docs/conventions/issue-naming.md "Release tracking").
+# At each train boundary it:
+#
+#   1. Opens or updates the `Release: vX.Y.Z` tracker for the cadence minor
+#      (the next minor of the current capsule.toml version).
+#   2. Evaluates the *cut gate* — the health of `main` (the latest Nightly
+#      self-host check), NOT the open scope. Whatever scoped work is not done
+#      ROLLS FORWARD to the next train: open `release:next-minor` items are
+#      surfaced for visibility but NEVER block the train (time-box semantics).
+#   3. Surfaces "ready to cut" on the tracker. It does **not** auto-dispatch
+#      the curated minor cut: the actual `release.yml` dispatch stays
+#      **human-confirmable**. A maintainer re-runs this workflow with
+#      `confirm_dispatch=true` to fire the cut once the cadence comment looks
+#      right (mirroring how `seed-cut-advisor.yml` only flags, never cuts).
+#
+# It is a PLAIN, deterministic Actions workflow in the spirit of
+# `seed-cut-advisor.yml` — NOT a gh-aw `.md` source. No compiled `.lock.yml`,
+# no LLM engine, no ANTHROPIC_API_KEY. A single pinned `actions/github-script`
+# step does the version math / tracker upsert / gate evaluation / optional
+# dispatch. The routine daily alpha (`channel=alpha bump=prerelease`) is
+# unaffected — this is the curated minor train on the cadence, and its alpha
+# cut doubles as the scheduled seed bump (SFEP-0026 §3.3).
+#
+# See `.github/AGENTS.md`, `docs/conventions/issue-naming.md` "Release
+# tracking" / "Seed pinning", and `.claude/commands/release-plan.md` (which
+# enriches the tracker the train opens).
+
+on:
+  schedule:
+    # Every Monday 09:00 UTC. The 2-week cadence is enforced in-script via
+    # ISO-week parity (even week == cadence week), since cron has no native
+    # "every other week" expression. A maintainer can always run off-cadence
+    # via workflow_dispatch.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Compute + report only; make no writes (no tracker, no comment, no dispatch)"
+        required: false
+        type: boolean
+        default: false
+      confirm_dispatch:
+        description: "Actually dispatch release.yml for the cadence minor cut (requires a clear cut gate)"
+        required: false
+        type: boolean
+        default: false
+      force:
+        description: "Ignore the bi-weekly ISO-week parity gate (manual runs only)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+concurrency:
+  group: release-train
+  cancel-in-progress: false
+
+jobs:
+  train:
+    name: Cadence train
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Run cadence train
+        uses: actions/github-script@v9.0.0
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          CONFIRM_DISPATCH: ${{ inputs.confirm_dispatch }}
+          FORCE: ${{ inputs.force }}
+        with:
+          github-token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const dryRun = process.env.DRY_RUN === 'true';
+            const confirmDispatch = process.env.CONFIRM_DISPATCH === 'true';
+            const force = process.env.FORCE === 'true';
+            const isSchedule = context.eventName === 'schedule';
+            const summary = [];
+            const note = (s) => { core.info(s); summary.push(s); };
+
+            // --- 0. Bi-weekly cadence gate (scheduled runs only) --------------
+            // ISO-8601 week number; even week == cadence week. Deterministic and
+            // aligned to the Monday-start 2-week iteration cadence.
+            function isoWeek(d) {
+              const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+              const day = t.getUTCDay() || 7;            // Mon=1..Sun=7
+              t.setUTCDate(t.getUTCDate() + 4 - day);     // nearest Thursday
+              const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+              return Math.ceil(((t - yearStart) / 86400000 + 1) / 7);
+            }
+            const week = isoWeek(new Date());
+            if (isSchedule && !force && (week % 2 !== 0)) {
+              note(`ISO week ${week} is odd — off-cadence; skipping (next even week is the train).`);
+              core.summary.addRaw('## Release Train — skipped (off-cadence)\n\n' + summary.join('\n')).write();
+              return;
+            }
+            note(`Cadence week (ISO week ${week}); event=${context.eventName}, dryRun=${dryRun}.`);
+
+            // --- 1. Compute the cadence minor target --------------------------
+            // Next minor of the current capsule.toml version. e.g.
+            // 0.7.0-alpha.49 -> v0.8.0. release.yml `channel=alpha bump=minor`
+            // produces 0.8.0-alpha.1, which doubles as the cadence seed bump.
+            const capsule = fs.readFileSync('compiler/capsule.toml', 'utf8');
+            const vm = capsule.match(/^version\s*=\s*"([^"]+)"/m);
+            if (!vm) { core.setFailed('Could not read version from compiler/capsule.toml'); return; }
+            const cm = vm[1].match(/^(\d+)\.(\d+)\.(\d+)/);
+            if (!cm) { core.setFailed(`Cannot parse version '${vm[1]}'`); return; }
+            const [maj, min] = [parseInt(cm[1], 10), parseInt(cm[2], 10)];
+            const target = `v${maj}.${min + 1}.0`;
+            const trackerTitle = `Release: ${target}`;
+            note(`Current ${vm[1]} → cadence minor target ${target} (tracker "${trackerTitle}").`);
+
+            // --- 2. Cut gate: health of main (NOT open scope) -----------------
+            // The train is time-boxed: open scope rolls forward and never gates
+            // the cut. The only thing that holds a cut is a broken main — we do
+            // not ship a broken train. Signal = latest Nightly self-host check
+            // (the triple-pass `make check`) on the default branch.
+            const defaultBranch = context.payload.repository?.default_branch || 'main';
+            async function latestConclusion(workflowFile) {
+              try {
+                const runs = await github.rest.actions.listWorkflowRuns({
+                  owner, repo, workflow_id: workflowFile,
+                  branch: defaultBranch, per_page: 1,
+                });
+                const r = runs.data.workflow_runs[0];
+                return r ? { conclusion: r.conclusion, url: r.html_url } : null;
+              } catch (e) {
+                core.warning(`Could not read runs for ${workflowFile}: ${e.message}`);
+                return null;
+              }
+            }
+            const nightly = await latestConclusion('nightly-selfhost.yml');
+            const cutGateClear = !!nightly && nightly.conclusion === 'success';
+            note(nightly
+              ? `Cut gate: latest nightly self-host on ${defaultBranch} = ${nightly.conclusion} (${nightly.url}).`
+              : `Cut gate: no nightly self-host run found on ${defaultBranch} — treating gate as NOT clear.`);
+
+            // --- 3. Roll-forward visibility: open release:next-minor items -----
+            const openNextMinor = (await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: 'release:next-minor', per_page: 100,
+            })).filter(i => !i.pull_request);
+            note(openNextMinor.length === 0
+              ? 'No open `release:next-minor` items — train carries the merged-and-validated work.'
+              : `${openNextMinor.length} open \`release:next-minor\` item(s) will ROLL FORWARD (they never block the train): `
+                + openNextMinor.map(i => '#' + i.number).join(', '));
+
+            // --- 4. Open or update the tracker --------------------------------
+            const existing = (await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', labels: 'tracking', per_page: 100,
+            })).filter(i => !i.pull_request && i.title.trim() === trackerTitle);
+            let tracker = existing[0] || null;
+            if (existing.length > 1) {
+              note(`⚠ Multiple open trackers titled "${trackerTitle}" (#${existing.map(i => i.number).join(', #')}); using the lowest.`);
+              tracker = existing.sort((a, b) => a.number - b.number)[0];
+            }
+
+            const cadenceMarker = `Cadence-train: ${target} (ISO week ${week})`;
+
+            if (!tracker) {
+              if (dryRun) {
+                note(`[dry-run] would CREATE tracker "${trackerTitle}" (label: tracking) and run \`/release-plan ${target}\` to enrich it.`);
+              } else {
+                const body = [
+                  '## Goal', '',
+                  `Track what must close before **${target}** is cut on the release cadence.`, '',
+                  '## Scope summary', '',
+                  '_Auto-opened by the cadence release train. Run `/release-plan '
+                    + target + '` to enrich the must-close / seed-blocker sub-issues and the seed-bump section._', '',
+                  '## Cut gate', '',
+                  'This is a curated cadence cut. The train surfaces readiness; the actual '
+                    + '`release.yml` dispatch stays human-confirmable (re-run **Release Train** with '
+                    + '`confirm_dispatch=true`). Open scope rolls forward — it never blocks the train.', '',
+                  '## Cross-references', '',
+                  '- Cadence train: `.github/workflows/release-train.yml`',
+                  '- Convention: `docs/conventions/issue-naming.md` "Release tracking" / "Seed pinning"',
+                  '- `/release-plan` skill: `.claude/commands/release-plan.md`',
+                  '- Design: SFEP-0026 (`docs/proposals/0026-delivery-process.md`) WS-C',
+                ].join('\n');
+                const created = await github.rest.issues.create({
+                  owner, repo, title: trackerTitle, labels: ['tracking'], body,
+                });
+                tracker = created.data;
+                note(`Created tracker #${tracker.number} (${tracker.html_url}).`);
+              }
+            } else {
+              note(`Tracker "${trackerTitle}" already open as #${tracker.number}.`);
+            }
+
+            // --- 5. Idempotent cadence comment --------------------------------
+            // One comment per (target, ISO week) window — re-runs in the same
+            // window do not double-post.
+            if (tracker) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: tracker.number, per_page: 100,
+              });
+              const already = comments.some(c => (c.body || '').includes(cadenceMarker));
+              const rollFwd = openNextMinor.length
+                ? openNextMinor.map(i => `#${i.number}`).join(', ')
+                : '_none_';
+              const gateLine = cutGateClear
+                ? `✅ Cut gate clear — latest nightly self-host on \`${defaultBranch}\` is green.`
+                : `⛔ Cut gate NOT clear — ${nightly ? 'nightly self-host is ' + nightly.conclusion : 'no nightly run found'}; hold the cut until main is green.`;
+              const cadenceBody = [
+                `${cadenceMarker}`, '',
+                `Cadence train boundary reached for **${target}**.`, '',
+                gateLine, '',
+                `Rolling forward (not blocking): ${rollFwd}`, '',
+                cutGateClear
+                  ? `**Ready to cut.** To dispatch the curated minor (\`channel=alpha bump=minor\` → \`${maj}.${min + 1}.0-alpha.1\`, which is also this cadence's seed bump), re-run the **Release Train** workflow with \`confirm_dispatch=true\`.`
+                  : `**Not cutting.** The train rolls forward; it will re-evaluate next cadence boundary once main is green.`,
+              ].join('\n');
+              if (dryRun) {
+                note(`[dry-run] would ${already ? 'SKIP (already posted)' : 'POST'} the cadence comment on #${tracker.number}.`);
+              } else if (already) {
+                note(`Cadence comment for ${target} (week ${week}) already on #${tracker.number}; skipping.`);
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number: tracker.number, body: cadenceBody });
+                note(`Posted cadence comment on #${tracker.number}.`);
+              }
+            }
+
+            // --- 6. Human-confirmable dispatch of release.yml -----------------
+            // Scheduled runs NEVER dispatch — they only surface readiness.
+            // A maintainer confirms by re-running with confirm_dispatch=true.
+            if (confirmDispatch && !isSchedule) {
+              if (dryRun) {
+                note('[dry-run] confirm_dispatch set but dry-run — not dispatching release.yml.');
+              } else if (!cutGateClear) {
+                note('confirm_dispatch set but cut gate NOT clear — refusing to dispatch release.yml on a red main.');
+              } else {
+                await github.rest.actions.createWorkflowDispatch({
+                  owner, repo, workflow_id: 'release.yml', ref: defaultBranch,
+                  inputs: { channel: 'alpha', bump: 'minor', dry_run: 'false' },
+                });
+                note(`Dispatched release.yml (channel=alpha bump=minor) → ${maj}.${min + 1}.0-alpha.1.`);
+              }
+            } else if (confirmDispatch && isSchedule) {
+              note('confirm_dispatch is ignored on scheduled runs — dispatch is human-confirmable (re-run manually).');
+            }
+
+            core.summary
+              .addRaw(`## Release Train — ${target}\n\n` + summary.map(s => '- ' + s).join('\n'))
+              .write();
