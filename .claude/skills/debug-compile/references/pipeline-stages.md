@@ -12,7 +12,7 @@ Use this table to map a compiler diagnostic to the file(s) most likely to contai
 | `.sfn-asm` emission error / malformed IR instruction | Emit | `compiler/src/emit_native.sfn`, `compiler/src/emit_native_state.sfn`, `compiler/src/native_ir.sfn` |
 | LLVM `clang` rejects generated `.ll` | Lowering | `compiler/src/llvm/lowering/` (start at `entrypoints.sfn`) |
 | Linker: undefined / duplicate symbol | Emission header / globals | `compiler/src/llvm/lowering/emission_header.sfn`, `module_globals.sfn` |
-| Runtime crash in a valid program | Runtime / lowering runtime bridge | `runtime/prelude.sfn`, `runtime/native/`, `compiler/src/llvm/runtime.sfn` |
+| Runtime crash in a valid program | Runtime / lowering runtime bridge | `runtime/prelude.sfn`, `runtime/sfn/`, `compiler/src/llvm/runtime.sfn` |
 | Self-hosting regression (seed OK, seedcheck broken) | LLVM lowering | Compare first-pass vs second-pass IR of the same module |
 
 ## Diagnostic conventions

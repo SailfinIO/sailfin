@@ -16,10 +16,10 @@ toward a 1.0 release with a pure Sailfin toolchain — no Python, no C runtime, 
 downstream fixup scripts.
 
 The compiler self-hosts from a released seed binary via `<seed> build -p compiler`,
-and its entry point is the Sailfin-emitted `@main` — no C code participates in
-startup. Supporting C runtime helpers (strings, arrays, exceptions, the C arena,
-crypto) still live under `runtime/native/src/` and will be ported into Sailfin
-before 1.0.
+and its entry point is the Sailfin-emitted `@main`. The runtime is pure Sailfin
+(`runtime/sfn/` + `runtime/prelude.sfn`); the former C runtime under
+`runtime/native/` was deleted (#822), so no C code participates in startup or
+links into the compiler.
 
 **Three pillars (the differentiators — don't dilute them):**
 1. **Effect types** (`![io, net, model, clock]`) for compile-time capability enforcement
@@ -107,7 +107,7 @@ for the self-host invariant and the full gate. See `tools/mcp-server/README.md`.
 | `compiler/src/cli_main.sfn` + `capsule_resolver.sfn` | The build driver — **pure orchestration, no fixups** |
 | `compiler/src/build_stamp.sfn` | Writes `build/native/.build-stamp` (`<version>+dev.<hash>`) |
 | `runtime/prelude.sfn` | Sailfin-native runtime (collections, strings, type checks) |
-| `runtime/native/` | Supporting C helpers (to be ported into Sailfin before 1.0) |
+| `runtime/sfn/` | Sailfin-native runtime modules (memory, string, io, concurrency) |
 | `compiler/tests/{unit,integration,e2e}/*_test.sfn` | Regression coverage |
 
 ## Effect System
